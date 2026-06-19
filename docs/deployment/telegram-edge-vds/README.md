@@ -28,6 +28,14 @@ Telegram webhook должен быть пустым. `telegram-poller` сам д
 - `telegram-mini-app-web` обслуживает `/game/app` и `/api/guest-portal/*`.
 - `bot-consumer` опционален, profile `consumer`, сейчас держать в dry-run.
 
+## ТЗ правки Telegram UX
+
+- Web `/game/auth` и `/play` должны иметь одну CTA `Войти через Telegram`: перед созданием challenge показывается понятное окно с двумя действиями `Продолжить` и `Другой способ входа`.
+- После `Продолжить` web создает challenge, открывает deep link Telegram и poll-ит status endpoint; отдельная вторая кнопка `Открыть бота` не нужна.
+- Edge VDS не принимает продуктовых решений: он пересылает safe update в основной API и отправляет полученный `replyMarkup` как opaque JSON.
+- После успешного contact-share основной API возвращает не принудительную Mini App кнопку, а выбор из трех продолжений: `Вернуться на сайт LeetPlus`, `Открыть Mini App`, `Продолжить в боте`.
+- Возврат на сайт предполагает, что исходная web-страница завершит вход через polling и выдаст HttpOnly `leetplus_guest_token`; Mini App остается отдельным вариантом на `https://tg.leetplus.ru/game/app`, но пока не является обязательным путем.
+
 ## Схема
 
 ```mermaid
@@ -151,6 +159,8 @@ curl -ksS -o /dev/null -w 'HTTP:%{http_code}:BYTES:%{size_download}\n' \
 TELEGRAM_AUTH_START status=AWAITING_CONTACT replySent=true
 TELEGRAM_AUTH_CONTACT status=CONFIRMED replySent=true
 ```
+
+В Telegram после contact-share должно прийти сообщение с тремя вариантами продолжения, а не только кнопка `Открыть Mini App`.
 
 ## Rollback
 

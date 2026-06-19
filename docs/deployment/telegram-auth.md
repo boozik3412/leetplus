@@ -1,6 +1,6 @@
 # Telegram-вход и Mini App на 1337
 
-Этот runbook описывает текущий production-контур регистрации участника геймификации: `/play` -> Telegram bot -> contact-share -> отдельный `GuestGameProfile` -> guest-token -> Telegram Mini App.
+Этот runbook описывает текущий production-контур регистрации участника геймификации: `/play` или `/game/auth` -> Telegram bot -> contact-share -> отдельный `GuestGameProfile` -> guest-token в браузере -> выбор клуба/игровой экран. Mini App живет на отдельном edge VDS и остается одним из вариантов после подтверждения телефона, но не должен быть единственным принудительным продолжением входа.
 
 Актуальная правда по edge-серверу сохранена в `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`.
 
@@ -25,12 +25,12 @@ Telegram bot и Mini App вынесены на 1337:
 
 ## Что делает контур
 
-- `/play` создает одноразовый Telegram auth challenge для выбранного клуба и открывает deep link бота.
+- `/play` и `/game/auth` показывают одну CTA `Войти через Telegram`: сначала информационное окно объясняет переход в Telegram и дает отмену `Другой способ входа`, затем web создает одноразовый Telegram auth challenge для выбранного клуба и открывает deep link бота.
 - `telegram-poller` на 1337 получает updates через `getUpdates`.
 - Edge adapter пересылает safe update в основной API `/guest-portal/telegram/webhook` с Telegram secret header.
 - Основной API принимает `/start lp_...`, переводит challenge в ожидание contact-share и возвращает safe `reply` payload.
-- Edge adapter отправляет safe reply в Telegram через Bot API/proxy: сначала кнопку `request_contact`, затем кнопку `Открыть Mini App`.
-- LeetPlus принимает только contact того же Telegram-пользователя, активирует или сливает отдельный `GuestGameProfile` по `phoneHash`, выдает guest-token через browser status endpoint и возвращает кнопку Mini App.
+- Edge adapter отправляет safe reply в Telegram через Bot API/proxy: сначала кнопку `request_contact`, затем после contact-share inline-выбор `Вернуться на сайт LeetPlus`, `Открыть Mini App`, `Продолжить в боте`.
+- LeetPlus принимает только contact того же Telegram-пользователя, активирует или сливает отдельный `GuestGameProfile` по `phoneHash`, а browser status endpoint выдает guest-token и переводит сайт на `/game/clubs`. Telegram reply не должен заставлять гостя открывать Mini App: Mini App, бот и возврат на сайт равноправные продолжения.
 - `/game/app` открывается на `https://tg.leetplus.ru`, проверяет Telegram Mini App `initData` bot token-ом на edge, передает в основной API edge assertion по shared secret, получает обычную HttpOnly guest-session и читает `GET /guest-portal/session/game-summary`.
 
 Raw phone, raw chat id, raw Telegram update, bot token и Langame payload не возвращаются на frontend и не сохраняются в audit.
@@ -162,6 +162,7 @@ curl -ksS -o /dev/null -w 'HTTP:%{http_code}:BYTES:%{size_download}\n' \
 - создать Telegram auth через LeetPlus/Mini App flow
 - перейти в `@leetplusru_bot` по deep-link `/start lp_CODE`
 - поделиться контактом
+- убедиться, что сообщение после contact-share дает выбор: `Вернуться на сайт LeetPlus`, `Открыть Mini App`, `Продолжить в боте`; Mini App не должен открываться без выбора гостя
 - в логах poller должны быть:
 
 ```text

@@ -169,6 +169,21 @@ export function PlayRegistrationClient({
   const activeVerificationOption = visibleVerification.options.find(
     (option) => option.channel === activeVerificationChannel,
   );
+  const switchFromTelegramToFallback = useCallback(() => {
+    const fallback =
+      visibleVerification.options.find(
+        (option) =>
+          option.channel !== "TELEGRAM_BOT" && option.status === "READY",
+      ) ??
+      visibleVerification.options.find(
+        (option) => option.channel !== "TELEGRAM_BOT",
+      );
+
+    if (fallback) {
+      setActiveVerificationChannel(fallback.channel);
+      setMessage(null);
+    }
+  }, [visibleVerification.options]);
   const canEnterOtpCode =
     challenge?.delivery.status === "DEV_CODE" ||
     challenge?.delivery.status === "SENT";
@@ -690,6 +705,7 @@ export function PlayRegistrationClient({
         message: data.message,
       });
       setMessage(data.message);
+      openTelegramDeepLink(data.botDeepLink);
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1235,6 +1251,7 @@ export function PlayRegistrationClient({
                         disabled={!gameConsentAccepted}
                         isPolling={isPollingTelegramAuth}
                         isStarting={isStartingTelegramAuth}
+                        onUseOtherMethod={switchFromTelegramToFallback}
                         onStart={startTelegramAuth}
                         telegramAuth={telegramAuth}
                         telegramAuthStatus={telegramAuthStatus}
@@ -1883,6 +1900,7 @@ function TelegramAuthPanel({
   disabled,
   isStarting,
   isPolling,
+  onUseOtherMethod,
   onStart,
 }: {
   verification: GuestPortalGamificationClubDirectory["verification"];
@@ -1891,12 +1909,15 @@ function TelegramAuthPanel({
   disabled: boolean;
   isStarting: boolean;
   isPolling: boolean;
+  onUseOtherMethod: () => void;
   onStart: () => void;
 }) {
+  const [showNotice, setShowNotice] = useState(false);
   const telegramOption = verification.options.find(
     (option) => option.channel === "TELEGRAM_BOT",
   );
   const ready = telegramOption?.status === "READY";
+  const authStarted = Boolean(telegramAuth);
 
   return (
     <div className="lp-game-auth-channel-detail rounded-lg border border-emerald-300/25 bg-emerald-300/[0.07] p-4">
@@ -1925,34 +1946,21 @@ function TelegramAuthPanel({
         </div>
       ) : null}
 
-      <div className="lp-game-auth-channel-actions mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="lp-game-auth-channel-actions mt-3">
         <button
-          className="lp-game-auth-channel-primary min-h-11 rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={disabled || !ready || isStarting}
-          onClick={onStart}
+          className="lp-game-auth-channel-primary min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled || !ready || isStarting || authStarted}
+          onClick={() => setShowNotice(true)}
           type="button"
         >
-          {isStarting ? "Создаем..." : "Войти через Telegram"}
+          {isStarting
+            ? "Создаем вход..."
+            : authStarted
+              ? isPolling
+                ? "Проверяем Telegram..."
+                : "Ожидаем контакт в Telegram"
+              : "Войти через Telegram"}
         </button>
-
-        {telegramAuth?.botDeepLink ? (
-          <a
-            className="lp-game-auth-channel-secondary flex min-h-11 items-center justify-center rounded-lg border border-emerald-300/35 px-4 text-sm font-black text-emerald-100 transition hover:border-emerald-300"
-            href={telegramAuth.botDeepLink}
-            rel="noreferrer"
-            target="_blank"
-          >
-            Открыть бота
-          </a>
-        ) : (
-          <button
-            className="lp-game-auth-channel-secondary min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
-            disabled
-            type="button"
-          >
-            Бот не открыт
-          </button>
-        )}
       </div>
 
       {telegramAuth ? (
@@ -1961,6 +1969,13 @@ function TelegramAuthPanel({
           {telegramAuth.botUsername ? <span>@{telegramAuth.botUsername}</span> : null}
           {isPolling ? <span>проверяем...</span> : null}
         </div>
+      ) : null}
+
+      {telegramAuth ? (
+        <p className="lp-game-auth-channel-note mt-2 text-xs leading-5 text-slate-300">
+          Telegram уже открыт отдельным окном или приложением. Поделитесь
+          телефоном в боте и вернитесь на сайт: вход завершится автоматически.
+        </p>
       ) : null}
 
       {disabled ? (
@@ -1972,6 +1987,46 @@ function TelegramAuthPanel({
           Telegram-вход включится после настройки бота; используйте код по
           телефону.
         </p>
+      ) : null}
+
+      {showNotice ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-cyan-200/25 bg-[#071013] p-5 shadow-2xl shadow-cyan-950/40">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">
+              Telegram-вход
+            </p>
+            <h3 className="mt-2 text-2xl font-black text-white">
+              Продолжить через бота?
+            </h3>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Сейчас откроется Telegram. В боте нажмите Start и поделитесь
+              своим телефоном кнопкой Telegram. После подтверждения можно
+              вернуться на сайт, остаться в боте или открыть Mini App.
+            </p>
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">
+              <button
+                className="min-h-11 rounded-lg border border-white/15 px-4 text-sm font-black text-slate-100 transition hover:border-cyan-200/60"
+                onClick={() => {
+                  setShowNotice(false);
+                  onUseOtherMethod();
+                }}
+                type="button"
+              >
+                Другой способ входа
+              </button>
+              <button
+                className="min-h-11 rounded-lg bg-cyan-200 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-100"
+                onClick={() => {
+                  setShowNotice(false);
+                  onStart();
+                }}
+                type="button"
+              >
+                Продолжить
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -2693,6 +2748,18 @@ function normalizeGuestPhoneForSubmit(value: string) {
   const digits = normalizeGuestPhoneDigits(value);
 
   return digits.length === 11 ? `+${digits}` : null;
+}
+
+function openTelegramDeepLink(botDeepLink: string | null) {
+  if (!botDeepLink || typeof window === "undefined") {
+    return;
+  }
+
+  const popup = window.open(botDeepLink, "_blank");
+
+  if (!popup) {
+    window.location.href = botDeepLink;
+  }
 }
 
 function normalizeSearch(value: string) {

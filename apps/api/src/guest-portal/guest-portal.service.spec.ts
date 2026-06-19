@@ -1891,6 +1891,7 @@ describe('GuestPortalService', () => {
       const { jwtService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_BOT_USERNAME: 'leetplusru_bot',
       });
       const phoneHash = createHmac('sha256', 'test-secret')
         .update('79991112233')
@@ -2009,12 +2010,21 @@ describe('GuestPortalService', () => {
         status: 'CONFIRMED',
         action: 'TELEGRAM_AUTH_CONTACT',
         profileId: 'profile-1',
+        message:
+          'Telegram contact подтвердил телефон. Гостевой игровой профиль готов к выдаче browser session.',
         reply: {
           provider: 'TELEGRAM',
           method: 'sendMessage',
           chatIdMasked: 'ch...56',
+          text: expect.stringContaining('Вернитесь на сайт LeetPlus'),
           replyMarkup: {
-            keyboard: [
+            inline_keyboard: [
+              [
+                {
+                  text: 'Вернуться на сайт LeetPlus',
+                  url: 'http://localhost:3000/game/clubs',
+                },
+              ],
               [
                 {
                   text: 'Открыть Mini App',
@@ -2023,9 +2033,13 @@ describe('GuestPortalService', () => {
                   },
                 },
               ],
+              [
+                {
+                  text: 'Продолжить в боте',
+                  url: 'https://t.me/leetplusru_bot',
+                },
+              ],
             ],
-            resize_keyboard: true,
-            one_time_keyboard: true,
           },
         },
       });

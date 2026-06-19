@@ -40,6 +40,8 @@ docker compose ps
 - `TELEGRAM_AUTH_START status=AWAITING_CONTACT replySent=true`
 - `TELEGRAM_AUTH_CONTACT status=CONFIRMED replySent=true`
 
+Актуальное UX-ТЗ для следующей проверки: после contact-share бот больше не должен показывать только `Открыть Mini App`. Основной API возвращает `replyMarkup` с выбором `Вернуться на сайт LeetPlus`, `Открыть Mini App`, `Продолжить в боте`, а edge 1337 отправляет этот payload без собственной продуктовой логики.
+
 ## Локальные исходники
 
 Основной локальный repo:
@@ -147,6 +149,7 @@ curl -ksS -o /dev/null -w 'HTTP:%{http_code}:BYTES:%{size_download}\n' \
 - создать Telegram auth через LeetPlus/Mini App flow
 - перейти в `@leetplusru_bot` по deep-link `/start lp_CODE`
 - поделиться контактом
+- проверить, что финальное сообщение предлагает сайт, Mini App и продолжение в боте, а не принудительный Mini App-only путь
 - в логах poller должны быть:
 
 ```text

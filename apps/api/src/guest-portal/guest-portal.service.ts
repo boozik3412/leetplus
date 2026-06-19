@@ -575,6 +575,17 @@ export type GuestPortalTelegramWebhookResponse = {
           one_time_keyboard: boolean;
         }
       | {
+          inline_keyboard: Array<
+            Array<{
+              text: string;
+              url?: string;
+              web_app?: {
+                url: string;
+              };
+            }>
+          >;
+        }
+      | {
           remove_keyboard: boolean;
         };
   };
@@ -4170,9 +4181,9 @@ export class GuestPortalService {
       telegramIdentityMasked,
       message:
         'Telegram contact подтвердил телефон. Гостевой игровой профиль готов к выдаче browser session.',
-      reply: this.telegramWebhookMiniAppReply(
+      reply: this.telegramWebhookPostAuthChoiceReply(
         telegramIdentityMasked,
-        'Готово: телефон подтвержден. Откройте клубную карту игрока в Mini App.',
+        'Готово: телефон подтвержден. Вернитесь на сайт LeetPlus, чтобы продолжить там, или выберите Mini App/бот как отдельный игровой интерфейс.',
       ),
     };
   }
@@ -4216,29 +4227,51 @@ export class GuestPortalService {
     };
   }
 
-  private telegramWebhookMiniAppReply(
+  private telegramWebhookPostAuthChoiceReply(
     chatIdMasked: string | null,
     text: string,
   ): GuestPortalTelegramWebhookResponse['reply'] {
+    const miniAppUrl = this.telegramMiniAppUrl();
+    const webReturnUrl = `${this.publicWebUrl().replace(/\/$/, '')}/game/clubs`;
+    const botUsername = this.telegramBotUsername();
+    const botUrl = botUsername ? `https://t.me/${botUsername}` : undefined;
+    const inlineKeyboard: NonNullable<
+      GuestPortalTelegramWebhookResponse['reply']
+    >['replyMarkup'] = {
+      inline_keyboard: [
+        [
+          {
+            text: 'Вернуться на сайт LeetPlus',
+            url: webReturnUrl,
+          },
+        ],
+        [
+          {
+            text: 'Открыть Mini App',
+            web_app: {
+              url: miniAppUrl,
+            },
+          },
+        ],
+        ...(botUrl
+          ? [
+              [
+                {
+                  text: 'Продолжить в боте',
+                  url: botUrl,
+                },
+              ],
+            ]
+          : []),
+      ],
+    };
+
     return {
       provider: 'TELEGRAM',
       method: 'sendMessage',
       chatIdMasked,
       text,
-      replyMarkup: {
-        keyboard: [
-          [
-            {
-              text: 'Открыть Mini App',
-              web_app: {
-                url: this.telegramMiniAppUrl(),
-              },
-            },
-          ],
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: true,
-      },
+      replyMarkup: inlineKeyboard,
     };
   }
 

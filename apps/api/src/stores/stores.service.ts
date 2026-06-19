@@ -17,6 +17,9 @@ import {
 
 const DADATA_SUGGEST_URL =
   'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address';
+const YANDEX_MAPS_LINK_RESOLVE_TIMEOUT_MS = 5_000;
+const YANDEX_MAPS_COORDINATES_NOT_FOUND_MESSAGE =
+  'В ссылке Яндекс Карт не найдены координаты. Откройте полную ссылку с параметрами ll, pt или "Что здесь".';
 
 type DadataAddressSuggestion = {
   value?: string;
@@ -51,6 +54,7 @@ export type StoreAddressGeocode = StoreAddressSuggestion & {
 
 export type StoreYandexMapsGeocode = {
   value: string;
+  resolvedUrl?: string;
   latitude: number;
   longitude: number;
   source: 'll' | 'pt' | 'sll' | 'whatshere' | 'rtext' | 'text';
@@ -98,7 +102,7 @@ export class StoresService {
         : await this.normalizePublicSlug(dto.publicSlug, tenantId);
     const yandexMapsUrl = this.normalizeOptionalString(dto.yandexMapsUrl);
     const yandexGeocode = yandexMapsUrl
-      ? this.parseYandexMapsGeocode(yandexMapsUrl)
+      ? await this.geocodeYandexMapsLink(yandexMapsUrl)
       : null;
 
     return this.prisma.store.create({
@@ -186,14 +190,34 @@ export class StoresService {
     return this.geocodeAddressWithToken(cleanQuery, token);
   }
 
-  geocodeYandexMapsLink(link: string | undefined) {
+  async geocodeYandexMapsLink(link: string | undefined) {
     const cleanLink = this.normalizeOptionalString(link);
 
     if (!cleanLink || cleanLink.length < 10) {
       throw new BadRequestException('Укажите ссылку Яндекс Карт');
     }
 
-    return this.parseYandexMapsGeocode(cleanLink);
+    const geocode = this.tryParseYandexMapsGeocode(cleanLink);
+
+    if (geocode) {
+      return geocode;
+    }
+
+    const resolvedUrl = await this.resolveYandexMapsLink(cleanLink);
+
+    if (resolvedUrl) {
+      const resolvedGeocode = this.tryParseYandexMapsGeocode(resolvedUrl);
+
+      if (resolvedGeocode) {
+        return {
+          ...resolvedGeocode,
+          value: cleanLink,
+          resolvedUrl,
+        };
+      }
+    }
+
+    throw new BadRequestException(YANDEX_MAPS_COORDINATES_NOT_FOUND_MESSAGE);
   }
 
   async geocodeMissingStoreCoordinates(user: AuthenticatedUser) {
@@ -318,7 +342,9 @@ export class StoresService {
     return geocode;
   }
 
-  private parseYandexMapsGeocode(cleanLink: string): StoreYandexMapsGeocode {
+  private tryParseYandexMapsGeocode(
+    cleanLink: string,
+  ): StoreYandexMapsGeocode | null {
     const url = parseHttpUrl(cleanLink);
 
     if (!url || !isSupportedYandexMapsUrl(url)) {
@@ -386,9 +412,45 @@ export class StoresService {
       };
     }
 
-    throw new BadRequestException(
-      'В ссылке Яндекс Карт не найдены координаты. Откройте полную ссылку с параметрами ll, pt или "Что здесь".',
+    return null;
+  }
+
+  private async resolveYandexMapsLink(cleanLink: string) {
+    const initialUrl = parseHttpUrl(cleanLink);
+
+    if (!initialUrl || !isSupportedYandexMapsUrl(initialUrl)) {
+      return null;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      YANDEX_MAPS_LINK_RESOLVE_TIMEOUT_MS,
     );
+
+    try {
+      const response = await fetch(initialUrl.toString(), {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'LeetPlus store geocoder (+https://leetplus.ru)',
+        },
+      });
+      const resolvedUrl = response.url;
+
+      if (!resolvedUrl || resolvedUrl === initialUrl.toString()) {
+        return null;
+      }
+
+      const url = parseHttpUrl(resolvedUrl);
+
+      return url && isSupportedYandexMapsUrl(url) ? url.toString() : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private collectUrlParams(url: URL) {
@@ -452,7 +514,7 @@ export class StoresService {
         : this.normalizeOptionalString(dto.yandexMapsUrl);
     const yandexGeocode =
       yandexMapsUrl && yandexMapsUrl !== current.yandexMapsUrl
-        ? this.parseYandexMapsGeocode(yandexMapsUrl)
+        ? await this.geocodeYandexMapsLink(yandexMapsUrl)
         : null;
 
     return this.prisma.store.update({

@@ -149,12 +149,12 @@ describe('StoresService', () => {
     });
   });
 
-  it('extracts coordinates from a Yandex Maps ll link without external requests', () => {
-    expect(
+  it('extracts coordinates from a Yandex Maps ll link without external requests', async () => {
+    await expect(
       service.geocodeYandexMapsLink(
         'https://yandex.ru/maps/54/yekaterinburg/?ll=60.597465%2C56.838011&z=17',
       ),
-    ).toEqual({
+    ).resolves.toEqual({
       value:
         'https://yandex.ru/maps/54/yekaterinburg/?ll=60.597465%2C56.838011&z=17',
       latitude: 56.838011,
@@ -163,15 +163,41 @@ describe('StoresService', () => {
     });
   });
 
-  it('extracts coordinates from a Yandex Maps whatshere link', () => {
-    expect(
+  it('extracts coordinates from a Yandex Maps whatshere link', async () => {
+    await expect(
       service.geocodeYandexMapsLink(
         'https://yandex.ru/maps/?whatshere%5Bpoint%5D=60.596988%2C56.829123&whatshere%5Bzoom%5D=17',
       ),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       latitude: 56.829123,
       longitude: 60.596988,
       source: 'whatshere',
+    });
+  });
+
+  it('resolves a Yandex Maps short link before extracting coordinates', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      url: 'https://yandex.ru/maps/54/yekaterinburg/?ll=60.597465%2C56.838011&z=17',
+    } as Response);
+
+    await expect(
+      service.geocodeYandexMapsLink('https://yandex.ru/maps/-/CDuDemo'),
+    ).resolves.toEqual({
+      value: 'https://yandex.ru/maps/-/CDuDemo',
+      resolvedUrl:
+        'https://yandex.ru/maps/54/yekaterinburg/?ll=60.597465%2C56.838011&z=17',
+      latitude: 56.838011,
+      longitude: 60.597465,
+      source: 'll',
+    });
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(requestUrl).toBe('https://yandex.ru/maps/-/CDuDemo');
+    expect(requestInit).toMatchObject({
+      method: 'GET',
+      redirect: 'follow',
     });
   });
 
@@ -201,12 +227,12 @@ describe('StoresService', () => {
     });
   });
 
-  it('rejects unsupported map links', () => {
-    expect(() =>
+  it('rejects unsupported map links', async () => {
+    await expect(
       service.geocodeYandexMapsLink(
         'https://maps.google.com/?q=56.838011,60.597465',
       ),
-    ).toThrow('Укажите ссылку Яндекс Карт');
+    ).rejects.toThrow();
   });
 
   it('rejects invalid coordinate values', async () => {

@@ -2059,6 +2059,164 @@ describe('GuestPortalService', () => {
       });
     });
 
+    it('answers Telegram /start without auth payload with safe club-selection guidance', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          text: '/start',
+          chat: { id: 123456 },
+          from: { id: 123456 },
+        },
+      });
+
+      expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            telegramIdentity: 'chat:123456',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_STATUS',
+        profileId: null,
+        telegramIdentityMasked: 'ch...56',
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          text: expect.stringContaining('выберите клуб'),
+          replyMarkup: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'Открыть Mini App',
+                  web_app: {
+                    url: 'https://tg.leetplus.ru/game/app',
+                  },
+                },
+              ],
+              [
+                {
+                  text: 'Вернуться на сайт LeetPlus',
+                  url: 'https://leetplus.ru/game/clubs',
+                },
+              ],
+              [
+                {
+                  text: 'Помощь',
+                  callback_data: '/help',
+                },
+                {
+                  text: 'Отписаться',
+                  callback_data: '/stop',
+                },
+              ],
+            ],
+          },
+        },
+      });
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('123456'));
+    });
+
+    it('answers Telegram /help with the bot action menu', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          text: '/help',
+          chat: { id: 123456 },
+          from: { id: 123456 },
+        },
+      });
+
+      expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_HELP',
+        profileId: null,
+        reply: {
+          text: expect.stringContaining('Доступные действия'),
+          replyMarkup: {
+            inline_keyboard: expect.any(Array),
+          },
+        },
+      });
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+    });
+
+    it('answers Continue in bot with safe linked profile state and actions', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        xp: 1250,
+        level: 3,
+        status: 'ACTIVE',
+        unsubscribedAt: null,
+      });
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        storeId: 'store-1',
+        store: {
+          name: '1337',
+        },
+      });
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          name: 'Сыграть 3 часа',
+          xpReward: 150,
+          progressTarget: 3,
+          progressUnit: 'часа',
+          storeIds: ['store-1'],
+          periodFrom: null,
+          periodTo: new Date(Date.now() + 86_400_000),
+        },
+      ]);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          text: 'Продолжить в боте',
+          chat: { id: 123456 },
+          from: { id: 123456 },
+        },
+      });
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_STATUS',
+        profileId: 'profile-1',
+        telegramIdentityMasked: 'ch...56',
+        reply: {
+          text: expect.stringContaining('Клуб: 1337.'),
+          replyMarkup: {
+            inline_keyboard: expect.any(Array),
+          },
+        },
+      });
+      expect(result.reply?.text).toEqual(expect.stringContaining('уровень 3'));
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Ближайший квест: Сыграть 3 часа'),
+      );
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('profile-1'),
+      );
+    });
+
     it('records referral attribution when Telegram status issues the game session', async () => {
       const { jwtService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',

@@ -122,6 +122,7 @@ type GuestPortalVerificationStatus =
   | 'READY_AFTER_OTP'
   | 'NOT_CONFIGURED'
   | 'PLANNED';
+type TelegramBotCommand = 'STATUS' | 'HELP';
 type GuestPortalPhoneIdentity = {
   normalized: string;
   hash: string;
@@ -548,6 +549,8 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'LINK_CODE'
     | 'TELEGRAM_AUTH_START'
     | 'TELEGRAM_AUTH_CONTACT'
+    | 'TELEGRAM_BOT_STATUS'
+    | 'TELEGRAM_BOT_HELP'
     | 'UNSUBSCRIBE'
     | 'UNKNOWN';
   profileId: string | null;
@@ -579,6 +582,7 @@ export type GuestPortalTelegramWebhookResponse = {
             Array<{
               text: string;
               url?: string;
+              callback_data?: string;
               web_app?: {
                 url: string;
               };
@@ -3866,6 +3870,17 @@ export class GuestPortalService {
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
 
+    const botCommand = telegramWebhookBotCommand(update.text);
+    if (botCommand) {
+      const response = await this.buildTelegramBotCommandResponse(
+        botCommand,
+        update.telegramChatId,
+        telegramIdentityMasked,
+      );
+
+      return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
+    }
+
     return {
       status: 'IGNORED',
       action: 'UNKNOWN',
@@ -4272,6 +4287,244 @@ export class GuestPortalService {
       chatIdMasked,
       text,
       replyMarkup: inlineKeyboard,
+    };
+  }
+
+  private async buildTelegramBotCommandResponse(
+    command: TelegramBotCommand,
+    telegramChatIdValue: string,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    if (command === 'HELP') {
+      return {
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_HELP',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          'Telegram bot help command processed without exposing guest identifiers.',
+        reply: this.telegramWebhookBotMenuReply(
+          telegramIdentityMasked,
+          [
+            'LeetPlus bot: здесь можно продолжить игру после Telegram-входа.',
+            'Доступные действия: открыть Mini App, вернуться на сайт, посмотреть статус или отписаться от уведомлений.',
+            'Для входа заново выберите клуб на сайте и нажмите "Войти через Telegram".',
+          ].join('\n'),
+        ),
+      };
+    }
+
+    const telegramIdentity = `chat:${telegramChatIdValue}`;
+    const profile = await this.prisma.guestGameProfile.findFirst({
+      where: {
+        telegramIdentity,
+        status: { not: 'ARCHIVED' },
+      },
+      orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        id: true,
+        tenantId: true,
+        xp: true,
+        level: true,
+        status: true,
+        unsubscribedAt: true,
+      },
+    });
+
+    if (!profile) {
+      return {
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_STATUS',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          'Telegram bot status command received for an unlinked Telegram chat.',
+        reply: this.telegramWebhookBotMenuReply(
+          telegramIdentityMasked,
+          [
+            'LeetPlus bot подключен.',
+            'Клуб: выберите клуб на сайте LeetPlus.',
+            'Профиль: этот Telegram еще не связан с игровым профилем.',
+            'Откройте сайт, выберите клуб и нажмите "Войти через Telegram".',
+          ].join('\n'),
+        ),
+      };
+    }
+
+    if (profile.status === TELEGRAM_AUTH_PROFILE_STATUS) {
+      return {
+        status: 'AWAITING_CONTACT',
+        action: 'TELEGRAM_BOT_STATUS',
+        profileId: profile.id,
+        telegramIdentityMasked,
+        message:
+          'Telegram bot status command received while auth is waiting for contact-share.',
+        reply: this.telegramWebhookContactRequestReply(
+          telegramIdentityMasked,
+          'Вход почти готов. Поделитесь телефоном кнопкой Telegram, чтобы LeetPlus подтвердил профиль.',
+        ),
+      };
+    }
+
+    const club = await this.findTelegramBotLatestClub(profile.id);
+    const mission = club
+      ? await this.findTelegramBotNearestMission(profile.tenantId, club.storeId)
+      : null;
+    const xp = Math.max(0, profile.xp ?? 0);
+    const level = Math.max(1, profile.level ?? levelFromXp(xp));
+    const lines = [
+      'LeetPlus bot: профиль подключен.',
+      club
+        ? `Клуб: ${club.name}.`
+        : 'Клуб: выберите клуб на сайте или в Mini App.',
+      `Прогресс: ${formatTelegramBotInteger(xp)} XP, уровень ${formatTelegramBotInteger(level)}.`,
+      profile.unsubscribedAt
+        ? 'Уведомления: отключены. Игровой статус доступен, но новые Telegram-рассылки заблокированы.'
+        : null,
+      club
+        ? mission
+          ? telegramBotMissionLine(mission)
+          : 'Квесты: активных заданий сейчас нет.'
+        : 'Квесты появятся после выбора клуба.',
+      'Действия: Mini App, сайт, помощь и отписка доступны кнопками ниже.',
+    ].filter((line): line is string => Boolean(line));
+
+    return {
+      status: 'CONFIRMED',
+      action: 'TELEGRAM_BOT_STATUS',
+      profileId: profile.id,
+      telegramIdentityMasked,
+      message: 'Telegram bot status command processed.',
+      reply: this.telegramWebhookBotMenuReply(
+        telegramIdentityMasked,
+        lines.join('\n'),
+      ),
+    };
+  }
+
+  private async findTelegramBotLatestClub(profileId: string): Promise<{
+    storeId: string;
+    name: string;
+  } | null> {
+    const link = await this.prisma.guestGameTelegramLinkChallenge.findFirst({
+      where: {
+        profileId,
+        status: {
+          in: [
+            TELEGRAM_AUTH_VERIFIED_STATUS,
+            TELEGRAM_AUTH_SESSION_ISSUED_STATUS,
+            'CONSUMED',
+          ],
+        },
+      },
+      orderBy: [
+        { consumedAt: 'desc' },
+        { updatedAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      select: {
+        storeId: true,
+        store: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+    const storeName = link?.store?.name?.trim();
+
+    return link && storeName
+      ? {
+          storeId: link.storeId,
+          name: storeName,
+        }
+      : null;
+  }
+
+  private async findTelegramBotNearestMission(
+    tenantId: string,
+    storeId: string,
+  ): Promise<{
+    name: string;
+    xpReward: number;
+    progressTarget: number | null;
+    progressUnit: string | null;
+  } | null> {
+    const missions = await this.prisma.guestGameMission.findMany({
+      where: {
+        tenantId,
+        status: 'ACTIVE',
+      },
+      orderBy: [{ periodTo: 'asc' }, { updatedAt: 'desc' }],
+      select: {
+        name: true,
+        xpReward: true,
+        progressTarget: true,
+        progressUnit: true,
+        storeIds: true,
+        periodFrom: true,
+        periodTo: true,
+      },
+      take: 12,
+    });
+    const activeMissions = missions
+      .filter((mission) => matchesStore(mission.storeIds, storeId))
+      .filter((mission) => activePeriod(mission.periodFrom, mission.periodTo))
+      .sort((left, right) => {
+        const leftTime = left.periodTo?.getTime() ?? Number.POSITIVE_INFINITY;
+        const rightTime = right.periodTo?.getTime() ?? Number.POSITIVE_INFINITY;
+
+        return leftTime - rightTime || right.xpReward - left.xpReward;
+      });
+    const mission = activeMissions[0] ?? null;
+
+    return mission
+      ? {
+          name: mission.name,
+          xpReward: mission.xpReward,
+          progressTarget: mission.progressTarget,
+          progressUnit: mission.progressUnit,
+        }
+      : null;
+  }
+
+  private telegramWebhookBotMenuReply(
+    chatIdMasked: string | null,
+    text: string,
+  ): GuestPortalTelegramWebhookResponse['reply'] {
+    return {
+      provider: 'TELEGRAM',
+      method: 'sendMessage',
+      chatIdMasked,
+      text,
+      replyMarkup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Открыть Mini App',
+              web_app: {
+                url: this.telegramMiniAppUrl(),
+              },
+            },
+          ],
+          [
+            {
+              text: 'Вернуться на сайт LeetPlus',
+              url: `${this.publicWebUrl().replace(/\/$/, '')}/game/clubs`,
+            },
+          ],
+          [
+            {
+              text: 'Помощь',
+              callback_data: '/help',
+            },
+            {
+              text: 'Отписаться',
+              callback_data: '/stop',
+            },
+          ],
+        ],
+      },
     };
   }
 
@@ -8565,6 +8818,70 @@ function telegramWebhookUnsubscribeCommand(text: string | null) {
       command,
     ) || /^(stop|unsubscribe|cancel|отписаться|стоп|отписка)$/i.test(trimmed)
   );
+}
+
+function telegramWebhookBotCommand(
+  text: string | null,
+): TelegramBotCommand | null {
+  if (!text) {
+    return null;
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const [command, ...payloadParts] = trimmed.split(/\s+/);
+  const normalized = trimmed.toLowerCase();
+
+  if (
+    /^\/help(@[A-Za-z0-9_]{3,64})?$/i.test(command) ||
+    /^(help|помощь|что умеешь)$/i.test(trimmed)
+  ) {
+    return 'HELP';
+  }
+
+  if (
+    /^\/start(@[A-Za-z0-9_]{3,64})?$/i.test(command) &&
+    payloadParts.length === 0
+  ) {
+    return 'STATUS';
+  }
+
+  if (/^\/(status|profile|quests|menu)(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
+    return 'STATUS';
+  }
+
+  return /^(продолжить в боте|статус|профиль|квесты|меню)$/i.test(normalized)
+    ? 'STATUS'
+    : null;
+}
+
+function telegramBotMissionLine(mission: {
+  name: string;
+  xpReward: number;
+  progressTarget: number | null;
+  progressUnit: string | null;
+}) {
+  const target =
+    mission.progressTarget && mission.progressTarget > 0
+      ? ` (${formatTelegramBotInteger(mission.progressTarget)}${
+          mission.progressUnit ? ` ${mission.progressUnit}` : ''
+        })`
+      : '';
+  const xp =
+    mission.xpReward > 0
+      ? `, +${formatTelegramBotInteger(mission.xpReward)} XP`
+      : '';
+
+  return `Ближайший квест: ${mission.name}${target}${xp}.`;
+}
+
+function formatTelegramBotInteger(value: number) {
+  return new Intl.NumberFormat('ru-RU', {
+    maximumFractionDigits: 0,
+  }).format(Math.max(0, Math.floor(value)));
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {

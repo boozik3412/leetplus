@@ -1,4 +1,4 @@
-import { GuestPortalClient } from "./portal";
+import { redirect } from "next/navigation";
 
 type PageProps = {
   params: Promise<{
@@ -9,6 +9,11 @@ type PageProps = {
 
 export default async function GuestPortalPage({ params }: PageProps) {
   const { tenantSlug, storeId } = await params;
+  const clubId = `${tenantSlug}:${storeId}`;
+  const target = new URLSearchParams({
+    clubId,
+    storeId,
+  });
 
-  return <GuestPortalClient tenantSlug={tenantSlug} storeId={storeId} />;
+  redirect(`/game/auth?${target.toString()}`);
 }

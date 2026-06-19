@@ -1518,10 +1518,6 @@ function ActiveGameSessionPanel({
     );
   }
 
-  const guestPortalHref = `/guest/${encodeURIComponent(
-    summary.tenant.slug,
-  )}/${encodeURIComponent(summary.store.publicSlug ?? summary.store.id)}`;
-
   return (
     <section className="mt-5 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-4 shadow-2xl shadow-black/20">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1555,9 +1551,9 @@ function ActiveGameSessionPanel({
           </Link>
           <Link
             className="flex min-h-11 items-center justify-center rounded-lg border border-white/15 px-4 text-sm font-bold text-slate-100 transition hover:border-white/30"
-            href={guestPortalHref}
+            href="/game/clubs"
           >
-            Кабинет клуба
+            Выбрать клуб
           </Link>
         </div>
       </div>

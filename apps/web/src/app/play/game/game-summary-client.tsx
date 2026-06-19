@@ -187,17 +187,8 @@ function EmptySessionView({
 }
 
 function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
-  const guestPortalHref = useMemo(
-    () =>
-      `/guest/${encodeURIComponent(summary.tenant.slug)}/${encodeURIComponent(
-        summary.store.publicSlug ?? summary.store.id,
-      )}`,
-    [summary.store.id, summary.store.publicSlug, summary.tenant.slug],
-  );
   const primaryAction = summary.nextActions[0] ?? null;
-  const primaryActionHref = primaryAction
-    ? gameActionHref(primaryAction, guestPortalHref)
-    : null;
+  const primaryActionHref = primaryAction ? gameActionHref(primaryAction) : null;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedLootId, setSelectedLootId] = useState<string | null>(null);
   const [promoCode, setPromoCode] = useState("");
@@ -205,7 +196,6 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
     summary,
     primaryAction,
     primaryActionHref,
-    guestPortalHref,
   );
   const lootCards = buildHomeLootCards(summary, selectedLootId);
   const battleQuests = buildHomeBattleQuests(summary);
@@ -347,7 +337,6 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
 
         <JourneyPanel
           journey={summary.journey}
-          guestPortalHref={guestPortalHref}
         />
 
         <ReferralPanel referral={summary.referral} />
@@ -356,7 +345,6 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
 
         <NextActionsPanel
           actions={summary.nextActions}
-          guestPortalHref={guestPortalHref}
         />
 
         <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
@@ -375,7 +363,7 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
         </section>
 
         <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <ChannelsPanel summary={summary} guestPortalHref={guestPortalHref} />
+          <ChannelsPanel summary={summary} />
           <ActivityPanel activity={summary.activity} />
         </section>
       </section>
@@ -645,7 +633,6 @@ function buildHomeBanners(
   summary: GuestPortalGameSummary,
   primaryAction: GameNextAction | null,
   primaryActionHref: string | null,
-  guestPortalHref: string,
 ): HomeBanner[] {
   const featuredMission = summary.missions.featured[0] ?? null;
   const secondMission = summary.missions.featured[1] ?? null;
@@ -681,7 +668,7 @@ function buildHomeBanners(
         summary.referral.channelHint ??
         "Лимитированные предметы и бонусы для гостей клуба.",
       tag: secondMission ? "квест" : "получить",
-      href: guestPortalHref,
+      href: "#rewards",
     },
   ];
 }
@@ -1043,10 +1030,8 @@ function ReferralPanel({
 
 function JourneyPanel({
   journey,
-  guestPortalHref,
 }: {
   journey: GuestPortalGameSummary["journey"];
-  guestPortalHref: string;
 }) {
   const nextStepLabel = journey.summary.nextStepLabel ?? "маршрут пройден";
 
@@ -1097,7 +1082,7 @@ function JourneyPanel({
             <p className="mt-2 text-xs leading-5 text-zinc-400">{step.hint}</p>
             {step.status !== "DONE" ? (
               <Link
-                href={journeyStepHref(step, guestPortalHref)}
+                href={journeyStepHref(step)}
                 className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-emerald-300/30 px-3 text-xs font-black text-emerald-100 transition hover:border-emerald-300 hover:bg-emerald-300/10"
               >
                 Открыть
@@ -1136,9 +1121,9 @@ function journeyStatusClass(status: GameJourneyStep["status"]) {
   }
 }
 
-function journeyStepHref(step: GameJourneyStep, guestPortalHref: string) {
+function journeyStepHref(step: GameJourneyStep) {
   if (step.anchor === "langame-match") {
-    return `${guestPortalHref}#langame-match`;
+    return "#next-actions";
   }
 
   return `#${step.anchor}`;
@@ -1326,14 +1311,12 @@ function Metric({
 
 function NextActionsPanel({
   actions,
-  guestPortalHref,
 }: {
   actions: GuestPortalGameSummary["nextActions"];
-  guestPortalHref: string;
 }) {
   if (actions.length === 0) {
     return (
-      <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+      <section id="next-actions" className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
         <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
           План игры
         </p>
@@ -1347,7 +1330,7 @@ function NextActionsPanel({
   }
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section id="next-actions" className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
@@ -1361,7 +1344,7 @@ function NextActionsPanel({
       </div>
       <div className="mt-5 grid gap-3 lg:grid-cols-3">
         {actions.map((action) => {
-          const href = gameActionHref(action, guestPortalHref);
+          const href = gameActionHref(action);
 
           return (
             <article
@@ -2798,12 +2781,10 @@ function walletStateHint(state: GameRewardWalletState) {
 
 function ChannelsPanel({
   summary,
-  guestPortalHref,
 }: {
   summary: GuestPortalGameSummary;
-  guestPortalHref: string;
 }) {
-  const communicationsHref = `${guestPortalHref}#communications`;
+  const communicationsHref = "#communications";
   const hasRewardChannel =
     summary.communications.telegram.readyForRewards ||
     summary.communications.max.readyForRewards;
@@ -4117,9 +4098,9 @@ const clubHomeCss = `
 }
 `;
 
-function gameActionHref(action: GameNextAction, guestPortalHref: string) {
+function gameActionHref(action: GameNextAction) {
   if (action.kind === "MATCH_LANGAME") {
-    return `${guestPortalHref}#langame-match`;
+    return "#next-actions";
   }
 
   return `#${action.anchor}`;

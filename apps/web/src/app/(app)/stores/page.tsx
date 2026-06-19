@@ -132,7 +132,7 @@ export default async function StoresPage() {
                     </td>
                     <td className="px-5 py-4 text-zinc-700">
                       <span className="font-mono text-xs">
-                        /guest/{user.tenantSlug}/{store.publicSlug ?? store.id}
+                        /game/auth?storeId={store.publicSlug ?? store.id}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-zinc-700">

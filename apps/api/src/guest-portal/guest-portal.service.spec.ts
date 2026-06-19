@@ -2156,7 +2156,7 @@ describe('GuestPortalService', () => {
               [
                 {
                   text: 'Продолжить в боте',
-                  url: 'https://t.me/leetplusru_bot',
+                  callback_data: '/status',
                 },
               ],
             ],
@@ -2272,6 +2272,78 @@ describe('GuestPortalService', () => {
         },
       });
       expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+    });
+
+    it('answers Telegram /status callback with the bot status menu', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-1',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: '/status',
+        },
+      });
+
+      expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            telegramIdentity: 'chat:123456',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_STATUS',
+        telegramIdentityMasked: 'ch...56',
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          replyMarkup: {
+            inline_keyboard: expect.any(Array),
+          },
+        },
+      });
+    });
+
+    it('falls back to Telegram status for unrecognized callback buttons', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-2',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: 'continue-in-bot',
+        },
+      });
+
+      expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            telegramIdentity: 'chat:123456',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'IGNORED',
+        action: 'TELEGRAM_BOT_STATUS',
+        telegramIdentityMasked: 'ch...56',
+        reply: { method: 'sendMessage' },
+      });
     });
 
     it('answers Continue in bot with safe linked profile state and actions', async () => {

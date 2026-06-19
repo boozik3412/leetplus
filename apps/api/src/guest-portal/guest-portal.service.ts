@@ -3889,6 +3889,16 @@ export class GuestPortalService {
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
 
+    if (update.callbackData) {
+      const response = await this.buildTelegramBotCommandResponse(
+        'STATUS',
+        update.telegramChatId,
+        telegramIdentityMasked,
+      );
+
+      return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
+    }
+
     return {
       status: 'IGNORED',
       action: 'UNKNOWN',
@@ -4281,7 +4291,7 @@ export class GuestPortalService {
               [
                 {
                   text: 'Продолжить в боте',
-                  url: botUrl,
+                  callback_data: '/status',
                 },
               ],
             ]
@@ -8758,10 +8768,11 @@ function telegramWebhookUpdate(value: unknown) {
   const from = objectRecord(message.from) ?? objectRecord(callbackQuery?.from);
   const contact = objectRecord(message.contact);
   const chatId = chat?.id ?? from?.id;
+  const callbackData = stringField(callbackQuery?.data);
   const text =
     stringField(message.text) ??
     stringField(message.caption) ??
-    stringField(callbackQuery?.data);
+    callbackData;
   const username =
     typeof from?.username === 'string'
       ? from.username
@@ -8784,6 +8795,7 @@ function telegramWebhookUpdate(value: unknown) {
     telegramUsername: username,
     contactPhone: stringField(contact?.phone_number),
     contactUserId,
+    callbackData,
   };
 }
 

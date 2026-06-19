@@ -28,10 +28,18 @@ type TelegramEdgeDeps = {
   logger?: TelegramEdgeLogger;
 };
 
+type TelegramMessage = {
+  chat?: { id?: unknown };
+};
+
 type TelegramUpdate = {
   update_id?: unknown;
-  message?: {
-    chat?: { id?: unknown };
+  message?: TelegramMessage;
+  edited_message?: TelegramMessage;
+  callback_query?: {
+    id?: unknown;
+    from?: { id?: unknown };
+    message?: TelegramMessage;
   };
 };
 
@@ -52,6 +60,11 @@ type TelegramSendMessageResponse = {
   result?: {
     message_id?: unknown;
   };
+};
+
+type TelegramAnswerCallbackQueryResponse = {
+  ok?: unknown;
+  description?: unknown;
 };
 
 type JsonBody = Record<string, unknown>;
@@ -146,6 +159,7 @@ export async function handleTelegramEdgeWebhook(
   const logger = deps.logger ?? console;
   const typedUpdate = telegramUpdate(update);
   const chatId = telegramChatId(typedUpdate);
+  const callbackQueryId = telegramCallbackQueryId(typedUpdate);
   const chatIdMasked = maskChatId(chatId);
   const leetPlusResponse = await postJson<LeetPlusWebhookResponse>(
     `${config.leetPlusApiUrl}${config.leetPlusWebhookPath}`,
@@ -164,6 +178,15 @@ export async function handleTelegramEdgeWebhook(
     replyText !== null;
 
   if (!shouldSend) {
+    const callbackAnswered = config.dryRun
+      ? false
+      : await answerTelegramCallbackQueryIfNeeded(
+          config,
+          fetchImpl,
+          logger,
+          callbackQueryId,
+        );
+
     logger.log(
       `Telegram edge webhook forwarded update action=${stringValue(
         leetPlusResponse.action,
@@ -176,6 +199,7 @@ export async function handleTelegramEdgeWebhook(
       upstreamAction: leetPlusResponse.action ?? null,
       replySent: false,
       dryRun: config.dryRun,
+      callbackAnswered,
     };
   }
 
@@ -213,6 +237,12 @@ export async function handleTelegramEdgeWebhook(
     };
   }
 
+  const callbackAnswered = await answerTelegramCallbackQueryIfNeeded(
+    config,
+    fetchImpl,
+    logger,
+    callbackQueryId,
+  );
   const telegramResult = await sendTelegramReply(
     config,
     fetchImpl,
@@ -237,6 +267,7 @@ export async function handleTelegramEdgeWebhook(
     dryRun: false,
     chatIdMasked,
     telegramMessageId: telegramResult.messageId,
+    callbackAnswered,
   };
 }
 
@@ -376,6 +407,41 @@ async function sendTelegramReply(
   };
 }
 
+async function answerTelegramCallbackQueryIfNeeded(
+  config: TelegramEdgeConfig,
+  fetchImpl: TelegramEdgeFetch,
+  logger: TelegramEdgeLogger,
+  callbackQueryId: string | null,
+) {
+  if (!callbackQueryId) {
+    return false;
+  }
+
+  try {
+    const response = await postJson<TelegramAnswerCallbackQueryResponse>(
+      `${config.telegramApiBaseUrl}/bot${config.botToken}/answerCallbackQuery`,
+      { callback_query_id: callbackQueryId },
+      fetchImpl,
+      config.requestTimeoutMs,
+    );
+
+    if (response.ok !== true) {
+      throw new Error(
+        typeof response.description === 'string'
+          ? response.description
+          : 'Telegram Bot API returned ok=false.',
+      );
+    }
+
+    return true;
+  } catch (error) {
+    logger.warn(
+      `Telegram edge callback answer failed: ${safeErrorMessage(error)}`,
+    );
+    return false;
+  }
+}
+
 async function postJson<T>(
   url: string,
   body: JsonBody,
@@ -440,14 +506,25 @@ function telegramUpdate(value: unknown): TelegramUpdate {
 }
 
 function telegramChatId(update: TelegramUpdate) {
-  const chatId = update.message?.chat?.id;
+  return telegramIdValue(
+    update.message?.chat?.id ??
+      update.edited_message?.chat?.id ??
+      update.callback_query?.message?.chat?.id ??
+      update.callback_query?.from?.id,
+  );
+}
 
-  if (typeof chatId === 'string') {
-    return chatId;
+function telegramCallbackQueryId(update: TelegramUpdate) {
+  return telegramIdValue(update.callback_query?.id);
+}
+
+function telegramIdValue(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
   }
 
-  if (typeof chatId === 'number' && Number.isFinite(chatId)) {
-    return String(Math.trunc(chatId));
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(Math.trunc(value));
   }
 
   return null;

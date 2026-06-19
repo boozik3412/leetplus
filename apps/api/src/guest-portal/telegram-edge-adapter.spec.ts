@@ -118,6 +118,84 @@ describe('telegram edge adapter', () => {
     );
   });
 
+  it('handles callback_query updates and answers the Telegram callback', async () => {
+    const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
+      .fn<TelegramEdgeFetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: 'CONFIRMED',
+            action: 'TELEGRAM_BOT_STATUS',
+            reply: {
+              provider: 'TELEGRAM',
+              method: 'sendMessage',
+              text: 'РЎС‚Р°С‚СѓСЃ РёРіСЂРѕРєР°',
+              replyMarkup: {
+                inline_keyboard: [
+                  [{ text: 'РџРѕРјРѕС‰СЊ', callback_data: '/help' }],
+                ],
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, result: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ok: true, result: { message_id: 778 } }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+
+    const result = await handleTelegramEdgeWebhook(
+      baseConfig,
+      {
+        update_id: 2,
+        callback_query: {
+          id: 'callback-1',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+            text: 'РњРµРЅСЋ',
+          },
+          data: '/status',
+        },
+      },
+      { fetch: fetchMock, logger: silentLogger },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      replySent: true,
+      dryRun: false,
+      chatIdMasked: 'ch...56',
+      telegramMessageId: '778',
+      callbackAnswered: true,
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://tg-proxy.test/botbot-token/answerCallbackQuery',
+      expect.objectContaining({
+        body: JSON.stringify({ callback_query_id: 'callback-1' }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://tg-proxy.test/botbot-token/sendMessage',
+      expect.objectContaining({
+        body: expect.stringContaining('"chat_id":"123456"'),
+      }),
+    );
+  });
   it('does not call Telegram in dry-run mode', async () => {
     const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest
       .fn<TelegramEdgeFetch>()

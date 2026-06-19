@@ -1,15 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import type {
-  GuestPortalCheckInResponse,
-  GuestPortalGameSummary,
-} from "@/lib/guest-portal";
+import type { GuestPortalGameSummary } from "@/lib/guest-portal";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
-type SubmitState = "idle" | "submitting";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
 type GameRewardWalletState =
   GuestPortalGameSummary["rewards"]["recent"][number]["walletState"];
@@ -51,15 +47,6 @@ export function GameSummaryClient() {
   const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState<string | null>(null);
-  const [checkInState, setCheckInState] = useState<SubmitState>("idle");
-  const [checkInMessage, setCheckInMessage] = useState<string | null>(null);
-
-  const refreshSummary = useCallback(async () => {
-    const nextSummary = await requestGameSummary();
-    setSummary(nextSummary);
-    setLoadState("ready");
-    setMessage(null);
-  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -99,47 +86,6 @@ export function GameSummaryClient() {
     };
   }, []);
 
-  async function checkIn() {
-    setCheckInState("submitting");
-    setCheckInMessage(null);
-
-    try {
-      const response = await fetch("/api/guest-portal/session/check-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          note: "Чекин гостя из игрового экрана LeetPlus Play.",
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          await readResponseMessage(response, "Не удалось выполнить чекин."),
-        );
-      }
-
-      const data = (await response.json()) as GuestPortalCheckInResponse;
-      const xpDelta = data.checkIn.processResult.summary.appliedXpDelta;
-      const rewards = data.checkIn.processResult.summary.createdRewards;
-      const rewardText = rewards
-        ? ` Наград в очереди: ${formatNumber(rewards)}.`
-        : "";
-
-      setCheckInMessage(
-        `Чекин подтвержден: ${formatDate(data.checkIn.checkedAt)}. XP: ${formatNumber(
-          xpDelta,
-        )}.${rewardText}`,
-      );
-      await refreshSummary();
-    } catch (error) {
-      setCheckInMessage(
-        getErrorMessage(error, "Не удалось выполнить чекин."),
-      );
-    } finally {
-      setCheckInState("idle");
-    }
-  }
-
   if (loadState === "loading") {
     return <GameShell body={<LoadingView />} />;
   }
@@ -173,12 +119,7 @@ export function GameSummaryClient() {
   return (
     <GameShell
       body={
-        <ReadyGameView
-          summary={summary}
-          onCheckIn={checkIn}
-          isCheckingIn={checkInState === "submitting"}
-          checkInMessage={checkInMessage}
-        />
+        <ReadyGameView summary={summary} />
       }
     />
   );
@@ -245,17 +186,7 @@ function EmptySessionView({
   );
 }
 
-function ReadyGameView({
-  summary,
-  onCheckIn,
-  isCheckingIn,
-  checkInMessage,
-}: {
-  summary: GuestPortalGameSummary;
-  onCheckIn: () => void;
-  isCheckingIn: boolean;
-  checkInMessage: string | null;
-}) {
+function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
   const guestPortalHref = useMemo(
     () =>
       `/guest/${encodeURIComponent(summary.tenant.slug)}/${encodeURIComponent(
@@ -393,7 +324,6 @@ function ReadyGameView({
 
         <PlayerProfilePanel
           summary={summary}
-          guestPortalHref={guestPortalHref}
           rankLabel={rankLabel}
           rankPercent={rankPercent}
           quickQuestCount={quickQuestCount}
@@ -401,12 +331,6 @@ function ReadyGameView({
           promoCode={promoCode}
           onPromoCodeChange={setPromoCode}
           onPromoSubmit={handlePromoSubmit}
-          onCheckIn={() => {
-            showToast("Проверяем активную сессию клуба.");
-            onCheckIn();
-          }}
-          isCheckingIn={isCheckingIn}
-          checkInMessage={checkInMessage}
         />
       </div>
 
@@ -604,7 +528,6 @@ function HomeBattlePass({
 
 function PlayerProfilePanel({
   summary,
-  guestPortalHref,
   rankLabel,
   rankPercent,
   quickQuestCount,
@@ -612,12 +535,8 @@ function PlayerProfilePanel({
   promoCode,
   onPromoCodeChange,
   onPromoSubmit,
-  onCheckIn,
-  isCheckingIn,
-  checkInMessage,
 }: {
   summary: GuestPortalGameSummary;
-  guestPortalHref: string;
   rankLabel: string;
   rankPercent: number;
   quickQuestCount: number;
@@ -625,9 +544,6 @@ function PlayerProfilePanel({
   promoCode: string;
   onPromoCodeChange: (value: string) => void;
   onPromoSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onCheckIn: () => void;
-  isCheckingIn: boolean;
-  checkInMessage: string | null;
 }) {
   return (
     <aside className="lp-club-profile-panel" aria-label="Профиль игрока">
@@ -669,17 +585,6 @@ function PlayerProfilePanel({
         </div>
       </div>
 
-      <div className="lp-club-profile-section lp-club-profile-stats">
-        <div>
-          <span className="lp-club-small-label">Бонусы</span>
-          <strong>{formatNumber(summary.loyalty.bonusBalance ?? 0)}</strong>
-        </div>
-        <div>
-          <span className="lp-club-small-label">Время</span>
-          <strong>{formatMinutes(summary.activity.playMinutes)}</strong>
-        </div>
-      </div>
-
       <form className="lp-club-promo" onSubmit={onPromoSubmit}>
         <label className="lp-club-small-label" htmlFor="promoCode">
           Промокод
@@ -697,18 +602,6 @@ function PlayerProfilePanel({
           История наград
         </Link>
       </form>
-
-      <div className="lp-club-quick-actions">
-        <button
-          type="button"
-          onClick={onCheckIn}
-          disabled={isCheckingIn}
-        >
-          {isCheckingIn ? "Проверяем..." : "Чекин в клубе"}
-        </button>
-        <Link href={guestPortalHref}>Открыть кабинет</Link>
-        {checkInMessage ? <p>{checkInMessage}</p> : null}
-      </div>
 
       <section className="lp-club-quest-widget" aria-label="Квесты игрока">
         <div className="lp-club-quest-widget-head">
@@ -3755,19 +3648,6 @@ const clubHomeCss = `
   background: linear-gradient(90deg, var(--amber), rgba(208, 170, 108, 0.48));
 }
 
-.lp-club-profile-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.lp-club-profile-stats strong {
-  display: block;
-  margin-top: 6px;
-  color: var(--text);
-  font-size: 18px;
-}
-
 .lp-club-promo {
   display: grid;
   gap: 10px;
@@ -3793,8 +3673,6 @@ const clubHomeCss = `
 }
 
 .lp-club-promo button,
-.lp-club-quick-actions button,
-.lp-club-quick-actions a,
 .lp-club-primary-link,
 .lp-club-ghost-link {
   display: inline-flex;
@@ -3843,35 +3721,6 @@ const clubHomeCss = `
   font-size: 12px;
   font-weight: 800;
   text-decoration: none;
-}
-
-.lp-club-quick-actions {
-  display: grid;
-  gap: 10px;
-  padding-top: 17px;
-}
-
-.lp-club-quick-actions button {
-  border: 1px solid rgba(131, 228, 236, 0.4);
-  color: #001012;
-  background: linear-gradient(135deg, #83e4ec, #94d6b8);
-}
-
-.lp-club-quick-actions button:disabled {
-  cursor: wait;
-  opacity: 0.68;
-}
-
-.lp-club-quick-actions a {
-  border: 1px solid rgba(196, 224, 225, 0.18);
-  color: var(--text);
-  background: rgba(0, 6, 9, 0.46);
-}
-
-.lp-club-quick-actions p {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .lp-club-quest-widget {
@@ -4133,8 +3982,7 @@ const clubHomeCss = `
     border-bottom: 0;
   }
 
-  .lp-club-promo,
-  .lp-club-quick-actions {
+  .lp-club-promo {
     padding-top: 0;
   }
 
@@ -4246,7 +4094,6 @@ const clubHomeCss = `
   }
 
   .lp-club-quick-metrics,
-  .lp-club-profile-stats,
   .lp-club-static-grid {
     grid-template-columns: 1fr;
   }
@@ -4343,16 +4190,6 @@ function formatSignedNumber(value: number) {
     maximumFractionDigits: 0,
     signDisplay: "always",
   }).format(value);
-}
-
-function formatMinutes(value: number) {
-  if (value < 60) {
-    return `${formatNumber(value)} мин`;
-  }
-
-  return `${new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 1,
-  }).format(value / 60)} ч`;
 }
 
 function formatDate(value: string) {

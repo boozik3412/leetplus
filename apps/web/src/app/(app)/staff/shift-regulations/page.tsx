@@ -271,9 +271,9 @@ export default async function StaffShiftRegulationsPage({
             </Link>
             <Link
               href="/staff/checklists/report"
-              className={headerActionSecondary}
+              className={headerActionSecondary.replace(" gap-2", "")}
             >
-              <span>Отчет по чек-листам</span>
+              Отчет по чек-листам
             </Link>
           </div>
         </header>

@@ -162,9 +162,10 @@ export function GameClubSelectClient({
     } catch (error) {
       setSelectedClubId(previousSelectedClubId ?? previousCurrentClubId);
       setCurrentClubId(previousCurrentClubId);
-      setMessage(
-        error instanceof Error ? error.message : "Не удалось выбрать клуб.",
-      );
+      const nextMessage =
+        error instanceof Error ? error.message : "Не удалось выбрать клуб.";
+      setMessage(nextMessage);
+      showToast(nextMessage);
     } finally {
       setSubmittingClubId(null);
     }

@@ -3152,10 +3152,19 @@ export class GuestPortalService {
         context.tenant.id === payload.tenantId ? payload.profileId : null,
     };
     const targetGuest = await this.findGuest(targetPayloadBase);
-    let targetProfile = await this.findProfile(
-      targetPayloadBase,
-      targetGuest?.id ?? null,
-    );
+    const targetGuestProfile = targetGuest
+      ? await this.prisma.guestGameProfile.findFirst({
+          where: {
+            tenantId: context.tenant.id,
+            guestId: targetGuest.id,
+            status: 'ACTIVE',
+          },
+          orderBy: { updatedAt: 'desc' },
+        })
+      : null;
+    let targetProfile =
+      targetGuestProfile ??
+      (await this.findProfile(targetPayloadBase, targetGuest?.id ?? null));
     const now = new Date();
 
     if (!targetProfile) {

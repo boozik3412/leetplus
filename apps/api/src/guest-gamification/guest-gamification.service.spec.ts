@@ -837,6 +837,7 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_PORTAL_OTP_SMS_RU_API_ID;
     delete process.env.GUEST_PORTAL_OTP_SMS_RU_BASE_URL;
     delete process.env.GUEST_PORTAL_OTP_SMS_RU_TEST_MODE;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED;
     delete process.env.GUEST_PORTAL_OTP_SMS_ENDPOINT;
     delete process.env.GUEST_PORTAL_OTP_SMS_TOKEN;
     delete process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES;
@@ -951,6 +952,10 @@ describe('GuestGamificationService', () => {
             value: 'test=1',
           }),
           expect.objectContaining({
+            label: 'SMS.ru live canary',
+            value: 'staged test-mode',
+          }),
+          expect.objectContaining({
             label: 'Лимит телефона',
             value: '3 за 60 мин',
           }),
@@ -967,10 +972,87 @@ describe('GuestGamificationService', () => {
       expect(smsText).not.toContain('smsru-api-id');
     });
 
+    it('keeps SMS OTP partial until SMS.ru live canary is enabled', () => {
+      process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_API_ID = 'smsru-api-id';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const otp = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP',
+      );
+      const sms = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP_SMS',
+      );
+      const smsText = JSON.stringify(sms);
+
+      expect(otp).toMatchObject({
+        status: 'PARTIAL',
+        ready: false,
+      });
+      expect(sms).toMatchObject({
+        status: 'PARTIAL',
+        ready: false,
+        configured: true,
+        enabled: true,
+      });
+      expect(sms.requiredEnv).toEqual(
+        expect.arrayContaining([
+          'GUEST_PORTAL_OTP_SMS_RU_TEST_MODE or GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED',
+        ]),
+      );
+      expect(sms.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: 'SMS.ru live canary',
+            value: 'нужен canary',
+          }),
+        ]),
+      );
+      expect(sms.note).toContain('controlled canary');
+      expect(smsText).not.toContain('smsru-api-id');
+    });
+
+    it('marks SMS.ru live OTP ready only with the canary flag enabled', () => {
+      process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_API_ID = 'smsru-api-id';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED = 'true';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const sms = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP_SMS',
+      );
+      const smsText = JSON.stringify(sms);
+
+      expect(sms).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+      });
+      expect(sms.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: 'SMS.ru test-mode',
+            value: 'выключен',
+          }),
+          expect.objectContaining({
+            label: 'SMS.ru live canary',
+            value: 'canary включен',
+          }),
+        ]),
+      );
+      expect(smsText).not.toContain('smsru-api-id');
+    });
+
     it('keeps SMS OTP partial when rate-limit or budget guards are disabled', () => {
       process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_PORTAL_OTP_SMS_ENABLED = 'true';
       process.env.GUEST_PORTAL_OTP_SMS_RU_API_ID = 'smsru-api-id';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_TEST_MODE = 'true';
       process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX = '0';
       const { service } = createService();
 
@@ -1015,6 +1097,7 @@ describe('GuestGamificationService', () => {
       process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_PORTAL_OTP_SMS_ENABLED = 'true';
       process.env.GUEST_PORTAL_USER_CALL_SMS_RU_API_ID = 'callcheck-api-id';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED = 'true';
       const { service } = createService();
 
       const readiness = (service as any).buildIntegrationReadiness([]);

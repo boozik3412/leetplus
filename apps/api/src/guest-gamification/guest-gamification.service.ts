@@ -9818,6 +9818,11 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
     envString('GUEST_PORTAL_USER_CALL_SMS_RU_API_ID');
   const smsRuConfigured = Boolean(smsRuApiId);
   const smsRuTestMode = envFlag('GUEST_PORTAL_OTP_SMS_RU_TEST_MODE');
+  const smsRuLiveCanaryEnabled = envFlag(
+    'GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED',
+  );
+  const smsRuLiveCanaryReady =
+    !smsRuConfigured || smsRuTestMode || smsRuLiveCanaryEnabled;
   const genericSmsConfigured = Boolean(
     envString('GUEST_PORTAL_OTP_SMS_ENDPOINT') &&
     envString('GUEST_PORTAL_OTP_SMS_TOKEN'),
@@ -9877,19 +9882,38 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
         label: 'SMS.ru test-mode',
         value: smsRuTestMode ? 'test=1' : 'выключен',
       },
+      {
+        label: 'SMS.ru live canary',
+        value: smsRuConfigured
+          ? smsRuLiveCanaryReady
+            ? smsRuTestMode
+              ? 'staged test-mode'
+              : 'canary включен'
+            : 'нужен canary'
+          : 'не используется',
+      },
       ...smsRateLimits.details,
     ],
     configuredNote:
       'SMS-код готов как резервный канал: backend отправит OTP через SMS.ru /sms/send или совместимый generic SMS provider только при включенном real-send и активных rate-limit/budget guards.',
     blockedNote:
       'SMS OTP не готов: нужен real-send, флаг SMS-канала и SMS.ru api_id либо generic endpoint/token.',
-    safetyReady: smsRateLimits.ready,
-    safetyRequiredEnv: smsRateLimits.requiredEnv,
-    partialNote: smsRateLimits.ready
-      ? undefined
-      : 'SMS OTP provider настроен, но live-режим нельзя считать готовым: один или несколько rate-limit/budget env отключены.',
+    safetyReady: smsRateLimits.ready && smsRuLiveCanaryReady,
+    safetyRequiredEnv: [
+      ...smsRateLimits.requiredEnv,
+      ...(smsRuLiveCanaryReady
+        ? []
+        : [
+            'GUEST_PORTAL_OTP_SMS_RU_TEST_MODE or GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED',
+          ]),
+    ],
+    partialNote: !smsRuLiveCanaryReady
+      ? 'SMS.ru provider настроен, но live-режим нельзя считать готовым без staged test-mode или отдельного controlled canary-флага.'
+      : smsRateLimits.ready
+        ? undefined
+        : 'SMS OTP provider настроен, но live-режим нельзя считать готовым: один или несколько rate-limit/budget env отключены.',
     nextAction:
-      'Провести staged QA с GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true, затем перевести SMS-код в резервный live-режим только с активными лимитами, provider-бюджетом и delivery audit без раскрытия кода.',
+      'Провести staged QA с GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true, затем включать live SMS только через GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED=true, активные лимиты, provider-бюджет и delivery audit без раскрытия кода.',
   });
   const telegram = guestPortalOtpProviderReadiness({
     channelLabel: 'Telegram',

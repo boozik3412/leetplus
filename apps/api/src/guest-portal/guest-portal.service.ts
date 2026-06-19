@@ -6729,6 +6729,17 @@ export class GuestPortalService {
 
     if (config.sms.enabled) {
       if (config.sms.smsRu.apiId) {
+        if (otpSmsRuLiveCanaryRequired(config)) {
+          return {
+            channel: 'SMS',
+            status: 'BLOCKED',
+            deliveredAt: null,
+            message:
+              'SMS-код в live-режиме ожидает controlled canary. Включите test-mode или отдельный canary-флаг перед реальной отправкой.',
+            requiredEnv: otpSmsRequiredEnv(config),
+          };
+        }
+
         try {
           const payload = await sendSmsRuOtpDelivery({
             apiId: config.sms.smsRu.apiId,
@@ -7875,6 +7886,10 @@ function guestPortalOtpDeliveryConfig(configService: ConfigService) {
           configService,
           'GUEST_PORTAL_OTP_SMS_RU_TEST_MODE',
         ),
+        liveCanaryEnabled: configFlag(
+          configService,
+          'GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED',
+        ),
       },
     },
     telegram: {
@@ -7899,11 +7914,22 @@ type GuestPortalOtpDeliveryConfig = ReturnType<
 >;
 
 function otpSmsReady(config: GuestPortalOtpDeliveryConfig) {
+  const smsRuReady =
+    Boolean(config.sms.smsRu.apiId) && !otpSmsRuLiveCanaryRequired(config);
+  const genericSmsReady = Boolean(config.sms.endpoint && config.sms.token);
+
   return (
     config.realSendEnabled &&
     config.sms.enabled &&
-    (Boolean(config.sms.smsRu.apiId) ||
-      Boolean(config.sms.endpoint && config.sms.token))
+    (smsRuReady || genericSmsReady)
+  );
+}
+
+function otpSmsRuLiveCanaryRequired(config: GuestPortalOtpDeliveryConfig) {
+  return Boolean(
+    config.sms.smsRu.apiId &&
+    !config.sms.smsRu.testMode &&
+    !config.sms.smsRu.liveCanaryEnabled,
   );
 }
 
@@ -7917,6 +7943,12 @@ function otpSmsRequiredEnv(config: GuestPortalOtpDeliveryConfig) {
     required.push(
       'GUEST_PORTAL_OTP_SMS_RU_API_ID or GUEST_PORTAL_USER_CALL_SMS_RU_API_ID',
       'or GUEST_PORTAL_OTP_SMS_ENDPOINT + GUEST_PORTAL_OTP_SMS_TOKEN',
+    );
+  }
+
+  if (otpSmsRuLiveCanaryRequired(config)) {
+    required.push(
+      'GUEST_PORTAL_OTP_SMS_RU_TEST_MODE or GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED',
     );
   }
 

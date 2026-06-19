@@ -1448,6 +1448,61 @@ describe('GuestPortalService', () => {
       fetchMock.mockRestore();
     });
 
+    it('blocks live SMS.ru OTP until controlled canary is enabled', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        NODE_ENV: 'production',
+        GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+      });
+      const fetchMock = jest.spyOn(globalThis, 'fetch');
+      jest.spyOn(service as any, 'generateOtp').mockReturnValue('1234');
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+
+      const result = await service.startOtp('leet', 'club-1337', {
+        phone: '+7 999 999-99-99',
+        gameConsentAccepted: true,
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            phoneMasked: '***9999',
+            status: 'DELIVERY_BLOCKED',
+            deliveryChannel: 'SMS',
+            deliveredAt: null,
+          }),
+        }),
+      );
+      expect(result.delivery).toMatchObject({
+        channel: 'SMS',
+        status: 'BLOCKED',
+        requiredEnv: expect.arrayContaining([
+          'GUEST_PORTAL_OTP_SMS_RU_TEST_MODE or GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED',
+        ]),
+      });
+      expect(JSON.stringify(result)).not.toContain('smsru-api-id');
+
+      fetchMock.mockRestore();
+    });
+
     it('blocks SMS OTP when the phone rate limit is reached before provider call', async () => {
       const { prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',
@@ -1455,6 +1510,7 @@ describe('GuestPortalService', () => {
         GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES: '60',
         GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX: '2',
       });
@@ -1508,6 +1564,7 @@ describe('GuestPortalService', () => {
         GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES: '10',
         GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX: '4',
       });
@@ -1563,6 +1620,7 @@ describe('GuestPortalService', () => {
         GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED: 'true',
         GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES: '1440',
         GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX: '5',
       });

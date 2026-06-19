@@ -54,6 +54,7 @@ flowchart LR
 ## Файлы
 
 - `CURRENT_1337_HANDOFF.md` - источник правды по текущему серверу 1337.
+- `BOT_MINI_APP_TZ.md` - рабочее ТЗ по Telegram-боту и Mini App с учетом UX-правок после production-теста.
 - `TRANSFER_SUMMARY.md` - общий summary архитектуры и env.
 - `SYNC_TOKEN_TENANT_HANDOFF.md` - откуда брать `SYNC_SERVICE_TOKEN` и tenant slug/id.
 - `telegram-edge.env.example` - env-поля для edge.

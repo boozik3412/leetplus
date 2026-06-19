@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -146,6 +147,16 @@ export type StaffChecklistUpdateDto = {
   createFollowUpTasks?: boolean;
 };
 
+export type StaffChecklistItemReviewMessageDto = {
+  body?: string | null;
+  attachmentUrl?: string | null;
+  attachments?: unknown;
+};
+
+export type StaffChecklistItemReviewResolveDto = {
+  comment?: string | null;
+};
+
 export type StaffChecklistSection = {
   id: string;
   title: string;
@@ -172,6 +183,28 @@ export type StaffChecklistEvidenceAttachment = {
   createdAt: string;
 };
 
+export type StaffChecklistReviewThreadStatus = 'OPEN' | 'RESOLVED';
+
+export type StaffChecklistReviewThreadMessage = {
+  id: string;
+  authorUserId: string | null;
+  authorName: string;
+  authorRole: string | null;
+  body: string;
+  attachments: StaffChecklistEvidenceAttachment[];
+  createdAt: string;
+};
+
+export type StaffChecklistReviewThread = {
+  id: string;
+  status: StaffChecklistReviewThreadStatus;
+  createdByUserId: string | null;
+  createdAt: string;
+  resolvedByUserId: string | null;
+  resolvedAt: string | null;
+  messages: StaffChecklistReviewThreadMessage[];
+};
+
 export type StaffChecklistAnswer = {
   sectionId: string;
   itemId: string;
@@ -180,6 +213,7 @@ export type StaffChecklistAnswer = {
   note: string | null;
   evidenceUrl: string | null;
   evidenceAttachments: StaffChecklistEvidenceAttachment[];
+  reviewThreads: StaffChecklistReviewThread[];
   completedAt: string | null;
 };
 
@@ -910,6 +944,236 @@ export class StaffChecklistsService {
           this.normalizeOptionalString(dto.reviewComment),
         );
       }
+
+      return this.fetchRunOrThrow(tx, tenantId, current.id);
+    });
+
+    return this.toRunResponse(run);
+  }
+
+  async addItemReviewMessage(
+    user: AuthenticatedUser,
+    id: string,
+    itemId: string,
+    dto: StaffChecklistItemReviewMessageDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const current = await this.prisma.staffChecklistRun.findFirst({
+      where: { id, tenantId },
+      include: checklistRunInclude,
+    });
+
+    if (!current) {
+      throw new NotFoundException('Checklist run not found');
+    }
+
+    this.ensureCanCommentChecklist(user, current);
+
+    const sections = this.normalizeSections(current.sectionsSnapshot);
+    const source = this.findChecklistItem(sections, itemId);
+
+    if (!source) {
+      throw new NotFoundException('Checklist item not found');
+    }
+
+    const body = this.normalizeRequiredString(
+      dto.body ?? undefined,
+      'Комментарий обязателен',
+    );
+    const attachments = this.normalizeEvidenceAttachments(
+      dto.attachments,
+      this.normalizeEvidenceUrl(dto.attachmentUrl),
+    );
+    const answers = this.normalizeAnswers(current.answers, sections);
+    const now = new Date();
+    const message: StaffChecklistReviewThreadMessage = {
+      id: randomUUID(),
+      authorUserId: user.id,
+      authorName: user.fullName ?? user.email,
+      authorRole: user.customRoleName ?? user.role,
+      body,
+      attachments,
+      createdAt: now.toISOString(),
+    };
+    let updatedThread: StaffChecklistReviewThread | null = null;
+    const nextAnswers = answers.map((answer) => {
+      if (answer.itemId !== itemId) {
+        return answer;
+      }
+
+      const openThread = answer.reviewThreads.find(
+        (thread) => thread.status === 'OPEN',
+      );
+      const nextThread: StaffChecklistReviewThread = openThread
+        ? {
+            ...openThread,
+            messages: [...openThread.messages, message],
+          }
+        : {
+            id: randomUUID(),
+            status: 'OPEN',
+            createdByUserId: user.id,
+            createdAt: now.toISOString(),
+            resolvedByUserId: null,
+            resolvedAt: null,
+            messages: [message],
+          };
+      updatedThread = nextThread;
+
+      return {
+        ...answer,
+        reviewThreads: [
+          ...answer.reviewThreads.filter(
+            (thread) => thread.id !== nextThread.id,
+          ),
+          nextThread,
+        ],
+      };
+    });
+    const metrics = this.calculateMetrics(sections, nextAnswers);
+
+    const run = await this.prisma.$transaction(async (tx) => {
+      await tx.staffChecklistRun.update({
+        where: { id: current.id },
+        data: {
+          answers: nextAnswers,
+          scoreTotal: metrics.scoreTotal,
+          scoreEarned: metrics.scoreEarned,
+          requiredItemsTotal: metrics.requiredItemsTotal,
+          requiredItemsDone: metrics.requiredItemsDone,
+          evidenceTotal: metrics.evidenceTotal,
+          evidenceDone: metrics.evidenceDone,
+          failedItems: metrics.failedItems,
+          blockingIssues: metrics.blockingIssues,
+        },
+        select: { id: true },
+      });
+
+      if (updatedThread) {
+        await this.createChecklistReviewNotification(
+          tx,
+          tenantId,
+          user,
+          current,
+          source,
+          updatedThread,
+          message,
+        );
+      }
+
+      return this.fetchRunOrThrow(tx, tenantId, current.id);
+    });
+
+    return this.toRunResponse(run);
+  }
+
+  async resolveItemReviewThread(
+    user: AuthenticatedUser,
+    id: string,
+    itemId: string,
+    dto: StaffChecklistItemReviewResolveDto = {},
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const current = await this.prisma.staffChecklistRun.findFirst({
+      where: { id, tenantId },
+      include: checklistRunInclude,
+    });
+
+    if (!current) {
+      throw new NotFoundException('Checklist run not found');
+    }
+
+    if (this.isChecklistUseOnlyUser(user)) {
+      throw new ForbiddenException(
+        'Зачесть уточнение может только проверяющий сотрудник',
+      );
+    }
+
+    const sections = this.normalizeSections(current.sectionsSnapshot);
+    const source = this.findChecklistItem(sections, itemId);
+
+    if (!source) {
+      throw new NotFoundException('Checklist item not found');
+    }
+
+    const answers = this.normalizeAnswers(current.answers, sections);
+    const now = new Date();
+    const comment = this.normalizeOptionalString(dto.comment);
+    let resolvedThread: StaffChecklistReviewThread | null = null;
+    const nextAnswers = answers.map((answer) => {
+      if (answer.itemId !== itemId) {
+        return answer;
+      }
+
+      const openThread = answer.reviewThreads.find(
+        (thread) => thread.status === 'OPEN',
+      );
+
+      if (!openThread) {
+        return answer;
+      }
+
+      const resolveMessage: StaffChecklistReviewThreadMessage | null = comment
+        ? {
+            id: randomUUID(),
+            authorUserId: user.id,
+            authorName: user.fullName ?? user.email,
+            authorRole: user.customRoleName ?? user.role,
+            body: comment,
+            attachments: [],
+            createdAt: now.toISOString(),
+          }
+        : null;
+      const nextThread: StaffChecklistReviewThread = {
+        ...openThread,
+        status: 'RESOLVED',
+        resolvedByUserId: user.id,
+        resolvedAt: now.toISOString(),
+        messages: resolveMessage
+          ? [...openThread.messages, resolveMessage]
+          : openThread.messages,
+      };
+      resolvedThread = nextThread;
+
+      return {
+        ...answer,
+        reviewThreads: answer.reviewThreads.map((thread) =>
+          thread.id === openThread.id ? nextThread : thread,
+        ),
+      };
+    });
+
+    if (!resolvedThread) {
+      throw new BadRequestException('Открытых уточнений по пункту нет');
+    }
+
+    const notificationThread = resolvedThread;
+    const metrics = this.calculateMetrics(sections, nextAnswers);
+    const run = await this.prisma.$transaction(async (tx) => {
+      await tx.staffChecklistRun.update({
+        where: { id: current.id },
+        data: {
+          answers: nextAnswers,
+          scoreTotal: metrics.scoreTotal,
+          scoreEarned: metrics.scoreEarned,
+          requiredItemsTotal: metrics.requiredItemsTotal,
+          requiredItemsDone: metrics.requiredItemsDone,
+          evidenceTotal: metrics.evidenceTotal,
+          evidenceDone: metrics.evidenceDone,
+          failedItems: metrics.failedItems,
+          blockingIssues: metrics.blockingIssues,
+        },
+        select: { id: true },
+      });
+
+      await this.createChecklistReviewResolvedNotification(
+        tx,
+        tenantId,
+        user,
+        current,
+        source,
+        notificationThread,
+      );
 
       return this.fetchRunOrThrow(tx, tenantId, current.id);
     });
@@ -1958,9 +2222,88 @@ export class StaffChecklistsService {
         note: null,
         evidenceUrl: null,
         evidenceAttachments: [],
+        reviewThreads: [],
         completedAt: null,
       })),
     );
+  }
+
+  private normalizeReviewThreads(value: unknown): StaffChecklistReviewThread[] {
+    const rawThreads = Array.isArray(value) ? value : [];
+
+    return rawThreads
+      .slice(0, 20)
+      .map((thread) => {
+        const record = this.asRecord(thread);
+        const id = this.normalizeOptionalString(record.id);
+
+        if (!id) {
+          return null;
+        }
+
+        const rawStatus = this.normalizeOptionalString(record.status);
+        const status: StaffChecklistReviewThreadStatus =
+          rawStatus === 'RESOLVED' ? 'RESOLVED' : 'OPEN';
+        const messages = this.normalizeReviewThreadMessages(record.messages);
+
+        return {
+          id,
+          status,
+          createdByUserId: this.normalizeOptionalString(record.createdByUserId),
+          createdAt:
+            this.normalizeOptionalString(record.createdAt) ??
+            new Date().toISOString(),
+          resolvedByUserId:
+            status === 'RESOLVED'
+              ? this.normalizeOptionalString(record.resolvedByUserId)
+              : null,
+          resolvedAt:
+            status === 'RESOLVED'
+              ? this.normalizeOptionalString(record.resolvedAt)
+              : null,
+          messages,
+        } satisfies StaffChecklistReviewThread;
+      })
+      .filter((thread): thread is StaffChecklistReviewThread =>
+        Boolean(thread),
+      );
+  }
+
+  private normalizeReviewThreadMessages(
+    value: unknown,
+  ): StaffChecklistReviewThreadMessage[] {
+    const rawMessages = Array.isArray(value) ? value : [];
+
+    return rawMessages
+      .slice(0, 100)
+      .map((message) => {
+        const record = this.asRecord(message);
+        const id = this.normalizeOptionalString(record.id);
+        const body = this.normalizeOptionalString(record.body);
+
+        if (!id || !body) {
+          return null;
+        }
+
+        return {
+          id,
+          authorUserId: this.normalizeOptionalString(record.authorUserId),
+          authorName:
+            this.normalizeOptionalString(record.authorName) ?? 'LeetPlus',
+          authorRole: this.normalizeOptionalString(record.authorRole),
+          body,
+          attachments: this.normalizeEvidenceAttachments(
+            record.attachments,
+            null,
+          ),
+          createdAt:
+            this.normalizeOptionalString(record.createdAt) ??
+            new Date().toISOString(),
+        } satisfies StaffChecklistReviewThreadMessage;
+      })
+      .filter((message): message is StaffChecklistReviewThreadMessage =>
+        Boolean(message),
+      );
   }
 
   private normalizeAnswers(
@@ -2005,6 +2348,7 @@ export class StaffChecklistsService {
           note: this.normalizeOptionalString(record.note),
           evidenceUrl,
           evidenceAttachments,
+          reviewThreads: this.normalizeReviewThreads(record.reviewThreads),
           completedAt,
         };
       }),
@@ -2113,6 +2457,149 @@ export class StaffChecklistsService {
         } satisfies StaffChecklistBlockingIssue;
       })
       .filter((issue): issue is StaffChecklistBlockingIssue => Boolean(issue));
+  }
+
+  private ensureCanCommentChecklist(
+    user: AuthenticatedUser,
+    current: { assignedToUserId: string | null },
+  ) {
+    if (!this.isChecklistUseOnlyUser(user)) {
+      return;
+    }
+
+    if (current.assignedToUserId && current.assignedToUserId !== user.id) {
+      throw new ForbiddenException('Чек-лист недоступен для вашей роли');
+    }
+  }
+
+  private findChecklistItem(
+    sections: StaffChecklistSection[],
+    itemId: string,
+  ): { section: StaffChecklistSection; item: StaffChecklistItem } | null {
+    for (const section of sections) {
+      const item = section.items.find((candidate) => candidate.id === itemId);
+
+      if (item) {
+        return { section, item };
+      }
+    }
+
+    return null;
+  }
+
+  private resolveChecklistReviewNotificationTarget(
+    actor: AuthenticatedUser,
+    run: StaffChecklistRunRow,
+    thread: StaffChecklistReviewThread,
+  ) {
+    if (
+      !this.isChecklistUseOnlyUser(actor) &&
+      run.assignedToUserId &&
+      run.assignedToUserId !== actor.id
+    ) {
+      return run.assignedToUserId;
+    }
+
+    const lastParticipant = [...thread.messages]
+      .reverse()
+      .find(
+        (message) => message.authorUserId && message.authorUserId !== actor.id,
+      );
+
+    return (
+      lastParticipant?.authorUserId ??
+      run.reviewedByUserId ??
+      run.createdByUserId ??
+      null
+    );
+  }
+
+  private async createChecklistReviewNotification(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    actor: AuthenticatedUser,
+    run: StaffChecklistRunRow,
+    source: { section: StaffChecklistSection; item: StaffChecklistItem },
+    thread: StaffChecklistReviewThread,
+    message: StaffChecklistReviewThreadMessage,
+  ) {
+    const targetUserId = this.resolveChecklistReviewNotificationTarget(
+      actor,
+      run,
+      thread,
+    );
+
+    if (!targetUserId || targetUserId === actor.id) {
+      return;
+    }
+
+    await tx.staffNotification.create({
+      data: {
+        tenantId,
+        storeId: run.storeId,
+        targetUserId,
+        sourceType: 'STAFF_CHECKLIST_REVIEW',
+        sourceId: `${run.id}:${source.item.id}`,
+        severity: 'WARNING',
+        status: 'OPEN',
+        title: 'Нужно уточнение по чек-листу',
+        message: [
+          `Чек-лист: ${run.title}`,
+          `Пункт: ${source.item.title}`,
+          `Комментарий: ${message.body}`,
+        ].join('\n'),
+        actionLabel: 'Открыть комментарий',
+        actionHref: `/staff/checklists?runId=${run.id}&itemId=${source.item.id}#item-${source.item.id}`,
+        dedupeKey: `staff-checklist-review:${run.id}:${source.item.id}:${message.id}`,
+        metadata: {
+          checklistRunId: run.id,
+          sectionId: source.section.id,
+          itemId: source.item.id,
+          threadId: thread.id,
+          messageId: message.id,
+        },
+      },
+    });
+  }
+
+  private async createChecklistReviewResolvedNotification(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    actor: AuthenticatedUser,
+    run: StaffChecklistRunRow,
+    source: { section: StaffChecklistSection; item: StaffChecklistItem },
+    thread: StaffChecklistReviewThread,
+  ) {
+    if (!run.assignedToUserId || run.assignedToUserId === actor.id) {
+      return;
+    }
+
+    await tx.staffNotification.create({
+      data: {
+        tenantId,
+        storeId: run.storeId,
+        targetUserId: run.assignedToUserId,
+        sourceType: 'STAFF_CHECKLIST_REVIEW',
+        sourceId: `${run.id}:${source.item.id}`,
+        severity: 'INFO',
+        status: 'OPEN',
+        title: 'Уточнение по чек-листу зачтено',
+        message: [
+          `Чек-лист: ${run.title}`,
+          `Пункт: ${source.item.title}`,
+          'Проверяющий зачел выполнение пункта.',
+        ].join('\n'),
+        actionLabel: 'Открыть чек-лист',
+        actionHref: `/staff/checklists?runId=${run.id}&itemId=${source.item.id}#item-${source.item.id}`,
+        dedupeKey: `staff-checklist-review-resolved:${run.id}:${source.item.id}:${thread.id}:${thread.resolvedAt}`,
+        metadata: {
+          checklistRunId: run.id,
+          sectionId: source.section.id,
+          itemId: source.item.id,
+          threadId: thread.id,
+        },
+      },
+    });
   }
 
   private async createFailedItemTasks(

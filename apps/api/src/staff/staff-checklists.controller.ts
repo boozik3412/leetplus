@@ -21,6 +21,8 @@ import {
   type StaffChecklistExecutionExportQuery,
   type StaffChecklistExecutionReport,
   type StaffChecklistExecutionReportQuery,
+  type StaffChecklistItemReviewMessageDto,
+  type StaffChecklistItemReviewResolveDto,
   type StaffChecklistReport,
   type StaffChecklistsQuery,
   type StaffChecklistUpdateDto,
@@ -91,5 +93,35 @@ export class StaffChecklistsController {
     @Body() dto: StaffChecklistUpdateDto,
   ) {
     return this.staffChecklistsService.updateChecklist(user, id, dto);
+  }
+
+  @Post(':id/items/:itemId/review-messages')
+  addItemReviewMessage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: StaffChecklistItemReviewMessageDto,
+  ) {
+    return this.staffChecklistsService.addItemReviewMessage(
+      user,
+      id,
+      itemId,
+      dto,
+    );
+  }
+
+  @Post(':id/items/:itemId/review-resolve')
+  resolveItemReviewThread(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: StaffChecklistItemReviewResolveDto,
+  ) {
+    return this.staffChecklistsService.resolveItemReviewThread(
+      user,
+      id,
+      itemId,
+      dto,
+    );
   }
 }

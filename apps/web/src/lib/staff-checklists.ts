@@ -81,6 +81,28 @@ export type StaffChecklistEvidenceAttachment = {
   createdAt: string;
 };
 
+export type StaffChecklistReviewThreadStatus = "OPEN" | "RESOLVED";
+
+export type StaffChecklistReviewThreadMessage = {
+  id: string;
+  authorUserId: string | null;
+  authorName: string;
+  authorRole: string | null;
+  body: string;
+  attachments: StaffChecklistEvidenceAttachment[];
+  createdAt: string;
+};
+
+export type StaffChecklistReviewThread = {
+  id: string;
+  status: StaffChecklistReviewThreadStatus;
+  createdByUserId: string | null;
+  createdAt: string;
+  resolvedByUserId: string | null;
+  resolvedAt: string | null;
+  messages: StaffChecklistReviewThreadMessage[];
+};
+
 export type StaffChecklistSection = {
   id: string;
   title: string;
@@ -96,6 +118,7 @@ export type StaffChecklistAnswer = {
   note: string | null;
   evidenceUrl: string | null;
   evidenceAttachments: StaffChecklistEvidenceAttachment[];
+  reviewThreads: StaffChecklistReviewThread[];
   completedAt: string | null;
 };
 
@@ -327,6 +350,58 @@ export async function getStaffChecklistExecutionReport(
   }
 
   return response.json() as Promise<StaffChecklistExecutionReport>;
+}
+
+export async function addStaffChecklistItemReviewMessage(
+  runId: string,
+  itemId: string,
+  payload: {
+    body: string;
+    attachmentUrl?: string | null;
+    attachments?: StaffChecklistEvidenceAttachment[];
+  },
+): Promise<StaffChecklistRun> {
+  const response = await fetch(
+    `${getApiUrl()}/staff/checklists/${runId}/items/${itemId}/review-messages`,
+    {
+      method: "POST",
+      headers: {
+        ...(await getAuthHeaders()),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to add staff checklist review message");
+  }
+
+  return response.json() as Promise<StaffChecklistRun>;
+}
+
+export async function resolveStaffChecklistItemReview(
+  runId: string,
+  itemId: string,
+  payload: { comment?: string | null } = {},
+): Promise<StaffChecklistRun> {
+  const response = await fetch(
+    `${getApiUrl()}/staff/checklists/${runId}/items/${itemId}/review-resolve`,
+    {
+      method: "POST",
+      headers: {
+        ...(await getAuthHeaders()),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to resolve staff checklist review");
+  }
+
+  return response.json() as Promise<StaffChecklistRun>;
 }
 
 function query(filters: Record<string, string | undefined>) {

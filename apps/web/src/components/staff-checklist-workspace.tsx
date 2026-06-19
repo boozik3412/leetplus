@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   StaffAttachmentUpload,
@@ -12,6 +12,8 @@ import type {
   StaffChecklistEvidenceAttachment,
   StaffChecklistRegulationOption,
   StaffChecklistReport,
+  StaffChecklistReviewThread,
+  StaffChecklistReviewThreadMessage,
   StaffChecklistRun,
   StaffChecklistStatus,
   StaffChecklistTemplateOption,
@@ -535,6 +537,17 @@ function ChecklistRunEditor({
   const [isPending, setIsPending] = useState(false);
   const [previewAttachment, setPreviewAttachment] =
     useState<StaffChecklistEvidenceAttachment | null>(null);
+  const [discussionTarget, setDiscussionTarget] = useState<{
+    sectionId: string;
+    itemId: string;
+  } | null>(null);
+  const [discussionBody, setDiscussionBody] = useState("");
+  const [discussionAttachmentUrl, setDiscussionAttachmentUrl] = useState("");
+  const [discussionAttachments, setDiscussionAttachments] = useState<
+    StaffChecklistEvidenceAttachment[]
+  >([]);
+  const [resolveComment, setResolveComment] = useState("");
+  const [isDiscussionPending, setIsDiscussionPending] = useState(false);
   const previewAttachmentHref = previewAttachment
     ? getAttachmentHref(previewAttachment)
     : null;
@@ -563,6 +576,57 @@ function ChecklistRunEditor({
       ),
     [answersByKey, run.sections],
   );
+  const discussionContext = useMemo(() => {
+    if (!discussionTarget) {
+      return null;
+    }
+
+    const section = run.sections.find(
+      (item) => item.id === discussionTarget.sectionId,
+    );
+    const item = section?.items.find(
+      (currentItem) => currentItem.id === discussionTarget.itemId,
+    );
+
+    if (!section || !item) {
+      return null;
+    }
+
+    const answer = answersByKey.get(`${section.id}::${item.id}`);
+    const threads = answer?.reviewThreads ?? [];
+    const openThread = threads.find((thread) => thread.status === "OPEN");
+
+    return { section, item, answer, threads, openThread };
+  }, [answersByKey, discussionTarget, run.sections]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const itemId = params.get("itemId");
+
+    if (!itemId) {
+      return;
+    }
+
+    const found = run.sections
+      .flatMap((section) =>
+        section.items.map((item) => ({
+          sectionId: section.id,
+          itemId: item.id,
+        })),
+      )
+      .find((item) => item.itemId === itemId);
+
+    if (!found) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      setDiscussionTarget(found);
+      document
+        .getElementById(`item-${itemId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [run.id, run.sections]);
 
   function patchAnswer(
     sectionId: string,
@@ -618,6 +682,108 @@ function ChecklistRunEditor({
           ? (nextAttachments[0]?.url ?? null)
           : (currentAnswer?.evidenceUrl ?? null),
     });
+  }
+
+  function appendDiscussionAttachment(attachment: StaffAttachmentUploadResult) {
+    const nextAttachment = toEvidenceAttachment(attachment);
+
+    setDiscussionAttachments((current) => [
+      ...current.filter((item) => item.id !== nextAttachment.id),
+      nextAttachment,
+    ]);
+  }
+
+  function removeDiscussionAttachment(attachmentId: string) {
+    setDiscussionAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId),
+    );
+  }
+
+  function closeDiscussion() {
+    setDiscussionTarget(null);
+    setDiscussionBody("");
+    setDiscussionAttachmentUrl("");
+    setDiscussionAttachments([]);
+    setResolveComment("");
+  }
+
+  async function submitDiscussionMessage() {
+    if (!discussionContext || !discussionTarget) {
+      return;
+    }
+
+    if (
+      !discussionBody.trim() &&
+      !discussionAttachmentUrl.trim() &&
+      discussionAttachments.length === 0
+    ) {
+      setMessage("Добавьте комментарий или доказательство.");
+      return;
+    }
+
+    setIsDiscussionPending(true);
+    setMessage(null);
+
+    const response = await fetch(
+      `/api/staff/checklists/${run.id}/items/${discussionTarget.itemId}/review-messages`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          body: discussionBody,
+          attachmentUrl: discussionAttachmentUrl || null,
+          attachments: discussionAttachments,
+        }),
+      },
+    );
+
+    setIsDiscussionPending(false);
+
+    if (!response.ok) {
+      setMessage(await readResponseError(response));
+      return;
+    }
+
+    const updatedRun = (await response.json()) as StaffChecklistRun;
+    setAnswers(updatedRun.answers);
+    setPersistedAnswers(updatedRun.answers);
+    setDiscussionBody("");
+    setDiscussionAttachmentUrl("");
+    setDiscussionAttachments([]);
+    setMessage("Комментарий по пункту добавлен.");
+    router.refresh();
+  }
+
+  async function resolveDiscussionThread() {
+    if (!discussionContext || !discussionTarget) {
+      return;
+    }
+
+    setIsDiscussionPending(true);
+    setMessage(null);
+
+    const response = await fetch(
+      `/api/staff/checklists/${run.id}/items/${discussionTarget.itemId}/review-resolve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: resolveComment || null }),
+      },
+    );
+
+    setIsDiscussionPending(false);
+
+    if (!response.ok) {
+      setMessage(await readResponseError(response));
+      return;
+    }
+
+    const updatedRun = (await response.json()) as StaffChecklistRun;
+    setAnswers(updatedRun.answers);
+    setPersistedAnswers(updatedRun.answers);
+    setResolveComment("");
+    setMessage("Уточнение закрыто, пункт зачтен.");
+    router.refresh();
   }
 
   async function updateRun(
@@ -694,6 +860,7 @@ function ChecklistRunEditor({
             note: currentAnswer.note,
             evidenceUrl: currentAnswer.evidenceUrl,
             evidenceAttachments: currentAnswer.evidenceAttachments ?? [],
+            reviewThreads: currentAnswer.reviewThreads ?? [],
             completedAt: null,
           }
         : answer,
@@ -801,9 +968,21 @@ function ChecklistRunEditor({
                 const isSubmitted = Boolean(answer?.completedAt);
                 const evidenceAttachments = getEvidenceAttachments(answer);
                 const hasEvidence = answerHasEvidence(answer);
+                const reviewThreads = answer?.reviewThreads ?? [];
+                const openReviewThreads = reviewThreads.filter(
+                  (thread) => thread.status === "OPEN",
+                );
+                const reviewMessagesCount = reviewThreads.reduce(
+                  (sum, thread) => sum + thread.messages.length,
+                  0,
+                );
 
                 return (
-                  <div key={item.id} className="px-3 py-3 sm:px-4">
+                  <div
+                    key={item.id}
+                    id={`item-${item.id}`}
+                    className="scroll-mt-24 px-3 py-3 sm:px-4"
+                  >
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/70">
                       <div className="grid gap-3 xl:grid-cols-[minmax(18rem,1fr)_minmax(28rem,34rem)] xl:items-start">
                         <div className="min-w-0">
@@ -981,6 +1160,37 @@ function ChecklistRunEditor({
                               className="mt-2 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                             />
                           </details>
+                          {canReviewRun || reviewThreads.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDiscussionTarget({
+                                  sectionId: section.id,
+                                  itemId: item.id,
+                                })
+                              }
+                              className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs font-semibold text-amber-900 transition hover:border-amber-300 hover:bg-amber-100 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
+                            >
+                              <span className="flex min-w-0 items-center gap-2">
+                                <span aria-hidden="true">▸</span>
+                                <span className="truncate">
+                                  Необходимо уточнение
+                                </span>
+                              </span>
+                              <span className="flex shrink-0 items-center gap-2">
+                                {openReviewThreads.length > 0 ? (
+                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-400/20 dark:text-amber-100">
+                                    открыто {openReviewThreads.length}
+                                  </span>
+                                ) : null}
+                                {reviewMessagesCount > 0 ? (
+                                  <span className="rounded-full bg-white px-2 py-0.5 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300">
+                                    {reviewMessagesCount} коммент.
+                                  </span>
+                                ) : null}
+                              </span>
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -1052,6 +1262,143 @@ function ChecklistRunEditor({
         </div>
       </div>
     </div>
+    {discussionContext ? (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Необходимо уточнение"
+        onClick={closeDiscussion}
+      >
+        <div
+          className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase text-amber-700 dark:text-amber-300">
+                Необходимо уточнение
+              </p>
+              <h3 className="mt-1 text-base font-semibold">
+                {discussionContext.item.title}
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500">
+                {discussionContext.section.title}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeDiscussion}
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            >
+              Свернуть
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            {discussionContext.threads.length > 0 ? (
+              <div className="space-y-3">
+                {discussionContext.threads.map((thread) => (
+                  <ReviewThreadCard
+                    key={thread.id}
+                    thread={thread}
+                    onPreviewAttachment={setPreviewAttachment}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-800">
+                Комментариев по пункту пока нет. Проверяющий может открыть
+                уточнение, а администратор ответит здесь же.
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <div className="grid gap-2">
+              <textarea
+                value={discussionBody}
+                onChange={(event) => setDiscussionBody(event.target.value)}
+                rows={3}
+                placeholder={
+                  canReviewRun
+                    ? "Что нужно уточнить или исправить по этому пункту"
+                    : "Ответ на комментарий проверяющего"
+                }
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+              />
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <input
+                  value={discussionAttachmentUrl}
+                  onChange={(event) =>
+                    setDiscussionAttachmentUrl(event.target.value)
+                  }
+                  placeholder="Ссылка на фото/файл, если он уже загружен отдельно"
+                  className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                />
+                <StaffAttachmentUpload
+                  label="Фото или файл к уточнению"
+                  buttonLabel="Добавить фото"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                  compressImages
+                  onUploaded={appendDiscussionAttachment}
+                />
+              </div>
+              {discussionAttachments.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {discussionAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+                    >
+                      <span className="min-w-0 truncate font-semibold">
+                        {attachment.fileName}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeDiscussionAttachment(attachment.id)}
+                        className="shrink-0 rounded-md px-2 py-1 font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-900"
+                      >
+                        Убрать
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap justify-between gap-2">
+                {canReviewRun && discussionContext.openThread ? (
+                  <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+                    <input
+                      value={resolveComment}
+                      onChange={(event) => setResolveComment(event.target.value)}
+                      placeholder="Комментарий при зачете, если нужен"
+                      className="h-10 min-w-56 flex-1 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                    />
+                    <button
+                      type="button"
+                      onClick={resolveDiscussionThread}
+                      disabled={isDiscussionPending}
+                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
+                    >
+                      Зачесть пункт
+                    </button>
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={submitDiscussionMessage}
+                  disabled={isDiscussionPending}
+                  className="ml-auto rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Отправить
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    ) : null}
     {previewAttachment && previewAttachmentHref ? (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -1105,6 +1452,95 @@ function ChecklistRunEditor({
       </div>
     ) : null}
     </>
+  );
+}
+
+function ReviewThreadCard({
+  thread,
+  onPreviewAttachment,
+}: {
+  thread: StaffChecklistReviewThread;
+  onPreviewAttachment: (attachment: StaffChecklistEvidenceAttachment) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span
+          className={
+            thread.status === "OPEN"
+              ? "rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-400/20 dark:text-amber-100"
+              : "rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-400/20 dark:text-emerald-100"
+          }
+        >
+          {thread.status === "OPEN" ? "Открыто" : "Зачтено"}
+        </span>
+        <span className="text-xs text-zinc-500">
+          {formatCompletionDateTime(thread.createdAt)}
+        </span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {thread.messages.map((message) => (
+          <ReviewThreadMessageRow
+            key={message.id}
+            message={message}
+            onPreviewAttachment={onPreviewAttachment}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReviewThreadMessageRow({
+  message,
+  onPreviewAttachment,
+}: {
+  message: StaffChecklistReviewThreadMessage;
+  onPreviewAttachment: (attachment: StaffChecklistEvidenceAttachment) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate font-semibold">{message.authorName}</p>
+          {message.authorRole ? (
+            <p className="text-xs text-zinc-500">{message.authorRole}</p>
+          ) : null}
+        </div>
+        <span className="text-xs text-zinc-500">
+          {formatCompletionDateTime(message.createdAt)}
+        </span>
+      </div>
+      <p className="mt-2 whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">
+        {message.body}
+      </p>
+      {message.attachments.length > 0 ? (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {message.attachments.map((attachment) => (
+            <a
+              key={attachment.id}
+              href={getAttachmentHref(attachment)}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                if (!isPreviewableImage(attachment)) {
+                  return;
+                }
+
+                event.preventDefault();
+                onPreviewAttachment(attachment);
+              }}
+              className="min-w-0 truncate rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+            >
+              {attachment.fileName}
+              {attachment.byteSize > 0
+                ? ` · ${formatAttachmentSize(attachment.byteSize)}`
+                : ""}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

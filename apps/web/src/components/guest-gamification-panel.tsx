@@ -67,6 +67,11 @@ type TabId =
 
 type EditorMode = "advanced" | "visual";
 
+const editorModeOptions = [
+  ["advanced", "Расширенные настройки"],
+  ["visual", "Визуальный редактор"],
+] as const satisfies readonly [EditorMode, string][];
+
 type GuestLogMappingPayload = {
   rawType: string;
   label: string;
@@ -1382,7 +1387,7 @@ export function GuestGamificationPanel({
   return (
     <div className="space-y-6">
       <section className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
               Геймификация гостей
@@ -1396,10 +1401,29 @@ export function GuestGamificationPanel({
               офферы и промо-эффект кампаний настраиваются отдельно.
             </p>
           </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-            Начисления в Langame идут через bonus ledger: approved-награда
-            попадает в очередь, dry-run проверяет контур, а dispatch пишет
-            бонусы только при включенном backend-режиме.
+          <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end">
+            <div className="inline-flex rounded-lg border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+              {editorModeOptions.map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setEditorMode(mode)}
+                  className={[
+                    "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                    editorMode === mode
+                      ? "bg-zinc-950 text-white dark:bg-cyan-300 dark:text-zinc-950"
+                      : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              Начисления в Langame идут через bonus ledger: approved-награда
+              попадает в очередь, dry-run проверяет контур, а dispatch пишет
+              бонусы только при включенном backend-режиме.
+            </div>
           </div>
         </div>
 
@@ -1463,29 +1487,6 @@ export function GuestGamificationPanel({
           </div>
         ) : null}
       </section>
-
-      <div className="flex flex-wrap gap-2 rounded-lg border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        {(
-          [
-            ["advanced", "Расширенные настройки"],
-            ["visual", "Визуальный редактор"],
-          ] as const
-        ).map(([mode, label]) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => setEditorMode(mode)}
-            className={[
-              "rounded-md px-4 py-2 text-sm font-semibold transition",
-              editorMode === mode
-                ? "bg-zinc-950 text-white dark:bg-cyan-300 dark:text-zinc-950"
-                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white",
-            ].join(" ")}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
 
       {editorMode === "visual" ? (
         <GuestGamificationVisualEditor

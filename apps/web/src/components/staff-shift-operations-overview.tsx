@@ -1080,7 +1080,7 @@ function EmployeeModal({
           href={checklistDetailHref(group.key)}
           className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
         >
-          История чек-листов
+          Отчет по чек-листам
         </a>
         <a
           href={taskDetailHref(group.key)}

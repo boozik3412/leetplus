@@ -297,7 +297,7 @@ export default async function StaffShiftRegulationsPage({
               className={headerActionSecondary}
             >
               <ChecklistHistoryIcon className="size-5 shrink-0" />
-              <span>История чек-листов</span>
+              <span>Отчет по чек-листам</span>
             </Link>
           </div>
         </header>

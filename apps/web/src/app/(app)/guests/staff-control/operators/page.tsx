@@ -107,13 +107,22 @@ function formatShiftId(value: string | null) {
   return value ? `ID смены: ${value}` : "ID смены не определен";
 }
 
+function staffMappingAnchorId(
+  externalDomain: string | null,
+  externalUserId: string,
+) {
+  const source = `${externalDomain ?? "source"}-${externalUserId}`;
+
+  return `staff-link-${source.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 function shiftSignalLabel(value: StaffControlAnomalyType) {
   const labels: Record<StaffControlAnomalyType, string> = {
     refunds: "Возврат",
     "missing-incassation": "Нет инкассации",
     "long-shift": "Длинная смена",
     "low-middle-check": "Низкий ср. чек",
-    "unmapped-operator": "Без привязки",
+    "unmapped-operator": "user_id без сотрудника",
   };
 
   return labels[value];
@@ -481,7 +490,20 @@ export default async function StaffOperatorsPage({
                               {row.linkedGuest.displayName}
                             </Link>
                           ) : (
-                            <span className="text-zinc-500">не привязан</span>
+                            <div className="space-y-1">
+                              <span className="font-medium text-amber-700 dark:text-amber-300">
+                                Langame user_id без сотрудника
+                              </span>
+                              <p className="text-xs text-zinc-500">
+                                Смены есть, но они не сопоставлены с карточкой персонала.
+                              </p>
+                              <a
+                                href={`#${staffMappingAnchorId(row.externalDomain, row.externalUserId)}`}
+                                className="inline-flex text-xs font-semibold text-emerald-700 underline underline-offset-4 dark:text-emerald-300"
+                              >
+                                Перейти к привязке
+                              </a>
+                            </div>
                           )}
                           {!row.linkedGuest && row.langameUser ? (
                             <p className="mt-1 text-xs text-zinc-500">
@@ -535,10 +557,23 @@ export default async function StaffOperatorsPage({
                       <tr className="bg-zinc-50/50 dark:bg-zinc-900/20">
                         <td colSpan={10} className="px-3 pb-4">
                           <ShiftDetailsPreview shifts={row.shiftDetails} />
-                          <div className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-                            <p className="mb-2 text-xs font-semibold uppercase text-zinc-500">
-                              Привязка сотрудника
-                            </p>
+                          <div
+                            id={staffMappingAnchorId(row.externalDomain, row.externalUserId)}
+                            className="scroll-mt-24 rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/60 dark:bg-amber-950/20"
+                          >
+                            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-xs font-semibold uppercase text-amber-800 dark:text-amber-200">
+                                  Привязка Langame user_id к сотруднику
+                                </p>
+                                <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+                                  Выберите карточку сотрудника LeetPlus. После сохранения закрытые смены этого user_id будут перенесены в аналитику выбранного сотрудника.
+                                </p>
+                              </div>
+                              <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                                user_id {row.externalUserId}
+                              </span>
+                            </div>
                             <StaffIdentityMappingForm
                               externalDomain={row.externalDomain}
                               externalUserId={row.externalUserId}
@@ -1231,9 +1266,24 @@ function OperatorCard({
               : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
           ].join(" ")}
         >
-          {row.linkedGuest ? "Привязан" : "Без привязки"}
+          {row.linkedGuest ? "Привязан" : "user_id без сотрудника"}
         </span>
       </div>
+
+      {!row.linkedGuest ? (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+          <p className="font-semibold">Что означает статус?</p>
+          <p className="mt-1 text-xs leading-5 text-amber-900/80 dark:text-amber-100/80">
+            Langame user_id найден в сменах, но не связан с карточкой сотрудника LeetPlus. Из-за этого смены, касса и сигналы не попадают в персональную аналитику.
+          </p>
+          <a
+            href={`#${staffMappingAnchorId(row.externalDomain, row.externalUserId)}`}
+            className="mt-2 inline-flex text-xs font-semibold underline underline-offset-4"
+          >
+            Перейти к привязке
+          </a>
+        </div>
+      ) : null}
 
       <div className="mt-3 rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
         <p className="text-xs font-medium uppercase text-zinc-500">
@@ -1296,7 +1346,23 @@ function OperatorCard({
         </p>
       </div>
 
-      <div className="mt-4">
+      <div
+        id={staffMappingAnchorId(row.externalDomain, row.externalUserId)}
+        className="mt-4 scroll-mt-24 rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/60 dark:bg-amber-950/20"
+      >
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase text-amber-800 dark:text-amber-200">
+              Привязка Langame user_id к сотруднику
+            </p>
+            <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+              Выберите карточку сотрудника LeetPlus. После сохранения закрытые смены этого user_id будут перенесены в аналитику выбранного сотрудника.
+            </p>
+          </div>
+          <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+            user_id {row.externalUserId}
+          </span>
+        </div>
         <StaffIdentityMappingForm
           externalDomain={row.externalDomain}
           externalUserId={row.externalUserId}

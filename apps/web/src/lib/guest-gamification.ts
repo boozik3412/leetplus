@@ -558,6 +558,22 @@ export type GuestGameRunbookLink = {
   href: string;
 };
 
+export type GuestGameBotConsumerPreviewItem = {
+  deliveryId: string;
+  rewardId: string;
+  channel: "TELEGRAM" | "MAX";
+  channelLabel: string;
+  recipientMasked: string | null;
+  channelIdentityMasked: string | null;
+  rewardLabel: string;
+  rewardType: string;
+  rewardAmount: number;
+  storeName: string | null;
+  profileLabel: string | null;
+  preparedAt: string;
+  expiresAt: string | null;
+};
+
 export type GuestGameBotConsumerStatus = {
   mode: "BLOCKED" | "DRY_RUN" | "READY";
   modeLabel: string;
@@ -576,6 +592,7 @@ export type GuestGameBotConsumerStatus = {
   failedAck: number;
   blockedAck: number;
   lastAckAt: string | null;
+  preview: GuestGameBotConsumerPreviewItem[];
   nextAction: string;
   note: string;
 };

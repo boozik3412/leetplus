@@ -1614,7 +1614,7 @@ V2:
 - бюджет не превышается;
 - можно экспортировать награды.
 
-Для контроля запуска внешнего consumer Guest Game Hub показывает отдельный `VDS bot-consumer` summary в delivery outbox: режим по API-visible env, каналы, количество ожидающих `READY_FOR_BOT` Telegram/MAX delivery, счетчики сохраненных ack `SENT/FAILED/BLOCKED`, время последнего ack, required env, следующий безопасный шаг и ссылку на runbook `docs/deployment/systemd`. Этот статус строится только из LeetPlus outbox/event, имен env и публичного пути к шаблонам, поэтому не раскрывает токены, raw phone, chat id, raw Telegram update или Langame payload; если systemd unit использует отдельный EnvironmentFile, фактическая работа подтверждается новыми ack-событиями.
+Для контроля запуска внешнего consumer Guest Game Hub показывает отдельный `VDS bot-consumer` summary в delivery outbox: режим по API-visible env, каналы, количество ожидающих `READY_FOR_BOT` Telegram/MAX delivery, счетчики сохраненных ack `SENT/FAILED/BLOCKED`, время последнего ack, required env, следующий безопасный шаг и ссылку на runbook `docs/deployment/systemd`. Дополнительно summary возвращает bounded preview первых кандидатов к отправке в том же порядке, что `pullBotDeliveries` (`preparedAt`, затем `createdAt`), ограниченный текущим canary/batch limit и очищенный от raw phone, chat id, raw Telegram update и provider payload. Этот статус строится только из LeetPlus outbox/event, имен env и публичного пути к шаблонам, поэтому не раскрывает токены, raw phone, chat id, raw Telegram update или Langame payload; если systemd unit использует отдельный EnvironmentFile, фактическая работа подтверждается новыми ack-событиями.
 
 ## 20. Последующие этапы
 

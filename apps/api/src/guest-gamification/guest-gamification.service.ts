@@ -1674,6 +1674,22 @@ export type GuestGameDeliveryDispatcherStatus = {
   note: string;
 };
 
+export type GuestGameBotConsumerPreviewItem = {
+  deliveryId: string;
+  rewardId: string;
+  channel: 'TELEGRAM' | 'MAX';
+  channelLabel: string;
+  recipientMasked: string | null;
+  channelIdentityMasked: string | null;
+  rewardLabel: string;
+  rewardType: string;
+  rewardAmount: number;
+  storeName: string | null;
+  profileLabel: string | null;
+  preparedAt: string;
+  expiresAt: string | null;
+};
+
 export type GuestGameBotConsumerStatus = {
   mode: 'BLOCKED' | 'DRY_RUN' | 'READY';
   modeLabel: string;
@@ -1692,6 +1708,7 @@ export type GuestGameBotConsumerStatus = {
   failedAck: number;
   blockedAck: number;
   lastAckAt: string | null;
+  preview: GuestGameBotConsumerPreviewItem[];
   nextAction: string;
   note: string;
 };
@@ -7134,6 +7151,12 @@ export class GuestGamificationService {
         item.readinessStatus === 'READY_FOR_BOT' &&
         (item.channel === 'TELEGRAM' || item.channel === 'MAX'),
     );
+    const previewLimit = Math.min(3, config.limit);
+    const preview = readyForBot
+      .slice()
+      .sort(compareBotConsumerDeliveryCandidate)
+      .slice(0, previewLimit)
+      .map((item) => this.toBotConsumerPreviewItem(item));
     const ackEvents = deliveries
       .flatMap((delivery) => delivery.events)
       .filter((event) => event.eventType.startsWith('DELIVERY_BOT_CONSUMER_'));
@@ -7184,6 +7207,7 @@ export class GuestGamificationService {
         (event) => event.eventType === 'DELIVERY_BOT_CONSUMER_BLOCKED',
       ).length,
       lastAckAt,
+      preview,
       nextAction: botConsumerNextAction(
         config,
         readyForBot.length,
@@ -7191,6 +7215,34 @@ export class GuestGamificationService {
         canaryRequired,
       ),
       note: 'Статус собран из API-visible env, текущего outbox и сохраненных ack-событий. Если runner запущен отдельным systemd unit со своим EnvironmentFile, фактический запуск подтверждается по новым ack-событиям.',
+    };
+  }
+
+  private toBotConsumerPreviewItem(
+    item: GuestGameDelivery,
+  ): GuestGameBotConsumerPreviewItem {
+    return {
+      deliveryId: item.id,
+      rewardId: item.rewardId,
+      channel: item.channel === 'MAX' ? 'MAX' : 'TELEGRAM',
+      channelLabel:
+        item.channelLabel ??
+        communicationQueueChannelLabel(
+          item.channel === 'MAX' ? 'MAX' : 'TELEGRAM',
+        ),
+      recipientMasked: item.recipientMasked,
+      channelIdentityMasked: item.channelIdentityMasked,
+      rewardLabel: item.reward.rewardLabel,
+      rewardType: item.reward.rewardType,
+      rewardAmount: Number(item.reward.rewardAmount),
+      storeName: item.store?.name ?? item.reward.store?.name ?? null,
+      profileLabel:
+        item.profile?.displayName ??
+        item.guest?.displayName ??
+        item.recipientMasked,
+      preparedAt:
+        dateTimeString(item.preparedAt) ?? dateTimeString(item.createdAt) ?? '',
+      expiresAt: dateTimeString(item.reward.expiresAt),
     };
   }
 
@@ -10318,6 +10370,38 @@ function botConsumerConfig(): BotConsumerConfig {
     channels,
     requiredEnv,
   };
+}
+
+function compareBotConsumerDeliveryCandidate(
+  left: GuestGameDelivery,
+  right: GuestGameDelivery,
+) {
+  const preparedDelta =
+    dateTimeMs(left.preparedAt) - dateTimeMs(right.preparedAt);
+
+  if (preparedDelta !== 0) {
+    return preparedDelta;
+  }
+
+  return dateTimeMs(left.createdAt) - dateTimeMs(right.createdAt);
+}
+
+function dateTimeString(value: string | Date | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function dateTimeMs(value: string | Date | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function botConsumerLimit(value: string | null) {

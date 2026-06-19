@@ -3150,12 +3150,29 @@ describe('GuestGamificationService', () => {
         failedAck: 0,
         blockedAck: 0,
         lastAckAt: isoNow,
+        preview: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            rewardId: 'reward-1',
+            channel: 'TELEGRAM',
+            channelLabel: 'Telegram',
+            recipientMasked: 'Guest One',
+            channelIdentityMasked: 'tg:***',
+            rewardLabel: '100 bonus points',
+            rewardType: 'BONUS',
+            rewardAmount: 100,
+            storeName: null,
+            profileLabel: 'Guest One',
+            expiresAt: null,
+          }),
+        ],
       });
       expect(outbox.botConsumer.nextAction).toContain('ack');
       expect(JSON.stringify(outbox.botConsumer)).not.toContain(
         'telegram-token',
       );
       expect(JSON.stringify(outbox.botConsumer)).not.toContain('sync-token');
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain('tg:123456');
     });
 
     it('requires canary limit before the first real-send ack', () => {
@@ -3182,6 +3199,13 @@ describe('GuestGamificationService', () => {
         pendingTelegram: 1,
         pendingMax: 0,
         lastAckAt: null,
+        preview: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            rewardId: 'reward-1',
+            channel: 'TELEGRAM',
+          }),
+        ],
       });
       expect(outbox.botConsumer.nextAction).toContain(
         'GUEST_GAME_BOT_CONSUMER_LIMIT=1',

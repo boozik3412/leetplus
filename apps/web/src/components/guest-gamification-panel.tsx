@@ -4264,6 +4264,34 @@ function CommunicationQueueCard({
                 Env: {botConsumer.requiredEnv.join(", ")}
               </p>
             ) : null}
+            {botConsumer.preview.length ? (
+              <div className="mt-2 space-y-1 rounded-md border border-cyan-100 bg-cyan-50/60 p-2 dark:border-cyan-900/50 dark:bg-cyan-950/30">
+                <p className="font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
+                  Первые к отправке
+                </p>
+                {botConsumer.preview.map((item) => (
+                  <div
+                    key={item.deliveryId}
+                    className="rounded border border-cyan-100 bg-white px-2 py-1 dark:border-cyan-900/50 dark:bg-zinc-950"
+                  >
+                    <p className="font-semibold text-zinc-950 dark:text-white">
+                      {item.rewardLabel} · {formatMoney(item.rewardAmount)}
+                    </p>
+                    <p className="text-zinc-500 dark:text-zinc-400">
+                      {item.channelLabel}
+                      {item.storeName ? ` · ${item.storeName}` : ""}
+                      {item.recipientMasked ? ` · ${item.recipientMasked}` : ""}
+                    </p>
+                    <p className="font-mono text-[11px] text-zinc-400">
+                      {item.deliveryId}
+                      {item.channelIdentityMasked
+                        ? ` · ${item.channelIdentityMasked}`
+                        : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <a
               className="mt-2 inline-flex text-xs font-bold text-cyan-700 underline decoration-cyan-300 underline-offset-4 hover:text-cyan-900 dark:text-cyan-200 dark:decoration-cyan-700 dark:hover:text-cyan-100"
               href={botConsumer.runbook.href}

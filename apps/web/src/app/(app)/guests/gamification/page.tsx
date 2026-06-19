@@ -487,6 +487,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
       failedAck: 0,
       blockedAck: 0,
       lastAckAt: null,
+      preview: [],
       nextAction: "Настроить env внешнего bot-consumer и запустить dry-run.",
       note: "Статус bot-consumer появится после ответа API workspace.",
     },

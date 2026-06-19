@@ -803,6 +803,10 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED;
     delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED;
     delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_GAME_MAX_DELIVERY_ENABLED;
+    delete process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT;
+    delete process.env.GUEST_GAME_MAX_BOT_TOKEN;
+    delete process.env.MAX_BOT_TOKEN;
     delete process.env.SYNC_SERVICE_TOKEN;
     delete process.env.LANGAME_BONUS_ACCRUAL_ENABLED;
     delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED;
@@ -815,8 +819,11 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_BOT_CONSUMER_TENANT_ID;
     delete process.env.GUEST_GAME_BOT_CONSUMER_TENANT_SLUG;
     delete process.env.GUEST_GAME_BOT_CONSUMER_CHANNELS;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_LIMIT;
     delete process.env.GUEST_GAME_BOT_CONSUMER_DRY_RUN;
     delete process.env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_MAX_BOT_TOKEN;
     delete process.env.GUEST_GAME_TELEGRAM_LINK_SECRET;
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET;
     delete process.env.GUEST_GAME_TELEGRAM_BOT_USERNAME;
@@ -3173,6 +3180,98 @@ describe('GuestGamificationService', () => {
       );
       expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
     });
+
+    it('sends MAX delivery through generic provider when env is explicitly enabled', async () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
+        'https://max-provider.example/send';
+      process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+      const { service, prisma } = createService();
+      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, messageId: 'max-message-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      const maxRow = deliveryRow({
+        channel: 'MAX',
+        channelIdentityMasked: 'max:***',
+        profile: {
+          id: 'profile-1',
+          displayName: 'Guest One',
+          contactMasked: '+7 *** **-11',
+          telegramIdentity: null,
+          maxIdentity: 'max:user-123',
+          xp: 120,
+          level: 2,
+        },
+      });
+
+      prisma.guestGameDelivery.findMany.mockResolvedValue([maxRow]);
+      prisma.guestGameDelivery.update.mockResolvedValue(
+        deliveryRow({
+          ...maxRow,
+          status: 'SENT',
+          sentAt: now,
+        }),
+      );
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+      jest.spyOn(service, 'getDeliveries').mockResolvedValue([]);
+
+      const result = await service.dispatchDeliveries(user, {
+        dryRun: false,
+        channels: ['MAX'],
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://max-provider.example/send',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            authorization: 'Bearer max-token',
+          }),
+          body: expect.stringContaining('"identity":"max:user-123"'),
+        }),
+      );
+      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'delivery-1' },
+          data: expect.objectContaining({
+            status: 'SENT',
+            sentAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+        user,
+        'delivery-1',
+        'reward-1',
+        expect.objectContaining({
+          eventType: 'DELIVERY_SENT_BY_PROVIDER',
+          fromStatus: 'READY',
+          toStatus: 'SENT',
+          channel: 'MAX',
+          payload: expect.objectContaining({
+            provider: 'MAX',
+            providerMessageId: 'max-message-1',
+            providerStatus: 'max:ok',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        dryRun: false,
+        checked: 1,
+        sent: 1,
+        failed: 0,
+        skipped: 0,
+        blocked: 0,
+      });
+      expect(JSON.stringify(result)).not.toContain('max-token');
+      expect(JSON.stringify(result)).not.toContain('max:user-123');
+
+      fetchMock.mockRestore();
+    });
   });
 
   describe('bot delivery consumer', () => {
@@ -3296,6 +3395,62 @@ describe('GuestGamificationService', () => {
       expect(JSON.stringify(outbox.botConsumer)).not.toContain(
         'telegram-token',
       );
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain('sync-token');
+    });
+
+    it('summarizes configured MAX bot-consumer provider without secrets', () => {
+      process.env.GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN = 'sync-token';
+      process.env.GUEST_GAME_BOT_CONSUMER_TENANT_SLUG = user.tenantSlug;
+      process.env.GUEST_GAME_BOT_CONSUMER_CHANNELS = 'max';
+      process.env.GUEST_GAME_BOT_CONSUMER_DRY_RUN = 'false';
+      process.env.GUEST_GAME_BOT_CONSUMER_LIMIT = '1';
+      process.env.GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT =
+        'https://max-provider.example/send';
+      process.env.GUEST_GAME_BOT_CONSUMER_MAX_BOT_TOKEN = 'max-token';
+      const { service } = createService();
+      const outbox = (service as any).buildDeliveryOutbox([
+        deliveryRow({
+          channel: 'MAX',
+          channelIdentityMasked: 'max:***',
+          profile: {
+            id: 'profile-1',
+            displayName: 'Guest One',
+            contactMasked: '+7 *** **-11',
+            telegramIdentity: null,
+            maxIdentity: 'max:user-123',
+            xp: 120,
+            level: 2,
+          },
+        }),
+      ]);
+
+      expect(outbox.botConsumer).toMatchObject({
+        mode: 'READY',
+        dryRun: false,
+        configured: true,
+        limit: 1,
+        canaryLimit: true,
+        canaryRequired: false,
+        channels: ['MAX'],
+        requiredEnv: [],
+        pendingReady: 1,
+        pendingTelegram: 0,
+        pendingMax: 1,
+        preview: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            rewardId: 'reward-1',
+            channel: 'MAX',
+            channelLabel: 'MAX',
+            channelIdentityMasked: 'max:***',
+          }),
+        ],
+      });
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain('max-token');
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain(
+        'max-provider.example',
+      );
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain('max:user-123');
       expect(JSON.stringify(outbox.botConsumer)).not.toContain('sync-token');
     });
 

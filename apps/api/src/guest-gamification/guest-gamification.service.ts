@@ -5611,7 +5611,13 @@ export class GuestGamificationService {
                 chatId: chatId ?? '',
                 text: deliveryProviderMessage(row),
               })
-            : await sendMaxDeliveryPlaceholder();
+            : await sendMaxDelivery({
+                endpoint: config.max.endpoint,
+                token: config.max.token,
+                identity: maxIdentity ?? '',
+                text: deliveryProviderMessage(row),
+                row,
+              });
         const now = new Date();
         const updated = await this.prisma.guestGameDelivery.update({
           where: { id: row.id },
@@ -10359,6 +10365,13 @@ function botConsumerConfig(): BotConsumerConfig {
     envString('GUEST_PORTAL_TELEGRAM_BOT_TOKEN') ??
     envString('TELEGRAM_BOT_TOKEN'),
   );
+  const maxProviderConfigured = Boolean(
+    (envString('GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT') ??
+      envString('GUEST_GAME_MAX_DELIVERY_ENDPOINT')) &&
+    (envString('GUEST_GAME_BOT_CONSUMER_MAX_BOT_TOKEN') ??
+      envString('GUEST_GAME_MAX_BOT_TOKEN') ??
+      envString('MAX_BOT_TOKEN')),
+  );
   const channels = botConsumerChannels(
     envString('GUEST_GAME_BOT_CONSUMER_CHANNELS'),
   );
@@ -10382,8 +10395,11 @@ function botConsumerConfig(): BotConsumerConfig {
     );
   }
 
-  if (!dryRun && channels.includes('MAX')) {
-    requiredEnv.push('MAX bot API contract');
+  if (!dryRun && channels.includes('MAX') && !maxProviderConfigured) {
+    requiredEnv.push(
+      'GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT or GUEST_GAME_MAX_DELIVERY_ENDPOINT',
+      'GUEST_GAME_BOT_CONSUMER_MAX_BOT_TOKEN or GUEST_GAME_MAX_BOT_TOKEN',
+    );
   }
 
   return {
@@ -10667,8 +10683,8 @@ function deliveryProviderStatus(
     pendingReady,
     enabledByEnv,
     configured,
-    canAttemptSend: false,
-    dryRunOnly: true,
+    canAttemptSend: enabledByEnv && configured,
+    dryRunOnly: !config.realSendEnabled,
     requiredEnv: [
       'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
       'GUEST_GAME_MAX_DELIVERY_ENABLED',
@@ -10677,7 +10693,7 @@ function deliveryProviderStatus(
     ],
     note:
       configured && enabledByEnv
-        ? 'MAX provider ожидает утвержденный API-контракт; автоматическая отправка пока заблокирована.'
+        ? 'MAX provider настроен через generic delivery endpoint; real-send разрешен только этим env-контуром.'
         : 'MAX provider не настроен или не включен; нужен подтвержденный endpoint и токен.',
   };
 }
@@ -10776,12 +10792,99 @@ async function sendTelegramDelivery({
   });
 }
 
-function sendMaxDeliveryPlaceholder(): Promise<Prisma.InputJsonValue> {
-  return Promise.reject(
-    new Error(
-      'MAX delivery provider is not implemented until confirmed API contract is configured.',
-    ),
-  );
+async function sendMaxDelivery({
+  endpoint,
+  token,
+  identity,
+  text,
+  row,
+}: {
+  endpoint: string;
+  token: string;
+  identity: string;
+  text: string;
+  row: DeliveryRow;
+}): Promise<Prisma.InputJsonValue> {
+  if (!identity) {
+    throw new Error('MAX identity is not configured for this delivery.');
+  }
+
+  if (!endpoint || !token) {
+    throw new Error('MAX delivery endpoint or token is not configured.');
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      channel: 'MAX',
+      recipient: {
+        identity,
+        identityMasked: row.channelIdentityMasked,
+        recipientMasked: row.recipientMasked,
+      },
+      message: {
+        title: row.messageTitle,
+        body: row.messageBody,
+        text,
+      },
+      delivery: {
+        id: row.id,
+        rewardId: row.rewardId,
+        tenantId: row.reward.tenantId,
+        preparedAt: row.preparedAt.toISOString(),
+      },
+      reward: {
+        label: nullableString(row.reward.rewardLabel) ?? row.reward.rewardType,
+        amount: numberValue(row.reward.rewardAmount),
+        type: row.reward.rewardType,
+        code: row.reward.rewardCode,
+        expiresAt: dateTimeString(row.reward.expiresAt),
+      },
+      store: row.store ? { id: row.store.id, name: row.store.name } : null,
+    }),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    status?: string;
+    description?: string;
+    error?: string;
+    messageId?: string | number;
+    message_id?: string | number;
+    id?: string | number;
+    result?: {
+      messageId?: string | number;
+      message_id?: string | number;
+      id?: string | number;
+    };
+  } | null;
+
+  if (!response.ok || body?.ok === false || body?.status === 'error') {
+    throw new Error(
+      `MAX delivery failed: ${
+        body?.description ?? body?.error ?? response.status
+      }`,
+    );
+  }
+
+  const providerMessageId =
+    body?.messageId ??
+    body?.message_id ??
+    body?.id ??
+    body?.result?.messageId ??
+    body?.result?.message_id ??
+    body?.result?.id ??
+    null;
+
+  return clean({
+    provider: 'MAX',
+    providerMessageId:
+      providerMessageId === null ? null : String(providerMessageId),
+    providerStatus: 'max:ok',
+  });
 }
 
 function safeDeliveryErrorMessage(error: unknown) {

@@ -10,6 +10,8 @@ export type BotConsumerConfig = {
   dryRun: boolean;
   telegramToken: string | null;
   telegramApiBaseUrl: string;
+  maxToken: string | null;
+  maxEndpoint: string | null;
   requestTimeoutMs: number;
 };
 
@@ -132,6 +134,13 @@ export function loadBotConsumerConfig(
       env.TELEGRAM_API_BASE_URL ??
       'https://api.telegram.org',
   );
+  const maxToken =
+    trimmed(env.GUEST_GAME_BOT_CONSUMER_MAX_BOT_TOKEN) ??
+    trimmed(env.GUEST_GAME_MAX_BOT_TOKEN) ??
+    trimmed(env.MAX_BOT_TOKEN);
+  const maxEndpoint =
+    trimmed(env.GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT) ??
+    trimmed(env.GUEST_GAME_MAX_DELIVERY_ENDPOINT);
   const requestTimeoutMs = parseBoundedInt(
     env.GUEST_GAME_BOT_CONSUMER_REQUEST_TIMEOUT_MS,
     defaultRequestTimeoutMs,
@@ -148,6 +157,8 @@ export function loadBotConsumerConfig(
     dryRun,
     telegramToken,
     telegramApiBaseUrl,
+    maxToken,
+    maxEndpoint,
     requestTimeoutMs,
   };
 
@@ -176,9 +187,11 @@ export function validateBotConsumerConfig(config: BotConsumerConfig) {
   }
 
   if (!config.dryRun && config.channels.includes('MAX')) {
-    throw new Error(
-      'MAX real send is not enabled in the VDS bot consumer yet. Use TELEGRAM or keep dry-run=true.',
-    );
+    if (!config.maxToken || !config.maxEndpoint) {
+      throw new Error(
+        'MAX real send requires GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT and GUEST_GAME_BOT_CONSUMER_MAX_BOT_TOKEN.',
+      );
+    }
   }
 }
 
@@ -193,7 +206,7 @@ export async function runBotConsumerOnce(
   const items: BotConsumerRunItem[] = [];
   let sent = 0;
   let failed = 0;
-  let blocked = 0;
+  const blocked = 0;
   let skipped = 0;
   let acked = 0;
   let idempotentAcks = 0;
@@ -211,38 +224,21 @@ export async function runBotConsumerOnce(
       continue;
     }
 
-    if (delivery.channel !== 'TELEGRAM') {
-      const note = 'Only Telegram real send is supported by this consumer.';
-      const ack = await ackBotDelivery(config, fetchImpl, delivery, {
-        status: 'BLOCKED',
-        note,
-        errorCode: 'unsupported_channel',
-      });
-      blocked += 1;
-      acked += 1;
-      idempotentAcks += ack.idempotent ? 1 : 0;
-      items.push({
-        deliveryId: delivery.deliveryId,
-        rewardId: delivery.rewardId,
-        channel: delivery.channel,
-        status: 'BLOCKED',
-        note,
-      });
-      continue;
-    }
-
     try {
-      const telegramResult = await sendTelegramDelivery(
-        config,
-        fetchImpl,
-        delivery,
-      );
-      const note = 'Telegram bot consumer sent reward delivery.';
+      const providerResult =
+        delivery.channel === 'TELEGRAM'
+          ? await sendTelegramDelivery(config, fetchImpl, delivery)
+          : await sendMaxDelivery(config, fetchImpl, delivery);
+      const note =
+        delivery.channel === 'TELEGRAM'
+          ? 'Telegram bot consumer sent reward delivery.'
+          : 'MAX bot consumer sent reward delivery.';
       const ack = await ackBotDelivery(config, fetchImpl, delivery, {
         status: 'SENT',
         note,
-        providerMessageId: telegramResult.messageId,
-        providerStatus: 'telegram:ok',
+        providerMessageId: providerResult.messageId,
+        providerStatus:
+          delivery.channel === 'TELEGRAM' ? 'telegram:ok' : 'max:ok',
       });
       sent += 1;
       acked += 1;
@@ -259,8 +255,12 @@ export async function runBotConsumerOnce(
       const ack = await ackBotDelivery(config, fetchImpl, delivery, {
         status: 'FAILED',
         note,
-        providerStatus: 'telegram:error',
-        errorCode: 'telegram_send_failed',
+        providerStatus:
+          delivery.channel === 'TELEGRAM' ? 'telegram:error' : 'max:error',
+        errorCode:
+          delivery.channel === 'TELEGRAM'
+            ? 'telegram_send_failed'
+            : 'max_send_failed',
       });
       failed += 1;
       acked += 1;
@@ -393,6 +393,63 @@ async function sendTelegramDelivery(
       response.result?.message_id === undefined
         ? null
         : String(response.result.message_id),
+  };
+}
+
+async function sendMaxDelivery(
+  config: BotConsumerConfig,
+  fetchImpl: BotConsumerFetch,
+  delivery: BotConsumerDelivery,
+): Promise<{ messageId: string | null }> {
+  const maxIdentity = delivery.recipient.maxIdentity;
+
+  if (!maxIdentity) {
+    throw new Error('MAX delivery has no confirmed identity.');
+  }
+
+  if (!config.maxEndpoint || !config.maxToken) {
+    throw new Error('MAX delivery endpoint or token is not configured.');
+  }
+
+  const response = await postJson<MaxDeliveryResponse>(
+    config.maxEndpoint,
+    {
+      channel: 'MAX',
+      recipient: {
+        identity: maxIdentity,
+        identityMasked: delivery.recipient.identityMasked,
+        recipientMasked: delivery.recipient.recipientMasked,
+      },
+      message: {
+        title: delivery.message.title,
+        body: delivery.message.body,
+        text: formatTelegramText(delivery),
+      },
+      delivery: {
+        id: delivery.deliveryId,
+        rewardId: delivery.rewardId,
+        tenantId: delivery.tenantId,
+        tenantSlug: delivery.tenantSlug,
+        preparedAt: delivery.preparedAt,
+      },
+      reward: delivery.reward,
+      store: delivery.store,
+    },
+    fetchImpl,
+    config.requestTimeoutMs,
+    {
+      authorization: `Bearer ${config.maxToken}`,
+    },
+  );
+
+  if (response.ok === false || response.status === 'error') {
+    throw new Error(
+      response.description ?? response.error ?? 'MAX delivery provider failed.',
+    );
+  }
+
+  return {
+    messageId: maxResponseMessageId(response),
   };
 }
 
@@ -549,3 +606,30 @@ type TelegramSendMessageResponse = {
     message_id?: number | string;
   };
 };
+
+type MaxDeliveryResponse = {
+  ok?: boolean;
+  status?: string;
+  description?: string;
+  error?: string;
+  messageId?: string | number;
+  message_id?: string | number;
+  id?: string | number;
+  result?: {
+    messageId?: string | number;
+    message_id?: string | number;
+    id?: string | number;
+  };
+};
+
+function maxResponseMessageId(response: MaxDeliveryResponse) {
+  const value =
+    response.messageId ??
+    response.message_id ??
+    response.id ??
+    response.result?.messageId ??
+    response.result?.message_id ??
+    response.result?.id;
+
+  return value === undefined || value === null ? null : String(value);
+}

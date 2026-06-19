@@ -853,6 +853,7 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED;
     delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN;
     delete process.env.GUEST_GAME_MAX_DELIVERY_ENABLED;
+    delete process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED;
     delete process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT;
     delete process.env.GUEST_GAME_MAX_BOT_TOKEN;
     delete process.env.MAX_BOT_TOKEN;
@@ -3302,9 +3303,73 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
     });
 
-    it('sends MAX delivery through generic provider when env is explicitly enabled', async () => {
+    it('blocks MAX delivery without an explicit live canary flag', async () => {
       process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
+        'https://max-provider.example/send';
+      process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+      const { service, prisma } = createService();
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('MAX canary guard should block fetch'));
+      const maxRow = deliveryRow({
+        channel: 'MAX',
+        channelIdentityMasked: 'max:***',
+        profile: {
+          id: 'profile-1',
+          displayName: 'Guest One',
+          contactMasked: '+7 *** **-11',
+          telegramIdentity: null,
+          maxIdentity: 'max:user-123',
+          xp: 120,
+          level: 2,
+        },
+      });
+
+      prisma.guestGameDelivery.findMany.mockResolvedValue([maxRow]);
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+      jest.spyOn(service, 'getDeliveries').mockResolvedValue([]);
+
+      const result = await service.dispatchDeliveries(user, {
+        dryRun: false,
+        channels: ['MAX'],
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+        user,
+        'delivery-1',
+        'reward-1',
+        expect.objectContaining({
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: 'READY',
+          toStatus: 'READY',
+          channel: 'MAX',
+          note: expect.stringContaining(
+            'GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED',
+          ),
+        }),
+      );
+      expect(result).toMatchObject({
+        dryRun: false,
+        checked: 1,
+        sent: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: 1,
+      });
+      expect(JSON.stringify(result)).not.toContain('max-token');
+      expect(JSON.stringify(result)).not.toContain('max:user-123');
+
+      fetchMock.mockRestore();
+    });
+
+    it('sends MAX delivery through generic provider when env and canary are explicitly enabled', async () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
         'https://max-provider.example/send';
       process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';

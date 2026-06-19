@@ -58,5 +58,6 @@ systemctl list-timers leetplus-guest-game-bot-consumer.timer
 - Не коммитить реальный `/etc/leetplus/guest-game-bot-consumer.env`.
 - На Telegram edge VDS можно использовать тот же Bot API proxy/base URL, что и для `leetplus-telegram-edge.service`.
 - До подтвержденного MAX provider endpoint оставлять `GUEST_GAME_BOT_CONSUMER_CHANNELS=TELEGRAM`. Для MAX real-send одновременно нужны `GUEST_GAME_BOT_CONSUMER_CHANNELS=MAX`, `GUEST_GAME_BOT_CONSUMER_MAX_DELIVERY_ENDPOINT`, `GUEST_GAME_BOT_CONSUMER_MAX_BOT_TOKEN`, `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false` и canary `GUEST_GAME_BOT_CONSUMER_LIMIT=1`.
+- Этот runbook относится к внешнему VDS consumer. Если MAX отправляется внутренним API dispatcher-ом Guest Game Hub, дополнительно нужен отдельный `GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED=true`; одни endpoint/token не запускают provider-вызов.
 - Cadence задает systemd timer, поэтому `GUEST_GAME_BOT_CONSUMER_INTERVAL_MS` в env-шаблоне намеренно пустой.
 - Unit принудительно использует one-shot режим через `GUEST_GAME_BOT_CONSUMER_MAX_TICKS=1`, чтобы restart/deploy не создавал бесконечный процесс.

@@ -3901,6 +3901,7 @@ export class GuestGamificationService {
     const maxDeliveryConfigured = Boolean(
       maxProvider?.configured && maxProvider.enabledByEnv,
     );
+    const maxDeliveryCanAttempt = Boolean(maxProvider?.canAttemptSend);
     const langameBonusAccrualEnabled = envFlag('LANGAME_BONUS_ACCRUAL_ENABLED');
     const bonusLedgerScheduler = bonusLedgerSchedulerReadiness(
       langameBonusAccrualEnabled,
@@ -4121,8 +4122,16 @@ export class GuestGamificationService {
       {
         key: 'MAX_DELIVERY',
         title: 'MAX bot / Mini App',
-        status: maxDeliveryConfigured ? 'MANUAL_ONLY' : 'BLOCKED',
-        statusLabel: maxDeliveryConfigured ? 'ожидает API' : 'не настроено',
+        status: maxDeliveryCanAttempt
+          ? 'MANUAL_ONLY'
+          : maxDeliveryConfigured
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: maxDeliveryCanAttempt
+          ? 'canary разрешен'
+          : maxDeliveryConfigured
+            ? 'нужен canary'
+            : 'не настроено',
         ready: false,
         configured: Boolean(maxProvider?.configured),
         enabled: Boolean(maxProvider?.enabledByEnv),
@@ -10383,6 +10392,7 @@ type DeliveryProviderConfig = {
     enabled: boolean;
     token: string;
     endpoint: string;
+    liveCanaryEnabled: boolean;
   };
 };
 
@@ -10436,6 +10446,7 @@ function deliveryProviderConfig(): DeliveryProviderConfig {
         envString('MAX_BOT_TOKEN') ??
         '',
       endpoint: envString('GUEST_GAME_MAX_DELIVERY_ENDPOINT') ?? '',
+      liveCanaryEnabled: envFlag('GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED'),
     },
   };
 }
@@ -10769,6 +10780,8 @@ function deliveryProviderStatus(
   const enabledByEnv = config.realSendEnabled && config.max.enabled;
   const configured =
     config.max.token.length > 0 && config.max.endpoint.length > 0;
+  const canAttemptSend =
+    enabledByEnv && configured && config.max.liveCanaryEnabled;
 
   return {
     channel,
@@ -10776,17 +10789,19 @@ function deliveryProviderStatus(
     pendingReady,
     enabledByEnv,
     configured,
-    canAttemptSend: enabledByEnv && configured,
+    canAttemptSend,
     dryRunOnly: !config.realSendEnabled,
     requiredEnv: [
       'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
       'GUEST_GAME_MAX_DELIVERY_ENABLED',
+      'GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED',
       'GUEST_GAME_MAX_BOT_TOKEN',
       'GUEST_GAME_MAX_DELIVERY_ENDPOINT',
     ],
-    note:
-      configured && enabledByEnv
-        ? 'MAX provider настроен через generic delivery endpoint; real-send разрешен только этим env-контуром.'
+    note: canAttemptSend
+      ? 'MAX provider настроен через generic delivery endpoint; real-send разрешен только явным live-canary флагом.'
+      : configured && enabledByEnv && !config.max.liveCanaryEnabled
+        ? 'MAX provider настроен, но live-send заблокирован до явного GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED=true.'
         : 'MAX provider не настроен или не включен; нужен подтвержденный endpoint и токен.',
   };
 }

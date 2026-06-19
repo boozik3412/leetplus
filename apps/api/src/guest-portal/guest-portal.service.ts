@@ -2538,7 +2538,18 @@ export class GuestPortalService {
   }
 
   private async signGuestPortalToken(payload: GuestPortalTokenPayload) {
-    return this.jwtService.signAsync(payload, {
+    const { exp, iat, nbf, ...signablePayload } =
+      payload as GuestPortalTokenPayload & {
+        exp?: unknown;
+        iat?: unknown;
+        nbf?: unknown;
+      };
+
+    void exp;
+    void iat;
+    void nbf;
+
+    return this.jwtService.signAsync(signablePayload, {
       expiresIn: (this.configService.get<string>(
         'GUEST_PORTAL_JWT_EXPIRES_IN',
       ) ?? GUEST_TOKEN_EXPIRES_IN) as JwtExpiresIn,

@@ -1065,6 +1065,9 @@ describe('GuestPortalService', () => {
         guestId: null,
         profileId: 'profile-1',
         phoneHash: 'phone-hash-1',
+        exp: 1781860000,
+        iat: 1781850000,
+        nbf: 1781850000,
       };
       const targetProfile = {
         id: 'profile-2',
@@ -1148,6 +1151,9 @@ describe('GuestPortalService', () => {
         }),
         expect.any(Object),
       );
+      expect(jwtService.signAsync.mock.calls[0][0]).not.toHaveProperty('exp');
+      expect(jwtService.signAsync.mock.calls[0][0]).not.toHaveProperty('iat');
+      expect(jwtService.signAsync.mock.calls[0][0]).not.toHaveProperty('nbf');
       expect(result).toMatchObject({
         token: 'selected-club-token',
         clubId: 'leet:club-2',

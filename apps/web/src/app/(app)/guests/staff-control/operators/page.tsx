@@ -556,7 +556,11 @@ export default async function StaffOperatorsPage({
                       </tr>
                       <tr className="bg-zinc-50/50 dark:bg-zinc-900/20">
                         <td colSpan={10} className="px-3 pb-4">
-                          <ShiftDetailsPreview shifts={row.shiftDetails} />
+                          <ShiftDetailsPreview
+                            shifts={row.shiftDetails}
+                            externalUserId={row.externalUserId}
+                            operatorName={adminDisplayName(row)}
+                          />
                           <div
                             id={staffMappingAnchorId(row.externalDomain, row.externalUserId)}
                             className="scroll-mt-24 rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/60 dark:bg-amber-950/20"
@@ -573,6 +577,26 @@ export default async function StaffOperatorsPage({
                               <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
                                 user_id {row.externalUserId}
                               </span>
+                            </div>
+                            <div className="mb-3 grid gap-2 rounded-md border border-amber-200 bg-white/70 p-3 text-xs dark:border-amber-900/60 dark:bg-zinc-950/70 sm:grid-cols-3">
+                              <div>
+                                <p className="font-semibold uppercase text-zinc-500">1. Проверьте смены выше</p>
+                                <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+                                  Они сгруппированы по этому Langame user_id.
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-semibold uppercase text-zinc-500">2. Выберите сотрудника</p>
+                                <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+                                  Нужна карточка LeetPlus, к которой относятся эти смены.
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-semibold uppercase text-zinc-500">3. Нажмите привязать</p>
+                                <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+                                  Смены user_id {row.externalUserId} перейдут в аналитику сотрудника.
+                                </p>
+                              </div>
                             </div>
                             <StaffIdentityMappingForm
                               externalDomain={row.externalDomain}
@@ -1152,8 +1176,12 @@ function MiniRanking({
 
 function ShiftDetailsPreview({
   shifts,
+  externalUserId,
+  operatorName,
 }: {
   shifts: StaffOperatorShiftDetail[];
+  externalUserId?: string;
+  operatorName?: string;
 }) {
   const visibleShifts = shifts.slice(0, 4);
 
@@ -1162,10 +1190,12 @@ function ShiftDetailsPreview({
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-zinc-500">
-            Смены для проверки
+            Смены этого Langame user_id
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Проблемные и последние закрытые смены с ID для сверки.
+            Показаны смены{operatorName ? ` оператора ${operatorName}` : ""}
+            {externalUserId ? ` · user_id ${externalUserId}` : ""}. После привязки они
+            попадут в аналитику выбранного сотрудника LeetPlus.
           </p>
         </div>
         {shifts.length > visibleShifts.length ? (
@@ -1337,7 +1367,11 @@ function OperatorCard({
         <OperatorMetric label="Ср. чек" value={formatRubles(row.averageShiftMiddleCheck)} />
       </div>
 
-      <ShiftDetailsPreview shifts={row.shiftDetails} />
+      <ShiftDetailsPreview
+        shifts={row.shiftDetails}
+        externalUserId={row.externalUserId}
+        operatorName={adminDisplayName(row)}
+      />
 
       <div className="mt-3">
         <p className="text-xs font-medium uppercase text-zinc-500">Клубы</p>
@@ -1362,6 +1396,26 @@ function OperatorCard({
           <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
             user_id {row.externalUserId}
           </span>
+        </div>
+        <div className="mb-3 grid gap-2 rounded-md border border-amber-200 bg-white/70 p-3 text-xs dark:border-amber-900/60 dark:bg-zinc-950/70 sm:grid-cols-3">
+          <div>
+            <p className="font-semibold uppercase text-zinc-500">1. Проверьте смены выше</p>
+            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+              Они сгруппированы по этому Langame user_id.
+            </p>
+          </div>
+          <div>
+            <p className="font-semibold uppercase text-zinc-500">2. Выберите сотрудника</p>
+            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+              Нужна карточка LeetPlus, к которой относятся эти смены.
+            </p>
+          </div>
+          <div>
+            <p className="font-semibold uppercase text-zinc-500">3. Нажмите привязать</p>
+            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
+              Смены user_id {row.externalUserId} перейдут в аналитику сотрудника.
+            </p>
+          </div>
         </div>
         <StaffIdentityMappingForm
           externalDomain={row.externalDomain}

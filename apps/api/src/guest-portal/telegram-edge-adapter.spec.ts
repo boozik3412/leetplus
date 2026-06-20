@@ -125,7 +125,7 @@ describe('telegram edge adapter', () => {
         new Response(
           JSON.stringify({
             status: 'CONFIRMED',
-            action: 'TELEGRAM_BOT_STATUS',
+            action: 'TELEGRAM_BOT_MENU',
             reply: {
               provider: 'TELEGRAM',
               method: 'sendMessage',
@@ -167,7 +167,7 @@ describe('telegram edge adapter', () => {
             chat: { id: 123456 },
             text: 'РњРµРЅСЋ',
           },
-          data: '/status',
+          data: 'bot:menu',
         },
       },
       { fetch: fetchMock, logger: silentLogger },
@@ -191,10 +191,13 @@ describe('telegram edge adapter', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       'https://tg-proxy.test/botbot-token/sendMessage',
-      expect.objectContaining({
-        body: expect.stringContaining('"chat_id":"123456"'),
-      }),
+      expect.any(Object),
     );
+    const sendMessageBody = fetchMock.mock.calls[2]?.[1]?.body;
+    if (typeof sendMessageBody !== 'string') {
+      throw new Error('Telegram sendMessage body should be a JSON string.');
+    }
+    expect(sendMessageBody).toContain('"chat_id":"123456"');
   });
   it('does not call Telegram in dry-run mode', async () => {
     const fetchMock: jest.MockedFunction<TelegramEdgeFetch> = jest

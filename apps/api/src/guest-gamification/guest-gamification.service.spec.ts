@@ -1450,6 +1450,39 @@ describe('GuestGamificationService', () => {
       expect(senderText).not.toContain('telegram-secret');
     });
 
+    it('marks Telegram bot menu ready on the polling edge contract without raw diagnostics', () => {
+      process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET = 'telegram-secret';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const menu = readiness.items.find(
+        (item: { key: string }) => item.key === 'TELEGRAM_BOT_MENU',
+      );
+      const menuText = JSON.stringify(menu);
+
+      expect(menu).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET'],
+        runbook: {
+          label: 'Runbook Telegram-входа',
+          path: 'docs/deployment/telegram-auth.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
+        },
+      });
+      expect(menu.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Sections' }),
+          expect.objectContaining({ label: 'Callback answer' }),
+          expect.objectContaining({ label: 'Safe payload' }),
+        ]),
+      );
+      expect(menuText).not.toContain('telegram-secret');
+      expect(menuText).not.toContain('chat:');
+    });
+
     it('marks Telegram auth reply sender ready without exposing token values', () => {
       process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET = 'telegram-secret';
       process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED = 'true';
@@ -1513,7 +1546,10 @@ describe('GuestGamificationService', () => {
       });
       expect(miniApp.details).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ label: 'Route', value: '/game/app' }),
+          expect.objectContaining({
+            label: 'Route',
+            value: '/game/app?tab=quests|rewards|profile',
+          }),
           expect.objectContaining({
             label: 'Bot username',
             value: 'настроен',

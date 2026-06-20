@@ -1312,6 +1312,7 @@ export type GuestGameIntegrationReadinessItem = {
     | 'INCOMING_CALL_LAST4_AUTH'
     | 'TELEGRAM_LINK'
     | 'TELEGRAM_WEBHOOK'
+    | 'TELEGRAM_BOT_MENU'
     | 'TELEGRAM_AUTH_REPLY_SENDER'
     | 'TELEGRAM_MINI_APP'
     | 'TELEGRAM_DELIVERY'
@@ -4182,10 +4183,41 @@ export class GuestGamificationService {
         configured: telegramWebhookConfigured,
         enabled: telegramWebhookConfigured,
         requiredEnv: ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET'],
-        note: 'Основной API принимает /start link-code и команды отписки от 1337 polling edge, не хранит raw update и не отправляет внешние ответы.',
+        note: 'Основной API принимает /start link-code, callback query и команды отписки от 1337 polling edge, не хранит raw update и возвращает только safe reply payload.',
         nextAction: telegramWebhookConfigured
           ? 'На 1337 проверить telegram-poller: webhook url=-, затем пройти Telegram canary.'
           : 'Задать update secret и только потом подключать 1337 polling edge к production API.',
+      },
+      {
+        key: 'TELEGRAM_BOT_MENU',
+        title: 'Telegram bot menu',
+        status: telegramWebhookConfigured ? 'READY' : 'BLOCKED',
+        statusLabel: telegramWebhookConfigured
+          ? 'callback menu ready'
+          : 'secret нужен',
+        ready: telegramWebhookConfigured,
+        configured: telegramWebhookConfigured,
+        enabled: telegramWebhookConfigured,
+        requiredEnv: ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET'],
+        details: [
+          {
+            label: 'Sections',
+            value: 'profile / quests / rewards / help',
+          },
+          {
+            label: 'Callback answer',
+            value: '1337 edge answerCallbackQuery',
+          },
+          {
+            label: 'Safe payload',
+            value: 'без raw text/contact/chat id',
+          },
+        ],
+        note: 'Bot menu строится в основном API из safe game summary; edge только прокидывает callback_data и отправляет opaque replyMarkup.',
+        nextAction: telegramWebhookConfigured
+          ? 'Проверить /start, /help, bot:profile, bot:quests, bot:rewards и fallback bot:menu через polling edge.'
+          : 'Сначала настроить общий update secret между API и 1337 edge.',
+        runbook: telegramAuthRunbook,
       },
       {
         key: 'TELEGRAM_AUTH_REPLY_SENDER',
@@ -4246,7 +4278,9 @@ export class GuestGamificationService {
         details: [
           {
             label: 'Route',
-            value: telegramMiniAppUrl ? '/game/app' : 'нужен URL',
+            value: telegramMiniAppUrl
+              ? '/game/app?tab=quests|rewards|profile'
+              : 'нужен URL',
           },
           {
             label: 'Bot username',
@@ -4261,7 +4295,7 @@ export class GuestGamificationService {
             value: telegramMiniAppEdgeSecret ? 'настроен' : 'не используется',
           },
         ],
-        note: 'Mini App открывает /game/app и выдает обычную guest-session для существующего GuestGameProfile. InitData можно валидировать на API bot token-ом или на отдельной edge VDS с передачей edge assertion.',
+        note: 'Mini App открывает /game/app, поддерживает tab deeplink и выдает обычную guest-session для существующего GuestGameProfile. InitData можно валидировать на API bot token-ом или на отдельной edge VDS с передачей edge assertion.',
         nextAction: telegramMiniAppReady
           ? 'Проверить кнопку Open Mini App после Telegram contact-share и mobile WebView /game/app на тестовом госте.'
           : 'Настроить bot username, Mini App URL и bot token на edge VDS или shared secret для edge assertion.',

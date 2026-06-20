@@ -126,7 +126,8 @@ type GuestPortalVerificationStatus =
   | 'READY_AFTER_OTP'
   | 'NOT_CONFIGURED'
   | 'PLANNED';
-type TelegramBotCommand = 'STATUS' | 'HELP';
+type TelegramBotCommand = 'MENU' | 'PROFILE' | 'QUESTS' | 'REWARDS' | 'HELP';
+type TelegramMiniAppTab = 'quests' | 'rewards' | 'profile';
 type GuestPortalPhoneIdentity = {
   normalized: string;
   hash: string;
@@ -554,6 +555,10 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_AUTH_START'
     | 'TELEGRAM_AUTH_CONTACT'
     | 'TELEGRAM_BOT_STATUS'
+    | 'TELEGRAM_BOT_MENU'
+    | 'TELEGRAM_BOT_PROFILE'
+    | 'TELEGRAM_BOT_QUESTS'
+    | 'TELEGRAM_BOT_REWARDS'
     | 'TELEGRAM_BOT_HELP'
     | 'UNSUBSCRIBE'
     | 'UNKNOWN';
@@ -3928,7 +3933,7 @@ export class GuestPortalService {
 
     if (update.callbackData) {
       const response = await this.buildTelegramBotCommandResponse(
-        'STATUS',
+        'MENU',
         update.telegramChatId,
         telegramIdentityMasked,
       );
@@ -4328,7 +4333,7 @@ export class GuestPortalService {
               [
                 {
                   text: 'Продолжить в боте',
-                  callback_data: '/status',
+                  callback_data: 'bot:menu',
                 },
               ],
             ]
@@ -4350,6 +4355,8 @@ export class GuestPortalService {
     telegramChatIdValue: string,
     telegramIdentityMasked: string | null,
   ): Promise<GuestPortalTelegramWebhookResponse> {
+    const action = telegramBotAction(command);
+
     if (command === 'HELP') {
       return {
         status: 'IGNORED',
@@ -4362,7 +4369,7 @@ export class GuestPortalService {
           telegramIdentityMasked,
           [
             'LeetPlus bot: здесь можно продолжить игру после Telegram-входа.',
-            'Доступные действия: открыть Mini App, вернуться на сайт, посмотреть статус или отписаться от уведомлений.',
+            'Доступные действия: профиль, квесты, награды, Mini App, сайт и отписка от уведомлений.',
             'Для входа заново выберите клуб на сайте и нажмите "Войти через Telegram".',
           ].join('\n'),
         ),
@@ -4379,6 +4386,11 @@ export class GuestPortalService {
       select: {
         id: true,
         tenantId: true,
+        guestId: true,
+        phoneHash: true,
+        contactMasked: true,
+        phoneConsentStatus: true,
+        phoneConsentAt: true,
         xp: true,
         level: true,
         status: true,
@@ -4389,11 +4401,11 @@ export class GuestPortalService {
     if (!profile) {
       return {
         status: 'IGNORED',
-        action: 'TELEGRAM_BOT_STATUS',
+        action,
         profileId: null,
         telegramIdentityMasked,
         message:
-          'Telegram bot status command received for an unlinked Telegram chat.',
+          'Telegram bot menu command received for an unlinked Telegram chat.',
         reply: this.telegramWebhookBotMenuReply(
           telegramIdentityMasked,
           [
@@ -4409,11 +4421,11 @@ export class GuestPortalService {
     if (profile.status === TELEGRAM_AUTH_PROFILE_STATUS) {
       return {
         status: 'AWAITING_CONTACT',
-        action: 'TELEGRAM_BOT_STATUS',
+        action,
         profileId: profile.id,
         telegramIdentityMasked,
         message:
-          'Telegram bot status command received while auth is waiting for contact-share.',
+          'Telegram bot menu command received while auth is waiting for contact-share.',
         reply: this.telegramWebhookContactRequestReply(
           telegramIdentityMasked,
           'Вход почти готов. Поделитесь телефоном кнопкой Telegram, чтобы LeetPlus подтвердил профиль.',
@@ -4422,37 +4434,56 @@ export class GuestPortalService {
     }
 
     const club = await this.findTelegramBotLatestClub(profile.id);
-    const mission = club
-      ? await this.findTelegramBotNearestMission(profile.tenantId, club.storeId)
-      : null;
     const xp = Math.max(0, profile.xp ?? 0);
     const level = Math.max(1, profile.level ?? levelFromXp(xp));
-    const lines = [
-      'LeetPlus bot: профиль подключен.',
-      club
-        ? `Клуб: ${club.name}.`
-        : 'Клуб: выберите клуб на сайте или в Mini App.',
-      `Прогресс: ${formatTelegramBotInteger(xp)} XP, уровень ${formatTelegramBotInteger(level)}.`,
-      profile.unsubscribedAt
-        ? 'Уведомления: отключены. Игровой статус доступен, но новые Telegram-рассылки заблокированы.'
-        : null,
-      club
-        ? mission
-          ? telegramBotMissionLine(mission)
-          : 'Квесты: активных заданий сейчас нет.'
-        : 'Квесты появятся после выбора клуба.',
-      'Действия: Mini App, сайт, помощь и отписка доступны кнопками ниже.',
-    ].filter((line): line is string => Boolean(line));
+    let portal: GuestPortalPayload | null = null;
+
+    if (club && profile.phoneHash) {
+      try {
+        portal = await this.buildPortalPayload({
+          sub: `telegram-bot:${profile.id}:${club.storeId}`,
+          purpose: GUEST_PORTAL_PURPOSE,
+          tenantId: profile.tenantId,
+          storeId: club.storeId,
+          guestId: profile.guestId,
+          profileId: profile.id,
+          phoneHash: profile.phoneHash,
+        });
+      } catch {
+        portal = null;
+      }
+    }
+
+    const mission =
+      portal || !club
+        ? null
+        : await this.findTelegramBotNearestMission(
+            profile.tenantId,
+            club.storeId,
+          );
+    const replyText = portal
+      ? telegramBotReplyText(command, portal, profile.unsubscribedAt)
+      : telegramBotFallbackReplyText(command, {
+          clubName: club?.name ?? null,
+          contactMasked: profile.contactMasked,
+          level,
+          mission,
+          phoneConsentAt: profile.phoneConsentAt,
+          phoneConsentStatus: profile.phoneConsentStatus,
+          unsubscribedAt: profile.unsubscribedAt,
+          xp,
+        });
 
     return {
       status: 'CONFIRMED',
-      action: 'TELEGRAM_BOT_STATUS',
+      action,
       profileId: profile.id,
       telegramIdentityMasked,
-      message: 'Telegram bot status command processed.',
+      message: 'Telegram bot menu command processed.',
       reply: this.telegramWebhookBotMenuReply(
         telegramIdentityMasked,
-        lines.join('\n'),
+        replyText,
+        telegramBotMiniAppTab(command),
       ),
     };
   }
@@ -4546,6 +4577,7 @@ export class GuestPortalService {
   private telegramWebhookBotMenuReply(
     chatIdMasked: string | null,
     text: string,
+    miniAppTab?: TelegramMiniAppTab,
   ): GuestPortalTelegramWebhookResponse['reply'] {
     return {
       provider: 'TELEGRAM',
@@ -4556,9 +4588,29 @@ export class GuestPortalService {
         inline_keyboard: [
           [
             {
+              text: 'Профиль',
+              callback_data: 'bot:profile',
+            },
+            {
+              text: 'Квесты',
+              callback_data: 'bot:quests',
+            },
+          ],
+          [
+            {
+              text: 'Награды',
+              callback_data: 'bot:rewards',
+            },
+            {
+              text: 'Меню',
+              callback_data: 'bot:menu',
+            },
+          ],
+          [
+            {
               text: 'Открыть Mini App',
               web_app: {
-                url: this.telegramMiniAppUrl(),
+                url: this.telegramMiniAppUrl(miniAppTab),
               },
             },
           ],
@@ -7477,16 +7529,354 @@ export class GuestPortalService {
     );
   }
 
-  private telegramMiniAppUrl() {
+  private telegramMiniAppUrl(tab?: TelegramMiniAppTab) {
     const configured = this.configService
       .get<string>('GUEST_GAME_TELEGRAM_MINI_APP_URL')
       ?.trim();
+    const baseUrl =
+      configured || `${this.publicWebUrl().replace(/\/$/, '')}/game/app`;
 
-    if (configured) {
-      return configured;
+    if (!tab) {
+      return baseUrl;
     }
 
-    return `${this.publicWebUrl().replace(/\/$/, '')}/game/app`;
+    const separator = baseUrl.includes('?') ? '&' : '?';
+
+    return `${baseUrl}${separator}tab=${encodeURIComponent(tab)}`;
+  }
+}
+
+function telegramBotReplyText(
+  command: TelegramBotCommand,
+  portal: GuestPortalPayload,
+  unsubscribedAt: Date | null,
+) {
+  switch (command) {
+    case 'PROFILE':
+      return telegramBotProfileText(portal, unsubscribedAt);
+    case 'QUESTS':
+      return telegramBotQuestsText(portal);
+    case 'REWARDS':
+      return telegramBotRewardsText(portal);
+    default:
+      return telegramBotMenuText(portal, unsubscribedAt);
+  }
+}
+
+function telegramBotMenuText(
+  portal: GuestPortalPayload,
+  unsubscribedAt: Date | null,
+) {
+  const nextAction = portal.gamification.nextActions[0] ?? null;
+  const mission = telegramBotFeaturedMissions(portal.gamification.missions)[0];
+  const summary = portal.gamification.rewardSummary;
+  const lines = [
+    'LeetPlus bot: игровое меню.',
+    `Клуб: ${portal.store.name}.`,
+    `Прогресс: ${formatTelegramBotInteger(portal.profile.xp)} XP, уровень ${formatTelegramBotInteger(portal.profile.level)}.`,
+    nextAction
+      ? `Ближайшее действие: ${nextAction.title} (${nextAction.statusLabel}).`
+      : mission
+        ? telegramBotMissionLine(mission)
+        : 'Ближайшее действие: откройте Mini App и проверьте клубную карту.',
+    `Награды: готово ${formatTelegramBotInteger(summary.ready)}, на проверке ${formatTelegramBotInteger(summary.waitingApproval)}, получено ${formatTelegramBotInteger(summary.redeemed)}.`,
+    unsubscribedAt || portal.communications.phone.unsubscribedAt
+      ? 'Уведомления: отключены. Игровой статус доступен, новые Telegram-доставки заблокированы.'
+      : 'Уведомления: включены для подтвержденных игровых доставок.',
+    'Выберите раздел кнопками ниже.',
+  ];
+
+  return lines.join('\n');
+}
+
+function telegramBotProfileText(
+  portal: GuestPortalPayload,
+  unsubscribedAt: Date | null,
+) {
+  const phone =
+    portal.communications.phone.masked ?? portal.profile.contactMasked;
+  const lines = [
+    'Профиль LeetPlus',
+    `Клуб: ${portal.store.name}.`,
+    `Уровень: ${formatTelegramBotInteger(portal.profile.level)}.`,
+    `XP: ${formatTelegramBotInteger(portal.profile.xp)} из ${formatTelegramBotInteger(portal.profile.nextLevelXp)}.`,
+    `Телефон: ${phone ?? 'скрыт'}.`,
+    `Согласие: ${telegramBotConsentLabel(portal.communications.phone.consentStatus)}.`,
+    `Telegram: ${telegramBotCommunicationLabel(portal.communications.telegram.status)}.`,
+    unsubscribedAt || portal.communications.phone.unsubscribedAt
+      ? 'Уведомления: отключены.'
+      : 'Уведомления: активны.',
+  ];
+
+  return lines.join('\n');
+}
+
+function telegramBotQuestsText(portal: GuestPortalPayload) {
+  const missions = telegramBotFeaturedMissions(portal.gamification.missions);
+
+  if (!missions.length) {
+    return [
+      'Квесты LeetPlus',
+      `Клуб: ${portal.store.name}.`,
+      'Активных квестов сейчас нет. Новые задания появятся в Mini App после публикации клубом.',
+    ].join('\n');
+  }
+
+  return [
+    'Квесты LeetPlus',
+    `Клуб: ${portal.store.name}.`,
+    ...missions
+      .slice(0, 4)
+      .map((mission) => telegramBotMissionDetailLine(mission)),
+    'Полные условия и шаги открываются в Mini App.',
+  ].join('\n');
+}
+
+function telegramBotRewardsText(portal: GuestPortalPayload) {
+  const summary = portal.gamification.rewardSummary;
+  const rewards = telegramBotFeaturedRewards(portal.gamification.rewards);
+  const bonus = portal.gamification.bonusHistory.items[0] ?? null;
+  const lines = [
+    'Награды LeetPlus',
+    `Готово: ${formatTelegramBotInteger(summary.ready)}. На проверке: ${formatTelegramBotInteger(summary.waitingApproval)}. Получено: ${formatTelegramBotInteger(summary.redeemed)}. Истекло: ${formatTelegramBotInteger(summary.expired)}.`,
+    rewards.length
+      ? 'Последние награды:'
+      : 'Наград пока нет. Выполняйте квесты, и они появятся здесь.',
+    ...rewards.slice(0, 4).map((reward) => telegramBotRewardLine(reward)),
+    bonus
+      ? `Последнее начисление: ${formatTelegramBotInteger(bonus.amount)} бонусов, ${bonus.statusLabel.toLowerCase()}.`
+      : null,
+    'Коды, claim payload и история выдачи доступны только в защищенном Mini App.',
+  ].filter((line): line is string => Boolean(line));
+
+  return lines.join('\n');
+}
+
+function telegramBotFallbackReplyText(
+  command: TelegramBotCommand,
+  input: {
+    clubName: string | null;
+    contactMasked: string | null;
+    level: number;
+    mission: {
+      name: string;
+      xpReward: number;
+      progressTarget: number | null;
+      progressUnit: string | null;
+    } | null;
+    phoneConsentAt: Date | null;
+    phoneConsentStatus: string | null;
+    unsubscribedAt: Date | null;
+    xp: number;
+  },
+) {
+  const lines = [
+    telegramBotTitle(command),
+    input.clubName
+      ? `Клуб: ${input.clubName}.`
+      : 'Клуб: выберите клуб на сайте или в Mini App.',
+    `Прогресс: ${formatTelegramBotInteger(input.xp)} XP, уровень ${formatTelegramBotInteger(input.level)}.`,
+  ];
+
+  if (command === 'PROFILE') {
+    lines.push(`Телефон: ${input.contactMasked ?? 'скрыт'}.`);
+    lines.push(
+      `Согласие: ${telegramBotConsentLabel(input.phoneConsentStatus)}${
+        input.phoneConsentAt ? '' : ' (дата не найдена)'
+      }.`,
+    );
+  }
+
+  if (command === 'QUESTS' || command === 'MENU') {
+    lines.push(
+      input.clubName
+        ? input.mission
+          ? telegramBotMissionLine(input.mission)
+          : 'Квесты: активных заданий сейчас нет.'
+        : 'Квесты появятся после выбора клуба.',
+    );
+  }
+
+  if (command === 'REWARDS') {
+    lines.push(
+      'Награды: откройте Mini App, чтобы увидеть готовые, ожидающие проверки и полученные награды.',
+    );
+  }
+
+  if (input.unsubscribedAt) {
+    lines.push(
+      'Уведомления: отключены. Игровой статус доступен, новые Telegram-доставки заблокированы.',
+    );
+  }
+
+  lines.push('Действия доступны кнопками ниже.');
+
+  return lines.join('\n');
+}
+
+function telegramBotAction(
+  command: TelegramBotCommand,
+): GuestPortalTelegramWebhookResponse['action'] {
+  switch (command) {
+    case 'PROFILE':
+      return 'TELEGRAM_BOT_PROFILE';
+    case 'QUESTS':
+      return 'TELEGRAM_BOT_QUESTS';
+    case 'REWARDS':
+      return 'TELEGRAM_BOT_REWARDS';
+    case 'HELP':
+      return 'TELEGRAM_BOT_HELP';
+    default:
+      return 'TELEGRAM_BOT_MENU';
+  }
+}
+
+function telegramBotMiniAppTab(
+  command: TelegramBotCommand,
+): TelegramMiniAppTab | undefined {
+  switch (command) {
+    case 'PROFILE':
+      return 'profile';
+    case 'QUESTS':
+      return 'quests';
+    case 'REWARDS':
+      return 'rewards';
+    default:
+      return undefined;
+  }
+}
+
+function telegramBotTitle(command: TelegramBotCommand) {
+  switch (command) {
+    case 'PROFILE':
+      return 'Профиль LeetPlus';
+    case 'QUESTS':
+      return 'Квесты LeetPlus';
+    case 'REWARDS':
+      return 'Награды LeetPlus';
+    default:
+      return 'LeetPlus bot: игровое меню.';
+  }
+}
+
+function telegramBotFeaturedMissions(missions: GuestPortalMission[]) {
+  return missions.slice().sort((left, right) => {
+    const leftDone = left.progressPercent >= 100 ? 1 : 0;
+    const rightDone = right.progressPercent >= 100 ? 1 : 0;
+
+    if (leftDone !== rightDone) {
+      return leftDone - rightDone;
+    }
+
+    return (
+      right.progressPercent - left.progressPercent ||
+      telegramBotDateMs(left.periodTo) - telegramBotDateMs(right.periodTo)
+    );
+  });
+}
+
+function telegramBotFeaturedRewards(rewards: GuestPortalReward[]) {
+  const rank: Record<GuestPortalReward['walletState'], number> = {
+    READY: 0,
+    WAITING_APPROVAL: 1,
+    REDEEMED: 2,
+    EXPIRED: 3,
+    CANCELED: 4,
+  };
+
+  return rewards.slice().sort((left, right) => {
+    const stateRank = rank[left.walletState] - rank[right.walletState];
+
+    if (stateRank !== 0) {
+      return stateRank;
+    }
+
+    return Date.parse(right.qualifiedAt) - Date.parse(left.qualifiedAt);
+  });
+}
+
+function telegramBotMissionDetailLine(mission: GuestPortalMission) {
+  const target = mission.progressTarget ?? 1;
+  const unit = mission.progressUnit ? ` ${mission.progressUnit}` : '';
+  const progress = `${formatTelegramBotInteger(mission.progressCurrent)}/${formatTelegramBotInteger(target)}${unit}`;
+  const xp =
+    mission.xpReward > 0
+      ? `, +${formatTelegramBotInteger(mission.xpReward)} XP`
+      : '';
+  const deadline = mission.periodTo
+    ? `, до ${formatTelegramBotDate(mission.periodTo)}`
+    : '';
+  const reward = mission.rewardLabel ? `, награда: ${mission.rewardLabel}` : '';
+
+  return `- ${mission.name}: ${progress}, ${formatTelegramBotInteger(mission.progressPercent)}%${xp}${reward}${deadline}. ${mission.rewardStatus.label}.`;
+}
+
+function telegramBotRewardLine(reward: GuestPortalReward) {
+  const source = reward.sourceLabel ? `, источник: ${reward.sourceLabel}` : '';
+  const expires = reward.expiresAt
+    ? `, до ${formatTelegramBotDate(reward.expiresAt)}`
+    : '';
+
+  return `- ${reward.rewardLabel}: ${telegramBotRewardStateLabel(reward.walletState)}${source}${expires}.`;
+}
+
+function telegramBotConsentLabel(status: string | null) {
+  switch (status) {
+    case 'GRANTED':
+      return 'подтверждено';
+    case 'DENIED':
+      return 'отклонено';
+    case 'UNSUBSCRIBED':
+      return 'отписка';
+    default:
+      return 'не подтверждено';
+  }
+}
+
+function telegramBotCommunicationLabel(
+  status: GuestPortalCommunicationChannel['status'],
+) {
+  switch (status) {
+    case 'READY':
+      return 'готов к наградам';
+    case 'CONNECTED_NO_CONSENT':
+      return 'подключен, нужно согласие';
+    case 'UNSUBSCRIBED':
+      return 'отписка';
+    default:
+      return 'не подключен';
+  }
+}
+
+function telegramBotRewardStateLabel(state: GuestPortalReward['walletState']) {
+  switch (state) {
+    case 'READY':
+      return 'готово';
+    case 'WAITING_APPROVAL':
+      return 'на проверке';
+    case 'REDEEMED':
+      return 'получено';
+    case 'EXPIRED':
+      return 'истекло';
+    default:
+      return 'отменено';
+  }
+}
+
+function telegramBotDateMs(value: string | null) {
+  return value
+    ? Date.parse(value) || Number.POSITIVE_INFINITY
+    : Number.POSITIVE_INFINITY;
+}
+
+function formatTelegramBotDate(value: string) {
+  try {
+    return new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit',
+      month: 'short',
+    }).format(new Date(value));
+  } catch {
+    return 'без срока';
   }
 }
 
@@ -8928,16 +9318,57 @@ function telegramWebhookBotCommand(
     /^\/start(@[A-Za-z0-9_]{3,64})?$/i.test(command) &&
     payloadParts.length === 0
   ) {
-    return 'STATUS';
+    return 'MENU';
   }
 
-  if (/^\/(status|profile|quests|menu)(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
-    return 'STATUS';
+  if (/^(bot:)?profile$/i.test(trimmed)) {
+    return 'PROFILE';
   }
 
-  return /^(продолжить в боте|статус|профиль|квесты|меню)$/i.test(normalized)
-    ? 'STATUS'
-    : null;
+  if (/^(bot:)?quests$/i.test(trimmed)) {
+    return 'QUESTS';
+  }
+
+  if (/^(bot:)?rewards$/i.test(trimmed)) {
+    return 'REWARDS';
+  }
+
+  if (
+    /^(bot:)?menu$/i.test(trimmed) ||
+    /^\/status(@[A-Za-z0-9_]{3,64})?$/i.test(command)
+  ) {
+    return 'MENU';
+  }
+
+  if (/^\/profile(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
+    return 'PROFILE';
+  }
+
+  if (/^\/quests(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
+    return 'QUESTS';
+  }
+
+  if (/^\/rewards(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
+    return 'REWARDS';
+  }
+
+  if (/^\/menu(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
+    return 'MENU';
+  }
+
+  if (/^(профиль)$/i.test(normalized)) {
+    return 'PROFILE';
+  }
+
+  if (/^(квесты|задания)$/i.test(normalized)) {
+    return 'QUESTS';
+  }
+
+  if (/^(награды|бонусы)$/i.test(normalized)) {
+    return 'REWARDS';
+  }
+
+  return /^(продолжить в боте|статус|меню)$/i.test(normalized) ? 'MENU' : null;
 }
 
 function telegramBotMissionLine(mission: {

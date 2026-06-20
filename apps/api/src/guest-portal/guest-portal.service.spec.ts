@@ -556,6 +556,7 @@ function portalPayloadFixture() {
           ],
         },
       ],
+      promoCards: [],
       rewardSummary: {
         total: 2,
         ready: 1,
@@ -691,6 +692,37 @@ function mockGameSummarySession(
     .mockResolvedValue(portal);
 
   return { buildPortalPayload, tokenPayload, verifyGuestToken };
+}
+
+function mockTelegramBotLinkedProfile(
+  prisma: any,
+  service: GuestPortalService,
+  portal: ReturnType<typeof portalPayloadFixture> = portalPayloadFixture(),
+) {
+  prisma.guestGameProfile.findFirst.mockResolvedValue({
+    id: 'profile-1',
+    tenantId: 'tenant-1',
+    guestId: 'guest-1',
+    phoneHash: 'phone-hash',
+    contactMasked: '+7 *** **-11',
+    phoneConsentStatus: 'GRANTED',
+    phoneConsentAt: new Date('2026-06-15T08:00:00.000Z'),
+    xp: 1250,
+    level: 3,
+    status: 'ACTIVE',
+    unsubscribedAt: null,
+  });
+  prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+    storeId: portal.store.id,
+    store: {
+      name: portal.store.name,
+    },
+  });
+  const buildPortalPayload = jest
+    .spyOn(service as any, 'buildPortalPayload')
+    .mockResolvedValue(portal);
+
+  return { buildPortalPayload, portal };
 }
 
 describe('GuestPortalService', () => {
@@ -2162,7 +2194,7 @@ describe('GuestPortalService', () => {
               [
                 {
                   text: 'Продолжить в боте',
-                  callback_data: '/status',
+                  callback_data: 'bot:menu',
                 },
               ],
             ],
@@ -2209,7 +2241,7 @@ describe('GuestPortalService', () => {
       );
       expect(result).toMatchObject({
         status: 'IGNORED',
-        action: 'TELEGRAM_BOT_STATUS',
+        action: 'TELEGRAM_BOT_MENU',
         profileId: null,
         telegramIdentityMasked: 'ch...56',
         reply: {
@@ -2218,6 +2250,26 @@ describe('GuestPortalService', () => {
           text: expect.stringContaining('выберите клуб'),
           replyMarkup: {
             inline_keyboard: [
+              [
+                {
+                  text: 'Профиль',
+                  callback_data: 'bot:profile',
+                },
+                {
+                  text: 'Квесты',
+                  callback_data: 'bot:quests',
+                },
+              ],
+              [
+                {
+                  text: 'Награды',
+                  callback_data: 'bot:rewards',
+                },
+                {
+                  text: 'Меню',
+                  callback_data: 'bot:menu',
+                },
+              ],
               [
                 {
                   text: 'Открыть Mini App',
@@ -2280,7 +2332,7 @@ describe('GuestPortalService', () => {
       expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
     });
 
-    it('answers Telegram /status callback with the bot status menu', async () => {
+    it('answers Telegram /status callback with the bot menu', async () => {
       const { prisma, service } = createService({
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
         GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
@@ -2307,7 +2359,7 @@ describe('GuestPortalService', () => {
       );
       expect(result).toMatchObject({
         status: 'IGNORED',
-        action: 'TELEGRAM_BOT_STATUS',
+        action: 'TELEGRAM_BOT_MENU',
         telegramIdentityMasked: 'ch...56',
         reply: {
           provider: 'TELEGRAM',
@@ -2319,7 +2371,7 @@ describe('GuestPortalService', () => {
       });
     });
 
-    it('falls back to Telegram status for unrecognized callback buttons', async () => {
+    it('falls back to Telegram menu for unrecognized callback buttons', async () => {
       const { prisma, service } = createService({
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
         GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
@@ -2346,7 +2398,7 @@ describe('GuestPortalService', () => {
       );
       expect(result).toMatchObject({
         status: 'IGNORED',
-        action: 'TELEGRAM_BOT_STATUS',
+        action: 'TELEGRAM_BOT_MENU',
         telegramIdentityMasked: 'ch...56',
         reply: { method: 'sendMessage' },
       });
@@ -2359,31 +2411,10 @@ describe('GuestPortalService', () => {
         WEB_URL: 'https://leetplus.ru',
       });
 
-      prisma.guestGameProfile.findFirst.mockResolvedValue({
-        id: 'profile-1',
-        tenantId: 'tenant-1',
-        xp: 1250,
-        level: 3,
-        status: 'ACTIVE',
-        unsubscribedAt: null,
-      });
-      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
-        storeId: 'store-1',
-        store: {
-          name: '1337',
-        },
-      });
-      prisma.guestGameMission.findMany.mockResolvedValue([
-        {
-          name: 'Сыграть 3 часа',
-          xpReward: 150,
-          progressTarget: 3,
-          progressUnit: 'часа',
-          storeIds: ['store-1'],
-          periodFrom: null,
-          periodTo: new Date(Date.now() + 86_400_000),
-        },
-      ]);
+      const { buildPortalPayload } = mockTelegramBotLinkedProfile(
+        prisma,
+        service,
+      );
 
       const result = await service.handleTelegramWebhook('telegram-secret', {
         message: {
@@ -2395,23 +2426,181 @@ describe('GuestPortalService', () => {
 
       expect(result).toMatchObject({
         status: 'CONFIRMED',
-        action: 'TELEGRAM_BOT_STATUS',
+        action: 'TELEGRAM_BOT_MENU',
         profileId: 'profile-1',
         telegramIdentityMasked: 'ch...56',
         reply: {
-          text: expect.stringContaining('Клуб: 1337.'),
+          text: expect.stringContaining('LeetPlus bot: игровое меню.'),
           replyMarkup: {
             inline_keyboard: expect.any(Array),
           },
         },
       });
+      expect(buildPortalPayload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          guestId: 'guest-1',
+          phoneHash: 'phone-hash',
+          profileId: 'profile-1',
+          storeId: 'store-1',
+        }),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Клуб: 1337.'),
+      );
       expect(result.reply?.text).toEqual(expect.stringContaining('уровень 3'));
       expect(result.reply?.text).toEqual(
-        expect.stringContaining('Ближайший квест: Сыграть 3 часа'),
+        expect.stringContaining('Награды: готово 1'),
       );
       expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
       expect(result.reply?.text).toEqual(
         expect.not.stringContaining('profile-1'),
+      );
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('LP-123'));
+    });
+
+    it('answers Telegram profile callback with safe profile details and Mini App deeplink', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      mockTelegramBotLinkedProfile(prisma, service);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-profile',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: 'bot:profile',
+        },
+      });
+      const buttons = (result.reply?.replyMarkup as any).inline_keyboard.flat();
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_PROFILE',
+        profileId: 'profile-1',
+        reply: {
+          text: expect.stringContaining('Профиль LeetPlus'),
+        },
+      });
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Телефон: +7 *** **-11.'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Согласие: подтверждено.'),
+      );
+      expect(
+        buttons.find((button: any) => button.text === 'Открыть Mini App'),
+      ).toMatchObject({
+        web_app: {
+          url: 'https://tg.leetplus.ru/game/app?tab=profile',
+        },
+      });
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('123456'));
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('profile-1'),
+      );
+    });
+
+    it('answers Telegram quests callback with mission progress and no raw ids', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      mockTelegramBotLinkedProfile(prisma, service);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-quests',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: 'bot:quests',
+        },
+      });
+      const buttons = (result.reply?.replyMarkup as any).inline_keyboard.flat();
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_QUESTS',
+        reply: {
+          text: expect.stringContaining('Квесты LeetPlus'),
+        },
+      });
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Сыграй 2 часа'),
+      );
+      expect(result.reply?.text).toEqual(expect.stringContaining('1/2 час'));
+      expect(result.reply?.text).toEqual(expect.stringContaining('+80 XP'));
+      expect(
+        buttons.find((button: any) => button.text === 'Открыть Mini App'),
+      ).toMatchObject({
+        web_app: {
+          url: 'https://tg.leetplus.ru/game/app?tab=quests',
+        },
+      });
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('mission-1'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('play-first-hour'),
+      );
+    });
+
+    it('answers Telegram rewards callback without reward code or claim payload', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      mockTelegramBotLinkedProfile(prisma, service);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-rewards',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: 'bot:rewards',
+        },
+      });
+      const buttons = (result.reply?.replyMarkup as any).inline_keyboard.flat();
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_REWARDS',
+        reply: {
+          text: expect.stringContaining('Награды LeetPlus'),
+        },
+      });
+      expect(result.reply?.text).toEqual(expect.stringContaining('Готово: 1'));
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('100 бонусов: готово'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('50 бонусов: на проверке'),
+      );
+      expect(
+        buttons.find((button: any) => button.text === 'Открыть Mini App'),
+      ).toMatchObject({
+        web_app: {
+          url: 'https://tg.leetplus.ru/game/app?tab=rewards',
+        },
+      });
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('LP-123'));
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('reward-1'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('claimPayload'),
       );
     });
 

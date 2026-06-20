@@ -41,10 +41,13 @@ export function TelegramMiniAppClient() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState<string | null>(null);
   const [clubs, setClubs] = useState<GuestPortalTelegramMiniAppClub[]>([]);
-  const [selectedTab, setSelectedTab] = useState<MiniAppTab>("home");
+  const initialSelectedTab = readMiniAppTabFromLocation();
+  const [selectedTab, setSelectedTab] =
+    useState<MiniAppTab>(initialSelectedTab);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [toast, setToast] = useState<string | null>(null);
   const initDataRef = useRef<string | null>(null);
+  const selectedTabRef = useRef<MiniAppTab>(initialSelectedTab);
   const toastTimerRef = useRef<number | null>(null);
 
   const showToast = useCallback((nextMessage: string) => {
@@ -63,6 +66,9 @@ export function TelegramMiniAppClient() {
       setClubs([]);
       setMessage(null);
       setLoadState("ready");
+      window.setTimeout(() => {
+        scrollMiniAppTabIntoView(selectedTabRef.current, "auto");
+      }, 80);
     },
     [],
   );
@@ -121,6 +127,22 @@ export function TelegramMiniAppClient() {
   }, [handleSessionResponse, openSummary]);
 
   useEffect(() => {
+    const syncTabFromLocation = () => {
+      const nextTab = readMiniAppTabFromLocation();
+      selectedTabRef.current = nextTab;
+      setSelectedTab(nextTab);
+      scrollMiniAppTabIntoView(nextTab, "smooth");
+    };
+
+    syncTabFromLocation();
+    window.addEventListener("popstate", syncTabFromLocation);
+
+    return () => {
+      window.removeEventListener("popstate", syncTabFromLocation);
+    };
+  }, []);
+
+  useEffect(() => {
     let isActive = true;
 
     async function load() {
@@ -157,12 +179,10 @@ export function TelegramMiniAppClient() {
       const data = await requestMiniAppSession({ initData, clubId });
       await handleSessionResponse(data);
       if (data.status === "CONFIRMED") {
+        selectedTabRef.current = "home";
         setSelectedTab("home");
-        window.setTimeout(() => {
-          document
-            .getElementById("home")
-            ?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 80);
+        writeMiniAppTabToUrl("home");
+        window.setTimeout(() => scrollMiniAppTabIntoView("home"), 80);
       }
     } catch (error) {
       setLoadState("error");
@@ -174,11 +194,11 @@ export function TelegramMiniAppClient() {
 
   const onSelectTab = useCallback(
     (tab: MiniAppTab) => {
+      selectedTabRef.current = tab;
       setSelectedTab(tab);
+      writeMiniAppTabToUrl(tab);
       getTelegramWebApp()?.HapticFeedback?.impactOccurred?.("light");
-      document
-        .getElementById(tab)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollMiniAppTabIntoView(tab);
     },
     [],
   );
@@ -1116,6 +1136,54 @@ function readTelegramInitData() {
     params.get("initData")?.trim() ||
     null
   );
+}
+
+function readMiniAppTabFromLocation(): MiniAppTab {
+  if (typeof window === "undefined") {
+    return "home";
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const queryTab = params.get("tab");
+  const hashTab = window.location.hash.replace(/^#/, "");
+
+  return miniAppTabValue(queryTab) ?? miniAppTabValue(hashTab) ?? "home";
+}
+
+function writeMiniAppTabToUrl(tab: MiniAppTab) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+
+  if (tab === "home") {
+    url.searchParams.delete("tab");
+  } else {
+    url.searchParams.set("tab", tab);
+  }
+
+  window.history.replaceState(window.history.state, "", url);
+}
+
+function scrollMiniAppTabIntoView(
+  tab: MiniAppTab,
+  behavior: ScrollBehavior = "smooth",
+) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.getElementById(tab)?.scrollIntoView({ behavior, block: "start" });
+}
+
+function miniAppTabValue(value: string | null): MiniAppTab | null {
+  return value === "home" ||
+    value === "quests" ||
+    value === "rewards" ||
+    value === "profile"
+    ? value
+    : null;
 }
 
 function getTelegramWebApp() {

@@ -610,6 +610,14 @@ export default async function StaffOperatorsPage({
                             <StaffIdentityMappingForm
                               externalDomain={row.externalDomain}
                               externalUserId={row.externalUserId}
+                              operatorName={adminDisplayName(row)}
+                              shiftCount={row.shiftsCount}
+                              storeNames={row.storeNames}
+                              lastShiftLabel={formatLastClosedShift(
+                                row.lastClosedShiftStartedAt,
+                                row.lastClosedShiftStoppedAt,
+                                row.lastClosedShiftStoreTimeZone,
+                              )}
                               staffOptions={report.staffOptions}
                               mappingId={row.mappingId}
                               variant="inline"
@@ -1434,6 +1442,14 @@ function OperatorCard({
         <StaffIdentityMappingForm
           externalDomain={row.externalDomain}
           externalUserId={row.externalUserId}
+          operatorName={adminDisplayName(row)}
+          shiftCount={row.shiftsCount}
+          storeNames={row.storeNames}
+          lastShiftLabel={formatLastClosedShift(
+            row.lastClosedShiftStartedAt,
+            row.lastClosedShiftStoppedAt,
+            row.lastClosedShiftStoreTimeZone,
+          )}
           staffOptions={staffOptions}
           mappingId={row.mappingId}
         />

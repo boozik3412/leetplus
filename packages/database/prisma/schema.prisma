@@ -194,6 +194,7 @@ model Tenant {
   recommendationStates                 RecommendationState[]
   reportDigestScheduleRuns             ReportDigestScheduleRun[]
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
+  guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
   langameStaffUsers                     LangameStaffUser[]
   staffMembers                         StaffMember[]
   staffTasks                           StaffTask[]
@@ -288,6 +289,7 @@ model User {
   updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftUpdatedBy")
   publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftPublishedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
+  guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
   staffMember                          StaffMember?                          @relation("StaffMemberUser")
   createdStaffMembers                  StaffMember[]                         @relation("StaffMemberCreatedBy")
   createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
@@ -2228,6 +2230,30 @@ model GuestStaffIdentityMapping {
   @@index([tenantId], map: "guest_staff_identity_mapping_tenant_idx")
   @@index([guestId], map: "guest_staff_identity_mapping_guest_idx")
   @@index([createdByUserId], map: "guest_staff_identity_mapping_user_idx")
+}
+
+model GuestStaffIdentityMappingEvent {
+  id                String               @id @default(uuid())
+  tenantId          String
+  mappingId         String?
+  action            String
+  externalProvider  IntegrationProvider?
+  externalDomain    String
+  externalUserId    String
+  previousGuestId   String?
+  nextGuestId       String?
+  note              String?
+  updatedShifts     Int                  @default(0)
+  createdByUserId   String?
+  createdAt         DateTime             @default(now())
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt], map: "guest_staff_identity_mapping_event_created_idx")
+  @@index([tenantId, externalDomain, externalUserId], map: "guest_staff_identity_mapping_event_external_idx")
+  @@index([mappingId], map: "guest_staff_identity_mapping_event_mapping_idx")
+  @@index([createdByUserId], map: "guest_staff_identity_mapping_event_user_idx")
 }
 
 model LangameStaffUser {

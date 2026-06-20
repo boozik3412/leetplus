@@ -41,6 +41,8 @@ import {
   type GuestListQuery,
   type GuestListResponse,
   type StaffIdentityMappingDto,
+  type StaffIdentityMappingEventQuery,
+  type StaffIdentityMappingEventRow,
   type StaffIdentityMappingResult,
   type StaffOperationsReport,
   type StaffOperationsReportQuery,
@@ -344,11 +346,25 @@ export class GuestsController {
   }
 
   @Roles(...staffControlAccessRoles)
+  @Get('staff-control/identity-mappings/events')
+  getStaffIdentityMappingEvents(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffIdentityMappingEventQuery,
+  ): Promise<StaffIdentityMappingEventRow[]> {
+    return this.guestsService.getStaffIdentityMappingEvents(user, query);
+  }
+
+  @Roles(...staffControlAccessRoles)
   @Delete('staff-control/identity-mappings/:id')
   unmapStaffIdentity(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-  ): Promise<{ id: string; updatedShifts: number }> {
+  ): Promise<{
+    id: string;
+    updatedShifts: number;
+    action: 'UNLINK';
+    auditEventId: string;
+  }> {
     return this.guestsService.unmapStaffIdentity(user, id);
   }
 

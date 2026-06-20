@@ -187,6 +187,13 @@ export type StaffIdentityMappingDto = {
   note?: string | null;
 };
 
+export type StaffIdentityMappingEventQuery = {
+  externalDomain?: string | null;
+  externalUserId?: string | null;
+  mappingId?: string | null;
+  limit?: string | number | null;
+};
+
 export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
@@ -797,6 +804,26 @@ export type StaffIdentityMappingResult = {
   externalDomain: string | null;
   externalUserId: string;
   updatedShifts: number;
+  action: 'LINK' | 'RELINK' | 'UPDATE' | 'UNLINK';
+  auditEventId: string;
+};
+
+export type StaffIdentityMappingEventRow = {
+  id: string;
+  mappingId: string | null;
+  action: string;
+  externalDomain: string | null;
+  externalUserId: string;
+  previousGuestId: string | null;
+  nextGuestId: string | null;
+  note: string | null;
+  updatedShifts: number;
+  createdAt: string;
+  createdBy: {
+    id: string;
+    fullName: string | null;
+    email: string;
+  } | null;
 };
 
 export type StaffOperatorShiftDetail = {
@@ -3144,7 +3171,7 @@ export class GuestsService {
       throw new BadRequestException('Selected guest is not a staff guest');
     }
 
-    const mapping = await this.prisma.guestStaffIdentityMapping.upsert({
+    const existing = await this.prisma.guestStaffIdentityMapping.findUnique({
       where: {
         tenantId_externalProvider_externalDomain_externalUserId: {
           tenantId,
@@ -3153,36 +3180,77 @@ export class GuestsService {
           externalUserId,
         },
       },
-      create: {
-        tenantId,
-        guestId,
-        externalProvider: IntegrationProvider.LANGAME,
-        externalDomain,
-        externalUserId,
-        note,
-        createdByUserId: user.id,
-      },
-      update: {
-        guestId,
-        note,
-        createdByUserId: user.id,
-      },
       select: {
         id: true,
         guestId: true,
-        externalDomain: true,
-        externalUserId: true,
       },
     });
-    const updatedShifts = await this.prisma.guestWorkingShift.updateMany({
-      where: {
-        tenantId,
-        externalProvider: IntegrationProvider.LANGAME,
-        externalDomain: shiftExternalDomain,
-        externalUserId,
-      },
-      data: { guestId },
-    });
+    const action = !existing
+      ? 'LINK'
+      : existing.guestId === guestId
+        ? 'UPDATE'
+        : 'RELINK';
+
+    const { mapping, updatedShifts, auditEvent } =
+      await this.prisma.$transaction(async (tx) => {
+        const mapping = await tx.guestStaffIdentityMapping.upsert({
+          where: {
+            tenantId_externalProvider_externalDomain_externalUserId: {
+              tenantId,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain,
+              externalUserId,
+            },
+          },
+          create: {
+            tenantId,
+            guestId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain,
+            externalUserId,
+            note,
+            createdByUserId: user.id,
+          },
+          update: {
+            guestId,
+            note,
+            createdByUserId: user.id,
+          },
+          select: {
+            id: true,
+            guestId: true,
+            externalDomain: true,
+            externalUserId: true,
+          },
+        });
+        const updatedShifts = await tx.guestWorkingShift.updateMany({
+          where: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: shiftExternalDomain,
+            externalUserId,
+          },
+          data: { guestId },
+        });
+        const auditEvent = await tx.guestStaffIdentityMappingEvent.create({
+          data: {
+            tenantId,
+            mappingId: mapping.id,
+            action,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain,
+            externalUserId,
+            previousGuestId: existing?.guestId ?? null,
+            nextGuestId: guestId,
+            note,
+            updatedShifts: updatedShifts.count,
+            createdByUserId: user.id,
+          },
+          select: { id: true },
+        });
+
+        return { mapping, updatedShifts, auditEvent };
+      });
 
     return {
       id: mapping.id,
@@ -3190,13 +3258,20 @@ export class GuestsService {
       externalDomain: mapping.externalDomain || null,
       externalUserId: mapping.externalUserId,
       updatedShifts: updatedShifts.count,
+      action,
+      auditEventId: auditEvent.id,
     };
   }
 
   async unmapStaffIdentity(
     user: AuthenticatedUser,
     mappingId: string,
-  ): Promise<{ id: string; updatedShifts: number }> {
+  ): Promise<{
+    id: string;
+    updatedShifts: number;
+    action: 'UNLINK';
+    auditEventId: string;
+  }> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const mapping = await this.prisma.guestStaffIdentityMapping.findFirst({
       where: { id: mappingId, tenantId },
@@ -3212,21 +3287,113 @@ export class GuestsService {
       throw new NotFoundException('Staff identity mapping not found');
     }
 
-    await this.prisma.guestStaffIdentityMapping.delete({
-      where: { id: mapping.id },
-    });
-    const updatedShifts = await this.prisma.guestWorkingShift.updateMany({
+    const { updatedShifts, auditEvent } = await this.prisma.$transaction(
+      async (tx) => {
+        await tx.guestStaffIdentityMapping.delete({
+          where: { id: mapping.id },
+        });
+        const updatedShifts = await tx.guestWorkingShift.updateMany({
+          where: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: mapping.externalDomain || null,
+            externalUserId: mapping.externalUserId,
+            guestId: mapping.guestId,
+          },
+          data: { guestId: null },
+        });
+        const auditEvent = await tx.guestStaffIdentityMappingEvent.create({
+          data: {
+            tenantId,
+            mappingId: mapping.id,
+            action: 'UNLINK',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: mapping.externalDomain,
+            externalUserId: mapping.externalUserId,
+            previousGuestId: mapping.guestId,
+            nextGuestId: null,
+            updatedShifts: updatedShifts.count,
+            createdByUserId: user.id,
+          },
+          select: { id: true },
+        });
+
+        return { updatedShifts, auditEvent };
+      },
+    );
+
+    return {
+      id: mapping.id,
+      updatedShifts: updatedShifts.count,
+      action: 'UNLINK',
+      auditEventId: auditEvent.id,
+    };
+  }
+
+  async getStaffIdentityMappingEvents(
+    user: AuthenticatedUser,
+    query: StaffIdentityMappingEventQuery,
+  ): Promise<StaffIdentityMappingEventRow[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const externalDomain = this.normalizeText(query.externalDomain, 255);
+    const externalUserId = query.externalUserId
+      ? this.normalizeExternalUserId(query.externalUserId)
+      : null;
+    const mappingId = this.normalizeText(query.mappingId, 120);
+    const requestedLimit = Number(query.limit ?? 50);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 100)
+      : 50;
+
+    const events = await this.prisma.guestStaffIdentityMappingEvent.findMany({
       where: {
         tenantId,
-        externalProvider: IntegrationProvider.LANGAME,
-        externalDomain: mapping.externalDomain || null,
-        externalUserId: mapping.externalUserId,
-        guestId: mapping.guestId,
+        ...(externalDomain !== null ? { externalDomain } : {}),
+        ...(externalUserId ? { externalUserId } : {}),
+        ...(mappingId ? { mappingId } : {}),
       },
-      data: { guestId: null },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        mappingId: true,
+        action: true,
+        externalDomain: true,
+        externalUserId: true,
+        previousGuestId: true,
+        nextGuestId: true,
+        note: true,
+        updatedShifts: true,
+        createdAt: true,
+        createdByUser: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
     });
 
-    return { id: mapping.id, updatedShifts: updatedShifts.count };
+    return events.map((event) => ({
+      id: event.id,
+      mappingId: event.mappingId,
+      action: event.action,
+      externalDomain: event.externalDomain || null,
+      externalUserId: event.externalUserId,
+      previousGuestId: event.previousGuestId,
+      nextGuestId: event.nextGuestId,
+      note: event.note,
+      updatedShifts: event.updatedShifts,
+      createdAt: event.createdAt.toISOString(),
+      createdBy: event.createdByUser
+        ? {
+            id: event.createdByUser.id,
+            fullName: event.createdByUser.fullName,
+            email: event.createdByUser.email,
+          }
+        : null,
+    }));
   }
 
   private async buildGuestMetrics(

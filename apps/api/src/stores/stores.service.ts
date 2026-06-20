@@ -64,6 +64,7 @@ type StoreAddressGeocodeResult = {
   storeId: string;
   name: string;
   address: string | null;
+  yandexMapsUrl?: string | null;
   status: 'UPDATED' | 'SKIPPED' | 'FAILED';
   reason?: string;
   latitude?: number;
@@ -226,30 +227,82 @@ export class StoresService {
       where: {
         tenantId,
         isActive: true,
-        address: { not: null },
         OR: [{ latitude: null }, { longitude: null }],
+        AND: [
+          {
+            OR: [{ address: { not: null } }, { yandexMapsUrl: { not: null } }],
+          },
+        ],
       },
       orderBy: { name: 'asc' },
       take: 25,
     });
     const token = this.configService.get<string>('DADATA_API_KEY')?.trim();
 
-    if (!token) {
-      throw new BadRequestException('Адресный справочник не настроен');
-    }
-
     const results: StoreAddressGeocodeResult[] = [];
 
     for (const store of stores) {
       const address = this.normalizeOptionalString(store.address);
+      const yandexMapsUrl = this.normalizeOptionalString(store.yandexMapsUrl);
+
+      if (yandexMapsUrl) {
+        try {
+          const geocode = await this.geocodeYandexMapsLink(yandexMapsUrl);
+          await this.prisma.store.update({
+            where: { id: store.id },
+            data: {
+              latitude: geocode.latitude,
+              longitude: geocode.longitude,
+            },
+          });
+          results.push({
+            storeId: store.id,
+            name: store.name,
+            address,
+            yandexMapsUrl,
+            status: 'UPDATED',
+            latitude: geocode.latitude,
+            longitude: geocode.longitude,
+          });
+          continue;
+        } catch (error) {
+          if (!address) {
+            results.push({
+              storeId: store.id,
+              name: store.name,
+              address,
+              yandexMapsUrl,
+              status: 'FAILED',
+              reason:
+                error instanceof BadRequestException
+                  ? String(error.message)
+                  : YANDEX_MAPS_COORDINATES_NOT_FOUND_MESSAGE,
+            });
+            continue;
+          }
+        }
+      }
 
       if (!address || address.length < 5) {
         results.push({
           storeId: store.id,
           name: store.name,
           address,
+          yandexMapsUrl,
           status: 'SKIPPED',
           reason: 'Адрес не указан',
+        });
+        continue;
+      }
+
+      if (!token) {
+        results.push({
+          storeId: store.id,
+          name: store.name,
+          address,
+          yandexMapsUrl,
+          status: 'FAILED',
+          reason: 'Адресный справочник не настроен',
         });
         continue;
       }
@@ -276,6 +329,7 @@ export class StoresService {
           storeId: store.id,
           name: store.name,
           address,
+          yandexMapsUrl,
           status: 'UPDATED',
           latitude: geocode.latitude,
           longitude: geocode.longitude,
@@ -285,6 +339,7 @@ export class StoresService {
           storeId: store.id,
           name: store.name,
           address,
+          yandexMapsUrl,
           status: 'FAILED',
           reason:
             error instanceof BadRequestException

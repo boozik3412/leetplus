@@ -345,8 +345,12 @@ describe('StoresService', () => {
       where: {
         tenantId: 'tenant-demo',
         isActive: true,
-        address: { not: null },
         OR: [{ latitude: null }, { longitude: null }],
+        AND: [
+          {
+            OR: [{ address: { not: null } }, { yandexMapsUrl: { not: null } }],
+          },
+        ],
       },
       orderBy: { name: 'asc' },
       take: 25,
@@ -367,6 +371,38 @@ describe('StoresService', () => {
       data: {
         latitude: 56.829123,
         longitude: 60.596988,
+      },
+    });
+  });
+
+  it('fills missing store coordinates from saved Yandex Maps links without Dadata token', async () => {
+    config.get.mockReturnValue(undefined);
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: '1337 Yandex',
+        address: null,
+        yandexMapsUrl:
+          'https://yandex.ru/maps/org/1337/123456789/?ll=60.597465%2C56.838011&z=17',
+        city: null,
+      },
+    ]);
+    prisma.store.update.mockResolvedValue({ id: 'store-1' });
+
+    await expect(
+      service.geocodeMissingStoreCoordinates(user),
+    ).resolves.toMatchObject({
+      checked: 1,
+      updated: 1,
+      skipped: 0,
+      failed: 0,
+      limit: 25,
+    });
+    expect(prisma.store.update).toHaveBeenCalledWith({
+      where: { id: 'store-1' },
+      data: {
+        latitude: 56.838011,
+        longitude: 60.597465,
       },
     });
   });

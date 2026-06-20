@@ -142,14 +142,14 @@ export function StoreEditForm({ store }: { store: Store }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="grid min-w-[1160px] gap-2"
+      className="grid gap-2"
       data-store-edit-form="true"
       data-store-action={`/api/stores/${store.id}`}
       data-initial-yandex-maps-url={store.yandexMapsUrl ?? ""}
       data-initial-latitude={formatCoordinateValue(store.latitude)}
       data-initial-longitude={formatCoordinateValue(store.longitude)}
     >
-      <div className="grid gap-2 md:grid-cols-9">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
         <StoreInputs store={store} />
       </div>
       <div className="flex items-center gap-3">

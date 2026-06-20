@@ -251,7 +251,6 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
   { group: "Ассортимент", href: "/reports", label: "Отчеты" },
   { group: "Ассортимент", href: "/products", label: "Товары" },
   { group: "Ассортимент", href: "/categories", label: "Категории" },
-  { group: "Ассортимент", href: "/stores", label: "Клубы" },
   { group: "Ассортимент", href: "/utilities", label: "Утилиты" },
   { group: "Ассортимент", href: "/import", label: "Импорт" },
   {
@@ -260,6 +259,7 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
     label: "Коммерческий аудит",
   },
   { group: "Управление", href: "/users", label: "Пользователи и роли" },
+  { group: "Управление", href: "/stores", label: "Торговые точки" },
   { group: "Управление", href: "/sync", label: "Синхронизация" },
   { group: "Управление", href: "/settings", label: "Настройки" },
 ];

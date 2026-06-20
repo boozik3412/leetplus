@@ -102,7 +102,6 @@ const navGroups: NavGroup[] = [
       { href: "/products", label: "Товары" },
       { href: "/categories", label: "Категории" },
       { href: "/suppliers", label: "Поставщики" },
-      { href: "/stores", label: "Торговые точки" },
       { href: "/reports", label: "Отчёты" },
       { href: "/import", label: "Импорт" },
       { href: "/utilities", label: "Утилиты" },
@@ -116,6 +115,7 @@ const navGroups: NavGroup[] = [
       { href: "/commercial/demo", label: "Демо-режим" },
       { href: "/commercial/tariffs", label: "Тарифы" },
       { href: "/users", label: "Пользователи и роли" },
+      { href: "/stores", label: "Торговые точки" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
     ],
@@ -635,6 +635,7 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
   if (
     currentPathname.startsWith("/commercial") ||
     currentPathname.startsWith("/users") ||
+    currentPathname.startsWith("/stores") ||
     currentPathname.startsWith("/sync") ||
     currentPathname.startsWith("/settings")
   ) {
@@ -646,7 +647,6 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
     currentPathname.startsWith("/products") ||
     currentPathname.startsWith("/categories") ||
     currentPathname.startsWith("/suppliers") ||
-    currentPathname.startsWith("/stores") ||
     currentPathname.startsWith("/reports") ||
     currentPathname.startsWith("/import") ||
     currentPathname.startsWith("/utilities")

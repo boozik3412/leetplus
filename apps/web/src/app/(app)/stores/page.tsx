@@ -7,6 +7,10 @@ import {
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import {
+  inferStoreCityFromAddress,
+  timeZoneForStoreCity,
+} from "@/lib/store-location";
 import { getStores, type Store } from "@/lib/stores";
 import type { ReactNode } from "react";
 
@@ -15,7 +19,10 @@ export default async function StoresPage() {
   const stores = await getStores();
   const canEditStores = can(user, "edit_stores");
   const missingCoordinates = stores.filter(
-    (store) => store.isActive && !hasCoordinates(store) && store.address,
+    (store) =>
+      store.isActive &&
+      !hasCoordinates(store) &&
+      (store.address || store.yandexMapsUrl),
   ).length;
   const gameStores = stores.filter(
     (store) => store.isActive && store.gamificationEnabled,
@@ -189,6 +196,9 @@ function StoreStatusPill({
 
 function StoreFieldReadiness({ store }: { store: Store }) {
   const coordinatesReady = hasCoordinates(store);
+  const inferredCity = inferStoreCityFromAddress(store.address);
+  const displayCity = store.city ?? inferredCity;
+  const displayTimeZone = store.timeZone ?? timeZoneForStoreCity(displayCity);
   const items = [
     {
       label: "Адрес",
@@ -198,22 +208,31 @@ function StoreFieldReadiness({ store }: { store: Store }) {
     },
     {
       label: "Город",
-      value: store.city ?? "нужно заполнить",
+      value:
+        displayCity ??
+        (coordinatesReady ? "не требуется для карты" : "нужно заполнить"),
       detail: store.city
         ? "Используется в поиске и быстрых фильтрах."
-        : "После выбора города подтянем часовой пояс.",
-      tone: store.city ? "ready" : "missing",
+        : inferredCity
+          ? "Определен по адресу и сохранится при следующем обновлении."
+          : coordinatesReady
+            ? "Карта уже работает по координатам; город нужен только для фильтров."
+            : "После выбора города подтянем часовой пояс.",
+      tone: displayCity ? "ready" : coordinatesReady ? "info" : "missing",
     },
     {
       label: "Часовой пояс",
       value:
-        store.timeZone ?? (store.city ? "не найден" : "заполнится от города"),
-      detail: store.timeZone
+        displayTimeZone ??
+        (coordinatesReady ? "не требуется для карты" : "заполнится от города"),
+      detail: displayTimeZone
         ? "Поле уже готово, отдельно заполнять не нужно."
-        : store.city
+        : displayCity
           ? "Город есть, но часовой пояс не определен."
+          : coordinatesReady
+            ? "Карта уже работает; часовой пояс нужен для расписаний и отчетов."
           : "Выберите город, и поле подставится автоматически.",
-      tone: store.timeZone ? "ready" : store.city ? "warning" : "info",
+      tone: displayTimeZone ? "ready" : displayCity ? "warning" : "info",
     },
     {
       label: "Координаты",

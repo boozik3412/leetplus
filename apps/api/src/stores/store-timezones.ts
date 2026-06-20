@@ -82,6 +82,39 @@ export function normalizeStoreCity(city: string | null | undefined) {
   return normalized || null;
 }
 
+export function cityFromStoreAddress(address: string | null | undefined) {
+  const normalized = address?.replace(/\s+/g, ' ').trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const prefixedCity = normalized.match(
+    /(?:^|[,\s])(?:г\.?|город)\s*([А-ЯЁA-Z][А-ЯЁA-Zа-яёa-z -]{1,60})/u,
+  );
+
+  if (prefixedCity?.[1]) {
+    return cleanupStoreCityName(prefixedCity[1]);
+  }
+
+  const firstPart = normalized.split(',')[0]?.trim() ?? '';
+
+  if (/^[А-ЯЁA-Z][А-ЯЁA-Zа-яёa-z -]{1,60}$/u.test(firstPart)) {
+    return cleanupStoreCityName(firstPart);
+  }
+
+  return null;
+}
+
+function cleanupStoreCityName(value: string) {
+  const cleaned = value
+    .replace(/\b(?:ул|улица|пр|проспект|пер|переулок|ш|шоссе)\.?$/iu, '')
+    .trim()
+    .replace(/\s+$/, '');
+
+  return cleaned || null;
+}
+
 export function isSupportedTimeZone(timeZone: string | null | undefined) {
   if (!timeZone) {
     return false;

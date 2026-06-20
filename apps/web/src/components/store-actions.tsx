@@ -2,6 +2,10 @@
 
 import { FormEvent, MouseEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  inferStoreCityFromAddress,
+  timeZoneForStoreCity,
+} from "@/lib/store-location";
 import type { Store } from "@/lib/stores";
 
 type ErrorResponse = {
@@ -261,9 +265,13 @@ export function StoreBulkGeocodeButton({
 
 function StoreInputs({ store }: { store?: Store }) {
   const router = useRouter();
+  const inferredCity = inferStoreCityFromAddress(store?.address);
+  const initialCity = store?.city ?? inferredCity ?? "";
+  const initialTimeZone =
+    store?.timeZone ?? timeZoneForStoreCity(initialCity) ?? "";
   const [address, setAddress] = useState(store?.address ?? "");
-  const [city, setCity] = useState(store?.city ?? "");
-  const [timeZone, setTimeZone] = useState(store?.timeZone ?? "");
+  const [city, setCity] = useState(initialCity);
+  const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [cityFiasId, setCityFiasId] = useState(store?.cityFiasId ?? "");
   const [cityKladrId, setCityKladrId] = useState(store?.cityKladrId ?? "");
   const [latitude, setLatitude] = useState(

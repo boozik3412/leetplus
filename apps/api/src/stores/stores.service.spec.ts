@@ -407,6 +407,37 @@ describe('StoresService', () => {
     });
   });
 
+  it('infers city and timezone when saving Yandex Maps link for addressed store', async () => {
+    const yandexMapsUrl =
+      'https://yandex.ru/maps/org/1337/123456789/?ll=53.212167%2C56.850208&z=17';
+    prisma.store.findFirst.mockResolvedValue({
+      id: 'store-1',
+      name: '1337-Пушкинская',
+      address: 'г. Ижевск, ул. Пушкинская, 217',
+      city: null,
+      cityFiasId: null,
+      cityKladrId: null,
+      timeZone: null,
+      yandexMapsUrl: null,
+    });
+    prisma.store.update.mockResolvedValue({ id: 'store-1' });
+
+    await service.update('store-1', { yandexMapsUrl }, user);
+
+    expect(prisma.store.update).toHaveBeenCalledWith({
+      where: { id: 'store-1' },
+      data: {
+        city: 'Ижевск',
+        cityFiasId: null,
+        cityKladrId: null,
+        latitude: 56.850208,
+        longitude: 53.212167,
+        timeZone: 'Europe/Samara',
+        yandexMapsUrl,
+      },
+    });
+  });
+
   it('archives store only after resolving it inside tenant', async () => {
     prisma.store.findFirst.mockResolvedValue({
       id: 'store-1',

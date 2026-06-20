@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import type { CreateStoreDto, UpdateStoreDto } from './stores.dto';
 import {
+  cityFromStoreAddress,
   isSupportedTimeZone,
   normalizeStoreCity,
   normalizeStoreTimeZone,
@@ -91,8 +92,9 @@ export class StoresService {
   async create(dto: CreateStoreDto, user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const name = this.normalizeName(dto.name);
+    const address = this.normalizeOptionalString(dto.address);
     const location = this.normalizeLocation(
-      dto.city,
+      this.normalizeOptionalString(dto.city) ?? cityFromStoreAddress(address),
       dto.timeZone,
       dto.cityFiasId,
       dto.cityKladrId,
@@ -111,7 +113,7 @@ export class StoresService {
         tenantId,
         name,
         publicSlug,
-        address: this.normalizeOptionalString(dto.address),
+        address,
         city: location.city,
         cityFiasId: location.cityFiasId,
         cityKladrId: location.cityKladrId,
@@ -253,6 +255,7 @@ export class StoresService {
             data: {
               latitude: geocode.latitude,
               longitude: geocode.longitude,
+              ...this.inferLocationPatch(store, address),
             },
           });
           results.push({
@@ -563,6 +566,10 @@ export class StoresService {
   async update(id: string, dto: UpdateStoreDto, user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
+    const nextAddress =
+      dto.address === undefined
+        ? current.address
+        : this.normalizeOptionalString(dto.address);
     const yandexMapsUrl =
       dto.yandexMapsUrl === undefined
         ? undefined
@@ -571,6 +578,32 @@ export class StoresService {
       yandexMapsUrl && yandexMapsUrl !== current.yandexMapsUrl
         ? await this.geocodeYandexMapsLink(yandexMapsUrl)
         : null;
+    const shouldNormalizeLocation =
+      dto.city !== undefined ||
+      dto.timeZone !== undefined ||
+      dto.cityFiasId !== undefined ||
+      dto.cityKladrId !== undefined ||
+      dto.address !== undefined ||
+      Boolean(yandexGeocode) ||
+      dto.latitude !== undefined ||
+      dto.longitude !== undefined;
+    const location = shouldNormalizeLocation
+      ? this.normalizeLocation(
+          this.normalizeOptionalString(dto.city) ??
+            current.city ??
+            cityFromStoreAddress(nextAddress),
+          dto.timeZone ?? current.timeZone,
+          dto.cityFiasId ?? current.cityFiasId,
+          dto.cityKladrId ?? current.cityKladrId,
+        )
+      : null;
+    const hasExplicitLocationInput =
+      dto.city !== undefined ||
+      dto.timeZone !== undefined ||
+      dto.cityFiasId !== undefined ||
+      dto.cityKladrId !== undefined;
+    const locationPatch =
+      location && (location.city || hasExplicitLocationInput) ? location : null;
 
     return this.prisma.store.update({
       where: { id: current.id },
@@ -587,20 +620,8 @@ export class StoresService {
               ),
             }
           : {}),
-        ...(dto.address !== undefined
-          ? { address: this.normalizeOptionalString(dto.address) }
-          : {}),
-        ...(dto.city !== undefined ||
-        dto.timeZone !== undefined ||
-        dto.cityFiasId !== undefined ||
-        dto.cityKladrId !== undefined
-          ? this.normalizeLocation(
-              dto.city,
-              dto.timeZone,
-              dto.cityFiasId,
-              dto.cityKladrId,
-            )
-          : {}),
+        ...(dto.address !== undefined ? { address: nextAddress } : {}),
+        ...(locationPatch ? locationPatch : {}),
         ...(yandexGeocode
           ? {
               latitude: yandexGeocode.latitude,
@@ -707,6 +728,42 @@ export class StoresService {
       cityFiasId: this.normalizeOptionalString(cityFiasId),
       cityKladrId: this.normalizeOptionalString(cityKladrId),
       timeZone: finalTimeZone,
+    };
+  }
+
+  private inferLocationPatch(
+    store: {
+      city?: string | null;
+      cityFiasId?: string | null;
+      cityKladrId?: string | null;
+      timeZone?: string | null;
+    },
+    address: string | null | undefined,
+  ) {
+    const city =
+      normalizeStoreCity(store.city) ?? cityFromStoreAddress(address);
+
+    if (!city) {
+      return {};
+    }
+
+    const timeZone =
+      normalizeStoreTimeZone(city, store.timeZone) ??
+      timeZoneForStoreCity(city);
+
+    if (!timeZone || !isSupportedTimeZone(timeZone)) {
+      return {};
+    }
+
+    return {
+      ...(store.city
+        ? {}
+        : {
+            city,
+            cityFiasId: this.normalizeOptionalString(store.cityFiasId),
+            cityKladrId: this.normalizeOptionalString(store.cityKladrId),
+          }),
+      ...(store.timeZone ? {} : { timeZone }),
     };
   }
 

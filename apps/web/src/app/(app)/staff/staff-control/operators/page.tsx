@@ -570,59 +570,11 @@ export default async function StaffOperatorsPage({
                             externalUserId={row.externalUserId}
                             operatorName={adminDisplayName(row)}
                           />
-                          <div
-                            id={staffMappingAnchorId(row.externalDomain, row.externalUserId)}
-                            className="scroll-mt-24 rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/60 dark:bg-amber-950/20"
-                          >
-                            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                              <div>
-                                <p className="text-xs font-semibold uppercase text-amber-800 dark:text-amber-200">
-                                  Привязка Langame user_id к сотруднику
-                                </p>
-                                <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-                                  Выберите карточку сотрудника LeetPlus. После сохранения закрытые смены этого user_id будут перенесены в аналитику выбранного сотрудника.
-                                </p>
-                              </div>
-                              <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                                user_id {row.externalUserId}
-                              </span>
-                            </div>
-                            <div className="mb-3 grid gap-2 rounded-md border border-amber-200 bg-white/70 p-3 text-xs dark:border-amber-900/60 dark:bg-zinc-950/70 sm:grid-cols-3">
-                              <div>
-                                <p className="font-semibold uppercase text-zinc-500">1. Проверьте смены выше</p>
-                                <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-                                  Они сгруппированы по этому Langame user_id.
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-semibold uppercase text-zinc-500">2. Выберите сотрудника</p>
-                                <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-                                  Нужна карточка LeetPlus, к которой относятся эти смены.
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-semibold uppercase text-zinc-500">3. Нажмите привязать</p>
-                                <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-                                  Смены user_id {row.externalUserId} перейдут в аналитику сотрудника.
-                                </p>
-                              </div>
-                            </div>
-                            <StaffIdentityMappingForm
-                              externalDomain={row.externalDomain}
-                              externalUserId={row.externalUserId}
-                              operatorName={adminDisplayName(row)}
-                              shiftCount={row.shiftsCount}
-                              storeNames={row.storeNames}
-                              lastShiftLabel={formatLastClosedShift(
-                                row.lastClosedShiftStartedAt,
-                                row.lastClosedShiftStoppedAt,
-                                row.lastClosedShiftStoreTimeZone,
-                              )}
-                              staffOptions={report.staffOptions}
-                              mappingId={row.mappingId}
-                              variant="inline"
-                            />
-                          </div>
+                          <IdentityMappingPanel
+                            row={row}
+                            staffOptions={report.staffOptions}
+                            formVariant="inline"
+                          />
                         </td>
                       </tr>
                     </Fragment>
@@ -1191,6 +1143,103 @@ function MiniRanking({
   );
 }
 
+function IdentityMappingPanel({
+  row,
+  staffOptions,
+  formVariant = "stacked",
+  className = "",
+}: {
+  row: StaffOperatorReport["rows"][number];
+  staffOptions: StaffOperatorReport["staffOptions"];
+  formVariant?: "stacked" | "inline";
+  className?: string;
+}) {
+  const operatorName = adminDisplayName(row);
+  const storesLabel = row.storeNames.length > 0 ? row.storeNames.join(", ") : "клуб не определен";
+  const lastShiftLabel = formatLastClosedShift(
+    row.lastClosedShiftStartedAt,
+    row.lastClosedShiftStoppedAt,
+    row.lastClosedShiftStoreTimeZone,
+  );
+
+  return (
+    <section
+      id={staffMappingAnchorId(row.externalDomain, row.externalUserId)}
+      className={[
+        "scroll-mt-24 rounded-md border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900/60 dark:bg-amber-950/20",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase text-amber-800 dark:text-amber-200">
+            Связать оператора Langame с сотрудником LeetPlus
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-zinc-950 dark:text-zinc-100">
+            {operatorName}
+          </h3>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-amber-900/90 dark:text-amber-100/80">
+            Эта форма относится к одному оператору Langame: user_id {row.externalUserId}
+            {row.externalDomain ? ` · ${row.externalDomain}` : ""}. Смены выше сгруппированы именно по нему; после сохранения они будут учитываться в аналитике выбранной карточки сотрудника.
+          </p>
+        </div>
+        <span className="w-fit shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+          {row.mappingId ? "связь уже есть" : "нужна привязка"}
+        </span>
+      </div>
+
+      <dl className="mt-3 grid gap-2 rounded-md border border-amber-200 bg-white/75 p-3 text-xs dark:border-amber-900/60 dark:bg-zinc-950/70 sm:grid-cols-3">
+        <IdentityMappingValue label="Langame user_id" value={`${row.externalUserId}${row.externalDomain ? ` · ${row.externalDomain}` : ""}`} />
+        <IdentityMappingValue label="Смены в выборке" value={`${formatNumber(row.shiftsCount)} · последняя: ${lastShiftLabel}`} />
+        <IdentityMappingValue label="Клубы по сменам" value={storesLabel} />
+      </dl>
+
+      <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+        <IdentityMappingStep title="1. Сверьте смены" text="Проверьте, что закрытые смены выше относятся к этому сотруднику." />
+        <IdentityMappingStep title="2. Выберите карточку" text="Нужна карточка LeetPlus того же сотрудника, а не смены или клуба." />
+        <IdentityMappingStep title="3. Сохраните" text={`После сохранения user_id ${row.externalUserId} будет связан с выбранной карточкой.`} />
+      </div>
+
+      <div className="mt-3">
+        <StaffIdentityMappingForm
+          externalDomain={row.externalDomain}
+          externalUserId={row.externalUserId}
+          operatorName={operatorName}
+          shiftCount={row.shiftsCount}
+          storeNames={row.storeNames}
+          lastShiftLabel={lastShiftLabel}
+          staffOptions={staffOptions}
+          mappingId={row.mappingId}
+          variant={formVariant}
+          showContext={false}
+        />
+      </div>
+    </section>
+  );
+}
+
+function IdentityMappingValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="font-semibold uppercase text-zinc-500">{label}</dt>
+      <dd className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={value}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function IdentityMappingStep({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-md border border-amber-200 bg-white/60 p-3 dark:border-amber-900/60 dark:bg-zinc-950/50">
+      <p className="font-semibold uppercase text-zinc-500">{title}</p>
+      <p className="mt-1 leading-5 text-zinc-600 dark:text-zinc-400">{text}</p>
+    </div>
+  );
+}
+
 function ShiftDetailsPreview({
   shifts,
   externalUserId,
@@ -1207,12 +1256,11 @@ function ShiftDetailsPreview({
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-zinc-500">
-            Смены этого Langame user_id
+            Смены, найденные у этого Langame user_id
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Показаны смены{operatorName ? ` оператора ${operatorName}` : ""}
-            {externalUserId ? ` · user_id ${externalUserId}` : ""}. После привязки они
-            попадут в аналитику выбранного сотрудника LeetPlus.
+            Карточки ниже сгруппированы по одному оператору Langame{operatorName ? `: ${operatorName}` : ""}
+            {externalUserId ? ` · user_id ${externalUserId}` : ""}. Если ФИО и смены совпадают с сотрудником LeetPlus, используйте блок привязки под списком смен.
           </p>
         </div>
         {shifts.length > visibleShifts.length ? (
@@ -1402,58 +1450,11 @@ function OperatorCard({
         </p>
       </div>
 
-      <div
-        id={staffMappingAnchorId(row.externalDomain, row.externalUserId)}
-        className="mt-4 scroll-mt-24 rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/60 dark:bg-amber-950/20"
-      >
-        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase text-amber-800 dark:text-amber-200">
-              Привязка Langame user_id к сотруднику
-            </p>
-            <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-              Выберите карточку сотрудника LeetPlus. После сохранения закрытые смены этого user_id будут перенесены в аналитику выбранного сотрудника.
-            </p>
-          </div>
-          <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-            user_id {row.externalUserId}
-          </span>
-        </div>
-        <div className="mb-3 grid gap-2 rounded-md border border-amber-200 bg-white/70 p-3 text-xs dark:border-amber-900/60 dark:bg-zinc-950/70 sm:grid-cols-3">
-          <div>
-            <p className="font-semibold uppercase text-zinc-500">1. Проверьте смены выше</p>
-            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-              Они сгруппированы по этому Langame user_id.
-            </p>
-          </div>
-          <div>
-            <p className="font-semibold uppercase text-zinc-500">2. Выберите сотрудника</p>
-            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-              Нужна карточка LeetPlus, к которой относятся эти смены.
-            </p>
-          </div>
-          <div>
-            <p className="font-semibold uppercase text-zinc-500">3. Нажмите привязать</p>
-            <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-              Смены user_id {row.externalUserId} перейдут в аналитику сотрудника.
-            </p>
-          </div>
-        </div>
-        <StaffIdentityMappingForm
-          externalDomain={row.externalDomain}
-          externalUserId={row.externalUserId}
-          operatorName={adminDisplayName(row)}
-          shiftCount={row.shiftsCount}
-          storeNames={row.storeNames}
-          lastShiftLabel={formatLastClosedShift(
-            row.lastClosedShiftStartedAt,
-            row.lastClosedShiftStoppedAt,
-            row.lastClosedShiftStoreTimeZone,
-          )}
-          staffOptions={staffOptions}
-          mappingId={row.mappingId}
-        />
-      </div>
+      <IdentityMappingPanel
+        row={row}
+        staffOptions={staffOptions}
+        className="mt-4"
+      />
     </article>
   );
 }

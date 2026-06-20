@@ -21,6 +21,7 @@ type StaffIdentityMappingFormProps = {
   shiftCount?: number;
   storeNames?: string[];
   lastShiftLabel?: string | null;
+  showContext?: boolean;
 };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
@@ -35,6 +36,7 @@ export function StaffIdentityMappingForm({
   shiftCount,
   storeNames = [],
   lastShiftLabel = null,
+  showContext = true,
 }: StaffIdentityMappingFormProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
@@ -176,34 +178,36 @@ export function StaffIdentityMappingForm({
           : "",
       ].join(" ")}
     >
-      <div className="min-w-0 rounded-md border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-600 lg:col-span-full dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
-              {displayOperator}
-            </p>
-            <p className="mt-1 text-zinc-500">
-              Langame user_id {externalUserId}
-              {externalDomain ? ` · ${externalDomain}` : ""}
-            </p>
+      {showContext ? (
+        <div className="min-w-0 rounded-md border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-600 lg:col-span-full dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+                {displayOperator}
+              </p>
+              <p className="mt-1 text-zinc-500">
+                Langame user_id {externalUserId}
+                {externalDomain ? ` · ${externalDomain}` : ""}
+              </p>
+            </div>
+            <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+              {mappingId ? "Связь есть" : "Требует привязки"}
+            </span>
           </div>
-          <span className="rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
-            {mappingId ? "Связь есть" : "Требует привязки"}
-          </span>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <ContextValue label="Смен в выборке" value={shiftCountLabel ?? "не рассчитано"} />
+            <ContextValue
+              label="Клубы"
+              value={
+                normalizedStoreNames.length > 0
+                  ? normalizedStoreNames.join(", ")
+                  : "клуб не определен"
+              }
+            />
+            <ContextValue label="Последняя смена" value={lastShiftLabel || "не найдена"} />
+          </div>
         </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          <ContextValue label="Смен в выборке" value={shiftCountLabel ?? "не рассчитано"} />
-          <ContextValue
-            label="Клубы"
-            value={
-              normalizedStoreNames.length > 0
-                ? normalizedStoreNames.join(", ")
-                : "клуб не определен"
-            }
-          />
-          <ContextValue label="Последняя смена" value={lastShiftLabel || "не найдена"} />
-        </div>
-      </div>
+      ) : null}
 
       <label className="grid min-w-0 gap-1">
         <span className="text-xs font-semibold uppercase text-zinc-500">

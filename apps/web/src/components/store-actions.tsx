@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, MouseEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Store } from "@/lib/stores";
 
@@ -35,6 +35,20 @@ type BulkGeocodeResponse = {
   skipped: number;
   failed: number;
   limit: number;
+};
+
+type StoreFormPayload = {
+  name: string;
+  address: string | null;
+  publicSlug: string | null;
+  city: string | null;
+  cityFiasId: string | null;
+  cityKladrId: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  yandexMapsUrl: string | null;
+  timeZone: string | null;
+  gamificationEnabled: boolean;
 };
 
 function getErrorMessage(data: unknown) {
@@ -126,7 +140,15 @@ export function StoreEditForm({ store }: { store: Store }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid min-w-[1160px] gap-2">
+    <form
+      onSubmit={handleSubmit}
+      className="grid min-w-[1160px] gap-2"
+      data-store-edit-form="true"
+      data-store-action={`/api/stores/${store.id}`}
+      data-initial-yandex-maps-url={store.yandexMapsUrl ?? ""}
+      data-initial-latitude={formatCoordinateValue(store.latitude)}
+      data-initial-longitude={formatCoordinateValue(store.longitude)}
+    >
       <div className="grid gap-2 md:grid-cols-9">
         <StoreInputs store={store} />
       </div>
@@ -186,6 +208,7 @@ export function StoreBulkGeocodeButton({
     setStatus(null);
 
     try {
+      const linkSaves = await persistVisibleYandexLinksBeforeBulk();
       const response = await fetch("/api/stores/address-geocode/missing", {
         method: "POST",
       });
@@ -197,8 +220,16 @@ export function StoreBulkGeocodeButton({
       }
 
       const result = data as BulkGeocodeResponse;
+      const savedPrefix =
+        linkSaves.saved > 0
+          ? `Сохранено из ссылок: ${linkSaves.saved}. `
+          : "";
+      const failedPrefix =
+        linkSaves.failed > 0
+          ? `Ошибок ссылок: ${linkSaves.failed}. `
+          : "";
       setStatus(
-        `Заполнено: ${result.updated}, ошибок: ${result.failed}, пропущено: ${result.skipped}`,
+        `${savedPrefix}${failedPrefix}Заполнено: ${result.updated}, ошибок: ${result.failed}, пропущено: ${result.skipped}`,
       );
       router.refresh();
     } catch {
@@ -229,6 +260,7 @@ export function StoreBulkGeocodeButton({
 }
 
 function StoreInputs({ store }: { store?: Store }) {
+  const router = useRouter();
   const [address, setAddress] = useState(store?.address ?? "");
   const [city, setCity] = useState(store?.city ?? "");
   const [timeZone, setTimeZone] = useState(store?.timeZone ?? "");
@@ -354,8 +386,12 @@ function StoreInputs({ store }: { store?: Store }) {
     }
   }
 
-  async function handleYandexMapsGeocode() {
+  async function handleYandexMapsGeocode(
+    event: MouseEvent<HTMLButtonElement>,
+  ) {
     const query = yandexMapsUrl.trim();
+    const form = event.currentTarget.form;
+    const storeAction = form?.dataset.storeAction;
 
     if (query.length < 10) {
       setGeocodeStatus("Вставьте ссылку Яндекс Карт");
@@ -381,6 +417,25 @@ function StoreInputs({ store }: { store?: Store }) {
       const geocode = data as YandexMapsGeocodeResult;
       setLatitude(String(geocode.latitude));
       setLongitude(String(geocode.longitude));
+
+      if (form && storeAction) {
+        const saveResponse = await submitStoreForm(storeAction, "PATCH", form, {
+          latitude: String(geocode.latitude),
+          longitude: String(geocode.longitude),
+          yandexMapsUrl: query,
+        });
+
+        if (!saveResponse.ok) {
+          const saveData = (await saveResponse.json()) as ErrorResponse;
+          setGeocodeStatus(getErrorMessage(saveData));
+          return;
+        }
+
+        setGeocodeStatus("Координаты из Яндекс Карт сохранены");
+        router.refresh();
+        return;
+      }
+
       setGeocodeStatus("Координаты из Яндекс Карт найдены");
     } catch {
       setGeocodeStatus("Не удалось разобрать ссылку Яндекс Карт");
@@ -526,28 +581,84 @@ async function submitStoreForm(
   url: string,
   method: "POST" | "PATCH",
   form: HTMLFormElement,
+  overrides: Partial<StoreFormPayload> = {},
 ) {
-  const formData = new FormData(form);
-
   return fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      name: String(formData.get("name") ?? "").trim(),
-      address: optionalString(formData.get("address")) ?? null,
-      publicSlug: optionalString(formData.get("publicSlug")) ?? null,
-      city: optionalString(formData.get("city")) ?? null,
-      cityFiasId: optionalString(formData.get("cityFiasId")) ?? null,
-      cityKladrId: optionalString(formData.get("cityKladrId")) ?? null,
-      latitude: optionalString(formData.get("latitude")) ?? null,
-      longitude: optionalString(formData.get("longitude")) ?? null,
-      yandexMapsUrl: optionalString(formData.get("yandexMapsUrl")) ?? null,
-      timeZone: optionalString(formData.get("timeZone")) ?? null,
-      gamificationEnabled: formData.get("gamificationEnabled") === "on",
+      ...buildStoreFormPayload(form),
+      ...overrides,
     }),
   });
+}
+
+async function persistVisibleYandexLinksBeforeBulk() {
+  const forms = Array.from(
+    document.querySelectorAll<HTMLFormElement>(
+      'form[data-store-edit-form="true"]',
+    ),
+  );
+  let saved = 0;
+  let failed = 0;
+
+  for (const form of forms) {
+    const storeAction = form.dataset.storeAction;
+
+    if (!storeAction) {
+      continue;
+    }
+
+    const formData = new FormData(form);
+    const yandexMapsUrl = optionalString(formData.get("yandexMapsUrl"));
+
+    if (!yandexMapsUrl) {
+      continue;
+    }
+
+    const latitude = optionalString(formData.get("latitude")) ?? "";
+    const longitude = optionalString(formData.get("longitude")) ?? "";
+    const initialYandexMapsUrl = form.dataset.initialYandexMapsUrl ?? "";
+    const initialLatitude = form.dataset.initialLatitude ?? "";
+    const initialLongitude = form.dataset.initialLongitude ?? "";
+    const hasUnsavedYandexLink = yandexMapsUrl !== initialYandexMapsUrl;
+    const hasUnsavedCoordinates =
+      latitude !== initialLatitude || longitude !== initialLongitude;
+
+    if (!hasUnsavedYandexLink && !hasUnsavedCoordinates) {
+      continue;
+    }
+
+    const response = await submitStoreForm(storeAction, "PATCH", form);
+
+    if (response.ok) {
+      saved += 1;
+    } else {
+      failed += 1;
+    }
+  }
+
+  return { saved, failed };
+}
+
+function buildStoreFormPayload(form: HTMLFormElement): StoreFormPayload {
+  const formData = new FormData(form);
+
+  return {
+    name: String(formData.get("name") ?? "").trim(),
+    address: optionalString(formData.get("address")) ?? null,
+    publicSlug: optionalString(formData.get("publicSlug")) ?? null,
+    city: optionalString(formData.get("city")) ?? null,
+    cityFiasId: optionalString(formData.get("cityFiasId")) ?? null,
+    cityKladrId: optionalString(formData.get("cityKladrId")) ?? null,
+    latitude: optionalString(formData.get("latitude")) ?? null,
+    longitude: optionalString(formData.get("longitude")) ?? null,
+    yandexMapsUrl: optionalString(formData.get("yandexMapsUrl")) ?? null,
+    timeZone: optionalString(formData.get("timeZone")) ?? null,
+    gamificationEnabled: formData.get("gamificationEnabled") === "on",
+  };
 }
 
 function optionalString(value: FormDataEntryValue | null) {

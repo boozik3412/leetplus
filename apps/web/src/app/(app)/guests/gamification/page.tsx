@@ -13,6 +13,7 @@ import {
   type GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
 import { can } from "@/lib/permissions";
+import { getProducts, type Product } from "@/lib/products";
 import { getStores, type Store } from "@/lib/stores";
 
 async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -546,13 +547,14 @@ export default async function GuestGamificationPage() {
     );
   }
 
-  const [workspace, audiences, stores, guestsResponse, leads] =
+  const [workspace, audiences, stores, guestsResponse, leads, products] =
     await Promise.all([
       safeValue(getGuestGamificationWorkspace(), emptyWorkspace),
       safeValue(getGuestAudiences(), []),
       safeValue<Store[]>(getStores(), []),
       safeNullable(getGuests({ pageSize: "80", sort: "lastActivity" })),
       safeValue<GuestCrmLead[]>(getGuestCrmLeads(), []),
+      safeValue<Product[]>(getProducts(), []),
     ]);
 
   const guests: GuestDashboardRow[] = guestsResponse?.rows ?? [];
@@ -574,6 +576,7 @@ export default async function GuestGamificationPage() {
           stores={stores}
           guests={guests}
           leads={leads}
+          products={products}
           tenantSlug={user.tenantSlug}
           access={{
             canManageRules: can(user, "manage_guest_game_rules"),

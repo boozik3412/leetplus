@@ -40,6 +40,7 @@ import type {
   GuestGameTariffSnapshotStatus,
   GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
+import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
 
 type Props = {
@@ -48,6 +49,7 @@ type Props = {
   stores: Store[];
   guests: GuestDashboardRow[];
   leads: GuestCrmLead[];
+  products: Product[];
   tenantSlug: string;
   access: {
     canManageRules: boolean;
@@ -486,6 +488,57 @@ const triggerHelpText: Record<string, string> = {
     "Правило проверится после выполнения другой миссии или квеста.",
 };
 
+const missionTypeOptions = [
+  { value: "REPEAT_VISIT", label: "Повторный визит" },
+  { value: "CHECK_IN", label: "Чекин в клубе" },
+  { value: "VISIT", label: "Посещение клуба" },
+  { value: "PLAY_HOUR", label: "Игровое время" },
+  { value: "BAR_PURCHASE", label: "Покупка в баре" },
+  { value: "PRODUCT_PURCHASE", label: "Покупка товара" },
+  { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
+  { value: "REFERRAL_ACCEPTED", label: "Приглашение друга" },
+  { value: "APP_OPEN", label: "Возврат в приложение" },
+  { value: "GUEST_LOG", label: "Событие Langame" },
+  { value: "CUSTOM", label: "Своя миссия" },
+];
+
+const missionTypeHelpText: Record<string, string> = {
+  REPEAT_VISIT:
+    "Квест засчитывает повторное посещение в заданном окне времени.",
+  CHECK_IN:
+    "Квест засчитывает чекин гостя в игровом модуле выбранного клуба.",
+  VISIT:
+    "Квест засчитывает факт визита: сессию, чекин или подходящий лог Langame.",
+  PLAY_HOUR:
+    "Квест считает накопленное игровое время или длительность сессии.",
+  BAR_PURCHASE:
+    "Квест считает покупки бара по сохраненным продажам или списаниям.",
+  PRODUCT_PURCHASE:
+    "Квест считает покупку выбранных товаров или категорий.",
+  BALANCE_TOPUP:
+    "Квест считает пополнение баланса гостя по сохраненным фактам Langame.",
+  REFERRAL_ACCEPTED:
+    "Квест засчитывает регистрацию приглашенного друга в игровом модуле.",
+  APP_OPEN:
+    "Квест срабатывает при открытии сайта, игрового модуля или Mini App.",
+  GUEST_LOG:
+    "Квест работает от выбранных событий Langame из подготовленного каталога.",
+  CUSTOM:
+    "Свободный сценарий: событие и условия задаются ниже вручную.",
+};
+
+const progressUnitOptions = [
+  { value: "visit", label: "визиты" },
+  { value: "check_in", label: "чекины" },
+  { value: "minute", label: "минуты игры" },
+  { value: "purchase", label: "покупки" },
+  { value: "rub", label: "рубли" },
+  { value: "day", label: "уникальные дни" },
+  { value: "friend", label: "друзья" },
+  { value: "event", label: "события" },
+  { value: "step", label: "шаги" },
+];
+
 const audienceHelpText: Record<string, string> = {
   "": "Правило доступно всем гостям выбранных клубов, если остальные условия совпали.",
   quiet_hours:
@@ -895,6 +948,7 @@ export function GuestGamificationPanel({
   stores,
   guests,
   leads,
+  products,
   tenantSlug,
   access,
 }: Props) {
@@ -1891,6 +1945,7 @@ export function GuestGamificationPanel({
           missions={workspace.missions}
           audiences={audiences}
           stores={stores}
+          products={products}
           tariffSnapshots={workspace.tariffSnapshots}
           guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingMissionId}
@@ -6096,6 +6151,7 @@ function MissionsTab({
   missions,
   audiences,
   stores,
+  products,
   tariffSnapshots,
   guestLogCatalog,
   editingId,
@@ -6111,6 +6167,7 @@ function MissionsTab({
   missions: GuestGameMission[];
   audiences: GuestAudience[];
   stores: Store[];
+  products: Product[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
@@ -6146,13 +6203,16 @@ function MissionsTab({
           />
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Тип миссии">
-              <input
-                className={fieldClass}
+              <OptionSelect
+                options={missionTypeOptions}
                 value={form.missionType}
-                onChange={(event) =>
-                  setForm({ ...form, missionType: event.target.value })
-                }
+                preservedLabel="Сохраненный тип"
+                onChange={(missionType) => setForm({ ...form, missionType })}
               />
+              <OptionHelp>
+                {missionTypeHelpText[form.missionType] ??
+                  "Тип помогает сотруднику понять сценарий квеста. Условия выполнения задаются ниже."}
+              </OptionHelp>
             </Field>
             <Field label="Событие для появления">
               <OptionSelect
@@ -6190,14 +6250,19 @@ function MissionsTab({
                 }
               />
             </Field>
-            <Field label="Единица">
-              <input
-                className={fieldClass}
+            <Field label="Что считаем">
+              <OptionSelect
+                options={progressUnitOptions}
                 value={form.progressUnit}
-                onChange={(event) =>
-                  setForm({ ...form, progressUnit: event.target.value })
+                preservedLabel="Сохраненная единица"
+                onChange={(progressUnit) =>
+                  setForm({ ...form, progressUnit })
                 }
               />
+              <OptionHelp>
+                Показывается гостю как единица прогресса: визиты, минуты,
+                покупки или шаги.
+              </OptionHelp>
             </Field>
           </div>
           <StoreSelect
@@ -6253,6 +6318,7 @@ function MissionsTab({
             form={form}
             tariffSnapshots={tariffSnapshots}
             guestLogCatalog={guestLogCatalog}
+            products={products}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <button
@@ -6277,7 +6343,7 @@ function MissionsTab({
           key={item.id}
           title={item.name}
           status={item.status}
-          subtitle={`${item.missionType} · ${item.xpReward} XP`}
+          subtitle={`${missionTypeLabel(item.missionType)} · ${item.xpReward} XP`}
           meta={[
             item.audience?.name ?? "все гости",
             packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
@@ -7253,11 +7319,13 @@ function MissionBusinessRules({
   form,
   tariffSnapshots,
   guestLogCatalog,
+  products,
   onChange,
 }: {
   form: MissionForm;
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   guestLogCatalog: GuestGameGuestLogCatalog;
+  products: Product[];
   onChange: (patch: Partial<MissionForm>) => void;
 }) {
   return (
@@ -7330,16 +7398,11 @@ function MissionBusinessRules({
               <option value="exists">Факт события</option>
             </select>
           </Field>
-          <Field label="События">
-            <input
-              className={fieldClass}
-              placeholder="Например: CHECK_IN, SESSION_START"
-              value={form.metricEventTypes}
-              onChange={(event) =>
-                onChange({ metricEventTypes: event.target.value })
-              }
-            />
-          </Field>
+          <MissionMetricEventField
+            value={form.metricEventTypes}
+            catalog={guestLogCatalog}
+            onChange={(metricEventTypes) => onChange({ metricEventTypes })}
+          />
           <Field label="Окна времени">
             <input
               className={fieldClass}
@@ -7348,47 +7411,15 @@ function MissionBusinessRules({
               onChange={(event) => onChange({ metricHours: event.target.value })}
             />
           </Field>
-          <Field label="Категории товара">
-            <input
-              className={fieldClass}
-              placeholder="Бар, Напитки"
-              value={form.metricCategoryNames}
-              onChange={(event) =>
-                onChange({ metricCategoryNames: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="ID категорий">
-            <input
-              className={fieldClass}
-              placeholder="Внутренние categoryId"
-              value={form.metricCategoryIds}
-              onChange={(event) =>
-                onChange({ metricCategoryIds: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="ID товаров">
-            <input
-              className={fieldClass}
-              placeholder="Внутренние productId"
-              value={form.metricProductIds}
-              onChange={(event) =>
-                onChange({ metricProductIds: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="Внешние ID товаров">
-            <input
-              className={fieldClass}
-              placeholder="Langame goods/product id"
-              value={form.metricExternalProductIds}
-              onChange={(event) =>
-                onChange({ metricExternalProductIds: event.target.value })
-              }
-            />
-          </Field>
         </div>
+        <MissionProductMetricSelector
+          products={products}
+          productIds={form.metricProductIds}
+          externalProductIds={form.metricExternalProductIds}
+          categoryIds={form.metricCategoryIds}
+          categoryNames={form.metricCategoryNames}
+          onChange={onChange}
+        />
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Окно выполнения, дней">
@@ -8740,6 +8771,41 @@ function guestLogEventOptions(
   return Array.from(options.values());
 }
 
+function missionMetricEventOptions(
+  catalog: GuestGameGuestLogCatalog,
+  selectedValues: string[],
+): GuestLogEventOption[] {
+  const options = new Map<string, GuestLogEventOption>();
+
+  for (const option of dryRunEventOptions) {
+    options.set(option.value, {
+      value: option.value,
+      label: option.label,
+      description:
+        triggerHelpText[option.value] ??
+        "Событие игрового модуля или сохраненный факт Langame.",
+    });
+  }
+
+  for (const option of guestLogEventOptions(catalog, selectedValues)) {
+    if (!options.has(option.value)) {
+      options.set(option.value, option);
+    }
+  }
+
+  for (const value of selectedValues) {
+    if (!options.has(value)) {
+      options.set(value, {
+        value,
+        label: value,
+        description: "Сохраненное значение из правила.",
+      });
+    }
+  }
+
+  return Array.from(options.values());
+}
+
 function SelectedGuestLogEvents({
   values,
   options,
@@ -9023,6 +9089,386 @@ function GuestLogConditionFields({
           </p>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function MissionMetricEventField({
+  value,
+  catalog,
+  onChange,
+}: {
+  value: string;
+  catalog: GuestGameGuestLogCatalog;
+  onChange: (value: string) => void;
+}) {
+  const selectedValues = csvList(value);
+  const options = missionMetricEventOptions(catalog, selectedValues);
+
+  return (
+    <Field label="События">
+      <select
+        className={fieldClass}
+        value=""
+        onChange={(event) => {
+          if (event.target.value) {
+            onChange(appendCsvToken(value, event.target.value));
+          }
+        }}
+      >
+        <option value="">Выберите событие</option>
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+            disabled={csvHasToken(value, option.value)}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <OptionHelp>
+        Можно выбрать несколько событий. Они будут считаться как прогресс
+        миссии.
+      </OptionHelp>
+      <SelectedGuestLogEvents
+        values={selectedValues}
+        options={options}
+        emptyLabel="События для прогресса пока не выбраны."
+        onRemove={(eventType) => onChange(removeCsvToken(value, eventType))}
+      />
+    </Field>
+  );
+}
+
+type ProductCategoryOption = {
+  id: string;
+  label: string;
+};
+
+function MissionProductMetricSelector({
+  products,
+  productIds,
+  externalProductIds,
+  categoryIds,
+  categoryNames,
+  onChange,
+}: {
+  products: Product[];
+  productIds: string;
+  externalProductIds: string;
+  categoryIds: string;
+  categoryNames: string;
+  onChange: (patch: Partial<MissionForm>) => void;
+}) {
+  const [productQuery, setProductQuery] = useState("");
+  const [categoryQuery, setCategoryQuery] = useState("");
+  const selectedProductIds = csvList(productIds);
+  const selectedExternalProductIds = csvList(externalProductIds);
+  const selectedCategoryIds = csvList(categoryIds);
+  const selectedCategoryNames = csvList(categoryNames);
+  const categoryOptions = useMemo(
+    () => productCategoryOptions(products, selectedCategoryIds, selectedCategoryNames),
+    [products, selectedCategoryIds, selectedCategoryNames],
+  );
+  const filteredProducts = useMemo(
+    () =>
+      filterProductsForMission(products, productQuery, selectedProductIds).slice(
+        0,
+        10,
+      ),
+    [products, productQuery, selectedProductIds],
+  );
+  const filteredCategories = useMemo(
+    () =>
+      filterCategoryOptions(
+        categoryOptions,
+        categoryQuery,
+        selectedCategoryIds,
+        selectedCategoryNames,
+      ).slice(0, 10),
+    [categoryOptions, categoryQuery, selectedCategoryIds, selectedCategoryNames],
+  );
+  const selectedProducts = selectedProductIds.map((id) => ({
+    value: id,
+    label:
+      products.find((product) => product.id === id)?.name ??
+      "Сохраненный товар",
+  }));
+  const selectedCategories = selectedCategoryIds.map((id) => {
+    const option = categoryOptions.find((category) => category.id === id);
+
+    return {
+      value: id,
+      label: option?.label ?? "Сохраненная категория",
+    };
+  });
+  const selectedNameCategories = selectedCategoryNames
+    .filter(
+      (name) =>
+        !selectedCategoryIds.some((id) => {
+          const option = categoryOptions.find((category) => category.id === id);
+          return option?.label === name;
+        }),
+    )
+    .map((name) => ({ value: name, label: name }));
+
+  function selectProduct(product: Product) {
+    onChange({ metricProductIds: appendCsvToken(productIds, product.id) });
+    setProductQuery("");
+  }
+
+  function selectCategory(category: ProductCategoryOption) {
+    onChange({
+      metricCategoryIds: appendCsvToken(categoryIds, category.id),
+      metricCategoryNames: appendCsvToken(categoryNames, category.label),
+    });
+    setCategoryQuery("");
+  }
+
+  return (
+    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+      <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+          Товары
+        </p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+          Найдите товар по названию или артикулу. В правило попадет внутренний
+          идентификатор, но сотруднику он не нужен.
+        </p>
+        <input
+          className={fieldClass}
+          placeholder="Начните вводить название товара"
+          value={productQuery}
+          onChange={(event) => setProductQuery(event.target.value)}
+        />
+        {productQuery.trim() ? (
+          <div className="mt-2 grid max-h-56 gap-2 overflow-y-auto rounded-lg border border-zinc-100 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+            {filteredProducts.length ? (
+              filteredProducts.map((product) => (
+                <button
+                  key={product.id}
+                  type="button"
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/30"
+                  onClick={() => selectProduct(product)}
+                >
+                  <span className="block font-semibold text-zinc-950 dark:text-white">
+                    {product.name}
+                  </span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                    {product.article ? `Артикул ${product.article}` : "без артикула"}
+                    {product.category?.name ? ` · ${product.category.name}` : ""}
+                  </span>
+                </button>
+              ))
+            ) : (
+              <p className="px-2 py-3 text-xs text-zinc-500 dark:text-zinc-400">
+                Товар не найден в текущем ассортименте.
+              </p>
+            )}
+          </div>
+        ) : null}
+        <SelectionChips
+          items={selectedProducts}
+          emptyLabel={
+            products.length
+              ? "Конкретные товары не выбраны."
+              : "Ассортимент недоступен или пока пуст."
+          }
+          onRemove={(productId) =>
+            onChange({ metricProductIds: removeCsvToken(productIds, productId) })
+          }
+        />
+        {selectedExternalProductIds.length ? (
+          <div className="mt-2">
+            <p className="mb-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+              Сохраненные товары Langame
+            </p>
+            <SelectionChips
+              items={selectedExternalProductIds.map((id) => ({
+                value: id,
+                label: "Сохраненный товар Langame",
+              }))}
+              emptyLabel=""
+              onRemove={(externalId) =>
+                onChange({
+                  metricExternalProductIds: removeCsvToken(
+                    externalProductIds,
+                    externalId,
+                  ),
+                })
+              }
+            />
+          </div>
+        ) : null}
+      </div>
+      <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+          Категории товаров
+        </p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+          Выберите категорию, если миссия должна считать любую покупку из этой
+          группы.
+        </p>
+        <input
+          className={fieldClass}
+          placeholder="Найти категорию"
+          value={categoryQuery}
+          onChange={(event) => setCategoryQuery(event.target.value)}
+        />
+        {categoryQuery.trim() ? (
+          <div className="mt-2 grid max-h-56 gap-2 overflow-y-auto rounded-lg border border-zinc-100 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+            {filteredCategories.length ? (
+              filteredCategories.map((category) => (
+                <button
+                  key={category.id}
+                  type="button"
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-left text-sm font-semibold transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/30"
+                  onClick={() => selectCategory(category)}
+                >
+                  {category.label}
+                </button>
+              ))
+            ) : (
+              <p className="px-2 py-3 text-xs text-zinc-500 dark:text-zinc-400">
+                Категория не найдена.
+              </p>
+            )}
+          </div>
+        ) : null}
+        <SelectionChips
+          items={[...selectedCategories, ...selectedNameCategories]}
+          emptyLabel="Категории не выбраны."
+          onRemove={(value) => {
+            const option = categoryOptions.find((category) => category.id === value);
+
+            onChange({
+              metricCategoryIds: removeCsvToken(categoryIds, value),
+              metricCategoryNames: removeCsvToken(
+                categoryNames,
+                option?.label ?? value,
+              ),
+            });
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function filterProductsForMission(
+  products: Product[],
+  query: string,
+  selectedProductIds: string[],
+) {
+  const normalized = query.trim().toLowerCase();
+
+  if (!normalized) {
+    return [];
+  }
+
+  return products.filter((product) => {
+    if (selectedProductIds.includes(product.id)) {
+      return false;
+    }
+
+    return [
+      product.name,
+      product.article,
+      product.category?.name,
+      product.supplier?.name,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(normalized));
+  });
+}
+
+function productCategoryOptions(
+  products: Product[],
+  selectedCategoryIds: string[],
+  selectedCategoryNames: string[],
+): ProductCategoryOption[] {
+  const map = new Map<string, ProductCategoryOption>();
+
+  for (const product of products) {
+    if (product.categoryId && product.category?.name) {
+      map.set(product.categoryId, {
+        id: product.categoryId,
+        label: product.category.name,
+      });
+    }
+  }
+
+  for (const id of selectedCategoryIds) {
+    if (!map.has(id)) {
+      map.set(id, { id, label: "Сохраненная категория" });
+    }
+  }
+
+  for (const name of selectedCategoryNames) {
+    if (![...map.values()].some((option) => option.label === name)) {
+      map.set(`name:${name}`, { id: `name:${name}`, label: name });
+    }
+  }
+
+  return [...map.values()].sort((left, right) =>
+    left.label.localeCompare(right.label, "ru"),
+  );
+}
+
+function filterCategoryOptions(
+  categories: ProductCategoryOption[],
+  query: string,
+  selectedCategoryIds: string[],
+  selectedCategoryNames: string[],
+) {
+  const normalized = query.trim().toLowerCase();
+
+  if (!normalized) {
+    return [];
+  }
+
+  return categories.filter(
+    (category) =>
+      !selectedCategoryIds.includes(category.id) &&
+      !selectedCategoryNames.includes(category.label) &&
+      category.label.toLowerCase().includes(normalized),
+  );
+}
+
+function SelectionChips({
+  items,
+  emptyLabel,
+  onRemove,
+}: {
+  items: Array<{ value: string; label: string }>;
+  emptyLabel: string;
+  onRemove: (value: string) => void;
+}) {
+  if (!items.length) {
+    return emptyLabel ? (
+      <p className="mt-2 rounded-lg border border-dashed border-zinc-200 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+        {emptyLabel}
+      </p>
+    ) : null;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {items.map((item) => (
+        <button
+          key={`${item.value}-${item.label}`}
+          type="button"
+          className="inline-flex max-w-full items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-left text-xs font-semibold text-emerald-900 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-100 dark:hover:border-red-900 dark:hover:bg-red-950/30 dark:hover:text-red-200"
+          title="Убрать из правила"
+          onClick={() => onRemove(item.value)}
+        >
+          <span className="truncate">{item.label}</span>
+          <span aria-hidden="true" className="text-sm leading-none">
+            x
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -9916,6 +10362,10 @@ function optionLabel(
   value: string,
 ) {
   return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function missionTypeLabel(value: string) {
+  return optionLabel(missionTypeOptions, value);
 }
 
 function tariffItemsByEndpoint(

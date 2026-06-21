@@ -85,6 +85,34 @@ const visualTriggerHelpText: Record<string, string> = {
   MISSION_COMPLETED: "Правило проверится после выполнения другой миссии или квеста.",
 };
 
+const visualMissionTypeOptions = [
+  { value: "REPEAT_VISIT", label: "Повторный визит" },
+  { value: "CHECK_IN", label: "Чекин в клубе" },
+  { value: "VISIT", label: "Посещение клуба" },
+  { value: "PLAY_HOUR", label: "Игровое время" },
+  { value: "BAR_PURCHASE", label: "Покупка в баре" },
+  { value: "PRODUCT_PURCHASE", label: "Покупка товара" },
+  { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
+  { value: "REFERRAL_ACCEPTED", label: "Приглашение друга" },
+  { value: "APP_OPEN", label: "Возврат в приложение" },
+  { value: "GUEST_LOG", label: "Событие Langame" },
+  { value: "CUSTOM", label: "Своя миссия" },
+];
+
+const visualMissionTypeHelpText: Record<string, string> = {
+  REPEAT_VISIT: "Квест засчитывает повторное посещение в заданном окне.",
+  CHECK_IN: "Квест засчитывает чекин гостя в выбранном клубе.",
+  VISIT: "Квест засчитывает посещение клуба.",
+  PLAY_HOUR: "Квест считает накопленное игровое время.",
+  BAR_PURCHASE: "Квест считает покупки бара.",
+  PRODUCT_PURCHASE: "Квест считает покупку выбранных товаров.",
+  BALANCE_TOPUP: "Квест считает пополнение баланса.",
+  REFERRAL_ACCEPTED: "Квест засчитывает приглашенного друга.",
+  APP_OPEN: "Квест срабатывает при открытии сайта или Mini App.",
+  GUEST_LOG: "Квест работает от событий Langame.",
+  CUSTOM: "Свободный сценарий с условиями из расширенных настроек.",
+};
+
 const visualTimeWindowOptions = [
   { value: "ANY", label: "Любое время" },
   { value: "QUIET_HOURS", label: "Тихие часы" },
@@ -979,6 +1007,11 @@ function MissionInspector({
             disabled={disabled}
             onChange={(title) => update({ ...item, title })}
           />
+          <MissionTypeField
+            value={item.missionType}
+            disabled={disabled}
+            onChange={(missionType) => update({ ...item, missionType })}
+          />
           <TriggerField
             value={item.triggerKind}
             disabled={disabled}
@@ -1789,6 +1822,45 @@ function TriggerField({
         ))}
       </select>
       <EditorHint>{visualTriggerHelpText[value] ?? "LeetPlus проверит правило, когда получит событие этого типа."}</EditorHint>
+    </label>
+  );
+}
+
+function MissionTypeField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const hasCurrentOption = visualMissionTypeOptions.some(
+    (option) => option.value === value,
+  );
+
+  return (
+    <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      Тип квеста
+      <select
+        className={fieldClass}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {!hasCurrentOption && value ? (
+          <option value={value}>Сохраненный тип: {value}</option>
+        ) : null}
+        {visualMissionTypeOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <EditorHint>
+        {visualMissionTypeHelpText[value] ??
+          "Тип помогает понять сценарий квеста; подробные условия можно уточнить в расширенных настройках."}
+      </EditorHint>
     </label>
   );
 }

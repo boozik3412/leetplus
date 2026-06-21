@@ -339,6 +339,49 @@ const lootBoxSegmentOptions = [
   { value: "referral", label: "Реферальные гости" },
 ];
 
+const triggerHelpText: Record<string, string> = {
+  SESSION_START:
+    "Правило проверится, когда у гостя начнется игровая сессия в клубе.",
+  CHECK_IN:
+    "Правило проверится после чекина гостя в игровом модуле выбранного клуба.",
+  VISIT:
+    "Общий визит в клуб: подходит для сценариев, где сессия, чекин или лог Langame считаются посещением.",
+  PLAY_HOUR:
+    "Правило проверится по накопленному игровому времени, например за час игры или завершение сессии.",
+  BAR_PURCHASE:
+    "Правило проверится после покупки или списания в баре, если факт есть в сохраненных данных.",
+  PRODUCT_PURCHASE:
+    "Правило проверится после товарной покупки из сохраненных продаж или списаний.",
+  BALANCE_TOPUP:
+    "Правило проверится после пополнения баланса гостя в сохраненных фактах Langame.",
+  GUEST_LOG:
+    "Правило проверится по событию из guests/logs. Ниже можно ограничить разрешенные и запрещенные типы логов.",
+  REFERRAL_ACCEPTED:
+    "Правило проверится, когда приглашенный гость успешно зарегистрируется по реферальной ссылке.",
+  REPEAT_VISIT:
+    "Правило проверит повторное посещение гостя в заданном окне времени.",
+  MISSION_COMPLETED:
+    "Правило проверится после выполнения другой миссии или квеста.",
+};
+
+const audienceHelpText: Record<string, string> = {
+  "": "Правило доступно всем гостям выбранных клубов, если остальные условия совпали.",
+  quiet_hours:
+    "Сценарий для загрузки непиковых часов. Обычно используется вместе с временным окном.",
+  new_guests:
+    "Для гостей, которые только начинают взаимодействовать с клубом или игровым модулем.",
+  regular_guests:
+    "Для постоянных гостей с регулярной активностью и повторными визитами.",
+  returning_guests:
+    "Для гостей, которых нужно вернуть после паузы или долгого отсутствия.",
+  vip_guests:
+    "Для самых активных или ценных гостей, которым можно давать отдельные условия.",
+  birthday:
+    "Для поздравительных сценариев и наград, привязанных к дню рождения.",
+  referral:
+    "Для гостей, пришедших через приглашение, или для реферальных механик.",
+};
+
 const rewardTypeOptions = [
   { value: "PROMOCODE", label: "Промокод" },
   { value: "BONUS", label: "Бонусы" },
@@ -5721,23 +5764,31 @@ function LootBoxesTab({
             title="Кому и когда открывать"
           >
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Триггер">
+              <Field label="Событие для появления">
                 <OptionSelect
                   options={lootBoxTriggerOptions}
                   value={form.triggerKind}
-                  preservedLabel="Сохраненный триггер"
+                  preservedLabel="Сохраненное событие"
                   onChange={(triggerKind) =>
                     setForm({ ...form, triggerKind })
                   }
                 />
+                <OptionHelp>
+                  {triggerHelpText[form.triggerKind] ??
+                    "LeetPlus проверит правило, когда получит событие этого типа."}
+                </OptionHelp>
               </Field>
-              <Field label="Сегмент">
+              <Field label="Аудитория">
                 <OptionSelect
                   options={lootBoxSegmentOptions}
                   value={form.segment}
-                  preservedLabel="Сохраненный сегмент"
+                  preservedLabel="Сохраненная аудитория"
                   onChange={(segment) => setForm({ ...form, segment })}
                 />
+                <OptionHelp>
+                  {audienceHelpText[form.segment] ??
+                    "Аудитория ограничивает, каким гостям доступно правило."}
+                </OptionHelp>
               </Field>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
@@ -5893,14 +5944,19 @@ function MissionsTab({
                 }
               />
             </Field>
-            <Field label="Триггер">
-              <input
-                className={fieldClass}
+            <Field label="Событие для появления">
+              <OptionSelect
+                options={dryRunEventOptions}
                 value={form.triggerKind}
-                onChange={(event) =>
-                  setForm({ ...form, triggerKind: event.target.value })
+                preservedLabel="Сохраненное событие"
+                onChange={(triggerKind) =>
+                  setForm({ ...form, triggerKind })
                 }
               />
+              <OptionHelp>
+                {triggerHelpText[form.triggerKind] ??
+                  "LeetPlus проверит правило, когда получит событие этого типа."}
+              </OptionHelp>
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -7370,6 +7426,14 @@ function OptionSelect({
         </option>
       ))}
     </select>
+  );
+}
+
+function OptionHelp({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+      {children}
+    </p>
   );
 }
 

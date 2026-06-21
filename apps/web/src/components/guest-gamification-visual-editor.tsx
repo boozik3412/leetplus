@@ -47,6 +47,37 @@ const sectionLabels: Record<EditorSection, string> = {
   checkIn: "Чекин",
 };
 
+const visualTriggerOptions = [
+  { value: "SESSION_START", label: "Старт сессии" },
+  { value: "CHECK_IN", label: "Чекин в клубе" },
+  { value: "VISIT", label: "Визит в клуб" },
+  { value: "PLAY_HOUR", label: "Час игры" },
+  { value: "BAR_PURCHASE", label: "Покупка в баре" },
+  { value: "PRODUCT_PURCHASE", label: "Товарная покупка" },
+  { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
+  { value: "GUEST_LOG", label: "Событие Langame" },
+  { value: "REFERRAL_ACCEPTED", label: "Реферал принят" },
+  { value: "REPEAT_VISIT", label: "Повторный визит" },
+  { value: "MISSION_COMPLETED", label: "Квест выполнен" },
+];
+
+const visualTriggerHelpText: Record<string, string> = {
+  SESSION_START: "Правило проверится, когда у гостя начнется игровая сессия в клубе.",
+  CHECK_IN: "Правило проверится после чекина гостя в игровом модуле выбранного клуба.",
+  VISIT:
+    "Общий визит в клуб: подходит для сценариев, где сессия, чекин или лог Langame считаются посещением.",
+  PLAY_HOUR:
+    "Правило проверится по накопленному игровому времени, например за час игры или завершение сессии.",
+  BAR_PURCHASE: "Правило проверится после покупки или списания в баре, если факт есть в сохраненных данных.",
+  PRODUCT_PURCHASE: "Правило проверится после товарной покупки из сохраненных продаж или списаний.",
+  BALANCE_TOPUP: "Правило проверится после пополнения баланса гостя в сохраненных фактах Langame.",
+  GUEST_LOG:
+    "Правило проверится по событию из guests/logs. Детальные типы событий можно ограничить в расширенных настройках.",
+  REFERRAL_ACCEPTED: "Правило проверится, когда приглашенный гость успешно зарегистрируется по реферальной ссылке.",
+  REPEAT_VISIT: "Правило проверит повторное посещение гостя в заданном окне времени.",
+  MISSION_COMPLETED: "Правило проверится после выполнения другой миссии или квеста.",
+};
+
 export function GuestGamificationVisualEditor({
   workspace,
   stores,
@@ -734,6 +765,12 @@ function LootBoxInspector({ payload, onChange, disabled }: InspectorProps) {
             disabled={disabled}
             onChange={(title) => update({ ...item, title })}
           />
+          <TriggerField
+            value={item.triggerKind}
+            disabled={disabled}
+            onChange={(triggerKind) => update({ ...item, triggerKind })}
+          />
+          <AudienceScopeHint />
           <TextField
             label="Приз"
             value={item.rewardLabel}
@@ -810,6 +847,12 @@ function MissionInspector({ payload, onChange, disabled }: InspectorProps) {
             disabled={disabled}
             onChange={(title) => update({ ...item, title })}
           />
+          <TriggerField
+            value={item.triggerKind}
+            disabled={disabled}
+            onChange={(triggerKind) => update({ ...item, triggerKind })}
+          />
+          <AudienceScopeHint />
           <div className="grid gap-3 sm:grid-cols-2">
             <NumberField
               label="XP"
@@ -1277,6 +1320,52 @@ function StatusField({
       </select>
     </label>
   );
+}
+
+function TriggerField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const hasCurrentOption = visualTriggerOptions.some((option) => option.value === value);
+
+  return (
+    <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      Событие для появления
+      <select
+        className={fieldClass}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {!hasCurrentOption && value ? <option value={value}>Сохраненное событие: {value}</option> : null}
+        {visualTriggerOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <EditorHint>{visualTriggerHelpText[value] ?? "LeetPlus проверит правило, когда получит событие этого типа."}</EditorHint>
+    </label>
+  );
+}
+
+function AudienceScopeHint() {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400">
+      <span className="block font-bold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">Аудитория</span>
+      В визуальном редакторе правило применяется к гостям выбранного клуба. Детальные сегменты настраиваются в
+      расширенных настройках.
+    </div>
+  );
+}
+
+function EditorHint({ children }: { children: ReactNode }) {
+  return <span className="mt-2 block text-xs normal-case leading-relaxed tracking-normal text-zinc-500">{children}</span>;
 }
 
 function RemoveButton({

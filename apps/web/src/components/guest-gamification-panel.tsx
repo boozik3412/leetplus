@@ -326,6 +326,81 @@ const dryRunEventOptions = [
   { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
 ];
 
+const manualXpEventOptions = [
+  {
+    value: "MANUAL_XP",
+    label: "Ручная корректировка XP",
+    description:
+      "Используйте для разового начисления или списания опыта по решению команды.",
+    defaultXpDelta: "50",
+    payloadReason: "manual_adjustment",
+  },
+  {
+    value: "CHECK_IN",
+    label: "Чекин в клубе",
+    description:
+      "Фиксирует ручной чекин, если гостя нужно отметить без гостевого экрана.",
+    defaultXpDelta: "10",
+    payloadReason: "manual_check_in",
+  },
+  {
+    value: "VISIT",
+    label: "Визит в клуб",
+    description:
+      "Отмечает посещение гостя, когда автоматический факт пока не подтянулся.",
+    defaultXpDelta: "20",
+    payloadReason: "manual_visit",
+  },
+  {
+    value: "PLAY_HOUR",
+    label: "Час игры",
+    description:
+      "Подходит для ручного зачета игрового времени или компенсации за сессию.",
+    defaultXpDelta: "25",
+    payloadReason: "manual_play_hour",
+  },
+  {
+    value: "MISSION_COMPLETED",
+    label: "Квест выполнен",
+    description:
+      "Используйте, когда сотрудник вручную подтверждает выполнение задания.",
+    defaultXpDelta: "50",
+    payloadReason: "manual_mission_completed",
+  },
+  {
+    value: "REFERRAL_ACCEPTED",
+    label: "Приглашенный гость зарегистрировался",
+    description:
+      "Ручной зачет реферального события, если автоматическая атрибуция не сработала.",
+    defaultXpDelta: "50",
+    payloadReason: "manual_referral",
+  },
+  {
+    value: "APP_OPEN",
+    label: "Открытие приложения",
+    description:
+      "Ручной зачет активности для сценариев возврата гостя в приложение.",
+    defaultXpDelta: "5",
+    payloadReason: "manual_app_open",
+  },
+] as const;
+
+function manualXpEventOption(value: string) {
+  return (
+    manualXpEventOptions.find((option) => option.value === value) ??
+    manualXpEventOptions[0]
+  );
+}
+
+function manualXpPayloadText(eventType: string) {
+  const option = manualXpEventOption(eventType);
+
+  return jsonText({
+    reason: option.payloadReason,
+    createdFrom: "guest_game_hub",
+  });
+}
+
 const lootBoxTriggerOptions = [
   { value: "SESSION_START", label: "Старт сессии" },
   { value: "APP_OPEN", label: "Открытие приложения" },
@@ -779,9 +854,7 @@ const defaultEventForm: EventForm = {
   source: "MANUAL",
   xpDelta: "50",
   note: "",
-  payloadText: jsonText({
-    reason: "manual_adjustment",
-  }),
+  payloadText: manualXpPayloadText("MANUAL_XP"),
 };
 
 const emptyDryRunSource = {
@@ -1788,6 +1861,7 @@ export function GuestGamificationPanel({
           onProfileStatus={updateProfileStatus}
           saving={saving}
           canManage={access.canManageRules}
+          canViewTechnicalPayload={access.isPlatformAdmin}
         />
       ) : null}
 
@@ -5532,6 +5606,7 @@ function ProfilesTab({
   onProfileStatus,
   saving,
   canManage,
+  canViewTechnicalPayload,
 }: {
   form: ProfileForm;
   setForm: (form: ProfileForm) => void;
@@ -5553,7 +5628,10 @@ function ProfilesTab({
   ) => Promise<void>;
   saving: string | null;
   canManage: boolean;
+  canViewTechnicalPayload: boolean;
 }) {
+  const selectedManualEvent = manualXpEventOption(eventForm.eventType);
+
   return (
     <div
       className={
@@ -5724,15 +5802,29 @@ function ProfilesTab({
             </Field>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Событие">
-                <input
+                <select
                   className={fieldClass}
                   value={eventForm.eventType}
-                  onChange={(event) =>
-                    setEventForm({ ...eventForm, eventType: event.target.value })
-                  }
-                />
+                  onChange={(event) => {
+                    const option = manualXpEventOption(event.target.value);
+
+                    setEventForm({
+                      ...eventForm,
+                      eventType: option.value,
+                      xpDelta: option.defaultXpDelta,
+                      payloadText: manualXpPayloadText(option.value),
+                    });
+                  }}
+                >
+                  {manualXpEventOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <OptionHelp>{selectedManualEvent.description}</OptionHelp>
               </Field>
-              <Field label="XP delta">
+              <Field label="Изменение XP">
                 <input
                   className={fieldClass}
                   type="number"
@@ -5741,6 +5833,9 @@ function ProfilesTab({
                     setEventForm({ ...eventForm, xpDelta: event.target.value })
                   }
                 />
+                <OptionHelp>
+                  Можно указать положительное или отрицательное значение.
+                </OptionHelp>
               </Field>
             </div>
             <Field label="Комментарий">
@@ -5752,15 +5847,24 @@ function ProfilesTab({
                 }
               />
             </Field>
-            <Field label="Payload JSON">
-              <textarea
-                className={`${fieldClass} min-h-28 font-mono text-xs`}
-                value={eventForm.payloadText}
-                onChange={(event) =>
-                  setEventForm({ ...eventForm, payloadText: event.target.value })
-                }
-              />
-            </Field>
+            {canViewTechnicalPayload ? (
+              <Field label="Технический payload JSON">
+                <textarea
+                  className={`${fieldClass} min-h-28 font-mono text-xs`}
+                  value={eventForm.payloadText}
+                  onChange={(event) =>
+                    setEventForm({
+                      ...eventForm,
+                      payloadText: event.target.value,
+                    })
+                  }
+                />
+                <OptionHelp>
+                  Видно только платформенным администраторам. Для сотрудников
+                  клубов payload формируется автоматически.
+                </OptionHelp>
+              </Field>
+            ) : null}
             <button
               type="button"
               className={primaryButtonClass}

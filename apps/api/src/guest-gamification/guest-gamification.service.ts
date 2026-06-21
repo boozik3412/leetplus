@@ -2034,6 +2034,14 @@ export type GuestGameProcessEventDto = GuestGameDryRunDto & {
   note?: string | null;
 };
 
+export type GuestGameSelectedReward = {
+  rewardType: string;
+  rewardAmount: number;
+  rewardLabel: string;
+  weight: number;
+  chancePercent: number;
+};
+
 export type GuestGameDryRunRule = {
   id: string;
   kind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
@@ -2045,6 +2053,7 @@ export type GuestGameDryRunRule = {
   rewardAmount: number | null;
   rewardLabel: string | null;
   selectedRewardLabel: string | null;
+  selectedReward: GuestGameSelectedReward | null;
   xpDelta: number;
   budgetAmount: number | null;
   progress: GuestGameProgressResult | null;
@@ -12898,6 +12907,7 @@ function buildProcessPayload(
       rewardAmount: rule.rewardAmount,
       rewardLabel: rule.rewardLabel,
       selectedRewardLabel: rule.selectedRewardLabel,
+      selectedReward: rule.selectedReward,
       xpDelta: rule.xpDelta,
       progress: rule.progress,
       blockers: rule.blockers,
@@ -13117,10 +13127,12 @@ function evaluateLootBoxDryRun(
   const reasons: string[] = [];
   const blockers: string[] = [];
   const ruleRewards = dryRunRewardsForRule(context.rewards, 'lootBox', rule.id);
+  const selectedReward = pickLootBoxReward(rule);
   const selectedRewardLabel =
-    dryRunWeightedReward(rule.probabilityRules) ??
-    rule.rewardLabel ??
-    rule.name;
+    selectedReward?.rewardLabel ?? rule.rewardLabel ?? rule.name;
+  const rewardAmount = selectedReward?.rewardAmount ?? rule.rewardAmount ?? 0;
+  const rewardType = selectedReward?.rewardType ?? rule.rewardType;
+  const rewardLabel = selectedReward?.rewardLabel ?? rule.rewardLabel;
 
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
@@ -13148,7 +13160,7 @@ function evaluateLootBoxDryRun(
   appendDryRunGuestLogTypeCheck(rule.periodRules, context, blockers, reasons);
   appendDryRunBudgetCheck(
     rule.budgetAmount,
-    rule.rewardAmount ?? 0,
+    rewardAmount,
     ruleRewards,
     blockers,
     reasons,
@@ -13171,10 +13183,11 @@ function evaluateLootBoxDryRun(
     name: rule.name,
     status: rule.status,
     manualApprovalRequired: rule.manualApprovalRequired,
-    rewardType: rule.rewardType,
-    rewardAmount: rule.rewardAmount,
-    rewardLabel: rule.rewardLabel,
+    rewardType,
+    rewardAmount,
+    rewardLabel,
     selectedRewardLabel,
+    selectedReward,
     xpDelta: 0,
     budgetAmount: rule.budgetAmount,
     progress: null,
@@ -13235,6 +13248,7 @@ function evaluateMissionDryRun(
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel,
     selectedRewardLabel: rule.rewardLabel ?? rule.name,
+    selectedReward: null,
     xpDelta: rule.xpReward,
     budgetAmount: rule.budgetAmount,
     progress,
@@ -13286,6 +13300,7 @@ function evaluateSeasonDryRun(
     rewardAmount: 0,
     rewardLabel: selectedRewardLabel,
     selectedRewardLabel,
+    selectedReward: null,
     xpDelta,
     budgetAmount: rule.budgetAmount,
     progress: null,
@@ -13958,20 +13973,135 @@ function dryRunSeasonRewardLabel(
     .join(' + ');
 }
 
-function dryRunWeightedReward(value: unknown) {
-  const items = dryRunArray(dryRunRecord(value).items)
-    .map((item) => dryRunRecord(item))
-    .map((item) => ({
-      label: dryRunString(item.label),
-      weight: dryRunNumber(item.weight, 0),
-    }))
-    .filter((item) => item.label);
+function pickLootBoxReward(
+  rule: GuestGameLootBox,
+): GuestGameSelectedReward | null {
+  const rewards = lootBoxRewards(rule);
 
-  if (!items.length) {
+  if (!rewards.length) {
     return null;
   }
 
-  return items.sort((left, right) => right.weight - left.weight)[0].label;
+  const totalWeight = sum(rewards.map((item) => Math.max(0, item.weight)));
+
+  if (totalWeight <= 0) {
+    return rewards[0];
+  }
+
+  const roll = Math.random() * totalWeight;
+  let cursor = 0;
+
+  for (const reward of rewards) {
+    cursor += Math.max(0, reward.weight);
+
+    if (roll < cursor) {
+      return reward;
+    }
+  }
+
+  return rewards.at(-1) ?? null;
+}
+
+function lootBoxRewards(rule: GuestGameLootBox): GuestGameSelectedReward[] {
+  const source = dryRunRecord(rule.probabilityRules);
+  const rawPrizes = dryRunArray(source.prizes);
+  const rawItems = dryRunArray(source.items);
+  const prizes = rawPrizes.length
+    ? rawPrizes.map((item) => lootBoxRewardFromPrize(rule, item))
+    : rawItems.map((item) => lootBoxRewardFromLegacyItem(rule, item));
+  const validPrizes = prizes.filter(
+    (item): item is Omit<GuestGameSelectedReward, 'chancePercent'> =>
+      item !== null && Boolean(item.rewardLabel) && item.weight > 0,
+  );
+  const fallbackPrize = lootBoxFallbackReward(rule);
+  const weightedPrizes = validPrizes.length
+    ? validPrizes
+    : fallbackPrize
+      ? [fallbackPrize]
+      : [];
+  const totalWeight = sum(weightedPrizes.map((item) => item.weight));
+
+  return weightedPrizes.map((item) => ({
+    ...item,
+    chancePercent:
+      totalWeight > 0
+        ? roundMoney((item.weight / totalWeight) * 100)
+        : roundMoney(100 / weightedPrizes.length),
+  }));
+}
+
+function lootBoxRewardFromPrize(
+  rule: GuestGameLootBox,
+  value: unknown,
+): Omit<GuestGameSelectedReward, 'chancePercent'> | null {
+  const record = dryRunRecord(value);
+  const rewardLabel =
+    dryRunString(record.rewardLabel) ??
+    dryRunString(record.label) ??
+    rule.rewardLabel ??
+    rule.name;
+
+  if (!rewardLabel) {
+    return null;
+  }
+
+  return {
+    rewardType:
+      dryRunString(record.rewardType) ??
+      dryRunString(record.type) ??
+      rule.rewardType ??
+      'PROMOCODE',
+    rewardAmount:
+      dryRunOptionalNumber(record.rewardAmount) ??
+      dryRunOptionalNumber(record.amount) ??
+      rule.rewardAmount ??
+      0,
+    rewardLabel,
+    weight: Math.max(
+      0,
+      dryRunOptionalNumber(record.weight) ??
+        dryRunOptionalNumber(record.chancePercent) ??
+        dryRunOptionalNumber(record.probability) ??
+        0,
+    ),
+  };
+}
+
+function lootBoxRewardFromLegacyItem(
+  rule: GuestGameLootBox,
+  value: unknown,
+): Omit<GuestGameSelectedReward, 'chancePercent'> | null {
+  const record = dryRunRecord(value);
+  const rewardLabel =
+    dryRunString(record.label) ?? rule.rewardLabel ?? rule.name;
+
+  if (!rewardLabel) {
+    return null;
+  }
+
+  return {
+    rewardType: rule.rewardType ?? 'PROMOCODE',
+    rewardAmount: rule.rewardAmount ?? 0,
+    rewardLabel,
+    weight: Math.max(0, dryRunNumber(record.weight, 0)),
+  };
+}
+
+function lootBoxFallbackReward(
+  rule: GuestGameLootBox,
+): Omit<GuestGameSelectedReward, 'chancePercent'> | null {
+  const rewardLabel = rule.rewardLabel ?? rule.name;
+
+  if (!rewardLabel && !rule.rewardType && !rule.rewardAmount) {
+    return null;
+  }
+
+  return {
+    rewardType: rule.rewardType ?? 'PROMOCODE',
+    rewardAmount: rule.rewardAmount ?? 0,
+    rewardLabel,
+    weight: 100,
+  };
 }
 
 function dryRunGuestSummary(row: {
@@ -14463,10 +14593,41 @@ function levelFromXp(xp: number) {
 function defaultProbabilityRules(): Prisma.InputJsonValue {
   return {
     type: 'weighted',
+    prizes: [
+      {
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 50,
+        rewardLabel: '50 бонусов',
+        weight: 85,
+        chancePercent: 85,
+      },
+      {
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 100,
+        rewardLabel: '100 бонусов',
+        weight: 5,
+        chancePercent: 5,
+      },
+      {
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 200,
+        rewardLabel: '200 бонусов',
+        weight: 2,
+        chancePercent: 2,
+      },
+      {
+        rewardType: 'PROMOCODE',
+        rewardAmount: 1000,
+        rewardLabel: 'Промокод на 1000 рублей',
+        weight: 1,
+        chancePercent: 1,
+      },
+    ],
     items: [
-      { label: 'XP battle pass', weight: 50 },
-      { label: 'Промокод бара', weight: 30 },
-      { label: 'Миссия на повторный визит', weight: 20 },
+      { label: '50 бонусов', weight: 85 },
+      { label: '100 бонусов', weight: 5 },
+      { label: '200 бонусов', weight: 2 },
+      { label: 'Промокод на 1000 рублей', weight: 1 },
     ],
   };
 }
@@ -14830,6 +14991,15 @@ function buildVisualLootBoxData(
     probabilityRules: {
       type: 'single',
       source: 'visual_editor',
+      prizes: [
+        {
+          rewardType: item.rewardType,
+          rewardAmount: item.rewardAmount ?? 0,
+          rewardLabel: item.rewardLabel,
+          weight: 100,
+          chancePercent: 100,
+        },
+      ],
       items: [{ label: item.rewardLabel, weight: 100 }],
     },
     manualApprovalRequired: false,

@@ -102,6 +102,14 @@ type ProfileForm = {
   status: GuestGameProfileStatus;
 };
 
+type LootBoxPrizeForm = {
+  id: string;
+  rewardType: string;
+  rewardAmount: string;
+  rewardLabel: string;
+  chancePercent: string;
+};
+
 type LootBoxForm = {
   name: string;
   status: GuestGameStatus;
@@ -125,9 +133,7 @@ type LootBoxForm = {
   hourTo: string;
   perGuestPerWeek: string;
   totalPerDay: string;
-  probabilityXpWeight: string;
-  probabilityPromoWeight: string;
-  probabilityMissionWeight: string;
+  prizes: LootBoxPrizeForm[];
   requireCashierConfirmation: boolean;
   oneDevicePerGuest: boolean;
   periodRulesText: string;
@@ -442,13 +448,44 @@ const defaultProfileForm: ProfileForm = {
   status: "ACTIVE",
 };
 
+const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
+  {
+    id: "default-bonus-50",
+    rewardType: "BONUS_BALANCE",
+    rewardAmount: "50",
+    rewardLabel: "50 бонусов",
+    chancePercent: "85",
+  },
+  {
+    id: "default-bonus-100",
+    rewardType: "BONUS_BALANCE",
+    rewardAmount: "100",
+    rewardLabel: "100 бонусов",
+    chancePercent: "5",
+  },
+  {
+    id: "default-bonus-200",
+    rewardType: "BONUS_BALANCE",
+    rewardAmount: "200",
+    rewardLabel: "200 бонусов",
+    chancePercent: "2",
+  },
+  {
+    id: "default-promo-1000",
+    rewardType: "PROMOCODE",
+    rewardAmount: "1000",
+    rewardLabel: "Промокод на 1000 рублей",
+    chancePercent: "1",
+  },
+];
+
 const defaultLootBoxForm: LootBoxForm = {
   name: "Лутбокс тихих часов",
   status: "DRAFT",
   triggerKind: "SESSION_START",
-  rewardType: "PROMOCODE",
-  rewardAmount: "0",
-  rewardLabel: "Промокод бара",
+  rewardType: defaultLootBoxPrizes[0].rewardType,
+  rewardAmount: defaultLootBoxPrizes[0].rewardAmount,
+  rewardLabel: defaultLootBoxPrizes[0].rewardLabel,
   audienceId: "",
   segment: "quiet_hours",
   sessionType: "",
@@ -465,9 +502,7 @@ const defaultLootBoxForm: LootBoxForm = {
   hourTo: "16:00",
   perGuestPerWeek: "1",
   totalPerDay: "30",
-  probabilityXpWeight: "50",
-  probabilityPromoWeight: "30",
-  probabilityMissionWeight: "20",
+  prizes: defaultLootBoxPrizes,
   requireCashierConfirmation: true,
   oneDevicePerGuest: true,
   periodRulesText: jsonText({
@@ -481,11 +516,17 @@ const defaultLootBoxForm: LootBoxForm = {
   }),
   probabilityRulesText: jsonText({
     type: "weighted",
-    items: [
-      { label: "XP Battle Pass", weight: 50 },
-      { label: "Промокод бара", weight: 30 },
-      { label: "Миссия на повторный визит", weight: 20 },
-    ],
+    prizes: defaultLootBoxPrizes.map((prize) => ({
+      rewardType: prize.rewardType,
+      rewardAmount: Number(prize.rewardAmount),
+      rewardLabel: prize.rewardLabel,
+      chancePercent: Number(prize.chancePercent),
+      weight: Number(prize.chancePercent),
+    })),
+    items: defaultLootBoxPrizes.map((prize) => ({
+      label: prize.rewardLabel,
+      weight: Number(prize.chancePercent),
+    })),
   }),
   budgetAmount: "5000",
   antiFraudText: jsonText({
@@ -876,13 +917,14 @@ export function GuestGamificationPanel({
         "Для изменения лутбоксов нужно право `Геймификация: правила`.",
       );
 
+      const primaryPrize = primaryLootBoxPrize(lootBoxForm);
       const payload = {
         name: lootBoxForm.name,
         status: lootBoxForm.status,
         triggerKind: lootBoxForm.triggerKind,
-        rewardType: lootBoxForm.rewardType,
-        rewardAmount: lootBoxForm.rewardAmount,
-        rewardLabel: nullable(lootBoxForm.rewardLabel),
+        rewardType: primaryPrize.rewardType,
+        rewardAmount: primaryPrize.rewardAmount,
+        rewardLabel: nullable(primaryPrize.rewardLabel),
         audienceId: nullable(lootBoxForm.audienceId),
         segment: nullable(lootBoxForm.segment),
         sessionType: nullable(lootBoxForm.sessionType),
@@ -5672,6 +5714,7 @@ function LootBoxesTab({
             manualApprovalRequired={form.manualApprovalRequired}
             note={form.note}
             audiences={audiences}
+            hideRewardFields
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <FormSection
@@ -6573,6 +6616,9 @@ function LootBoxBusinessRules({
   guestLogCatalog: GuestGameGuestLogCatalog;
   onChange: (patch: Partial<LootBoxForm>) => void;
 }) {
+  const updatePrizes = (prizes: LootBoxPrizeForm[]) =>
+    onChange(lootBoxPrizePatch(form, prizes));
+
   return (
     <BusinessRuleSection
       title="Правила запуска"
@@ -6643,41 +6689,7 @@ function LootBoxBusinessRules({
           />
         </Field>
       </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Вес XP">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.probabilityXpWeight}
-            onChange={(event) =>
-              onChange({ probabilityXpWeight: event.target.value })
-            }
-          />
-        </Field>
-        <Field label="Вес промокода">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.probabilityPromoWeight}
-            onChange={(event) =>
-              onChange({ probabilityPromoWeight: event.target.value })
-            }
-          />
-        </Field>
-        <Field label="Вес миссии">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.probabilityMissionWeight}
-            onChange={(event) =>
-              onChange({ probabilityMissionWeight: event.target.value })
-            }
-          />
-        </Field>
-      </div>
+      <LootBoxPrizesEditor prizes={form.prizes} onChange={updatePrizes} />
       <div className="grid gap-3 sm:grid-cols-2">
         <ToggleField
           label="Подтверждает кассир"
@@ -6693,6 +6705,152 @@ function LootBoxBusinessRules({
         />
       </div>
     </BusinessRuleSection>
+  );
+}
+
+function LootBoxPrizesEditor({
+  prizes,
+  onChange,
+}: {
+  prizes: LootBoxPrizeForm[];
+  onChange: (prizes: LootBoxPrizeForm[]) => void;
+}) {
+  const chanceTotal = prizes.reduce(
+    (total, prize) => total + Math.max(0, numeric(prize.chancePercent, 0)),
+    0,
+  );
+  const chanceDiff = Math.round((100 - chanceTotal) * 100) / 100;
+  const chanceStatus =
+    Math.abs(chanceDiff) < 0.01
+      ? "Сумма шансов 100%"
+      : chanceDiff > 0
+        ? `Осталось ${formatChanceNumber(chanceDiff)}%`
+        : `Превышение ${formatChanceNumber(Math.abs(chanceDiff))}%`;
+  const chanceStatusClass =
+    Math.abs(chanceDiff) < 0.01
+      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+      : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
+
+  const updatePrize = (index: number, patch: Partial<LootBoxPrizeForm>) => {
+    onChange(
+      prizes.map((prize, prizeIndex) =>
+        prizeIndex === index ? { ...prize, ...patch } : prize,
+      ),
+    );
+  };
+  const removePrize = (index: number) => {
+    if (prizes.length <= 1) {
+      return;
+    }
+
+    onChange(prizes.filter((_, prizeIndex) => prizeIndex !== index));
+  };
+  const addPrize = () =>
+    onChange([
+      ...prizes,
+      {
+        id: `prize-${Date.now()}-${prizes.length + 1}`,
+        rewardType: "BONUS_BALANCE",
+        rewardAmount: "50",
+        rewardLabel: "Новый приз",
+        chancePercent: "0",
+      },
+    ]);
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+            Призы и вероятности
+          </p>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            Добавьте несколько возможных наград. При открытии лутбокса LeetPlus
+            выберет один приз по указанным шансам.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={[
+              "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+              chanceStatusClass,
+            ].join(" ")}
+          >
+            {chanceStatus}
+          </span>
+          <button
+            type="button"
+            className={smallButtonClass}
+            title="Шансы выпада сохранятся пропорционально установленным текущим призам"
+            onClick={() => onChange(normalizeLootBoxPrizeChances(prizes))}
+          >
+            Настроить вероятности автоматически
+          </button>
+          <button type="button" className={smallButtonClass} onClick={addPrize}>
+            Добавить приз
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-3">
+        {prizes.map((prize, index) => (
+          <div
+            key={prize.id}
+            className="grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50 lg:grid-cols-[minmax(150px,1fr)_minmax(110px,0.6fr)_minmax(190px,1.2fr)_minmax(110px,0.55fr)_auto] lg:items-end"
+          >
+            <Field label="Тип награды">
+              <OptionSelect
+                options={rewardTypeOptions}
+                value={prize.rewardType}
+                preservedLabel="Сохраненный тип награды"
+                onChange={(rewardType) => updatePrize(index, { rewardType })}
+              />
+            </Field>
+            <Field label="Сумма">
+              <input
+                className={fieldClass}
+                type="number"
+                min="0"
+                value={prize.rewardAmount}
+                onChange={(event) =>
+                  updatePrize(index, { rewardAmount: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Название приза">
+              <input
+                className={fieldClass}
+                value={prize.rewardLabel}
+                onChange={(event) =>
+                  updatePrize(index, { rewardLabel: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Шанс, %">
+              <input
+                className={fieldClass}
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={prize.chancePercent}
+                onChange={(event) =>
+                  updatePrize(index, { chancePercent: event.target.value })
+                }
+              />
+            </Field>
+            <button
+              type="button"
+              className={`${smallButtonClass} justify-center lg:h-10`}
+              disabled={prizes.length <= 1}
+              onClick={() => removePrize(index)}
+            >
+              Удалить
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -7256,6 +7414,7 @@ function RuleCommonFields({
   manualApprovalRequired,
   note,
   audiences,
+  hideRewardFields = false,
   onChange,
 }: {
   status: GuestGameStatus;
@@ -7268,6 +7427,7 @@ function RuleCommonFields({
   manualApprovalRequired: boolean;
   note: string;
   audiences: GuestAudience[];
+  hideRewardFields?: boolean;
   onChange: (patch: Partial<LootBoxForm & MissionForm>) => void;
 }) {
   return (
@@ -7289,56 +7449,91 @@ function RuleCommonFields({
           </Field>
         </div>
       </FormSection>
-      <FormSection title="Награда и бюджет">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <Field label="Тип награды">
-            <OptionSelect
-              options={rewardTypeOptions}
-              value={rewardType}
-              preservedLabel="Сохраненный тип награды"
-              onChange={(nextRewardType) =>
-                onChange({ rewardType: nextRewardType })
-              }
-            />
-          </Field>
-          <Field label="Сумма">
-            <input
-              className={fieldClass}
-              type="number"
-              value={rewardAmount}
-              onChange={(event) => onChange({ rewardAmount: event.target.value })}
-            />
-          </Field>
-          <Field label="Бюджет">
-            <input
-              className={fieldClass}
-              type="number"
-              value={budgetAmount}
-              onChange={(event) => onChange({ budgetAmount: event.target.value })}
-            />
-          </Field>
-        </div>
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
-          <Field label="Название награды">
-            <input
-              className={fieldClass}
-              value={rewardLabel}
-              onChange={(event) => onChange({ rewardLabel: event.target.value })}
-            />
-          </Field>
-          <Field label="Подтверждение">
-            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <FormSection title={hideRewardFields ? "Бюджет и выдача" : "Награда и бюджет"}>
+        {hideRewardFields ? (
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
+            <Field label="Бюджет">
               <input
-                type="checkbox"
-                checked={manualApprovalRequired}
+                className={fieldClass}
+                type="number"
+                value={budgetAmount}
                 onChange={(event) =>
-                  onChange({ manualApprovalRequired: event.target.checked })
+                  onChange({ budgetAmount: event.target.value })
                 }
               />
-              Вручную
-            </label>
-          </Field>
-        </div>
+            </Field>
+            <Field label="Подтверждение">
+              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+                <input
+                  type="checkbox"
+                  checked={manualApprovalRequired}
+                  onChange={(event) =>
+                    onChange({ manualApprovalRequired: event.target.checked })
+                  }
+                />
+                Вручную
+              </label>
+            </Field>
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <Field label="Тип награды">
+                <OptionSelect
+                  options={rewardTypeOptions}
+                  value={rewardType}
+                  preservedLabel="Сохраненный тип награды"
+                  onChange={(nextRewardType) =>
+                    onChange({ rewardType: nextRewardType })
+                  }
+                />
+              </Field>
+              <Field label="Сумма">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  value={rewardAmount}
+                  onChange={(event) =>
+                    onChange({ rewardAmount: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Бюджет">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  value={budgetAmount}
+                  onChange={(event) =>
+                    onChange({ budgetAmount: event.target.value })
+                  }
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
+              <Field label="Название награды">
+                <input
+                  className={fieldClass}
+                  value={rewardLabel}
+                  onChange={(event) =>
+                    onChange({ rewardLabel: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Подтверждение">
+                <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+                  <input
+                    type="checkbox"
+                    checked={manualApprovalRequired}
+                    onChange={(event) =>
+                      onChange({ manualApprovalRequired: event.target.checked })
+                    }
+                  />
+                  Вручную
+                </label>
+              </Field>
+            </div>
+          </>
+        )}
       </FormSection>
       <FormSection title="Аудитория и заметка">
         <AudienceSelect
@@ -8396,20 +8591,13 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     hourTo: timeWindowPart(lootBox.periodRules, 1, "16:00"),
     perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", "1"),
     totalPerDay: numberRule(lootBox.limits, "totalPerDay", "30"),
-    probabilityXpWeight: probabilityWeight(
+    prizes: lootBoxPrizesToForm(
       lootBox.probabilityRules,
-      "XP Battle Pass",
-      "50",
-    ),
-    probabilityPromoWeight: probabilityWeight(
-      lootBox.probabilityRules,
-      "Промокод бара",
-      "30",
-    ),
-    probabilityMissionWeight: probabilityWeight(
-      lootBox.probabilityRules,
-      "Миссия на повторный визит",
-      "20",
+      {
+        rewardType: lootBox.rewardType,
+        rewardAmount: moneyFormValue(lootBox.rewardAmount),
+        rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+      },
     ),
     requireCashierConfirmation: booleanRule(
       lootBox.antiFraudRules,
@@ -8706,23 +8894,52 @@ function buildLootBoxLimits(form: LootBoxForm) {
 }
 
 function buildLootBoxProbabilityRules(form: LootBoxForm) {
+  const prizes = form.prizes
+    .map((prize) => {
+      const rewardLabel = prize.rewardLabel.trim();
+      const chancePercent = Math.max(0, numeric(prize.chancePercent, 0));
+
+      return {
+        rewardType: prize.rewardType || "PROMOCODE",
+        rewardAmount: optionalNumber(prize.rewardAmount) ?? 0,
+        rewardLabel:
+          rewardLabel ||
+          optionLabel(rewardTypeOptions, prize.rewardType) ||
+          "Награда лутбокса",
+        chancePercent,
+        weight: chancePercent,
+      };
+    })
+    .filter(
+      (prize) =>
+        prize.rewardLabel.trim() ||
+        prize.rewardAmount > 0 ||
+        prize.rewardType,
+    );
+  const safePrizes = prizes.length
+    ? prizes
+    : [
+        {
+          ...primaryLootBoxPrize(form),
+          rewardAmount: optionalNumber(primaryLootBoxPrize(form).rewardAmount) ?? 0,
+          chancePercent: 100,
+          weight: 100,
+        },
+      ];
+  const totalChancePercent = safePrizes.reduce(
+    (total, prize) => total + prize.chancePercent,
+    0,
+  );
+
   return {
     type: "weighted",
     source: "business_controls",
-    items: [
-      {
-        label: "XP Battle Pass",
-        weight: numeric(form.probabilityXpWeight, 0),
-      },
-      {
-        label: form.rewardLabel || "Промокод бара",
-        weight: numeric(form.probabilityPromoWeight, 0),
-      },
-      {
-        label: "Миссия на повторный визит",
-        weight: numeric(form.probabilityMissionWeight, 0),
-      },
-    ],
+    totalChancePercent: Math.round(totalChancePercent * 100) / 100,
+    prizes: safePrizes,
+    items: safePrizes.map((prize) => ({
+      label: prize.rewardLabel,
+      weight: prize.weight,
+    })),
   };
 }
 
@@ -9048,27 +9265,134 @@ function timeWindowPart(value: unknown, part: 0 | 1, fallback: string) {
   return fallback;
 }
 
-function probabilityWeight(
+function lootBoxPrizesToForm(
   value: unknown,
-  label: string,
-  fallback: string,
-) {
-  const items = asRecord(value).items;
-  if (!Array.isArray(items)) {
-    return fallback;
+  fallback: Pick<LootBoxPrizeForm, "rewardType" | "rewardAmount" | "rewardLabel">,
+): LootBoxPrizeForm[] {
+  const record = asRecord(value);
+  const prizes = Array.isArray(record.prizes) ? record.prizes : [];
+  const items = Array.isArray(record.items) ? record.items : [];
+  const source = prizes.length ? prizes : items;
+  const mapped = source
+    .map((item, index) => lootBoxPrizeFromRuleItem(item, index, fallback))
+    .filter((item): item is LootBoxPrizeForm => Boolean(item));
+
+  if (mapped.length) {
+    return mapped;
   }
 
-  const matched = items.find((item) => {
-    const record = asRecord(item);
-    return String(record.label ?? "")
-      .toLowerCase()
-      .includes(label.toLowerCase());
-  });
-  const weight = asRecord(matched).weight;
+  if (fallback.rewardLabel || fallback.rewardType || fallback.rewardAmount) {
+    return [
+      {
+        id: "fallback-prize",
+        rewardType: fallback.rewardType || "PROMOCODE",
+        rewardAmount: fallback.rewardAmount || "0",
+        rewardLabel: fallback.rewardLabel || "Награда лутбокса",
+        chancePercent: "100",
+      },
+    ];
+  }
 
-  return typeof weight === "number" && Number.isFinite(weight)
-    ? String(weight)
-    : fallback;
+  return defaultLootBoxPrizes.map((prize) => ({ ...prize }));
+}
+
+function lootBoxPrizeFromRuleItem(
+  value: unknown,
+  index: number,
+  fallback: Pick<LootBoxPrizeForm, "rewardType" | "rewardAmount" | "rewardLabel">,
+): LootBoxPrizeForm | null {
+  const record = asRecord(value);
+  const rewardLabel = String(
+    record.rewardLabel ?? record.label ?? fallback.rewardLabel ?? "",
+  ).trim();
+
+  if (!rewardLabel) {
+    return null;
+  }
+
+  return {
+    id: `rule-prize-${index}`,
+    rewardType: String(
+      record.rewardType ?? record.type ?? fallback.rewardType ?? "PROMOCODE",
+    ),
+    rewardAmount: numberFormValue(
+      record.rewardAmount ?? record.amount ?? fallback.rewardAmount ?? "0",
+    ),
+    rewardLabel,
+    chancePercent: numberFormValue(
+      record.chancePercent ?? record.weight ?? record.probability ?? "0",
+    ),
+  };
+}
+
+function numberFormValue(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? formatChanceNumber(parsed) : "";
+}
+
+function lootBoxPrizePatch(
+  form: LootBoxForm,
+  prizes: LootBoxPrizeForm[],
+): Partial<LootBoxForm> {
+  const primary = primaryLootBoxPrize({ ...form, prizes });
+
+  return {
+    prizes,
+    rewardType: primary.rewardType,
+    rewardAmount: primary.rewardAmount,
+    rewardLabel: primary.rewardLabel,
+  };
+}
+
+function primaryLootBoxPrize(form: LootBoxForm) {
+  const prize = form.prizes.find(
+    (item) =>
+      item.rewardLabel.trim() ||
+      item.rewardAmount.trim() ||
+      item.rewardType.trim(),
+  );
+
+  return {
+    rewardType: prize?.rewardType || form.rewardType || "PROMOCODE",
+    rewardAmount: prize?.rewardAmount || form.rewardAmount || "0",
+    rewardLabel: prize?.rewardLabel || form.rewardLabel || "Награда лутбокса",
+  };
+}
+
+function normalizeLootBoxPrizeChances(prizes: LootBoxPrizeForm[]) {
+  if (!prizes.length) {
+    return prizes;
+  }
+
+  const rawValues = prizes.map((prize) =>
+    Math.max(0, numeric(prize.chancePercent, 0)),
+  );
+  const total = rawValues.reduce((sum, value) => sum + value, 0);
+  const normalized =
+    total > 0
+      ? rawValues.map((value) => (value / total) * 100)
+      : rawValues.map(() => 100 / prizes.length);
+  const rounded = normalized.map((value) => Math.round(value * 100) / 100);
+  const roundedTotal = rounded.reduce((sum, value) => sum + value, 0);
+  const diff = Math.round((100 - roundedTotal) * 100) / 100;
+  const lastIndex = rounded.length - 1;
+
+  rounded[lastIndex] = Math.max(
+    0,
+    Math.round((rounded[lastIndex] + diff) * 100) / 100,
+  );
+
+  return prizes.map((prize, index) => ({
+    ...prize,
+    chancePercent: formatChanceNumber(rounded[index]),
+  }));
+}
+
+function formatChanceNumber(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : String(rounded).replace(/\.?0+$/, "");
 }
 
 function seasonLevelStep(value: unknown, fallback: string) {

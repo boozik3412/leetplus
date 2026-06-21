@@ -330,6 +330,13 @@ export type GuestGameDryRunRule = {
   rewardAmount: number | null;
   rewardLabel: string | null;
   selectedRewardLabel: string | null;
+  selectedReward: {
+    rewardType: string;
+    rewardAmount: number;
+    rewardLabel: string;
+    weight: number;
+    chancePercent: number;
+  } | null;
   xpDelta: number;
   budgetAmount: number | null;
   progress: GuestGameDryRunProgress | null;

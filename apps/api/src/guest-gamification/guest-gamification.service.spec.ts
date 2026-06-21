@@ -13,6 +13,7 @@ import {
   GuestGamificationService,
   type GuestGameDryRunResult,
   type GuestGameEvent,
+  type GuestGameLootBox,
   type GuestGameMission,
   type GuestGamePipelineRunResult,
   type GuestGamePilotFirstBonusReconciliation,
@@ -257,6 +258,51 @@ function activeMission(
   };
 }
 
+function activeLootBox(
+  overrides: Partial<GuestGameLootBox> = {},
+): GuestGameLootBox {
+  return {
+    id: 'loot-box-1',
+    name: 'Prize lootbox',
+    status: 'ACTIVE',
+    rewardType: 'BONUS_BALANCE',
+    rewardAmount: 50,
+    rewardLabel: '50 бонусов',
+    storeIds: [],
+    budgetAmount: null,
+    manualApprovalRequired: false,
+    note: null,
+    createdAt: isoNow,
+    updatedAt: isoNow,
+    audience: null,
+    createdBy: null,
+    triggerKind: 'SESSION_START',
+    segment: null,
+    sessionType: null,
+    periodRules: {},
+    limits: {},
+    probabilityRules: {
+      type: 'weighted',
+      prizes: [
+        {
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: 50,
+          rewardLabel: '50 бонусов',
+          weight: 85,
+        },
+        {
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: 200,
+          rewardLabel: '200 бонусов',
+          weight: 15,
+        },
+      ],
+    },
+    antiFraudRules: {},
+    ...overrides,
+  };
+}
+
 function visualEditorStore(overrides: Record<string, unknown> = {}) {
   return {
     id: 'store-1',
@@ -375,6 +421,7 @@ function dryRunResult(
         rewardAmount: 50,
         rewardLabel: '50 bonus points',
         selectedRewardLabel: '50 bonus points',
+        selectedReward: null,
         manualApprovalRequired: false,
         xpDelta: 30,
         budgetAmount: null,
@@ -2778,6 +2825,50 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameEvent.create).not.toHaveBeenCalled();
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
       expect(langameClient.postEndpoint).not.toHaveBeenCalled();
+    });
+
+    it('selects a loot box prize by configured weighted probabilities', async () => {
+      const { service } = createService();
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.9);
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([activeLootBox()]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      try {
+        const result = await service.dryRun(user, {
+          eventType: 'SESSION_START',
+          occurredAt: isoNow,
+          sessionType: 'regular_session',
+        });
+
+        expect(result.summary).toMatchObject({
+          checkedRules: 1,
+          eligibleRules: 1,
+          estimatedRewardAmount: 200,
+        });
+        expect(result.rules[0]).toMatchObject({
+          id: 'loot-box-1',
+          kind: 'LOOT_BOX',
+          eligible: true,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: 200,
+          rewardLabel: '200 бонусов',
+          selectedRewardLabel: '200 бонусов',
+          selectedReward: {
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 200,
+            rewardLabel: '200 бонусов',
+            chancePercent: 15,
+          },
+        });
+      } finally {
+        randomSpy.mockRestore();
+      }
     });
 
     it('blocks a mission until the configured progress metric reaches its target', async () => {

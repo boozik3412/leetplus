@@ -4029,23 +4029,32 @@ export class GuestGamificationService {
       telegramWebhookReplyEnabled &&
       telegramWebhookReplyToken,
     );
+    const telegramEdgeReplyReady = Boolean(
+      telegramWebhookSecret && telegramMiniAppEdgeSecret,
+    );
+    const telegramAuthReplySenderReady =
+      telegramWebhookReplyReady || telegramEdgeReplyReady;
     const telegramWebhookReplyRequiredEnv = [
       ...(telegramWebhookSecret ? [] : ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET']),
-      ...(telegramWebhookReplyEnabled
+      ...(telegramEdgeReplyReady || telegramWebhookReplyEnabled
         ? []
-        : ['GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED']),
-      ...(telegramWebhookReplyToken
+        : [
+            'GUEST_GAME_TG_EDGE_SHARED_SECRET or GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
+          ]),
+      ...(telegramEdgeReplyReady || telegramWebhookReplyToken
         ? []
         : [
             'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
           ]),
     ];
     const telegramWebhookReplyStatus: GuestGameIntegrationReadinessStatus =
-      telegramWebhookReplyReady
+      telegramAuthReplySenderReady
         ? 'READY'
         : !telegramWebhookSecret
           ? 'BLOCKED'
-          : telegramWebhookReplyEnabled || telegramWebhookReplyToken
+          : telegramWebhookReplyEnabled ||
+              telegramWebhookReplyToken ||
+              telegramMiniAppEdgeSecret
             ? 'PARTIAL'
             : 'MANUAL_ONLY';
     const telegramMiniAppReady = Boolean(
@@ -4224,15 +4233,19 @@ export class GuestGamificationService {
         title: 'Telegram reply sender для входа',
         status: telegramWebhookReplyStatus,
         statusLabel: telegramWebhookReplyReady
-          ? 'sender ready'
-          : telegramWebhookReplyStatus === 'MANUAL_ONLY'
-            ? 'adapter-only'
-            : telegramWebhookReplyStatus === 'PARTIAL'
-              ? 'частично'
-              : 'secret нужен',
-        ready: telegramWebhookReplyReady,
-        configured: Boolean(telegramWebhookReplyToken),
-        enabled: telegramWebhookReplyEnabled,
+          ? 'api sender ready'
+          : telegramEdgeReplyReady
+            ? 'edge sender ready'
+            : telegramWebhookReplyStatus === 'MANUAL_ONLY'
+              ? 'adapter-only'
+              : telegramWebhookReplyStatus === 'PARTIAL'
+                ? 'частично'
+                : 'secret нужен',
+        ready: telegramAuthReplySenderReady,
+        configured: Boolean(
+          telegramWebhookReplyToken || telegramEdgeReplyReady,
+        ),
+        enabled: Boolean(telegramWebhookReplyEnabled || telegramEdgeReplyReady),
         requiredEnv: telegramWebhookReplyRequiredEnv,
         details: [
           {
@@ -4241,20 +4254,30 @@ export class GuestGamificationService {
           },
           {
             label: 'Sender',
-            value: telegramWebhookReplyEnabled ? 'включен' : 'выключен',
+            value: telegramWebhookReplyReady
+              ? 'API-side'
+              : telegramEdgeReplyReady
+                ? '1337 polling edge'
+                : telegramWebhookReplyEnabled
+                  ? 'API-side включен'
+                  : 'выключен',
           },
           {
             label: 'Bot token',
             value: telegramWebhookReplyToken
-              ? 'настроен'
-              : 'нужен для API-side send',
+              ? 'на API'
+              : telegramEdgeReplyReady
+                ? 'на edge'
+                : 'нужен для API-side send',
           },
         ],
         note: telegramWebhookReplyReady
           ? 'API сам отправляет Telegram reply payload из текущего update: кнопку request_contact после /start и remove_keyboard после подтверждения. Raw chat_id используется только из текущего update в памяти.'
-          : 'По умолчанию LeetPlus возвращает safe reply payload для 1337 edge adapter. Для прямой отправки нужны update secret, env-флаг sender и bot token.',
-        nextAction: telegramWebhookReplyReady
-          ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте и смотреть replyDispatch=SENT без raw chat id.'
+          : telegramEdgeReplyReady
+            ? '1337 polling edge отправляет safe reply payload в Telegram. API-side sender можно включить отдельно, если перенести bot token на основную VDS.'
+            : 'LeetPlus возвращает safe reply payload для 1337 edge adapter. Для прямой отправки нужны update secret, env-флаг sender и bot token.',
+        nextAction: telegramAuthReplySenderReady
+          ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте без raw chat id, raw phone и raw update.'
           : 'Добавить недостающие env или оставить 1337 polling edge, который отправляет reply payload.',
         runbook: telegramAuthRunbook,
       },

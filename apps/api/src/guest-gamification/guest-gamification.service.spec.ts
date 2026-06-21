@@ -1438,7 +1438,7 @@ describe('GuestGamificationService', () => {
         configured: false,
         enabled: false,
         requiredEnv: [
-          'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
+          'GUEST_GAME_TG_EDGE_SHARED_SECRET or GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
           'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
         ],
         runbook: {
@@ -1448,6 +1448,44 @@ describe('GuestGamificationService', () => {
         },
       });
       expect(senderText).not.toContain('telegram-secret');
+    });
+
+    it('marks Telegram auth reply sender ready through the polling edge contract', () => {
+      process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET = 'telegram-secret';
+      process.env.GUEST_GAME_TG_EDGE_SHARED_SECRET = 'edge-secret';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const sender = readiness.items.find(
+        (item: { key: string }) => item.key === 'TELEGRAM_AUTH_REPLY_SENDER',
+      );
+      const senderText = JSON.stringify(sender);
+
+      expect(sender).toMatchObject({
+        status: 'READY',
+        statusLabel: 'edge sender ready',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: [],
+        runbook: {
+          label: 'Runbook Telegram-входа',
+          path: 'docs/deployment/telegram-auth.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
+        },
+      });
+      expect(sender.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Update secret' }),
+          expect.objectContaining({
+            label: 'Sender',
+            value: '1337 polling edge',
+          }),
+          expect.objectContaining({ label: 'Bot token', value: 'на edge' }),
+        ]),
+      );
+      expect(senderText).not.toContain('telegram-secret');
+      expect(senderText).not.toContain('edge-secret');
     });
 
     it('marks Telegram bot menu ready on the polling edge contract without raw diagnostics', () => {

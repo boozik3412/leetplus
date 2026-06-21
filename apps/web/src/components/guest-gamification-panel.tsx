@@ -312,6 +312,27 @@ const dryRunEventOptions = [
   { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
 ];
 
+const lootBoxTriggerOptions = [
+  { value: "SESSION_START", label: "Старт сессии" },
+  { value: "CHECK_IN", label: "Чекин в клубе" },
+  { value: "VISIT", label: "Визит в клуб" },
+  { value: "PLAY_HOUR", label: "Час игры" },
+  { value: "BAR_PURCHASE", label: "Покупка в баре" },
+  { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
+  { value: "GUEST_LOG", label: "Событие Langame" },
+];
+
+const lootBoxSegmentOptions = [
+  { value: "", label: "Все гости" },
+  { value: "quiet_hours", label: "Тихие часы" },
+  { value: "new_guests", label: "Новые гости" },
+  { value: "regular_guests", label: "Постоянные гости" },
+  { value: "returning_guests", label: "Вернувшиеся гости" },
+  { value: "vip_guests", label: "VIP / активные" },
+  { value: "birthday", label: "День рождения" },
+  { value: "referral", label: "Реферальные гости" },
+];
+
 const sessionTypeOptions = [
   { value: "", label: "любой тип" },
   { value: "regular_session", label: "обычная сессия" },
@@ -368,6 +389,9 @@ const smallButtonClass =
 
 const primaryButtonClass =
   "rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300";
+
+const formSectionClass =
+  "rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/35";
 
 const statusOptions: GuestGameStatus[] = [
   "DRAFT",
@@ -5618,7 +5642,7 @@ function LootBoxesTab({
         editingId ? "Редактирование лутбокса" : "Настройка лутбокса"
       }
       form={
-        <div className="space-y-3">
+        <div className="space-y-4">
           <RuleCommonFields
             status={form.status}
             name={form.name}
@@ -5632,82 +5656,88 @@ function LootBoxesTab({
             audiences={audiences}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Триггер">
-              <input
-                className={fieldClass}
-                value={form.triggerKind}
-                onChange={(event) =>
-                  setForm({ ...form, triggerKind: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Сегмент">
-              <input
-                className={fieldClass}
-                value={form.segment}
-                onChange={(event) =>
-                  setForm({ ...form, segment: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Тип сессии">
-              <select
-                className={fieldClass}
-                value={form.sessionType}
-                onChange={(event) =>
-                  setForm({ ...form, sessionType: event.target.value })
-                }
-              >
-                {sessionTypeOptions.map((option) => (
-                  <option key={option.value || "any"} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Пакет часов">
-              <select
-                className={fieldClass}
-                value={form.packetMode}
-                onChange={(event) =>
-                  setForm({ ...form, packetMode: event.target.value })
-                }
-              >
-                {packetModeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <StoreSelect
-            stores={stores}
-            value={form.storeIds}
-            onChange={(storeIds) => setForm({ ...form, storeIds })}
-          />
+          <FormSection
+            title="Кому и когда открывать"
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Триггер">
+                <OptionSelect
+                  options={lootBoxTriggerOptions}
+                  value={form.triggerKind}
+                  preservedLabel="Сохраненный триггер"
+                  onChange={(triggerKind) =>
+                    setForm({ ...form, triggerKind })
+                  }
+                />
+              </Field>
+              <Field label="Сегмент">
+                <OptionSelect
+                  options={lootBoxSegmentOptions}
+                  value={form.segment}
+                  preservedLabel="Сохраненный сегмент"
+                  onChange={(segment) => setForm({ ...form, segment })}
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Тип сессии">
+                <select
+                  className={fieldClass}
+                  value={form.sessionType}
+                  onChange={(event) =>
+                    setForm({ ...form, sessionType: event.target.value })
+                  }
+                >
+                  {sessionTypeOptions.map((option) => (
+                    <option key={option.value || "any"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Пакет часов">
+                <select
+                  className={fieldClass}
+                  value={form.packetMode}
+                  onChange={(event) =>
+                    setForm({ ...form, packetMode: event.target.value })
+                  }
+                >
+                  {packetModeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <StoreSelect
+              stores={stores}
+              value={form.storeIds}
+              onChange={(storeIds) => setForm({ ...form, storeIds })}
+            />
+          </FormSection>
           <LootBoxBusinessRules
             form={form}
             tariffSnapshots={tariffSnapshots}
             guestLogCatalog={guestLogCatalog}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
-          <button
-            type="button"
-            className={primaryButtonClass}
-            disabled={saving === "lootBox"}
-            onClick={onSave}
-          >
-            {editingId ? "Изменить лутбокс" : "Создать лутбокс"}
-          </button>
-          {editingId ? (
-            <button type="button" className={smallButtonClass} onClick={onReset}>
-              Сбросить выбор
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              className={`${primaryButtonClass} sm:min-w-44`}
+              disabled={saving === "lootBox"}
+              onClick={onSave}
+            >
+              {editingId ? "Сохранить" : "Создать лутбокс"}
             </button>
-          ) : null}
+            {editingId ? (
+              <button type="button" className={smallButtonClass} onClick={onReset}>
+                Сбросить выбор
+              </button>
+            ) : null}
+          </div>
         </div>
       }
       listTitle="Лутбоксы"
@@ -5717,10 +5747,10 @@ function LootBoxesTab({
           key={item.id}
           title={item.name}
           status={item.status}
-          subtitle={`${item.triggerKind} · ${item.rewardLabel ?? item.rewardType}`}
+          subtitle={`${optionLabel(lootBoxTriggerOptions, item.triggerKind)} · ${item.rewardLabel ?? item.rewardType}`}
           meta={[
             item.audience?.name ?? "все гости",
-            item.segment ?? "без сегмента",
+            optionLabel(lootBoxSegmentOptions, item.segment ?? ""),
             packetModeLabel(stringRule(item.periodRules, "packetMode", "ANY")),
             tariffRuleSummary(item.periodRules),
             guestLogRuleSummary(item.periodRules),
@@ -7114,6 +7144,65 @@ function BusinessRuleSection({
   );
 }
 
+function FormSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`${formSectionClass} space-y-3`}>
+      <div>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          {title}
+        </h3>
+        {description ? (
+          <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            {description}
+          </p>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function OptionSelect({
+  options,
+  value,
+  onChange,
+  preservedLabel,
+}: {
+  options: Array<{ value: string; label: string }>;
+  value: string;
+  onChange: (value: string) => void;
+  preservedLabel: string;
+}) {
+  const hasCurrentOption = options.some((option) => option.value === value);
+
+  return (
+    <select
+      className={fieldClass}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {!hasCurrentOption && value ? (
+        <option value={value}>
+          {preservedLabel}: {value}
+        </option>
+      ) : null}
+      {options.map((option) => (
+        <option key={option.value || "empty"} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function ToggleField({
   label,
   checked,
@@ -7162,74 +7251,85 @@ function RuleCommonFields({
 }) {
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Название">
-          <input
-            className={fieldClass}
-            value={name}
-            onChange={(event) => onChange({ name: event.target.value })}
-          />
-        </Field>
-        <Field label="Статус">
-          <StatusSelect value={status} onChange={(next) => onChange({ status: next })} />
-        </Field>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Тип награды">
-          <input
-            className={fieldClass}
-            value={rewardType}
-            onChange={(event) => onChange({ rewardType: event.target.value })}
-          />
-        </Field>
-        <Field label="Сумма">
-          <input
-            className={fieldClass}
-            type="number"
-            value={rewardAmount}
-            onChange={(event) => onChange({ rewardAmount: event.target.value })}
-          />
-        </Field>
-        <Field label="Бюджет">
-          <input
-            className={fieldClass}
-            type="number"
-            value={budgetAmount}
-            onChange={(event) => onChange({ budgetAmount: event.target.value })}
-          />
-        </Field>
-      </div>
-      <Field label="Название награды">
-        <input
-          className={fieldClass}
-          value={rewardLabel}
-          onChange={(event) => onChange({ rewardLabel: event.target.value })}
+      <FormSection title="Основное">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(180px,0.6fr)]">
+          <Field label="Название">
+            <input
+              className={fieldClass}
+              value={name}
+              onChange={(event) => onChange({ name: event.target.value })}
+            />
+          </Field>
+          <Field label="Статус">
+            <StatusSelect
+              value={status}
+              onChange={(next) => onChange({ status: next })}
+            />
+          </Field>
+        </div>
+      </FormSection>
+      <FormSection title="Награда и бюджет">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <Field label="Тип награды">
+            <input
+              className={fieldClass}
+              value={rewardType}
+              onChange={(event) => onChange({ rewardType: event.target.value })}
+            />
+          </Field>
+          <Field label="Сумма">
+            <input
+              className={fieldClass}
+              type="number"
+              value={rewardAmount}
+              onChange={(event) => onChange({ rewardAmount: event.target.value })}
+            />
+          </Field>
+          <Field label="Бюджет">
+            <input
+              className={fieldClass}
+              type="number"
+              value={budgetAmount}
+              onChange={(event) => onChange({ budgetAmount: event.target.value })}
+            />
+          </Field>
+        </div>
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
+          <Field label="Название награды">
+            <input
+              className={fieldClass}
+              value={rewardLabel}
+              onChange={(event) => onChange({ rewardLabel: event.target.value })}
+            />
+          </Field>
+          <Field label="Подтверждение">
+            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <input
+                type="checkbox"
+                checked={manualApprovalRequired}
+                onChange={(event) =>
+                  onChange({ manualApprovalRequired: event.target.checked })
+                }
+              />
+              Вручную
+            </label>
+          </Field>
+        </div>
+      </FormSection>
+      <FormSection title="Аудитория и заметка">
+        <AudienceSelect
+          audiences={audiences}
+          value={audienceId}
+          onChange={(next) => onChange({ audienceId: next })}
         />
-      </Field>
-      <AudienceSelect
-        audiences={audiences}
-        value={audienceId}
-        onChange={(next) => onChange({ audienceId: next })}
-      />
-      <Field label="Подтверждение">
-        <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm dark:border-zinc-800">
-          <input
-            type="checkbox"
-            checked={manualApprovalRequired}
-            onChange={(event) =>
-              onChange({ manualApprovalRequired: event.target.checked })
-            }
+        <Field label="Заметка">
+          <textarea
+            className={`${fieldClass} min-h-20`}
+            value={note}
+            onChange={(event) => onChange({ note: event.target.value })}
           />
-          Вручную
-        </label>
-      </Field>
-      <Field label="Заметка">
-        <textarea
-          className={`${fieldClass} min-h-20`}
-          value={note}
-          onChange={(event) => onChange({ note: event.target.value })}
-        />
-      </Field>
+        </Field>
+      </FormSection>
     </>
   );
 }
@@ -7253,14 +7353,19 @@ function RulesLayout<T>({
     <div
       className={
         canManage
-          ? "grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]"
+          ? "grid items-start gap-4 2xl:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]"
           : "grid gap-5"
       }
     >
       {canManage ? <Panel title={formTitle}>{form}</Panel> : null}
-      <section className="space-y-3">
-        <SectionTitle title={listTitle} />
-        <div className="grid gap-3 lg:grid-cols-2">
+      <section className="min-w-0 space-y-3">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <SectionTitle title={listTitle} />
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            {items.length} правил
+          </p>
+        </div>
+        <div className="grid max-w-5xl gap-3 lg:grid-cols-2 2xl:max-w-none">
           {items.length ? (
             items.map(renderItem)
           ) : (
@@ -8787,6 +8892,13 @@ function stringListRule(value: unknown, key: string, fallback = "") {
   }
 
   return typeof raw === "string" && raw.trim() ? raw : fallback;
+}
+
+function optionLabel(
+  options: Array<{ value: string; label: string }>,
+  value: string,
+) {
+  return options.find((option) => option.value === value)?.label ?? value;
 }
 
 function tariffItemsByEndpoint(

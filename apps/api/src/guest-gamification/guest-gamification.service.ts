@@ -4134,9 +4134,11 @@ export class GuestGamificationService {
       },
       {
         key: 'OTP_TELEGRAM',
-        title: 'Telegram OTP provider',
+        title: 'Telegram OTP-код (резерв)',
         status: otp.telegram.status,
-        statusLabel: otp.telegram.statusLabel,
+        statusLabel: otp.telegram.ready
+          ? otp.telegram.statusLabel
+          : 'резерв · выключен',
         ready: otp.telegram.ready,
         configured: otp.telegram.configured,
         enabled: otp.telegram.enabled,
@@ -10770,11 +10772,13 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
       'TELEGRAM_BOT_TOKEN',
     ],
     configuredNote:
-      'Telegram token найден; OTP можно отправить только гостю с уже подтвержденным numeric chat_id.',
+      'Резервный Telegram OTP-код готов: его можно отправить только гостю с уже подтвержденным numeric chat_id. Основной Telegram-вход идет через бота и contact-share.',
     blockedNote:
-      'Telegram OTP не готов: нужен bot token, включенный канал и заранее привязанный гостем Telegram.',
+      'Резервный Telegram OTP-код выключен. Это не влияет на основной вход через Telegram-бота: OTP нужен только как дополнительный канал для уже привязанных гостей с chat:<id>.',
+    partialNote:
+      'Резервный Telegram OTP-код оставлен выключенным или настроен частично. Основной Telegram-вход работает отдельно через бота, contact-share и polling edge.',
     nextAction:
-      'Сначала проверить deep link и webhook привязки бота, затем включать OTP только для профилей с сохраненным chat:<id>.',
+      'Оставить резервом до отдельного решения; включать после проверки основного Telegram-бота, согласий и профилей с chat:<id>.',
   });
   const max = guestPortalOtpProviderReadiness({
     channelLabel: 'MAX',

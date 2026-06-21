@@ -306,6 +306,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
 
 const dryRunEventOptions = [
   { value: "SESSION_START", label: "Старт сессии" },
+  { value: "APP_OPEN", label: "Открытие приложения" },
   { value: "VISIT", label: "Визит" },
   { value: "CHECK_IN", label: "Чекин в клубе" },
   { value: "PLAY_HOUR", label: "Час игры" },
@@ -320,6 +321,7 @@ const dryRunEventOptions = [
 
 const lootBoxTriggerOptions = [
   { value: "SESSION_START", label: "Старт сессии" },
+  { value: "APP_OPEN", label: "Открытие приложения" },
   { value: "CHECK_IN", label: "Чекин в клубе" },
   { value: "VISIT", label: "Визит в клуб" },
   { value: "PLAY_HOUR", label: "Час игры" },
@@ -342,6 +344,8 @@ const lootBoxSegmentOptions = [
 const triggerHelpText: Record<string, string> = {
   SESSION_START:
     "Правило проверится, когда у гостя начнется игровая сессия в клубе.",
+  APP_OPEN:
+    "Правило проверится, когда гость откроет сайт игрового модуля или Telegram Mini App. Подходит для возврата потерявшихся гостей.",
   CHECK_IN:
     "Правило проверится после чекина гостя в игровом модуле выбранного клуба.",
   VISIT:

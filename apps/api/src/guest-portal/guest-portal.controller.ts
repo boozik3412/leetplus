@@ -8,6 +8,7 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  type GuestPortalAppOpenResponse,
   type GuestPortalCheckInResponse,
   type GuestPortalClubSelectResponse,
   type GuestPortalCommunicationPreferenceResponse,
@@ -161,6 +162,14 @@ export class GuestPortalController {
     @Headers('authorization') authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
     return this.guestPortalService.getGameSummary(authorization);
+  }
+
+  @Post('session/app-open')
+  recordAppOpen(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() dto: { surface?: unknown },
+  ): Promise<GuestPortalAppOpenResponse> {
+    return this.guestPortalService.recordAppOpen(authorization, dto);
   }
 
   @Post('session/select-club')

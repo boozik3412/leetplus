@@ -30,6 +30,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   GuestGamificationService,
   type GuestGameCheckInResult,
+  type GuestGameProcessEventResult,
 } from '../guest-gamification/guest-gamification.service';
 import {
   evaluateGuestGameProgress,
@@ -93,7 +94,11 @@ const GAME_REFERRAL_ACCEPTED_EVENT_TYPE = 'GAME_REFERRAL_ACCEPTED';
 const GAME_REFERRAL_EVENT_SOURCE = 'GUEST_PORTAL_REFERRAL';
 const GUEST_GAME_REFERRAL_LOOKUP_LIMIT = 5000;
 const GUEST_GAME_REFERRAL_CODE_PATTERN = /^lp_ref_[A-Za-z0-9_-]{16,64}$/;
+const GAME_APP_OPEN_EVENT_TYPE = 'APP_OPEN';
+const GAME_APP_OPEN_SOURCE_KIND = 'GUEST_APP_OPEN';
+const GAME_APP_OPEN_EXTERNAL_DOMAIN = 'leetplus-guest-portal';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
+type GuestPortalAppOpenSurface = 'WEB' | 'SITE' | 'TG_MINI_APP';
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
 type GuestPortalOtpDeliveryStatus =
   | 'DEV_CODE'
@@ -1266,6 +1271,17 @@ export type GuestPortalLangameDetailsResponse = {
 export type GuestPortalCheckInResponse = {
   checkIn: GuestGameCheckInResult;
   portal: GuestPortalPayload;
+};
+
+export type GuestPortalAppOpenResponse = {
+  processed: true;
+  idempotent: boolean;
+  appliedXpDelta: number;
+  createdRewards: number;
+  queuedRewardAmount: number;
+  portal: GuestPortalPayload;
+  summary: GuestPortalGameSummary;
+  message: string;
 };
 
 export type GuestPortalClubSelectResponse = {
@@ -3157,6 +3173,84 @@ export class GuestPortalService {
       webUrl: this.publicWebUrl(),
       referralStats,
     });
+  }
+
+  async recordAppOpen(
+    authorization: string | undefined,
+    dto: { surface?: unknown },
+  ): Promise<GuestPortalAppOpenResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const context = await this.getTenantStoreByIds(
+      payload.tenantId,
+      payload.storeId,
+    );
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile) {
+      throw new BadRequestException(
+        'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
+      );
+    }
+
+    const openedAt = new Date();
+    const openedDate = openedAt.toISOString().slice(0, 10);
+    const surface = guestPortalAppOpenSurface(dto.surface);
+    const sourceFactId = [profile.id, context.store.id, openedDate].join(':');
+    const actor: AuthenticatedUser = {
+      id: `guest-portal:${payload.sub}`,
+      email: 'guest-portal@leetplus.local',
+      fullName: 'Гостевой портал',
+      role: UserRole.CLUB_MANAGER,
+      isPlatformAdmin: false,
+      tenantId: context.tenant.id,
+      tenantSlug: context.tenant.slug,
+      tenantStatus: TenantLifecycleStatus.ACTIVE,
+    };
+    const processResult: GuestGameProcessEventResult =
+      await this.guestGamificationService.processEvent(actor, {
+        profileId: profile.id,
+        guestId: guest?.id ?? profile.guestId ?? null,
+        storeId: context.store.id,
+        eventType: GAME_APP_OPEN_EVENT_TYPE,
+        occurredAt: openedAt.toISOString(),
+        sourceFactId,
+        sourceFactKind: GAME_APP_OPEN_SOURCE_KIND,
+        externalDomain: GAME_APP_OPEN_EXTERNAL_DOMAIN,
+        externalId: sourceFactId,
+        note:
+          surface === 'TG_MINI_APP'
+            ? 'Гость открыл Telegram Mini App LeetPlus Game.'
+            : 'Гость открыл игровой модуль LeetPlus.',
+      });
+    const nextPayload: GuestPortalTokenPayload = {
+      ...payload,
+      guestId: guest?.id ?? profile.guestId ?? null,
+      profileId: profile.id,
+    };
+    const portal = await this.buildPortalPayload(nextPayload);
+    const referralStats = await this.getGameReferralStats(
+      nextPayload.tenantId,
+      portal.profile.id,
+    );
+    const summary = buildGameSummaryFromPortal(portal, {
+      referralSecret: this.referralSecret(),
+      webUrl: this.publicWebUrl(),
+      referralStats,
+    });
+
+    return {
+      processed: true,
+      idempotent: processResult.summary.idempotent,
+      appliedXpDelta: processResult.summary.appliedXpDelta,
+      createdRewards: processResult.summary.createdRewards,
+      queuedRewardAmount: processResult.summary.queuedRewardAmount,
+      portal,
+      summary,
+      message: processResult.summary.idempotent
+        ? 'Открытие уже засчитано сегодня.'
+        : 'Открытие игрового модуля засчитано.',
+    };
   }
 
   async selectGameClub(
@@ -8107,6 +8201,30 @@ function normalizeMiniAppClubSelection(dto: {
     tenantSlug,
     storeId,
   };
+}
+
+function guestPortalAppOpenSurface(value: unknown): GuestPortalAppOpenSurface {
+  const normalized =
+    typeof value === 'string'
+      ? value
+          .trim()
+          .toUpperCase()
+          .replace(/[-\s]+/g, '_')
+      : '';
+
+  if (
+    normalized === 'TG_MINI_APP' ||
+    normalized === 'MINI_APP' ||
+    normalized === 'TELEGRAM_MINI_APP'
+  ) {
+    return 'TG_MINI_APP';
+  }
+
+  if (normalized === 'SITE') {
+    return 'SITE';
+  }
+
+  return 'WEB';
 }
 
 function miniAppClubMatchesSelection(

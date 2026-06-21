@@ -49,6 +49,7 @@ const sectionLabels: Record<EditorSection, string> = {
 
 const visualTriggerOptions = [
   { value: "SESSION_START", label: "Старт сессии" },
+  { value: "APP_OPEN", label: "Открытие приложения" },
   { value: "CHECK_IN", label: "Чекин в клубе" },
   { value: "VISIT", label: "Визит в клуб" },
   { value: "PLAY_HOUR", label: "Час игры" },
@@ -63,6 +64,8 @@ const visualTriggerOptions = [
 
 const visualTriggerHelpText: Record<string, string> = {
   SESSION_START: "Правило проверится, когда у гостя начнется игровая сессия в клубе.",
+  APP_OPEN:
+    "Правило проверится, когда гость откроет сайт игрового модуля или Telegram Mini App. Подходит для возврата потерявшихся гостей.",
   CHECK_IN: "Правило проверится после чекина гостя в игровом модуле выбранного клуба.",
   VISIT:
     "Общий визит в клуб: подходит для сценариев, где сессия, чекин или лог Langame считаются посещением.",

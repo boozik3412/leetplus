@@ -53,7 +53,7 @@ export function GameSummaryClient() {
 
     async function loadInitialSummary() {
       try {
-        const nextSummary = await requestGameSummary();
+        const nextSummary = await recordGameAppOpen("WEB");
 
         if (!isActive) {
           return;
@@ -4136,8 +4136,11 @@ function gameActionButtonLabel(action: GameNextAction) {
   return labels[action.kind];
 }
 
-async function requestGameSummary() {
-  const response = await fetch("/api/guest-portal/session/game-summary", {
+async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
+  const response = await fetch("/api/guest-portal/session/app-open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ surface }),
     cache: "no-store",
   });
 
@@ -4151,7 +4154,7 @@ async function requestGameSummary() {
     );
   }
 
-  return (await response.json()) as GuestPortalGameSummary;
+  return ((await response.json()) as { summary: GuestPortalGameSummary }).summary;
 }
 
 async function readResponseMessage(

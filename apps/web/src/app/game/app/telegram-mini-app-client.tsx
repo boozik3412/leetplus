@@ -61,7 +61,8 @@ export function TelegramMiniAppClient() {
 
   const openSummary = useCallback(
     async (nextSummary?: GuestPortalGameSummary | null) => {
-      const resolvedSummary = nextSummary ?? (await requestGameSummary());
+      const resolvedSummary =
+        nextSummary ?? (await recordGameAppOpen("TG_MINI_APP"));
       setSummary(resolvedSummary);
       setClubs([]);
       setMessage(null);
@@ -1085,8 +1086,11 @@ async function requestMiniAppSession({
   return (await response.json()) as GuestPortalTelegramMiniAppSessionResponse;
 }
 
-async function requestGameSummary() {
-  const response = await fetch("/api/guest-portal/session/game-summary", {
+async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
+  const response = await fetch("/api/guest-portal/session/app-open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ surface }),
     cache: "no-store",
   });
 
@@ -1100,7 +1104,7 @@ async function requestGameSummary() {
     );
   }
 
-  return (await response.json()) as GuestPortalGameSummary;
+  return ((await response.json()) as { summary: GuestPortalGameSummary }).summary;
 }
 
 async function readResponseMessage(response: Response, fallback: string) {

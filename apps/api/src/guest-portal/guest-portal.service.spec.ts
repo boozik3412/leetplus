@@ -86,12 +86,15 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   const langameSettingsService = {
     searchGuestByPhoneForPortal: jest.fn(),
   };
+  const guestGamificationService = {
+    processEvent: jest.fn(),
+  };
   const service = new GuestPortalService(
     prisma,
     configService,
     jwtService as any,
     langameSettingsService as any,
-    {} as any,
+    guestGamificationService as any,
   );
 
   prisma.tenant.findFirst.mockResolvedValue(null);
@@ -132,7 +135,13 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     sources: [],
   });
 
-  return { jwtService, langameSettingsService, prisma, service };
+  return {
+    guestGamificationService,
+    jwtService,
+    langameSettingsService,
+    prisma,
+    service,
+  };
 }
 
 function buildTestReferralCode(
@@ -1023,6 +1032,82 @@ describe('GuestPortalService', () => {
       expect(summary).not.toHaveProperty('guestSnapshot');
       expect(summary.activity).not.toHaveProperty('timeline');
       expect(summary.activity).not.toHaveProperty('xpHistory');
+    });
+
+    it('records app-open as a daily profile event before returning game summary', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-21T10:00:00.000Z'));
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      const { tokenPayload } = mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+        },
+      });
+      jest.spyOn(service as any, 'findGuest').mockResolvedValue(null);
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: null,
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          appliedXpDelta: 25,
+          createdRewards: 1,
+          queuedRewardAmount: 50,
+          idempotent: false,
+        },
+      });
+      prisma.guestGameEvent.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+      prisma.guestGameEvent.findFirst.mockResolvedValueOnce(null);
+
+      try {
+        const result = await service.recordAppOpen('Bearer guest-token', {
+          surface: 'telegram-mini-app',
+        });
+
+        expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            tenantId: tokenPayload.tenantId,
+            tenantSlug: 'leet',
+          }),
+          expect.objectContaining({
+            profileId: portal.profile.id,
+            guestId: null,
+            storeId: portal.store.id,
+            eventType: 'APP_OPEN',
+            sourceFactId: 'profile-1:store-1:2026-06-21',
+            sourceFactKind: 'GUEST_APP_OPEN',
+            externalDomain: 'leetplus-guest-portal',
+            externalId: 'profile-1:store-1:2026-06-21',
+            note: expect.stringContaining('Telegram Mini App'),
+          }),
+        );
+        expect(result).toMatchObject({
+          processed: true,
+          idempotent: false,
+          appliedXpDelta: 25,
+          createdRewards: 1,
+          queuedRewardAmount: 50,
+          summary: {
+            tenant: portal.tenant,
+            store: portal.store,
+            profile: portal.profile,
+          },
+        });
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('limits bonus ledger history in compact game summary', async () => {

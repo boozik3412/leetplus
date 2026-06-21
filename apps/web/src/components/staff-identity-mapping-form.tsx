@@ -49,6 +49,7 @@ const eventActionLabels: Record<string, string> = {
   RELINK: "Перепривязка",
   UPDATE: "Связь обновлена",
   UNLINK: "Связь снята",
+  ROLLBACK: "Откат решения",
 };
 
 const eventDateFormatter = new Intl.DateTimeFormat("ru-RU", {
@@ -86,6 +87,7 @@ export function StaffIdentityMappingForm({
   const [events, setEvents] = useState<StaffIdentityMappingEvent[]>([]);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [rollingBackEventId, setRollingBackEventId] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [selectedGuestId, setSelectedGuestId] = useState("");
   const isInline = variant === "inline";
@@ -235,6 +237,66 @@ export function StaffIdentityMappingForm({
       setError("Не удалось сохранить привязку");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function rollbackEvent(event: StaffIdentityMappingEvent) {
+    const note = window.prompt(
+      "Комментарий к откату",
+      "Откат ошибочной привязки",
+    );
+
+    if (note === null) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      [
+        `Откатить последнее решение по Langame user_id ${event.externalUserId}?`,
+        event.previousGuestId
+          ? "Связь вернется к предыдущему сотруднику."
+          : "Связь будет снята, а смены снова станут без привязки.",
+      ].join("\n\n"),
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setRollingBackEventId(event.id);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(
+        `/api/guests/staff-control/identity-mappings/events/${event.id}/rollback`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note }),
+        },
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось откатить решение по привязке");
+        return;
+      }
+
+      const payload = (await response.json().catch(() => null)) as {
+        updatedShifts?: number;
+      } | null;
+      setSuccess(
+        `Откат выполнен. Обновлено смен: ${payload?.updatedShifts ?? 0}.`,
+      );
+      setHistoryVersion((value) => value + 1);
+      router.refresh();
+    } catch {
+      setError("Не удалось откатить решение по привязке");
+    } finally {
+      setRollingBackEventId(null);
     }
   }
 
@@ -399,6 +461,8 @@ export function StaffIdentityMappingForm({
         events={events}
         error={eventsError}
         isLoading={isLoadingEvents}
+        rollingBackEventId={rollingBackEventId}
+        onRollback={rollbackEvent}
         className="lg:col-span-full"
       />
     </form>
@@ -421,11 +485,15 @@ function MappingEventsPanel({
   events,
   error,
   isLoading,
+  rollingBackEventId,
+  onRollback,
   className = "",
 }: {
   events: StaffIdentityMappingEvent[];
   error: string | null;
   isLoading: boolean;
+  rollingBackEventId: string | null;
+  onRollback: (event: StaffIdentityMappingEvent) => void;
   className?: string;
 }) {
   return (
@@ -459,7 +527,8 @@ function MappingEventsPanel({
         ) : null}
         {events.length > 0 ? (
           <ol className="space-y-2">
-            {events.map((event) => {
+            {events.map((event, index) => {
+              const canRollback = index === 0 && event.action !== "ROLLBACK";
               const author =
                 event.createdBy?.fullName?.trim() ||
                 event.createdBy?.email ||
@@ -474,9 +543,21 @@ function MappingEventsPanel({
                     <p className="font-semibold text-zinc-950 dark:text-zinc-100">
                       {eventActionLabels[event.action] ?? event.action}
                     </p>
-                    <p className="text-zinc-500">
-                      {formatEventDate(event.createdAt)}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-zinc-500">
+                        {formatEventDate(event.createdAt)}
+                      </p>
+                      {canRollback ? (
+                        <button
+                          type="button"
+                          onClick={() => onRollback(event)}
+                          disabled={rollingBackEventId === event.id}
+                          className="rounded-full border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-700 transition hover:border-amber-300 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/70 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                        >
+                          {rollingBackEventId === event.id ? "Откат..." : "Откатить"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                   <p className="mt-1">
                     {author}

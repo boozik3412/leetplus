@@ -41,6 +41,7 @@ import {
   type GuestListQuery,
   type GuestListResponse,
   type StaffIdentityMappingDto,
+  type StaffIdentityMappingRollbackDto,
   type StaffIdentityMappingEventQuery,
   type StaffIdentityMappingEventRow,
   type StaffIdentityMappingResult,
@@ -352,6 +353,16 @@ export class GuestsController {
     @Query() query: StaffIdentityMappingEventQuery,
   ): Promise<StaffIdentityMappingEventRow[]> {
     return this.guestsService.getStaffIdentityMappingEvents(user, query);
+  }
+
+  @Roles(...staffControlAccessRoles)
+  @Post('staff-control/identity-mappings/events/:id/rollback')
+  rollbackStaffIdentityMappingEvent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: StaffIdentityMappingRollbackDto,
+  ): Promise<StaffIdentityMappingResult> {
+    return this.guestsService.rollbackStaffIdentityMappingEvent(user, id, dto);
   }
 
   @Roles(...staffControlAccessRoles)

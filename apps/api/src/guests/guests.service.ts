@@ -187,6 +187,10 @@ export type StaffIdentityMappingDto = {
   note?: string | null;
 };
 
+export type StaffIdentityMappingRollbackDto = {
+  note?: string | null;
+};
+
 export type StaffIdentityMappingEventQuery = {
   externalDomain?: string | null;
   externalUserId?: string | null;
@@ -800,11 +804,11 @@ export type StaffOperationsReport = {
 
 export type StaffIdentityMappingResult = {
   id: string;
-  guestId: string;
+  guestId: string | null;
   externalDomain: string | null;
   externalUserId: string;
   updatedShifts: number;
-  action: 'LINK' | 'RELINK' | 'UPDATE' | 'UNLINK';
+  action: 'LINK' | 'RELINK' | 'UPDATE' | 'UNLINK' | 'ROLLBACK';
   auditEventId: string;
 };
 
@@ -3326,6 +3330,172 @@ export class GuestsService {
       id: mapping.id,
       updatedShifts: updatedShifts.count,
       action: 'UNLINK',
+      auditEventId: auditEvent.id,
+    };
+  }
+
+  async rollbackStaffIdentityMappingEvent(
+    user: AuthenticatedUser,
+    eventId: string,
+    dto: StaffIdentityMappingRollbackDto = {},
+  ): Promise<StaffIdentityMappingResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const note = this.normalizeText(dto.note, 1000);
+    const event = await this.prisma.guestStaffIdentityMappingEvent.findFirst({
+      where: { id: eventId, tenantId },
+      select: {
+        id: true,
+        mappingId: true,
+        action: true,
+        externalDomain: true,
+        externalUserId: true,
+        previousGuestId: true,
+        nextGuestId: true,
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Staff identity mapping event not found');
+    }
+
+    if (event.action === 'ROLLBACK') {
+      throw new BadRequestException('Rollback event cannot be rolled back');
+    }
+
+    const latestEvent =
+      await this.prisma.guestStaffIdentityMappingEvent.findFirst({
+        where: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: event.externalDomain,
+          externalUserId: event.externalUserId,
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+
+    if (latestEvent?.id !== event.id) {
+      throw new BadRequestException(
+        'Only the latest mapping decision can be rolled back',
+      );
+    }
+
+    if (event.previousGuestId) {
+      const [guest, staffGroups] = await Promise.all([
+        this.prisma.guest.findFirst({
+          where: { id: event.previousGuestId, tenantId },
+          select: {
+            id: true,
+            externalDomain: true,
+            externalGuestTypeId: true,
+          },
+        }),
+        this.loadAdminGuestGroups(tenantId),
+      ]);
+
+      if (!guest) {
+        throw new NotFoundException('Previous staff guest not found');
+      }
+
+      const isStaffGuest = staffGroups.some(
+        (group) =>
+          group.externalDomain === guest.externalDomain &&
+          group.externalGroupId === guest.externalGuestTypeId,
+      );
+
+      if (!isStaffGuest) {
+        throw new BadRequestException('Previous guest is not a staff guest');
+      }
+    }
+
+    const externalDomain = event.externalDomain ?? '';
+    const shiftExternalDomain = externalDomain || null;
+    const currentMapping =
+      await this.prisma.guestStaffIdentityMapping.findUnique({
+        where: {
+          tenantId_externalProvider_externalDomain_externalUserId: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain,
+            externalUserId: event.externalUserId,
+          },
+        },
+        select: { id: true, guestId: true },
+      });
+
+    const { mappingId, updatedShifts, auditEvent } =
+      await this.prisma.$transaction(async (tx) => {
+        let mappingId = currentMapping?.id ?? event.mappingId ?? event.id;
+
+        if (event.previousGuestId) {
+          const mapping = await tx.guestStaffIdentityMapping.upsert({
+            where: {
+              tenantId_externalProvider_externalDomain_externalUserId: {
+                tenantId,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain,
+                externalUserId: event.externalUserId,
+              },
+            },
+            create: {
+              tenantId,
+              guestId: event.previousGuestId,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain,
+              externalUserId: event.externalUserId,
+              note,
+              createdByUserId: user.id,
+            },
+            update: {
+              guestId: event.previousGuestId,
+              note,
+              createdByUserId: user.id,
+            },
+            select: { id: true },
+          });
+          mappingId = mapping.id;
+        } else if (currentMapping) {
+          await tx.guestStaffIdentityMapping.delete({
+            where: { id: currentMapping.id },
+          });
+        }
+
+        const updatedShifts = await tx.guestWorkingShift.updateMany({
+          where: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: shiftExternalDomain,
+            externalUserId: event.externalUserId,
+          },
+          data: { guestId: event.previousGuestId ?? null },
+        });
+        const auditEvent = await tx.guestStaffIdentityMappingEvent.create({
+          data: {
+            tenantId,
+            mappingId,
+            action: 'ROLLBACK',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain,
+            externalUserId: event.externalUserId,
+            previousGuestId: currentMapping?.guestId ?? event.nextGuestId,
+            nextGuestId: event.previousGuestId,
+            note,
+            updatedShifts: updatedShifts.count,
+            createdByUserId: user.id,
+          },
+          select: { id: true },
+        });
+
+        return { mappingId, updatedShifts, auditEvent };
+      });
+
+    return {
+      id: mappingId,
+      guestId: event.previousGuestId,
+      externalDomain: externalDomain || null,
+      externalUserId: event.externalUserId,
+      updatedShifts: updatedShifts.count,
+      action: 'ROLLBACK',
       auditEventId: auditEvent.id,
     };
   }

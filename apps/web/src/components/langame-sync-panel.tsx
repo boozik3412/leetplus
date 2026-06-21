@@ -927,6 +927,15 @@ const syncPeriodOptions: { value: SyncPeriod; label: string; caption: string }[]
   },
 ];
 
+const guestCriticalProfileKeys: { key: EndpointProfileKey; label: string }[] = [
+  { key: "guests", label: "База гостей" },
+  { key: "guestGroups", label: "Группы" },
+  { key: "guestBalances", label: "Баланс" },
+  { key: "guestBonusBalances", label: "Бонусы" },
+  { key: "guestSessions", label: "Сессии" },
+  { key: "guestLogs", label: "Логи" },
+];
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
@@ -1047,6 +1056,24 @@ export function LangameSyncPanel({
       setSyncDateFrom(shiftDateInput(today, -29));
       setSyncDateTo(today);
     }
+  }
+
+  function scrollToDiagnosticsBlock(elementId: string) {
+    window.setTimeout(() => {
+      document.getElementById(elementId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
+  }
+
+  function selectEndpointProfile(profileKey: EndpointProfileKey) {
+    setEndpointProfileKey(profileKey);
+    scrollToDiagnosticsBlock("endpoint-profile-diagnostics");
+  }
+
+  function openGuestSearchDiagnostics() {
+    scrollToDiagnosticsBlock("guest-search-diagnostics");
   }
 
   async function syncAllLangameData() {
@@ -1590,38 +1617,42 @@ export function LangameSyncPanel({
         diagnosticsStatus={routeDiagnosticsStatus}
         latestGuestStatus={latestGuestStatus}
         onCheckDiagnostics={checkRouteDiagnostics}
+        onOpenGuestSearchDiagnostics={openGuestSearchDiagnostics}
+        onSelectProfileKey={selectEndpointProfile}
         settings={settings}
       />
       <EndpointProfileQualityOverview
         selectedProfileKey={endpointProfileKey}
         settings={settings}
-        onSelectProfileKey={setEndpointProfileKey}
+        onSelectProfileKey={selectEndpointProfile}
       />
-      <EndpointProfileDiagnosticsPanel
-        clubId={endpointProfileClubId}
-        dateFrom={syncDateFrom}
-        dateTo={syncDateTo}
-        guestId={endpointProfileGuestId}
-        page={endpointProfilePage}
-        pageLimit={endpointProfilePageLimit}
-        profileError={endpointProfileError}
-        profileKey={endpointProfileKey}
-        profileStatus={endpointProfileStatus}
-        result={endpointProfileResult}
-        settings={settings}
-        snapshotError={endpointSnapshotError}
-        snapshotResult={endpointSnapshotResult}
-        snapshotStatus={endpointSnapshotStatus}
-        sourceId={endpointProfileSourceId}
-        onClubIdChange={setEndpointProfileClubId}
-        onGuestIdChange={setEndpointProfileGuestId}
-        onPageChange={setEndpointProfilePage}
-        onPageLimitChange={setEndpointProfilePageLimit}
-        onProfileKeyChange={setEndpointProfileKey}
-        onSourceIdChange={setEndpointProfileSourceId}
-        onSnapshot={runEndpointSnapshot}
-        onSubmit={checkEndpointProfileDiagnostics}
-      />
+      <div id="endpoint-profile-diagnostics" className="scroll-mt-6">
+        <EndpointProfileDiagnosticsPanel
+          clubId={endpointProfileClubId}
+          dateFrom={syncDateFrom}
+          dateTo={syncDateTo}
+          guestId={endpointProfileGuestId}
+          page={endpointProfilePage}
+          pageLimit={endpointProfilePageLimit}
+          profileError={endpointProfileError}
+          profileKey={endpointProfileKey}
+          profileStatus={endpointProfileStatus}
+          result={endpointProfileResult}
+          settings={settings}
+          snapshotError={endpointSnapshotError}
+          snapshotResult={endpointSnapshotResult}
+          snapshotStatus={endpointSnapshotStatus}
+          sourceId={endpointProfileSourceId}
+          onClubIdChange={setEndpointProfileClubId}
+          onGuestIdChange={setEndpointProfileGuestId}
+          onPageChange={setEndpointProfilePage}
+          onPageLimitChange={setEndpointProfilePageLimit}
+          onProfileKeyChange={setEndpointProfileKey}
+          onSourceIdChange={setEndpointProfileSourceId}
+          onSnapshot={runEndpointSnapshot}
+          onSubmit={checkEndpointProfileDiagnostics}
+        />
+      </div>
       <ServiceDiagnosticsPanel
         diagnostics={serviceDiagnostics}
         diagnosticsError={serviceDiagnosticsError}
@@ -1629,17 +1660,19 @@ export function LangameSyncPanel({
         onCheckDiagnostics={checkServiceDiagnostics}
         settings={settings}
       />
-      <GuestSearchDiagnosticsPanel
-        field={guestSearchField}
-        query={guestSearchQuery}
-        result={guestSearchResult}
-        searchError={guestSearchError}
-        searchStatus={guestSearchStatus}
-        settings={settings}
-        onFieldChange={setGuestSearchField}
-        onQueryChange={setGuestSearchQuery}
-        onSubmit={searchGuestDiagnostics}
-      />
+      <div id="guest-search-diagnostics" className="scroll-mt-6">
+        <GuestSearchDiagnosticsPanel
+          field={guestSearchField}
+          query={guestSearchQuery}
+          result={guestSearchResult}
+          searchError={guestSearchError}
+          searchStatus={guestSearchStatus}
+          settings={settings}
+          onFieldChange={setGuestSearchField}
+          onQueryChange={setGuestSearchQuery}
+          onSubmit={searchGuestDiagnostics}
+        />
+      </div>
       <LatestGuestDiagnostics status={latestGuestStatus} />
       <div className="grid gap-6 xl:grid-cols-2">
         <SyncHistory jobs={settings.syncJobs} />
@@ -2167,6 +2200,8 @@ function EndpointMapPanel({
   diagnosticsStatus,
   diagnosticsError,
   onCheckDiagnostics,
+  onSelectProfileKey,
+  onOpenGuestSearchDiagnostics,
 }: {
   settings: LangameSettings;
   latestGuestStatus: GuestSyncStatus | null;
@@ -2174,8 +2209,16 @@ function EndpointMapPanel({
   diagnosticsStatus: RouteDiagnosticsStatus;
   diagnosticsError: string | null;
   onCheckDiagnostics: () => void;
+  onSelectProfileKey: (key: EndpointProfileKey) => void;
+  onOpenGuestSearchDiagnostics: () => void;
 }) {
   const availableRouteKeys = getAvailableRouteKeys(diagnostics);
+  const profileHealthByKey = new Map(
+    buildEndpointProfileHealth(settings).map((profile) => [
+      profile.endpoint.key,
+      profile,
+    ]),
+  );
   const endpointsByGroup = endpointGroupOrder.map((group) => ({
     group,
     endpoints: langameEndpointMap.filter((endpoint) => endpoint.group === group),
@@ -2324,6 +2367,14 @@ function EndpointMapPanel({
               </span>
             </div>
 
+            {group === "guests" ? (
+              <GuestEndpointReadinessPanel
+                profileHealthByKey={profileHealthByKey}
+                onOpenGuestSearchDiagnostics={onOpenGuestSearchDiagnostics}
+                onSelectProfileKey={onSelectProfileKey}
+              />
+            ) : null}
+
             <div className="mt-3 grid gap-2 xl:grid-cols-2">
               {endpoints.map((endpoint) => {
                 const availability = getEndpointAvailability(
@@ -2331,6 +2382,14 @@ function EndpointMapPanel({
                   availableRouteKeys,
                   diagnostics,
                 );
+                const profileKey = getEndpointProfileKeyForMapItem(endpoint);
+                const profileHealth = profileKey
+                  ? profileHealthByKey.get(profileKey) ?? null
+                  : null;
+                const canOpenProfile = Boolean(profileKey);
+                const canOpenGuestSearch =
+                  endpoint.method === "POST" &&
+                  normalizeRoutePath(endpoint.path) === "/guests/search";
 
                 return (
                   <div
@@ -2363,13 +2422,54 @@ function EndpointMapPanel({
                           {endpointStatusLabels[endpoint.usageStatus]}
                         </span>
                         <span className={availabilityBadgeClass(availability)}>
-                          {availabilityLabel(availability)}
+                          маршрут: {availabilityLabel(availability)}
                         </span>
+                        {profileHealth ? (
+                          <span
+                            className={endpointProfileHealthBadgeClass(
+                              profileHealth.status,
+                            )}
+                          >
+                            профиль: {endpointProfileHealthLabel(profileHealth.status)}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                     <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                       {endpoint.description}
                     </p>
+                    {profileHealth ? (
+                      <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        {endpointProfileHealthDetail(profileHealth)}
+                      </p>
+                    ) : canOpenGuestSearch ? (
+                      <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        Для точечного поиска нужен отдельный безопасный запрос с
+                        телефоном, email, ID гостя или бонусной картой.
+                      </p>
+                    ) : null}
+                    {canOpenProfile || canOpenGuestSearch ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {profileKey ? (
+                          <button
+                            type="button"
+                            onClick={() => onSelectProfileKey(profileKey)}
+                            className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+                          >
+                            Открыть проверку
+                          </button>
+                        ) : null}
+                        {canOpenGuestSearch ? (
+                          <button
+                            type="button"
+                            onClick={onOpenGuestSearchDiagnostics}
+                            className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+                          >
+                            Открыть поиск
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -2377,6 +2477,113 @@ function EndpointMapPanel({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function GuestEndpointReadinessPanel({
+  profileHealthByKey,
+  onSelectProfileKey,
+  onOpenGuestSearchDiagnostics,
+}: {
+  profileHealthByKey: Map<EndpointProfileKey, EndpointProfileHealth>;
+  onSelectProfileKey: (key: EndpointProfileKey) => void;
+  onOpenGuestSearchDiagnostics: () => void;
+}) {
+  const criticalProfiles = guestCriticalProfileKeys.map((item) => ({
+    ...item,
+    health: profileHealthByKey.get(item.key),
+  }));
+  const checkedCount = criticalProfiles.filter(
+    (item) => (item.health?.status ?? "unchecked") !== "unchecked",
+  ).length;
+  const readyCount = criticalProfiles.filter(
+    (item) => item.health?.status === "ready",
+  ).length;
+  const problemCount = criticalProfiles.filter((item) =>
+    ["partial", "stale", "failed"].includes(item.health?.status ?? "unchecked"),
+  ).length;
+  const guestLogsHealth = profileHealthByKey.get("guestLogs");
+  const guestSessionsHealth = profileHealthByKey.get("guestSessions");
+  const nextAction =
+    guestLogsHealth?.status === "ready"
+      ? "guests/logs готов для квестов, anti-fraud и конструктора событий."
+      : "Сначала проверьте guests/logs за выбранный период: это основной источник событий гостя для квестов.";
+
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+            Готовность гостевого контура
+          </p>
+          <p className="mt-1 text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+            {readyCount}/{criticalProfiles.length} критичных endpoint готовы
+          </p>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+            Проверяем не только наличие маршрута в Langame, но и реальный
+            payload: строки, поля, пустые ответы и ошибки по активным источникам.
+            {problemCount > 0
+              ? ` Требуют внимания: ${problemCount}.`
+              : ""}
+          </p>
+        </div>
+        <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:w-[28rem]">
+          <SyncHealthMetric
+            detail="из критичных guest endpoint"
+            label="Профили"
+            value={`${checkedCount}/${criticalProfiles.length}`}
+          />
+          <SyncHealthMetric
+            detail={endpointProfileHealthDetail(
+              guestSessionsHealth ?? fallbackEndpointProfileHealth("guestSessions"),
+            )}
+            label="Сессии"
+            tone={guestSessionsHealth?.status === "ready" ? "neutral" : "warning"}
+            value={endpointProfileHealthLabel(
+              guestSessionsHealth?.status ?? "unchecked",
+            )}
+          />
+          <SyncHealthMetric
+            detail={endpointProfileHealthDetail(
+              guestLogsHealth ?? fallbackEndpointProfileHealth("guestLogs"),
+            )}
+            label="Логи"
+            tone={guestLogsHealth?.status === "ready" ? "neutral" : "warning"}
+            value={endpointProfileHealthLabel(
+              guestLogsHealth?.status ?? "unchecked",
+            )}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {criticalProfiles.map((item) => {
+          const status = item.health?.status ?? "unchecked";
+
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onSelectProfileKey(item.key)}
+              className="rounded-full border border-white bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+            >
+              {item.label}: {endpointProfileHealthLabel(status)}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onOpenGuestSearchDiagnostics}
+          className="rounded-full border border-white bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+        >
+          Точечный поиск гостя
+        </button>
+      </div>
+
+      <p className="mt-3 rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-emerald-900/60 dark:bg-zinc-950 dark:text-zinc-400">
+        {nextAction}
+      </p>
     </div>
   );
 }
@@ -3903,6 +4110,24 @@ function buildEndpointProfileHealth(
   });
 }
 
+function fallbackEndpointProfileHealth(key: EndpointProfileKey): EndpointProfileHealth {
+  const endpoint =
+    endpointProfileOptions.find((profile) => profile.key === key) ??
+    endpointProfileOptions[0];
+
+  return {
+    endpoint,
+    status: "unchecked",
+    checkedCount: 0,
+    expectedCount: 0,
+    successCount: 0,
+    errorCount: 0,
+    latestCheckedAt: null,
+    rowCount: 0,
+    nextAction: "Запустить ручное профилирование endpoint в /sync.",
+  };
+}
+
 function mapEndpointSnapshotCandidateStatus(
   status?: LangameSettings["endpointSnapshotCandidates"][number]["status"],
 ): EndpointProfileHealthStatus {
@@ -4152,6 +4377,21 @@ function getAvailableRouteKeys(diagnostics: RouteDiagnosticsResult | null) {
   });
 
   return keys;
+}
+
+function getEndpointProfileKeyForMapItem(
+  endpoint: EndpointMapItem,
+): EndpointProfileKey | null {
+  if (endpoint.method !== "GET") {
+    return null;
+  }
+
+  const normalizedPath = normalizeRoutePath(endpoint.path);
+  const profile = endpointProfileOptions.find(
+    (option) => normalizeRoutePath(option.path) === normalizedPath,
+  );
+
+  return profile?.key ?? null;
 }
 
 function getEndpointAvailability(

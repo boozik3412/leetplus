@@ -130,7 +130,7 @@ function shiftSignalLabel(value: StaffControlAnomalyType) {
     "missing-incassation": "Нет инкассации",
     "long-shift": "Длинная смена",
     "low-middle-check": "Низкий ср. чек",
-    "unmapped-operator": "user_id без сотрудника",
+    "unmapped-operator": "нужно сопоставить",
   };
 
   return labels[value];
@@ -398,6 +398,8 @@ export default async function StaffOperatorsPage({
           </div>
         </details>
 
+        <IdentityHelpPanel />
+
         <AdminComparisonPanel report={report} isFullView={isFullView} />
 
         <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -449,7 +451,7 @@ export default async function StaffOperatorsPage({
                       Администратор
                     </th>
                     <th className="px-3 py-3 text-left font-semibold">
-                      Сотрудник
+                      Сотрудник LeetPlus
                     </th>
                     <th className="px-3 py-3 text-left font-semibold">Клубы</th>
                     <th className="px-3 py-3 text-left font-semibold">
@@ -500,16 +502,16 @@ export default async function StaffOperatorsPage({
                           ) : (
                             <div className="space-y-1">
                               <span className="font-medium text-amber-700 dark:text-amber-300">
-                                Langame user_id без сотрудника
+                                Нужно сопоставить с LeetPlus
                               </span>
                               <p className="text-xs text-zinc-500">
-                                Смены есть, но они не сопоставлены с карточкой персонала.
+                                Смены пришли из Langame, но еще не закреплены за карточкой сотрудника.
                               </p>
                               <a
                                 href={`#${staffMappingAnchorId(row.externalDomain, row.externalUserId)}`}
                                 className="inline-flex text-xs font-semibold text-emerald-700 underline underline-offset-4 dark:text-emerald-300"
                               >
-                                Перейти к привязке
+                                Открыть блок привязки
                               </a>
                             </div>
                           )}
@@ -987,6 +989,48 @@ function FilterChip({ label }: { label: string }) {
   );
 }
 
+
+function IdentityHelpPanel() {
+  return (
+    <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-zinc-700 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-zinc-300">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+            Как читать привязки
+          </p>
+          <h2 className="mt-1 text-base font-semibold text-zinc-950 dark:text-zinc-100">
+            Одна строка = один Langame user_id, а не готовая карточка сотрудника
+          </h2>
+        </div>
+        <span className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-xs font-semibold text-zinc-600 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800">
+          Сначала сверка, потом привязка
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <IdentityHint title="Langame user_id" text="Оператор из Langame, от которого приходят смены, касса, возвраты и инкассация." />
+        <IdentityHint title="Карточка LeetPlus" text="Сотрудник внутри LeetPlus, к которому должны попадать смены и показатели." />
+        <IdentityHint title="Смены ниже" text="Закрытые смены именно этого Langame user_id. Они помогают проверить, чей это аккаунт." />
+        <IdentityHint title="Привязка" text="Сопоставление одного Langame user_id с одной карточкой сотрудника LeetPlus." />
+      </div>
+      <div className="mt-4 grid gap-2 md:grid-cols-4">
+        <IdentityMappingStep title="1. Сверьте" text="Проверьте ФИО, клуб, последние смены и кассовые операции." />
+        <IdentityMappingStep title="2. Выберите" text="В блоке привязки выберите карточку того же сотрудника LeetPlus." />
+        <IdentityMappingStep title="3. Сохраните" text="После сохранения смены этого user_id попадут в аналитику выбранного сотрудника." />
+        <IdentityMappingStep title="4. Исправьте при ошибке" text="Если связали не того сотрудника, используйте журнал привязок и откат." />
+      </div>
+    </section>
+  );
+}
+
+function IdentityHint({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-md border border-emerald-100 bg-white/70 p-3 dark:border-emerald-900/70 dark:bg-zinc-950/40">
+      <p className="font-semibold text-zinc-950 dark:text-zinc-100">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">{text}</p>
+    </div>
+  );
+}
+
 function adminDisplayName(row: StaffOperatorReport["rows"][number]) {
   return (
     row.linkedGuest?.displayName ??
@@ -1175,31 +1219,31 @@ function IdentityMappingPanel({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase text-amber-800 dark:text-amber-200">
-            Связать оператора Langame с сотрудником LeetPlus
+            Действие по этому Langame user_id
           </p>
           <h3 className="mt-1 text-base font-semibold text-zinc-950 dark:text-zinc-100">
             {operatorName}
           </h3>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-amber-900/90 dark:text-amber-100/80">
-            Эта форма относится к одному оператору Langame: user_id {row.externalUserId}
-            {row.externalDomain ? ` · ${row.externalDomain}` : ""}. Смены выше сгруппированы именно по нему; после сохранения они будут учитываться в аналитике выбранной карточки сотрудника.
+            Эта форма относится только к оператору Langame: user_id {row.externalUserId}
+            {row.externalDomain ? ` · ${row.externalDomain}` : ""}. Выберите карточку сотрудника LeetPlus, которому действительно принадлежат смены выше.
           </p>
         </div>
         <span className="w-fit shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-          {row.mappingId ? "связь уже есть" : "нужна привязка"}
+          {row.mappingId ? "уже сопоставлен" : "нужно сопоставить"}
         </span>
       </div>
 
       <dl className="mt-3 grid gap-2 rounded-md border border-amber-200 bg-white/75 p-3 text-xs dark:border-amber-900/60 dark:bg-zinc-950/70 sm:grid-cols-3">
         <IdentityMappingValue label="Langame user_id" value={`${row.externalUserId}${row.externalDomain ? ` · ${row.externalDomain}` : ""}`} />
-        <IdentityMappingValue label="Смены в выборке" value={`${formatNumber(row.shiftsCount)} · последняя: ${lastShiftLabel}`} />
-        <IdentityMappingValue label="Клубы по сменам" value={storesLabel} />
+        <IdentityMappingValue label="Смены этого user_id" value={`${formatNumber(row.shiftsCount)} · последняя: ${lastShiftLabel}`} />
+        <IdentityMappingValue label="Клубы в этих сменах" value={storesLabel} />
       </dl>
 
       <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
-        <IdentityMappingStep title="1. Сверьте смены" text="Проверьте, что закрытые смены выше относятся к этому сотруднику." />
-        <IdentityMappingStep title="2. Выберите карточку" text="Нужна карточка LeetPlus того же сотрудника, а не смены или клуба." />
-        <IdentityMappingStep title="3. Сохраните" text={`После сохранения user_id ${row.externalUserId} будет связан с выбранной карточкой.`} />
+        <IdentityMappingStep title="1. Сверьте смены" text="Проверьте ФИО, клубы, последние смены и суммы. Это главное доказательство, что user_id выбран верно." />
+        <IdentityMappingStep title="2. Выберите карточку" text="Выберите именно сотрудника LeetPlus. Клуб и смены уже подтянуты из Langame для сверки." />
+        <IdentityMappingStep title="3. Сохраните" text={`После сохранения смены этого user_id в периоде будут учитываться в аналитике выбранного сотрудника.`} />
       </div>
 
       <div className="mt-3">
@@ -1256,11 +1300,11 @@ function ShiftDetailsPreview({
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-zinc-500">
-            Смены, найденные у этого Langame user_id
+            Смены для сверки этого Langame user_id
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Карточки ниже сгруппированы по одному оператору Langame{operatorName ? `: ${operatorName}` : ""}
-            {externalUserId ? ` · user_id ${externalUserId}` : ""}. Если ФИО и смены совпадают с сотрудником LeetPlus, используйте блок привязки под списком смен.
+            Ниже показаны последние проблемные и закрытые смены одного оператора Langame{operatorName ? `: ${operatorName}` : ""}
+            {externalUserId ? ` · user_id ${externalUserId}` : ""}. По ним проще понять, к какой карточке LeetPlus его привязать.
           </p>
         </div>
         {shifts.length > visibleShifts.length ? (
@@ -1365,15 +1409,15 @@ function OperatorCard({
               : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
           ].join(" ")}
         >
-          {row.linkedGuest ? "Привязан" : "user_id без сотрудника"}
+          {row.linkedGuest ? "Привязан" : "нужно сопоставить"}
         </span>
       </div>
 
       {!row.linkedGuest ? (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
-          <p className="font-semibold">Что означает статус?</p>
+          <p className="font-semibold">Что это значит?</p>
           <p className="mt-1 text-xs leading-5 text-amber-900/80 dark:text-amber-100/80">
-            Langame user_id найден в сменах, но не связан с карточкой сотрудника LeetPlus. Из-за этого смены, касса и сигналы не попадают в персональную аналитику.
+            Эти смены пришли от одного Langame user_id, но LeetPlus еще не знает, какому сотруднику их относить. Сверьте смены и выберите карточку сотрудника в блоке ниже.
           </p>
           <a
             href={`#${staffMappingAnchorId(row.externalDomain, row.externalUserId)}`}

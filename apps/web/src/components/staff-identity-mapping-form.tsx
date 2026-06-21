@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type StaffIdentityOption = {
   id: string;
@@ -24,7 +24,48 @@ type StaffIdentityMappingFormProps = {
   showContext?: boolean;
 };
 
+type StaffIdentityMappingEvent = {
+  id: string;
+  mappingId: string | null;
+  action: string;
+  externalDomain: string | null;
+  externalUserId: string;
+  previousGuestId: string | null;
+  nextGuestId: string | null;
+  note: string | null;
+  updatedShifts: number;
+  createdAt: string;
+  createdBy: {
+    id: string;
+    fullName: string | null;
+    email: string;
+  } | null;
+};
+
 const numberFormatter = new Intl.NumberFormat("ru-RU");
+
+const eventActionLabels: Record<string, string> = {
+  LINK: "Привязка создана",
+  RELINK: "Перепривязка",
+  UPDATE: "Связь обновлена",
+  UNLINK: "Связь снята",
+};
+
+const eventDateFormatter = new Intl.DateTimeFormat("ru-RU", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function formatEventDate(value: string) {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? value
+    : eventDateFormatter.format(date);
+}
 
 export function StaffIdentityMappingForm({
   externalDomain,
@@ -42,6 +83,10 @@ export function StaffIdentityMappingForm({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [events, setEvents] = useState<StaffIdentityMappingEvent[]>([]);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
   const [selectedGuestId, setSelectedGuestId] = useState("");
   const isInline = variant === "inline";
   const selectedStaff = useMemo(
@@ -54,6 +99,73 @@ export function StaffIdentityMappingForm({
     .filter(Boolean);
   const shiftCountLabel =
     typeof shiftCount === "number" ? numberFormatter.format(shiftCount) : null;
+
+  const eventsQuery = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (mappingId) {
+      params.set("mappingId", mappingId);
+    } else {
+      if (externalDomain) {
+        params.set("externalDomain", externalDomain);
+      }
+
+      params.set("externalUserId", externalUserId);
+    }
+
+    params.set("limit", "5");
+
+    return params.toString();
+  }, [externalDomain, externalUserId, mappingId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadEvents() {
+      setIsLoadingEvents(true);
+      setEventsError(null);
+
+      try {
+        const response = await fetch(
+          `/api/guests/staff-control/identity-mappings/events?${eventsQuery}`,
+        );
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as {
+            message?: string;
+          } | null;
+          throw new Error(payload?.message ?? "Не удалось загрузить журнал");
+        }
+
+        const payload = (await response.json().catch(() => [])) as
+          | StaffIdentityMappingEvent[]
+          | null;
+
+        if (isMounted) {
+          setEvents(Array.isArray(payload) ? payload : []);
+        }
+      } catch (eventError) {
+        if (isMounted) {
+          setEvents([]);
+          setEventsError(
+            eventError instanceof Error
+              ? eventError.message
+              : "Не удалось загрузить журнал",
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingEvents(false);
+        }
+      }
+    }
+
+    loadEvents();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [eventsQuery, historyVersion]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -117,6 +229,7 @@ export function StaffIdentityMappingForm({
       setSuccess(
         `Привязка сохранена. Обновлено смен: ${payload?.updatedShifts ?? 0}.`,
       );
+      setHistoryVersion((value) => value + 1);
       router.refresh();
     } catch {
       setError("Не удалось сохранить привязку");
@@ -160,6 +273,7 @@ export function StaffIdentityMappingForm({
       }
 
       setSuccess("Привязка снята.");
+      setHistoryVersion((value) => value + 1);
       router.refresh();
     } catch {
       setError("Не удалось снять привязку");
@@ -281,6 +395,12 @@ export function StaffIdentityMappingForm({
           {success}
         </p>
       ) : null}
+      <MappingEventsPanel
+        events={events}
+        error={eventsError}
+        isLoading={isLoadingEvents}
+        className="lg:col-span-full"
+      />
     </form>
   );
 }
@@ -293,5 +413,86 @@ function ContextValue({ label, value }: { label: string; value: string }) {
         {value}
       </p>
     </div>
+  );
+}
+
+
+function MappingEventsPanel({
+  events,
+  error,
+  isLoading,
+  className = "",
+}: {
+  events: StaffIdentityMappingEvent[];
+  error: string | null;
+  isLoading: boolean;
+  className?: string;
+}) {
+  return (
+    <details
+      className={[
+        "group rounded-md border border-zinc-200 bg-white/70 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-400",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 font-semibold text-zinc-700 marker:hidden dark:text-zinc-200">
+        <span>Журнал решений по привязке</span>
+        <span className="inline-flex items-center gap-2 text-zinc-500">
+          {isLoading
+            ? "загрузка"
+            : `${numberFormatter.format(events.length)} последних`}
+          <span className="text-base leading-none transition group-open:rotate-180">
+            v
+          </span>
+        </span>
+      </summary>
+      <div className="border-t border-zinc-200 px-3 py-3 dark:border-zinc-800">
+        {error ? (
+          <p className="font-medium text-amber-700 dark:text-amber-300">
+            {error}
+          </p>
+        ) : null}
+        {!error && !isLoading && events.length === 0 ? (
+          <p>Решений по этому Langame user_id пока нет.</p>
+        ) : null}
+        {events.length > 0 ? (
+          <ol className="space-y-2">
+            {events.map((event) => {
+              const author =
+                event.createdBy?.fullName?.trim() ||
+                event.createdBy?.email ||
+                "система";
+
+              return (
+                <li
+                  key={event.id}
+                  className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-zinc-950 dark:text-zinc-100">
+                      {eventActionLabels[event.action] ?? event.action}
+                    </p>
+                    <p className="text-zinc-500">
+                      {formatEventDate(event.createdAt)}
+                    </p>
+                  </div>
+                  <p className="mt-1">
+                    {author}
+                    {event.updatedShifts > 0
+                      ? ` · перенесено смен: ${numberFormatter.format(event.updatedShifts)}`
+                      : " · смены не переносились"}
+                  </p>
+                  {event.note ? (
+                    <p className="mt-1 text-zinc-500">{event.note}</p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+        ) : null}
+      </div>
+    </details>
   );
 }

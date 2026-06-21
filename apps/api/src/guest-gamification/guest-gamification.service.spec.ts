@@ -1926,14 +1926,14 @@ describe('GuestGamificationService', () => {
       expect(readiness.runbook.nextAction).toContain('dry-run');
       expect(readiness.targetStore).toMatchObject({
         id: 'store-1337',
-        playPath: '/play?storeId=store-1337',
+        playPath: '/play/game',
       });
       expect(readiness.items).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             key: 'PUBLIC_REGISTRATION',
-            actionHref: '/play?storeId=store-1337',
-            actionLabel: 'Открыть /play',
+            actionHref: '/game/auth?storeId=1337',
+            actionLabel: 'Открыть вход',
           }),
           expect.objectContaining({
             key: 'PUBLIC_GAME_QA',

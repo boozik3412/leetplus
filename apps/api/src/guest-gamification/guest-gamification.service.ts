@@ -3571,6 +3571,10 @@ export class GuestGamificationService {
       (targetStore.latitude != null || targetStore.longitude != null),
     );
     const storeSlugOrId = targetStore?.publicSlug ?? targetStore?.id ?? null;
+    const targetStoreAuthPath = storeSlugOrId
+      ? `/game/auth?storeId=${encodeURIComponent(storeSlugOrId)}`
+      : '/game/auth';
+    const targetStoreGamePath = '/play/game';
     const targetStorePayload = targetStore
       ? {
           id: targetStore.id,
@@ -3582,7 +3586,7 @@ export class GuestGamificationService {
           externalClubId: targetStore.externalClubId,
           gamificationEnabled: targetStore.gamificationEnabled,
           guestPortalPath: `/guest/${tenantSlug}/${storeSlugOrId}`,
-          playPath: `/play?storeId=${encodeURIComponent(targetStore.id)}`,
+          playPath: targetStoreGamePath,
         }
       : null;
     const items: GuestGamePilotReadinessItem[] = [
@@ -3605,7 +3609,7 @@ export class GuestGamificationService {
           ? 'Пилот выбирает клуб 1337, если он найден среди активных клубов; иначе берется первый клуб с включенной геймификацией.'
           : 'В tenant нет активного клуба для пилотного запуска геймификации.',
         nextAction: targetStore?.gamificationEnabled
-          ? 'Оставить клуб включенным в публичном каталоге /play.'
+          ? 'Оставить клуб включенным в публичном каталоге /game/clubs.'
           : 'Включить флаг геймификации у пилотного клуба на странице клубов.',
         actionHref: '/stores',
         actionLabel: 'Открыть клубы',
@@ -3633,9 +3637,9 @@ export class GuestGamificationService {
               ? 'заполнена одна координата'
               : 'координат нет'
           : 'клуб не выбран',
-        note: 'Перед production QA первого бонуса пилотный клуб должен участвовать в карте и поиске рядом на /game/clubs и /play.',
+        note: 'Перед production QA первого бонуса пилотный клуб должен участвовать в карте и поиске рядом на /game/clubs и /play/game.',
         nextAction: targetStoreCoordinatesReady
-          ? 'Проверить /game/clubs и /play с фильтром рядом на реальной геолокации.'
+          ? 'Проверить /game/clubs и /play/game с фильтром рядом на реальной геолокации.'
           : 'Заполнить широту и долготу пилотного клуба в /stores вручную или через bulk-действие Заполнить координаты.',
         actionHref: '/stores',
         actionLabel: targetStoreCoordinatesReady
@@ -3652,13 +3656,13 @@ export class GuestGamificationService {
             : 'BLOCKED',
         statusLabel: registrationReady ? 'готово' : 'не готово',
         ready: registrationReady,
-        metric: registrationReady ? '/play' : 'нужна настройка',
-        note: 'Гость должен пройти путь /play -> выбор клуба -> согласие -> OTP без сотруднической авторизации.',
+        metric: registrationReady ? '/game/auth' : 'нужна настройка',
+        note: 'Гость должен пройти путь /game/auth -> согласие -> OTP/Telegram/звонок -> выбор клуба без сотруднической авторизации.',
         nextAction: registrationReady
           ? 'Проверить путь на тестовом телефоне и открыть гостевой кабинет клуба.'
-          : 'Включить клуб в каталог /play через флаг геймификации или активное игровое правило.',
-        actionHref: targetStorePayload?.playPath ?? '/play',
-        actionLabel: 'Открыть /play',
+          : 'Включить клуб в каталог /game/clubs через флаг геймификации или активное игровое правило.',
+        actionHref: targetStore ? targetStoreAuthPath : '/game/auth',
+        actionLabel: 'Открыть вход',
       },
       {
         key: 'PUBLIC_GAME_QA',
@@ -3743,9 +3747,9 @@ export class GuestGamificationService {
         note: 'Регистрация не создает общий Guest, а создает отдельный GuestGameProfile для XP, миссий и наград.',
         nextAction: activeProfiles.length
           ? 'Использовать тестовый профиль для dry-run и первого события.'
-          : 'Зарегистрировать тестового участника через /play.',
-        actionHref: targetStorePayload?.playPath ?? '/play',
-        actionLabel: 'Открыть /play',
+          : 'Зарегистрировать тестового участника через /game/auth.',
+        actionHref: targetStorePayload?.playPath ?? targetStoreGamePath,
+        actionLabel: 'Открыть игру',
       },
       {
         key: 'LANGAME_MATCH',
@@ -3762,8 +3766,8 @@ export class GuestGamificationService {
         nextAction: linkedProfiles.length
           ? 'Перейти к проверке факта сессии и события.'
           : 'В гостевом кабинете нажать ручную проверку Langame или дождаться foundation sync.',
-        actionHref: targetStorePayload?.guestPortalPath ?? '/play',
-        actionLabel: targetStorePayload ? 'Открыть кабинет' : 'Открыть /play',
+        actionHref: targetStorePayload?.guestPortalPath ?? targetStoreGamePath,
+        actionLabel: targetStorePayload ? 'Открыть кабинет' : 'Открыть игру',
       },
       {
         key: 'ACTIVE_RULES',
@@ -4293,7 +4297,7 @@ export class GuestGamificationService {
             ? '1337 polling edge отправляет safe reply payload в Telegram. API-side sender можно включить отдельно, если перенести bot token на основную VDS.'
             : 'LeetPlus возвращает safe reply payload для 1337 edge adapter. Для прямой отправки нужны update secret, env-флаг sender и bot token.',
         nextAction: telegramAuthReplySenderReady
-          ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте без raw chat id, raw phone и raw update.'
+          ? 'Проверить /game/auth -> Telegram deep link -> contact-share на тестовом госте без raw chat id, raw phone и raw update.'
           : 'Добавить недостающие env или оставить 1337 polling edge, который отправляет reply payload.',
         runbook: telegramAuthRunbook,
       },
@@ -10938,11 +10942,11 @@ function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
     ],
     note: ready
       ? provider === 'SMS_RU_CALLCHECK'
-        ? 'Fallback-вход по SMS.ru Callcheck готов: /play создает USER_CALL challenge, гость звонит на выданный SMS.ru номер, а LeetPlus подтверждает статус polling-запросом.'
-        : 'Fallback-вход по звонку готов: /play создает USER_CALL challenge, гость звонит на настроенный номер, а call-provider подтверждает caller id сервисным callback.'
+        ? 'Fallback-вход по SMS.ru Callcheck готов: /game/auth создает USER_CALL challenge, гость звонит на выданный SMS.ru номер, а LeetPlus подтверждает статус polling-запросом.'
+        : 'Fallback-вход по звонку готов: /game/auth создает USER_CALL challenge, гость звонит на настроенный номер, а call-provider подтверждает caller id сервисным callback.'
       : 'Звонок пользователя остается вторым каналом после Telegram-бота; сейчас поддержаны ручной callback provider и SMS.ru Callcheck.',
     nextAction: ready
-      ? 'Проверить /play на тестовом госте: создать вход по звонку, позвонить с введенного номера и подтвердить callback без раскрытия raw phone.'
+      ? 'Проверить /game/auth на тестовом госте: создать вход по звонку, позвонить с введенного номера и подтвердить callback без раскрытия raw phone.'
       : 'Задать env GUEST_PORTAL_USER_CALL_ENABLED и либо GUEST_PORTAL_USER_CALL_SMS_RU_API_ID для SMS.ru, либо GUEST_PORTAL_USER_CALL_PHONE_NUMBER/GUEST_PORTAL_USER_CALL_SECRET для ручного provider.',
     runbook: guestAuthFallbackRunbook,
   };
@@ -10993,7 +10997,7 @@ function guestPortalIncomingCallLast4Readiness(): GuestGameIntegrationReadinessI
       },
     ],
     note: ready
-      ? 'Резервный вход готов: /play создает challenge, provider звонит гостю с номером, последние 4 цифры которого проверяются в LeetPlus.'
+      ? 'Резервный вход готов: /game/auth создает challenge, provider звонит гостю с номером, последние 4 цифры которого проверяются в LeetPlus.'
       : 'Четвертый канал оставлен резервом после Telegram-бота, звонка пользователя на номер и SMS-кода; для запуска нужен отдельный call-provider исходящих звонков.',
     nextAction: ready
       ? 'Проверить один тестовый вход: создать звонок, ввести последние 4 цифры номера и убедиться, что raw phone не попадает в UI.'

@@ -520,6 +520,7 @@ export type GuestGamePipelineRunResult = {
 
 export type GuestGamificationSummary = {
   profilesCount: number;
+  registeredProfilesCount: number;
   totalXp: number;
   averageLevel: number;
   activeLootBoxes: number;

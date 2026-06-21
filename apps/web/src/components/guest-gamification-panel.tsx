@@ -1677,7 +1677,13 @@ export function GuestGamificationPanel({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Игровые профили" value={workspace.summary.profilesCount} />
+          <StatCard
+            label="Зарегистрировано в игре"
+            value={
+              workspace.summary.registeredProfilesCount ??
+              workspace.summary.profilesCount
+            }
+          />
           <StatCard label="XP в системе" value={workspace.summary.totalXp} />
           <StatCard label="Награды к выдаче" value={workspace.summary.pendingRewards} />
           <StatCard
@@ -6782,9 +6788,15 @@ function LootBoxBusinessRules({
         catalog={guestLogCatalog}
         onChange={onChange}
       />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Лутбоксов на гостя в неделю">
-          <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+            Лимит на одного гостя
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            Сколько раз один участник может открыть этот лутбокс за неделю.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
               <input
                 type="radio"
@@ -6805,30 +6817,41 @@ function LootBoxBusinessRules({
             </label>
           </div>
           {hasWeeklyLootBoxLimit ? (
-            <input
-              className={`${fieldClass} mt-2`}
-              type="number"
-              min="1"
-              value={form.perGuestPerWeek}
-              onChange={(event) =>
-                onChange({ perGuestPerWeek: event.target.value })
-              }
-            />
+            <label className="mt-3 block text-sm font-medium text-zinc-700 dark:text-zinc-200">
+              Открытий на гостя в неделю
+              <input
+                className={fieldClass}
+                type="number"
+                min="1"
+                value={form.perGuestPerWeek}
+                onChange={(event) =>
+                  onChange({ perGuestPerWeek: event.target.value })
+                }
+              />
+            </label>
           ) : (
             <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
               LeetPlus не будет ограничивать количество открытий этим недельным лимитом.
             </p>
           )}
-        </Field>
-        <Field label="Открытий в день">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.totalPerDay}
-            onChange={(event) => onChange({ totalPerDay: event.target.value })}
-          />
-        </Field>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <label className="block text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+            Общий дневной лимит
+            <input
+              className={fieldClass}
+              type="number"
+              min="1"
+              value={form.totalPerDay}
+              onChange={(event) => onChange({ totalPerDay: event.target.value })}
+            />
+          </label>
+          <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            Сколько всего открытий разрешено в день по этому лутбоксу для всех
+            выбранных клубов. Оставьте поле пустым, если общий дневной лимит не
+            нужен.
+          </p>
+        </div>
       </div>
       <LootBoxPrizesEditor prizes={form.prizes} onChange={updatePrizes} />
     </BusinessRuleSection>
@@ -8527,51 +8550,65 @@ function GuestLogConditionFields({
     <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
-          Типы событий guests/logs
+          События Langame для лутбокса
         </p>
         {catalog.summary.types ? (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {catalog.summary.types} типов · {catalog.summary.logs} логов ·{" "}
+            {catalog.summary.types} типов · {catalog.summary.logs} событий ·{" "}
             {catalog.summary.domains} источников
           </p>
         ) : (
           <Link
-            href="/sync"
+            href="/sync?includeGuestLogs=1"
             className="text-xs font-semibold text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-300"
           >
-            Загрузить guests/logs в синхронизации
+            Загрузить события из Langame
           </Link>
         )}
       </div>
+      <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+        Этот блок нужен только для лутбоксов, которые открываются по конкретным
+        действиям гостя в Langame: вход, визит, турнир, отмена или другое
+        сохраненное событие. Если лутбокс не зависит от таких событий, оставьте
+        поля пустыми.
+      </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <Field label="Разрешенные типы">
+        <Field label="Какие события открывают лутбокс">
           <input
             className={fieldClass}
-            placeholder="visit, login, tournament"
+            placeholder="например: visit, login, tournament"
             value={guestLogTypes}
             onChange={(event) => onChange({ guestLogTypes: event.target.value })}
           />
+          <span className="block text-xs font-normal leading-5 text-zinc-500 dark:text-zinc-400">
+            Несколько значений можно указать через запятую или добавить ниже из
+            готовых вариантов.
+          </span>
         </Field>
-        <Field label="Запрещенные типы">
+        <Field label="Какие события не засчитывать">
           <input
             className={fieldClass}
-            placeholder="manual_cancel, test"
+            placeholder="например: manual_cancel, test"
             value={blockedGuestLogTypes}
             onChange={(event) =>
               onChange({ blockedGuestLogTypes: event.target.value })
             }
           />
+          <span className="block text-xs font-normal leading-5 text-zinc-500 dark:text-zinc-400">
+            Используйте для тестовых, ручных или отмененных действий, которые не
+            должны выдавать награду.
+          </span>
         </Field>
       </div>
       {businessPresets.length ? (
         <div className="mt-3 rounded-lg border border-cyan-100 bg-cyan-50/70 p-3 dark:border-cyan-950 dark:bg-cyan-950/20">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[11px] font-bold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-              Бизнес-пресеты
+              Готовые варианты
             </p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Система группирует raw-типы по смыслу, сами значения сохраняются
-              в правило.
+              Выберите бизнес-смысл, а технические значения Langame попадут в
+              правило автоматически.
             </p>
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-2">
@@ -8594,7 +8631,7 @@ function GuestLogConditionFields({
                         : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100",
                     ].join(" ")}
                   >
-                    {preset.intent === "block" ? "запрет" : "допуск"}
+                    {preset.intent === "block" ? "исключить" : "открывает"}
                   </span>
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
@@ -8613,7 +8650,7 @@ function GuestLogConditionFields({
         <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3 dark:border-emerald-950 dark:bg-emerald-950/20">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-              Найденные типы Langame
+              Найденные события Langame
             </p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {catalog.summary.latestAt
@@ -8656,8 +8693,8 @@ function GuestLogConditionFields({
             })}
           </div>
           <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            Нажатие на название добавляет тип в разрешенные. Кнопка
-            `запретить` добавляет тип в anti-fraud список.
+            Нажатие на название добавляет событие как условие открытия.
+            Кнопка `запретить` добавляет событие в список исключений.
           </p>
         </div>
       ) : null}

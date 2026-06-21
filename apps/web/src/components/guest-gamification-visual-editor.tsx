@@ -1688,7 +1688,7 @@ function LootBoxLimitField({
 
   return (
     <div className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-      Лутбоксов на гостя
+      Лутбоксов на одного гостя в неделю
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case tracking-normal text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
           <input
@@ -1710,20 +1710,23 @@ function LootBoxLimitField({
         </label>
       </div>
       {hasLimit ? (
-        <input
-          className={fieldClass}
-          type="number"
-          min={1}
-          value={value}
-          disabled={disabled}
-          onChange={(event) => {
-            const parsed = Number(event.target.value);
-            onChange(Number.isFinite(parsed) ? Math.max(1, parsed) : 1);
-          }}
-        />
+        <label className="mt-2 block text-sm font-medium normal-case tracking-normal text-zinc-700 dark:text-zinc-200">
+          Открытий на гостя в неделю
+          <input
+            className={fieldClass}
+            type="number"
+            min={1}
+            value={value}
+            disabled={disabled}
+            onChange={(event) => {
+              const parsed = Number(event.target.value);
+              onChange(Number.isFinite(parsed) ? Math.max(1, parsed) : 1);
+            }}
+          />
+        </label>
       ) : (
         <EditorHint>
-          Лутбокс не будет ограничен количеством открытий на гостя.
+          Лутбокс не будет ограничен количеством открытий на одного гостя.
         </EditorHint>
       )}
     </div>

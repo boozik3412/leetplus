@@ -1068,6 +1068,7 @@ type GuestLogCatalogItemAccumulator = {
 
 export type GuestGamificationSummary = {
   profilesCount: number;
+  registeredProfilesCount: number;
   totalXp: number;
   averageLevel: number;
   activeLootBoxes: number;
@@ -7824,6 +7825,7 @@ export class GuestGamificationService {
 
     return {
       profilesCount: profiles.length,
+      registeredProfilesCount: profiles.filter(isRegisteredGameProfile).length,
       totalXp: sum(profiles.map((profile) => profile.xp)),
       averageLevel: profiles.length
         ? Math.round(
@@ -9553,6 +9555,36 @@ function profileConsentTimestamp(source: ProfileCommunicationConsent) {
   }
 
   return source.phoneConsentStatus === 'UNKNOWN' ? 0 : 1;
+}
+
+const gameRegistrationConsentSources = new Set([
+  'guest_portal_game_consent',
+  'telegram_auth_contact_share',
+  'guest_portal_club_selection',
+  'guest_portal',
+  'telegram_bot',
+]);
+
+function isRegisteredGameProfile(profile: GuestGameProfile) {
+  if (profile.status === 'ARCHIVED' || !profile.phoneHash) {
+    return false;
+  }
+
+  const consent = profile.communication;
+  const hasRegistrationDate = Boolean(
+    consent.phoneConsentAt || consent.unsubscribedAt,
+  );
+
+  if (!hasRegistrationDate || consent.phoneConsentStatus === 'DENIED') {
+    return false;
+  }
+
+  const source = consent.phoneConsentSource ?? '';
+  if (gameRegistrationConsentSources.has(source)) {
+    return true;
+  }
+
+  return !profile.createdBy && consent.phoneConsentStatus === 'GRANTED';
 }
 
 function mapLootBox(row: LootBoxRow): GuestGameLootBox {

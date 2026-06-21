@@ -34,6 +34,7 @@ async function safeNullable<T>(promise: Promise<T>): Promise<T | null> {
 const emptyWorkspace: GuestGamificationWorkspace = {
   summary: {
     profilesCount: 0,
+    registeredProfilesCount: 0,
     totalXp: 0,
     averageLevel: 0,
     activeLootBoxes: 0,

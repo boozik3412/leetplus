@@ -184,6 +184,11 @@ export type GuestGameVisualEditorLootBox = {
   rewardLabel: string;
   condition: string;
   limitPerGuest: number | null;
+  timeWindowMode: string;
+  weekdayMode: string;
+  weekdays: number[];
+  hourFrom: string;
+  hourTo: string;
 };
 
 export type GuestGameVisualEditorMission = {

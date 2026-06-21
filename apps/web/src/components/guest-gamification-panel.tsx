@@ -110,6 +110,9 @@ type LootBoxPrizeForm = {
   chancePercent: string;
 };
 
+type LootBoxTimeWindowMode = "ANY" | "QUIET_HOURS" | "CUSTOM";
+type LootBoxWeekdayMode = "ANY" | "WEEKDAYS" | "WEEKENDS" | "CUSTOM";
+
 type LootBoxForm = {
   name: string;
   status: GuestGameStatus;
@@ -129,6 +132,9 @@ type LootBoxForm = {
   storeIds: string[];
   quietHoursEnabled: boolean;
   weekdaysOnly: boolean;
+  timeWindowMode: LootBoxTimeWindowMode;
+  weekdayMode: LootBoxWeekdayMode;
+  selectedWeekdays: number[];
   hourFrom: string;
   hourTo: string;
   perGuestPerWeek: string;
@@ -341,6 +347,42 @@ const lootBoxSegmentOptions = [
   { value: "referral", label: "Реферальные гости" },
 ];
 
+const lootBoxTimeWindowOptions: Array<{
+  value: LootBoxTimeWindowMode;
+  label: string;
+}> = [
+  { value: "ANY", label: "Любое время" },
+  { value: "QUIET_HOURS", label: "Тихие часы" },
+  { value: "CUSTOM", label: "Свое окно" },
+];
+
+const lootBoxWeekdayOptions: Array<{
+  value: LootBoxWeekdayMode;
+  label: string;
+}> = [
+  { value: "ANY", label: "Любой день" },
+  { value: "WEEKDAYS", label: "Будни" },
+  { value: "WEEKENDS", label: "Выходные" },
+  { value: "CUSTOM", label: "Выбрать дни" },
+];
+
+const weekdayOptions = [
+  { value: 1, label: "Пн" },
+  { value: 2, label: "Вт" },
+  { value: 3, label: "Ср" },
+  { value: 4, label: "Чт" },
+  { value: 5, label: "Пт" },
+  { value: 6, label: "Сб" },
+  { value: 0, label: "Вс" },
+];
+
+const weekdayPresets: Record<LootBoxWeekdayMode, number[]> = {
+  ANY: [0, 1, 2, 3, 4, 5, 6],
+  WEEKDAYS: [1, 2, 3, 4, 5],
+  WEEKENDS: [0, 6],
+  CUSTOM: [1, 2, 3, 4, 5],
+};
+
 const triggerHelpText: Record<string, string> = {
   SESSION_START:
     "Правило проверится, когда у гостя начнется игровая сессия в клубе.",
@@ -545,6 +587,9 @@ const defaultLootBoxForm: LootBoxForm = {
   storeIds: [],
   quietHoursEnabled: true,
   weekdaysOnly: true,
+  timeWindowMode: "QUIET_HOURS",
+  weekdayMode: "WEEKDAYS",
+  selectedWeekdays: [1, 2, 3, 4, 5],
   hourFrom: "10:00",
   hourTo: "16:00",
   perGuestPerWeek: "1",
@@ -553,6 +598,8 @@ const defaultLootBoxForm: LootBoxForm = {
   requireCashierConfirmation: true,
   oneDevicePerGuest: true,
   periodRulesText: jsonText({
+    timeWindowMode: "QUIET_HOURS",
+    weekdayMode: "WEEKDAYS",
     weekdays: [1, 2, 3, 4, 5],
     hours: ["10:00-16:00"],
     packetMode: "ANY",
@@ -6675,36 +6722,7 @@ function LootBoxBusinessRules({
       title="Правила запуска"
       description="Настройте, когда лутбокс открывается, сколько раз его можно получить и как распределяются награды."
     >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <ToggleField
-          label="Только тихие часы"
-          checked={form.quietHoursEnabled}
-          onChange={(quietHoursEnabled) => onChange({ quietHoursEnabled })}
-        />
-        <ToggleField
-          label="Только будни"
-          checked={form.weekdaysOnly}
-          onChange={(weekdaysOnly) => onChange({ weekdaysOnly })}
-        />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Начало окна">
-          <input
-            className={fieldClass}
-            type="time"
-            value={form.hourFrom}
-            onChange={(event) => onChange({ hourFrom: event.target.value })}
-          />
-        </Field>
-        <Field label="Конец окна">
-          <input
-            className={fieldClass}
-            type="time"
-            value={form.hourTo}
-            onChange={(event) => onChange({ hourTo: event.target.value })}
-          />
-        </Field>
-      </div>
+      <LootBoxScheduleFields form={form} onChange={onChange} />
       <TariffConditionFields
         snapshots={tariffSnapshots}
         tariffGroupId={form.tariffGroupId}
@@ -6768,6 +6786,143 @@ function LootBoxBusinessRules({
       </div>
       <LootBoxPrizesEditor prizes={form.prizes} onChange={updatePrizes} />
     </BusinessRuleSection>
+  );
+}
+
+function LootBoxScheduleFields({
+  form,
+  onChange,
+}: {
+  form: LootBoxForm;
+  onChange: (patch: Partial<LootBoxForm>) => void;
+}) {
+  const usesTimeWindow = form.timeWindowMode !== "ANY";
+  const usesCustomWeekdays = form.weekdayMode === "CUSTOM";
+  const selectedWeekdays = form.selectedWeekdays.length
+    ? form.selectedWeekdays
+    : weekdayPresets.CUSTOM;
+
+  const setWeekdayMode = (weekdayMode: LootBoxWeekdayMode) => {
+    onChange({
+      weekdayMode,
+      weekdaysOnly: weekdayMode === "WEEKDAYS",
+      selectedWeekdays:
+        weekdayMode === "CUSTOM"
+          ? selectedWeekdays
+          : weekdayPresets[weekdayMode],
+    });
+  };
+  const toggleWeekday = (weekday: number) => {
+    const next = selectedWeekdays.includes(weekday)
+      ? selectedWeekdays.filter((item) => item !== weekday)
+      : [...selectedWeekdays, weekday];
+
+    onChange({
+      weekdayMode: "CUSTOM",
+      weekdaysOnly: false,
+      selectedWeekdays: sortWeekdays(next),
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Field label="Когда показывать">
+          <select
+            className={fieldClass}
+            value={form.timeWindowMode}
+            onChange={(event) => {
+              const timeWindowMode = event.target.value as LootBoxTimeWindowMode;
+
+              onChange({
+                timeWindowMode,
+                quietHoursEnabled: timeWindowMode !== "ANY",
+              });
+            }}
+          >
+            {lootBoxTimeWindowOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <OptionHelp>
+            {form.timeWindowMode === "ANY"
+              ? "Лутбокс может появиться в любое время, если остальные условия совпали."
+              : form.timeWindowMode === "QUIET_HOURS"
+                ? "Сценарий для загрузки непиковых часов. Ниже задайте окно тихих часов."
+                : "Задайте собственный временной интервал для появления лутбокса."}
+          </OptionHelp>
+        </Field>
+        <Field label="По каким дням">
+          <select
+            className={fieldClass}
+            value={form.weekdayMode}
+            onChange={(event) =>
+              setWeekdayMode(event.target.value as LootBoxWeekdayMode)
+            }
+          >
+            {lootBoxWeekdayOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <OptionHelp>
+            {form.weekdayMode === "ANY"
+              ? "День недели не ограничивает появление лутбокса."
+              : form.weekdayMode === "WEEKDAYS"
+                ? "Лутбокс доступен с понедельника по пятницу."
+                : form.weekdayMode === "WEEKENDS"
+                  ? "Лутбокс доступен только в субботу и воскресенье."
+                  : "Отметьте конкретные дни, когда лутбокс может появиться."}
+          </OptionHelp>
+        </Field>
+      </div>
+      {usesTimeWindow ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label="Начало окна">
+            <input
+              className={fieldClass}
+              type="time"
+              value={form.hourFrom}
+              onChange={(event) => onChange({ hourFrom: event.target.value })}
+            />
+          </Field>
+          <Field label="Конец окна">
+            <input
+              className={fieldClass}
+              type="time"
+              value={form.hourTo}
+              onChange={(event) => onChange({ hourTo: event.target.value })}
+            />
+          </Field>
+        </div>
+      ) : null}
+      {usesCustomWeekdays ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {weekdayOptions.map((weekday) => {
+            const active = selectedWeekdays.includes(weekday.value);
+
+            return (
+              <button
+                key={weekday.value}
+                type="button"
+                className={[
+                  "rounded-lg border px-3 py-2 text-xs font-bold transition",
+                  active
+                    ? "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+                    : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300",
+                ].join(" ")}
+                onClick={() => toggleWeekday(weekday.value)}
+              >
+                {weekday.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -8671,6 +8826,9 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     storeIds: lootBox.storeIds,
     quietHoursEnabled: booleanRule(lootBox.periodRules, "quietHoursEnabled", true),
     weekdaysOnly: booleanRule(lootBox.periodRules, "weekdaysOnly", true),
+    timeWindowMode: lootBoxTimeWindowMode(lootBox.periodRules),
+    weekdayMode: lootBoxWeekdayMode(lootBox.periodRules),
+    selectedWeekdays: lootBoxSelectedWeekdays(lootBox.periodRules),
     hourFrom: timeWindowPart(lootBox.periodRules, 0, "10:00"),
     hourTo: timeWindowPart(lootBox.periodRules, 1, "16:00"),
     perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", ""),
@@ -8953,13 +9111,18 @@ function appendCsvTokens(current: string, tokens: string[]) {
 function buildLootBoxPeriodRules(form: LootBoxForm) {
   const start = form.hourFrom || "00:00";
   const end = form.hourTo || "23:59";
+  const usesTimeWindow = form.timeWindowMode !== "ANY";
+  const weekdays =
+    form.weekdayMode === "ANY" ? [] : lootBoxWeekdaysForMode(form);
 
   return {
     source: "business_controls",
-    quietHoursEnabled: form.quietHoursEnabled,
-    weekdaysOnly: form.weekdaysOnly,
-    weekdays: form.weekdaysOnly ? [1, 2, 3, 4, 5] : [0, 1, 2, 3, 4, 5, 6],
-    hours: form.quietHoursEnabled ? [`${start}-${end}`] : [],
+    timeWindowMode: form.timeWindowMode,
+    weekdayMode: form.weekdayMode,
+    quietHoursEnabled: usesTimeWindow,
+    weekdaysOnly: form.weekdayMode === "WEEKDAYS",
+    weekdays,
+    hours: usesTimeWindow ? [`${start}-${end}`] : [],
     packetMode: form.packetMode,
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
@@ -9187,6 +9350,104 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function arrayRule(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function numberArrayRule(value: unknown, key: string) {
+  return arrayRule(asRecord(value)[key])
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6);
+}
+
+function sortWeekdays(value: number[]) {
+  const order = new Map(weekdayOptions.map((item, index) => [item.value, index]));
+
+  return Array.from(new Set(value))
+    .filter((item) => order.has(item))
+    .sort((left, right) => (order.get(left) ?? 0) - (order.get(right) ?? 0));
+}
+
+function sameWeekdays(left: number[], right: number[]) {
+  const leftSorted = sortWeekdays(left);
+  const rightSorted = sortWeekdays(right);
+
+  return (
+    leftSorted.length === rightSorted.length &&
+    leftSorted.every((item, index) => item === rightSorted[index])
+  );
+}
+
+function lootBoxTimeWindowMode(value: unknown): LootBoxTimeWindowMode {
+  const record = asRecord(value);
+  const storedMode = record.timeWindowMode;
+  const hours = arrayRule(record.hours).filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+
+  if (
+    storedMode === "ANY" ||
+    storedMode === "QUIET_HOURS" ||
+    storedMode === "CUSTOM"
+  ) {
+    return storedMode;
+  }
+
+  if (!hours.length && record.quietHoursEnabled !== true) {
+    return "ANY";
+  }
+
+  return record.quietHoursEnabled === true ? "QUIET_HOURS" : "CUSTOM";
+}
+
+function lootBoxWeekdayMode(value: unknown): LootBoxWeekdayMode {
+  const record = asRecord(value);
+  const storedMode = record.weekdayMode;
+  const weekdays = numberArrayRule(value, "weekdays");
+
+  if (
+    storedMode === "ANY" ||
+    storedMode === "WEEKDAYS" ||
+    storedMode === "WEEKENDS" ||
+    storedMode === "CUSTOM"
+  ) {
+    return storedMode;
+  }
+
+  if (sameWeekdays(weekdays, weekdayPresets.WEEKDAYS)) {
+    return "WEEKDAYS";
+  }
+
+  if (sameWeekdays(weekdays, weekdayPresets.WEEKENDS)) {
+    return "WEEKENDS";
+  }
+
+  if (!weekdays.length || sameWeekdays(weekdays, weekdayPresets.ANY)) {
+    return record.weekdaysOnly === true ? "WEEKDAYS" : "ANY";
+  }
+
+  return "CUSTOM";
+}
+
+function lootBoxSelectedWeekdays(value: unknown) {
+  const mode = lootBoxWeekdayMode(value);
+  const weekdays = numberArrayRule(value, "weekdays");
+
+  if (mode === "CUSTOM") {
+    return sortWeekdays(weekdays.length ? weekdays : weekdayPresets.CUSTOM);
+  }
+
+  return weekdayPresets[mode];
+}
+
+function lootBoxWeekdaysForMode(form: LootBoxForm) {
+  if (form.weekdayMode === "CUSTOM") {
+    return sortWeekdays(
+      form.selectedWeekdays.length
+        ? form.selectedWeekdays
+        : weekdayPresets.CUSTOM,
+    );
+  }
+
+  return weekdayPresets[form.weekdayMode];
 }
 
 function metricRule(value: unknown) {

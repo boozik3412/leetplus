@@ -801,6 +801,11 @@ export type GuestGameVisualEditorLootBox = {
   rewardLabel: string;
   condition: string;
   limitPerGuest: number | null;
+  timeWindowMode: string;
+  weekdayMode: string;
+  weekdays: number[];
+  hourFrom: string;
+  hourTo: string;
 };
 
 export type GuestGameVisualEditorMission = {
@@ -14717,6 +14722,11 @@ function normalizeVisualEditorPayload(
           rewardLabel: visualString(itemRecord.rewardLabel, 'Награда клуба'),
           condition: visualString(itemRecord.condition, 'Активность в клубе'),
           limitPerGuest: visualIntOrNull(itemRecord.limitPerGuest, 1, 1000),
+          timeWindowMode: visualTimeWindowMode(itemRecord.timeWindowMode),
+          weekdayMode: visualWeekdayMode(itemRecord.weekdayMode),
+          weekdays: visualWeekdays(itemRecord.weekdays),
+          hourFrom: visualTimeValue(itemRecord.hourFrom, '10:00'),
+          hourTo: visualTimeValue(itemRecord.hourTo, '16:00'),
         };
       })
       .slice(0, 12),
@@ -14842,6 +14852,7 @@ function visualLootBoxFromRule(
   rule: GuestGameLootBox,
 ): GuestGameVisualEditorLootBox {
   const limits = visualRecord(rule.limits);
+  const periodRules = visualRecord(rule.periodRules);
 
   return {
     id: rule.id,
@@ -14851,15 +14862,21 @@ function visualLootBoxFromRule(
     rewardType: rule.rewardType,
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel ?? rule.name,
-    condition: visualString(
-      visualRecord(rule.periodRules).condition,
-      rule.triggerKind,
-    ),
+    condition: visualString(periodRules.condition, rule.triggerKind),
     limitPerGuest: visualIntOrNull(
       limits.perGuest ?? limits.perGuestPerWeek,
       1,
       1000,
     ),
+    timeWindowMode: visualTimeWindowMode(
+      periodRules.timeWindowMode ?? inferVisualTimeWindowMode(periodRules),
+    ),
+    weekdayMode: visualWeekdayMode(
+      periodRules.weekdayMode ?? inferVisualWeekdayMode(periodRules),
+    ),
+    weekdays: visualWeekdays(periodRules.weekdays),
+    hourFrom: visualPeriodHour(periodRules, 0, '10:00'),
+    hourTo: visualPeriodHour(periodRules, 1, '16:00'),
   };
 }
 
@@ -14983,6 +15000,7 @@ function buildVisualLootBoxData(
     periodRules: {
       source: 'visual_editor',
       condition: item.condition,
+      ...buildVisualLootBoxPeriodRules(item),
     },
     limits: {
       source: 'visual_editor',
@@ -15474,6 +15492,118 @@ function visualId(value: unknown) {
 
 function visualBool(value: unknown, fallback: boolean) {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+function visualTimeWindowMode(value: unknown) {
+  const parsed = visualString(value, 'ANY').toUpperCase();
+
+  return ['ANY', 'QUIET_HOURS', 'CUSTOM'].includes(parsed) ? parsed : 'ANY';
+}
+
+function visualWeekdayMode(value: unknown) {
+  const parsed = visualString(value, 'ANY').toUpperCase();
+
+  return ['ANY', 'WEEKDAYS', 'WEEKENDS', 'CUSTOM'].includes(parsed)
+    ? parsed
+    : 'ANY';
+}
+
+function visualWeekdays(value: unknown) {
+  const weekdays = Array.from(
+    new Set(
+      visualArray(value)
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6),
+    ),
+  );
+  const order = new Map(
+    [1, 2, 3, 4, 5, 6, 0].map((item, index) => [item, index]),
+  );
+
+  return weekdays.sort(
+    (left, right) => (order.get(left) ?? 0) - (order.get(right) ?? 0),
+  );
+}
+
+function visualTimeValue(value: unknown, fallback: string) {
+  const parsed = visualString(value, fallback);
+
+  return /^\d{2}:\d{2}$/.test(parsed) ? parsed : fallback;
+}
+
+function visualPeriodHour(
+  periodRules: Record<string, unknown>,
+  part: 0 | 1,
+  fallback: string,
+) {
+  const hours = visualArray(periodRules.hours).filter(
+    (item): item is string => typeof item === 'string' && item.includes('-'),
+  );
+  const raw = hours[0]?.split('-')[part]?.trim();
+
+  return visualTimeValue(raw, fallback);
+}
+
+function inferVisualTimeWindowMode(periodRules: Record<string, unknown>) {
+  const hours = visualArray(periodRules.hours);
+
+  if (!hours.length && periodRules.quietHoursEnabled !== true) {
+    return 'ANY';
+  }
+
+  return periodRules.quietHoursEnabled === true ? 'QUIET_HOURS' : 'CUSTOM';
+}
+
+function inferVisualWeekdayMode(periodRules: Record<string, unknown>) {
+  const weekdays = visualWeekdays(periodRules.weekdays);
+  const same = (expected: number[]) =>
+    weekdays.length === expected.length &&
+    weekdays.every((item, index) => item === expected[index]);
+
+  if (same([1, 2, 3, 4, 5])) {
+    return 'WEEKDAYS';
+  }
+
+  if (same([6, 0])) {
+    return 'WEEKENDS';
+  }
+
+  if (!weekdays.length || same([1, 2, 3, 4, 5, 6, 0])) {
+    return periodRules.weekdaysOnly === true ? 'WEEKDAYS' : 'ANY';
+  }
+
+  return 'CUSTOM';
+}
+
+function buildVisualLootBoxPeriodRules(item: GuestGameVisualEditorLootBox) {
+  const timeWindowMode = visualTimeWindowMode(item.timeWindowMode);
+  const weekdayMode = visualWeekdayMode(item.weekdayMode);
+  const hours =
+    timeWindowMode === 'ANY'
+      ? []
+      : [
+          `${visualTimeValue(item.hourFrom, '10:00')}-${visualTimeValue(
+            item.hourTo,
+            '16:00',
+          )}`,
+        ];
+  const weekdays =
+    weekdayMode === 'CUSTOM'
+      ? visualWeekdays(item.weekdays)
+      : weekdayMode === 'WEEKDAYS'
+        ? [1, 2, 3, 4, 5]
+        : weekdayMode === 'WEEKENDS'
+          ? [0, 6]
+          : [];
+
+  return {
+    timeWindowMode,
+    weekdayMode,
+    quietHoursEnabled: timeWindowMode !== 'ANY',
+    weekdaysOnly: weekdayMode === 'WEEKDAYS',
+    weekdays,
+    hours,
+  };
 }
 
 function visualStatus(value: unknown, fallback: StatusValue): StatusValue {

@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
+  GuestGameLootBox,
+  GuestGameMission,
+  GuestGamePromoCard,
+  GuestGameSeason,
   GuestGameStatus,
   GuestGameVisualDraft,
   GuestGameVisualEditorCheckIn,
@@ -79,6 +83,36 @@ const visualTriggerHelpText: Record<string, string> = {
   REFERRAL_ACCEPTED: "Правило проверится, когда приглашенный гость успешно зарегистрируется по реферальной ссылке.",
   REPEAT_VISIT: "Правило проверит повторное посещение гостя в заданном окне времени.",
   MISSION_COMPLETED: "Правило проверится после выполнения другой миссии или квеста.",
+};
+
+const visualTimeWindowOptions = [
+  { value: "ANY", label: "Любое время" },
+  { value: "QUIET_HOURS", label: "Тихие часы" },
+  { value: "CUSTOM", label: "Свое окно" },
+];
+
+const visualWeekdayOptions = [
+  { value: "ANY", label: "Любой день" },
+  { value: "WEEKDAYS", label: "Будни" },
+  { value: "WEEKENDS", label: "Выходные" },
+  { value: "CUSTOM", label: "Выбрать дни" },
+];
+
+const visualWeekdayItems = [
+  { value: 1, label: "Пн" },
+  { value: 2, label: "Вт" },
+  { value: 3, label: "Ср" },
+  { value: 4, label: "Чт" },
+  { value: 5, label: "Пт" },
+  { value: 6, label: "Сб" },
+  { value: 0, label: "Вс" },
+];
+
+const visualWeekdayPresets: Record<string, number[]> = {
+  ANY: [0, 1, 2, 3, 4, 5, 6],
+  WEEKDAYS: [1, 2, 3, 4, 5],
+  WEEKENDS: [0, 6],
+  CUSTOM: [1, 2, 3, 4, 5],
 };
 
 export function GuestGamificationVisualEditor({
@@ -337,6 +371,8 @@ export function GuestGamificationVisualEditor({
               activeSection={activeSection}
               onSelect={setActiveSection}
               onChange={updatePayload}
+              workspace={workspace}
+              storeId={storeId}
               canManage={canManage}
             />
           ) : (
@@ -582,6 +618,8 @@ function Inspector({
   activeSection,
   onSelect,
   onChange,
+  workspace,
+  storeId,
   canManage,
 }: {
   payload: GuestGameVisualEditorPayload;
@@ -590,6 +628,8 @@ function Inspector({
   onChange: (
     updater: (payload: GuestGameVisualEditorPayload) => GuestGameVisualEditorPayload,
   ) => void;
+  workspace: GuestGamificationWorkspace;
+  storeId: string;
   canManage: boolean;
 }) {
   return (
@@ -617,6 +657,8 @@ function Inspector({
           <BattlePassInspector
             payload={payload}
             onChange={onChange}
+            workspace={workspace}
+            storeId={storeId}
             disabled={!canManage}
           />
         ) : null}
@@ -624,6 +666,8 @@ function Inspector({
           <LootBoxInspector
             payload={payload}
             onChange={onChange}
+            workspace={workspace}
+            storeId={storeId}
             disabled={!canManage}
           />
         ) : null}
@@ -631,6 +675,8 @@ function Inspector({
           <MissionInspector
             payload={payload}
             onChange={onChange}
+            workspace={workspace}
+            storeId={storeId}
             disabled={!canManage}
           />
         ) : null}
@@ -638,6 +684,8 @@ function Inspector({
           <PromoInspector
             payload={payload}
             onChange={onChange}
+            workspace={workspace}
+            storeId={storeId}
             disabled={!canManage}
           />
         ) : null}
@@ -645,6 +693,8 @@ function Inspector({
           <CheckInInspector
             payload={payload}
             onChange={onChange}
+            workspace={workspace}
+            storeId={storeId}
             disabled={!canManage}
           />
         ) : null}
@@ -656,13 +706,54 @@ function Inspector({
 function BattlePassInspector({
   payload,
   onChange,
+  workspace,
+  storeId,
   disabled,
 }: InspectorProps) {
   const battlePass = payload.battlePass;
+  const seasonTemplates = templatesForStore(workspace.seasons, storeId);
 
   return (
     <div className="space-y-3">
       <InspectorTitle title="Battle Pass" />
+      <TemplatePicker
+        title="Шаблон Battle Pass"
+        description="Выберите сезон из расширенных настроек, чтобы применить уровни, XP и награды."
+        items={seasonTemplates}
+        emptyLabel="Готовых сезонов для выбранного клуба пока нет."
+        getLabel={(season) => `${season.name} · ${statusLabel(season.status)}`}
+        disabled={disabled}
+        actionLabel="Применить сезон"
+        onApply={(season) =>
+          onChange((current) => ({
+            ...current,
+            battlePass: visualBattlePassFromSeasonTemplate(season),
+          }))
+        }
+      />
+      <TemplatePicker
+        title="Шаги Battle Pass"
+        description="Можно подтянуть только награды уровней, не меняя название и статус текущего сезона."
+        items={seasonTemplates}
+        emptyLabel="Нет сезонов с готовыми шагами."
+        getLabel={(season) => `${season.name} · уровни`}
+        disabled={disabled}
+        actionLabel="Подтянуть шаги"
+        onApply={(season) => {
+          const template = visualBattlePassFromSeasonTemplate(season);
+
+          onChange((current) => ({
+            ...current,
+            battlePass: {
+              ...current.battlePass,
+              levelCount: template.levelCount,
+              xpPerLevel: template.xpPerLevel,
+              mainPrize: template.mainPrize,
+              levelRewards: template.levelRewards,
+            },
+          }));
+        }}
+      />
       <TextField
         label="Название сезона"
         value={battlePass.title}
@@ -743,23 +834,41 @@ function BattlePassInspector({
   );
 }
 
-function LootBoxInspector({ payload, onChange, disabled }: InspectorProps) {
+function LootBoxInspector({
+  payload,
+  onChange,
+  workspace,
+  storeId,
+  disabled,
+}: InspectorProps) {
+  const lootBoxTemplates = templatesForStore(workspace.lootBoxes, storeId);
+
   return (
     <CollectionInspector
       title="Лутбоксы"
       items={payload.lootBoxes}
       emptyLabel="Добавить лутбокс"
-      createItem={(): GuestGameVisualEditorLootBox => ({
-        id: null,
-        title: "Новый лутбокс",
-        status: "DRAFT",
-        triggerKind: "SESSION_START",
-        rewardType: "BONUS",
-        rewardAmount: 100,
-        rewardLabel: "Бонус клуба",
-        condition: "Активность в клубе",
-        limitPerGuest: 1,
-      })}
+      templateSlot={
+        <TemplatePicker
+          title="Шаблон лутбокса"
+          description="Добавьте копию правила, созданного в расширенных настройках."
+          items={lootBoxTemplates}
+          emptyLabel="Готовых лутбоксов для выбранного клуба пока нет."
+          getLabel={(lootBox) => `${lootBox.name} · ${statusLabel(lootBox.status)}`}
+          disabled={disabled}
+          actionLabel="Добавить шаблон"
+          onApply={(lootBox) =>
+            onChange((current) => ({
+              ...current,
+              lootBoxes: [
+                ...current.lootBoxes,
+                visualLootBoxFromTemplate(lootBox),
+              ],
+            }))
+          }
+        />
+      }
+      createItem={createVisualLootBox}
       renderItem={(item, index, update, remove) => (
         <div className="space-y-3">
           <TextField
@@ -772,6 +881,11 @@ function LootBoxInspector({ payload, onChange, disabled }: InspectorProps) {
             value={item.triggerKind}
             disabled={disabled}
             onChange={(triggerKind) => update({ ...item, triggerKind })}
+          />
+          <LootBoxScheduleField
+            item={item}
+            disabled={disabled}
+            onChange={(patch) => update({ ...item, ...patch })}
           />
           <AudienceScopeHint />
           <TextField
@@ -822,26 +936,41 @@ function LootBoxInspector({ payload, onChange, disabled }: InspectorProps) {
   );
 }
 
-function MissionInspector({ payload, onChange, disabled }: InspectorProps) {
+function MissionInspector({
+  payload,
+  onChange,
+  workspace,
+  storeId,
+  disabled,
+}: InspectorProps) {
+  const missionTemplates = templatesForStore(workspace.missions, storeId);
+
   return (
     <CollectionInspector
       title="Квесты"
       items={payload.missions}
       emptyLabel="Добавить квест"
-      createItem={(): GuestGameVisualEditorMission => ({
-        id: null,
-        title: "Новый квест",
-        status: "DRAFT",
-        missionType: "CUSTOM",
-        triggerKind: "SESSION_START",
-        xpReward: 100,
-        rewardType: "PROMOCODE",
-        rewardAmount: null,
-        rewardLabel: "Промокод бара",
-        progressTarget: 1,
-        progressUnit: null,
-        questSteps: [{ id: "step-1", title: "Выполнить шаг", target: 1 }],
-      })}
+      templateSlot={
+        <TemplatePicker
+          title="Шаблон квеста"
+          description="Добавьте квест из расширенных настроек вместе с XP, наградой и шагами."
+          items={missionTemplates}
+          emptyLabel="Готовых квестов для выбранного клуба пока нет."
+          getLabel={(mission) => `${mission.name} · ${statusLabel(mission.status)}`}
+          disabled={disabled}
+          actionLabel="Добавить шаблон"
+          onApply={(mission) =>
+            onChange((current) => ({
+              ...current,
+              missions: [
+                ...current.missions,
+                visualMissionFromTemplate(mission),
+              ],
+            }))
+          }
+        />
+      }
+      createItem={createVisualMission}
       renderItem={(item, index, update, remove) => (
         <div className="space-y-3">
           <TextField
@@ -917,23 +1046,41 @@ function MissionInspector({ payload, onChange, disabled }: InspectorProps) {
   );
 }
 
-function PromoInspector({ payload, onChange, disabled }: InspectorProps) {
+function PromoInspector({
+  payload,
+  onChange,
+  workspace,
+  storeId,
+  disabled,
+}: InspectorProps) {
+  const promoTemplates = templatesForStore(workspace.promoCards, storeId);
+
   return (
     <CollectionInspector
       title="События и акции"
       items={payload.promoCards}
       emptyLabel="Добавить баннер"
-      createItem={(): GuestGameVisualEditorPromoCard => ({
-        id: null,
-        label: "Акция",
-        title: "Новое событие",
-        description: "Короткое описание для гостевой главной.",
-        tag: "активно",
-        status: "DRAFT",
-        targetAnchor: "missions",
-        periodFrom: null,
-        periodTo: null,
-      })}
+      templateSlot={
+        <TemplatePicker
+          title="Шаблон акции"
+          description="Добавьте баннер события или акции, созданный в расширенных настройках."
+          items={promoTemplates}
+          emptyLabel="Готовых акций для выбранного клуба пока нет."
+          getLabel={(promo) => `${promo.title} · ${statusLabel(promo.status)}`}
+          disabled={disabled}
+          actionLabel="Добавить шаблон"
+          onApply={(promo) =>
+            onChange((current) => ({
+              ...current,
+              promoCards: [
+                ...current.promoCards,
+                visualPromoFromTemplate(promo),
+              ],
+            }))
+          }
+        />
+      }
+      createItem={createVisualPromo}
       renderItem={(item, index, update, remove) => (
         <div className="space-y-3">
           <TextField
@@ -988,8 +1135,18 @@ function PromoInspector({ payload, onChange, disabled }: InspectorProps) {
   );
 }
 
-function CheckInInspector({ payload, onChange, disabled }: InspectorProps) {
+function CheckInInspector({
+  payload,
+  onChange,
+  workspace,
+  storeId,
+  disabled,
+}: InspectorProps) {
   const checkIn = payload.checkIn;
+  const checkInTemplates = templatesForStore(workspace.missions, storeId).filter(
+    (mission) =>
+      mission.triggerKind === "CHECK_IN" || mission.missionType === "CHECK_IN",
+  );
 
   function patch(next: Partial<GuestGameVisualEditorCheckIn>) {
     onChange((current) => ({
@@ -1001,6 +1158,16 @@ function CheckInInspector({ payload, onChange, disabled }: InspectorProps) {
   return (
     <div className="space-y-3">
       <InspectorTitle title="Чекин в клубе" />
+      <TemplatePicker
+        title="Шаблон чек-ина"
+        description="Примените CHECK_IN-правило из расширенных настроек."
+        items={checkInTemplates}
+        emptyLabel="Готовых CHECK_IN-правил для выбранного клуба пока нет."
+        getLabel={(mission) => `${mission.name} · ${statusLabel(mission.status)}`}
+        disabled={disabled}
+        actionLabel="Применить"
+        onApply={(mission) => patch(visualCheckInFromMissionTemplate(mission))}
+      />
       <label className="flex min-h-11 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
         <input
           type="checkbox"
@@ -1063,6 +1230,8 @@ type InspectorProps = {
   onChange: (
     updater: (payload: GuestGameVisualEditorPayload) => GuestGameVisualEditorPayload,
   ) => void;
+  workspace: GuestGamificationWorkspace;
+  storeId: string;
   disabled: boolean;
 };
 
@@ -1070,6 +1239,7 @@ function CollectionInspector<T>({
   title,
   items,
   emptyLabel,
+  templateSlot,
   createItem,
   renderItem,
   onChange,
@@ -1078,6 +1248,7 @@ function CollectionInspector<T>({
   title: string;
   items: T[];
   emptyLabel: string;
+  templateSlot?: ReactNode;
   createItem: () => T;
   renderItem: (
     item: T,
@@ -1117,6 +1288,7 @@ function CollectionInspector<T>({
           {emptyLabel}
         </button>
       </div>
+      {templateSlot}
       {items.length ? (
         <div className="flex gap-2 overflow-x-auto pb-1">
           {items.map((item, index) => (
@@ -1215,6 +1387,80 @@ function InspectorTitle({ title }: { title: string }) {
   );
 }
 
+function TemplatePicker<T extends { id: string }>({
+  title,
+  description,
+  items,
+  emptyLabel,
+  getLabel,
+  disabled,
+  actionLabel,
+  onApply,
+}: {
+  title: string;
+  description: string;
+  items: T[];
+  emptyLabel: string;
+  getLabel: (item: T) => string;
+  disabled: boolean;
+  actionLabel: string;
+  onApply: (item: T) => void;
+}) {
+  const [selectedId, setSelectedId] = useState("");
+  const selected =
+    items.find((item) => item.id === selectedId) ?? items[0] ?? null;
+
+  if (!items.length) {
+    return (
+      <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
+        <span className="block font-bold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
+          {title}
+        </span>
+        {emptyLabel}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-cyan-200 bg-cyan-50/50 p-3 dark:border-cyan-900/60 dark:bg-cyan-950/20">
+      <div className="mb-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
+          {title}
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+          {description}
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <select
+          className={fieldClass}
+          value={selected?.id ?? ""}
+          disabled={disabled}
+          onChange={(event) => setSelectedId(event.target.value)}
+        >
+          {items.map((item) => (
+            <option key={item.id} value={item.id}>
+              {getLabel(item)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="rounded-lg border border-cyan-300 px-3 py-2 text-xs font-bold text-cyan-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-cyan-800 dark:text-cyan-100"
+          disabled={disabled || !selected}
+          onClick={() => {
+            if (selected) {
+              onApply(selected);
+            }
+          }}
+        >
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TextField({
   label,
   value,
@@ -1294,6 +1540,138 @@ function NumberField({
         }}
       />
     </label>
+  );
+}
+
+function LootBoxScheduleField({
+  item,
+  disabled,
+  onChange,
+}: {
+  item: GuestGameVisualEditorLootBox;
+  disabled: boolean;
+  onChange: (patch: Partial<GuestGameVisualEditorLootBox>) => void;
+}) {
+  const weekdays = item.weekdays.length
+    ? item.weekdays
+    : visualWeekdayPresets.CUSTOM;
+  const hasTimeWindow = item.timeWindowMode !== "ANY";
+  const hasCustomWeekdays = item.weekdayMode === "CUSTOM";
+  const setWeekdayMode = (weekdayMode: string) => {
+    onChange({
+      weekdayMode,
+      weekdays:
+        weekdayMode === "CUSTOM"
+          ? weekdays
+          : visualWeekdayPresets[weekdayMode] ?? visualWeekdayPresets.ANY,
+    });
+  };
+  const toggleWeekday = (weekday: number) => {
+    const next = weekdays.includes(weekday)
+      ? weekdays.filter((item) => item !== weekday)
+      : [...weekdays, weekday];
+
+    onChange({
+      weekdayMode: "CUSTOM",
+      weekdays: sortVisualWeekdays(next),
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Когда показывать
+          <select
+            className={fieldClass}
+            value={item.timeWindowMode}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange({ timeWindowMode: event.target.value })
+            }
+          >
+            {visualTimeWindowOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <EditorHint>
+            {item.timeWindowMode === "ANY"
+              ? "Время не ограничивает появление лутбокса."
+              : "Лутбокс появится только внутри выбранного временного окна."}
+          </EditorHint>
+        </label>
+        <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          По каким дням
+          <select
+            className={fieldClass}
+            value={item.weekdayMode}
+            disabled={disabled}
+            onChange={(event) => setWeekdayMode(event.target.value)}
+          >
+            {visualWeekdayOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <EditorHint>
+            {item.weekdayMode === "CUSTOM"
+              ? "Отметьте конкретные дни для появления лутбокса."
+              : "Дни можно ограничить буднями, выходными или оставить без ограничения."}
+          </EditorHint>
+        </label>
+      </div>
+      {hasTimeWindow ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Начало окна
+            <input
+              className={fieldClass}
+              type="time"
+              value={item.hourFrom}
+              disabled={disabled}
+              onChange={(event) => onChange({ hourFrom: event.target.value })}
+            />
+          </label>
+          <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Конец окна
+            <input
+              className={fieldClass}
+              type="time"
+              value={item.hourTo}
+              disabled={disabled}
+              onChange={(event) => onChange({ hourTo: event.target.value })}
+            />
+          </label>
+        </div>
+      ) : null}
+      {hasCustomWeekdays ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {visualWeekdayItems.map((weekday) => {
+            const active = weekdays.includes(weekday.value);
+
+            return (
+              <button
+                key={weekday.value}
+                type="button"
+                disabled={disabled}
+                className={[
+                  "rounded-lg border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50",
+                  active
+                    ? "border-cyan-300 bg-cyan-100 text-cyan-950 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-100"
+                    : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300",
+                ].join(" ")}
+                onClick={() => toggleWeekday(weekday.value)}
+              >
+                {weekday.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1426,6 +1804,354 @@ function EditorHint({ children }: { children: ReactNode }) {
   return <span className="mt-2 block text-xs normal-case leading-relaxed tracking-normal text-zinc-500">{children}</span>;
 }
 
+function sortVisualWeekdays(value: number[]) {
+  const order = new Map(
+    visualWeekdayItems.map((item, index) => [item.value, index]),
+  );
+
+  return Array.from(new Set(value))
+    .filter((item) => order.has(item))
+    .sort((left, right) => (order.get(left) ?? 0) - (order.get(right) ?? 0));
+}
+
+function createVisualLootBox(): GuestGameVisualEditorLootBox {
+  return {
+    id: null,
+    title: "Новый лутбокс",
+    status: "DRAFT",
+    triggerKind: "SESSION_START",
+    rewardType: "BONUS",
+    rewardAmount: 100,
+    rewardLabel: "Бонус клуба",
+    condition: "Активность в клубе",
+    limitPerGuest: 1,
+    timeWindowMode: "ANY",
+    weekdayMode: "ANY",
+    weekdays: visualWeekdayPresets.ANY,
+    hourFrom: "10:00",
+    hourTo: "16:00",
+  };
+}
+
+function createVisualMission(): GuestGameVisualEditorMission {
+  return {
+    id: null,
+    title: "Новый квест",
+    status: "DRAFT",
+    missionType: "CUSTOM",
+    triggerKind: "SESSION_START",
+    xpReward: 100,
+    rewardType: "PROMOCODE",
+    rewardAmount: null,
+    rewardLabel: "Промокод бара",
+    progressTarget: 1,
+    progressUnit: null,
+    questSteps: [{ id: "step-1", title: "Выполнить шаг", target: 1 }],
+  };
+}
+
+function createVisualPromo(): GuestGameVisualEditorPromoCard {
+  return {
+    id: null,
+    label: "Акция",
+    title: "Новое событие",
+    description: "Короткое описание для гостевой главной.",
+    tag: "активно",
+    status: "DRAFT",
+    targetAnchor: "missions",
+    periodFrom: null,
+    periodTo: null,
+  };
+}
+
+function templatesForStore<T extends { storeIds: string[]; status: GuestGameStatus }>(
+  items: T[],
+  storeId: string,
+) {
+  return items
+    .filter(
+      (item) =>
+        item.status !== "ARCHIVED" &&
+        (!item.storeIds.length || !storeId || item.storeIds.includes(storeId)),
+    )
+    .sort((left, right) => {
+      if (left.status !== right.status) {
+        return left.status === "ACTIVE" ? -1 : 1;
+      }
+
+      return templateName(left).localeCompare(templateName(right), "ru");
+    });
+}
+
+function templateName(value: unknown) {
+  const record = templateRecord(value);
+  return templateString(record.name ?? record.title, "");
+}
+
+function statusLabel(status: GuestGameStatus) {
+  const labels: Record<GuestGameStatus, string> = {
+    DRAFT: "черновик",
+    ACTIVE: "активно",
+    PAUSED: "пауза",
+    FINISHED: "завершено",
+    ARCHIVED: "архив",
+  };
+
+  return labels[status] ?? status;
+}
+
+function visualBattlePassFromSeasonTemplate(
+  season: GuestGameSeason,
+): GuestGameVisualEditorPayload["battlePass"] {
+  const levels = templateArray(season.levels).map((item) =>
+    templateRecord(item),
+  );
+  const levelRewards = levels
+    .map((item, index) => ({
+      level: templateInt(item.level, index + 1, 1, 60),
+      reward: templateString(item.freeReward ?? item.premiumReward, ""),
+    }))
+    .filter((item) => item.reward.trim());
+  const firstXp = templateNumber(levels[0]?.xp, 0);
+  const secondXp = templateNumber(levels[1]?.xp, firstXp + 250);
+  const xpPerLevel = Math.max(1, secondXp - firstXp);
+
+  return {
+    id: null,
+    enabled: true,
+    title: season.name,
+    status: season.status,
+    levelCount: Math.max(levels.length, levelRewards.length, 1),
+    xpPerLevel,
+    mainPrize: levelRewards.at(-1)?.reward ?? null,
+    levelRewards,
+  };
+}
+
+function visualLootBoxFromTemplate(
+  lootBox: GuestGameLootBox,
+): GuestGameVisualEditorLootBox {
+  const periodRules = templateRecord(lootBox.periodRules);
+  const limits = templateRecord(lootBox.limits);
+
+  return {
+    ...createVisualLootBox(),
+    id: null,
+    title: lootBox.name,
+    status: lootBox.status,
+    triggerKind: lootBox.triggerKind,
+    rewardType: lootBox.rewardType,
+    rewardAmount: lootBox.rewardAmount,
+    rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+    condition: templateString(periodRules.condition, lootBox.triggerKind),
+    limitPerGuest: templateNumberOrNull(
+      limits.perGuest ?? limits.perGuestPerWeek,
+    ),
+    timeWindowMode: templateTimeWindowMode(
+      periodRules.timeWindowMode ?? inferTemplateTimeWindowMode(periodRules),
+    ),
+    weekdayMode: templateWeekdayMode(
+      periodRules.weekdayMode ?? inferTemplateWeekdayMode(periodRules),
+    ),
+    weekdays: templateWeekdays(periodRules.weekdays),
+    hourFrom: templatePeriodHour(periodRules, 0, "10:00"),
+    hourTo: templatePeriodHour(periodRules, 1, "16:00"),
+  };
+}
+
+function visualMissionFromTemplate(
+  mission: GuestGameMission,
+): GuestGameVisualEditorMission {
+  const conditions = templateRecord(mission.conditions);
+  const questSteps = templateArray(conditions.questSteps)
+    .map((item, index) => {
+      const record = templateRecord(item);
+
+      return {
+        id: templateString(record.id, `step-${index + 1}`),
+        title: templateString(record.title, ""),
+        target: templateInt(record.target, index + 1, 1, 100000),
+      };
+    })
+    .filter((step) => step.title.trim());
+
+  return {
+    ...createVisualMission(),
+    id: null,
+    title: mission.name,
+    status: mission.status,
+    missionType: mission.missionType,
+    triggerKind: mission.triggerKind,
+    xpReward: mission.xpReward,
+    rewardType: mission.rewardType,
+    rewardAmount: mission.rewardAmount,
+    rewardLabel: mission.rewardLabel ?? mission.name,
+    progressTarget: mission.progressTarget,
+    progressUnit: mission.progressUnit,
+    questSteps: questSteps.length
+      ? questSteps
+      : [{ id: "step-1", title: mission.name, target: 1 }],
+  };
+}
+
+function visualPromoFromTemplate(
+  promo: GuestGamePromoCard,
+): GuestGameVisualEditorPromoCard {
+  return {
+    ...createVisualPromo(),
+    id: null,
+    label: promo.label,
+    title: promo.title,
+    description: promo.description,
+    tag: promo.tag,
+    status: promo.status,
+    targetAnchor: promo.targetAnchor,
+    periodFrom: promo.periodFrom,
+    periodTo: promo.periodTo,
+  };
+}
+
+function visualCheckInFromMissionTemplate(
+  mission: GuestGameMission,
+): Partial<GuestGameVisualEditorCheckIn> {
+  const isBonus = isBonusRewardType(mission.rewardType);
+
+  return {
+    enabled: mission.status === "ACTIVE",
+    rewardMode: isBonus ? "BONUS" : mission.xpReward > 0 ? "XP" : "",
+    xp: mission.xpReward || null,
+    bonusAmount: isBonus ? mission.rewardAmount : null,
+    rewardLabel: mission.rewardLabel ?? mission.name,
+  };
+}
+
+function isBonusRewardType(rewardType: string) {
+  return [
+    "BONUS",
+    "BONUS_POINTS",
+    "BONUS_BALANCE",
+    "LOYALTY_BONUS",
+    "CASHBACK",
+  ].includes(rewardType);
+}
+
+function templateRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function templateArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function templateString(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function templateNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function templateNumberOrNull(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function templateInt(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const parsed = templateNumber(value, fallback);
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+function templateTimeWindowMode(value: unknown) {
+  const mode = templateString(value, "ANY").toUpperCase();
+
+  return ["ANY", "QUIET_HOURS", "CUSTOM"].includes(mode) ? mode : "ANY";
+}
+
+function templateWeekdayMode(value: unknown) {
+  const mode = templateString(value, "ANY").toUpperCase();
+
+  return ["ANY", "WEEKDAYS", "WEEKENDS", "CUSTOM"].includes(mode)
+    ? mode
+    : "ANY";
+}
+
+function templateWeekdays(value: unknown) {
+  return sortVisualWeekdays(
+    templateArray(value)
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6),
+  );
+}
+
+function templateSameWeekdays(left: number[], right: number[]) {
+  const leftSorted = sortVisualWeekdays(left);
+  const rightSorted = sortVisualWeekdays(right);
+
+  return (
+    leftSorted.length === rightSorted.length &&
+    leftSorted.every((item, index) => item === rightSorted[index])
+  );
+}
+
+function inferTemplateTimeWindowMode(periodRules: Record<string, unknown>) {
+  const hours = templateArray(periodRules.hours);
+
+  if (!hours.length && periodRules.quietHoursEnabled !== true) {
+    return "ANY";
+  }
+
+  return periodRules.quietHoursEnabled === true ? "QUIET_HOURS" : "CUSTOM";
+}
+
+function inferTemplateWeekdayMode(periodRules: Record<string, unknown>) {
+  const weekdays = templateWeekdays(periodRules.weekdays);
+
+  if (templateSameWeekdays(weekdays, visualWeekdayPresets.WEEKDAYS)) {
+    return "WEEKDAYS";
+  }
+
+  if (templateSameWeekdays(weekdays, visualWeekdayPresets.WEEKENDS)) {
+    return "WEEKENDS";
+  }
+
+  if (
+    !weekdays.length ||
+    templateSameWeekdays(weekdays, visualWeekdayPresets.ANY)
+  ) {
+    return periodRules.weekdaysOnly === true ? "WEEKDAYS" : "ANY";
+  }
+
+  return "CUSTOM";
+}
+
+function templateTimeValue(value: unknown, fallback: string) {
+  const raw = templateString(value, fallback);
+  return /^\d{2}:\d{2}$/.test(raw) ? raw : fallback;
+}
+
+function templatePeriodHour(
+  periodRules: Record<string, unknown>,
+  part: 0 | 1,
+  fallback: string,
+) {
+  const hours = templateArray(periodRules.hours).filter(
+    (item): item is string => typeof item === "string" && item.includes("-"),
+  );
+  const raw = hours[0]?.split("-")[part]?.trim();
+
+  return templateTimeValue(raw, fallback);
+}
+
 function RemoveButton({
   label,
   disabled,
@@ -1517,6 +2243,11 @@ function fallbackLootBoxes(): GuestGameVisualEditorLootBox[] {
       rewardLabel: "Бонус за визит",
       condition: "Визит в клуб",
       limitPerGuest: 1,
+      timeWindowMode: "ANY",
+      weekdayMode: "ANY",
+      weekdays: visualWeekdayPresets.ANY,
+      hourFrom: "10:00",
+      hourTo: "16:00",
     },
   ];
 }

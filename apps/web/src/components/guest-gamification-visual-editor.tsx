@@ -113,6 +113,50 @@ const visualMissionTypeHelpText: Record<string, string> = {
   CUSTOM: "Свободный сценарий с условиями из расширенных настроек.",
 };
 
+const visualProgressUnitOptions = [
+  { value: "visit", label: "визиты" },
+  { value: "check_in", label: "чекины" },
+  { value: "minute", label: "минуты игры" },
+  { value: "purchase", label: "покупки" },
+  { value: "rub", label: "рубли" },
+  { value: "day", label: "уникальные дни" },
+  { value: "friend", label: "друзья" },
+  { value: "event", label: "события" },
+  { value: "step", label: "шаги" },
+];
+
+const visualProgressUnitHelpText: Record<string, string> = {
+  visit: "Гость видит прогресс как количество визитов.",
+  check_in: "Гость видит прогресс как количество чекинов.",
+  minute: "Гость видит прогресс как накопленное игровое время.",
+  purchase: "Гость видит прогресс как количество покупок.",
+  rub: "Гость видит прогресс как сумму покупок или пополнений в рублях.",
+  day: "Гость видит прогресс как количество уникальных дней активности.",
+  friend: "Гость видит прогресс как количество приглашенных друзей.",
+  event: "Гость видит прогресс как количество подходящих событий.",
+  step: "Гость видит прогресс как шаги квестовой цепочки.",
+};
+
+const visualPromoTargetOptions = [
+  { value: "home", label: "Главная игрового модуля" },
+  { value: "missions", label: "Квесты" },
+  { value: "lootBoxes", label: "Лутбоксы" },
+  { value: "battlePass", label: "Battle Pass" },
+  { value: "rewards", label: "Награды" },
+  { value: "profile", label: "Профиль гостя" },
+  { value: "checkIn", label: "Чекин в клубе" },
+];
+
+const visualPromoTargetHelpText: Record<string, string> = {
+  home: "Баннер ведет на главную страницу игрового модуля.",
+  missions: "Баннер ведет к списку квестов.",
+  lootBoxes: "Баннер ведет к лутбоксам и доступным открытиям.",
+  battlePass: "Баннер ведет к сезонному Battle Pass.",
+  rewards: "Баннер ведет к наградам и промокодам.",
+  profile: "Баннер ведет к профилю гостя.",
+  checkIn: "Баннер ведет к действию чекина в выбранном клубе.",
+};
+
 const visualTimeWindowOptions = [
   { value: "ANY", label: "Любое время" },
   { value: "QUIET_HOURS", label: "Тихие часы" },
@@ -1034,6 +1078,11 @@ function MissionInspector({
               onChange={(progressTarget) => update({ ...item, progressTarget })}
             />
           </div>
+          <MissionProgressUnitField
+            value={item.progressUnit ?? "step"}
+            disabled={disabled}
+            onChange={(progressUnit) => update({ ...item, progressUnit })}
+          />
           <TextField
             label="Награда"
             value={item.rewardLabel}
@@ -1141,8 +1190,7 @@ function PromoInspector({
               disabled={disabled}
               onChange={(tag) => update({ ...item, tag })}
             />
-            <TextField
-              label="Anchor"
+            <PromoTargetField
               value={item.targetAnchor ?? ""}
               disabled={disabled}
               onChange={(targetAnchor) => update({ ...item, targetAnchor })}
@@ -1786,7 +1834,7 @@ function StatusField({
       >
         {statusOptions.map((status) => (
           <option key={status} value={status}>
-            {status}
+            {statusLabel(status)}
           </option>
         ))}
       </select>
@@ -1814,7 +1862,9 @@ function TriggerField({
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       >
-        {!hasCurrentOption && value ? <option value={value}>Сохраненное событие: {value}</option> : null}
+        {!hasCurrentOption && value ? (
+          <option value={value}>Сохраненное событие</option>
+        ) : null}
         {visualTriggerOptions.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -1849,7 +1899,7 @@ function MissionTypeField({
         onChange={(event) => onChange(event.target.value)}
       >
         {!hasCurrentOption && value ? (
-          <option value={value}>Сохраненный тип: {value}</option>
+          <option value={value}>Сохраненный тип квеста</option>
         ) : null}
         {visualMissionTypeOptions.map((option) => (
           <option key={option.value} value={option.value}>
@@ -1860,6 +1910,85 @@ function MissionTypeField({
       <EditorHint>
         {visualMissionTypeHelpText[value] ??
           "Тип помогает понять сценарий квеста; подробные условия можно уточнить в расширенных настройках."}
+      </EditorHint>
+    </label>
+  );
+}
+
+function MissionProgressUnitField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const hasCurrentOption = visualProgressUnitOptions.some(
+    (option) => option.value === value,
+  );
+
+  return (
+    <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      Что считаем
+      <select
+        className={fieldClass}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {!hasCurrentOption && value ? (
+          <option value={value}>Сохраненный способ расчета</option>
+        ) : null}
+        {visualProgressUnitOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <EditorHint>
+        {visualProgressUnitHelpText[value] ??
+          "Выберите, в каких понятных единицах гость будет видеть прогресс квеста."}
+      </EditorHint>
+    </label>
+  );
+}
+
+function PromoTargetField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const normalizedValue = value || "home";
+  const hasCurrentOption = visualPromoTargetOptions.some(
+    (option) => option.value === normalizedValue,
+  );
+
+  return (
+    <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      Куда вести гостя
+      <select
+        className={fieldClass}
+        value={normalizedValue}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {!hasCurrentOption && normalizedValue ? (
+          <option value={normalizedValue}>Сохраненный раздел</option>
+        ) : null}
+        {visualPromoTargetOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <EditorHint>
+        {visualPromoTargetHelpText[normalizedValue] ??
+          "Выберите раздел гостевой страницы, куда должен вести баннер."}
       </EditorHint>
     </label>
   );
@@ -1920,7 +2049,7 @@ function createVisualMission(): GuestGameVisualEditorMission {
     rewardAmount: null,
     rewardLabel: "Промокод бара",
     progressTarget: 1,
-    progressUnit: null,
+    progressUnit: "step",
     questSteps: [{ id: "step-1", title: "Выполнить шаг", target: 1 }],
   };
 }

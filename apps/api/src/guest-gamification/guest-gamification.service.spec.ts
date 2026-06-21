@@ -2198,7 +2198,7 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('blocks guests/logs rules with a checked-empty diagnostic instead of a blind sync prompt', () => {
+    it('keeps checked-empty guests/logs rules as a diagnostic warning after foundation sync', () => {
       const { service } = createService();
 
       const readiness = (service as any).buildPilotReadiness(
@@ -2231,21 +2231,20 @@ describe('GuestGamificationService', () => {
       );
 
       expect(readiness.runbook).toMatchObject({
-        stage: 'BLOCKED',
-        canRunDryRun: false,
-        blockers: ['Факты guests/logs'],
+        stage: 'DRY_RUN',
+        canRunDryRun: true,
+        blockers: [],
       });
       expect(readiness.items).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             key: 'GUEST_LOGS',
-            status: 'BLOCKED',
+            status: 'PARTIAL',
             statusLabel: '0 после sync',
-            note: expect.stringContaining('последний успешный foundation sync'),
-            nextAction: expect.stringContaining(
-              'подтверждения payload Langame',
-            ),
-            actionLabel: 'Открыть диагностику',
+            note: expect.stringContaining('Диагностика guests/logs закрыта'),
+            nextAction: expect.stringContaining('Хвост закрыт'),
+            actionHref: '/guests/gamification',
+            actionLabel: 'Открыть правила',
           }),
         ]),
       );

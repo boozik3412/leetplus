@@ -7,6 +7,7 @@ import { can } from "@/lib/permissions";
 type SyncPageProps = {
   searchParams?: Promise<{
     includeGuestLogs?: string | string[];
+    endpoint?: string | string[];
   }>;
 };
 
@@ -16,6 +17,9 @@ export default async function SyncPage({ searchParams }: SyncPageProps) {
   const includeGuestLogsParam = Array.isArray(params?.includeGuestLogs)
     ? params?.includeGuestLogs[0]
     : params?.includeGuestLogs;
+  const endpointParam = Array.isArray(params?.endpoint)
+    ? params?.endpoint[0]
+    : params?.endpoint;
   const initialIncludeGuestLogs =
     includeGuestLogsParam === "1" ||
     includeGuestLogsParam === "true" ||
@@ -71,6 +75,7 @@ export default async function SyncPage({ searchParams }: SyncPageProps) {
         <LangameSyncPanel
           initialSettings={langameSettings}
           initialIncludeGuestLogs={initialIncludeGuestLogs}
+          initialEndpointProfileKey={endpointParam}
         />
       </div>
     </main>

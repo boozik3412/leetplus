@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-19
+Last updated: 2026-06-21
 
 ## Current Workflow
 
@@ -23,6 +23,12 @@ Last updated: 2026-06-19
 - Production VDS: Ubuntu 24.04 LTS on reg.ru, IP `168.222.143.243`
 - Production mail: `reports@leetplus.ru` through Mail.ru/VK WorkSpace SMTP
 - Telegram bot and Mini App edge: current handoff is `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`; the live edge is `https://tg.leetplus.ru` on server 1337 (`188.234.220.76`) and currently uses Telegram polling, not webhook.
+
+## Latest Gamification State
+
+- Guest Game Hub pilot readiness no longer treats a checked-empty `guests/logs` endpoint as a pilot stop-blocker after a successful foundation sync returned 0 rows. It remains a visible diagnostic warning for rules that depend on `guests/logs`, while the first-bonus path should use rules without that dependency until Langame payload is confirmed.
+- Guest Game Hub now gives the VDS `bot-consumer` a concrete tenant-scope hint based on the current tenant slug, and the static tariff snapshot block links directly to the matching `/sync` endpoint profile/snapshot workflow.
+- The technical Langame bonus ledger warning in `/guests/gamification` is platform-admin only; club roles should work with the business controls without seeing backend-mode details.
 
 ## Product Context
 

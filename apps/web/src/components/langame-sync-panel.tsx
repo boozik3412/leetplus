@@ -936,6 +936,20 @@ const guestCriticalProfileKeys: { key: EndpointProfileKey; label: string }[] = [
   { key: "guestLogs", label: "Логи" },
 ];
 
+function normalizeEndpointProfileKey(
+  value: string | null | undefined,
+): EndpointProfileKey {
+  const fallback: EndpointProfileKey = "transactions";
+
+  if (!value) {
+    return fallback;
+  }
+
+  return endpointProfileOptions.some((endpoint) => endpoint.key === value)
+    ? (value as EndpointProfileKey)
+    : fallback;
+}
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
@@ -952,11 +966,16 @@ function getErrorMessage(data: unknown) {
 export function LangameSyncPanel({
   initialSettings,
   initialIncludeGuestLogs = false,
+  initialEndpointProfileKey,
 }: {
   initialSettings: LangameSettings;
   initialIncludeGuestLogs?: boolean;
+  initialEndpointProfileKey?: string;
 }) {
   const today = getTodayInputValue();
+  const initialProfileKey = normalizeEndpointProfileKey(
+    initialEndpointProfileKey,
+  );
   const [settings, setSettings] = useState(initialSettings);
   const [syncPeriod, setSyncPeriod] = useState<SyncPeriod>("last7");
   const [syncDateFrom, setSyncDateFrom] = useState(shiftDateInput(today, -6));
@@ -994,7 +1013,7 @@ export function LangameSyncPanel({
     useState<GuestSearchStatus>("idle");
   const [guestSearchError, setGuestSearchError] = useState<string | null>(null);
   const [endpointProfileKey, setEndpointProfileKey] =
-    useState<EndpointProfileKey>("transactions");
+    useState<EndpointProfileKey>(initialProfileKey);
   const [endpointProfileSourceId, setEndpointProfileSourceId] = useState("");
   const [endpointProfileClubId, setEndpointProfileClubId] = useState("");
   const [endpointProfileGuestId, setEndpointProfileGuestId] = useState("");

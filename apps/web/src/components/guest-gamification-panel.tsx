@@ -53,6 +53,7 @@ type Props = {
     canManageRules: boolean;
     canApproveRewards: boolean;
     canViewGuestPii: boolean;
+    isPlatformAdmin: boolean;
   };
 };
 
@@ -1635,11 +1636,13 @@ export function GuestGamificationPanel({
                 </button>
               ))}
             </div>
-            <div className="max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-              Начисления в Langame идут через bonus ledger: approved-награда
-              попадает в очередь, dry-run проверяет контур, а dispatch пишет
-              бонусы только при включенном backend-режиме.
-            </div>
+            {access.isPlatformAdmin ? (
+              <div className="max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                Начисления в Langame идут через bonus ledger: approved-награда
+                попадает в очередь, dry-run проверяет контур, а dispatch пишет
+                бонусы только при включенном backend-режиме.
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -2989,7 +2992,10 @@ function OverviewTab({
         onUpdateDeliveryStatus={onUpdateDeliveryStatus}
       />
 
-      <TariffSnapshotReadinessCard snapshots={workspace.tariffSnapshots} />
+      <TariffSnapshotReadinessCard
+        snapshots={workspace.tariffSnapshots}
+        onOpenRules={() => onOpenTab("lootBoxes")}
+      />
 
       <GuestLogCatalogCard
         catalog={workspace.guestLogCatalog}
@@ -4948,8 +4954,10 @@ function SafetyNoteCard({
 
 function TariffSnapshotReadinessCard({
   snapshots,
+  onOpenRules,
 }: {
   snapshots: GuestGameTariffSnapshotEndpoint[];
+  onOpenRules?: () => void;
 }) {
   const readyCount = snapshots.filter((snapshot) => snapshot.status === "READY")
     .length;
@@ -4973,16 +4981,34 @@ function TariffSnapshotReadinessCard({
         <div>
           <SectionTitle title="Тарифные snapshot-источники" />
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-            Конструктор условий использует только подготовленные данные Langame.
-            Здесь видно, какие тарифные справочники уже сохранены в LeetPlus и
-            готовы для правил лутбоксов, миссий и battle pass.
+            Тарифы редактируются в Langame, а LeetPlus использует сохраненный
+            snapshot этих справочников в правилах лутбоксов, миссий и battle
+            pass. Отсюда можно перейти к нужному endpoint, проверить поля и
+            создать свежий snapshot.
           </p>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
-          {readyCount}/{snapshots.length} готовы
-          <span className="ml-2 text-zinc-400">
-            {latestAt ? formatDate(latestAt) : "snapshot не создан"}
-          </span>
+        <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+            {readyCount}/{snapshots.length} готовы
+            <span className="ml-2 text-zinc-400">
+              {latestAt ? formatDate(latestAt) : "snapshot не создан"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/sync?endpoint=tariffsGroups#endpoint-profile-diagnostics"
+              className={smallButtonClass}
+            >
+              Открыть тарифы в /sync
+            </Link>
+            <button
+              type="button"
+              className={smallButtonClass}
+              onClick={onOpenRules}
+            >
+              Использовать в правилах
+            </button>
+          </div>
         </div>
       </div>
 
@@ -5075,11 +5101,30 @@ function TariffSnapshotReadinessCard({
             <p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
               {snapshot.nextAction}
             </p>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href={tariffSnapshotSyncHref(snapshot.endpointKey)}
+                className={smallButtonClass}
+              >
+                Проверить endpoint
+              </Link>
+              <Link
+                href={tariffSnapshotSyncHref(snapshot.endpointKey)}
+                className={smallButtonClass}
+              >
+                Создать snapshot
+              </Link>
+            </div>
           </article>
         ))}
       </div>
     </section>
   );
+}
+
+function tariffSnapshotSyncHref(endpointKey: string) {
+  return `/sync?endpoint=${encodeURIComponent(endpointKey)}#endpoint-profile-diagnostics`;
 }
 
 function GuestLogCatalogCard({

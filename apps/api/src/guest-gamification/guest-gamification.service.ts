@@ -3072,7 +3072,7 @@ export class GuestGamificationService {
       ]);
     const integrationReadiness = this.buildIntegrationReadiness(deliveries);
     const communicationQueue = this.buildCommunicationQueue(profiles, rewards);
-    const deliveryOutbox = this.buildDeliveryOutbox(deliveries);
+    const deliveryOutbox = this.buildDeliveryOutbox(deliveries, user.tenantSlug);
 
     return {
       summary: this.buildSummary(
@@ -3789,7 +3789,9 @@ export class GuestGamificationService {
         status: guestLogsReady
           ? 'READY'
           : guestLogsRequiredByRules
-            ? 'BLOCKED'
+            ? guestLogsCheckedEmpty
+              ? 'PARTIAL'
+              : 'BLOCKED'
             : guestLogMappings
               ? 'PARTIAL'
               : 'MANUAL_ONLY',
@@ -3820,7 +3822,7 @@ export class GuestGamificationService {
             : `Каталог событий сохранен для будущих квестов и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}. Текущие правила могут идти без guests/logs.`
           : guestLogsRequiredByRules
             ? guestLogsCheckedEmpty
-              ? `Активные правила используют guests/logs, но последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} проверил endpoint и вернул 0 логов. Повтор sync без разбора Langame payload не снимет риск.`
+              ? `Диагностика guests/logs закрыта: последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} проверил endpoint и вернул 0 логов. Пилот можно продолжать на правилах без guests/logs, а guests/logs-зависимости считать ожидающими подтверждения payload Langame.`
               : 'Активные правила используют типы guests/logs, но сохраненных фактов пока нет: dry-run по этим правилам будет неполным.'
             : guestLogMappings
               ? 'Словарь типов уже настроен, но текущие активные правила не требуют guests/logs.'
@@ -3831,18 +3833,22 @@ export class GuestGamificationService {
           ? 'Скачать CSV каталога и выбрать реальные типы для правил 1337.'
           : guestLogsRequiredByRules
             ? guestLogsCheckedEmpty
-              ? 'Открыть диагностику /sync, проверить строки последнего foundation-run и временно убрать зависимость rules от guests/logs до подтверждения payload Langame.'
+              ? 'Хвост закрыт: endpoint уже проверен и вернул 0 строк. Для первого бонуса используйте правила без guests/logs; к guests/logs вернуться после подтверждения payload Langame.'
               : 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов перед dry-run.'
             : guestLogsCheckedEmpty
               ? 'Можно запускать dry-run текущих правил; для guests/logs-квестов сначала подтвердить у Langame, почему endpoint возвращает 0 строк.'
               : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
         actionHref: guestLogsReady
           ? '/api/guests/gamification/guest-log-catalog/export'
-          : '/sync?includeGuestLogs=1',
+          : guestLogsRequiredByRules && guestLogsCheckedEmpty
+            ? '/guests/gamification'
+            : '/sync?includeGuestLogs=1',
         actionLabel: guestLogsReady
           ? 'Скачать CSV'
-          : guestLogsCheckedEmpty
-            ? 'Открыть диагностику'
+          : guestLogsRequiredByRules && guestLogsCheckedEmpty
+            ? 'Открыть правила'
+            : guestLogsCheckedEmpty
+              ? 'Открыть диагностику'
             : 'Открыть /sync',
       },
       {
@@ -7932,6 +7938,7 @@ export class GuestGamificationService {
 
   private buildDeliveryOutbox(
     deliveries: GuestGameDelivery[],
+    tenantSlug?: string,
   ): GuestGameDeliveryOutbox {
     return {
       summary: {
@@ -7949,7 +7956,7 @@ export class GuestGamificationService {
         manual: deliveries.filter((item) => item.channel === 'MANUAL').length,
       },
       dispatcher: this.buildDeliveryDispatcherStatus(deliveries),
-      botConsumer: this.buildBotConsumerStatus(deliveries),
+      botConsumer: this.buildBotConsumerStatus(deliveries, tenantSlug),
       items: deliveries.slice(0, 12),
       note: 'Outbox хранит подготовленные снимки выдачи наград. Внешний Telegram/MAX-бот пока не отправляет эти сообщения.',
     };
@@ -7957,8 +7964,9 @@ export class GuestGamificationService {
 
   private buildBotConsumerStatus(
     deliveries: GuestGameDelivery[],
+    tenantSlug?: string,
   ): GuestGameBotConsumerStatus {
-    const config = botConsumerConfig();
+    const config = botConsumerConfig(tenantSlug);
     const readyForBot = deliveries.filter(
       (item) =>
         item.status === 'READY' &&
@@ -11207,7 +11215,7 @@ function deliveryProviderConfig(): DeliveryProviderConfig {
   };
 }
 
-function botConsumerConfig(): BotConsumerConfig {
+function botConsumerConfig(tenantSlug?: string): BotConsumerConfig {
   const dryRunEnv = envString('GUEST_GAME_BOT_CONSUMER_DRY_RUN');
   const dryRun = dryRunEnv === null ? true : booleanValue(dryRunEnv);
   const limit = botConsumerLimit(envString('GUEST_GAME_BOT_CONSUMER_LIMIT'));
@@ -11245,7 +11253,9 @@ function botConsumerConfig(): BotConsumerConfig {
 
   if (!tenantScopeConfigured) {
     requiredEnv.push(
-      'GUEST_GAME_BOT_CONSUMER_TENANT_ID or GUEST_GAME_BOT_CONSUMER_TENANT_SLUG',
+      tenantSlug
+        ? `GUEST_GAME_BOT_CONSUMER_TENANT_SLUG=${tenantSlug} or GUEST_GAME_BOT_CONSUMER_TENANT_ID`
+        : 'GUEST_GAME_BOT_CONSUMER_TENANT_ID or GUEST_GAME_BOT_CONSUMER_TENANT_SLUG',
     );
   }
 

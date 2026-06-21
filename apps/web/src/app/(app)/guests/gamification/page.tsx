@@ -578,6 +578,7 @@ export default async function GuestGamificationPage() {
             canManageRules: can(user, "manage_guest_game_rules"),
             canApproveRewards: can(user, "approve_guest_game_rewards"),
             canViewGuestPii: can(user, "view_guest_game_pii"),
+            isPlatformAdmin: user.isPlatformAdmin,
           }}
         />
       </div>

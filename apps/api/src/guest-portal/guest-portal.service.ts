@@ -4695,8 +4695,11 @@ export class GuestPortalService {
         replyMarkup: response.reply.replyMarkup,
       });
 
+      const responseWithoutReply = { ...response };
+      delete responseWithoutReply.reply;
+
       return {
-        ...response,
+        ...responseWithoutReply,
         replyDispatch: {
           provider: 'TELEGRAM',
           status: 'SENT',

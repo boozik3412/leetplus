@@ -46,6 +46,9 @@ type TelegramUpdate = {
 type LeetPlusWebhookResponse = {
   status?: unknown;
   action?: unknown;
+  replyDispatch?: {
+    status?: unknown;
+  };
   reply?: {
     provider?: unknown;
     method?: unknown;
@@ -176,6 +179,7 @@ export async function handleTelegramEdgeWebhook(
     reply?.provider === 'TELEGRAM' &&
     reply.method === 'sendMessage' &&
     replyText !== null;
+  const alreadySentByApi = leetPlusResponse.replyDispatch?.status === 'SENT';
 
   if (!shouldSend) {
     const callbackAnswered = config.dryRun
@@ -199,6 +203,34 @@ export async function handleTelegramEdgeWebhook(
       upstreamAction: leetPlusResponse.action ?? null,
       replySent: false,
       dryRun: config.dryRun,
+      callbackAnswered,
+    };
+  }
+
+  if (alreadySentByApi) {
+    const callbackAnswered = config.dryRun
+      ? false
+      : await answerTelegramCallbackQueryIfNeeded(
+          config,
+          fetchImpl,
+          logger,
+          callbackQueryId,
+        );
+
+    logger.log(
+      `Telegram edge skipped reply already sent by API action=${stringValue(
+        leetPlusResponse.action,
+      )} status=${stringValue(leetPlusResponse.status)} chat=${chatIdMasked}`,
+    );
+
+    return {
+      ok: true,
+      upstreamStatus: leetPlusResponse.status ?? null,
+      upstreamAction: leetPlusResponse.action ?? null,
+      replySent: false,
+      replyAlreadySentByApi: true,
+      dryRun: config.dryRun,
+      chatIdMasked,
       callbackAnswered,
     };
   }

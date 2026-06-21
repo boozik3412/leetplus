@@ -24,7 +24,7 @@ Telegram webhook должен быть пустым. `telegram-poller` сам д
 ## Что работает на 1337
 
 - `telegram-poller` получает Telegram updates через `getUpdates`.
-- `telegram-edge` пересылает updates в основной API и отправляет safe replies в Telegram.
+- `telegram-edge` пересылает updates в основной API и отправляет safe replies в Telegram только как fallback, если основной API вернул safe `reply` payload.
 - `telegram-mini-app-web` обслуживает `/game/app` и `/api/guest-portal/*`.
 - `bot-consumer` опционален, profile `consumer`, сейчас держать в dry-run.
 
@@ -43,8 +43,9 @@ flowchart LR
   TG["Telegram Bot API"] -->|"getUpdates polling"| POLLER["1337 telegram-poller"]
   POLLER --> EDGE["1337 telegram-edge"]
   EDGE -->|"safe update + secret"| API["Main LeetPlus API"]
-  API -->|"safe reply payload"| EDGE
-  EDGE -->|"sendMessage via Bot API/proxy"| TG
+  API -->|"replyDispatch=SENT or safe reply payload"| EDGE
+  API -->|"sendMessage via Bot API"| TG
+  EDGE -->|"fallback sendMessage via Bot API/proxy"| TG
   TGAPP["Telegram Mini App WebView"] -->|"/game/app"| EDGEWEB["1337 Next web"]
   EDGEWEB -->|"validate initData with bot token"| EDGEWEB
   EDGEWEB -->|"edge assertion + shared secret"| API
@@ -63,14 +64,15 @@ flowchart LR
 ## Env основной VDS
 
 ```env
-GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=false
+GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=true
+GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN=<telegram-bot-token>
 GUEST_GAME_TELEGRAM_MINI_APP_URL=https://tg.leetplus.ru/game/app
 GUEST_GAME_TELEGRAM_BOT_USERNAME=leetplusru_bot
 GUEST_GAME_TG_EDGE_SHARED_SECRET=<same-as-edge>
 GUEST_GAME_TELEGRAM_WEBHOOK_SECRET=<same-as-edge-update-secret>
 ```
 
-Основная VDS не отправляет Telegram replies напрямую.
+Основная VDS отправляет Telegram replies напрямую. Edge adapter остается в polling-контуре и отправляет сообщения только когда API вернул safe `reply` payload.
 
 ## Env 1337
 

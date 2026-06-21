@@ -2011,6 +2011,7 @@ describe('GuestPortalService', () => {
           status: 'SENT',
           chatIdMasked: 'ch...56',
         });
+        expect(result.reply).toBeUndefined();
         expect(fetchMock).toHaveBeenCalledWith(
           'https://api.telegram.org/bottelegram-token/sendMessage',
           expect.objectContaining({

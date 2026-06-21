@@ -333,6 +333,21 @@ const lootBoxSegmentOptions = [
   { value: "referral", label: "Реферальные гости" },
 ];
 
+const rewardTypeOptions = [
+  { value: "PROMOCODE", label: "Промокод" },
+  { value: "BONUS", label: "Бонусы" },
+  { value: "BONUS_POINTS", label: "Бонусные баллы" },
+  { value: "BONUS_BALANCE", label: "Бонусный баланс Langame" },
+  { value: "BALANCE", label: "Денежный баланс Langame" },
+  { value: "XP", label: "Опыт XP" },
+  { value: "LOYALTY_BONUS", label: "Бонус лояльности" },
+  { value: "CASHBACK", label: "Кешбэк" },
+  { value: "FREE_HOURS", label: "Бесплатные часы" },
+  { value: "CASHIER_CODE", label: "Код кассиру" },
+  { value: "MERCH", label: "Физический приз" },
+  { value: "BATTLE_PASS_REWARD", label: "Награда Battle Pass" },
+];
+
 const sessionTypeOptions = [
   { value: "", label: "любой тип" },
   { value: "regular_session", label: "обычная сессия" },
@@ -3295,7 +3310,10 @@ function PilotReadinessCard({
                           </div>
                           <p className="mt-1 leading-5 text-zinc-600 dark:text-zinc-300">
                             {item.reward
-                              ? `${item.reward.rewardLabel} · ${item.reward.rewardType}`
+                              ? `${item.reward.rewardLabel} · ${optionLabel(
+                                  rewardTypeOptions,
+                                  item.reward.rewardType,
+                                )}`
                               : item.source}
                           </p>
                           <p className="mt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
@@ -5747,7 +5765,9 @@ function LootBoxesTab({
           key={item.id}
           title={item.name}
           status={item.status}
-          subtitle={`${optionLabel(lootBoxTriggerOptions, item.triggerKind)} · ${item.rewardLabel ?? item.rewardType}`}
+          subtitle={`${optionLabel(lootBoxTriggerOptions, item.triggerKind)} · ${
+            item.rewardLabel ?? optionLabel(rewardTypeOptions, item.rewardType)
+          }`}
           meta={[
             item.audience?.name ?? "все гости",
             optionLabel(lootBoxSegmentOptions, item.segment ?? ""),
@@ -6301,11 +6321,12 @@ function RewardsTab({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Тип">
-              <input
-                className={fieldClass}
+              <OptionSelect
+                options={rewardTypeOptions}
                 value={form.rewardType}
-                onChange={(event) =>
-                  setForm({ ...form, rewardType: event.target.value })
+                preservedLabel="Сохраненный тип награды"
+                onChange={(rewardType) =>
+                  setForm({ ...form, rewardType })
                 }
               />
             </Field>
@@ -7271,10 +7292,13 @@ function RuleCommonFields({
       <FormSection title="Награда и бюджет">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <Field label="Тип награды">
-            <input
-              className={fieldClass}
+            <OptionSelect
+              options={rewardTypeOptions}
               value={rewardType}
-              onChange={(event) => onChange({ rewardType: event.target.value })}
+              preservedLabel="Сохраненный тип награды"
+              onChange={(nextRewardType) =>
+                onChange({ rewardType: nextRewardType })
+              }
             />
           </Field>
           <Field label="Сумма">
@@ -7541,7 +7565,8 @@ function RewardRow({
               reward.guest?.displayName ??
               reward.guestExternalId ??
               "без гостя"}{" "}
-            · {reward.rewardType} · {formatMoney(reward.rewardAmount)}
+            · {optionLabel(rewardTypeOptions, reward.rewardType)} ·{" "}
+            {formatMoney(reward.rewardAmount)}
           </p>
           <p className="mt-1 text-xs text-zinc-400">
             {reward.store?.name ?? "любой клуб"} · {formatDate(reward.qualifiedAt)}

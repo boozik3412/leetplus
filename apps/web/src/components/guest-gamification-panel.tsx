@@ -577,8 +577,7 @@ const defaultLootBoxForm: LootBoxForm = {
   }),
   budgetAmount: "5000",
   antiFraudText: jsonText({
-    requiresCashierConfirmation: true,
-    oneDevicePerGuest: true,
+    source: "business_controls",
   }),
   manualApprovalRequired: true,
   note: "Выдача только после проверки администратором.",
@@ -980,7 +979,7 @@ export function GuestGamificationPanel({
         limits: buildLootBoxLimits(lootBoxForm),
         probabilityRules: buildLootBoxProbabilityRules(lootBoxForm),
         budgetAmount: lootBoxForm.budgetAmount,
-        antiFraudRules: buildLootBoxAntiFraudRules(lootBoxForm),
+        antiFraudRules: buildLootBoxAntiFraudRules(),
         manualApprovalRequired: lootBoxForm.manualApprovalRequired,
         note: nullable(lootBoxForm.note),
       };
@@ -6669,6 +6668,7 @@ function LootBoxBusinessRules({
 }) {
   const updatePrizes = (prizes: LootBoxPrizeForm[]) =>
     onChange(lootBoxPrizePatch(form, prizes));
+  const hasWeeklyLootBoxLimit = form.perGuestPerWeek.trim().length > 0;
 
   return (
     <BusinessRuleSection
@@ -6719,16 +6719,42 @@ function LootBoxBusinessRules({
         onChange={onChange}
       />
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Раз в неделю на гостя">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.perGuestPerWeek}
-            onChange={(event) =>
-              onChange({ perGuestPerWeek: event.target.value })
-            }
-          />
+        <Field label="Лутбоксов на гостя в неделю">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+              <input
+                type="radio"
+                checked={!hasWeeklyLootBoxLimit}
+                onChange={() => onChange({ perGuestPerWeek: "" })}
+              />
+              <span>Сколько угодно</span>
+            </label>
+            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+              <input
+                type="radio"
+                checked={hasWeeklyLootBoxLimit}
+                onChange={() =>
+                  onChange({ perGuestPerWeek: form.perGuestPerWeek || "1" })
+                }
+              />
+              <span>Задать количество</span>
+            </label>
+          </div>
+          {hasWeeklyLootBoxLimit ? (
+            <input
+              className={`${fieldClass} mt-2`}
+              type="number"
+              min="1"
+              value={form.perGuestPerWeek}
+              onChange={(event) =>
+                onChange({ perGuestPerWeek: event.target.value })
+              }
+            />
+          ) : (
+            <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+              LeetPlus не будет ограничивать количество открытий этим недельным лимитом.
+            </p>
+          )}
         </Field>
         <Field label="Открытий в день">
           <input
@@ -6741,20 +6767,6 @@ function LootBoxBusinessRules({
         </Field>
       </div>
       <LootBoxPrizesEditor prizes={form.prizes} onChange={updatePrizes} />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <ToggleField
-          label="Подтверждает кассир"
-          checked={form.requireCashierConfirmation}
-          onChange={(requireCashierConfirmation) =>
-            onChange({ requireCashierConfirmation })
-          }
-        />
-        <ToggleField
-          label="Один девайс на гостя"
-          checked={form.oneDevicePerGuest}
-          onChange={(oneDevicePerGuest) => onChange({ oneDevicePerGuest })}
-        />
-      </div>
     </BusinessRuleSection>
   );
 }
@@ -8661,7 +8673,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     weekdaysOnly: booleanRule(lootBox.periodRules, "weekdaysOnly", true),
     hourFrom: timeWindowPart(lootBox.periodRules, 0, "10:00"),
     hourTo: timeWindowPart(lootBox.periodRules, 1, "16:00"),
-    perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", "1"),
+    perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", ""),
     totalPerDay: numberRule(lootBox.limits, "totalPerDay", "30"),
     prizes: lootBoxPrizesToForm(
       lootBox.probabilityRules,
@@ -8958,10 +8970,13 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
 }
 
 function buildLootBoxLimits(form: LootBoxForm) {
+  const perGuestPerWeek = optionalNumber(form.perGuestPerWeek);
+  const totalPerDay = optionalNumber(form.totalPerDay);
+
   return {
     source: "business_controls",
-    perGuestPerWeek: optionalNumber(form.perGuestPerWeek),
-    totalPerDay: optionalNumber(form.totalPerDay),
+    ...(perGuestPerWeek == null ? {} : { perGuestPerWeek }),
+    ...(totalPerDay == null ? {} : { totalPerDay }),
   };
 }
 
@@ -9015,11 +9030,9 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
   };
 }
 
-function buildLootBoxAntiFraudRules(form: LootBoxForm) {
+function buildLootBoxAntiFraudRules() {
   return {
     source: "business_controls",
-    requiresCashierConfirmation: form.requireCashierConfirmation,
-    oneDevicePerGuest: form.oneDevicePerGuest,
   };
 }
 

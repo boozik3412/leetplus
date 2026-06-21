@@ -788,12 +788,12 @@ function LootBoxInspector({ payload, onChange, disabled }: InspectorProps) {
               disabled={disabled}
               onChange={(rewardAmount) => update({ ...item, rewardAmount })}
             />
-            <NumberField
-              label="Лимит"
-              value={item.limitPerGuest ?? 1}
-              min={1}
+            <LootBoxLimitField
+              value={item.limitPerGuest}
               disabled={disabled}
-              onChange={(limitPerGuest) => update({ ...item, limitPerGuest })}
+              onChange={(limitPerGuest) =>
+                update({ ...item, limitPerGuest })
+              }
             />
           </div>
           <TextField
@@ -1294,6 +1294,61 @@ function NumberField({
         }}
       />
     </label>
+  );
+}
+
+function LootBoxLimitField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: number | null;
+  disabled: boolean;
+  onChange: (value: number | null) => void;
+}) {
+  const hasLimit = value != null;
+
+  return (
+    <div className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      Лутбоксов на гостя
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case tracking-normal text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+          <input
+            type="radio"
+            checked={!hasLimit}
+            disabled={disabled}
+            onChange={() => onChange(null)}
+          />
+          <span>Сколько угодно</span>
+        </label>
+        <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case tracking-normal text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+          <input
+            type="radio"
+            checked={hasLimit}
+            disabled={disabled}
+            onChange={() => onChange(value ?? 1)}
+          />
+          <span>Задать количество</span>
+        </label>
+      </div>
+      {hasLimit ? (
+        <input
+          className={fieldClass}
+          type="number"
+          min={1}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => {
+            const parsed = Number(event.target.value);
+            onChange(Number.isFinite(parsed) ? Math.max(1, parsed) : 1);
+          }}
+        />
+      ) : (
+        <EditorHint>
+          Лутбокс не будет ограничен количеством открытий на гостя.
+        </EditorHint>
+      )}
+    </div>
   );
 }
 

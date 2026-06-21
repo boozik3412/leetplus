@@ -14986,7 +14986,12 @@ function buildVisualLootBoxData(
     },
     limits: {
       source: 'visual_editor',
-      perGuest: item.limitPerGuest,
+      ...(item.limitPerGuest == null
+        ? {}
+        : {
+            perGuest: item.limitPerGuest,
+            perGuestPerWeek: item.limitPerGuest,
+          }),
     },
     probabilityRules: {
       type: 'single',

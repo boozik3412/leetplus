@@ -79,7 +79,7 @@ export default async function StoresPage() {
                 }
               >
                 {gameStores.length === 0
-                  ? "Квесты не включены"
+                  ? "Геймификация не включена"
                   : gameStoresMissingCoordinates === 0
                     ? "Геопоиск готов"
                     : `Без координат: ${gameStoresMissingCoordinates}`}
@@ -129,8 +129,8 @@ export default async function StoresPage() {
                         tone={store.gamificationEnabled ? "ready" : "muted"}
                       >
                         {store.gamificationEnabled
-                          ? "Квесты включены"
-                          : "Квесты выключены"}
+                          ? "Геймификация включена"
+                          : "Геймификация выключена"}
                       </StoreStatusPill>
                       <StoreStatusPill
                         tone={hasCoordinates(store) ? "ready" : "warning"}

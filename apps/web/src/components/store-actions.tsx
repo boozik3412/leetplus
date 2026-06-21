@@ -579,7 +579,7 @@ function StoreInputs({ store }: { store?: Store }) {
           defaultChecked={store?.gamificationEnabled ?? false}
           className="size-4 rounded border-zinc-300 text-zinc-900"
         />
-        Квесты
+        Геймификация
       </label>
     </>
   );

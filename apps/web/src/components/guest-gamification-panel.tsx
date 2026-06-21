@@ -6173,21 +6173,12 @@ function SeasonsTab({
                 }
               />
             </Field>
-            <Field label="Подтверждение">
-              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm dark:border-zinc-800">
-                <input
-                  type="checkbox"
-                  checked={form.manualApprovalRequired}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      manualApprovalRequired: event.target.checked,
-                    })
-                  }
-                />
-                Вручную
-              </label>
-            </Field>
+            <RewardApprovalSelect
+              manualApprovalRequired={form.manualApprovalRequired}
+              onChange={(manualApprovalRequired) =>
+                setForm({ ...form, manualApprovalRequired })
+              }
+            />
           </div>
           <Field label="Заметка">
             <textarea
@@ -7382,6 +7373,27 @@ function OptionSelect({
   );
 }
 
+function RewardApprovalSelect({
+  manualApprovalRequired,
+  onChange,
+}: {
+  manualApprovalRequired: boolean;
+  onChange: (manualApprovalRequired: boolean) => void;
+}) {
+  return (
+    <Field label="Выдача награды">
+      <select
+        className={fieldClass}
+        value={manualApprovalRequired ? "manual" : "auto"}
+        onChange={(event) => onChange(event.target.value === "manual")}
+      >
+        <option value="auto">Автоматически</option>
+        <option value="manual">После подтверждения сотрудником</option>
+      </select>
+    </Field>
+  );
+}
+
 function ToggleField({
   label,
   checked,
@@ -7462,18 +7474,14 @@ function RuleCommonFields({
                 }
               />
             </Field>
-            <Field label="Подтверждение">
-              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
-                <input
-                  type="checkbox"
-                  checked={manualApprovalRequired}
-                  onChange={(event) =>
-                    onChange({ manualApprovalRequired: event.target.checked })
-                  }
-                />
-                Вручную
-              </label>
-            </Field>
+            <RewardApprovalSelect
+              manualApprovalRequired={manualApprovalRequired}
+              onChange={(nextManualApprovalRequired) =>
+                onChange({
+                  manualApprovalRequired: nextManualApprovalRequired,
+                })
+              }
+            />
           </div>
         ) : (
           <>
@@ -7519,18 +7527,14 @@ function RuleCommonFields({
                   }
                 />
               </Field>
-              <Field label="Подтверждение">
-                <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
-                  <input
-                    type="checkbox"
-                    checked={manualApprovalRequired}
-                    onChange={(event) =>
-                      onChange({ manualApprovalRequired: event.target.checked })
-                    }
-                  />
-                  Вручную
-                </label>
-              </Field>
+              <RewardApprovalSelect
+                manualApprovalRequired={manualApprovalRequired}
+                onChange={(nextManualApprovalRequired) =>
+                  onChange({
+                    manualApprovalRequired: nextManualApprovalRequired,
+                  })
+                }
+              />
             </div>
           </>
         )}

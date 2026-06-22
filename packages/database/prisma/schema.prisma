@@ -1471,6 +1471,7 @@ model GuestGameProfile {
   displayName     String?
   contactMasked   String?
   phoneHash       String?
+  phoneEncrypted  String?
   telegramIdentity String?
   maxIdentity     String?
   phoneConsentStatus GuestCommunicationConsentStatus @default(UNKNOWN)
@@ -1881,6 +1882,7 @@ model GuestPortalOtpChallenge {
   storeId         String
   phoneHash       String
   phoneMasked     String?
+  phoneEncrypted  String?
   guestId         String?
   profileId       String?
   codeHash        String

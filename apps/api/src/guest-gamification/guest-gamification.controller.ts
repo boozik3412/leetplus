@@ -354,14 +354,6 @@ export class GuestGamificationController {
   ): Promise<GuestGameReward> {
     const reward = await this.gamificationService.updateReward(user, id, dto);
 
-    if (dto.status === 'APPROVED') {
-      await this.bonusLedgerService.queueApprovedRewards(user, {
-        rewardId: reward.id,
-        rewardTypes: [reward.rewardType],
-        limit: 1,
-      });
-    }
-
     return reward;
   }
 

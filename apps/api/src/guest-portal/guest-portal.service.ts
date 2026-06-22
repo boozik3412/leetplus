@@ -32,6 +32,7 @@ import {
   type GuestGameCheckInResult,
   type GuestGameProcessEventResult,
 } from '../guest-gamification/guest-gamification.service';
+import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import {
   evaluateGuestGameProgress,
   type GuestGameProgressEvent,
@@ -183,6 +184,7 @@ type GuestPortalOtpChallengeRegistration = {
   profileId: string | null;
   phoneHash: string;
   phoneMasked: string | null;
+  phoneEncrypted: string | null;
   gameConsentAcceptedAt: Date | null;
   gameConsentVersion: string | null;
 };
@@ -1347,6 +1349,7 @@ export class GuestPortalService {
     private readonly jwtService: JwtService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly guestGamificationService: GuestGamificationService,
+    private readonly secretEncryptionService: SecretEncryptionService,
   ) {}
 
   async getPublicConfig(
@@ -1838,6 +1841,7 @@ export class GuestPortalService {
         storeId: context.store.id,
         phoneHash: phone.hash,
         phoneMasked: phone.masked,
+        phoneEncrypted: this.encryptPhone(phone),
         guestId: guest?.id ?? null,
         profileId: profile?.id ?? null,
         codeHash: this.hashOtpCode(id, code),
@@ -1991,6 +1995,7 @@ export class GuestPortalService {
         storeId: context.store.id,
         phoneHash: phone.hash,
         phoneMasked: phone.masked,
+        phoneEncrypted: this.encryptPhone(phone),
         guestId: guest?.id ?? null,
         profileId: profile?.id ?? null,
         codeHash: this.hashOtpCode(id, opaqueCode),
@@ -2302,6 +2307,7 @@ export class GuestPortalService {
         storeId: context.store.id,
         phoneHash: phone.hash,
         phoneMasked: phone.masked,
+        phoneEncrypted: this.encryptPhone(phone),
         guestId: guest?.id ?? null,
         profileId: profile?.id ?? null,
         codeHash: this.hashOtpCode(id, code),
@@ -2885,6 +2891,8 @@ export class GuestPortalService {
                 ? { guestId: guest.id }
                 : {}),
               phoneHash: existingProfile.phoneHash ?? challenge.phoneHash,
+              phoneEncrypted:
+                challenge.phoneEncrypted ?? existingProfile.phoneEncrypted,
               contactMasked:
                 existingProfile.contactMasked ??
                 guest?.phoneMasked ??
@@ -2914,6 +2922,7 @@ export class GuestPortalService {
                 guest?.emailMasked ??
                 challenge.phoneMasked,
               phoneHash: challenge.phoneHash,
+              phoneEncrypted: challenge.phoneEncrypted,
               ...profileConsentData,
               status: 'ACTIVE',
               lastActivityAt: now,
@@ -4234,6 +4243,8 @@ export class GuestPortalService {
       const commonData = {
         telegramIdentity,
         phoneHash: existingProfile?.phoneHash ?? phone.hash,
+        phoneEncrypted:
+          existingProfile?.phoneEncrypted ?? this.encryptPhone(phone),
         contactMasked:
           existingProfile?.contactMasked ??
           guest?.phoneMasked ??
@@ -4275,6 +4286,7 @@ export class GuestPortalService {
           data: {
             status: TELEGRAM_AUTH_MERGED_PROFILE_STATUS,
             phoneHash: phone.hash,
+            phoneEncrypted: this.encryptPhone(phone),
             contactMasked: phone.masked,
             lastActivityAt: now,
           },
@@ -6625,6 +6637,10 @@ export class GuestPortalService {
         .digest('hex'),
       masked: normalized.length <= 4 ? '****' : `***${normalized.slice(-4)}`,
     };
+  }
+
+  private encryptPhone(phone: GuestPortalPhoneIdentity) {
+    return this.secretEncryptionService.encrypt(phone.normalized);
   }
 
   private validateTelegramMiniAppInitData(

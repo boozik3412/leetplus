@@ -89,12 +89,17 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   const guestGamificationService = {
     processEvent: jest.fn(),
   };
+  const secretEncryptionService = {
+    encrypt: jest.fn((value: string) => `encrypted:${value}`),
+    decrypt: jest.fn(),
+  };
   const service = new GuestPortalService(
     prisma,
     configService,
     jwtService as any,
     langameSettingsService as any,
     guestGamificationService as any,
+    secretEncryptionService as any,
   );
 
   prisma.tenant.findFirst.mockResolvedValue(null);

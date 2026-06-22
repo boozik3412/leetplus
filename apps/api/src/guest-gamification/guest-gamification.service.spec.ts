@@ -170,6 +170,10 @@ function createService(
   const bonusLedgerSchedulerService = {
     getRuntimeStatus: jest.fn(() => schedulerStatus),
   };
+  const bonusLedgerService = {
+    queueApprovedRewards: jest.fn().mockResolvedValue({ queued: 0 }),
+    dispatch: jest.fn().mockResolvedValue({ confirmed: 0 }),
+  };
   const configService = {
     get: jest.fn(),
   };
@@ -180,12 +184,14 @@ function createService(
     langameClient,
     configService,
     bonusLedgerSchedulerService,
+    bonusLedgerService,
     service: new GuestGamificationService(
       prisma,
       langameSettingsService as any,
       langameClient as any,
       configService as any,
       bonusLedgerSchedulerService as any,
+      bonusLedgerService as any,
       staffTeamChatService as any,
     ),
   };
@@ -199,6 +205,7 @@ function profileFixture(
     displayName: 'Guest One',
     contactMasked: '+7 *** **-11',
     phoneHash: 'phone-hash',
+    phoneEncrypted: null,
     telegramIdentity: 'tg:123456',
     maxIdentity: null,
     xp: 120,
@@ -1233,7 +1240,11 @@ describe('GuestGamificationService', () => {
       const staffTeamChatService = {
         createGamificationRewardApprovalNotification: jest.fn(),
       };
-      const { service } = createService(prisma, null, staffTeamChatService);
+      const { service, bonusLedgerService } = createService(
+        prisma,
+        null,
+        staffTeamChatService,
+      );
 
       prisma.guestGameReward.create.mockResolvedValue(
         rewardRow({ id: 'reward-approved-chat', status: 'APPROVED' }),
@@ -1250,6 +1261,20 @@ describe('GuestGamificationService', () => {
       expect(
         staffTeamChatService.createGamificationRewardApprovalNotification,
       ).not.toHaveBeenCalled();
+      expect(bonusLedgerService.queueApprovedRewards).toHaveBeenCalledWith(
+        user,
+        {
+          rewardId: 'reward-approved-chat',
+          rewardTypes: ['BONUS'],
+          limit: 1,
+        },
+      );
+      expect(bonusLedgerService.dispatch).toHaveBeenCalledWith(user, {
+        rewardId: 'reward-approved-chat',
+        rewardTypes: ['BONUS'],
+        limit: 1,
+        queueApprovedRewards: false,
+      });
     });
   });
 

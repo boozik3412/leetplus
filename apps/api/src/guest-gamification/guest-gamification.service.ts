@@ -27,6 +27,7 @@ import {
   GuestBonusLedgerSchedulerService,
   type GuestBonusLedgerSchedulerRuntimeStatus,
 } from './guest-bonus-ledger-scheduler.service';
+import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import {
   evaluateGuestGameProgress,
   guestGameTriggerMatches,
@@ -3139,6 +3140,7 @@ export class GuestGamificationService {
     private readonly langameClient: LangameClient,
     private readonly configService: ConfigService,
     private readonly bonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
+    private readonly bonusLedgerService: GuestBonusLedgerService,
     @Optional()
     private readonly staffTeamChatService?: StaffTeamChatService,
   ) {}
@@ -7055,6 +7057,7 @@ export class GuestGamificationService {
     if (row.status === 'PENDING') {
       await this.notifyRewardApprovalRequired(row);
     }
+    await this.queueAndDispatchApprovedReward(user, row);
 
     return mapReward(row);
   }
@@ -7099,6 +7102,7 @@ export class GuestGamificationService {
         note: row.rewardLabel,
       });
     }
+    await this.queueAndDispatchApprovedReward(user, row);
 
     return mapReward(row);
   }
@@ -9133,6 +9137,35 @@ export class GuestGamificationService {
     } catch (error) {
       this.logger.warn(
         `Failed to send gamification reward approval chat message for ${row.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private async queueAndDispatchApprovedReward(
+    user: AuthenticatedUser,
+    row: RewardRow,
+  ) {
+    if (row.status !== 'APPROVED') {
+      return;
+    }
+
+    try {
+      await this.bonusLedgerService.queueApprovedRewards(user, {
+        rewardId: row.id,
+        rewardTypes: [row.rewardType],
+        limit: 1,
+      });
+      await this.bonusLedgerService.dispatch(user, {
+        rewardId: row.id,
+        rewardTypes: [row.rewardType],
+        limit: 1,
+        queueApprovedRewards: false,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to queue/dispatch approved gamification reward ${row.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

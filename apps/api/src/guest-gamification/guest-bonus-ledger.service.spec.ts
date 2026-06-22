@@ -50,6 +50,9 @@ function createPrismaMock() {
     guest: {
       findFirst: jest.fn(),
     },
+    guestGameProfile: {
+      findFirst: jest.fn(),
+    },
     tenant: {
       findMany: jest.fn(),
     },
@@ -90,6 +93,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameDeliveryEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guest.findFirst.mockResolvedValue(null);
+  prisma.guestGameProfile.findFirst.mockResolvedValue(null);
   prisma.tenant.findMany.mockResolvedValue([]);
   prisma.$transaction.mockImplementation((callback) => callback(prisma));
 
@@ -662,6 +666,62 @@ describe('GuestBonusLedgerService', () => {
     expect(
       JSON.stringify(prisma.guestBonusLedgerEntry.createMany.mock.calls[0][0]),
     ).not.toContain('79991112233');
+  });
+
+  it('queues approved game rewards by encrypted profile phone when no shared guest is linked', async () => {
+    const { service, prisma, secretEncryptionService } = createService();
+
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
+    prisma.guestGameReward.findMany.mockResolvedValue([
+      {
+        id: 'reward-profile-phone',
+        profileId: 'profile-1',
+        guestId: null,
+        storeId: 'store-1337',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        guestExternalId: null,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+        rewardLabel: '50 bonuses',
+        rewardCode: 'LP-50',
+        guest: null,
+        profile: {
+          phoneEncrypted: 'profile-encrypted-phone',
+          contactMasked: '***3344',
+        },
+      },
+    ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.queueApprovedRewards(user, {
+      limit: 1,
+      rewardId: 'reward-profile-phone',
+    });
+
+    expect(result).toMatchObject({
+      checkedRewards: 1,
+      queued: 1,
+      skipped: 0,
+    });
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          guestId: null,
+          profileId: 'profile-1',
+          rewardId: 'reward-profile-phone',
+          status: 'PENDING',
+          metadata: expect.objectContaining({
+            langameBalanceType: 'bonus_balance',
+            phoneMasked: '***3344',
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(
+      JSON.stringify(prisma.guestBonusLedgerEntry.createMany.mock.calls[0][0]),
+    ).not.toContain('79992223344');
   });
 
   it('queues explicit money balance rewards with Langame balance type', async () => {

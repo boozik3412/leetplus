@@ -162,6 +162,7 @@ type BonusLedgerConfig = {
   path: string | null;
   rewardTypes: string[];
   storeId: string | null;
+  rewardId: string | null;
   limit: number;
   maxAttempts: number;
   retryMinutes: number;
@@ -303,6 +304,12 @@ export class GuestBonusLedgerService {
             phoneMasked: true,
           },
         },
+        profile: {
+          select: {
+            phoneEncrypted: true,
+            contactMasked: true,
+          },
+        },
       },
       orderBy: [{ qualifiedAt: 'asc' }, { createdAt: 'asc' }],
       take: limit,
@@ -322,7 +329,9 @@ export class GuestBonusLedgerService {
         reward.guest?.externalProvider ??
         IntegrationProvider.LANGAME;
       const amount = decimalToNumber(reward.rewardAmount);
-      const phone = this.resolveEncryptedPhone(reward.guest);
+      const phone =
+        this.resolveEncryptedPhone(reward.guest) ??
+        this.resolveEncryptedPhone(reward.profile);
       const balanceType = langameBalanceTypeForRewardType(reward.rewardType);
 
       if (!phone) {
@@ -751,6 +760,7 @@ export class GuestBonusLedgerService {
       where: {
         tenantId,
         ...(config.storeId ? { storeId: config.storeId } : {}),
+        ...(config.rewardId ? { rewardId: config.rewardId } : {}),
         status: { in: ['PENDING', 'FAILED'] },
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
       },
@@ -766,6 +776,9 @@ export class GuestBonusLedgerService {
     const storeFilter = config.storeId
       ? Prisma.sql`AND "storeId" = ${config.storeId}`
       : Prisma.empty;
+    const rewardFilter = config.rewardId
+      ? Prisma.sql`AND "rewardId" = ${config.rewardId}`
+      : Prisma.empty;
 
     return this.prisma.$queryRaw<ClaimedBonusLedgerEntry[]>(Prisma.sql`
       UPDATE "GuestBonusLedgerEntry"
@@ -780,6 +793,7 @@ export class GuestBonusLedgerService {
         FROM "GuestBonusLedgerEntry"
         WHERE "tenantId" = ${tenantId}
           ${storeFilter}
+          ${rewardFilter}
           AND (
             "status" = 'PENDING'
             OR (
@@ -1054,12 +1068,13 @@ export class GuestBonusLedgerService {
   }
 
   private resolveEncryptedPhone(
-    guest: {
+    entity: {
       phoneEncrypted: string | null;
-      phoneMasked: string | null;
+      phoneMasked?: string | null;
+      contactMasked?: string | null;
     } | null,
   ) {
-    if (!guest?.phoneEncrypted) {
+    if (!entity?.phoneEncrypted) {
       return null;
     }
 
@@ -1067,7 +1082,7 @@ export class GuestBonusLedgerService {
 
     try {
       phone = normalizeLangamePhone(
-        this.secretEncryptionService.decrypt(guest.phoneEncrypted),
+        this.secretEncryptionService.decrypt(entity.phoneEncrypted),
       );
     } catch {
       phone = null;
@@ -1079,7 +1094,8 @@ export class GuestBonusLedgerService {
 
     return {
       value: phone,
-      masked: guest.phoneMasked ?? maskPhoneForAudit(phone),
+      masked:
+        entity.phoneMasked ?? entity.contactMasked ?? maskPhoneForAudit(phone),
     };
   }
 
@@ -1109,13 +1125,31 @@ export class GuestBonusLedgerService {
         : null;
     const phone = this.resolveEncryptedPhone(guest);
 
-    if (!phone) {
+    if (phone) {
+      return phone;
+    }
+
+    const profile = entry.profileId
+      ? await this.prisma.guestGameProfile.findFirst({
+          where: {
+            id: entry.profileId,
+            tenantId: entry.tenantId,
+          },
+          select: {
+            phoneEncrypted: true,
+            contactMasked: true,
+          },
+        })
+      : null;
+    const profilePhone = this.resolveEncryptedPhone(profile);
+
+    if (!profilePhone) {
       throw new BadRequestException(
         'У ledger-записи нет расшифровываемого телефона гостя для Langame /master_api/guests/balance/phone.',
       );
     }
 
-    return phone;
+    return profilePhone;
   }
 
   private resolveEntrySource(
@@ -1218,6 +1252,7 @@ export class GuestBonusLedgerService {
       path,
       rewardTypes: this.resolveRewardTypes(dto.rewardTypes),
       storeId: nullableString(dto.storeId),
+      rewardId: nullableString(dto.rewardId),
       limit: canary ? 1 : positiveInt(dto.limit, 50, 250),
       maxAttempts: positiveInt(
         this.configService.get<string>('LANGAME_BONUS_ACCRUAL_MAX_ATTEMPTS'),

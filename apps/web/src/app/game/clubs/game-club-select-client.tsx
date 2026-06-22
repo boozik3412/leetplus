@@ -17,6 +17,46 @@ type GameClubSelectClientProps = {
   loadError: string | null;
 };
 
+type YandexPlacemarkInstance = {
+  events: {
+    add(eventName: string, handler: () => void): void;
+  };
+};
+
+type YandexMapInstance = {
+  destroy(): void;
+  setBounds(bounds: [[number, number], [number, number]], options?: Record<string, unknown>): void;
+  setCenter(center: [number, number], zoom?: number, options?: Record<string, unknown>): void;
+  geoObjects: {
+    add(object: YandexPlacemarkInstance): void;
+    removeAll(): void;
+  };
+};
+
+type YandexMapsApi = {
+  ready(callback: () => void): void;
+  Map: new (
+    container: HTMLElement,
+    state: { center: [number, number]; zoom: number; controls?: string[] },
+    options?: Record<string, unknown>,
+  ) => YandexMapInstance;
+  Placemark: new (
+    coordinates: [number, number],
+    properties?: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) => YandexPlacemarkInstance;
+};
+
+type ClubMapStatus = "idle" | "loading" | "ready" | "missing" | "error";
+
+declare global {
+  interface Window {
+    ymaps?: YandexMapsApi;
+  }
+}
+
+let yandexMapsApiPromise: Promise<YandexMapsApi> | null = null;
+
 export function GameClubSelectClient({
   initialDirectory,
   loadError,
@@ -46,6 +86,13 @@ export function GameClubSelectClient({
       });
     }, 80);
   }, []);
+  const previewClubOnMap = useCallback(
+    (club: GuestPortalGamificationClub) => {
+      setSelectedClubId(club.id);
+      showToast(`${club.store.name}: клуб подсвечен на карте`);
+    },
+    [showToast],
+  );
 
   useEffect(() => {
     let active = true;
@@ -276,23 +323,13 @@ export function GameClubSelectClient({
               {mapExpanded ? "Свернуть карту" : "Развернуть карту"}
             </button>
           </div>
-          <div className="lp-club-map-canvas" aria-hidden="true">
-            {visibleClubs.slice(0, 9).map((club, index) => (
-              <span
-                className={`lp-club-marker ${
-                  club.id === selectedClubId ? "is-selected" : ""
-                }`}
-                key={club.id}
-                style={markerStyle(index)}
-              >
-                <MapPinIcon />
-              </span>
-            ))}
-            <span className="lp-club-map-meta">
-              <span>{activeFilterLabel}</span>
-              <span>{pluralizeClubs(visibleClubs.length)}</span>
-            </span>
-          </div>
+          <ClubMapCanvas
+            activeFilterLabel={activeFilterLabel}
+            clubs={visibleClubs}
+            expanded={mapExpanded}
+            selectedClubId={selectedClub?.id ?? selectedClubId}
+            onPreviewClub={previewClubOnMap}
+          />
         </section>
 
         <section className="lp-club-content-grid">
@@ -372,7 +409,7 @@ export function GameClubSelectClient({
               </strong>
             </SideBlock>
             <div className="lp-club-actions" ref={gameActionsRef}>
-              <Link className="lp-club-primary" href="/game/app">
+              <Link className="lp-club-primary" href="/play/game">
                 Открыть игру
                 <ArrowRightIcon />
               </Link>
@@ -444,6 +481,185 @@ function CityChip({
     >
       {label}
     </button>
+  );
+}
+
+function ClubMapCanvas({
+  activeFilterLabel,
+  clubs,
+  expanded,
+  selectedClubId,
+  onPreviewClub,
+}: {
+  activeFilterLabel: string;
+  clubs: GuestPortalGamificationClub[];
+  expanded: boolean;
+  selectedClubId: string | null;
+  onPreviewClub: (club: GuestPortalGamificationClub) => void;
+}) {
+  const mapNodeRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<YandexMapInstance | null>(null);
+  const [mapStatus, setMapStatus] = useState<ClubMapStatus>("idle");
+  const queueMapStatus = useCallback((status: ClubMapStatus) => {
+    window.setTimeout(() => setMapStatus(status), 0);
+  }, []);
+  const clubsWithCoordinates = useMemo(
+    () => clubs.filter((club) => clubCoordinates(club) !== null),
+    [clubs],
+  );
+
+  useEffect(() => {
+    return () => {
+      mapRef.current?.destroy();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!expanded) {
+      mapRef.current?.destroy();
+      mapRef.current = null;
+      queueMapStatus("idle");
+      return;
+    }
+
+    if (clubsWithCoordinates.length === 0) {
+      queueMapStatus("missing");
+      return;
+    }
+
+    let active = true;
+    queueMapStatus(mapRef.current ? "ready" : "loading");
+
+    loadYandexMapsApi()
+      .then((ymaps) => {
+        if (!active || !mapNodeRef.current) {
+          return;
+        }
+
+        const selectedClub =
+          clubsWithCoordinates.find((club) => club.id === selectedClubId) ??
+          clubsWithCoordinates[0];
+        const center = clubCoordinates(selectedClub) ?? [55.751244, 37.618423];
+
+        if (!mapRef.current) {
+          mapRef.current = new ymaps.Map(
+            mapNodeRef.current,
+            {
+              center,
+              controls: ["zoomControl", "geolocationControl", "fullscreenControl"],
+              zoom: clubsWithCoordinates.length > 1 ? 11 : 15,
+            },
+            {
+              autoFitToViewport: "always",
+              suppressMapOpenBlock: true,
+            },
+          );
+        }
+
+        setMapStatus("ready");
+      })
+      .catch(() => {
+        if (active) {
+          setMapStatus("error");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [clubsWithCoordinates, expanded, queueMapStatus, selectedClubId]);
+
+  useEffect(() => {
+    const ymaps = window.ymaps;
+    const map = mapRef.current;
+
+    if (!expanded || mapStatus !== "ready" || !ymaps || !map) {
+      return;
+    }
+
+    map.geoObjects.removeAll();
+    const bounds = createMapBounds(clubsWithCoordinates);
+
+    clubsWithCoordinates.forEach((club) => {
+      const coordinates = clubCoordinates(club);
+
+      if (!coordinates) {
+        return;
+      }
+
+      const selected = club.id === selectedClubId;
+      const placemark = new ymaps.Placemark(
+        coordinates,
+        {
+          balloonContentBody: formatClubLocation(club) || "Адрес клуба",
+          balloonContentHeader: club.store.name,
+          hintContent: club.store.name,
+        },
+        {
+          iconColor: selected ? "#d0aa6c" : "#83e4ec",
+          preset: selected ? "islands#yellowDotIcon" : "islands#blueDotIcon",
+        },
+      );
+
+      placemark.events.add("click", () => onPreviewClub(club));
+      map.geoObjects.add(placemark);
+    });
+
+    if (bounds) {
+      map.setBounds(bounds, {
+        checkZoomRange: true,
+        duration: 250,
+        zoomMargin: 46,
+      });
+    } else if (clubsWithCoordinates[0]) {
+      const coordinates = clubCoordinates(clubsWithCoordinates[0]);
+
+      if (coordinates) {
+        map.setCenter(coordinates, 15, { duration: 250 });
+      }
+    }
+  }, [clubsWithCoordinates, expanded, mapStatus, onPreviewClub, selectedClubId]);
+
+  return (
+    <div className="lp-club-map-canvas">
+      {expanded ? (
+        <div className="lp-club-yandex-shell">
+          <div
+            className="lp-club-yandex-map"
+            ref={mapNodeRef}
+            aria-label="Интерактивная карта клубов"
+          />
+          {mapStatus !== "ready" ? (
+            <div className="lp-club-map-state" role="status">
+              {mapStatus === "loading" || mapStatus === "idle"
+                ? "Загружаем Яндекс Карту..."
+                : mapStatus === "missing"
+                  ? "Карта появится после добавления координат клубов."
+                  : "Не удалось загрузить карту. Проверьте подключение и ключ Яндекс Карт."}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="lp-club-map-static" aria-hidden="true">
+          {clubs.slice(0, 9).map((club, index) => (
+            <span
+              className={`lp-club-marker ${
+                club.id === selectedClubId ? "is-selected" : ""
+              }`}
+              key={club.id}
+              style={markerStyle(index)}
+            >
+              <MapPinIcon />
+            </span>
+          ))}
+        </div>
+      )}
+      <span className="lp-club-map-meta">
+        <span>{activeFilterLabel}</span>
+        <span>{pluralizeClubs(clubs.length)}</span>
+      </span>
+    </div>
   );
 }
 
@@ -582,6 +798,41 @@ function distanceLabel(club: GuestPortalGamificationClub) {
   return `${distance.toFixed(distance >= 10 ? 0 : 1)} км`;
 }
 
+function clubCoordinates(club: GuestPortalGamificationClub): [number, number] | null {
+  const { latitude, longitude } = club.location;
+
+  if (
+    typeof latitude !== "number" ||
+    typeof longitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  return [latitude, longitude];
+}
+
+function createMapBounds(
+  clubs: GuestPortalGamificationClub[],
+): [[number, number], [number, number]] | null {
+  const coordinates = clubs
+    .map((club) => clubCoordinates(club))
+    .filter((value): value is [number, number] => value !== null);
+
+  if (coordinates.length < 2) {
+    return null;
+  }
+
+  const latitudes = coordinates.map(([latitude]) => latitude);
+  const longitudes = coordinates.map(([, longitude]) => longitude);
+
+  return [
+    [Math.min(...latitudes), Math.min(...longitudes)],
+    [Math.max(...latitudes), Math.max(...longitudes)],
+  ];
+}
+
 function pluralizeClubs(count: number) {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -628,6 +879,65 @@ async function readMessage(response: Response) {
   } catch {
     return "Запрос не выполнен.";
   }
+}
+
+function loadYandexMapsApi() {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Yandex Maps can be loaded only in browser."));
+  }
+
+  if (window.ymaps) {
+    return new Promise<YandexMapsApi>((resolve) => {
+      window.ymaps?.ready(() => resolve(window.ymaps as YandexMapsApi));
+    });
+  }
+
+  if (yandexMapsApiPromise) {
+    return yandexMapsApiPromise;
+  }
+
+  yandexMapsApiPromise = new Promise<YandexMapsApi>((resolve, reject) => {
+    const apiKey = process.env.NEXT_PUBLIC_YANDEX_MAPS_API_KEY?.trim();
+    const source = `https://api-maps.yandex.ru/2.1/?lang=ru_RU${
+      apiKey ? `&apikey=${encodeURIComponent(apiKey)}` : ""
+    }`;
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      'script[data-leetplus-yandex-maps="true"]',
+    );
+
+    const resolveWhenReady = () => {
+      if (!window.ymaps) {
+        reject(new Error("Yandex Maps API did not initialize."));
+        return;
+      }
+
+      window.ymaps.ready(() => resolve(window.ymaps as YandexMapsApi));
+    };
+
+    if (existingScript) {
+      existingScript.addEventListener("load", resolveWhenReady, { once: true });
+      existingScript.addEventListener(
+        "error",
+        () => reject(new Error("Yandex Maps script failed.")),
+        { once: true },
+      );
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.async = true;
+    script.dataset.leetplusYandexMaps = "true";
+    script.src = source;
+    script.addEventListener("load", resolveWhenReady, { once: true });
+    script.addEventListener(
+      "error",
+      () => reject(new Error("Yandex Maps script failed.")),
+      { once: true },
+    );
+    document.head.appendChild(script);
+  });
+
+  return yandexMapsApiPromise;
 }
 
 function ChevronLeftIcon() {
@@ -1041,7 +1351,7 @@ function ClubSelectStyles() {
     rgba(3, 9, 12, .78);
   transition: height 220ms ease;
 }
-.lp-club-map-canvas::before {
+.lp-club-map-static::before {
   content: "";
   position: absolute;
   inset: 18px;
@@ -1055,6 +1365,46 @@ function ClubSelectStyles() {
 }
 .lp-club-map.is-expanded .lp-club-map-canvas {
   height: 320px;
+}
+.lp-club-map-static,
+.lp-club-yandex-shell,
+.lp-club-yandex-map {
+  position: absolute;
+  inset: 0;
+}
+.lp-club-map-static {
+  pointer-events: none;
+}
+.lp-club-yandex-shell {
+  background: rgba(3, 9, 12, .82);
+}
+.lp-club-yandex-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,.3), transparent 18%, transparent 82%, rgba(0,0,0,.3)),
+    radial-gradient(circle at 82% 18%, rgba(131, 228, 236, .12), transparent 28%);
+  mix-blend-mode: multiply;
+}
+.lp-club-yandex-map {
+  filter: saturate(.72) brightness(.76) contrast(1.08);
+}
+.lp-club-map-state {
+  position: absolute;
+  inset: 18px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border: 1px dashed rgba(131, 228, 236, .32);
+  border-radius: 8px;
+  background: rgba(0, 6, 9, .68);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
 }
 .lp-club-marker {
   position: absolute;

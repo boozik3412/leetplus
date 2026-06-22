@@ -8423,7 +8423,7 @@ function formatGuestShortName(value: string | null | undefined) {
     return "Гость";
   }
 
-  if (/^гость\b/i.test(normalized)) {
+  if (/^гость(?:\s|$)/i.test(normalized)) {
     return normalized;
   }
 
@@ -8575,7 +8575,7 @@ function RewardRow({
         </div>
       </summary>
       <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(240px,auto)]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
@@ -8627,13 +8627,13 @@ function RewardRow({
             ) : null}
           </div>
           {canApprove ? (
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
               Сначала согласуйте право на приз. После этого автоматические
               бонусы уйдут в очередь начисления, а ручную выдачу можно закрыть
               кодом кассира или кнопкой «Отметить выдано».
             </p>
-            <div className="flex flex-wrap gap-2 xl:justify-end">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
               <button
                 type="button"
                 className={smallButtonClass}

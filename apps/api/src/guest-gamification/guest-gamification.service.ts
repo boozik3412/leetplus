@@ -122,6 +122,69 @@ const tariffSnapshotDefinitions = [
   },
 ] as const;
 
+const rewardApprovalEventLabels: Record<string, string> = {
+  SESSION_START: 'Старт сессии',
+  APP_OPEN: 'Открытие приложения',
+  CHECK_IN: 'Чекин в клубе',
+  VISIT: 'Визит в клуб',
+  PLAY_HOUR: 'Час игры',
+  BAR_PURCHASE: 'Покупка в баре',
+  PRODUCT_PURCHASE: 'Покупка товара',
+  BALANCE_TOPUP: 'Пополнение баланса',
+  BALANCE_TOP_UP: 'Пополнение баланса',
+  GUEST_LOG: 'Событие Langame',
+  REFERRAL_ACCEPTED: 'Регистрация приглашенного гостя',
+  GAME_REFERRAL_ACCEPTED: 'Регистрация приглашенного гостя',
+  REPEAT_VISIT: 'Повторный визит',
+  MISSION_COMPLETED: 'Квест выполнен',
+  visit: 'Визит',
+  login: 'Вход в клуб',
+  tournament: 'Турнир',
+  manual_cancel: 'Ручная отмена',
+  test: 'Тестовое событие',
+};
+
+const rewardApprovalSegmentLabels: Record<string, string> = {
+  quiet_hours: 'Тихие часы',
+  new_guests: 'Новые гости',
+  regular_guests: 'Постоянные гости',
+  returning_guests: 'Вернувшиеся гости',
+  vip_guests: 'VIP / активные',
+  birthday: 'День рождения',
+  referral: 'Реферальные гости',
+};
+
+const rewardApprovalMissionTypeLabels: Record<string, string> = {
+  REPEAT_VISIT: 'Повторный визит',
+  CHECK_IN: 'Чекин в клубе',
+  VISIT: 'Посещение клуба',
+  PLAY_HOUR: 'Игровое время',
+  BAR_PURCHASE: 'Покупка в баре',
+  PRODUCT_PURCHASE: 'Покупка товара',
+  BALANCE_TOPUP: 'Пополнение баланса',
+  REFERRAL_ACCEPTED: 'Приглашение друга',
+  APP_OPEN: 'Возврат в приложение',
+  GUEST_LOG: 'Событие Langame',
+  CUSTOM: 'Своя миссия',
+};
+
+const rewardApprovalProgressUnitLabels: Record<string, string> = {
+  visit: 'визитов',
+  check_in: 'чекинов',
+  minute: 'минут игры',
+  purchase: 'покупок',
+  rub: 'рублей',
+  day: 'уникальных дней',
+  friend: 'друзей',
+  event: 'событий',
+  step: 'шагов',
+};
+
+const rewardApprovalSessionTypeLabels: Record<string, string> = {
+  regular_session: 'обычная сессия',
+  packet_hours: 'пакет часов',
+};
+
 type StatusValue = (typeof statusValues)[number];
 type ProfileStatus = (typeof profileStatuses)[number];
 type RewardStatus = (typeof rewardStatuses)[number];
@@ -332,9 +395,51 @@ const rewardInclude = {
       emailMasked: true,
     },
   },
-  lootBox: { select: { id: true, name: true, status: true } },
-  mission: { select: { id: true, name: true, status: true, xpReward: true } },
-  season: { select: { id: true, name: true, status: true } },
+  lootBox: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      triggerKind: true,
+      segment: true,
+      sessionType: true,
+      periodRules: true,
+      limits: true,
+      manualApprovalRequired: true,
+      note: true,
+    },
+  },
+  mission: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      missionType: true,
+      triggerKind: true,
+      xpReward: true,
+      progressTarget: true,
+      progressUnit: true,
+      conditions: true,
+      periodFrom: true,
+      periodTo: true,
+      perGuestLimit: true,
+      totalRewardLimit: true,
+      manualApprovalRequired: true,
+      note: true,
+    },
+  },
+  season: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      seasonType: true,
+      periodFrom: true,
+      periodTo: true,
+      manualApprovalRequired: true,
+      note: true,
+    },
+  },
   store: { select: { id: true, name: true } },
   createdByUser: { select: creatorSelect },
   approvedByUser: { select: creatorSelect },
@@ -9060,24 +9165,7 @@ export class GuestGamificationService {
   }
 
   private rewardApprovalConditions(row: RewardRow) {
-    const evidence = jsonRecord(row.evidence);
-    const rule = jsonRecord(evidence.rule as Prisma.JsonValue | null);
-    const values = [
-      row.note,
-      nullableString(rule.name),
-      nullableString(rule.triggerKind)
-        ? `событие: ${nullableString(rule.triggerKind)}`
-        : null,
-      nullableString(evidence.eventType)
-        ? `факт: ${nullableString(evidence.eventType)}`
-        : null,
-      row.externalId ? `externalId: ${row.externalId}` : null,
-    ];
-
-    return values
-      .map((value) => value?.trim())
-      .filter((value): value is string => Boolean(value))
-      .join(' · ');
+    return buildRewardApprovalConditions(row);
   }
 
   private async createSystemEvent(
@@ -13106,6 +13194,485 @@ function rewardRuleLink(rule: GuestGameDryRunRule) {
   }
 
   return { seasonId: rule.id };
+}
+
+function buildRewardApprovalConditions(row: RewardRow) {
+  const evidence = jsonRecord(row.evidence);
+  const rule = jsonRecord(evidence.rule as Prisma.JsonValue | null);
+  const hasLinkedRule = Boolean(row.lootBox || row.mission || row.season);
+  const values = [
+    ...rewardApprovalRuleConditions(row, evidence, rule),
+    ...(hasLinkedRule ? [] : rewardApprovalReasonConditions(rule)),
+    ...rewardApprovalFallbackConditions(row, evidence, rule),
+  ];
+  const unique = new Set<string>();
+
+  for (const value of values) {
+    const line = rewardApprovalCleanLine(value);
+
+    if (!line || unique.has(line)) {
+      continue;
+    }
+
+    unique.add(line);
+  }
+
+  return [...unique].join(' · ') || 'Условия указаны в правиле геймификации';
+}
+
+function rewardApprovalRuleConditions(
+  row: RewardRow,
+  evidence: Record<string, unknown>,
+  rule: Record<string, unknown>,
+) {
+  if (row.lootBox) {
+    return rewardApprovalLootBoxConditions(row.lootBox, evidence, rule);
+  }
+
+  if (row.mission) {
+    return rewardApprovalMissionConditions(row.mission, evidence, rule);
+  }
+
+  if (row.season) {
+    return rewardApprovalSeasonConditions(row.season);
+  }
+
+  return [];
+}
+
+function rewardApprovalLootBoxConditions(
+  lootBox: NonNullable<RewardRow['lootBox']>,
+  evidence: Record<string, unknown>,
+  rule: Record<string, unknown>,
+) {
+  const periodRules = jsonRecord(lootBox.periodRules);
+  const limits = jsonRecord(lootBox.limits);
+  const trigger =
+    nullableString(lootBox.triggerKind) ??
+    nullableString(rule.triggerKind) ??
+    nullableString(evidence.eventType);
+  const values = [
+    trigger
+      ? `Событие для появления: ${rewardApprovalEventLabel(trigger)}`
+      : null,
+    lootBox.segment
+      ? `Аудитория: ${rewardApprovalSegmentLabel(lootBox.segment)}`
+      : null,
+    ...rewardApprovalPeriodRuleLines(periodRules),
+    ...rewardApprovalSessionRuleLines(lootBox.sessionType, periodRules),
+    ...rewardApprovalGuestLogRuleLines(periodRules),
+    ...rewardApprovalLimitRuleLines(limits),
+  ];
+
+  return values;
+}
+
+function rewardApprovalMissionConditions(
+  mission: NonNullable<RewardRow['mission']>,
+  evidence: Record<string, unknown>,
+  rule: Record<string, unknown>,
+) {
+  const conditions = jsonRecord(mission.conditions);
+  const trigger =
+    nullableString(mission.triggerKind) ??
+    nullableString(rule.triggerKind) ??
+    nullableString(evidence.eventType);
+  const values = [
+    trigger
+      ? `Событие для появления: ${rewardApprovalEventLabel(trigger)}`
+      : null,
+    mission.missionType
+      ? `Тип квеста: ${rewardApprovalMissionTypeLabel(mission.missionType)}`
+      : null,
+    mission.progressTarget
+      ? `Цель: ${mission.progressTarget} ${rewardApprovalProgressUnitLabel(
+          mission.progressUnit,
+        )}`
+      : null,
+    ...rewardApprovalMissionConditionLines(conditions),
+    ...rewardApprovalDatePeriodLines(mission.periodFrom, mission.periodTo),
+    mission.perGuestLimit
+      ? `Лимит на гостя: ${mission.perGuestLimit} ${pluralRu(
+          mission.perGuestLimit,
+          'награда',
+          'награды',
+          'наград',
+        )}`
+      : null,
+    mission.totalRewardLimit
+      ? `Общий лимит: ${mission.totalRewardLimit} ${pluralRu(
+          mission.totalRewardLimit,
+          'награда',
+          'награды',
+          'наград',
+        )}`
+      : null,
+  ];
+
+  return values;
+}
+
+function rewardApprovalSeasonConditions(
+  season: NonNullable<RewardRow['season']>,
+) {
+  return [
+    season.seasonType
+      ? `Сезон: ${rewardApprovalHumanToken(season.seasonType)}`
+      : null,
+    ...rewardApprovalDatePeriodLines(season.periodFrom, season.periodTo),
+  ];
+}
+
+function rewardApprovalMissionConditionLines(
+  conditions: Record<string, unknown>,
+) {
+  const values = [
+    ...rewardApprovalPeriodRuleLines(conditions),
+    ...rewardApprovalGuestLogRuleLines(conditions),
+  ];
+  const windowDays = dryRunOptionalNumber(conditions.windowDays);
+  const minSessionMinutes = dryRunOptionalNumber(conditions.minSessionMinutes);
+  const minSpendAmount = dryRunOptionalNumber(conditions.minSpendAmount);
+  const events = dryRunStringValues(
+    conditions.events,
+    conditions.eventTypes,
+    conditions.guestLogTypes,
+  );
+  const productNames = dryRunStringValues(
+    conditions.productNames,
+    conditions.productName,
+    conditions.categoryNames,
+    conditions.categoryName,
+  );
+
+  if (windowDays != null) {
+    values.push(
+      `Окно выполнения: ${windowDays} ${pluralRu(windowDays, 'день', 'дня', 'дней')}`,
+    );
+  }
+  if (minSessionMinutes != null) {
+    values.push(`Минимум игры: ${minSessionMinutes} мин`);
+  }
+  if (minSpendAmount != null) {
+    values.push(`Минимальная покупка: ${minSpendAmount} руб`);
+  }
+  if (events.length) {
+    values.push(`События: ${events.map(rewardApprovalEventLabel).join(', ')}`);
+  }
+  if (productNames.length) {
+    values.push(`Товары/категории: ${productNames.join(', ')}`);
+  }
+  if (conditions.noRepeatSameDay === true) {
+    values.push('Без повтора в тот же день');
+  }
+  if (conditions.requiresLangameFact === true) {
+    values.push('Нужен подтвержденный факт Langame');
+  }
+
+  return values;
+}
+
+function rewardApprovalPeriodRuleLines(rules: Record<string, unknown>) {
+  const values: Array<string | null> = [];
+  const timeWindowMode = nullableString(rules.timeWindowMode)?.toUpperCase();
+  const hours = dryRunStringArray(rules.hours);
+  const quietHoursEnabled = rules.quietHoursEnabled === true;
+  const timeLabel =
+    timeWindowMode === 'QUIET_HOURS' || (!timeWindowMode && quietHoursEnabled)
+      ? 'Тихие часы'
+      : timeWindowMode === 'CUSTOM'
+        ? 'Свое окно'
+        : timeWindowMode === 'ANY'
+          ? 'Любое время'
+          : hours.length
+            ? 'Свое окно'
+            : null;
+
+  if (timeLabel && timeLabel !== 'Любое время') {
+    values.push(
+      hours.length
+        ? `Когда показывать: ${timeLabel} (${hours.join(', ')})`
+        : `Когда показывать: ${timeLabel}`,
+    );
+  }
+
+  const weekdayMode = nullableString(rules.weekdayMode)?.toUpperCase();
+  const weekdays = dryRunNumberArray(rules.weekdays);
+  const weekdayLabel =
+    weekdayMode === 'WEEKDAYS' || (!weekdayMode && rules.weekdaysOnly === true)
+      ? 'Будни'
+      : weekdayMode === 'WEEKENDS'
+        ? 'Выходные'
+        : weekdayMode === 'CUSTOM'
+          ? rewardApprovalWeekdaysLabel(weekdays)
+          : weekdayMode === 'ANY'
+            ? 'Любой день'
+            : weekdays.length
+              ? rewardApprovalWeekdaysLabel(weekdays)
+              : null;
+
+  if (weekdayLabel && weekdayLabel !== 'Любой день') {
+    values.push(`По каким дням: ${weekdayLabel}`);
+  }
+
+  return values;
+}
+
+function rewardApprovalSessionRuleLines(
+  sessionType: string | null,
+  rules: Record<string, unknown>,
+) {
+  const values: Array<string | null> = [];
+  const normalizedSessionType = sessionType
+    ? normalizeSessionType(sessionType)
+    : null;
+  const packetMode = nullableString(rules.packetMode)?.toUpperCase();
+
+  if (normalizedSessionType && normalizedSessionType !== 'any') {
+    values.push(
+      `Тип сессии: ${
+        rewardApprovalSessionTypeLabels[normalizedSessionType] ??
+        rewardApprovalHumanToken(normalizedSessionType)
+      }`,
+    );
+  }
+
+  if (packetMode === 'PACKET_ONLY') {
+    values.push('Пакет часов: только пакет');
+  } else if (packetMode === 'NON_PACKET_ONLY') {
+    values.push('Пакет часов: без пакета');
+  }
+
+  return values;
+}
+
+function rewardApprovalGuestLogRuleLines(rules: Record<string, unknown>) {
+  const allowed = dryRunStringValues(
+    rules.guestLogTypes,
+    rules.allowedGuestLogTypes,
+    rules.eventTypes,
+  );
+  const blocked = dryRunStringValues(
+    rules.blockedGuestLogTypes,
+    rules.blockedEventTypes,
+  );
+  const values: Array<string | null> = [];
+
+  if (allowed.length) {
+    values.push(
+      `События Langame: ${allowed.map(rewardApprovalEventLabel).join(', ')}`,
+    );
+  }
+  if (blocked.length) {
+    values.push(
+      `Не засчитывать: ${blocked.map(rewardApprovalEventLabel).join(', ')}`,
+    );
+  }
+
+  return values;
+}
+
+function rewardApprovalLimitRuleLines(rules: Record<string, unknown>) {
+  const perGuestPerWeek = dryRunOptionalNumber(rules.perGuestPerWeek);
+  const totalPerDay = dryRunOptionalNumber(rules.totalPerDay);
+  const values: Array<string | null> = [];
+
+  if (perGuestPerWeek != null) {
+    values.push(
+      `Лимит на гостя: ${perGuestPerWeek} ${pluralRu(
+        perGuestPerWeek,
+        'открытие',
+        'открытия',
+        'открытий',
+      )} в неделю`,
+    );
+  }
+  if (totalPerDay != null) {
+    values.push(
+      `Общий дневной лимит: ${totalPerDay} ${pluralRu(
+        totalPerDay,
+        'открытие',
+        'открытия',
+        'открытий',
+      )}`,
+    );
+  }
+
+  return values;
+}
+
+function rewardApprovalDatePeriodLines(
+  periodFrom: Date | string | null,
+  periodTo: Date | string | null,
+) {
+  if (!periodFrom && !periodTo) {
+    return [];
+  }
+
+  const from = periodFrom ? rewardApprovalDateLabel(periodFrom) : 'без начала';
+  const to = periodTo ? rewardApprovalDateLabel(periodTo) : 'без окончания';
+
+  return [`Период: ${from} - ${to}`];
+}
+
+function rewardApprovalReasonConditions(rule: Record<string, unknown>) {
+  return dryRunArray(rule.reasons)
+    .map((item) => nullableString(item))
+    .filter((item): item is string => Boolean(item))
+    .filter((item) => !rewardApprovalIsOperationalReason(item));
+}
+
+function rewardApprovalFallbackConditions(
+  row: RewardRow,
+  evidence: Record<string, unknown>,
+  rule: Record<string, unknown>,
+) {
+  if (row.lootBox || row.mission || row.season) {
+    return [];
+  }
+
+  const eventType =
+    nullableString(evidence.eventType) ?? nullableString(rule.triggerKind);
+  const values = [
+    eventType
+      ? `Факт выполнения: ${rewardApprovalEventLabel(eventType)}`
+      : null,
+    nullableString(rule.name) ? `Правило: ${nullableString(rule.name)}` : null,
+    rewardApprovalBusinessNote(row.note),
+  ];
+
+  return values;
+}
+
+function rewardApprovalBusinessNote(value: unknown) {
+  const note = nullableString(value);
+
+  if (!note || /подтвержденн.+запуск.+события геймификации/i.test(note)) {
+    return null;
+  }
+
+  return note;
+}
+
+function rewardApprovalCleanLine(value: string | null | undefined) {
+  const line = value?.trim();
+
+  if (!line || rewardApprovalLooksTechnical(line)) {
+    return null;
+  }
+
+  return line.replace(/\s+/g, ' ');
+}
+
+function rewardApprovalLooksTechnical(value: string) {
+  const normalized = value.toLowerCase();
+
+  return (
+    normalized.includes('externalid') ||
+    normalized.includes('external id') ||
+    normalized.includes('guest-game:') ||
+    normalized.includes('sourcefact') ||
+    normalized.includes('rawphone') ||
+    normalized.includes('payload') ||
+    /^[a-z]+:[a-z_]+:[a-z_]+:[a-f0-9-]{16,}/i.test(value)
+  );
+}
+
+function rewardApprovalIsOperationalReason(value: string) {
+  return [
+    'Правило активно',
+    'Черновик проверяется в тестовом режиме',
+    'Выбранный клуб входит в область правила',
+    'Доступно для всей сети',
+    'Бюджет не задан',
+    'Пакет часов не ограничен',
+    'Выдача требует подтверждения сотрудником',
+  ].includes(value);
+}
+
+function rewardApprovalEventLabel(value: string) {
+  return (
+    rewardApprovalEventLabels[value] ??
+    rewardApprovalEventLabels[value.toUpperCase()] ??
+    rewardApprovalHumanToken(value)
+  );
+}
+
+function rewardApprovalSegmentLabel(value: string) {
+  return rewardApprovalSegmentLabels[value] ?? rewardApprovalHumanToken(value);
+}
+
+function rewardApprovalMissionTypeLabel(value: string) {
+  return (
+    rewardApprovalMissionTypeLabels[value] ?? rewardApprovalHumanToken(value)
+  );
+}
+
+function rewardApprovalProgressUnitLabel(value: string | null) {
+  if (!value) {
+    return 'шагов';
+  }
+
+  return (
+    rewardApprovalProgressUnitLabels[value] ?? rewardApprovalHumanToken(value)
+  );
+}
+
+function rewardApprovalWeekdaysLabel(values: number[]) {
+  const labels = values.map((value) => {
+    switch (value) {
+      case 1:
+        return 'Пн';
+      case 2:
+        return 'Вт';
+      case 3:
+        return 'Ср';
+      case 4:
+        return 'Чт';
+      case 5:
+        return 'Пт';
+      case 6:
+        return 'Сб';
+      case 0:
+        return 'Вс';
+      default:
+        return null;
+    }
+  });
+
+  return labels.filter(Boolean).join(', ') || 'выбранные дни';
+}
+
+function rewardApprovalDateLabel(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function rewardApprovalHumanToken(value: string) {
+  return value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function pluralRu(value: number, one: string, few: string, many: string) {
+  const mod10 = Math.abs(value) % 10;
+  const mod100 = Math.abs(value) % 100;
+
+  if (mod10 === 1 && mod100 !== 11) {
+    return one;
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+    return few;
+  }
+
+  return many;
 }
 
 function processRuleKindLabel(kind: GuestGameDryRunRule['kind']) {

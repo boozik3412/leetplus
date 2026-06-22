@@ -1108,7 +1108,7 @@ describe('GuestGamificationService', () => {
   });
 
   describe('reward approval chat', () => {
-    it('sends pending rewards to the gamification staff chat without raw phone', async () => {
+    it('sends pending rewards to the gamification staff chat with readable conditions', async () => {
       const prisma = createPrismaMock();
       const staffTeamChatService = {
         createGamificationRewardApprovalNotification: jest
@@ -1122,20 +1122,48 @@ describe('GuestGamificationService', () => {
         rewardLabel: 'Промокод бара',
         rewardAmount: new Prisma.Decimal(0),
         storeId: 'store-1',
-        note: 'Открытие после чекина',
+        note: 'Создано подтвержденным запуском события геймификации.',
+        externalId:
+          'guest-game:GUEST_APP_OPEN:APP_OPEN:162c32aa-1a34-4bc9-8e07-48696eea57d',
         evidence: {
           rawPhone: '79999999999',
-          eventType: 'CHECK_IN',
+          eventType: 'APP_OPEN',
           rule: {
-            name: 'Три чекина',
-            triggerKind: 'CHECK_IN',
+            name: 'Тест',
+            triggerKind: 'APP_OPEN',
+            reasons: [
+              'Правило активно',
+              'Выбранный клуб входит в область правила',
+              'Выдача требует подтверждения сотрудником',
+            ],
           },
         },
         lootBoxId: 'loot-1',
         lootBox: {
           id: 'loot-1',
-          name: 'Лутбокс чекина',
+          name: 'Тест',
           status: 'ACTIVE',
+          triggerKind: 'APP_OPEN',
+          segment: 'quiet_hours',
+          sessionType: null,
+          periodRules: {
+            source: 'business_controls',
+            timeWindowMode: 'QUIET_HOURS',
+            weekdayMode: 'WEEKDAYS',
+            quietHoursEnabled: true,
+            weekdaysOnly: true,
+            weekdays: [1, 2, 3, 4, 5],
+            hours: ['10:00-16:00'],
+            guestLogTypes: ['visit', 'login'],
+            blockedGuestLogTypes: ['manual_cancel'],
+          },
+          limits: {
+            source: 'business_controls',
+            perGuestPerWeek: 1,
+            totalPerDay: 30,
+          },
+          manualApprovalRequired: true,
+          note: null,
         },
         store: {
           id: 'store-1',
@@ -1159,14 +1187,39 @@ describe('GuestGamificationService', () => {
         expect.objectContaining({
           rewardId: 'reward-pending-chat',
           activityType: 'Лутбокс',
-          activityName: 'Лутбокс чекина',
-          conditions: expect.stringContaining('Три чекина'),
+          activityName: 'Тест',
+          conditions: expect.stringContaining(
+            'Событие для появления: Открытие приложения',
+          ),
           guestPhone: '+7 *** **-11',
           storeName: '1337-Пушкинская',
           actionHref:
             '/guests/gamification?tab=rewards&rewardId=reward-pending-chat',
         }),
       );
+      const notification =
+        staffTeamChatService.createGamificationRewardApprovalNotification.mock
+          .calls[0][1];
+      expect(notification.conditions).toContain('Аудитория: Тихие часы');
+      expect(notification.conditions).toContain(
+        'Когда показывать: Тихие часы (10:00-16:00)',
+      );
+      expect(notification.conditions).toContain('По каким дням: Будни');
+      expect(notification.conditions).toContain(
+        'События Langame: Визит, Вход в клуб',
+      );
+      expect(notification.conditions).toContain(
+        'Не засчитывать: Ручная отмена',
+      );
+      expect(notification.conditions).toContain(
+        'Лимит на гостя: 1 открытие в неделю',
+      );
+      expect(notification.conditions).toContain(
+        'Общий дневной лимит: 30 открытий',
+      );
+      expect(notification.conditions).not.toContain('APP_OPEN');
+      expect(notification.conditions).not.toContain('externalId');
+      expect(notification.conditions).not.toContain('guest-game:');
       expect(
         JSON.stringify(
           staffTeamChatService.createGamificationRewardApprovalNotification.mock

@@ -622,6 +622,23 @@ const rewardWalletStateLabels: Record<GuestGameReward["walletState"], string> = 
   EXPIRED: "срок истек",
 };
 
+const rewardStatusActionLabels: Record<GuestGameRewardStatus, string> = {
+  PENDING: "Вернуть к выдаче",
+  APPROVED: "Согласовать",
+  PAID: "Отметить выдано",
+  CANCELED: "Отменить",
+  EXPIRED: "Списать как сгоревшую",
+};
+
+const rewardStatusDescriptions: Record<GuestGameRewardStatus, string> = {
+  PENDING: "Награда создана и ждет проверки сотрудником.",
+  APPROVED:
+    "Согласовано: сотрудник подтвердил право гостя на приз, но выдача еще не закрыта.",
+  PAID: "Выдано: приз уже погашен или начислен, повторно выдать его нельзя.",
+  CANCELED: "Отменено: награда не будет выдана гостю.",
+  EXPIRED: "Сгорело: срок действия награды истек.",
+};
+
 const fieldClass =
   "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white";
 
@@ -6824,18 +6841,19 @@ function RewardsTab({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-zinc-950 dark:text-white">
-                Погашение кода
+                Погашение кода гостя
               </p>
               <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                Вставьте код с гостевой страницы или весь QR payload. Награда
-                перейдет в статус “выдано”.
+                Когда гость показывает код из кошелька или QR-код, вставьте
+                короткий код кассиру. После погашения награда считается
+                выданной и повторно использовать код нельзя.
               </p>
             </div>
             <div className="grid flex-1 gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
               <input
                 className={fieldClass}
                 value={redeemForm.claim}
-                placeholder="LP-... или LEETPLUS_REWARD:..."
+                placeholder="Например, LP-D5791101"
                 onChange={(event) =>
                   setRedeemForm((current) => ({
                     ...current,
@@ -6898,10 +6916,20 @@ function RewardsTab({
               </div>
             ) : (
               <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-                Кассирский сценарий работает внутри LeetPlus: проверка кода,
-                защита от повторной выдачи и системное событие в истории.
+                Погашение проверяет код, клуб и статус награды, затем закрывает
+                приз как выданный и защищает его от повторного использования.
               </div>
             )}
+          </div>
+          <div className="mt-3 rounded-lg border border-cyan-200/70 bg-white/70 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-cyan-900/50 dark:bg-zinc-950/40 dark:text-zinc-300">
+            <span className="font-semibold text-zinc-900 dark:text-white">
+              Согласовано
+            </span>{" "}
+            — право на приз подтверждено, но выдача еще не закрыта.{" "}
+            <span className="font-semibold text-zinc-900 dark:text-white">
+              Выдано
+            </span>{" "}
+            — приз уже погашен или начислен, повторная выдача заблокирована.
           </div>
         </div>
         ) : (
@@ -8202,6 +8230,14 @@ function RewardRow({
   saving: string | null;
   canApprove: boolean;
 }) {
+  const guestName =
+    reward.profile?.displayName ??
+    reward.guest?.displayName ??
+    reward.guestExternalId ??
+    "без гостя";
+  const guestContact =
+    reward.profile?.contactMasked ?? reward.guest?.contact ?? "телефон не указан";
+
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -8214,15 +8250,17 @@ function RewardRow({
             <StatusPill label={rewardWalletStateLabels[reward.walletState]} />
           </div>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {reward.profile?.displayName ??
-              reward.guest?.displayName ??
-              reward.guestExternalId ??
-              "без гостя"}{" "}
-            · {optionLabel(rewardTypeOptions, reward.rewardType)} ·{" "}
+            {guestName} · телефон: {guestContact}
+          </p>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            {optionLabel(rewardTypeOptions, reward.rewardType)} ·{" "}
             {formatMoney(reward.rewardAmount)}
           </p>
           <p className="mt-1 text-xs text-zinc-400">
             {reward.store?.name ?? "любой клуб"} · {formatDate(reward.qualifiedAt)}
+          </p>
+          <p className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+            {rewardStatusDescriptions[reward.status]}
           </p>
           <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -8243,8 +8281,9 @@ function RewardRow({
             </div>
           </div>
           {reward.claimPayload ? (
-            <p className="mt-2 break-all rounded-lg border border-dashed border-cyan-300/40 px-3 py-2 font-mono text-xs text-cyan-700 dark:text-cyan-200">
-              QR payload: {reward.claimPayload}
+            <p className="mt-2 rounded-lg border border-dashed border-cyan-300/40 px-3 py-2 text-xs text-cyan-700 dark:text-cyan-200">
+              QR-код готов для гостевой страницы. Для ручной выдачи используйте
+              короткий код кассиру выше.
             </p>
           ) : null}
         </div>
@@ -8265,7 +8304,7 @@ function RewardRow({
               disabled={saving === `reward-${reward.id}` || reward.status === status}
               onClick={() => onStatus(reward, status)}
             >
-              {rewardStatusLabels[status]}
+              {rewardStatusActionLabels[status]}
             </button>
           ))}
         </div>

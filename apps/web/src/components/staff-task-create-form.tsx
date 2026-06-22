@@ -47,7 +47,7 @@ type AssignmentMode = "ANY_OF" | "INDIVIDUAL";
 type StaffTaskCreateFormProps = {
   users: StaffTaskUser[];
   stores: StaffTaskStore[];
-  currentUser: Pick<StaffTaskUser, "id" | "role">;
+  currentUser: Pick<StaffTaskUser, "id" | "role" | "stores">;
 };
 
 export function StaffTaskCreateForm({
@@ -59,6 +59,15 @@ export function StaffTaskCreateForm({
   const needsConfirmation = confirmationCreatorRoles.has(currentUser.role);
   const needsStaffAssignee =
     needsConfirmation || currentUser.role === "SENIOR_ADMINISTRATOR";
+  const isSeniorAdministrator = currentUser.role === "SENIOR_ADMINISTRATOR";
+  const currentUserStoreIds = useMemo(
+    () => userStoreIds(currentUser),
+    [currentUser],
+  );
+  const currentUserStoreIdSet = useMemo(
+    () => new Set(currentUserStoreIds),
+    [currentUserStoreIds],
+  );
   const [isExpanded, setIsExpanded] = useState(() => !needsConfirmation);
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +84,22 @@ export function StaffTaskCreateForm({
         ? users.filter(
             (user) =>
               staffAssigneeRoles.has(user.role) &&
-              (!needsConfirmation || user.id !== currentUser.id),
+              (!needsConfirmation || user.id !== currentUser.id) &&
+              (!isSeniorAdministrator ||
+                userStoreIds(user).some((storeId) =>
+                  currentUserStoreIdSet.has(storeId),
+                )),
           )
         : users
       ).sort((left, right) => userLabel(left).localeCompare(userLabel(right))),
-    [currentUser.id, needsConfirmation, needsStaffAssignee, users],
+    [
+      currentUser.id,
+      currentUserStoreIdSet,
+      isSeniorAdministrator,
+      needsConfirmation,
+      needsStaffAssignee,
+      users,
+    ],
   );
   const observerUsers = useMemo(
     () =>
@@ -96,9 +116,27 @@ export function StaffTaskCreateForm({
         .sort((left, right) => left.name.localeCompare(right.name)),
     [stores],
   );
+  const visibleStores = useMemo(
+    () =>
+      isSeniorAdministrator
+        ? activeStores.filter((store) => currentUserStoreIdSet.has(store.id))
+        : activeStores,
+    [activeStores, currentUserStoreIdSet, isSeniorAdministrator],
+  );
+  const seniorStoreId = useMemo(
+    () =>
+      activeStores.find((store) => currentUserStoreIdSet.has(store.id))?.id ??
+      currentUserStoreIds[0] ??
+      "",
+    [activeStores, currentUserStoreIdSet, currentUserStoreIds],
+  );
+  const taskStoreId = isSeniorAdministrator ? seniorStoreId : selectedStoreId;
   const usersWithoutStore = useMemo(
-    () => assigneeUsers.filter((user) => userStoreIds(user).length === 0),
-    [assigneeUsers],
+    () =>
+      isSeniorAdministrator
+        ? []
+        : assigneeUsers.filter((user) => userStoreIds(user).length === 0),
+    [assigneeUsers, isSeniorAdministrator],
   );
   const selectedCount = selectedAssigneeIds.size;
   const allAssigneesSelected =
@@ -126,7 +164,7 @@ export function StaffTaskCreateForm({
 
     setMany(ids, checked);
 
-    if (checked && !selectedStoreId) {
+    if (checked && !isSeniorAdministrator && !selectedStoreId) {
       setSelectedStoreId(store.id);
     }
   }
@@ -180,6 +218,11 @@ export function StaffTaskCreateForm({
       }
     }
 
+    if (isSeniorAdministrator && !seniorStoreId) {
+      setError("У старшего администратора не указан клуб. Назначить задачу можно только внутри своего клуба.");
+      return;
+    }
+
     const dueAt = String(form.get("dueAt") ?? "").trim();
     setIsPending(true);
     setError(null);
@@ -190,7 +233,7 @@ export function StaffTaskCreateForm({
       type: form.get("type"),
       priority: form.get("priority"),
       dueAt: dueAt ? new Date(dueAt).toISOString() : null,
-      storeId: selectedStoreId || null,
+      storeId: taskStoreId || null,
       assignedToUserId:
         assigneeIds.length === 1 && assignmentMode !== "ANY_OF"
           ? assigneeIds[0]
@@ -216,7 +259,7 @@ export function StaffTaskCreateForm({
 
       event.currentTarget.reset();
       setSelectedAssigneeIds(new Set());
-      setSelectedStoreId("");
+      setSelectedStoreId(isSeniorAdministrator ? seniorStoreId : "");
       setAssignmentMode("INDIVIDUAL");
       setIsExpanded(false);
       router.refresh();
@@ -276,7 +319,13 @@ export function StaffTaskCreateForm({
         hidden={!isExpanded}
         noValidate
       >
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
+        <div
+          className={`mt-4 grid gap-3 ${
+            isSeniorAdministrator
+              ? "lg:grid-cols-[1.4fr_1fr]"
+              : "lg:grid-cols-[1.4fr_1fr_1fr]"
+          }`}
+        >
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-zinc-500">
               Что сделать
@@ -289,24 +338,26 @@ export function StaffTaskCreateForm({
             />
           </label>
 
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-zinc-500">
-              Клуб задачи
-            </span>
-            <select
-              name="storeId"
-              value={selectedStoreId}
-              onChange={(event) => setSelectedStoreId(event.target.value)}
-              className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-            >
-              <option value="">Вся сеть</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!isSeniorAdministrator ? (
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Клуб задачи
+              </span>
+              <select
+                name="storeId"
+                value={selectedStoreId}
+                onChange={(event) => setSelectedStoreId(event.target.value)}
+                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">Вся сеть</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-zinc-500">
@@ -369,7 +420,7 @@ export function StaffTaskCreateForm({
 
           <div className="mt-3 flex flex-wrap gap-2">
             <CheckPill
-              label="Весь персонал"
+              label={isSeniorAdministrator ? "Весь персонал клуба" : "Весь персонал"}
               count={assigneeUsers.length}
               checked={allAssigneesSelected}
               disabled={assigneeUsers.length === 0}
@@ -380,7 +431,7 @@ export function StaffTaskCreateForm({
                 )
               }
             />
-            {activeStores.map((store) => {
+            {visibleStores.map((store) => {
               const storeUsers = assigneeUsers.filter((user) =>
                 userStoreIds(user).includes(store.id),
               );
@@ -402,7 +453,7 @@ export function StaffTaskCreateForm({
           </div>
 
           <div className="mt-3 grid gap-3 lg:grid-cols-2">
-            {activeStores.map((store) => {
+            {visibleStores.map((store) => {
               const storeUsers = assigneeUsers.filter((user) =>
                 userStoreIds(user).includes(store.id),
               );

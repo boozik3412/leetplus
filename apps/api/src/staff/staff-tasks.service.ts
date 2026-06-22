@@ -509,12 +509,14 @@ export class StaffTasksService {
       assignedToUserIds.length,
     );
     const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
+    const taskStoreId = typeof data.storeId === 'string' ? data.storeId : null;
 
     await this.assertTaskCreationPolicy(
       tenantId,
       user,
       assignedToUserIds,
       observerUserIds,
+      taskStoreId,
     );
 
     const tasks = await this.prisma.$transaction(async (tx) => {
@@ -1671,6 +1673,7 @@ export class StaffTasksService {
     user: AuthenticatedUser,
     assignedToUserIds: string[],
     observerUserIds: string[],
+    taskStoreId: string | null,
   ) {
     const staffOnly = this.mustCreateTaskForStaffOnly(user);
     const needsConfirmation = this.mustRequestTaskConfirmation(user);
@@ -1687,7 +1690,11 @@ export class StaffTasksService {
 
     const assignedUsers = await this.prisma.user.findMany({
       where: { id: { in: assignedToUserIds }, tenantId, isActive: true },
-      select: { id: true, role: true },
+      select: {
+        id: true,
+        role: true,
+        storeAccesses: { select: { storeId: true } },
+      },
     });
 
     if (assignedUsers.length !== assignedToUserIds.length) {
@@ -1705,6 +1712,15 @@ export class StaffTasksService {
         user.role === UserRole.SENIOR_ADMINISTRATOR
           ? 'Старший администратор может назначать задачи только администраторам и стажерам.'
           : 'Администратор и стажер могут назначать задачи только администраторам и стажерам.',
+      );
+    }
+
+    if (user.role === UserRole.SENIOR_ADMINISTRATOR) {
+      await this.assertSeniorAdministratorTaskStoreScope(
+        tenantId,
+        user.id,
+        assignedUsers,
+        taskStoreId,
       );
     }
 
@@ -1737,6 +1753,48 @@ export class StaffTasksService {
     if (!allConfirmationUsersAreAllowed) {
       throw new ForbiddenException(
         'Подтверждающими могут быть только старший администратор, управляющий клубом или менеджер по стандартам.',
+      );
+    }
+  }
+
+  private async assertSeniorAdministratorTaskStoreScope(
+    tenantId: string,
+    userId: string,
+    assignedUsers: Array<{
+      id: string;
+      storeAccesses: Array<{ storeId: string }>;
+    }>,
+    taskStoreId: string | null,
+  ) {
+    const seniorUser = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId, isActive: true },
+      select: { storeAccesses: { select: { storeId: true } } },
+    });
+    const seniorStoreIds = new Set(
+      seniorUser?.storeAccesses.map((access) => access.storeId) ?? [],
+    );
+
+    if (seniorStoreIds.size === 0) {
+      throw new ForbiddenException(
+        'У старшего администратора не указан клуб. Назначить задачу можно только внутри своего клуба.',
+      );
+    }
+
+    if (!taskStoreId || !seniorStoreIds.has(taskStoreId)) {
+      throw new ForbiddenException(
+        'Старший администратор может ставить задачи только в своем клубе.',
+      );
+    }
+
+    const hasOnlyOwnStoreAssignees = assignedUsers.every((assignedUser) =>
+      assignedUser.storeAccesses.some((access) =>
+        seniorStoreIds.has(access.storeId),
+      ),
+    );
+
+    if (!hasOnlyOwnStoreAssignees) {
+      throw new ForbiddenException(
+        'Старший администратор может назначать задачи только администраторам и стажерам своего клуба.',
       );
     }
   }

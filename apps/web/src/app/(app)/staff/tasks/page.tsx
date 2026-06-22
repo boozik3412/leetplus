@@ -460,6 +460,7 @@ export default async function StaffTasksPage({
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTaskReport(filters);
+  const currentStaffUser = report.users.find((user) => user.id === currentUser.id);
   const activeGroupRows =
     report.filters.view === "byClub"
       ? report.groups.byClub
@@ -595,7 +596,11 @@ export default async function StaffTasksPage({
           <StaffTaskCreateForm
             users={report.users}
             stores={report.stores}
-            currentUser={{ id: currentUser.id, role: currentUser.role }}
+            currentUser={{
+              id: currentUser.id,
+              role: currentUser.role,
+              stores: currentStaffUser?.stores ?? [],
+            }}
           />
         </section>
 

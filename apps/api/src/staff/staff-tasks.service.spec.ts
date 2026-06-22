@@ -112,9 +112,13 @@ describe('StaffTasksService status review workflow', () => {
     const tenantContextService = {
       resolve: jest.fn().mockResolvedValue({ tenantId }),
     };
+    const staffTeamChatService = {
+      createSystemNotification: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new StaffTasksService(
       prisma as never,
       tenantContextService as never,
+      staffTeamChatService as never,
     );
 
     (
@@ -127,11 +131,18 @@ describe('StaffTasksService status review workflow', () => {
   }
 
   function createTaskPolicyService(
-    users: Array<{ id: string; role: UserRole }>,
+    users: Array<{
+      id: string;
+      role: UserRole;
+      storeAccesses?: Array<{ storeId: string }>;
+    }>,
   ) {
     const usersById = new Map(users.map((user) => [user.id, user]));
     const findFirst = jest.fn(
-      (args: { where?: { id?: string }; select?: { role?: boolean } }) => {
+      (args: {
+        where?: { id?: string };
+        select?: { role?: boolean; storeAccesses?: unknown };
+      }) => {
         const userId = args.where?.id;
         const found = userId ? usersById.get(userId) : null;
 
@@ -140,29 +151,47 @@ describe('StaffTasksService status review workflow', () => {
         }
 
         return Promise.resolve(
-          args.select?.role
-            ? { id: found.id, role: found.role }
-            : { id: found.id },
+          args.select?.storeAccesses
+            ? {
+                id: found.id,
+                role: found.role,
+                storeAccesses: found.storeAccesses ?? [],
+              }
+            : args.select?.role
+              ? { id: found.id, role: found.role }
+              : { id: found.id },
         );
       },
     );
     const findMany = jest.fn(
       (args: {
         where?: { id?: { in?: string[] } };
-        select?: { role?: boolean };
+        select?: { role?: boolean; storeAccesses?: unknown };
       }) => {
         const ids = args.where?.id?.in ?? [];
         const found = ids
           .map((id) => usersById.get(id))
-          .filter((user): user is { id: string; role: UserRole } =>
-            Boolean(user),
+          .filter(
+            (
+              user,
+            ): user is {
+              id: string;
+              role: UserRole;
+              storeAccesses?: Array<{ storeId: string }>;
+            } => Boolean(user),
           );
 
         return Promise.resolve(
           found.map((user) =>
-            args.select?.role
-              ? { id: user.id, role: user.role }
-              : { id: user.id },
+            args.select?.storeAccesses
+              ? {
+                  id: user.id,
+                  role: user.role,
+                  storeAccesses: user.storeAccesses ?? [],
+                }
+              : args.select?.role
+                ? { id: user.id, role: user.role }
+                : { id: user.id },
           ),
         );
       },
@@ -192,6 +221,11 @@ describe('StaffTasksService status review workflow', () => {
     };
     const prisma = {
       user: { findFirst, findMany },
+      store: {
+        findFirst: jest.fn(({ where }: { where?: { id?: string } }) =>
+          where?.id ? Promise.resolve({ id: where.id }) : Promise.resolve(null),
+        ),
+      },
       $transaction: jest
         .fn()
         .mockImplementation((callback: (tx: unknown) => unknown) =>
@@ -201,9 +235,13 @@ describe('StaffTasksService status review workflow', () => {
     const tenantContextService = {
       resolve: jest.fn().mockResolvedValue({ tenantId }),
     };
+    const staffTeamChatService = {
+      createSystemNotification: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new StaffTasksService(
       prisma as never,
       tenantContextService as never,
+      staffTeamChatService as never,
     );
 
     (
@@ -364,6 +402,56 @@ describe('StaffTasksService status review workflow', () => {
     ).rejects.toThrow(ForbiddenException);
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not allow a senior administrator to assign tasks outside their club', async () => {
+    const { prisma, service } = createTaskPolicyService([
+      {
+        id: 'senior-1',
+        role: UserRole.SENIOR_ADMINISTRATOR,
+        storeAccesses: [{ storeId: 'store-1' }],
+      },
+      {
+        id: 'admin-2',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        storeAccesses: [{ storeId: 'store-2' }],
+      },
+    ]);
+
+    await expect(
+      service.createTask(actor(UserRole.SENIOR_ADMINISTRATOR, 'senior-1'), {
+        title: 'Проверить кассу',
+        storeId: 'store-1',
+        assignedToUserId: 'admin-2',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('allows a senior administrator to assign tasks inside their club', async () => {
+    const { service, tx } = createTaskPolicyService([
+      {
+        id: 'senior-1',
+        role: UserRole.SENIOR_ADMINISTRATOR,
+        storeAccesses: [{ storeId: 'store-1' }],
+      },
+      {
+        id: 'admin-2',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        storeAccesses: [{ storeId: 'store-1' }],
+      },
+    ]);
+
+    await expect(
+      service.createTask(actor(UserRole.SENIOR_ADMINISTRATOR, 'senior-1'), {
+        title: 'Проверить кассу',
+        storeId: 'store-1',
+        assignedToUserId: 'admin-2',
+      }),
+    ).resolves.toMatchObject({ id: 'task-created' });
+
+    expect(tx.staffTask.create).toHaveBeenCalled();
   });
 
   it('allows an administrator to create a task for another administrator with confirmation', async () => {

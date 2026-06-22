@@ -997,14 +997,7 @@ function WorkPanel({
   currentItem: ChecklistTodoItem | null;
   overdueCount: number;
 }) {
-  const runningTemplateIds = new Set(
-    checklists
-      .map((run) => run.templateId)
-      .filter((templateId): templateId is string => Boolean(templateId)),
-  );
-  const templateChoices = checklistTemplates.filter(
-    (template) => !runningTemplateIds.has(template.id),
-  );
+  const templateChoices = checklistTemplates;
   const recommendedTemplateId = recommendedChecklist
     ? null
     : (templateChoices[0]?.id ?? null);

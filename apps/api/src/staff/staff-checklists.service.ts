@@ -779,19 +779,6 @@ export class StaffChecklistsService {
       ? user.id
       : await this.resolveUserId(tenantId, dto.assignedToUserId);
 
-    if (isUseOnlyUser && source.kind === 'TEMPLATE') {
-      const currentRun = await this.findCurrentOwnTemplateRun(
-        tenantId,
-        user.id,
-        source.id,
-        storeId,
-      );
-
-      if (currentRun) {
-        return this.toRunResponse(currentRun);
-      }
-    }
-
     const sections = this.normalizeSections(source.sections);
     const answers = this.defaultAnswers(sections);
     const metrics = this.calculateMetrics(sections, answers);
@@ -1347,25 +1334,6 @@ export class StaffChecklistsService {
       !source.storeId ||
       scope.storeIds.includes(source.storeId)
     );
-  }
-
-  private findCurrentOwnTemplateRun(
-    tenantId: string,
-    userId: string,
-    templateId: string,
-    storeId: string | null,
-  ) {
-    return this.prisma.staffChecklistRun.findFirst({
-      where: {
-        tenantId,
-        templateId,
-        assignedToUserId: userId,
-        storeId,
-        status: { in: ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'] },
-      },
-      include: checklistRunInclude,
-      orderBy: [{ updatedAt: 'desc' }],
-    });
   }
 
   private ensureCanCreateChecklist(user: AuthenticatedUser) {

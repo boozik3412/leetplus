@@ -290,8 +290,10 @@ export default async function StaffChecklistsPage({
             key={report.filters.runId ?? "all-checklists"}
             report={report}
             focusRunId={report.filters.runId}
-            canCreateRuns={canManageChecklists}
+            canCreateRuns={true}
             canReviewRuns={canManageChecklists}
+            canAssignRuns={canManageChecklists}
+            canStartFromRegulations={canManageChecklists}
           />
         </section>
       </div>

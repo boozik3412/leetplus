@@ -208,11 +208,15 @@ export function StaffChecklistWorkspace({
   focusRunId,
   canCreateRuns = true,
   canReviewRuns = true,
+  canAssignRuns = canCreateRuns,
+  canStartFromRegulations = canCreateRuns,
 }: {
   report: StaffChecklistReport;
   focusRunId?: string | null;
   canCreateRuns?: boolean;
   canReviewRuns?: boolean;
+  canAssignRuns?: boolean;
+  canStartFromRegulations?: boolean;
 }) {
   const router = useRouter();
   const initialRunId =
@@ -234,11 +238,13 @@ export function StaffChecklistWorkspace({
     () =>
       canCreateRuns
         ? [
-            ...report.publishedRegulations.map((regulation) => ({
-              ...regulation,
-              key: `regulation:${regulation.id}`,
-              kind: "REGULATION" as const,
-            })),
+            ...(canStartFromRegulations
+              ? report.publishedRegulations.map((regulation) => ({
+                  ...regulation,
+                  key: `regulation:${regulation.id}`,
+                  kind: "REGULATION" as const,
+                }))
+              : []),
             ...report.checklistTemplates.map((template) => ({
               ...template,
               key: `template:${template.id}`,
@@ -246,7 +252,12 @@ export function StaffChecklistWorkspace({
             })),
           ]
         : [],
-    [canCreateRuns, report.checklistTemplates, report.publishedRegulations],
+    [
+      canCreateRuns,
+      canStartFromRegulations,
+      report.checklistTemplates,
+      report.publishedRegulations,
+    ],
   );
   const [selectedSourceKey, setSelectedSourceKey] = useState(
     sourceOptions[0]?.key ?? "",
@@ -282,7 +293,7 @@ export function StaffChecklistWorkspace({
           selectedSource.kind === "REGULATION" ? selectedSource.id : null,
         templateId: selectedSource.kind === "TEMPLATE" ? selectedSource.id : null,
         storeId: storeId || null,
-        assignedToUserId: assignedToUserId || null,
+        assignedToUserId: canAssignRuns ? assignedToUserId || null : null,
         scheduledAt: scheduledAt || null,
       }),
     });
@@ -386,23 +397,25 @@ export function StaffChecklistWorkspace({
                 </select>
               </label>
 
-              <label className="block text-sm">
-                <span className="text-xs font-semibold uppercase text-zinc-500">
-                  Ответственный
-                </span>
-                <select
-                  value={assignedToUserId}
-                  onChange={(event) => setAssignedToUserId(event.target.value)}
-                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                >
-                  <option value="">Не назначен</option>
-                  {report.users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.fullName ?? user.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {canAssignRuns ? (
+                <label className="block text-sm">
+                  <span className="text-xs font-semibold uppercase text-zinc-500">
+                    Ответственный
+                  </span>
+                  <select
+                    value={assignedToUserId}
+                    onChange={(event) => setAssignedToUserId(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                  >
+                    <option value="">Не назначен</option>
+                    {report.users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.fullName ?? user.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
 
               <label className="block text-sm">
                 <span className="text-xs font-semibold uppercase text-zinc-500">
@@ -836,7 +849,10 @@ function ChecklistRunEditor({
   ) {
     const currentAnswer = answersByKey.get(`${sectionId}::${itemId}`);
 
-    if (currentAnswer?.completedAt) {
+    const canResubmitSubmittedItem =
+      run.status === "RETURNED" || run.status === "ESCALATED";
+
+    if (currentAnswer?.completedAt && !canResubmitSubmittedItem) {
       setMessage("Пункт уже отправлен.");
       return;
     }
@@ -866,7 +882,9 @@ function ChecklistRunEditor({
         : answer,
     );
     const nextStatus =
-      run.status === "OPEN" || run.status === "RETURNED"
+      run.status === "OPEN" ||
+      run.status === "RETURNED" ||
+      run.status === "ESCALATED"
         ? "IN_PROGRESS"
         : undefined;
 
@@ -966,6 +984,8 @@ function ChecklistRunEditor({
                   answer?.completedAt ?? null,
                 );
                 const isSubmitted = Boolean(answer?.completedAt);
+                const canResubmitSubmittedItem =
+                  run.status === "RETURNED" || run.status === "ESCALATED";
                 const evidenceAttachments = getEvidenceAttachments(answer);
                 const hasEvidence = answerHasEvidence(answer);
                 const reviewThreads = answer?.reviewThreads ?? [];
@@ -1057,17 +1077,24 @@ function ChecklistRunEditor({
                                   item.evidenceRequired,
                                 )
                               }
-                              disabled={isPending || isSubmitted}
+                              disabled={
+                                isPending ||
+                                (isSubmitted && !canResubmitSubmittedItem)
+                              }
                               className="h-10 w-full min-w-32 whitespace-nowrap rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
                               title={
-                                isSubmitted
+                                isSubmitted && !canResubmitSubmittedItem
                                   ? "Пункт уже отправлен"
                                   : item.evidenceRequired && !hasEvidence
                                     ? "Перед отправкой понадобится доказательство"
                                     : "Зафиксировать выполнение пункта"
                               }
                             >
-                              {isSubmitted ? "Отправлено" : "Отправить"}
+                              {isSubmitted && !canResubmitSubmittedItem
+                                ? "Отправлено"
+                                : isSubmitted
+                                  ? "Отправить снова"
+                                  : "Отправить"}
                             </button>
                           </div>
                           <details className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">

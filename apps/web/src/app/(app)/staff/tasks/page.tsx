@@ -726,6 +726,13 @@ export default async function StaffTasksPage({
         ) : null}
 
         <section className="mt-6 space-y-3">
+          <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-300">Список задач</p>
+            <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">Задачи по выбранным фильтрам</h2>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Ниже отображаются задачи, подходящие под выбранный статус, клуб, ответственного и поиск.
+            </p>
+          </div>
           {report.rows.length === 0 ? (
             <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
               Задач по текущим фильтрам нет. Создайте первую задачу выше или

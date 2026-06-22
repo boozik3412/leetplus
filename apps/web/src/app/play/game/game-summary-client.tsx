@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
+import type {
+  CSSProperties,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  RefObject,
+} from "react";
 import type { GuestPortalGameSummary } from "@/lib/guest-portal";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -33,7 +39,7 @@ type HomeLootCard = {
   status: string;
   active: boolean;
 };
-type LootboxOverlayPhase = "opening" | "open" | "collected";
+type LootboxOverlayPhase = "ready" | "opening" | "open" | "collected";
 type HomeBattleQuest = {
   id: string;
   title: string;
@@ -195,7 +201,7 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
   const [lootboxOverlayCard, setLootboxOverlayCard] =
     useState<HomeLootCard | null>(null);
   const [lootboxOverlayPhase, setLootboxOverlayPhase] =
-    useState<LootboxOverlayPhase>("opening");
+    useState<LootboxOverlayPhase>("ready");
   const lootboxRewardRef = useRef<HTMLButtonElement | null>(null);
   const [promoCode, setPromoCode] = useState("");
   const homeBanners = buildHomeBanners(
@@ -234,10 +240,7 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
       return;
     }
 
-    const timerId = window.setTimeout(
-      () => setLootboxOverlayPhase("open"),
-      1600,
-    );
+    const timerId = window.setTimeout(() => setLootboxOverlayPhase("open"), 1700);
 
     return () => window.clearTimeout(timerId);
   }, [lootboxOverlayCard, lootboxOverlayPhase]);
@@ -258,7 +261,7 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setLootboxOverlayCard(null);
-        setLootboxOverlayPhase("opening");
+        setLootboxOverlayPhase("ready");
       }
     }
 
@@ -274,13 +277,22 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
   function openLootboxOverlay(card: HomeLootCard) {
     setSelectedLootId(card.id);
     setLootboxOverlayCard(card);
+    setLootboxOverlayPhase("ready");
+    showToast("Контейнер готов к открытию.");
+  }
+
+  function beginLootboxOpening() {
+    if (!lootboxOverlayCard || lootboxOverlayPhase !== "ready") {
+      return;
+    }
+
     setLootboxOverlayPhase("opening");
     showToast("Контейнер открывается.");
   }
 
   function closeLootboxOverlay() {
     setLootboxOverlayCard(null);
-    setLootboxOverlayPhase("opening");
+    setLootboxOverlayPhase("ready");
   }
 
   function collectLootboxReward() {
@@ -446,6 +458,7 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
           card={lootboxOverlayCard}
           phase={lootboxOverlayPhase}
           rewardRef={lootboxRewardRef}
+          onOpen={beginLootboxOpening}
           onClose={closeLootboxOverlay}
           onCollect={collectLootboxReward}
         />
@@ -549,15 +562,18 @@ function LootboxOpeningOverlay({
   card,
   phase,
   rewardRef,
+  onOpen,
   onClose,
   onCollect,
 }: {
   card: HomeLootCard;
   phase: LootboxOverlayPhase;
   rewardRef: RefObject<HTMLButtonElement | null>;
+  onOpen: () => void;
   onClose: () => void;
   onCollect: () => void;
 }) {
+  const isReady = phase === "ready";
   const isOpening = phase === "opening";
   const isOpen = phase === "open";
   const isCollected = phase === "collected";
@@ -565,7 +581,32 @@ function LootboxOpeningOverlay({
     ? "Награда сохранена"
     : isOpen
       ? "Контейнер открыт"
-      : "Идет открытие";
+      : isOpening
+        ? "Идет открытие"
+        : "Нажмите на контейнер, чтобы открыть";
+  const primaryActionLabel = isCollected
+    ? "Готово"
+    : isOpen
+      ? "Забрать результат"
+      : isOpening
+        ? "Открывается"
+        : "Открыть контейнер";
+  const handlePrimaryAction = isCollected
+    ? onClose
+    : isOpen
+      ? onCollect
+      : isReady
+        ? onOpen
+        : undefined;
+
+  function handleMachineKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!isReady || (event.key !== "Enter" && event.key !== " ")) {
+      return;
+    }
+
+    event.preventDefault();
+    onOpen();
+  }
 
   return (
     <div
@@ -594,18 +635,27 @@ function LootboxOpeningOverlay({
         <div
           className={[
             "lp-lootbox-machine",
+            isReady ? "is-ready" : "",
             isOpening ? "is-opening" : "",
             isOpen || isCollected ? "is-open" : "",
             isCollected ? "is-collected" : "",
           ].join(" ")}
-          aria-hidden="true"
+          role={isReady ? "button" : undefined}
+          tabIndex={isReady ? 0 : undefined}
+          aria-label={isReady ? "Открыть лутбокс" : undefined}
+          onClick={isReady ? onOpen : undefined}
+          onKeyDown={handleMachineKeyDown}
         >
+          <span className="lp-lootbox-energy-field" aria-hidden="true" />
           <span className="lp-lootbox-beam" />
           <span className="lp-lootbox-case lp-lootbox-case-lid" />
           <span className="lp-lootbox-case lp-lootbox-case-base" />
           <span className="lp-lootbox-case lp-lootbox-case-left" />
           <span className="lp-lootbox-case lp-lootbox-case-right" />
           <span className="lp-lootbox-core" />
+          <span className="lp-lootbox-lock-open" aria-hidden="true">
+            <LockIcon />
+          </span>
           {Array.from({ length: 9 }, (_, index) => (
             <span
               key={index}
@@ -613,27 +663,30 @@ function LootboxOpeningOverlay({
               style={{ "--particle-index": index } as CSSProperties}
             />
           ))}
-        </div>
 
-        <button
-          type="button"
-          ref={rewardRef}
-          className={[
-            "lp-lootbox-reward-card",
-            isOpen || isCollected ? "is-visible" : "",
-            isCollected ? "is-collected" : "",
-          ].join(" ")}
-          disabled={!isOpen}
-          onClick={onCollect}
-        >
-          <span>{isCollected ? "Получено" : "Выпала награда"}</span>
-          <strong>{card.description}</strong>
-          <small>
-            {isCollected
-              ? "Результат сохранен в игровом профиле."
-              : "Нажмите, чтобы забрать результат."}
-          </small>
-        </button>
+          <button
+            type="button"
+            ref={rewardRef}
+            className={[
+              "lp-lootbox-reward-card",
+              isOpen || isCollected ? "is-visible" : "",
+              isCollected ? "is-collected" : "",
+            ].join(" ")}
+            disabled={!isOpen}
+            onClick={(event) => {
+              event.stopPropagation();
+              onCollect();
+            }}
+          >
+            <span>{isCollected ? "Получено" : "Выпала награда"}</span>
+            <strong>{card.description}</strong>
+            <small>
+              {isCollected
+                ? "Результат сохранен в игровом профиле."
+                : "Нажмите, чтобы забрать результат."}
+            </small>
+          </button>
+        </div>
 
         <div className="lp-lootbox-dialog-actions">
           <button type="button" className="lp-club-ghost-link" onClick={onClose}>
@@ -643,9 +696,9 @@ function LootboxOpeningOverlay({
             type="button"
             className="lp-club-primary-link"
             disabled={isOpening}
-            onClick={isCollected ? onClose : onCollect}
+            onClick={handlePrimaryAction}
           >
-            {isCollected ? "Готово" : "Забрать результат"}
+            {primaryActionLabel}
           </button>
         </div>
       </div>
@@ -3802,6 +3855,15 @@ const clubHomeCss = `
   animation: lootboxFloat 3.8s ease-in-out infinite;
 }
 
+.lp-lootbox-machine.is-ready {
+  cursor: pointer;
+}
+
+.lp-lootbox-machine:focus-visible {
+  outline: 1px solid rgba(131, 228, 236, 0.72);
+  outline-offset: 6px;
+}
+
 .lp-lootbox-machine::after {
   content: "";
   position: absolute;
@@ -3814,6 +3876,23 @@ const clubHomeCss = `
   background: rgba(0, 0, 0, 0.54);
   filter: blur(14px);
   transform: translateX(-50%);
+}
+
+.lp-lootbox-energy-field {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  z-index: 1;
+  width: min(280px, 58%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(208, 251, 255, 0.72), rgba(131, 228, 236, 0.28) 32%, transparent 68%);
+  opacity: 0.22;
+  filter: blur(12px);
+  transform: translate(-50%, -50%) scale(0.88);
+  transition:
+    opacity 260ms ease,
+    transform 500ms ease;
 }
 
 .lp-lootbox-beam {
@@ -3911,6 +3990,46 @@ const clubHomeCss = `
   transform: rotate(45deg);
 }
 
+.lp-lootbox-lock-open {
+  position: absolute;
+  left: 50%;
+  bottom: 94px;
+  z-index: 8;
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+  border: 1px solid rgba(208, 170, 108, 0.64);
+  border-radius: 50%;
+  color: var(--amber);
+  background:
+    radial-gradient(circle, rgba(208, 170, 108, 0.28), transparent 56%),
+    rgba(0, 0, 0, 0.58);
+  box-shadow:
+    0 0 34px rgba(208, 170, 108, 0.18),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.1);
+  transform: translateX(-50%);
+  transition:
+    border-color 180ms ease,
+    color 180ms ease,
+    opacity 220ms ease,
+    transform 420ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.lp-lootbox-lock-open svg {
+  width: 25px;
+  height: 25px;
+}
+
+.lp-lootbox-machine.is-ready:hover .lp-lootbox-lock-open,
+.lp-lootbox-machine.is-ready:focus-visible .lp-lootbox-lock-open {
+  border-color: rgba(131, 228, 236, 0.88);
+  color: var(--cyan);
+  box-shadow:
+    0 0 36px rgba(131, 228, 236, 0.28),
+    0 0 80px rgba(208, 170, 108, 0.16);
+}
+
 .lp-lootbox-particle {
   bottom: 170px;
   z-index: 7;
@@ -3924,6 +4043,14 @@ const clubHomeCss = `
 
 .lp-lootbox-machine.is-opening {
   animation: lootboxKick 900ms ease both;
+}
+
+.lp-lootbox-machine.is-opening .lp-lootbox-lock-open,
+.lp-lootbox-machine.is-open .lp-lootbox-lock-open,
+.lp-lootbox-machine.is-collected .lp-lootbox-lock-open {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-30px) scale(0.72);
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-case-lid,
@@ -3941,6 +4068,13 @@ const clubHomeCss = `
   transform: translateX(-50%) translateX(52px) rotateY(-18deg);
 }
 
+.lp-lootbox-machine.is-opening .lp-lootbox-energy-field,
+.lp-lootbox-machine.is-open .lp-lootbox-energy-field,
+.lp-lootbox-machine.is-collected .lp-lootbox-energy-field {
+  opacity: 0.85;
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
 .lp-lootbox-machine.is-opening .lp-lootbox-beam,
 .lp-lootbox-machine.is-open .lp-lootbox-beam {
   animation: lootboxBeamRise 1100ms ease 180ms both;
@@ -3952,12 +4086,14 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-reward-card {
-  position: relative;
-  z-index: 1;
+  position: absolute;
+  left: 50%;
+  bottom: 128px;
+  z-index: 10;
   display: grid;
-  width: min(420px, 100%);
-  min-height: 118px;
-  margin: -62px auto 0;
+  width: min(220px, 64%);
+  min-height: 164px;
+  place-items: center;
   padding: 16px;
   border: 1px solid rgba(208, 170, 108, 0.34);
   border-radius: 8px;
@@ -3970,7 +4106,7 @@ const clubHomeCss = `
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(24px) scale(0.94);
+  transform: translate3d(-50%, 42px, 120px) scale(0.84) rotateX(18deg);
   transition:
     border-color 180ms ease,
     opacity 260ms ease,
@@ -3978,9 +4114,8 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-reward-card.is-visible {
-  opacity: 1;
   pointer-events: auto;
-  transform: translateY(0) scale(1);
+  animation: lootboxRewardRise 1200ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
 }
 
 .lp-lootbox-reward-card:disabled {
@@ -4011,8 +4146,10 @@ const clubHomeCss = `
 .lp-lootbox-reward-card strong {
   margin-top: 7px;
   color: var(--text);
-  font-size: 22px;
+  max-width: 156px;
+  font-size: 19px;
   line-height: 1.08;
+  text-align: center;
 }
 
 .lp-lootbox-reward-card small {
@@ -4083,6 +4220,23 @@ const clubHomeCss = `
   100% {
     opacity: 0.42;
     transform: translateX(-50%) scaleY(1);
+  }
+}
+
+@keyframes lootboxRewardRise {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, 48px, 120px) scale(0.74) rotateX(22deg);
+  }
+
+  54% {
+    opacity: 1;
+    transform: translate3d(-50%, -76px, 120px) scale(1.06) rotateX(0deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(-50%, -58px, 120px) scale(1) rotateX(0deg);
   }
 }
 

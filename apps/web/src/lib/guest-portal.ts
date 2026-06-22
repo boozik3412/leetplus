@@ -293,6 +293,13 @@ export type GuestPortalPayload = {
       rewardType: string;
       manualApprovalRequired: boolean;
       note: string | null;
+      openState: "OPENABLE" | "WAITING_EVENT" | "LIMIT_REACHED";
+      openable: boolean;
+      openBlocker: string | null;
+      weeklyOpenedCount: number;
+      weeklyLimit: number | null;
+      dailyOpenedCount: number;
+      dailyLimit: number | null;
       openedCount: number;
       readyRewards: number;
       waitingApprovalRewards: number;
@@ -603,6 +610,13 @@ export type GuestPortalGameSummary = {
         | "triggerKind"
         | "rewardLabel"
         | "rewardType"
+        | "openState"
+        | "openable"
+        | "openBlocker"
+        | "weeklyOpenedCount"
+        | "weeklyLimit"
+        | "dailyOpenedCount"
+        | "dailyLimit"
         | "openedCount"
         | "readyRewards"
         | "waitingApprovalRewards"

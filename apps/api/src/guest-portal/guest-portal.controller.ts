@@ -17,6 +17,7 @@ import {
   type GuestPortalIncomingCallLast4StartResponse,
   type GuestPortalIncomingCallLast4VerifyResponse,
   type GuestPortalLangameDetailsResponse,
+  type GuestPortalLootBoxOpenResponse,
   type GuestPortalMessengerUpdateResponse,
   GuestPortalService,
   type GuestPortalLangameMatchResponse,
@@ -170,6 +171,14 @@ export class GuestPortalController {
     @Body() dto: { surface?: unknown },
   ): Promise<GuestPortalAppOpenResponse> {
     return this.guestPortalService.recordAppOpen(authorization, dto);
+  }
+
+  @Post('session/loot-boxes/:lootBoxId/open')
+  openLootBox(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('lootBoxId') lootBoxId: string,
+  ): Promise<GuestPortalLootBoxOpenResponse> {
+    return this.guestPortalService.openLootBox(authorization, lootBoxId);
   }
 
   @Post('session/select-club')

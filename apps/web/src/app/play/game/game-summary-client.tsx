@@ -38,8 +38,24 @@ type HomeLootCard = {
   description: string;
   status: string;
   active: boolean;
+  openable: boolean;
+  openBlocker: string | null;
+  rewardLabel: string | null;
+  weeklyOpenedCount: number;
+  weeklyLimit: number | null;
+  dailyOpenedCount: number;
+  dailyLimit: number | null;
 };
 type LootboxOverlayPhase = "ready" | "opening" | "open" | "collected";
+type GuestPortalLootBoxOpenResponse = {
+  processed: true;
+  idempotent: boolean;
+  createdRewards: number;
+  queuedRewardAmount: number;
+  rewards: Array<{ rewardLabel?: string | null }>;
+  summary: GuestPortalGameSummary;
+  message: string;
+};
 type HomeBattleQuest = {
   id: string;
   title: string;
@@ -126,7 +142,7 @@ export function GameSummaryClient() {
   return (
     <GameShell
       body={
-        <ReadyGameView summary={summary} />
+        <ReadyGameView summary={summary} onSummaryChange={setSummary} />
       }
     />
   );
@@ -193,7 +209,13 @@ function EmptySessionView({
   );
 }
 
-function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
+function ReadyGameView({
+  summary,
+  onSummaryChange,
+}: {
+  summary: GuestPortalGameSummary;
+  onSummaryChange: (summary: GuestPortalGameSummary) => void;
+}) {
   const primaryAction = summary.nextActions[0] ?? null;
   const primaryActionHref = primaryAction ? gameActionHref(primaryAction) : null;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -236,16 +258,6 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
   }, [toastMessage]);
 
   useEffect(() => {
-    if (!lootboxOverlayCard || lootboxOverlayPhase !== "opening") {
-      return;
-    }
-
-    const timerId = window.setTimeout(() => setLootboxOverlayPhase("open"), 1700);
-
-    return () => window.clearTimeout(timerId);
-  }, [lootboxOverlayCard, lootboxOverlayPhase]);
-
-  useEffect(() => {
     if (lootboxOverlayPhase !== "open") {
       return;
     }
@@ -276,18 +288,53 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
 
   function openLootboxOverlay(card: HomeLootCard) {
     setSelectedLootId(card.id);
+
+    if (!card.openable) {
+      showToast(card.openBlocker ?? "Лутбокс сейчас недоступен.");
+      return;
+    }
+
     setLootboxOverlayCard(card);
     setLootboxOverlayPhase("ready");
     showToast("Контейнер готов к открытию.");
   }
 
-  function beginLootboxOpening() {
+  async function beginLootboxOpening() {
     if (!lootboxOverlayCard || lootboxOverlayPhase !== "ready") {
       return;
     }
 
+    const currentCard = lootboxOverlayCard;
     setLootboxOverlayPhase("opening");
     showToast("Контейнер открывается.");
+
+    try {
+      const [result] = await Promise.all([
+        openGameLootBox(currentCard.id),
+        wait(1250),
+      ]);
+      const updatedLootBox = result.summary.lootBoxes.featured.find(
+        (item) => item.id === currentCard.id,
+      );
+      const rewardLabel =
+        result.rewards[0]?.rewardLabel ??
+        updatedLootBox?.latestReward?.rewardLabel ??
+        updatedLootBox?.rewardLabel ??
+        currentCard.rewardLabel ??
+        currentCard.description;
+
+      onSummaryChange(result.summary);
+      setLootboxOverlayCard({
+        ...currentCard,
+        description: rewardLabel,
+        rewardLabel,
+      });
+      setLootboxOverlayPhase("open");
+      showToast(result.message);
+    } catch (error) {
+      setLootboxOverlayPhase("ready");
+      showToast(getErrorMessage(error, "Лутбокс сейчас недоступен."));
+    }
   }
 
   function closeLootboxOverlay() {
@@ -530,9 +577,11 @@ function HomeLootBoxes({
               "lootbox-entry",
               "lp-lootbox-entry",
               card.active ? "is-active" : "",
+              !card.openable ? "is-disabled" : "",
             ].join(" ")}
-            aria-haspopup="dialog"
+            aria-haspopup={card.openable ? "dialog" : undefined}
             aria-controls="lootboxOverlay"
+            aria-disabled={!card.openable}
             onClick={() => onSelect(card)}
           >
             <span className="lp-lootbox-entry-top">
@@ -950,6 +999,13 @@ function buildHomeLootCards(
       description: "Открывается за визит, авторизацию и активность в клубе.",
       status: summary.rewards.summary.ready > 0 ? "доступен" : "сегодня",
       active: false,
+      openable: false,
+      openBlocker: "Лутбокс появится после настройки клуба.",
+      rewardLabel: null,
+      weeklyOpenedCount: 0,
+      weeklyLimit: null,
+      dailyOpenedCount: 0,
+      dailyLimit: null,
     },
     {
       id: "team-drop",
@@ -959,6 +1015,13 @@ function buildHomeLootCards(
         summary.journey.summary.total,
       )}`,
       active: false,
+      openable: false,
+      openBlocker: "Командный лутбокс появится после настройки клуба.",
+      rewardLabel: null,
+      weeklyOpenedCount: 0,
+      weeklyLimit: null,
+      dailyOpenedCount: 0,
+      dailyLimit: null,
     },
     {
       id: "rank-case",
@@ -966,6 +1029,13 @@ function buildHomeLootCards(
       description: "Откроется после следующей ступени уровня или ранга.",
       status: "ранг",
       active: false,
+      openable: false,
+      openBlocker: "Ранговый кейс откроется после настройки сезона.",
+      rewardLabel: null,
+      weeklyOpenedCount: 0,
+      weeklyLimit: null,
+      dailyOpenedCount: 0,
+      dailyLimit: null,
     },
   ];
   const realCards = summary.lootBoxes.featured.slice(0, 3).map((lootBox) => ({
@@ -975,15 +1045,17 @@ function buildHomeLootCards(
       lootBox.latestReward?.rewardLabel ??
       lootBox.rewardLabel ??
       "Лутбокс с наградой за активность в клубе.",
-    status:
-      lootBox.readyRewards > 0
-        ? "доступен"
-        : lootBox.openedCount > 0
-          ? `открыт ${formatNumber(lootBox.openedCount)}`
-          : "ожидает",
+    status: lootboxCardStatus(lootBox),
     active: false,
+    openable: lootBox.openable,
+    openBlocker: lootBox.openBlocker,
+    rewardLabel: lootBox.rewardLabel,
+    weeklyOpenedCount: lootBox.weeklyOpenedCount,
+    weeklyLimit: lootBox.weeklyLimit,
+    dailyOpenedCount: lootBox.dailyOpenedCount,
+    dailyLimit: lootBox.dailyLimit,
   }));
-  const cards = [...realCards, ...fallback].slice(0, 3);
+  const cards = realCards.length > 0 ? realCards : fallback;
   const activeId = selectedLootId ?? cards[0]?.id ?? null;
 
   return cards.map((card) => ({
@@ -992,12 +1064,42 @@ function buildHomeLootCards(
   }));
 }
 
+function lootboxCardStatus(
+  lootBox: GuestPortalGameSummary["lootBoxes"]["featured"][number],
+) {
+  if (!lootBox.openable && lootBox.openState === "LIMIT_REACHED") {
+    return "лимит";
+  }
+
+  if (!lootBox.openable) {
+    return "ждет событие";
+  }
+
+  if (lootBox.readyRewards > 0) {
+    return "доступен";
+  }
+
+  if (lootBox.openedCount > 0) {
+    return `открыт ${formatNumber(lootBox.openedCount)}`;
+  }
+
+  return "доступен";
+}
+
 function lootboxCardHint(card: HomeLootCard) {
+  if (!card.openable && card.openBlocker) {
+    return card.openBlocker;
+  }
+
+  if (card.openable && card.weeklyLimit) {
+    return `Осталось ${formatNumber(Math.max(0, card.weeklyLimit - card.weeklyOpenedCount))} из ${formatNumber(card.weeklyLimit)} на неделю`;
+  }
+
   if (card.status === "доступен" || card.status === "сегодня") {
     return "Контейнер готов к открытию";
   }
 
-  if (card.status === "ожидает") {
+  if (card.status === "ожидает" || card.status === "ждет событие") {
     return "Откроется после события в клубе";
   }
 
@@ -3671,6 +3773,21 @@ const clubHomeCss = `
   transform: translateY(-2px);
 }
 
+.lootbox-entry.is-disabled {
+  border-color: rgba(196, 224, 225, 0.12);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.lootbox-entry.is-disabled:hover,
+.lootbox-entry.is-disabled:focus-visible {
+  border-color: rgba(196, 224, 225, 0.18);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.38),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.07);
+  transform: none;
+}
+
 .lp-lootbox-entry-top,
 .lp-lootbox-entry-bottom {
   position: relative;
@@ -4988,6 +5105,30 @@ async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
   return ((await response.json()) as { summary: GuestPortalGameSummary }).summary;
 }
 
+async function openGameLootBox(
+  lootBoxId: string,
+): Promise<GuestPortalLootBoxOpenResponse> {
+  const response = await fetch(
+    `/api/guest-portal/session/loot-boxes/${encodeURIComponent(lootBoxId)}/open`,
+    {
+      method: "POST",
+      cache: "no-store",
+    },
+  );
+
+  if (response.status === 401) {
+    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(response, "Лутбокс сейчас недоступен."),
+    );
+  }
+
+  return (await response.json()) as GuestPortalLootBoxOpenResponse;
+}
+
 async function readResponseMessage(
   response: Response,
   fallback = "Не удалось загрузить игровой экран.",
@@ -5002,6 +5143,10 @@ async function readResponseMessage(
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function clampPercent(value: number) {

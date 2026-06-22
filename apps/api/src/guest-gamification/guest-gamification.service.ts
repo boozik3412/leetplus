@@ -2120,6 +2120,7 @@ export type GuestGameEventDto = {
 export type GuestGameDryRunDto = {
   profileId?: string | null;
   guestId?: string | null;
+  lootBoxId?: string | null;
   storeId?: string | null;
   eventType?: string | null;
   occurredAt?: string | null;
@@ -7256,6 +7257,7 @@ export class GuestGamificationService {
     dto: GuestGameDryRunDto,
   ): Promise<GuestGameDryRunResult> {
     const eventType = stringValue(dto.eventType) ?? 'SESSION_START';
+    const lootBoxId = nullableId(dto.lootBoxId);
     const occurredAt = dateValue(dto.occurredAt) ?? new Date();
     const sessionType = nullableString(dto.sessionType) ?? null;
     const sessionPacket = nullableBooleanValue(dto.sessionPacket);
@@ -7315,10 +7317,22 @@ export class GuestGamificationService {
       rewards,
       progressEvents,
     };
+    const targetLootBoxes = lootBoxId
+      ? lootBoxes.filter((item) => item.id === lootBoxId)
+      : lootBoxes;
+
+    if (lootBoxId && !targetLootBoxes.length) {
+      throw new NotFoundException('Лутбокс не найден');
+    }
+
     const rules = [
-      ...lootBoxes.map((item) => evaluateLootBoxDryRun(item, context)),
-      ...missions.map((item) => evaluateMissionDryRun(item, context)),
-      ...seasons.map((item) => evaluateSeasonDryRun(item, context)),
+      ...targetLootBoxes.map((item) => evaluateLootBoxDryRun(item, context)),
+      ...(lootBoxId
+        ? []
+        : missions.map((item) => evaluateMissionDryRun(item, context))),
+      ...(lootBoxId
+        ? []
+        : seasons.map((item) => evaluateSeasonDryRun(item, context))),
     ];
     const eligibleRules = rules.filter((rule) => rule.eligible);
 
@@ -7422,6 +7436,7 @@ export class GuestGamificationService {
     const event = await this.createProcessEvent(user, {
       profileId: profile.id,
       guestId: profile.guest?.id ?? dryRun.guest?.id ?? null,
+      lootBoxId: nullableId(dto.lootBoxId),
       eventType: dryRun.eventType,
       source,
       externalProvider: eventReference?.externalProvider ?? null,
@@ -16069,6 +16084,15 @@ function buildVisualEditorPreviewSummary(
         triggerKind: item.triggerKind,
         rewardLabel: item.rewardLabel,
         rewardType: item.rewardType,
+        manualApprovalRequired: false,
+        note: null,
+        openState: 'WAITING_EVENT',
+        openable: false,
+        openBlocker: 'Предпросмотр не открывает лутбоксы.',
+        weeklyOpenedCount: 0,
+        weeklyLimit: null,
+        dailyOpenedCount: 0,
+        dailyLimit: null,
         openedCount: 0,
         readyRewards: 0,
         waitingApprovalRewards: 0,

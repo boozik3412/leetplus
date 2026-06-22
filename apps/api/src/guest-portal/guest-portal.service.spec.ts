@@ -44,7 +44,11 @@ function createPrismaMock() {
       updateMany: jest.fn(),
     },
     guestGameReward: {
+      count: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestGameVisualDraft: {
+      findFirst: jest.fn(),
     },
     guestGameDelivery: {
       updateMany: jest.fn(),
@@ -64,6 +68,7 @@ function createPrismaMock() {
       findMany: jest.fn(),
     },
     guestGameLootBox: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     guestGameSeason: {
@@ -87,6 +92,8 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     searchGuestByPhoneForPortal: jest.fn(),
   };
   const guestGamificationService = {
+    createEvent: jest.fn(),
+    dryRun: jest.fn(),
     processEvent: jest.fn(),
   };
   const secretEncryptionService = {
@@ -117,6 +124,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameProfile.findMany.mockResolvedValue([]);
   prisma.guestGameProfile.create.mockResolvedValue(null);
   prisma.guestGameProfile.update.mockResolvedValue(null);
+  prisma.guestGameReward.count.mockResolvedValue(0);
+  prisma.guestGameVisualDraft.findFirst.mockResolvedValue(null);
+  prisma.guestGameLootBox.findFirst.mockResolvedValue(null);
   prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue(null);
   prisma.guestGameTelegramLinkChallenge.create.mockResolvedValue(null);
   prisma.guestGameTelegramLinkChallenge.update.mockResolvedValue(null);
@@ -399,6 +409,13 @@ function portalPayloadFixture() {
           rewardType: 'BONUS',
           manualApprovalRequired: false,
           note: null,
+          openState: 'WAITING_EVENT',
+          openable: false,
+          openBlocker: 'Лутбокс откроется после события: старт игровой сессии.',
+          weeklyOpenedCount: 1,
+          weeklyLimit: 2,
+          dailyOpenedCount: 1,
+          dailyLimit: null,
           openedCount: 1,
           readyRewards: 0,
           waitingApprovalRewards: 1,
@@ -1039,7 +1056,7 @@ describe('GuestPortalService', () => {
       expect(summary.activity).not.toHaveProperty('xpHistory');
     });
 
-    it('records app-open as a daily profile event before returning game summary', async () => {
+    it('records app-open without granting lootbox rewards before returning game summary', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-06-21T10:00:00.000Z'));
       const { guestGamificationService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
@@ -1063,14 +1080,7 @@ describe('GuestPortalService', () => {
         id: portal.profile.id,
         guestId: null,
       });
-      guestGamificationService.processEvent.mockResolvedValue({
-        summary: {
-          appliedXpDelta: 25,
-          createdRewards: 1,
-          queuedRewardAmount: 50,
-          idempotent: false,
-        },
-      });
+      guestGamificationService.createEvent.mockResolvedValue({});
       prisma.guestGameEvent.count
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -1081,7 +1091,7 @@ describe('GuestPortalService', () => {
           surface: 'telegram-mini-app',
         });
 
-        expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+        expect(guestGamificationService.createEvent).toHaveBeenCalledWith(
           expect.objectContaining({
             tenantId: tokenPayload.tenantId,
             tenantSlug: 'leet',
@@ -1089,21 +1099,25 @@ describe('GuestPortalService', () => {
           expect.objectContaining({
             profileId: portal.profile.id,
             guestId: null,
-            storeId: portal.store.id,
             eventType: 'APP_OPEN',
-            sourceFactId: 'profile-1:store-1:2026-06-21',
-            sourceFactKind: 'GUEST_APP_OPEN',
             externalDomain: 'leetplus-guest-portal',
-            externalId: 'profile-1:store-1:2026-06-21',
+            externalId:
+              'guest-game:GUEST_APP_OPEN:APP_OPEN:profile-1:store-1:2026-06-21',
             note: expect.stringContaining('Telegram Mini App'),
+            payload: expect.objectContaining({
+              sourceFactId: 'profile-1:store-1:2026-06-21',
+              sourceFactKind: 'GUEST_APP_OPEN',
+              storeId: portal.store.id,
+            }),
           }),
         );
+        expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
         expect(result).toMatchObject({
           processed: true,
           idempotent: false,
-          appliedXpDelta: 25,
-          createdRewards: 1,
-          queuedRewardAmount: 50,
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
           summary: {
             tenant: portal.tenant,
             store: portal.store,
@@ -1113,6 +1127,137 @@ describe('GuestPortalService', () => {
       } finally {
         jest.useRealTimers();
       }
+    });
+
+    it('does not open a session-start lootbox from the guest home click', async () => {
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-1',
+        tenantId: 'tenant-1',
+        name: 'Лутбокс тихих часов',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'SESSION_START',
+      });
+
+      await expect(
+        service.openLootBox('Bearer guest-token', 'loot-1'),
+      ).rejects.toThrow('старт игровой сессии');
+
+      expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
+      expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
+    });
+
+    it('opens an app-open lootbox through dry-run and process-event', async () => {
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      const { tokenPayload } = mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-app',
+        tenantId: 'tenant-1',
+        name: 'Daily app lootbox',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'APP_OPEN',
+      });
+      prisma.guestGameReward.count.mockResolvedValue(0);
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-app',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 50,
+        },
+        rewards: [{ rewardLabel: '50 bonuses' }],
+      });
+
+      const result = await service.openLootBox(
+        'Bearer guest-token',
+        'loot-app',
+      );
+
+      expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: tokenPayload.tenantId,
+          tenantSlug: 'leet',
+        }),
+        expect.objectContaining({
+          profileId: portal.profile.id,
+          guestId: 'guest-1',
+          lootBoxId: 'loot-app',
+          storeId: portal.store.id,
+          eventType: 'APP_OPEN',
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        }),
+      );
+      expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-app',
+          eventType: 'APP_OPEN',
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        }),
+      );
+      expect(result).toMatchObject({
+        processed: true,
+        idempotent: false,
+        createdRewards: 1,
+        queuedRewardAmount: 50,
+        rewards: [{ rewardLabel: '50 bonuses' }],
+      });
     });
 
     it('limits bonus ledger history in compact game summary', async () => {

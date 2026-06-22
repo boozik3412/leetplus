@@ -61,6 +61,8 @@ export type StaffTeamChatQuery = {
   channelId?: string;
   storeId?: string;
   search?: string;
+  dateFrom?: string;
+  dateTo?: string;
   pinned?: string;
   pageSize?: string;
 };
@@ -124,6 +126,8 @@ export type StaffTeamChatReport = {
     channelId: string | null;
     storeId: string | null;
     search: string | null;
+    dateFrom: string | null;
+    dateTo: string | null;
     pinned: boolean;
     pageSize: number;
   };
@@ -739,11 +743,19 @@ export class StaffTeamChatService {
       Math.max(Number.parseInt(query.pageSize ?? '80', 10) || 80, 20),
       200,
     );
+    const dateFrom = this.normalizeDateFilter(query.dateFrom);
+    const dateTo = this.normalizeDateFilter(query.dateTo);
+
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      throw new BadRequestException('dateFrom must be before dateTo');
+    }
 
     return {
       channelId: this.normalizeOptionalString(query.channelId),
       storeId: this.normalizeOptionalString(query.storeId),
       search: this.normalizeOptionalString(query.search),
+      dateFrom,
+      dateTo,
       pinned: query.pinned === 'true' || query.pinned === '1',
       pageSize,
     };
@@ -758,6 +770,24 @@ export class StaffTeamChatService {
 
     if (filters.search) {
       where.body = { contains: filters.search, mode: 'insensitive' };
+    }
+
+    if (filters.storeId) {
+      where.storeId = filters.storeId;
+    }
+
+    if (filters.dateFrom || filters.dateTo) {
+      const createdAt: Prisma.DateTimeFilter = {};
+
+      if (filters.dateFrom) {
+        createdAt.gte = this.startOfUtcDate(filters.dateFrom);
+      }
+
+      if (filters.dateTo) {
+        createdAt.lt = this.nextUtcDate(filters.dateTo);
+      }
+
+      where.createdAt = createdAt;
     }
 
     if (filters.pinned) {
@@ -1712,6 +1742,30 @@ export class StaffTeamChatService {
     }
 
     return normalized.slice(0, maxLength);
+  }
+
+  private normalizeDateFilter(value: string | null | undefined) {
+    const normalized = this.normalizeOptionalString(value, 10);
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      throw new BadRequestException('date filter must be YYYY-MM-DD');
+    }
+
+    return normalized;
+  }
+
+  private startOfUtcDate(value: string) {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  private nextUtcDate(value: string) {
+    const date = this.startOfUtcDate(value);
+    date.setUTCDate(date.getUTCDate() + 1);
+    return date;
   }
 
   private resolveOne<T extends readonly string[]>(

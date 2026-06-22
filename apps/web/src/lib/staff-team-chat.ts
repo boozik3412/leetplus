@@ -68,6 +68,8 @@ export type StaffTeamChatFilters = {
   channelId?: string;
   storeId?: string;
   search?: string;
+  dateFrom?: string;
+  dateTo?: string;
   pinned?: string;
   pageSize?: string;
 };
@@ -77,6 +79,8 @@ export type StaffTeamChatReport = {
     channelId: string | null;
     storeId: string | null;
     search: string | null;
+    dateFrom: string | null;
+    dateTo: string | null;
     pinned: boolean;
     pageSize: number;
   };

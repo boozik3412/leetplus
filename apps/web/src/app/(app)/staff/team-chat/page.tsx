@@ -21,6 +21,8 @@ function resolveFilters(params: Awaited<SearchParams>): StaffTeamChatFilters {
     channelId: searchParam(params.channelId),
     storeId: searchParam(params.storeId),
     search: searchParam(params.search)?.trim(),
+    dateFrom: searchParam(params.dateFrom),
+    dateTo: searchParam(params.dateTo),
     pinned: searchParam(params.pinned),
     pageSize: searchParam(params.pageSize) ?? "80",
   };

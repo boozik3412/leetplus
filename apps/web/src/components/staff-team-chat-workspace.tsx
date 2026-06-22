@@ -1073,10 +1073,90 @@ export function StaffTeamChatWorkspace({
             <Metric label="Непрочитано" value={report.summary.unread} />
           </div>
 
-          <form className="hidden" action="/staff/team-chat">
+          <form
+            className="mt-4 grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.4fr)_minmax(150px,0.8fr)_minmax(150px,0.8fr)_minmax(180px,1fr)_minmax(150px,0.8fr)_auto]"
+            action="/staff/team-chat"
+          >
             {activeChannel ? (
               <input type="hidden" name="channelId" value={activeChannel.id} />
             ) : null}
+            <input
+              type="hidden"
+              name="pageSize"
+              value={String(report.filters.pageSize)}
+            />
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase text-zinc-500 dark:text-zinc-400">
+              Поиск
+              <input
+                name="search"
+                defaultValue={report.filters.search ?? ""}
+                className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                placeholder="Автор, текст отчета"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase text-zinc-500 dark:text-zinc-400">
+              С даты
+              <input
+                type="date"
+                name="dateFrom"
+                defaultValue={report.filters.dateFrom ?? ""}
+                className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase text-zinc-500 dark:text-zinc-400">
+              По дату
+              <input
+                type="date"
+                name="dateTo"
+                defaultValue={report.filters.dateTo ?? ""}
+                className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase text-zinc-500 dark:text-zinc-400">
+              Клуб
+              <select
+                name="storeId"
+                defaultValue={report.filters.storeId ?? ""}
+                className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+              >
+                <option value="">Все клубы</option>
+                {report.stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-bold uppercase text-zinc-500 dark:text-zinc-400">
+              Сообщения
+              <select
+                name="pinned"
+                defaultValue={report.filters.pinned ? "true" : ""}
+                className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+              >
+                <option value="">Все</option>
+                <option value="true">Закрепленные</option>
+              </select>
+            </label>
+            <div className="flex items-end gap-2 sm:col-span-2 xl:col-span-1">
+              <button
+                className="h-10 flex-1 rounded-lg bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white"
+                type="submit"
+              >
+                Показать
+              </button>
+              <Link
+                href={
+                  activeChannel
+                    ? `/staff/team-chat?channelId=${encodeURIComponent(activeChannel.id)}`
+                    : "/staff/team-chat"
+                }
+                className="flex h-10 items-center justify-center rounded-lg border border-zinc-200 px-3 text-sm font-semibold text-zinc-600 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+              >
+                Сбросить
+              </Link>
+            </div>
+            <fieldset disabled className="hidden">
             <input
               name="search"
               defaultValue={report.filters.search ?? ""}
@@ -1097,6 +1177,7 @@ export function StaffTeamChatWorkspace({
             >
               Найти
             </button>
+            </fieldset>
           </form>
         </div>
 

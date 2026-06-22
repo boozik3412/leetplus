@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, ReactNode, RefObject } from "react";
 import type { GuestPortalGameSummary } from "@/lib/guest-portal";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -33,6 +33,7 @@ type HomeLootCard = {
   status: string;
   active: boolean;
 };
+type LootboxOverlayPhase = "opening" | "open" | "collected";
 type HomeBattleQuest = {
   id: string;
   title: string;
@@ -191,6 +192,11 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
   const primaryActionHref = primaryAction ? gameActionHref(primaryAction) : null;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedLootId, setSelectedLootId] = useState<string | null>(null);
+  const [lootboxOverlayCard, setLootboxOverlayCard] =
+    useState<HomeLootCard | null>(null);
+  const [lootboxOverlayPhase, setLootboxOverlayPhase] =
+    useState<LootboxOverlayPhase>("opening");
+  const lootboxRewardRef = useRef<HTMLButtonElement | null>(null);
   const [promoCode, setPromoCode] = useState("");
   const homeBanners = buildHomeBanners(
     summary,
@@ -223,8 +229,67 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
     return () => window.clearTimeout(timerId);
   }, [toastMessage]);
 
+  useEffect(() => {
+    if (!lootboxOverlayCard || lootboxOverlayPhase !== "opening") {
+      return;
+    }
+
+    const timerId = window.setTimeout(
+      () => setLootboxOverlayPhase("open"),
+      1600,
+    );
+
+    return () => window.clearTimeout(timerId);
+  }, [lootboxOverlayCard, lootboxOverlayPhase]);
+
+  useEffect(() => {
+    if (lootboxOverlayPhase !== "open") {
+      return;
+    }
+
+    lootboxRewardRef.current?.focus();
+  }, [lootboxOverlayPhase]);
+
+  useEffect(() => {
+    if (!lootboxOverlayCard) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setLootboxOverlayCard(null);
+        setLootboxOverlayPhase("opening");
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [lootboxOverlayCard]);
+
   function showToast(message: string) {
     setToastMessage(message);
+  }
+
+  function openLootboxOverlay(card: HomeLootCard) {
+    setSelectedLootId(card.id);
+    setLootboxOverlayCard(card);
+    setLootboxOverlayPhase("opening");
+    showToast("Контейнер открывается.");
+  }
+
+  function closeLootboxOverlay() {
+    setLootboxOverlayCard(null);
+    setLootboxOverlayPhase("opening");
+  }
+
+  function collectLootboxReward() {
+    if (!lootboxOverlayCard) {
+      return;
+    }
+
+    setLootboxOverlayPhase("collected");
+    showToast(`Награда отмечена: ${lootboxOverlayCard.description}.`);
   }
 
   function handlePromoSubmit(event: FormEvent<HTMLFormElement>) {
@@ -297,10 +362,7 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
 
           <HomeLootBoxes
             cards={lootCards}
-            onSelect={(card) => {
-              setSelectedLootId(card.id);
-              showToast(`Выбран лутбокс: ${card.title}.`);
-            }}
+            onSelect={openLootboxOverlay}
           />
 
           <HomeBattlePass
@@ -378,6 +440,16 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
       >
         {toastMessage}
       </div>
+
+      {lootboxOverlayCard ? (
+        <LootboxOpeningOverlay
+          card={lootboxOverlayCard}
+          phase={lootboxOverlayPhase}
+          rewardRef={lootboxRewardRef}
+          onClose={closeLootboxOverlay}
+          onCollect={collectLootboxReward}
+        />
+      ) : null}
     </div>
   );
 }
@@ -437,23 +509,147 @@ function HomeLootBoxes({
       </div>
 
       <div className="lp-club-loot-grid">
-        {cards.map((card) => (
+        {cards.map((card, index) => (
           <button
             key={card.id}
             type="button"
             className={[
-              "lp-club-loot-card",
+              "lootbox-entry",
+              "lp-lootbox-entry",
               card.active ? "is-active" : "",
             ].join(" ")}
+            aria-haspopup="dialog"
+            aria-controls="lootboxOverlay"
             onClick={() => onSelect(card)}
           >
-            <em>{card.status}</em>
-            <strong>{card.title}</strong>
-            <span>{card.description}</span>
+            <span className="lp-lootbox-entry-top">
+              <span>
+                <span className="lp-lootbox-entry-label">
+                  {index === 0 ? "Лутбокс дня" : "Клубный контейнер"}
+                </span>
+                <strong>{card.title}</strong>
+              </span>
+              <span className="lp-lootbox-entry-state">{card.status}</span>
+            </span>
+            <span className="lp-lootbox-entry-art" aria-hidden="true" />
+            <span className="lp-lootbox-entry-bottom">
+              <span>{lootboxCardHint(card)}</span>
+              <span className="lp-lootbox-mini-lock" aria-hidden="true">
+                <LockIcon />
+              </span>
+            </span>
           </button>
         ))}
       </div>
     </section>
+  );
+}
+
+function LootboxOpeningOverlay({
+  card,
+  phase,
+  rewardRef,
+  onClose,
+  onCollect,
+}: {
+  card: HomeLootCard;
+  phase: LootboxOverlayPhase;
+  rewardRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  onCollect: () => void;
+}) {
+  const isOpening = phase === "opening";
+  const isOpen = phase === "open";
+  const isCollected = phase === "collected";
+  const statusLabel = isCollected
+    ? "Награда сохранена"
+    : isOpen
+      ? "Контейнер открыт"
+      : "Идет открытие";
+
+  return (
+    <div
+      id="lootboxOverlay"
+      className="lp-lootbox-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lootboxOverlayTitle"
+    >
+      <div className="lp-lootbox-dialog">
+        <button
+          type="button"
+          className="lp-lootbox-close"
+          aria-label="Закрыть окно лутбокса"
+          onClick={onClose}
+        >
+          ×
+        </button>
+
+        <div className="lp-lootbox-dialog-head">
+          <span className="lp-lootbox-kicker">Открытие лутбокса</span>
+          <h3 id="lootboxOverlayTitle">{card.title}</h3>
+          <p>{statusLabel}</p>
+        </div>
+
+        <div
+          className={[
+            "lp-lootbox-machine",
+            isOpening ? "is-opening" : "",
+            isOpen || isCollected ? "is-open" : "",
+            isCollected ? "is-collected" : "",
+          ].join(" ")}
+          aria-hidden="true"
+        >
+          <span className="lp-lootbox-beam" />
+          <span className="lp-lootbox-case lp-lootbox-case-lid" />
+          <span className="lp-lootbox-case lp-lootbox-case-base" />
+          <span className="lp-lootbox-case lp-lootbox-case-left" />
+          <span className="lp-lootbox-case lp-lootbox-case-right" />
+          <span className="lp-lootbox-core" />
+          {Array.from({ length: 9 }, (_, index) => (
+            <span
+              key={index}
+              className="lp-lootbox-particle"
+              style={{ "--particle-index": index } as CSSProperties}
+            />
+          ))}
+        </div>
+
+        <button
+          type="button"
+          ref={rewardRef}
+          className={[
+            "lp-lootbox-reward-card",
+            isOpen || isCollected ? "is-visible" : "",
+            isCollected ? "is-collected" : "",
+          ].join(" ")}
+          disabled={!isOpen}
+          onClick={onCollect}
+        >
+          <span>{isCollected ? "Получено" : "Выпала награда"}</span>
+          <strong>{card.description}</strong>
+          <small>
+            {isCollected
+              ? "Результат сохранен в игровом профиле."
+              : "Нажмите, чтобы забрать результат."}
+          </small>
+        </button>
+
+        <div className="lp-lootbox-dialog-actions">
+          <button type="button" className="lp-club-ghost-link" onClick={onClose}>
+            Закрыть
+          </button>
+          <button
+            type="button"
+            className="lp-club-primary-link"
+            disabled={isOpening}
+            onClick={isCollected ? onClose : onCollect}
+          >
+            {isCollected ? "Готово" : "Забрать результат"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -699,7 +895,7 @@ function buildHomeLootCards(
       id: "daily-container",
       title: "Ежедневный контейнер",
       description: "Открывается за визит, авторизацию и активность в клубе.",
-      status: summary.rewards.summary.ready > 0 ? "ready" : "daily",
+      status: summary.rewards.summary.ready > 0 ? "доступен" : "сегодня",
       active: false,
     },
     {
@@ -715,7 +911,7 @@ function buildHomeLootCards(
       id: "rank-case",
       title: "Ранговый кейс",
       description: "Откроется после следующей ступени уровня или ранга.",
-      status: "rank",
+      status: "ранг",
       active: false,
     },
   ];
@@ -728,10 +924,10 @@ function buildHomeLootCards(
       "Лутбокс с наградой за активность в клубе.",
     status:
       lootBox.readyRewards > 0
-        ? "ready"
+        ? "доступен"
         : lootBox.openedCount > 0
-          ? formatNumber(lootBox.openedCount)
-          : "rank",
+          ? `открыт ${formatNumber(lootBox.openedCount)}`
+          : "ожидает",
     active: false,
   }));
   const cards = [...realCards, ...fallback].slice(0, 3);
@@ -741,6 +937,18 @@ function buildHomeLootCards(
     ...card,
     active: card.id === activeId,
   }));
+}
+
+function lootboxCardHint(card: HomeLootCard) {
+  if (card.status === "доступен" || card.status === "сегодня") {
+    return "Контейнер готов к открытию";
+  }
+
+  if (card.status === "ожидает") {
+    return "Откроется после события в клубе";
+  }
+
+  return "Нажмите, чтобы посмотреть контейнер";
 }
 
 function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest[] {
@@ -860,6 +1068,16 @@ function RefreshIcon() {
       <path d="M4 4v4h4" />
       <path d="M4 13a8 8 0 0 0 14.4 4.8L20 16" />
       <path d="M20 20v-4h-4" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M7 10V8a5 5 0 0 1 10 0v2" />
+      <path d="M6 10h12v10H6z" />
+      <path d="M12 14v2" />
     </svg>
   );
 }
@@ -3355,74 +3573,533 @@ const clubHomeCss = `
   gap: 14px;
 }
 
-.lp-club-loot-card {
+.lootbox-entry {
   position: relative;
-  min-height: 116px;
+  display: grid;
+  grid-template-rows: auto minmax(132px, 1fr) auto;
+  min-height: 276px;
   overflow: hidden;
-  padding: 16px;
-  border: 1px solid rgba(196, 224, 225, 0.15);
+  padding: 17px;
+  border: 1px solid rgba(131, 228, 236, 0.28);
   border-radius: var(--radius);
   color: inherit;
   text-align: left;
-  background: rgba(2, 8, 11, 0.54);
+  background:
+    radial-gradient(circle at 50% 46%, rgba(131, 228, 236, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(131, 228, 236, 0.08), transparent 38%),
+    rgba(4, 11, 14, 0.92);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.38),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.07);
   cursor: pointer;
   transition:
     border-color 180ms ease,
-    background 180ms ease,
+    box-shadow 180ms ease,
     transform 180ms ease;
 }
 
-.lp-club-loot-card:hover,
-.lp-club-loot-card.is-active {
-  border-color: rgba(131, 228, 236, 0.64);
-  background:
-    linear-gradient(90deg, rgba(131, 228, 236, 0.12), transparent),
-    rgba(8, 18, 22, 0.86);
-  transform: translateY(-1px);
-}
-
-.lp-club-loot-card::after {
+.lootbox-entry::before {
   content: "";
   position: absolute;
-  right: 14px;
-  bottom: 14px;
-  width: 52px;
-  height: 38px;
-  border: 1px solid rgba(131, 228, 236, 0.38);
+  inset: 12px;
+  border: 1px solid rgba(196, 224, 225, 0.08);
   border-radius: 6px;
-  background:
-    linear-gradient(90deg, transparent 0 45%, rgba(131, 228, 236, 0.24) 45% 55%, transparent 55% 100%),
-    linear-gradient(180deg, rgba(196, 224, 225, 0.1), rgba(196, 224, 225, 0.02));
-  box-shadow: inset 0 0 0 7px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
 }
 
-.lp-club-loot-card strong {
+.lootbox-entry:hover,
+.lootbox-entry:focus-visible,
+.lootbox-entry.is-active {
+  border-color: rgba(131, 228, 236, 0.7);
+  box-shadow:
+    0 30px 92px rgba(0, 0, 0, 0.48),
+    0 0 32px rgba(131, 228, 236, 0.14);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.lp-lootbox-entry-top,
+.lp-lootbox-entry-bottom {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lp-lootbox-entry-label,
+.lp-lootbox-entry-state {
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-entry-top strong {
   display: block;
-  max-width: 70%;
+  margin-top: 7px;
   color: var(--text);
-  font-size: 16px;
-  line-height: 1.2;
+  font-size: 20px;
+  line-height: 1.05;
+  font-weight: 780;
 }
 
-.lp-club-loot-card span {
-  display: block;
-  margin-top: 10px;
-  max-width: 70%;
+.lp-lootbox-entry-state {
+  flex: 0 0 auto;
+  color: var(--amber);
+}
+
+.lp-lootbox-entry-art {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-height: 138px;
+  place-items: center;
+}
+
+.lp-lootbox-entry-art::before {
+  content: "";
+  width: min(78%, 188px);
+  aspect-ratio: 1;
+  background: url("/assets/gamification-lootbox.svg") center / contain no-repeat;
+  filter:
+    drop-shadow(0 24px 36px rgba(0, 0, 0, 0.52))
+    drop-shadow(0 0 22px rgba(131, 228, 236, 0.18));
+}
+
+.lp-lootbox-entry-bottom {
+  min-height: 46px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(196, 224, 225, 0.12);
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
-.lp-club-loot-card em {
+.lp-lootbox-mini-lock {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(208, 170, 108, 0.62);
+  border-radius: 50%;
+  color: var(--amber);
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.lp-lootbox-mini-lock svg {
+  width: 16px;
+  height: 16px;
+}
+
+.lp-lootbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 44%, rgba(131, 228, 236, 0.12), transparent 34%),
+    rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(10px);
+}
+
+.lp-lootbox-dialog {
+  position: relative;
+  width: min(780px, 100%);
+  max-height: min(780px, calc(100dvh - 40px));
+  overflow: auto;
+  padding: clamp(20px, 3vw, 32px);
+  border: 1px solid rgba(131, 228, 236, 0.3);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 34%),
+    rgba(4, 10, 13, 0.97);
+  box-shadow:
+    0 44px 130px rgba(0, 0, 0, 0.72),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.06);
+}
+
+.lp-lootbox-dialog::before {
+  content: "";
   position: absolute;
-  right: 16px;
-  top: 14px;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0 49.8%, rgba(131, 228, 236, 0.07) 49.8% 50%, transparent 50%),
+    linear-gradient(rgba(196, 224, 225, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(196, 224, 225, 0.035) 1px, transparent 1px);
+  background-size: auto, 76px 76px, 76px 76px;
+  mask-image: radial-gradient(circle at 50% 54%, #000, transparent 82%);
+}
+
+.lp-lootbox-close {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  z-index: 2;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(196, 224, 225, 0.16);
+  border-radius: 7px;
+  color: var(--muted);
+  background: rgba(196, 224, 225, 0.04);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lp-lootbox-close:hover,
+.lp-lootbox-close:focus-visible {
+  border-color: rgba(131, 228, 236, 0.42);
+  color: var(--text);
+  outline: none;
+}
+
+.lp-lootbox-dialog-head {
+  position: relative;
+  z-index: 1;
+  max-width: 540px;
+  padding-right: 58px;
+}
+
+.lp-lootbox-kicker {
   color: var(--cyan);
   font-size: 10px;
-  font-style: normal;
   font-weight: 860;
-  letter-spacing: 0.12em;
+  letter-spacing: 0;
   text-transform: uppercase;
+}
+
+.lp-lootbox-dialog-head h3 {
+  margin-top: 10px;
+  color: var(--text);
+  font-size: clamp(32px, 5vw, 54px);
+  line-height: 0.98;
+  font-weight: 760;
+}
+
+.lp-lootbox-dialog-head p {
+  margin-top: 10px;
+  color: #c2d0d1;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.lp-lootbox-machine {
+  position: relative;
+  z-index: 1;
+  height: clamp(300px, 44vh, 390px);
+  margin: 18px 0 10px;
+  isolation: isolate;
+  perspective: 1200px;
+  animation: lootboxFloat 3.8s ease-in-out infinite;
+}
+
+.lp-lootbox-machine::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 0;
+  width: min(330px, 62%);
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.54);
+  filter: blur(14px);
+  transform: translateX(-50%);
+}
+
+.lp-lootbox-beam {
+  position: absolute;
+  left: 50%;
+  bottom: 166px;
+  z-index: 1;
+  width: min(210px, 48%);
+  height: 250px;
+  opacity: 0;
+  transform: translateX(-50%) scaleY(0.2);
+  transform-origin: bottom;
+  background: linear-gradient(180deg, rgba(208, 251, 255, 0.64), rgba(131, 228, 236, 0.18), transparent);
+  clip-path: polygon(44% 0, 56% 0, 100% 100%, 0 100%);
+  filter: blur(3px);
+}
+
+.lp-lootbox-case,
+.lp-lootbox-core,
+.lp-lootbox-particle {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.lp-lootbox-case {
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 1px rgba(131, 228, 236, 0.08),
+    0 24px 80px rgba(0, 0, 0, 0.46);
+  transition: transform 760ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.lp-lootbox-case-base {
+  bottom: 54px;
+  z-index: 3;
+  width: min(320px, 72%);
+  height: 160px;
+  background:
+    linear-gradient(90deg, transparent 0 44%, rgba(131, 228, 236, 0.22) 44% 56%, transparent 56% 100%),
+    linear-gradient(180deg, #101c20, #050a0d 62%, #10191c);
+}
+
+.lp-lootbox-case-lid {
+  bottom: 208px;
+  z-index: 5;
+  width: min(350px, 78%);
+  height: 62px;
+  background:
+    linear-gradient(90deg, transparent 0 45%, rgba(208, 170, 108, 0.24) 45% 55%, transparent 55% 100%),
+    linear-gradient(180deg, #14272c, #071014);
+  transform-origin: 50% 100%;
+}
+
+.lp-lootbox-case-left,
+.lp-lootbox-case-right {
+  bottom: 72px;
+  z-index: 4;
+  width: min(116px, 26%);
+  height: 132px;
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.16), transparent 45%),
+    #081116;
+}
+
+.lp-lootbox-case-left {
+  margin-left: -102px;
+}
+
+.lp-lootbox-case-right {
+  margin-left: 102px;
+}
+
+.lp-lootbox-core {
+  bottom: 125px;
+  z-index: 6;
+  display: grid;
+  width: 74px;
+  height: 74px;
+  place-items: center;
+  border: 1px solid rgba(208, 170, 108, 0.58);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(208, 170, 108, 0.38), transparent 56%),
+    rgba(0, 0, 0, 0.48);
+  box-shadow: 0 0 28px rgba(208, 170, 108, 0.22);
+}
+
+.lp-lootbox-core::before {
+  content: "";
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(131, 228, 236, 0.74);
+  transform: rotate(45deg);
+}
+
+.lp-lootbox-particle {
+  bottom: 170px;
+  z-index: 7;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  opacity: 0;
+  box-shadow: 0 0 16px rgba(131, 228, 236, 0.86);
+}
+
+.lp-lootbox-machine.is-opening {
+  animation: lootboxKick 900ms ease both;
+}
+
+.lp-lootbox-machine.is-opening .lp-lootbox-case-lid,
+.lp-lootbox-machine.is-open .lp-lootbox-case-lid {
+  transform: translateX(-50%) translateY(-90px) rotateX(-58deg);
+}
+
+.lp-lootbox-machine.is-opening .lp-lootbox-case-left,
+.lp-lootbox-machine.is-open .lp-lootbox-case-left {
+  transform: translateX(-50%) translateX(-52px) rotateY(18deg);
+}
+
+.lp-lootbox-machine.is-opening .lp-lootbox-case-right,
+.lp-lootbox-machine.is-open .lp-lootbox-case-right {
+  transform: translateX(-50%) translateX(52px) rotateY(-18deg);
+}
+
+.lp-lootbox-machine.is-opening .lp-lootbox-beam,
+.lp-lootbox-machine.is-open .lp-lootbox-beam {
+  animation: lootboxBeamRise 1100ms ease 180ms both;
+}
+
+.lp-lootbox-machine.is-opening .lp-lootbox-particle,
+.lp-lootbox-machine.is-open .lp-lootbox-particle {
+  animation: lootboxParticleBurst 900ms ease calc(180ms + var(--particle-index) * 52ms) both;
+}
+
+.lp-lootbox-reward-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(420px, 100%);
+  min-height: 118px;
+  margin: -62px auto 0;
+  padding: 16px;
+  border: 1px solid rgba(208, 170, 108, 0.34);
+  border-radius: 8px;
+  color: var(--text);
+  text-align: left;
+  background:
+    linear-gradient(135deg, rgba(208, 170, 108, 0.18), transparent 42%),
+    rgba(6, 10, 12, 0.92);
+  box-shadow: 0 28px 86px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(24px) scale(0.94);
+  transition:
+    border-color 180ms ease,
+    opacity 260ms ease,
+    transform 320ms ease;
+}
+
+.lp-lootbox-reward-card.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.lp-lootbox-reward-card:disabled {
+  cursor: default;
+}
+
+.lp-lootbox-reward-card:focus-visible,
+.lp-lootbox-reward-card:hover {
+  border-color: rgba(208, 170, 108, 0.72);
+  outline: none;
+}
+
+.lp-lootbox-reward-card.is-collected {
+  border-color: rgba(148, 214, 184, 0.55);
+  background:
+    linear-gradient(135deg, rgba(148, 214, 184, 0.18), transparent 42%),
+    rgba(6, 10, 12, 0.92);
+}
+
+.lp-lootbox-reward-card span {
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-reward-card strong {
+  margin-top: 7px;
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1.08;
+}
+
+.lp-lootbox-reward-card small {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lp-lootbox-dialog-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.lp-lootbox-dialog-actions .lp-club-primary-link,
+.lp-lootbox-dialog-actions .lp-club-ghost-link {
+  min-width: 180px;
+  padding: 0 16px;
+  cursor: pointer;
+}
+
+.lp-lootbox-dialog-actions .lp-club-primary-link:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@keyframes lootboxFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotateX(0deg);
+  }
+
+  50% {
+    transform: translateY(-8px) rotateX(1.5deg);
+  }
+}
+
+@keyframes lootboxKick {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+
+  34% {
+    transform: translateY(10px) scale(0.98);
+  }
+
+  100% {
+    transform: translateY(-6px) scale(1.01);
+  }
+}
+
+@keyframes lootboxBeamRise {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scaleY(0.2);
+  }
+
+  34% {
+    opacity: 0.9;
+  }
+
+  100% {
+    opacity: 0.42;
+    transform: translateX(-50%) scaleY(1);
+  }
+}
+
+@keyframes lootboxParticleBurst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) rotate(calc((var(--particle-index) - 4) * 28deg)) translateY(0) scale(0.4);
+  }
+
+  20% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0) rotate(calc((var(--particle-index) - 4) * 28deg)) translateY(-162px) scale(1);
+  }
 }
 
 .lp-club-battlepass {

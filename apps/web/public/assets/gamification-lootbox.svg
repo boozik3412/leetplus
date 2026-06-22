@@ -1,0 +1,71 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sci-fi lootbox">
+  <defs>
+    <linearGradient id="caseTop" x1="128" y1="128" x2="394" y2="292" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1B2B30"/>
+      <stop offset="0.48" stop-color="#0A1216"/>
+      <stop offset="1" stop-color="#182528"/>
+    </linearGradient>
+    <linearGradient id="caseFace" x1="96" y1="220" x2="416" y2="410" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0C171B"/>
+      <stop offset="0.62" stop-color="#050A0D"/>
+      <stop offset="1" stop-color="#142125"/>
+    </linearGradient>
+    <linearGradient id="cyanLine" x1="104" y1="134" x2="408" y2="376" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D0FBFF"/>
+      <stop offset="0.52" stop-color="#83E4EC"/>
+      <stop offset="1" stop-color="#54BFC6"/>
+    </linearGradient>
+    <linearGradient id="amberLine" x1="150" y1="166" x2="362" y2="372" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0D49B"/>
+      <stop offset="1" stop-color="#D0AA6C"/>
+    </linearGradient>
+    <radialGradient id="coreGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 268) rotate(90) scale(142 142)">
+      <stop stop-color="#D0FBFF" stop-opacity="0.96"/>
+      <stop offset="0.32" stop-color="#83E4EC" stop-opacity="0.44"/>
+      <stop offset="1" stop-color="#83E4EC" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softGlow" x="32" y="46" width="448" height="420" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feGaussianBlur in="BackgroundImageFix" stdDeviation="18"/>
+      <feComposite in2="SourceAlpha" operator="in" result="effect1_backgroundBlur_1"/>
+      <feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#000000" flood-opacity="0.48"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="16" flood-color="#83E4EC" flood-opacity="0.2"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_backgroundBlur_1" result="shape"/>
+    </filter>
+    <filter id="lineGlow" x="67" y="92" width="378" height="330" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feGaussianBlur stdDeviation="3.5" result="effect1_foregroundBlur_2"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_foregroundBlur_2" result="shape"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softGlow)">
+    <ellipse cx="256" cy="400" rx="156" ry="28" fill="#000000" fill-opacity="0.58"/>
+    <path d="M106 189L154 128H358L406 189L358 250H154L106 189Z" fill="url(#caseTop)" stroke="#2B474D" stroke-width="2"/>
+    <path d="M118 199H394L367 384H145L118 199Z" fill="url(#caseFace)" stroke="#21383D" stroke-width="2"/>
+    <path d="M154 128L118 199H394L358 128H154Z" fill="#0C1716" fill-opacity="0.76"/>
+    <path d="M151 214H361L341 365H171L151 214Z" fill="#03080A" fill-opacity="0.72" stroke="#20383E" stroke-width="2"/>
+    <path d="M178 236H334L322 342H190L178 236Z" fill="#061114" stroke="#24464C" stroke-width="1.5"/>
+    <circle cx="256" cy="276" r="118" fill="url(#coreGlow)" opacity="0.68"/>
+    <path d="M226 212H286L302 276L286 340H226L210 276L226 212Z" fill="#071216" stroke="url(#cyanLine)" stroke-width="3"/>
+    <path d="M244 240H268L278 276L268 312H244L234 276L244 240Z" fill="#0C1E22" stroke="url(#amberLine)" stroke-width="2"/>
+    <path d="M256 220V332" stroke="url(#cyanLine)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M132 199H380" stroke="#83E4EC" stroke-opacity="0.42" stroke-width="2"/>
+    <path d="M154 128H358" stroke="#D0FBFF" stroke-opacity="0.32" stroke-width="2"/>
+    <path d="M118 199L145 384" stroke="#83E4EC" stroke-opacity="0.32" stroke-width="2"/>
+    <path d="M394 199L367 384" stroke="#83E4EC" stroke-opacity="0.32" stroke-width="2"/>
+    <path d="M156 166H222" stroke="url(#cyanLine)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M290 166H356" stroke="url(#cyanLine)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M184 360H328" stroke="#D0AA6C" stroke-opacity="0.58" stroke-width="3" stroke-linecap="round"/>
+    <path d="M188 151L164 182" stroke="#D0AA6C" stroke-opacity="0.52" stroke-width="2"/>
+    <path d="M324 151L348 182" stroke="#D0AA6C" stroke-opacity="0.52" stroke-width="2"/>
+  </g>
+
+  <g filter="url(#lineGlow)" opacity="0.8">
+    <path d="M86 190H122" stroke="#83E4EC" stroke-width="2" stroke-linecap="round"/>
+    <path d="M390 190H426" stroke="#83E4EC" stroke-width="2" stroke-linecap="round"/>
+    <path d="M256 94V130" stroke="#83E4EC" stroke-width="2" stroke-linecap="round"/>
+    <path d="M216 106L228 130" stroke="#D0AA6C" stroke-width="2" stroke-linecap="round"/>
+    <path d="M296 106L284 130" stroke="#D0AA6C" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</svg>

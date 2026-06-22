@@ -633,11 +633,13 @@ const rewardStatusActionLabels: Record<GuestGameRewardStatus, string> = {
 const rewardStatusDescriptions: Record<GuestGameRewardStatus, string> = {
   PENDING: "Награда создана и ждет проверки сотрудником.",
   APPROVED:
-    "Согласовано: сотрудник подтвердил право гостя на приз, но выдача еще не закрыта.",
+    "Согласовано: сотрудник подтвердил право гостя на приз. Автоматические бонусы попадут в очередь начисления, а ручную выдачу нужно закрыть кодом кассира или отметкой выдачи.",
   PAID: "Выдано: приз уже погашен или начислен, повторно выдать его нельзя.",
   CANCELED: "Отменено: награда не будет выдана гостю.",
   EXPIRED: "Сгорело: срок действия награды истек.",
 };
+
+type RewardSortMode = "newest" | "oldest";
 
 const fieldClass =
   "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white";
@@ -6629,16 +6631,67 @@ function RewardsTab({
   saving: string | null;
   canApprove: boolean;
 }) {
+  const [rewardSearch, setRewardSearch] = useState("");
+  const [selectedRewardTypes, setSelectedRewardTypes] = useState<string[]>([]);
+  const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([]);
+  const [rewardSort, setRewardSort] = useState<RewardSortMode>("newest");
+  const filteredRewards = useMemo(() => {
+    const query = rewardSearch.trim().toLocaleLowerCase("ru-RU");
+    const rewardTypeSet = new Set(selectedRewardTypes);
+    const storeSet = new Set(selectedStoreIds);
+
+    return rewards
+      .filter((reward) => {
+        const matchesType =
+          rewardTypeSet.size === 0 || rewardTypeSet.has(reward.rewardType);
+        const storeId = reward.store?.id ?? "";
+        const matchesStore = storeSet.size === 0 || storeSet.has(storeId);
+        const matchesSearch =
+          !query || rewardSearchTokens(reward).some((token) => token.includes(query));
+
+        return matchesType && matchesStore && matchesSearch;
+      })
+      .sort((left, right) => {
+        const leftTime = new Date(left.qualifiedAt).getTime();
+        const rightTime = new Date(right.qualifiedAt).getTime();
+
+        return rewardSort === "newest"
+          ? rightTime - leftTime
+          : leftTime - rightTime;
+      });
+  }, [rewardSearch, rewardSort, rewards, selectedRewardTypes, selectedStoreIds]);
+
+  const rewardStoreOptions = useMemo(() => {
+    const rewardStoreIds = new Set(
+      rewards.map((reward) => reward.store?.id).filter(Boolean),
+    );
+    const storesWithRewards = stores.filter((store) => rewardStoreIds.has(store.id));
+
+    return storesWithRewards.length ? storesWithRewards : stores;
+  }, [rewards, stores]);
+
   return (
-    <div
-      className={
-        canApprove
-          ? "grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]"
-          : "grid gap-5"
-      }
-    >
+    <div className="space-y-5">
       {canApprove ? (
-      <Panel title={editingId ? "Редактирование награды" : "Ручная награда"}>
+      <details
+        className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+        open={editingId ? true : undefined}
+      >
+        <summary className="flex cursor-pointer list-none flex-col gap-3 p-4 text-left outline-none transition hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-400 sm:flex-row sm:items-center sm:justify-between dark:hover:bg-zinc-900/60 [&::-webkit-details-marker]:hidden">
+          <div className="min-w-0">
+            <p className="text-base font-bold text-zinc-950 dark:text-white">
+              {editingId ? "Редактирование награды" : "Ручная награда"}
+            </p>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Создать приз вручную или поправить выбранную награду из кошелька.
+            </p>
+          </div>
+          <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs font-bold text-zinc-600 transition group-open:border-emerald-300 group-open:bg-emerald-50 group-open:text-emerald-800 dark:border-zinc-800 dark:text-zinc-300 dark:group-open:border-emerald-800 dark:group-open:bg-emerald-950/40 dark:group-open:text-emerald-100">
+            <span className="group-open:hidden">Развернуть</span>
+            <span className="hidden group-open:inline">Свернуть</span>
+          </span>
+        </summary>
+        <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
         <div className="space-y-3">
           <Field label="Профиль">
             <select
@@ -6820,7 +6873,8 @@ function RewardsTab({
             </button>
           ) : null}
         </div>
-      </Panel>
+        </div>
+      </details>
       ) : null}
 
       <section className="space-y-3">
@@ -6939,9 +6993,22 @@ function RewardsTab({
             статусов и кассирское погашение недоступны.
           </div>
         )}
+        <RewardWalletFilters
+          query={rewardSearch}
+          onQueryChange={setRewardSearch}
+          rewardTypes={selectedRewardTypes}
+          onRewardTypesChange={setSelectedRewardTypes}
+          storeIds={selectedStoreIds}
+          onStoreIdsChange={setSelectedStoreIds}
+          sort={rewardSort}
+          onSortChange={setRewardSort}
+          stores={rewardStoreOptions}
+          totalCount={rewards.length}
+          visibleCount={filteredRewards.length}
+        />
         <div className="space-y-2">
-          {rewards.length ? (
-            rewards.map((reward) => (
+          {filteredRewards.length ? (
+            filteredRewards.map((reward) => (
               <RewardRow
                 key={reward.id}
                 reward={reward}
@@ -6952,10 +7019,136 @@ function RewardsTab({
               />
             ))
           ) : (
-            <EmptyState text="Наград пока нет" />
+            <EmptyState text={rewards.length ? "По фильтрам наград нет" : "Наград пока нет"} />
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function RewardWalletFilters({
+  query,
+  onQueryChange,
+  rewardTypes,
+  onRewardTypesChange,
+  storeIds,
+  onStoreIdsChange,
+  sort,
+  onSortChange,
+  stores,
+  totalCount,
+  visibleCount,
+}: {
+  query: string;
+  onQueryChange: (query: string) => void;
+  rewardTypes: string[];
+  onRewardTypesChange: (rewardTypes: string[]) => void;
+  storeIds: string[];
+  onStoreIdsChange: (storeIds: string[]) => void;
+  sort: RewardSortMode;
+  onSortChange: (sort: RewardSortMode) => void;
+  stores: Store[];
+  totalCount: number;
+  visibleCount: number;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <Field label="Поиск по ФИО или телефону">
+          <input
+            className={fieldClass}
+            value={query}
+            placeholder="Например, Иванов или 993780"
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
+        </Field>
+        <Field label="Дата и время">
+          <select
+            className={fieldClass}
+            value={sort}
+            onChange={(event) =>
+              onSortChange(event.target.value as RewardSortMode)
+            }
+          >
+            <option value="newest">Сначала новые</option>
+            <option value="oldest">Сначала старые</option>
+          </select>
+        </Field>
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <RewardFilterChips
+          title="Тип награды"
+          options={rewardTypeOptions}
+          value={rewardTypes}
+          onChange={onRewardTypesChange}
+        />
+        <RewardFilterChips
+          title="Клуб"
+          options={stores.map((store) => ({
+            value: store.id,
+            label: store.name,
+          }))}
+          value={storeIds}
+          onChange={onStoreIdsChange}
+        />
+      </div>
+      <p className="mt-3 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        Показано {visibleCount} из {totalCount}
+      </p>
+    </div>
+  );
+}
+
+function RewardFilterChips({
+  title,
+  options,
+  value,
+  onChange,
+}: {
+  title: string;
+  options: Array<{ value: string; label: string }>;
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const selected = new Set(value);
+  const toggle = (nextValue: string) => {
+    onChange(
+      selected.has(nextValue)
+        ? value.filter((currentValue) => currentValue !== nextValue)
+        : [...value, nextValue],
+    );
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/35">
+      <p className="text-xs font-bold uppercase text-zinc-500 dark:text-zinc-400">
+        {title}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {options.length ? (
+          options.map((option) => {
+            const isSelected = selected.has(option.value);
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={
+                  isSelected
+                    ? "rounded-full bg-zinc-950 px-3 py-1.5 text-xs font-bold text-white dark:bg-emerald-300 dark:text-zinc-950"
+                    : "rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-emerald-300 hover:text-emerald-800 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-emerald-700 dark:hover:text-emerald-100"
+                }
+                onClick={() => toggle(option.value)}
+              >
+                {option.label}
+              </button>
+            );
+          })
+        ) : (
+          <span className="text-xs text-zinc-400">Нет вариантов</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -8214,6 +8407,104 @@ function RuleCard({
   );
 }
 
+function rewardGuestFullName(reward: GuestGameReward) {
+  return (
+    reward.profile?.displayName ??
+    reward.guest?.displayName ??
+    reward.guestExternalId ??
+    "Гость"
+  );
+}
+
+function formatGuestShortName(value: string | null | undefined) {
+  const normalized = value?.trim().replace(/\s+/g, " ");
+
+  if (!normalized || normalized === "без гостя") {
+    return "Гость";
+  }
+
+  if (/^гость\b/i.test(normalized)) {
+    return normalized;
+  }
+
+  const parts = normalized.split(" ").filter(Boolean);
+  const initial = (part: string) =>
+    part.slice(0, 1).toLocaleUpperCase("ru-RU");
+
+  if (parts.length >= 3) {
+    return `${parts[0]} ${initial(parts[1])}.${initial(parts[2])}.`;
+  }
+
+  if (parts.length === 2) {
+    return `${parts[0]} ${initial(parts[1])}.`;
+  }
+
+  return normalized;
+}
+
+function formatPhoneTail(value: string | null | undefined) {
+  if (!value) {
+    return "телефон не указан";
+  }
+
+  const digits = value.replace(/\D/g, "");
+
+  if (digits.length >= 6) {
+    return `***${digits.slice(-6)}`;
+  }
+
+  if (digits.length > 0) {
+    return `***${digits}`;
+  }
+
+  return value;
+}
+
+function formatRewardPhone(reward: GuestGameReward) {
+  return formatPhoneTail(reward.guest?.contact ?? reward.profile?.contactMasked);
+}
+
+function rewardActivityLabel(reward: GuestGameReward) {
+  if (reward.lootBox) {
+    return "Лутбокс";
+  }
+
+  if (reward.mission) {
+    return "Квест";
+  }
+
+  if (reward.season) {
+    return "Battle Pass";
+  }
+
+  if (reward.source === "MANUAL" || reward.source === "CASHIER") {
+    return "Ручная награда";
+  }
+
+  return "Игровое событие";
+}
+
+function rewardSearchTokens(reward: GuestGameReward) {
+  const fullName = rewardGuestFullName(reward);
+  const phone = formatRewardPhone(reward);
+
+  return [
+    fullName,
+    formatGuestShortName(fullName),
+    phone,
+    reward.guest?.contact,
+    reward.profile?.contactMasked,
+    reward.rewardLabel,
+    reward.rewardCode,
+    rewardActivityLabel(reward),
+    reward.store?.name,
+    optionLabel(rewardTypeOptions, reward.rewardType),
+    formatDate(reward.qualifiedAt),
+  ]
+    .filter(Boolean)
+    .map((token) => String(token).toLocaleLowerCase("ru-RU"));
+}
+
 function RewardRow({
   reward,
   onStatus,
@@ -8230,91 +8521,149 @@ function RewardRow({
   saving: string | null;
   canApprove: boolean;
 }) {
-  const guestName =
-    reward.profile?.displayName ??
-    reward.guest?.displayName ??
-    reward.guestExternalId ??
-    "без гостя";
-  const guestContact =
-    reward.profile?.contactMasked ?? reward.guest?.contact ?? "телефон не указан";
+  const fullGuestName = rewardGuestFullName(reward);
+  const guestName = formatGuestShortName(fullGuestName);
+  const guestContact = formatRewardPhone(reward);
+  const activity = rewardActivityLabel(reward);
+  const storeName = reward.store?.name ?? "любой клуб";
+  const qualifiedAt = formatDate(reward.qualifiedAt);
+  const rewardTypeLabel = optionLabel(rewardTypeOptions, reward.rewardType);
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
+    <details className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <summary className="cursor-pointer list-none p-4 outline-none transition hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-400 dark:hover:bg-zinc-900/60 [&::-webkit-details-marker]:hidden">
+        <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr_0.9fr_0.9fr_0.8fr_auto] lg:items-center">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase text-zinc-400">
+              Тип активности
+            </p>
+            <p className="mt-1 font-semibold text-zinc-950 dark:text-white">
+              {activity}
+            </p>
+            <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
               {reward.rewardLabel}
-            </h3>
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase text-zinc-400">Клуб</p>
+            <p className="mt-1 truncate text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              {storeName}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase text-zinc-400">Дата</p>
+            <p className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              {qualifiedAt}
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase text-zinc-400">ФИО</p>
+            <p className="mt-1 truncate text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              {guestName}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase text-zinc-400">Телефон</p>
+            <p className="mt-1 font-mono text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              {guestContact}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
             <StatusPill label={rewardStatusLabels[reward.status]} />
             <StatusPill label={rewardWalletStateLabels[reward.walletState]} />
           </div>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {guestName} · телефон: {guestContact}
-          </p>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {optionLabel(rewardTypeOptions, reward.rewardType)} ·{" "}
-            {formatMoney(reward.rewardAmount)}
-          </p>
-          <p className="mt-1 text-xs text-zinc-400">
-            {reward.store?.name ?? "любой клуб"} · {formatDate(reward.qualifiedAt)}
-          </p>
-          <p className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
-            {rewardStatusDescriptions[reward.status]}
-          </p>
-          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
-              <span className="block font-semibold uppercase text-zinc-400">
-                Код кассиру
-              </span>
-              <span className="mt-1 block font-mono text-sm font-bold text-zinc-900 dark:text-white">
-                {reward.rewardCode ?? "будет создан при согласовании"}
-              </span>
+        </div>
+      </summary>
+      <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(240px,auto)]">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
+                {reward.rewardLabel}
+              </h3>
+              <StatusPill label={rewardStatusLabels[reward.status]} />
+              <StatusPill label={rewardWalletStateLabels[reward.walletState]} />
             </div>
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
-              <span className="block font-semibold uppercase text-zinc-400">
-                Срок
-              </span>
-              <span className="mt-1 block text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-                {reward.expiresAt ? formatDate(reward.expiresAt) : "без срока"}
-              </span>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              {guestName} · телефон: {guestContact}
+            </p>
+            {fullGuestName !== guestName ? (
+              <p className="mt-1 text-xs text-zinc-400">
+                Имя в профиле: {fullGuestName}
+              </p>
+            ) : null}
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              {rewardTypeLabel} · {formatMoney(reward.rewardAmount)}
+            </p>
+            <p className="mt-1 text-xs text-zinc-400">
+              {storeName} · {qualifiedAt}
+            </p>
+            <p className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+              {rewardStatusDescriptions[reward.status]}
+            </p>
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <span className="block font-semibold uppercase text-zinc-400">
+                  Код кассиру
+                </span>
+                <span className="mt-1 block font-mono text-sm font-bold text-zinc-900 dark:text-white">
+                  {reward.rewardCode ?? "будет создан при согласовании"}
+                </span>
+              </div>
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <span className="block font-semibold uppercase text-zinc-400">
+                  Срок
+                </span>
+                <span className="mt-1 block text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                  {reward.expiresAt ? formatDate(reward.expiresAt) : "без срока"}
+                </span>
+              </div>
+            </div>
+            {reward.claimPayload ? (
+              <p className="mt-2 rounded-lg border border-dashed border-cyan-300/40 px-3 py-2 text-xs text-cyan-700 dark:text-cyan-200">
+                QR-код готов для гостевой страницы. Для ручной выдачи используйте
+                короткий код кассиру выше.
+              </p>
+            ) : null}
+          </div>
+          {canApprove ? (
+          <div className="space-y-2">
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              Сначала согласуйте право на приз. После этого автоматические
+              бонусы уйдут в очередь начисления, а ручную выдачу можно закрыть
+              кодом кассира или кнопкой «Отметить выдано».
+            </p>
+            <div className="flex flex-wrap gap-2 xl:justify-end">
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={() => onEdit(reward)}
+              >
+                Редактировать
+              </button>
+              {rewardStatusOptions.map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  className={smallButtonClass}
+                  disabled={
+                    saving === `reward-${reward.id}` || reward.status === status
+                  }
+                  onClick={() => onStatus(reward, status)}
+                >
+                  {rewardStatusActionLabels[status]}
+                </button>
+              ))}
             </div>
           </div>
-          {reward.claimPayload ? (
-            <p className="mt-2 rounded-lg border border-dashed border-cyan-300/40 px-3 py-2 text-xs text-cyan-700 dark:text-cyan-200">
-              QR-код готов для гостевой страницы. Для ручной выдачи используйте
-              короткий код кассиру выше.
+          ) : (
+            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 xl:text-right">
+              Только просмотр награды
             </p>
-          ) : null}
+          )}
         </div>
-        {canApprove ? (
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={smallButtonClass}
-            onClick={() => onEdit(reward)}
-          >
-            Редактировать
-          </button>
-          {rewardStatusOptions.map((status) => (
-            <button
-              key={status}
-              type="button"
-              className={smallButtonClass}
-              disabled={saving === `reward-${reward.id}` || reward.status === status}
-              onClick={() => onStatus(reward, status)}
-            >
-              {rewardStatusActionLabels[status]}
-            </button>
-          ))}
-        </div>
-        ) : (
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 sm:text-right">
-            Только просмотр награды
-          </p>
-        )}
       </div>
-    </div>
+    </details>
   );
 }
 

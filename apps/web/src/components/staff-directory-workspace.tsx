@@ -149,6 +149,7 @@ export function StaffDirectoryWorkspace({
   const [activeShiftsError, setActiveShiftsError] = useState<string | null>(
     null,
   );
+  const [langameSearch, setLangameSearch] = useState("");
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === draft.id) ?? null,
@@ -162,6 +163,52 @@ export function StaffDirectoryWorkspace({
   );
   const displayedActiveShiftReport =
     activeShiftReport?.store.id === draft.storeId ? activeShiftReport : null;
+  const selectedStore = useMemo(
+    () => report.stores.find((store) => store.id === draft.storeId) ?? null,
+    [draft.storeId, report.stores],
+  );
+  const langameSearchResults = useMemo(() => {
+    const query = langameSearch.trim().toLowerCase();
+    const storeLabel = selectedStore?.name.toLowerCase() ?? "";
+
+    return report.langameUsers
+      .filter((user) => {
+        const haystack = [
+          user.displayName,
+          user.externalUserId,
+          user.externalDomain,
+          user.email,
+          user.username,
+          user.phone,
+          user.workPointLabel,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        if (query) {
+          return haystack.includes(query);
+        }
+
+        if (storeLabel && user.workPointLabel) {
+          return user.workPointLabel.toLowerCase().includes(storeLabel);
+        }
+
+        return true;
+      })
+      .sort((left, right) => {
+        if (left.mappedStaffMemberId && !right.mappedStaffMemberId) {
+          return 1;
+        }
+
+        if (!left.mappedStaffMemberId && right.mappedStaffMemberId) {
+          return -1;
+        }
+
+        return left.displayName.localeCompare(right.displayName, "ru");
+      })
+      .slice(0, 8);
+  }, [langameSearch, report.langameUsers, selectedStore]);
 
   useEffect(() => {
     const storeId = draft.storeId;
@@ -254,6 +301,9 @@ export function StaffDirectoryWorkspace({
       email: draft.email || user.email || "",
       phone: draft.phone || user.phone || "",
     });
+    setMessage(
+      `Подставлен Langame user_id ${user.externalUserId} (${user.displayName}). Сохраните карточку сотрудника, чтобы закрепить привязку.`,
+    );
   }
 
   function applyActiveShiftCandidate(candidate: ActiveShiftCandidate) {
@@ -707,6 +757,78 @@ export function StaffDirectoryWorkspace({
                 ) : (
                   <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
                     Открытых смен по выбранному клубу сейчас не найдено.
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {report.canManageDirectory ? (
+              <div className="mt-3 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">
+                      Найти Langame user_id
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Поиск по ФИО, телефону, email, домену или user_id. Если
+                      смены сейчас нет, найдите оператора вручную и подставьте
+                      его в карточку.
+                    </p>
+                  </div>
+                  {selectedStore ? (
+                    <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-500 dark:bg-zinc-900">
+                      {selectedStore.name}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={langameSearch}
+                    onChange={(event) => setLangameSearch(event.target.value)}
+                    placeholder="Например: Мальцев, user_id 27, 46.langamepro.ru"
+                    className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                  {langameSearch ? (
+                    <button
+                      type="button"
+                      onClick={() => setLangameSearch("")}
+                      className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700"
+                    >
+                      Сбросить
+                    </button>
+                  ) : null}
+                </div>
+                {langameSearchResults.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {langameSearchResults.map((user) => (
+                      <button
+                        key={`${user.externalDomain}-${user.externalUserId}`}
+                        type="button"
+                        onClick={() => applyLangameUser(user)}
+                        className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-emerald-950/20"
+                      >
+                        <span className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-sm font-semibold">
+                            {user.displayName}
+                          </span>
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold uppercase text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                            Подставить
+                          </span>
+                        </span>
+                        <span className="mt-1 block text-xs text-zinc-500">
+                          {user.externalDomain} · user_id {user.externalUserId}
+                          {user.workPointLabel ? ` · ${user.workPointLabel}` : ""}
+                        </span>
+                        {user.mappedStaffMemberId ? (
+                          <span className="mt-1 block text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                            Уже привязан к карточке сотрудника
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
+                    Оператор Langame не найден. Уточните ФИО или user_id.
                   </p>
                 )}
               </div>

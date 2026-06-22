@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
+import { hasCapability, resolveUserCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -19,6 +20,9 @@ export const STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION =
 export const STAFF_CHAT_REPORTING_CHANNEL_NAME = 'Отчетность';
 export const STAFF_CHAT_REPORTING_CHANNEL_DESCRIPTION =
   'Итоговые отчеты администраторов по сменам: чек-листы, задачи, вложения и ручные комментарии перед сдачей смены.';
+export const STAFF_CHAT_GAMIFICATION_CHANNEL_NAME = 'Геймификация';
+export const STAFF_CHAT_GAMIFICATION_CHANNEL_DESCRIPTION =
+  'Награды игрового модуля, которые требуют подтверждения сотрудником.';
 const defaultNetworkChannels = [
   {
     name: 'Информация и объявления',
@@ -89,6 +93,21 @@ export type StaffChatSystemNotificationDto = {
   severity?: 'INFO' | 'WARNING' | 'CRITICAL';
   actionLabel?: string | null;
   actionHref?: string | null;
+};
+
+export type StaffChatGamificationRewardApprovalDto = {
+  rewardId: string;
+  activityType: string;
+  activityName?: string | null;
+  conditions?: string | null;
+  rewardLabel: string;
+  rewardAmount?: string | number | null;
+  guestLabel?: string | null;
+  guestPhone?: string | null;
+  storeId?: string | null;
+  storeName?: string | null;
+  qualifiedAt: string | Date;
+  actionHref: string;
 };
 
 export type StaffChatReadDto = {
@@ -602,6 +621,57 @@ export class StaffTeamChatService {
     });
   }
 
+  async createGamificationRewardApprovalNotification(
+    tenantId: string,
+    dto: StaffChatGamificationRewardApprovalDto,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = tx ?? this.prisma;
+    const { channelId, memberUserIds } =
+      await this.ensureGamificationApprovalChannel(client, tenantId);
+    const body = this.buildGamificationRewardApprovalBody(dto);
+    const message = await client.staffChatMessage.create({
+      data: {
+        tenantId,
+        channelId,
+        authorUserId: null,
+        storeId: dto.storeId ?? null,
+        body,
+        kind: 'INCIDENT',
+        priority: 'HIGH',
+        isPinned: false,
+      },
+      select: { id: true },
+    });
+
+    if (memberUserIds.length > 0) {
+      await client.staffNotification.createMany({
+        data: memberUserIds.map((targetUserId) => ({
+          tenantId,
+          storeId: dto.storeId ?? null,
+          targetUserId,
+          sourceType: 'GUEST_GAME_REWARD',
+          sourceId: dto.rewardId,
+          severity: 'WARNING',
+          status: 'OPEN',
+          title: 'Награда требует подтверждения',
+          message: body.slice(0, 700),
+          actionLabel: 'Открыть чат',
+          actionHref: `/staff/team-chat?channelId=${encodeURIComponent(channelId)}`,
+          dedupeKey: `guest-game-reward:${dto.rewardId}:approval:${targetUserId}`,
+          metadata: {
+            channelId,
+            messageId: message.id,
+            rewardId: dto.rewardId,
+          },
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    return message;
+  }
+
   async updateMessage(
     user: AuthenticatedUser,
     id: string,
@@ -836,6 +906,124 @@ export class StaffTeamChatService {
     return channel.id;
   }
 
+  private async ensureGamificationApprovalChannel(
+    client: Prisma.TransactionClient | PrismaService,
+    tenantId: string,
+  ) {
+    const channel = await client.staffChatChannel.upsert({
+      where: {
+        tenantId_name: {
+          tenantId,
+          name: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME,
+        },
+      },
+      create: {
+        tenantId,
+        name: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME,
+        description: STAFF_CHAT_GAMIFICATION_CHANNEL_DESCRIPTION,
+        scope: 'CUSTOM',
+        isDefault: false,
+      },
+      update: {
+        description: STAFF_CHAT_GAMIFICATION_CHANNEL_DESCRIPTION,
+        isArchived: false,
+        scope: 'CUSTOM',
+        storeId: null,
+        roleScope: null,
+        isDefault: false,
+      },
+      select: { id: true },
+    });
+    const memberUserIds = await this.resolveGamificationApproverUserIds(
+      client,
+      tenantId,
+    );
+
+    await this.syncGamificationApprovalMembers(
+      client,
+      tenantId,
+      channel.id,
+      memberUserIds,
+    );
+
+    return { channelId: channel.id, memberUserIds };
+  }
+
+  private async resolveGamificationApproverUserIds(
+    client: Prisma.TransactionClient | PrismaService,
+    tenantId: string,
+  ) {
+    const [users, roleOverrides] = await Promise.all([
+      client.user.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          id: true,
+          role: true,
+          isPlatformAdmin: true,
+          customRole: {
+            select: { permissions: true },
+          },
+        },
+      }),
+      client.userRoleOverride.findMany({
+        where: { tenantId },
+        select: { role: true, permissions: true },
+      }),
+    ]);
+    const roleOverrideByRole = new Map(
+      roleOverrides.map((override) => [override.role, override]),
+    );
+
+    return users
+      .filter((user) => {
+        if (user.isPlatformAdmin) {
+          return true;
+        }
+
+        const permissions = resolveUserCapabilities({
+          role: user.role,
+          customRole: user.customRole,
+          roleOverride: user.customRole
+            ? null
+            : (roleOverrideByRole.get(user.role) ?? null),
+        });
+
+        return hasCapability({ permissions }, 'approve_guest_game_rewards');
+      })
+      .map((user) => user.id);
+  }
+
+  private async syncGamificationApprovalMembers(
+    client: Prisma.TransactionClient | PrismaService,
+    tenantId: string,
+    channelId: string,
+    memberUserIds: string[],
+  ) {
+    await client.staffChatChannelMember.deleteMany({
+      where: {
+        tenantId,
+        channelId,
+        ...(memberUserIds.length > 0
+          ? { userId: { notIn: memberUserIds } }
+          : {}),
+      },
+    });
+
+    if (memberUserIds.length === 0) {
+      return;
+    }
+
+    await client.staffChatChannelMember.createMany({
+      data: memberUserIds.map((userId) => ({
+        tenantId,
+        channelId,
+        userId,
+        role: 'MEMBER',
+      })),
+      skipDuplicates: true,
+    });
+  }
+
   private buildSystemNotificationBody(dto: StaffChatSystemNotificationDto) {
     const lines = [
       this.normalizeRequiredString(dto.title, 'Notification title', 240),
@@ -846,6 +1034,57 @@ export class StaffTeamChatService {
     ];
 
     return lines.filter(Boolean).join('\n\n').slice(0, 4000);
+  }
+
+  private buildGamificationRewardApprovalBody(
+    dto: StaffChatGamificationRewardApprovalDto,
+  ) {
+    const rewardAmount =
+      dto.rewardAmount === null ||
+      dto.rewardAmount === undefined ||
+      `${dto.rewardAmount}`.trim() === '' ||
+      `${dto.rewardAmount}`.trim() === '0'
+        ? null
+        : `${dto.rewardAmount}`;
+    const rewardLine = rewardAmount
+      ? `${dto.rewardLabel} · ${rewardAmount}`
+      : dto.rewardLabel;
+    const lines = [
+      'Награда требует подтверждения',
+      `Активность: ${this.compactLine([dto.activityType, dto.activityName])}`,
+      `Условия: ${dto.conditions?.trim() || 'условия указаны в правиле геймификации'}`,
+      `Приз: ${rewardLine}`,
+      `Гость: ${dto.guestLabel?.trim() || 'гость игрового модуля'}`,
+      `Телефон: ${dto.guestPhone?.trim() || 'контакт не указан'}`,
+      `Клуб: ${dto.storeName?.trim() || 'не указан'}`,
+      `Выполнено: ${this.formatStaffChatDate(dto.qualifiedAt)}`,
+      `Подтвердить награду: ${this.normalizeRequiredString(dto.actionHref, 'Action URL', 500)}`,
+    ];
+
+    return lines.join('\n').slice(0, 4000);
+  }
+
+  private compactLine(values: Array<string | null | undefined>) {
+    return values
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value))
+      .join(' · ');
+  }
+
+  private formatStaffChatDate(value: string | Date) {
+    const date = value instanceof Date ? value : new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+
+    return new Intl.DateTimeFormat('ru-RU', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
   }
 
   private resolveSystemNotificationPriority(
@@ -978,8 +1217,32 @@ export class StaffTeamChatService {
     user: AuthenticatedUser,
     tenantId: string,
   ): Promise<Prisma.StaffChatChannelWhereInput> {
+    if (
+      !hasCapability(user, 'view_communications') &&
+      hasCapability(user, 'approve_guest_game_rewards')
+    ) {
+      return {
+        tenantId,
+        isArchived: false,
+        name: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME,
+        scope: 'CUSTOM',
+        members: { some: { userId: user.id } },
+      };
+    }
+
     if (this.canSeeAllChannels(user.role)) {
-      return { tenantId, isArchived: false };
+      return {
+        tenantId,
+        isArchived: false,
+        OR: [
+          { name: { not: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME } },
+          {
+            name: STAFF_CHAT_GAMIFICATION_CHANNEL_NAME,
+            scope: 'CUSTOM',
+            members: { some: { userId: user.id } },
+          },
+        ],
+      };
     }
 
     const storeIds = await this.getUserStoreIds(user.id);

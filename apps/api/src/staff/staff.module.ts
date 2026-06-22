@@ -104,5 +104,6 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffDisciplineService,
     StaffSalaryService,
   ],
+  exports: [StaffTeamChatService],
 })
 export class StaffModule {}

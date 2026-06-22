@@ -45,6 +45,13 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Insufficient role permissions');
     }
 
+    if (
+      this.isGamificationApprovalChatAccess(request) &&
+      hasCapability(user, 'approve_guest_game_rewards')
+    ) {
+      return true;
+    }
+
     const mustUseCapabilityDecision = Boolean(
       user?.customRoleId ||
       user?.hasRoleOverride ||
@@ -148,6 +155,17 @@ export class RolesGuard implements CanActivate {
     }
 
     return null;
+  }
+
+  private isGamificationApprovalChatAccess(request: AuthenticatedRequest) {
+    const path = this.normalizePath(request);
+    const method = request.method?.toUpperCase() ?? 'GET';
+
+    if (method === 'GET') {
+      return path === '/staff/team-chat' || path === '/staff/team-chat/events';
+    }
+
+    return method === 'POST' && path === '/staff/team-chat/read';
   }
 
   private resolveReportsCapability(

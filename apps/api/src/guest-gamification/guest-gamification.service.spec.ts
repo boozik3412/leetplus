@@ -157,6 +157,9 @@ function schedulerRuntimeStatus(
 function createService(
   prisma = createPrismaMock(),
   schedulerStatus: GuestBonusLedgerSchedulerRuntimeStatus | null = null,
+  staffTeamChatService: {
+    createGamificationRewardApprovalNotification: jest.Mock;
+  } | null = null,
 ) {
   const langameSettingsService = {
     resolveTenantAccess: jest.fn(),
@@ -183,6 +186,7 @@ function createService(
       langameClient as any,
       configService as any,
       bonusLedgerSchedulerService as any,
+      staffTeamChatService as any,
     ),
   };
 }
@@ -1100,6 +1104,99 @@ describe('GuestGamificationService', () => {
           botReady: true,
         },
       });
+    });
+  });
+
+  describe('reward approval chat', () => {
+    it('sends pending rewards to the gamification staff chat without raw phone', async () => {
+      const prisma = createPrismaMock();
+      const staffTeamChatService = {
+        createGamificationRewardApprovalNotification: jest
+          .fn()
+          .mockResolvedValue({ id: 'chat-message-1' }),
+      };
+      const { service } = createService(prisma, null, staffTeamChatService);
+      const pendingReward = rewardRow({
+        id: 'reward-pending-chat',
+        status: 'PENDING',
+        rewardLabel: 'Промокод бара',
+        rewardAmount: new Prisma.Decimal(0),
+        storeId: 'store-1',
+        note: 'Открытие после чекина',
+        evidence: {
+          rawPhone: '79999999999',
+          eventType: 'CHECK_IN',
+          rule: {
+            name: 'Три чекина',
+            triggerKind: 'CHECK_IN',
+          },
+        },
+        lootBoxId: 'loot-1',
+        lootBox: {
+          id: 'loot-1',
+          name: 'Лутбокс чекина',
+          status: 'ACTIVE',
+        },
+        store: {
+          id: 'store-1',
+          name: '1337-Пушкинская',
+        },
+      });
+
+      prisma.guestGameReward.create.mockResolvedValue(pendingReward);
+      prisma.guestGameEvent.create.mockResolvedValue({});
+
+      await service.createReward(user, {
+        rewardType: 'PROMOCODE',
+        rewardLabel: 'Промокод бара',
+        status: 'PENDING',
+      });
+
+      expect(
+        staffTeamChatService.createGamificationRewardApprovalNotification,
+      ).toHaveBeenCalledWith(
+        user.tenantId,
+        expect.objectContaining({
+          rewardId: 'reward-pending-chat',
+          activityType: 'Лутбокс',
+          activityName: 'Лутбокс чекина',
+          conditions: expect.stringContaining('Три чекина'),
+          guestPhone: '+7 *** **-11',
+          storeName: '1337-Пушкинская',
+          actionHref:
+            '/guests/gamification?tab=rewards&rewardId=reward-pending-chat',
+        }),
+      );
+      expect(
+        JSON.stringify(
+          staffTeamChatService.createGamificationRewardApprovalNotification.mock
+            .calls[0][1],
+        ),
+      ).not.toContain('79999999999');
+    });
+
+    it('does not send approved rewards to the approval chat', async () => {
+      const prisma = createPrismaMock();
+      const staffTeamChatService = {
+        createGamificationRewardApprovalNotification: jest.fn(),
+      };
+      const { service } = createService(prisma, null, staffTeamChatService);
+
+      prisma.guestGameReward.create.mockResolvedValue(
+        rewardRow({ id: 'reward-approved-chat', status: 'APPROVED' }),
+      );
+      prisma.guestGameEvent.create.mockResolvedValue({});
+
+      await service.createReward(user, {
+        rewardType: 'BONUS',
+        rewardLabel: '50 бонусов',
+        rewardAmount: 50,
+        status: 'APPROVED',
+      });
+
+      expect(
+        staffTeamChatService.createGamificationRewardApprovalNotification,
+      ).not.toHaveBeenCalled();
     });
   });
 

@@ -2,7 +2,9 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
@@ -20,6 +22,7 @@ import { LangameSettingsService } from '../integrations/langame-settings.service
 import type { LangameGuestSession } from '../integrations/langame.types';
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { StaffTeamChatService } from '../staff/staff-team-chat.service';
 import {
   GuestBonusLedgerSchedulerService,
   type GuestBonusLedgerSchedulerRuntimeStatus,
@@ -3023,12 +3026,16 @@ function isPilotFirstBonusLedgerRow(row: BonusLedgerAuditRow) {
 
 @Injectable()
 export class GuestGamificationService {
+  private readonly logger = new Logger(GuestGamificationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
     private readonly configService: ConfigService,
     private readonly bonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
+    @Optional()
+    private readonly staffTeamChatService?: StaffTeamChatService,
   ) {}
 
   async getWorkspace(
@@ -3073,7 +3080,10 @@ export class GuestGamificationService {
       ]);
     const integrationReadiness = this.buildIntegrationReadiness(deliveries);
     const communicationQueue = this.buildCommunicationQueue(profiles, rewards);
-    const deliveryOutbox = this.buildDeliveryOutbox(deliveries, user.tenantSlug);
+    const deliveryOutbox = this.buildDeliveryOutbox(
+      deliveries,
+      user.tenantSlug,
+    );
 
     return {
       summary: this.buildSummary(
@@ -3850,7 +3860,7 @@ export class GuestGamificationService {
             ? 'Открыть конструктор'
             : guestLogsCheckedEmpty
               ? 'Открыть диагностику'
-            : 'Открыть /sync',
+              : 'Открыть /sync',
       },
       {
         key: 'TEST_EVENT',
@@ -6937,6 +6947,10 @@ export class GuestGamificationService {
       note: row.rewardLabel,
     });
 
+    if (row.status === 'PENDING') {
+      await this.notifyRewardApprovalRequired(row);
+    }
+
     return mapReward(row);
   }
 
@@ -6948,6 +6962,11 @@ export class GuestGamificationService {
     const current = await this.assertReward(user, id);
     const data = await this.buildRewardData(user, dto, false);
     const nextStatus = dto.status;
+
+    if (nextStatus && nextStatus === current.status) {
+      delete data.approvedByUserId;
+      delete data.paidAt;
+    }
 
     if (
       (nextStatus === 'APPROVED' || nextStatus === 'PAID') &&
@@ -6963,7 +6982,7 @@ export class GuestGamificationService {
       include: rewardInclude,
     });
 
-    if (dto.status) {
+    if (dto.status && dto.status !== current.status) {
       await this.createSystemEvent(user, {
         profileId: row.profileId,
         guestId: row.guestId,
@@ -8973,6 +8992,92 @@ export class GuestGamificationService {
       payload: jsonValue(dto.payload),
       note: nullableString(dto.note),
     }) as Prisma.GuestGameEventUncheckedCreateInput;
+  }
+
+  private async notifyRewardApprovalRequired(row: RewardRow) {
+    if (!this.staffTeamChatService) {
+      return;
+    }
+
+    try {
+      await this.staffTeamChatService.createGamificationRewardApprovalNotification(
+        row.tenantId,
+        {
+          rewardId: row.id,
+          activityType: this.rewardActivityType(row),
+          activityName: this.rewardActivityName(row),
+          conditions: this.rewardApprovalConditions(row),
+          rewardLabel: row.rewardLabel,
+          rewardAmount: numberValue(row.rewardAmount),
+          guestLabel:
+            row.profile?.displayName ??
+            row.guest?.fullNameMasked ??
+            row.guest?.externalGuestId ??
+            null,
+          guestPhone:
+            row.profile?.contactMasked ??
+            row.guest?.phoneMasked ??
+            row.guest?.emailMasked ??
+            null,
+          storeId: row.storeId,
+          storeName: row.store?.name ?? null,
+          qualifiedAt: row.qualifiedAt,
+          actionHref: `/guests/gamification?tab=rewards&rewardId=${encodeURIComponent(row.id)}`,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send gamification reward approval chat message for ${row.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private rewardActivityType(row: RewardRow) {
+    if (row.lootBoxId) {
+      return 'Лутбокс';
+    }
+
+    if (row.missionId) {
+      return 'Квест';
+    }
+
+    if (row.seasonId) {
+      return 'Battle Pass';
+    }
+
+    return row.source === 'MANUAL' ? 'Ручная награда' : 'Игровое событие';
+  }
+
+  private rewardActivityName(row: RewardRow) {
+    return (
+      row.lootBox?.name ??
+      row.mission?.name ??
+      row.season?.name ??
+      row.rewardLabel
+    );
+  }
+
+  private rewardApprovalConditions(row: RewardRow) {
+    const evidence = jsonRecord(row.evidence);
+    const rule = jsonRecord(evidence.rule as Prisma.JsonValue | null);
+    const values = [
+      row.note,
+      nullableString(rule.name),
+      nullableString(rule.triggerKind)
+        ? `событие: ${nullableString(rule.triggerKind)}`
+        : null,
+      nullableString(evidence.eventType)
+        ? `факт: ${nullableString(evidence.eventType)}`
+        : null,
+      row.externalId ? `externalId: ${row.externalId}` : null,
+    ];
+
+    return values
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value))
+      .join(' · ');
   }
 
   private async createSystemEvent(

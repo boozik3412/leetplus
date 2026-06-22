@@ -32,8 +32,10 @@ export default async function StaffTeamChatPage({
   searchParams: SearchParams;
 }) {
   const user = await requireCurrentUser();
+  const canViewCommunications = can(user, "view_communications");
+  const canApproveGameRewards = can(user, "approve_guest_game_rewards");
 
-  if (!can(user, "view_communications")) {
+  if (!canViewCommunications && !canApproveGameRewards) {
     redirect("/dashboard");
   }
   const canViewStaff = can(user, "view_staff");

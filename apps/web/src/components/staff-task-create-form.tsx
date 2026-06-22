@@ -699,6 +699,6 @@ function userLabel(user: StaffTaskUser) {
   return user.fullName ?? user.email;
 }
 
-function userStoreIds(user: StaffTaskUser) {
+function userStoreIds(user: Pick<StaffTaskUser, "stores">) {
   return user.stores?.map((store) => store.id) ?? [];
 }

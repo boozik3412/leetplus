@@ -241,6 +241,49 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
+  it('allows reward approvers to read the gamification approval chat only', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/team-chat',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: ['approve_guest_game_rewards'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/staff/team-chat/read',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: ['approve_guest_game_rewards'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/staff/team-chat/messages',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: ['approve_guest_game_rewards'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('keeps other staff pages behind staff access', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 

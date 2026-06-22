@@ -1774,8 +1774,84 @@ function MessageActionLink({
 }: {
   action: { label: string; href: string };
 }) {
+  const router = useRouter();
+  const rewardId = getGamificationRewardApprovalId(action);
+  const [pending, setPending] = useState(false);
+  const [status, setStatus] = useState<"idle" | "done" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
   const className =
     "inline-flex items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15";
+
+  async function approveReward() {
+    if (!rewardId || pending) {
+      return;
+    }
+
+    setPending(true);
+    setError(null);
+    setStatus("idle");
+
+    try {
+      const response = await fetch(
+        `/api/guests/gamification/rewards/${encodeURIComponent(rewardId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "APPROVED" }),
+        },
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { message?: string }
+          | null;
+        throw new Error(payload?.message ?? "Не удалось подтвердить награду.");
+      }
+
+      setStatus("done");
+      router.refresh();
+    } catch (caught) {
+      setStatus("error");
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (rewardId) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={approveReward}
+          disabled={pending || status === "done"}
+          className={[
+            className,
+            pending || status === "done"
+              ? "cursor-not-allowed opacity-70"
+              : "",
+          ].join(" ")}
+        >
+          {status === "done"
+            ? "Награда подтверждена"
+            : pending
+              ? "Подтверждаем..."
+              : action.label}
+        </button>
+        <Link
+          href={action.href}
+          className="inline-flex items-center justify-center rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          Открыть кошелек
+        </Link>
+        {status === "error" && error ? (
+          <span className="text-xs font-semibold text-red-600 dark:text-red-300">
+            {error}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   if (action.href.startsWith("/")) {
     return (
@@ -1802,7 +1878,7 @@ function parseMessageAction(body: string) {
 
   const match = lines[actionLineIndex]
     ?.trim()
-    .match(/^(Открыть [^:]{1,80}):\s*((?:\/|https?:\/\/)\S+)$/i);
+    .match(/^((?:Открыть|Подтвердить) [^:]{1,80}):\s*((?:\/|https?:\/\/)\S+)$/i);
 
   if (!match) {
     return { body, action: null };
@@ -1828,6 +1904,27 @@ function parseMessageAction(body: string) {
       href,
     },
   };
+}
+
+function getGamificationRewardApprovalId(action: {
+  label: string;
+  href: string;
+}) {
+  if (!/^Подтвердить /i.test(action.label)) {
+    return null;
+  }
+
+  try {
+    const url = new URL(action.href, "https://leetplus.local");
+
+    if (url.pathname !== "/guests/gamification") {
+      return null;
+    }
+
+    return url.searchParams.get("rewardId");
+  } catch {
+    return null;
+  }
 }
 
 function findLastTextLineIndex(lines: string[]) {

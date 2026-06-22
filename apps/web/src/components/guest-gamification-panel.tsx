@@ -51,6 +51,8 @@ type Props = {
   leads: GuestCrmLead[];
   products: Product[];
   tenantSlug: string;
+  initialTab?: TabId;
+  initialEditorMode?: EditorMode;
   access: {
     canManageRules: boolean;
     canApproveRewards: boolean;
@@ -59,7 +61,7 @@ type Props = {
   };
 };
 
-type TabId =
+export type TabId =
   | "overview"
   | "profiles"
   | "lootBoxes"
@@ -68,7 +70,7 @@ type TabId =
   | "rewards"
   | "testRun";
 
-type EditorMode = "advanced" | "visual";
+export type EditorMode = "advanced" | "visual";
 
 const editorModeOptions = [
   ["advanced", "Расширенные настройки"],
@@ -950,11 +952,13 @@ export function GuestGamificationPanel({
   leads,
   products,
   tenantSlug,
+  initialTab = "overview",
+  initialEditorMode = "advanced",
   access,
 }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
-  const [editorMode, setEditorMode] = useState<EditorMode>("advanced");
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+  const [editorMode, setEditorMode] = useState<EditorMode>(initialEditorMode);
   const [profileForm, setProfileForm] =
     useState<ProfileForm>(defaultProfileForm);
   const [lootBoxForm, setLootBoxForm] =

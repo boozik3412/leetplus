@@ -1,4 +1,8 @@
-import { GuestGamificationPanel } from "@/components/guest-gamification-panel";
+import {
+  GuestGamificationPanel,
+  type EditorMode,
+  type TabId,
+} from "@/components/guest-gamification-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
@@ -15,6 +19,36 @@ import {
 import { can } from "@/lib/permissions";
 import { getProducts, type Product } from "@/lib/products";
 import { getStores, type Store } from "@/lib/stores";
+
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+const gamificationTabs = new Set<TabId>([
+  "overview",
+  "profiles",
+  "lootBoxes",
+  "missions",
+  "seasons",
+  "rewards",
+  "testRun",
+]);
+
+function firstSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseGamificationTab(value: string | string[] | undefined): TabId {
+  const tab = firstSearchParam(value);
+  return tab && gamificationTabs.has(tab as TabId)
+    ? (tab as TabId)
+    : "overview";
+}
+
+function parseGamificationMode(
+  value: string | string[] | undefined,
+): EditorMode {
+  const mode = firstSearchParam(value);
+  return mode === "visual" ? "visual" : "advanced";
+}
 
 async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
   try {
@@ -517,7 +551,14 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   },
 };
 
-export default async function GuestGamificationPage() {
+export default async function GuestGamificationPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const params = await searchParams;
+  const initialTab = parseGamificationTab(params.tab);
+  const initialEditorMode = parseGamificationMode(params.mode);
   const user = await requireCurrentUser();
 
   if (!can(user, "view_guest_gamification")) {
@@ -571,6 +612,7 @@ export default async function GuestGamificationPage() {
         />
 
         <GuestGamificationPanel
+          key={`${initialEditorMode}:${initialTab}`}
           initialWorkspace={workspace}
           audiences={audiences}
           stores={stores}
@@ -578,6 +620,8 @@ export default async function GuestGamificationPage() {
           leads={leads}
           products={products}
           tenantSlug={user.tenantSlug}
+          initialTab={initialTab}
+          initialEditorMode={initialEditorMode}
           access={{
             canManageRules: can(user, "manage_guest_game_rules"),
             canApproveRewards: can(user, "approve_guest_game_rewards"),

@@ -3781,8 +3781,8 @@ export class GuestGamificationService {
         nextAction: activeRuleCount
           ? 'Запустить dry-run по тестовому профилю и пилотному клубу.'
           : 'Создать простую миссию или лутбокс для клуба 1337.',
-        actionHref: '/guests/gamification',
-        actionLabel: 'Открыть правила',
+        actionHref: '/guests/gamification?mode=advanced&tab=lootBoxes',
+        actionLabel: 'Открыть конструктор',
       },
       {
         key: 'GUEST_LOGS',
@@ -3842,12 +3842,12 @@ export class GuestGamificationService {
         actionHref: guestLogsReady
           ? '/api/guests/gamification/guest-log-catalog/export'
           : guestLogsRequiredByRules && guestLogsCheckedEmpty
-            ? '/guests/gamification'
+            ? '/guests/gamification?mode=advanced&tab=lootBoxes'
             : '/sync?includeGuestLogs=1',
         actionLabel: guestLogsReady
           ? 'Скачать CSV'
           : guestLogsRequiredByRules && guestLogsCheckedEmpty
-            ? 'Открыть правила'
+            ? 'Открыть конструктор'
             : guestLogsCheckedEmpty
               ? 'Открыть диагностику'
             : 'Открыть /sync',

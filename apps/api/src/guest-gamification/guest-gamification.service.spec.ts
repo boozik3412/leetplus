@@ -2243,8 +2243,8 @@ describe('GuestGamificationService', () => {
             statusLabel: '0 после sync',
             note: expect.stringContaining('Диагностика guests/logs закрыта'),
             nextAction: expect.stringContaining('Хвост закрыт'),
-            actionHref: '/guests/gamification',
-            actionLabel: 'Открыть правила',
+            actionHref: '/guests/gamification?mode=advanced&tab=lootBoxes',
+            actionLabel: 'Открыть конструктор',
           }),
         ]),
       );

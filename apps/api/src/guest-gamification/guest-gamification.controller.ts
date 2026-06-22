@@ -347,12 +347,22 @@ export class GuestGamificationController {
   }
 
   @Patch('rewards/:id')
-  updateReward(
+  async updateReward(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: GuestGameRewardUpdateDto,
   ): Promise<GuestGameReward> {
-    return this.gamificationService.updateReward(user, id, dto);
+    const reward = await this.gamificationService.updateReward(user, id, dto);
+
+    if (dto.status === 'APPROVED') {
+      await this.bonusLedgerService.queueApprovedRewards(user, {
+        rewardId: reward.id,
+        rewardTypes: [reward.rewardType],
+        limit: 1,
+      });
+    }
+
+    return reward;
   }
 
   @Get('deliveries')

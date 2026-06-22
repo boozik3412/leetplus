@@ -623,6 +623,7 @@ describe('GuestBonusLedgerService', () => {
     const result = await service.queueApprovedRewards(user, {
       limit: 1,
       storeId: 'store-1337',
+      rewardId: 'reward-1',
     });
 
     expect(result).toMatchObject({
@@ -653,6 +654,7 @@ describe('GuestBonusLedgerService', () => {
         where: expect.objectContaining({
           tenantId: user.tenantId,
           storeId: 'store-1337',
+          id: 'reward-1',
         }),
         take: 1,
       }),

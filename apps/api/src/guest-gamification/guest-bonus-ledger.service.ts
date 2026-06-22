@@ -49,6 +49,7 @@ export type GuestGameBonusLedgerQueueDto = {
   rewardTypes?: string[] | string | null;
   limit?: number | string | null;
   storeId?: string | null;
+  rewardId?: string | null;
 };
 
 export type GuestGameBonusLedgerDispatchDto = GuestGameBonusLedgerQueueDto & {
@@ -246,14 +247,30 @@ export class GuestBonusLedgerService {
     user: Pick<AuthenticatedUser, 'id' | 'tenantId'>,
     dto: GuestGameBonusLedgerQueueDto = {},
   ): Promise<GuestGameBonusLedgerQueueResult> {
-    const rewardTypes = this.resolveRewardTypes(dto.rewardTypes);
+    const rewardTypes = this.resolveRewardTypes(dto.rewardTypes).filter(
+      isLangameBalanceRewardType,
+    );
     const storeId = nullableString(dto.storeId);
+    const rewardId = nullableString(dto.rewardId);
     const limit = positiveInt(dto.limit, 500, 1000);
+
+    if (rewardTypes.length === 0) {
+      return {
+        checkedRewards: 0,
+        queued: 0,
+        skipped: 0,
+        rewardTypes: [],
+        items: [],
+        note: 'Для этой награды нет автоматического начисления через Langame balance API.',
+      };
+    }
+
     const rewards = await this.prisma.guestGameReward.findMany({
       where: {
         tenantId: user.tenantId,
         status: 'APPROVED',
         ...(storeId ? { storeId } : {}),
+        ...(rewardId ? { id: rewardId } : {}),
         rewardAmount: { gt: 0 },
         OR: rewardTypes.map((type) => ({
           rewardType: { equals: type, mode: 'insensitive' as const },
@@ -1338,6 +1355,20 @@ function normalizeLangameBalancePath(path: string) {
   }
 
   return normalized;
+}
+
+function isLangameBalanceRewardType(rewardType: string | null) {
+  const normalized = rewardType?.trim().toUpperCase();
+
+  return Boolean(
+    normalized &&
+    (defaultBonusRewardTypes.includes(
+      normalized as (typeof defaultBonusRewardTypes)[number],
+    ) ||
+      moneyBalanceRewardTypes.includes(
+        normalized as (typeof moneyBalanceRewardTypes)[number],
+      )),
+  );
 }
 
 function langameBalanceTypeForRewardType(rewardType: string | null) {

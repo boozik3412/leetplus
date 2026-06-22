@@ -574,6 +574,19 @@ const rewardTypeOptions = [
   { value: "BATTLE_PASS_REWARD", label: "Награда Battle Pass" },
 ];
 
+const automaticLedgerRewardTypes = new Set([
+  "BALANCE",
+  "BONUS",
+  "BONUS_BALANCE",
+  "BONUS_POINTS",
+  "CASH_BALANCE",
+  "DEPOSIT",
+  "LANGAME_BALANCE",
+  "LOYALTY_BONUS",
+  "MONEY_BALANCE",
+  "WALLET_BALANCE",
+]);
+
 const sessionTypeOptions = [
   { value: "", label: "любой тип" },
   { value: "regular_session", label: "обычная сессия" },
@@ -8505,6 +8518,56 @@ function rewardSearchTokens(reward: GuestGameReward) {
     .map((token) => String(token).toLocaleLowerCase("ru-RU"));
 }
 
+function isAutomaticLedgerReward(reward: GuestGameReward) {
+  return (
+    reward.rewardAmount > 0 &&
+    automaticLedgerRewardTypes.has(reward.rewardType.toUpperCase())
+  );
+}
+
+function rewardWalletLabel(reward: GuestGameReward) {
+  if (
+    reward.status === "APPROVED" &&
+    reward.walletState === "READY" &&
+    isAutomaticLedgerReward(reward)
+  ) {
+    return "в начислении";
+  }
+
+  return rewardWalletStateLabels[reward.walletState];
+}
+
+function rewardActionNotice(reward: GuestGameReward) {
+  if (reward.status === "PENDING" && isAutomaticLedgerReward(reward)) {
+    return "Нажмите «Согласовать и начислить»: право на приз подтвердится, а бонусы сразу уйдут в очередь начисления Langame.";
+  }
+
+  if (reward.status === "PENDING") {
+    return "Сначала согласуйте право на приз. После этого ручную выдачу можно закрыть кодом кассира или кнопкой «Отметить выдано».";
+  }
+
+  if (reward.status === "APPROVED" && isAutomaticLedgerReward(reward)) {
+    return "Награда согласована и передана в очередь начисления Langame. После успешной записи в Langame статус станет «выдано».";
+  }
+
+  if (reward.status === "APPROVED") {
+    return "Награда согласована. Выдайте приз вручную и закройте его кодом кассира или кнопкой «Отметить выдано».";
+  }
+
+  return rewardStatusDescriptions[reward.status];
+}
+
+function rewardStatusButtonLabel(
+  reward: GuestGameReward,
+  status: GuestGameRewardStatus,
+) {
+  if (status === "APPROVED" && isAutomaticLedgerReward(reward)) {
+    return "Согласовать и начислить";
+  }
+
+  return rewardStatusActionLabels[status];
+}
+
 function RewardRow({
   reward,
   onStatus,
@@ -8570,7 +8633,7 @@ function RewardRow({
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
             <StatusPill label={rewardStatusLabels[reward.status]} />
-            <StatusPill label={rewardWalletStateLabels[reward.walletState]} />
+            <StatusPill label={rewardWalletLabel(reward)} />
           </div>
         </div>
       </summary>
@@ -8582,7 +8645,7 @@ function RewardRow({
                 {reward.rewardLabel}
               </h3>
               <StatusPill label={rewardStatusLabels[reward.status]} />
-              <StatusPill label={rewardWalletStateLabels[reward.walletState]} />
+              <StatusPill label={rewardWalletLabel(reward)} />
             </div>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               {guestName} · телефон: {guestContact}
@@ -8629,9 +8692,7 @@ function RewardRow({
           {canApprove ? (
           <div className="min-w-0 space-y-2">
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-              Сначала согласуйте право на приз. После этого автоматические
-              бонусы уйдут в очередь начисления, а ручную выдачу можно закрыть
-              кодом кассира или кнопкой «Отметить выдано».
+              {rewardActionNotice(reward)}
             </p>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
               <button
@@ -8651,7 +8712,7 @@ function RewardRow({
                   }
                   onClick={() => onStatus(reward, status)}
                 >
-                  {rewardStatusActionLabels[status]}
+                  {rewardStatusButtonLabel(reward, status)}
                 </button>
               ))}
             </div>

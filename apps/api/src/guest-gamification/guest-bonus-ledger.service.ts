@@ -33,7 +33,8 @@ const scheduledBonusLedgerActorRoles = [
   UserRole.ADMIN,
   UserRole.MANAGER,
 ] as const;
-const guestPortalExternalDomains = new Set(['leetplus-guest-portal']);
+const guestPortalExternalDomain = 'leetplus-guest-portal';
+const guestPortalExternalDomains = new Set([guestPortalExternalDomain]);
 
 type BonusLedgerMode = 'DISABLED' | 'DRY_RUN' | 'READY';
 type BonusLedgerItemStatus =
@@ -820,6 +821,12 @@ export class GuestBonusLedgerService {
               "status" = 'PROCESSING'
               AND "attempts" < ${config.maxAttempts}
               AND "lockedAt" < NOW() - (${config.staleLockMinutes} * INTERVAL '1 minute')
+            )
+            OR (
+              "status" = 'FAILED'
+              AND "attempts" >= ${config.maxAttempts}
+              AND "externalDomain" = ${guestPortalExternalDomain}
+              AND "errorMessage" ILIKE ${`%${guestPortalExternalDomain}%`}
             )
           )
         ORDER BY COALESCE("nextAttemptAt", "createdAt"), "createdAt"

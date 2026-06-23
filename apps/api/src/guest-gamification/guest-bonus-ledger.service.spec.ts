@@ -380,6 +380,45 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('claims max-attempt guest portal domain failures for source recovery', async () => {
+    const { service, prisma } = createService();
+
+    prisma.$queryRaw.mockResolvedValue([]);
+
+    await (service as any).claimReadyEntries(user.tenantId, {
+      mode: 'READY',
+      dryRun: false,
+      canary: false,
+      ready: true,
+      enabled: true,
+      path: '/master_api/guests/balance/phone',
+      rewardTypes: ['BONUS_BALANCE'],
+      storeId: null,
+      rewardId: null,
+      limit: 1,
+      maxAttempts: 5,
+      retryMinutes: 1,
+      staleLockMinutes: 15,
+    });
+
+    const query = prisma.$queryRaw.mock.calls[0][0] as {
+      strings?: string[];
+      values?: unknown[];
+    };
+    expect(query.strings).toBeDefined();
+    const sql = query.strings?.join('?') ?? '';
+
+    expect(sql).toContain('"attempts" >=');
+    expect(sql).toContain('"externalDomain" = ?');
+    expect(sql).toContain('"errorMessage" ILIKE ?');
+    expect(query.values).toEqual(
+      expect.arrayContaining([
+        'leetplus-guest-portal',
+        '%leetplus-guest-portal%',
+      ]),
+    );
+  });
+
   it('does not pass guest portal pseudo-user as ledger processor id', async () => {
     const { service, prisma, langameSettingsService } = createService({
       LANGAME_BONUS_ACCRUAL_ENABLED: 'true',

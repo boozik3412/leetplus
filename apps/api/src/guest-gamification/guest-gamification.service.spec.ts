@@ -464,6 +464,23 @@ function dryRunResult(
   };
 }
 
+function noRewardDryRunResult(
+  overrides: Partial<GuestGameDryRunResult> = {},
+): GuestGameDryRunResult {
+  return dryRunResult({
+    ...overrides,
+    rules: overrides.rules ?? [],
+    summary: {
+      checkedRules: 0,
+      eligibleRules: 0,
+      blockedRules: 0,
+      estimatedRewardAmount: 0,
+      projectedXpDelta: 0,
+      ...overrides.summary,
+    },
+  });
+}
+
 function eventResult(overrides: Partial<GuestGameEvent> = {}): GuestGameEvent {
   const profile = profileFixture();
 
@@ -3384,7 +3401,7 @@ describe('GuestGamificationService', () => {
         profile,
         profileCreated: false,
       });
-      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      jest.spyOn(service, 'dryRun').mockResolvedValue(noRewardDryRunResult());
       prisma.guestGameEvent.findFirst.mockResolvedValue({
         id: 'event-existing',
         eventType: 'SESSION_START',
@@ -3556,6 +3573,94 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('repairs a mission reward when the event exists but the reward is missing', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const eventExternalId =
+        'guest-game:GUEST_SESSION:SESSION_START:session-1';
+      const repairedReward = rewardResult({
+        id: 'reward-mission-repaired',
+        externalId: `${eventExternalId}:reward:MISSION:mission-1`,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 50,
+        rewardLabel: '50 bonus points',
+        mission: {
+          id: 'mission-1',
+          name: 'Visit mission',
+          status: 'ACTIVE',
+          xpReward: 30,
+        },
+      });
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(
+        dryRunResult({
+          rules: [
+            {
+              ...dryRunResult().rules[0],
+              id: 'mission-1',
+              kind: 'MISSION',
+              name: 'Visit mission',
+              rewardType: 'BONUS_BALANCE',
+              rewardAmount: 50,
+              rewardLabel: '50 bonus points',
+              selectedRewardLabel: '50 bonus points',
+              manualApprovalRequired: false,
+            },
+          ],
+        }),
+      );
+      jest
+        .spyOn(service as any, 'createProcessRewards')
+        .mockResolvedValue([repairedReward]);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(
+        eventResult({
+          id: 'event-existing',
+          externalId: eventExternalId,
+          occurredAt: now as unknown as string,
+          createdAt: now as unknown as string,
+        }),
+      );
+      prisma.guestGameReward.findMany.mockResolvedValue([]);
+
+      const result = await service.processEvent(user, {
+        profileId: profile.id,
+        guestId: 'guest-1',
+        eventType: 'SESSION_START',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'fact-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-1',
+      });
+
+      expect((service as any).createProcessRewards).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'fact-1',
+        }),
+        expect.objectContaining({ eventType: 'SESSION_START' }),
+        profile.id,
+        expect.objectContaining({
+          externalId: eventExternalId,
+          externalDomain: 'club-1',
+        }),
+      );
+      expect(result).toMatchObject({
+        processed: true,
+        event: { id: 'event-existing' },
+        rewards: [{ id: 'reward-mission-repaired' }],
+        summary: {
+          createdRewards: 1,
+          queuedRewardAmount: 50,
+          idempotent: true,
+        },
+      });
+    });
+
     it('treats a parallel unique event conflict as idempotent without creating duplicate rewards', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();
@@ -3568,7 +3673,7 @@ describe('GuestGamificationService', () => {
         profile,
         profileCreated: false,
       });
-      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      jest.spyOn(service, 'dryRun').mockResolvedValue(noRewardDryRunResult());
       jest
         .spyOn(service as any, 'createProcessEvent')
         .mockRejectedValue(new ConflictException('duplicate event'));
@@ -3630,6 +3735,105 @@ describe('GuestGamificationService', () => {
           idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
           idempotent: true,
           langameWrite: false,
+        },
+      });
+    });
+
+    it('repairs a Battle Pass reward after a parallel unique event conflict', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const eventExternalId =
+        'guest-game:GUEST_SESSION:SESSION_START:session-1';
+      const repairedReward = rewardResult({
+        id: 'reward-season-repaired',
+        externalId: `${eventExternalId}:reward:SEASON:season-1`,
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardAmount: 0,
+        rewardLabel: 'Free drink',
+        season: {
+          id: 'season-1',
+          name: 'Club season',
+          status: 'ACTIVE',
+        },
+      });
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(
+        dryRunResult({
+          rules: [
+            {
+              ...dryRunResult().rules[0],
+              id: 'season-1',
+              kind: 'SEASON',
+              name: 'Club season',
+              rewardType: 'BATTLE_PASS_REWARD',
+              rewardAmount: 0,
+              rewardLabel: 'Free drink',
+              selectedRewardLabel: 'Free drink',
+              manualApprovalRequired: false,
+            },
+          ],
+          summary: {
+            checkedRules: 1,
+            eligibleRules: 1,
+            blockedRules: 0,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 30,
+          },
+        }),
+      );
+      jest
+        .spyOn(service as any, 'createProcessEvent')
+        .mockRejectedValue(new ConflictException('duplicate event'));
+      jest
+        .spyOn(service as any, 'createProcessRewards')
+        .mockResolvedValue([repairedReward]);
+      prisma.guestGameEvent.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(
+          eventResult({
+            id: 'event-existing',
+            externalId: eventExternalId,
+            occurredAt: now as unknown as string,
+            createdAt: now as unknown as string,
+          }),
+        );
+      prisma.guestGameReward.findMany.mockResolvedValue([]);
+
+      const result = await service.processEvent(user, {
+        profileId: profile.id,
+        guestId: 'guest-1',
+        eventType: 'SESSION_START',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'fact-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-1',
+      });
+
+      expect((service as any).createProcessRewards).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'fact-1',
+        }),
+        expect.objectContaining({ eventType: 'SESSION_START' }),
+        profile.id,
+        expect.objectContaining({
+          externalId: eventExternalId,
+          externalDomain: 'club-1',
+        }),
+      );
+      expect(result).toMatchObject({
+        processed: true,
+        event: { id: 'event-existing' },
+        rewards: [{ id: 'reward-season-repaired' }],
+        summary: {
+          createdRewards: 1,
+          queuedRewardAmount: 0,
+          idempotent: true,
         },
       });
     });
@@ -3962,6 +4166,87 @@ describe('GuestGamificationService', () => {
           eventType: 'REFERRAL_ACCEPTED',
         }),
       );
+    });
+  });
+
+  describe('updateReward', () => {
+    it('queues and dispatches a manually approved mission bonus reward', async () => {
+      const { service, prisma, bonusLedgerService } = createService();
+      const mission = {
+        id: 'mission-1',
+        name: 'Visit mission',
+        status: 'ACTIVE',
+        xpReward: 30,
+      };
+      const pending = rewardRow({
+        id: 'reward-mission-pending',
+        status: 'PENDING',
+        missionId: 'mission-1',
+        mission,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+        rewardLabel: '50 bonus points',
+        rewardCode: null,
+      });
+      const approved = rewardRow({
+        id: 'reward-mission-pending',
+        status: 'APPROVED',
+        approvedByUserId: user.id,
+        missionId: 'mission-1',
+        mission,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+        rewardLabel: '50 bonus points',
+        rewardCode: 'LP-50',
+      });
+
+      prisma.guestGameReward.findFirst.mockResolvedValue(pending);
+      prisma.guestGameReward.update.mockResolvedValue(approved);
+      jest.spyOn(service as any, 'createSystemEvent').mockResolvedValue(null);
+
+      const result = await service.updateReward(
+        user,
+        'reward-mission-pending',
+        {
+          status: 'APPROVED',
+        },
+      );
+
+      expect(prisma.guestGameReward.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'reward-mission-pending' },
+          data: expect.objectContaining({
+            status: 'APPROVED',
+            approvedByUserId: user.id,
+          }),
+        }),
+      );
+      expect((service as any).createSystemEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'REWARD_APPROVED',
+          missionId: 'mission-1',
+        }),
+      );
+      expect(bonusLedgerService.queueApprovedRewards).toHaveBeenCalledWith(
+        user,
+        {
+          rewardId: 'reward-mission-pending',
+          rewardTypes: ['BONUS_BALANCE'],
+          limit: 1,
+        },
+      );
+      expect(bonusLedgerService.dispatch).toHaveBeenCalledWith(user, {
+        rewardId: 'reward-mission-pending',
+        rewardTypes: ['BONUS_BALANCE'],
+        limit: 1,
+        queueApprovedRewards: false,
+      });
+      expect(result).toMatchObject({
+        id: 'reward-mission-pending',
+        status: 'APPROVED',
+        rewardType: 'BONUS_BALANCE',
+      });
     });
   });
 

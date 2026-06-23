@@ -7478,16 +7478,15 @@ export class GuestGamificationService {
         user,
         eventReference,
       );
-      const repairedRewards =
-        rewards.length === 0 && nullableId(dto.lootBoxId)
-          ? await this.createProcessRewards(
-              user,
-              dto,
-              dryRun,
-              profile.id,
-              eventReference,
-            )
-          : [];
+      const repairedRewards = shouldRecoverProcessRewards(dryRun, rewards)
+        ? await this.createProcessRewards(
+            user,
+            dto,
+            dryRun,
+            profile.id,
+            eventReference,
+          )
+        : [];
       const processRewards =
         repairedRewards.length > 0 ? repairedRewards : rewards;
 
@@ -7507,7 +7506,10 @@ export class GuestGamificationService {
           idempotent: true,
           langameWrite: false,
         },
-        note: 'Snapshot-событие уже было обработано ранее; повторный запуск не создал XP, события или награды.',
+        note:
+          repairedRewards.length > 0
+            ? 'Snapshot-событие уже было обработано ранее; LeetPlus восстановил отсутствующие награды без повторного XP или события.'
+            : 'Snapshot-событие уже было обработано ранее; повторный запуск не создал XP, события или награды.',
       };
     }
 
@@ -7546,16 +7548,15 @@ export class GuestGamificationService {
             user,
             eventReference,
           );
-          const repairedRewards =
-            rewards.length === 0 && nullableId(dto.lootBoxId)
-              ? await this.createProcessRewards(
-                  user,
-                  dto,
-                  dryRun,
-                  profile.id,
-                  eventReference,
-                )
-              : [];
+          const repairedRewards = shouldRecoverProcessRewards(dryRun, rewards)
+            ? await this.createProcessRewards(
+                user,
+                dto,
+                dryRun,
+                profile.id,
+                eventReference,
+              )
+            : [];
           const processRewards =
             repairedRewards.length > 0 ? repairedRewards : rewards;
 
@@ -7575,7 +7576,10 @@ export class GuestGamificationService {
               idempotent: true,
               langameWrite: false,
             },
-            note: 'Событие уже было обработано параллельным запросом; повторный запуск не создал XP, события или награды.',
+            note:
+              repairedRewards.length > 0
+                ? 'Событие уже было обработано параллельным запросом; LeetPlus восстановил отсутствующие награды без повторного XP или события.'
+                : 'Событие уже было обработано параллельным запросом; повторный запуск не создал XP, события или награды.',
           };
         }
       }
@@ -13464,6 +13468,13 @@ function shouldQueueProcessReward(rule: GuestGameDryRunRule) {
     rule.selectedRewardLabel ||
     (rule.rewardAmount ?? 0) > 0,
   );
+}
+
+function shouldRecoverProcessRewards(
+  dryRun: GuestGameDryRunResult,
+  rewards: GuestGameReward[],
+) {
+  return rewards.length === 0 && dryRun.rules.some(shouldQueueProcessReward);
 }
 
 function rewardRuleLink(rule: GuestGameDryRunRule) {

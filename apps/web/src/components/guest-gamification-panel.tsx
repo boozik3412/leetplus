@@ -561,17 +561,33 @@ const audienceHelpText: Record<string, string> = {
 
 const rewardTypeOptions = [
   { value: "PROMOCODE", label: "Промокод" },
-  { value: "BONUS", label: "Бонусы" },
-  { value: "BONUS_POINTS", label: "Бонусные баллы" },
-  { value: "BONUS_BALANCE", label: "Бонусный баланс Langame" },
+  { value: "BONUS_BALANCE", label: "Бонусы Langame" },
   { value: "BALANCE", label: "Денежный баланс Langame" },
   { value: "XP", label: "Опыт XP" },
-  { value: "LOYALTY_BONUS", label: "Бонус лояльности" },
-  { value: "CASHBACK", label: "Кешбэк" },
   { value: "FREE_HOURS", label: "Бесплатные часы" },
   { value: "CASHIER_CODE", label: "Код кассиру" },
   { value: "MERCH", label: "Физический приз" },
   { value: "BATTLE_PASS_REWARD", label: "Награда Battle Pass" },
+];
+
+const lootBoxRewardTypeOptions = rewardTypeOptions.filter(
+  (option) => !["BALANCE", "BATTLE_PASS_REWARD"].includes(option.value),
+);
+
+const legacyRewardTypeLabelOptions = [
+  { value: "BONUS", label: "Бонусы Langame (старый тип)" },
+  { value: "BONUS_POINTS", label: "Бонусы Langame (старый тип)" },
+  { value: "LOYALTY_BONUS", label: "Бонусы Langame (старый тип)" },
+  { value: "CASHBACK", label: "Бонусы Langame (старый тип)" },
+  { value: "CASH_BALANCE", label: "Бонусы Langame (старый тип)" },
+  { value: "LANGAME_BALANCE", label: "Бонусы Langame (старый тип)" },
+  { value: "MONEY_BALANCE", label: "Денежный баланс Langame (старый тип)" },
+  { value: "WALLET_BALANCE", label: "Денежный баланс Langame (старый тип)" },
+];
+
+const rewardTypeLabelOptions = [
+  ...rewardTypeOptions,
+  ...legacyRewardTypeLabelOptions,
 ];
 
 const automaticLedgerRewardTypes = new Set([
@@ -3642,8 +3658,7 @@ function PilotReadinessCard({
                           </div>
                           <p className="mt-1 leading-5 text-zinc-600 dark:text-zinc-300">
                             {item.reward
-                              ? `${item.reward.rewardLabel} · ${optionLabel(
-                                  rewardTypeOptions,
+                              ? `${item.reward.rewardLabel} · ${rewardTypeLabelFromValue(
                                   item.reward.rewardType,
                                 )}`
                               : item.source}
@@ -6182,7 +6197,7 @@ function LootBoxesTab({
             lootBoxTriggerOptions,
             item.triggerKind,
           )} · Награда: ${
-            item.rewardLabel ?? optionLabel(rewardTypeOptions, item.rewardType)
+            item.rewardLabel ?? rewardTypeLabelFromValue(item.rewardType)
           }`}
           meta={[
             item.audience?.name ?? "все гости",
@@ -7522,7 +7537,7 @@ function LootBoxPrizesEditor({
           >
             <Field label="Тип награды">
               <OptionSelect
-                options={rewardTypeOptions}
+                options={lootBoxRewardTypeOptions}
                 value={prize.rewardType}
                 preservedLabel="Сохраненный тип награды"
                 onChange={(rewardType) => updatePrize(index, { rewardType })}
@@ -8555,7 +8570,7 @@ function rewardSearchTokens(reward: GuestGameReward) {
     reward.rewardCode,
     rewardActivityLabel(reward),
     reward.store?.name,
-    optionLabel(rewardTypeOptions, reward.rewardType),
+    rewardTypeLabelFromValue(reward.rewardType),
     formatDate(reward.qualifiedAt),
   ]
     .filter(Boolean)
@@ -8634,7 +8649,7 @@ function RewardRow({
   const activity = rewardActivityLabel(reward);
   const storeName = reward.store?.name ?? "любой клуб";
   const qualifiedAt = formatDate(reward.qualifiedAt);
-  const rewardTypeLabel = optionLabel(rewardTypeOptions, reward.rewardType);
+  const rewardTypeLabel = rewardTypeLabelFromValue(reward.rewardType);
 
   return (
     <details className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -10518,15 +10533,18 @@ function buildLootBoxLimits(form: LootBoxForm) {
 function buildLootBoxProbabilityRules(form: LootBoxForm) {
   const prizes = form.prizes
     .map((prize) => {
+      const rewardType = canonicalLootBoxRewardType(
+        prize.rewardType || "PROMOCODE",
+      );
       const rewardLabel = prize.rewardLabel.trim();
       const chancePercent = Math.max(0, numeric(prize.chancePercent, 0));
 
       return {
-        rewardType: prize.rewardType || "PROMOCODE",
+        rewardType,
         rewardAmount: optionalNumber(prize.rewardAmount) ?? 0,
         rewardLabel:
           rewardLabel ||
-          optionLabel(rewardTypeOptions, prize.rewardType) ||
+          rewardTypeLabelFromValue(rewardType) ||
           "Награда лутбокса",
         chancePercent,
         weight: chancePercent,
@@ -10861,6 +10879,32 @@ function optionLabel(
   return options.find((option) => option.value === value)?.label ?? value;
 }
 
+function rewardTypeLabelFromValue(value: string) {
+  return optionLabel(rewardTypeLabelOptions, value);
+}
+
+function canonicalLootBoxRewardType(value: string) {
+  const normalized = value.trim().toUpperCase();
+
+  if (!normalized) {
+    return value;
+  }
+
+  if (
+    [
+      "BONUS",
+      "BONUS_POINTS",
+      "BONUS_BALANCE",
+      "CASHBACK",
+      "LOYALTY_BONUS",
+    ].includes(normalized)
+  ) {
+    return "BONUS_BALANCE";
+  }
+
+  return normalized;
+}
+
 function missionTypeLabel(value: string) {
   return optionLabel(missionTypeOptions, value);
 }
@@ -11007,7 +11051,9 @@ function lootBoxPrizesToForm(
     return [
       {
         id: "fallback-prize",
-        rewardType: fallback.rewardType || "PROMOCODE",
+        rewardType: canonicalLootBoxRewardType(
+          fallback.rewardType || "PROMOCODE",
+        ),
         rewardAmount: fallback.rewardAmount || "0",
         rewardLabel: fallback.rewardLabel || "Награда лутбокса",
         chancePercent: "100",
@@ -11034,8 +11080,10 @@ function lootBoxPrizeFromRuleItem(
 
   return {
     id: `rule-prize-${index}`,
-    rewardType: String(
-      record.rewardType ?? record.type ?? fallback.rewardType ?? "PROMOCODE",
+    rewardType: canonicalLootBoxRewardType(
+      String(
+        record.rewardType ?? record.type ?? fallback.rewardType ?? "PROMOCODE",
+      ),
     ),
     rewardAmount: numberFormValue(
       record.rewardAmount ?? record.amount ?? fallback.rewardAmount ?? "0",
@@ -11075,7 +11123,9 @@ function primaryLootBoxPrize(form: LootBoxForm) {
   );
 
   return {
-    rewardType: prize?.rewardType || form.rewardType || "PROMOCODE",
+    rewardType: canonicalLootBoxRewardType(
+      prize?.rewardType || form.rewardType || "PROMOCODE",
+    ),
     rewardAmount: prize?.rewardAmount || form.rewardAmount || "0",
     rewardLabel: prize?.rewardLabel || form.rewardLabel || "Награда лутбокса",
   };

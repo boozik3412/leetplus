@@ -418,7 +418,7 @@ export function GuestGamificationVisualEditor({
           ].join(" ")}
         >
           {publishBlocked
-            ? "Для включенного чек-ина нужно выбрать награду: XP или бонусы."
+            ? "Для включенного чек-ина нужно выбрать награду: XP или бонусы Langame."
             : message}
         </div>
       ) : null}
@@ -1331,7 +1331,7 @@ function CheckInInspector({
         >
           <option value="">Выберите награду</option>
           <option value="XP">XP</option>
-          <option value="BONUS">Бонусы</option>
+          <option value="BONUS">Бонусы Langame</option>
         </select>
       </label>
       {checkIn.rewardMode === "XP" ? (
@@ -1345,7 +1345,7 @@ function CheckInInspector({
       ) : null}
       {checkIn.rewardMode === "BONUS" ? (
         <NumberField
-          label="Бонусы за чекин"
+          label="Бонусы Langame за чекин"
           value={checkIn.bonusAmount ?? 1}
           min={1}
           disabled={disabled || !checkIn.enabled}
@@ -2109,9 +2109,9 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
     title: "Новый лутбокс",
     status: "DRAFT",
     triggerKind: "SESSION_START",
-    rewardType: "BONUS",
+    rewardType: "BONUS_BALANCE",
     rewardAmount: 100,
-    rewardLabel: "Бонус клуба",
+    rewardLabel: "Бонусы Langame",
     condition: visualTriggerLabel("SESSION_START"),
     limitPerGuest: 1,
     timeWindowMode: "ANY",
@@ -2229,7 +2229,7 @@ function visualLootBoxFromTemplate(
     title: lootBox.name,
     status: lootBox.status,
     triggerKind: lootBox.triggerKind,
-    rewardType: lootBox.rewardType,
+    rewardType: canonicalVisualLootBoxRewardType(lootBox.rewardType),
     rewardAmount: lootBox.rewardAmount,
     rewardLabel: lootBox.rewardLabel ?? lootBox.name,
     condition: visualLootBoxConditionLabel(
@@ -2325,6 +2325,10 @@ function isBonusRewardType(rewardType: string) {
     "LOYALTY_BONUS",
     "CASHBACK",
   ].includes(rewardType);
+}
+
+function canonicalVisualLootBoxRewardType(rewardType: string) {
+  return isBonusRewardType(rewardType) ? "BONUS_BALANCE" : rewardType;
 }
 
 function templateRecord(value: unknown): Record<string, unknown> {
@@ -2530,7 +2534,7 @@ function fallbackLootBoxes(): GuestGameVisualEditorLootBox[] {
       title: "Ежедневный контейнер",
       status: "ACTIVE",
       triggerKind: "SESSION_START",
-      rewardType: "BONUS",
+      rewardType: "BONUS_BALANCE",
       rewardAmount: 100,
       rewardLabel: "Бонус за визит",
       condition: "Визит в клуб",

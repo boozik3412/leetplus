@@ -2847,6 +2847,33 @@ function isBonusLedgerRewardType(rewardType: string | null) {
   );
 }
 
+function canonicalLootBoxRewardType(rewardType: string): string;
+function canonicalLootBoxRewardType(rewardType: null | undefined): undefined;
+function canonicalLootBoxRewardType(
+  rewardType: string | null | undefined,
+): string | undefined;
+function canonicalLootBoxRewardType(rewardType: string | null | undefined) {
+  const normalized = rewardType?.trim().toUpperCase();
+
+  if (!normalized) {
+    return rewardType ?? undefined;
+  }
+
+  if (
+    [
+      'BONUS',
+      'BONUS_POINTS',
+      'BONUS_BALANCE',
+      'CASHBACK',
+      'LOYALTY_BONUS',
+    ].includes(normalized)
+  ) {
+    return 'BONUS_BALANCE';
+  }
+
+  return normalized;
+}
+
 function positiveConfigInt(
   value: string | undefined,
   fallback: number,
@@ -9081,6 +9108,8 @@ export class GuestGamificationService {
       await this.assertAudience(user, dto.audienceId);
     }
 
+    const rewardType = canonicalLootBoxRewardType(stringValue(dto.rewardType));
+
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
@@ -9094,8 +9123,7 @@ export class GuestGamificationService {
       triggerKind:
         stringValue(dto.triggerKind) ??
         (isCreate ? 'SESSION_START' : undefined),
-      rewardType:
-        stringValue(dto.rewardType) ?? (isCreate ? 'PROMOCODE' : undefined),
+      rewardType: rewardType ?? (isCreate ? 'PROMOCODE' : undefined),
       rewardAmount: decimalValue(dto.rewardAmount),
       rewardLabel: nullableString(dto.rewardLabel),
       segment: nullableString(dto.segment),
@@ -15030,11 +15058,12 @@ function lootBoxRewardFromPrize(
   }
 
   return {
-    rewardType:
+    rewardType: canonicalLootBoxRewardType(
       dryRunString(record.rewardType) ??
-      dryRunString(record.type) ??
-      rule.rewardType ??
-      'PROMOCODE',
+        dryRunString(record.type) ??
+        rule.rewardType ??
+        'PROMOCODE',
+    ),
     rewardAmount:
       dryRunOptionalNumber(record.rewardAmount) ??
       dryRunOptionalNumber(record.amount) ??
@@ -15064,7 +15093,7 @@ function lootBoxRewardFromLegacyItem(
   }
 
   return {
-    rewardType: rule.rewardType ?? 'PROMOCODE',
+    rewardType: canonicalLootBoxRewardType(rule.rewardType ?? 'PROMOCODE'),
     rewardAmount: rule.rewardAmount ?? 0,
     rewardLabel,
     weight: Math.max(0, dryRunNumber(record.weight, 0)),
@@ -15081,7 +15110,7 @@ function lootBoxFallbackReward(
   }
 
   return {
-    rewardType: rule.rewardType ?? 'PROMOCODE',
+    rewardType: canonicalLootBoxRewardType(rule.rewardType ?? 'PROMOCODE'),
     rewardAmount: rule.rewardAmount ?? 0,
     rewardLabel,
     weight: 100,
@@ -15707,10 +15736,9 @@ function normalizeVisualEditorPayload(
             itemRecord.triggerKind,
             'SESSION_START',
           ).toUpperCase(),
-          rewardType: visualString(
-            itemRecord.rewardType,
-            'PROMOCODE',
-          ).toUpperCase(),
+          rewardType: canonicalLootBoxRewardType(
+            visualString(itemRecord.rewardType, 'PROMOCODE'),
+          ),
           rewardAmount: visualNumberOrNull(itemRecord.rewardAmount),
           rewardLabel: visualString(itemRecord.rewardLabel, 'Награда клуба'),
           condition: visualString(itemRecord.condition, 'Активность в клубе'),
@@ -15852,7 +15880,7 @@ function visualLootBoxFromRule(
     title: rule.name,
     status: rule.status,
     triggerKind: rule.triggerKind,
-    rewardType: rule.rewardType,
+    rewardType: canonicalLootBoxRewardType(rule.rewardType),
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel ?? rule.name,
     condition: visualLootBoxCondition(
@@ -15982,13 +16010,15 @@ function buildVisualLootBoxData(
   storeIds: string[],
   item: GuestGameVisualEditorLootBox,
 ) {
+  const rewardType = canonicalLootBoxRewardType(item.rewardType);
+
   return clean({
     tenantId: user.tenantId,
     createdByUserId: actorUserId(user),
     name: item.title,
     status: item.status,
     triggerKind: item.triggerKind,
-    rewardType: item.rewardType,
+    rewardType,
     rewardAmount:
       item.rewardAmount == null ? null : new Prisma.Decimal(item.rewardAmount),
     rewardLabel: item.rewardLabel,
@@ -16012,7 +16042,7 @@ function buildVisualLootBoxData(
       source: 'visual_editor',
       prizes: [
         {
-          rewardType: item.rewardType,
+          rewardType,
           rewardAmount: item.rewardAmount ?? 0,
           rewardLabel: item.rewardLabel,
           weight: 100,
@@ -16314,7 +16344,7 @@ function buildVisualEditorPreviewSummary(
         name: item.title,
         triggerKind: item.triggerKind,
         rewardLabel: item.rewardLabel,
-        rewardType: item.rewardType,
+        rewardType: canonicalLootBoxRewardType(item.rewardType),
         manualApprovalRequired: false,
         note: null,
         openState: 'WAITING_EVENT',

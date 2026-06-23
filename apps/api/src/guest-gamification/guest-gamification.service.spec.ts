@@ -3162,6 +3162,52 @@ describe('GuestGamificationService', () => {
       }
     });
 
+    it('normalizes legacy loot box bonus prize aliases to BONUS_BALANCE', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          rewardType: 'BONUS',
+          probabilityRules: {
+            type: 'weighted',
+            prizes: [
+              {
+                rewardType: 'BONUS',
+                rewardAmount: 50,
+                rewardLabel: '50 бонусов',
+                weight: 100,
+              },
+            ],
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        kind: 'LOOT_BOX',
+        eligible: true,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 50,
+        selectedReward: {
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: 50,
+          rewardLabel: '50 бонусов',
+        },
+      });
+    });
+
     it('blocks a mission until the configured progress metric reaches its target', async () => {
       const { service } = createService();
 

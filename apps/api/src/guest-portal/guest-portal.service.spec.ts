@@ -1481,11 +1481,11 @@ describe('GuestPortalService', () => {
       );
     });
 
-    it('limits mission board in compact game summary', async () => {
+    it('limits mission board in game summary for expanded quests', async () => {
       const { service } = createService();
       const portal = portalPayloadFixture();
       const baseMission = portal.gamification.missions[0];
-      portal.gamification.missions = Array.from({ length: 7 }, (_, index) => ({
+      portal.gamification.missions = Array.from({ length: 11 }, (_, index) => ({
         ...baseMission,
         id: `mission-${index + 1}`,
         name: `Mission ${index + 1}`,
@@ -1500,8 +1500,8 @@ describe('GuestPortalService', () => {
 
       const summary = await service.getGameSummary('Bearer guest-token');
 
-      expect(summary.missions.total).toBe(7);
-      expect(summary.missions.featured).toHaveLength(6);
+      expect(summary.missions.total).toBe(11);
+      expect(summary.missions.featured).toHaveLength(10);
       expect(summary.missions.featured.map((mission) => mission.id)).toEqual([
         'mission-1',
         'mission-2',
@@ -1509,6 +1509,10 @@ describe('GuestPortalService', () => {
         'mission-4',
         'mission-5',
         'mission-6',
+        'mission-7',
+        'mission-8',
+        'mission-9',
+        'mission-10',
       ]);
     });
   });

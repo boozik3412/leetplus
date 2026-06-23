@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   FormEvent,
@@ -63,6 +63,34 @@ type HomeBattleQuest = {
   state: "complete" | "current" | "locked";
   label: string;
 };
+type QuestStatus = "done" | "live" | "next";
+type PlayerQuest = {
+  id: string;
+  title: string;
+  description: string;
+  status: QuestStatus;
+  label: string;
+  progress?: {
+    current: number;
+    total: number;
+    label: string;
+    percent: number;
+  };
+  reward?: {
+    type: "xp" | "lootbox" | "rank" | "promo";
+    value: string | number;
+  };
+};
+type QuestBoardStyle = CSSProperties &
+  Partial<
+    Record<
+      | "--quest-board-left"
+      | "--quest-board-top"
+      | "--quest-board-right"
+      | "--quest-board-bottom",
+      string
+    >
+  >;
 
 class EmptySessionError extends Error {}
 
@@ -227,7 +255,13 @@ function ReadyGameView({
   const [lootboxOverlayPhase, setLootboxOverlayPhase] =
     useState<LootboxOverlayPhase>("ready");
   const lootboxRewardRef = useRef<HTMLButtonElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const lootBoxesRef = useRef<HTMLElement | null>(null);
+  const battlePassRef = useRef<HTMLElement | null>(null);
   const [promoCode, setPromoCode] = useState("");
+  const [questsExpanded, setQuestsExpanded] = useState(false);
+  const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
+  const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
   const homeBanners = buildHomeBanners(
     summary,
     primaryAction,
@@ -235,9 +269,9 @@ function ReadyGameView({
   );
   const lootCards = buildHomeLootCards(summary, selectedLootId);
   const battleQuests = buildHomeBattleQuests(summary);
-  const quickQuestCount = battleQuests.filter(
-    (quest) => quest.state === "complete",
-  ).length;
+  const playerQuests = useMemo(() => buildPlayerQuests(summary), [summary]);
+  const completedQuestCount = summary.progress.summary.missionsCompleted;
+  const questTotalCount = summary.missions.total || playerQuests.length;
   const battlePassProgress = clampPercent(
     summary.battlePass.active?.progressPercent ?? summary.journey.summary.readyPercent,
   );
@@ -248,6 +282,32 @@ function ReadyGameView({
     "Главная награда";
   const rankLabel = buildRankLabel(summary.profile.level);
   const rankPercent = buildRankPercent(summary);
+
+  const syncQuestBoardBounds = useCallback(() => {
+    const shell = shellRef.current;
+    const lootBoxes = lootBoxesRef.current;
+    const battlePass = battlePassRef.current;
+
+    if (!shell || !lootBoxes || !battlePass) {
+      return;
+    }
+
+    const shellRect = shell.getBoundingClientRect();
+    const lootRect = lootBoxes.getBoundingClientRect();
+    const battleRect = battlePass.getBoundingClientRect();
+    const left = Math.min(lootRect.left, battleRect.left) - shellRect.left;
+    const top = lootRect.top - shellRect.top;
+    const right =
+      shellRect.right - Math.max(lootRect.right, battleRect.right);
+    const bottom = shellRect.bottom - battleRect.bottom;
+
+    setQuestBoardStyle({
+      "--quest-board-left": `${Math.max(0, Math.round(left))}px`,
+      "--quest-board-top": `${Math.max(0, Math.round(top))}px`,
+      "--quest-board-right": `${Math.max(0, Math.round(right))}px`,
+      "--quest-board-bottom": `${Math.max(0, Math.round(bottom))}px`,
+    });
+  }, [setQuestBoardStyle]);
 
   useEffect(() => {
     if (!toastMessage) {
@@ -284,8 +344,69 @@ function ReadyGameView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [lootboxOverlayCard]);
 
+  useEffect(() => {
+    if (!questsExpanded) {
+      return;
+    }
+
+    syncQuestBoardBounds();
+
+    function handleResize() {
+      syncQuestBoardBounds();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setQuestsExpanded(false);
+      }
+    }
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(handleResize);
+
+    [shellRef.current, lootBoxesRef.current, battlePassRef.current].forEach(
+      (item) => {
+        if (item) {
+          resizeObserver?.observe(item);
+        }
+      },
+    );
+
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [questsExpanded, syncQuestBoardBounds]);
+
   function showToast(message: string) {
     setToastMessage(message);
+  }
+
+  function toggleQuestsExpanded() {
+    const nextExpanded = !questsExpanded;
+
+    if (nextExpanded) {
+      syncQuestBoardBounds();
+    }
+
+    setQuestsExpanded(nextExpanded);
+    showToast(nextExpanded ? "Открыт экран квестов." : "Квесты свернуты.");
+  }
+
+  function closeQuestBoard() {
+    setQuestsExpanded(false);
+    showToast("Квесты свернуты.");
+  }
+
+  function handleQuestClick(quest: PlayerQuest) {
+    setSelectedQuestId(quest.id);
+    showToast(`${quest.title}: ${quest.description}`);
   }
 
   function openLootboxOverlay(card: HomeLootCard) {
@@ -393,7 +514,13 @@ function ReadyGameView({
         </div>
       </header>
 
-      <div className="lp-club-shell">
+      <div
+        ref={shellRef}
+        className={[
+          "lp-club-shell",
+          questsExpanded ? "is-quests-expanded" : "",
+        ].join(" ")}
+      >
         <div className="lp-club-main-flow">
           <section className="lp-club-stage" aria-label="Главный блок клуба">
             <div id="profile" className="lp-club-card">
@@ -427,11 +554,13 @@ function ReadyGameView({
           </section>
 
           <HomeLootBoxes
+            sectionRef={lootBoxesRef}
             cards={lootCards}
             onSelect={openLootboxOverlay}
           />
 
           <HomeBattlePass
+            sectionRef={battlePassRef}
             quests={battleQuests}
             progress={battlePassProgress}
             rewardLabel={mainRewardLabel}
@@ -444,11 +573,25 @@ function ReadyGameView({
           summary={summary}
           rankLabel={rankLabel}
           rankPercent={rankPercent}
-          quickQuestCount={quickQuestCount}
-          quickQuests={battleQuests.slice(0, 3)}
+          completedQuestCount={completedQuestCount}
+          questTotalCount={questTotalCount}
+          quests={playerQuests}
+          questsExpanded={questsExpanded}
+          selectedQuestId={selectedQuestId}
           promoCode={promoCode}
           onPromoCodeChange={setPromoCode}
           onPromoSubmit={handlePromoSubmit}
+          onQuestClick={handleQuestClick}
+          onQuestsToggle={toggleQuestsExpanded}
+        />
+
+        <QuestBoard
+          quests={playerQuests}
+          expanded={questsExpanded}
+          selectedQuestId={selectedQuestId}
+          style={questBoardStyle}
+          onClose={closeQuestBoard}
+          onQuestClick={handleQuestClick}
         />
       </div>
 
@@ -511,14 +654,21 @@ function HomeBannerGrid({
 }
 
 function HomeLootBoxes({
+  sectionRef,
   cards,
   onSelect,
 }: {
+  sectionRef?: RefObject<HTMLElement | null>;
   cards: HomeLootCard[];
   onSelect: (card: HomeLootCard) => void;
 }) {
   return (
-    <section id="lootBoxes" className="lp-club-panel lp-club-lootboxes" aria-label="Лутбоксы">
+    <section
+      id="lootBoxes"
+      ref={sectionRef}
+      className="lp-club-panel lp-club-lootboxes"
+      aria-label="Лутбоксы"
+    >
       <div className="lp-club-section-head">
         <span>
           <h2>Лутбоксы</h2>
@@ -719,12 +869,14 @@ function LootboxOpeningOverlay({
 }
 
 function HomeBattlePass({
+  sectionRef,
   quests,
   progress,
   rewardLabel,
   seasonName,
   onToast,
 }: {
+  sectionRef?: RefObject<HTMLElement | null>;
   quests: HomeBattleQuest[];
   progress: number;
   rewardLabel: string;
@@ -732,7 +884,12 @@ function HomeBattlePass({
   onToast: (message: string) => void;
 }) {
   return (
-    <section id="battlePass" className="lp-club-panel lp-club-battlepass" aria-label="Батлпасс">
+    <section
+      id="battlePass"
+      ref={sectionRef}
+      className="lp-club-panel lp-club-battlepass"
+      aria-label="Батлпасс"
+    >
       <div className="lp-club-section-head">
         <span>
           <h2>Батлпасс клуба</h2>
@@ -779,21 +936,33 @@ function PlayerProfilePanel({
   summary,
   rankLabel,
   rankPercent,
-  quickQuestCount,
-  quickQuests,
+  completedQuestCount,
+  questTotalCount,
+  quests,
+  questsExpanded,
+  selectedQuestId,
   promoCode,
   onPromoCodeChange,
   onPromoSubmit,
+  onQuestClick,
+  onQuestsToggle,
 }: {
   summary: GuestPortalGameSummary;
   rankLabel: string;
   rankPercent: number;
-  quickQuestCount: number;
-  quickQuests: HomeBattleQuest[];
+  completedQuestCount: number;
+  questTotalCount: number;
+  quests: PlayerQuest[];
+  questsExpanded: boolean;
+  selectedQuestId: string | null;
   promoCode: string;
   onPromoCodeChange: (value: string) => void;
   onPromoSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onQuestClick: (quest: PlayerQuest) => void;
+  onQuestsToggle: () => void;
 }) {
+  const compactQuests = quests.slice(0, 5);
+
   return (
     <aside className="lp-club-profile-panel" aria-label="Профиль игрока">
       <div className="lp-club-profile-logo">
@@ -852,41 +1021,188 @@ function PlayerProfilePanel({
         </Link>
       </form>
 
-      <section className="lp-club-quest-widget" aria-label="Квесты игрока">
+      <section
+        className="lp-club-quest-widget quest-widget"
+        aria-label="Квесты игрока"
+      >
         <div className="lp-club-quest-widget-head">
           <span>
             <span className="lp-club-small-label">Квесты</span>
             <strong>Быстрые задачи</strong>
           </span>
-          <span className="lp-club-quest-count">
-            {formatNumber(quickQuestCount)} / {formatNumber(quickQuests.length)}
+          <span className="lp-club-quest-widget-actions">
+            <span className="lp-club-quest-count">
+              {formatNumber(completedQuestCount)} / {formatNumber(questTotalCount)}
+            </span>
+            <button
+              id="questToggle"
+              type="button"
+              className="lp-club-quest-open-button quest-open-button"
+              aria-expanded={questsExpanded}
+              aria-controls="questBoard"
+              onClick={onQuestsToggle}
+            >
+              {questsExpanded ? "Свернуть" : "Открыть все"}
+            </button>
           </span>
         </div>
 
         <div className="lp-club-side-quest-list">
-          {quickQuests.map((quest) => (
-            <Link
-              key={quest.id}
-              href="#battlePass"
-              className={[
-                "lp-club-side-quest",
-                quest.state === "complete" ? "is-done" : "",
-                quest.state === "current" ? "is-current" : "",
-              ].join(" ")}
-            >
-              <span className="lp-club-side-quest-icon" aria-hidden="true">
-                {quest.state === "complete" ? <CheckIcon /> : <QuestIcon />}
-              </span>
-              <span>
-                <strong>{quest.title}</strong>
-                <span>{quest.description}</span>
-              </span>
-              <span className="lp-club-side-quest-state">{quest.label}</span>
-            </Link>
-          ))}
+          {compactQuests.length ? (
+            compactQuests.map((quest) => (
+              <button
+                key={quest.id}
+                type="button"
+                className={[
+                  "lp-club-side-quest",
+                  quest.status === "done" ? "is-done" : "",
+                  quest.status === "live" ? "is-current" : "",
+                  selectedQuestId === quest.id ? "is-selected" : "",
+                ].join(" ")}
+                onClick={() => onQuestClick(quest)}
+              >
+                <span className="lp-club-side-quest-icon" aria-hidden="true">
+                  {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
+                </span>
+                <span className="lp-club-side-quest-copy">
+                  <strong>{quest.title}</strong>
+                  <span>{quest.progress?.label ?? quest.description}</span>
+                  {quest.progress ? (
+                    <span
+                      className="lp-club-side-quest-progress"
+                      aria-hidden="true"
+                    >
+                      <i
+                        style={
+                          {
+                            "--value": `${quest.progress.percent}%`,
+                          } as CSSProperties
+                        }
+                      />
+                    </span>
+                  ) : null}
+                </span>
+                <span className="lp-club-side-quest-state">{quest.label}</span>
+              </button>
+            ))
+          ) : (
+            <p className="lp-club-quest-empty">
+              Квесты появятся после настройки клуба.
+            </p>
+          )}
         </div>
       </section>
     </aside>
+  );
+}
+
+function QuestBoard({
+  quests,
+  expanded,
+  selectedQuestId,
+  style,
+  onClose,
+  onQuestClick,
+}: {
+  quests: PlayerQuest[];
+  expanded: boolean;
+  selectedQuestId: string | null;
+  style: QuestBoardStyle;
+  onClose: () => void;
+  onQuestClick: (quest: PlayerQuest) => void;
+}) {
+  const groups = buildQuestGroups(quests);
+
+  return (
+    <section
+      id="questBoard"
+      className={[
+        "lp-club-quest-board quest-board",
+        expanded ? "is-open" : "",
+      ].join(" ")}
+      aria-label="Все квесты игрока"
+      aria-hidden={!expanded}
+      style={style}
+    >
+      <div className="lp-club-quest-board-head">
+        <div>
+          <span className="lp-club-small-label">Квесты</span>
+          <h2>Экран задач</h2>
+          <p>
+            {formatNumber(quests.length)} задач клуба, сгруппированных по состоянию.
+          </p>
+        </div>
+        <button
+          id="questBoardClose"
+          type="button"
+          className="lp-club-quest-board-close quest-board-close"
+          disabled={!expanded}
+          onClick={onClose}
+        >
+          Свернуть
+        </button>
+      </div>
+
+      <div className="lp-club-quest-board-list">
+        {groups.map((group) => (
+          <section
+            key={group.id}
+            className="lp-club-quest-group"
+            aria-label={group.ariaLabel}
+          >
+            <div className="lp-club-quest-group-head">
+              <strong>{group.title}</strong>
+              <span>{formatNumber(group.items.length)}</span>
+            </div>
+
+            {group.items.length ? (
+              group.items.map((quest) => (
+                <button
+                  key={quest.id}
+                  type="button"
+                  className={[
+                    "lp-club-quest-full-card",
+                    quest.status === "done" ? "is-done" : "",
+                    quest.status === "live" ? "is-current" : "",
+                    selectedQuestId === quest.id ? "is-selected" : "",
+                  ].join(" ")}
+                  disabled={!expanded}
+                  onClick={() => onQuestClick(quest)}
+                >
+                  <span className="lp-club-quest-full-icon" aria-hidden="true">
+                    {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
+                  </span>
+                  <span className="lp-club-quest-full-main">
+                    <strong>{quest.title}</strong>
+                    <span>{quest.description}</span>
+                    {quest.progress ? (
+                      <span className="lp-club-quest-progress">
+                        <span
+                          className="lp-club-quest-progress-bar"
+                          aria-hidden="true"
+                        >
+                          <i
+                            style={
+                              {
+                                "--value": `${quest.progress.percent}%`,
+                              } as CSSProperties
+                            }
+                          />
+                        </span>
+                        <span>{quest.progress.label}</span>
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="lp-club-quest-full-state">{quest.label}</span>
+                </button>
+              ))
+            ) : (
+              <div className="lp-club-quest-group-empty">Пока пусто</div>
+            )}
+          </section>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1067,6 +1383,155 @@ function lootboxCardHint(card: HomeLootCard) {
   }
 
   return "Нажмите, чтобы посмотреть контейнер";
+}
+
+function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
+  return summary.missions.featured.map((mission) => {
+    const status = playerQuestStatus(mission);
+    const progress = playerQuestProgress(mission);
+    const reward = playerQuestReward(mission);
+
+    return {
+      id: mission.id,
+      title: mission.name,
+      description: playerQuestDescription(mission, reward),
+      status,
+      label: playerQuestStatusLabel(status),
+      progress,
+      reward,
+    };
+  });
+}
+
+function buildQuestGroups(quests: PlayerQuest[]) {
+  return [
+    {
+      id: "done" as const,
+      title: "Выполнены",
+      ariaLabel: "Выполненные квесты",
+      items: quests.filter((quest) => quest.status === "done"),
+    },
+    {
+      id: "live" as const,
+      title: "В процессе",
+      ariaLabel: "Квесты в процессе",
+      items: quests.filter((quest) => quest.status === "live"),
+    },
+    {
+      id: "next" as const,
+      title: "Не начаты",
+      ariaLabel: "Не начатые квесты",
+      items: quests.filter((quest) => quest.status === "next"),
+    },
+  ];
+}
+
+function playerQuestStatus(mission: GameMission): QuestStatus {
+  const completedStates: Array<GameMission["rewardStatus"]["state"]> = [
+    "COMPLETED",
+    "WAITING_APPROVAL",
+    "READY",
+    "QUEUED",
+    "SENDING",
+    "CONFIRMED",
+    "REDEEMED",
+  ];
+
+  if (
+    mission.progressPercent >= 100 ||
+    completedStates.includes(mission.rewardStatus.state)
+  ) {
+    return "done";
+  }
+
+  if (mission.progressCurrent > 0 || mission.progressPercent > 0) {
+    return "live";
+  }
+
+  return "next";
+}
+
+function playerQuestStatusLabel(status: QuestStatus) {
+  const labels = {
+    done: "done",
+    live: "live",
+    next: "next",
+  } satisfies Record<QuestStatus, string>;
+
+  return labels[status];
+}
+
+function playerQuestProgress(
+  mission: GameMission,
+): PlayerQuest["progress"] {
+  const lastStep = mission.questSteps[mission.questSteps.length - 1] ?? null;
+  const total = Math.max(1, mission.progressTarget ?? lastStep?.target ?? 1);
+  const current = Math.min(total, Math.max(0, mission.progressCurrent));
+  const percent = clampPercent(mission.progressPercent);
+  const hasProgress =
+    mission.progressTarget !== null ||
+    mission.questSteps.length > 0 ||
+    current > 0 ||
+    percent > 0;
+
+  if (!hasProgress) {
+    return undefined;
+  }
+
+  return {
+    current,
+    total,
+    label: playerQuestProgressLabel(current, total, mission.progressUnit),
+    percent,
+  };
+}
+
+function playerQuestProgressLabel(
+  current: number,
+  total: number,
+  unit: string | null,
+) {
+  const unitLabel = unit ? ` ${unit}` : "";
+
+  return `${formatNumber(current)} / ${formatNumber(total)}${unitLabel}`;
+}
+
+function playerQuestReward(mission: GameMission): PlayerQuest["reward"] {
+  const rewardLabel = mission.rewardLabel?.trim() ?? "";
+  const rewardLabelLower = rewardLabel.toLocaleLowerCase("ru-RU");
+
+  if (rewardLabelLower.includes("лутбокс")) {
+    return { type: "lootbox", value: rewardLabel };
+  }
+
+  if (mission.xpReward > 0) {
+    return { type: "xp", value: `${formatNumber(mission.xpReward)} XP` };
+  }
+
+  if (rewardLabel) {
+    return { type: "promo", value: rewardLabel };
+  }
+
+  return undefined;
+}
+
+function playerQuestDescription(
+  mission: GameMission,
+  reward: PlayerQuest["reward"],
+) {
+  if (mission.rewardStatus.state !== "IN_PROGRESS") {
+    return mission.rewardStatus.hint;
+  }
+
+  if (mission.rewardLabel) {
+    return `Награда: ${mission.rewardLabel}.`;
+  }
+
+  if (reward) {
+    return `Награда: ${reward.value}.`;
+  }
+
+  return "Клубный квест с прогрессом по активности гостя.";
 }
 
 function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest[] {
@@ -3411,6 +3876,7 @@ const clubHomeCss = `
 }
 
 .lp-club-shell {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 20px;
@@ -4678,11 +5144,15 @@ const clubHomeCss = `
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-height: 58px;
   padding: 10px;
   border: 1px solid rgba(196, 224, 225, 0.14);
   border-radius: 7px;
   color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
   text-decoration: none;
   background: rgba(2, 8, 11, 0.48);
   transition:
@@ -4692,7 +5162,8 @@ const clubHomeCss = `
 }
 
 .lp-club-side-quest:hover,
-.lp-club-side-quest.is-current {
+.lp-club-side-quest.is-current,
+.lp-club-side-quest.is-selected {
   border-color: rgba(131, 228, 236, 0.58);
   background:
     linear-gradient(90deg, rgba(131, 228, 236, 0.1), transparent),
@@ -4716,6 +5187,11 @@ const clubHomeCss = `
   background: rgba(196, 224, 225, 0.045);
 }
 
+.lp-club-side-quest-copy {
+  display: block;
+  min-width: 0;
+}
+
 .lp-club-side-quest strong {
   display: block;
   overflow: hidden;
@@ -4726,7 +5202,7 @@ const clubHomeCss = `
   white-space: nowrap;
 }
 
-.lp-club-side-quest span span {
+.lp-club-side-quest-copy > span {
   display: block;
   margin-top: 5px;
   overflow: hidden;
@@ -4735,6 +5211,22 @@ const clubHomeCss = `
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.lp-club-side-quest-progress {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.08);
+}
+
+.lp-club-side-quest-progress i {
+  display: block;
+  width: var(--value);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--teal));
+  box-shadow: 0 0 14px rgba(131, 228, 236, 0.4);
 }
 
 .lp-club-side-quest-state {
@@ -4747,6 +5239,305 @@ const clubHomeCss = `
 
 .lp-club-side-quest.is-current .lp-club-side-quest-state,
 .lp-club-side-quest.is-done .lp-club-side-quest-state {
+  color: var(--cyan);
+}
+
+.lp-club-quest-widget-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.lp-club-quest-open-button,
+.lp-club-quest-board-close {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid rgba(196, 224, 225, 0.16);
+  border-radius: 7px;
+  color: var(--cyan);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: rgba(196, 224, 225, 0.04);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-quest-open-button:hover,
+.lp-club-quest-open-button:focus-visible,
+.lp-club-quest-board-close:hover,
+.lp-club-quest-board-close:focus-visible {
+  border-color: rgba(131, 228, 236, 0.58);
+  background: rgba(131, 228, 236, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.lp-club-quest-empty,
+.lp-club-quest-group-empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed rgba(196, 224, 225, 0.14);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  background: rgba(2, 8, 11, 0.36);
+}
+
+.lp-club-quest-board {
+  position: absolute;
+  top: var(--quest-board-top, 298px);
+  right: var(--quest-board-right, 300px);
+  bottom: var(--quest-board-bottom, 32px);
+  left: var(--quest-board-left, 18px);
+  z-index: 8;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+  padding: 20px;
+  border: 1px solid rgba(131, 228, 236, 0.32);
+  border-radius: var(--radius);
+  opacity: 0;
+  pointer-events: none;
+  clip-path: inset(0 0 0 100% round 8px);
+  transform-origin: right center;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 28%),
+    rgba(5, 12, 15, 0.96);
+  box-shadow:
+    0 34px 110px rgba(0, 0, 0, 0.66),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.06);
+  transition:
+    opacity 260ms ease,
+    clip-path 360ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.lp-club-quest-board::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0 49.8%, rgba(131, 228, 236, 0.08) 49.8% 50%, transparent 50%),
+    linear-gradient(rgba(196, 224, 225, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(196, 224, 225, 0.035) 1px, transparent 1px);
+  background-size: auto, 82px 82px, 82px 82px;
+  mask-image: radial-gradient(circle at 70% 48%, #000, transparent 82%);
+}
+
+.lp-club-quest-board.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  clip-path: inset(0 0 0 0 round 8px);
+}
+
+.lp-club-shell.is-quests-expanded .lp-club-lootboxes,
+.lp-club-shell.is-quests-expanded .lp-club-battlepass {
+  opacity: 0.18;
+  filter: blur(1.5px);
+  pointer-events: none;
+}
+
+.lp-club-quest-board-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-club-quest-board-head h2 {
+  margin-top: 7px;
+  color: var(--text);
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 0.98;
+  font-weight: 760;
+}
+
+.lp-club-quest-board-head p {
+  max-width: 560px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lp-club-quest-board-list {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 8px;
+  scrollbar-color: rgba(131, 228, 236, 0.58) rgba(196, 224, 225, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.lp-club-quest-board-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.lp-club-quest-board-list::-webkit-scrollbar-track {
+  border: 1px solid rgba(196, 224, 225, 0.08);
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.055);
+}
+
+.lp-club-quest-board-list::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(5, 12, 15, 0.96);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(131, 228, 236, 0.98), rgba(84, 191, 198, 0.58));
+  box-shadow: 0 0 18px rgba(131, 228, 236, 0.34);
+}
+
+.lp-club-quest-group {
+  display: grid;
+  gap: 8px;
+}
+
+.lp-club-quest-group-head {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lp-club-quest-group-head strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 820;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lp-club-quest-group-head span {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.lp-club-quest-full-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 68px;
+  padding: 10px 12px;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 7px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  background: rgba(2, 8, 11, 0.58);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-quest-full-card:hover,
+.lp-club-quest-full-card.is-current,
+.lp-club-quest-full-card.is-selected {
+  border-color: rgba(131, 228, 236, 0.6);
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.1), transparent),
+    rgba(8, 18, 22, 0.86);
+  transform: translateY(-1px);
+}
+
+.lp-club-quest-full-card.is-done {
+  border-color: rgba(148, 214, 184, 0.46);
+  background: rgba(23, 48, 40, 0.3);
+}
+
+.lp-club-quest-full-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(131, 228, 236, 0.28);
+  border-radius: 7px;
+  color: var(--cyan);
+  background: rgba(196, 224, 225, 0.045);
+}
+
+.lp-club-quest-full-main {
+  min-width: 0;
+}
+
+.lp-club-quest-full-main strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.lp-club-quest-full-main > span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.lp-club-quest-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 7px;
+}
+
+.lp-club-quest-progress-bar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 999px;
+  background: rgba(0, 6, 9, 0.72);
+}
+
+.lp-club-quest-progress-bar i {
+  display: block;
+  width: var(--value);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--teal));
+  box-shadow: 0 0 18px rgba(131, 228, 236, 0.38);
+}
+
+.lp-club-quest-progress > span:not(.lp-club-quest-progress-bar),
+.lp-club-quest-full-state {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lp-club-quest-full-state {
   color: var(--cyan);
 }
 
@@ -5028,6 +5819,28 @@ const clubHomeCss = `
     margin-top: 18px;
     padding-top: 17px;
     border-top: 1px solid rgba(196, 224, 225, 0.12);
+  }
+
+  .lp-club-quest-board {
+    position: fixed;
+    inset: 84px 12px 12px;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: hidden;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 28%),
+      rgba(5, 12, 15, 0.985);
+  }
+
+  .lp-club-quest-full-card {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .lp-club-quest-full-state {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .lp-club-detail-head {

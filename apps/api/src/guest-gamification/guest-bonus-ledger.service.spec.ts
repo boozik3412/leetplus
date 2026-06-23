@@ -53,6 +53,9 @@ function createPrismaMock() {
     guestGameProfile: {
       findFirst: jest.fn(),
     },
+    store: {
+      findFirst: jest.fn(),
+    },
     tenant: {
       findMany: jest.fn(),
     },
@@ -94,6 +97,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameDeliveryEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guest.findFirst.mockResolvedValue(null);
   prisma.guestGameProfile.findFirst.mockResolvedValue(null);
+  prisma.store.findFirst.mockResolvedValue(null);
   prisma.tenant.findMany.mockResolvedValue([]);
   prisma.$transaction.mockImplementation((callback) => callback(prisma));
 
@@ -818,6 +822,68 @@ describe('GuestBonusLedgerService', () => {
     ).not.toContain('79992223344');
   });
 
+  it('queues guest portal profile rewards through the store Langame domain', async () => {
+    const { service, prisma, secretEncryptionService } = createService();
+
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
+    prisma.guestGameReward.findMany.mockResolvedValue([
+      {
+        id: 'reward-guest-portal-domain',
+        profileId: 'profile-1',
+        guestId: null,
+        storeId: 'store-1337',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'leetplus-guest-portal',
+        guestExternalId: null,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+        rewardLabel: '50 bonuses',
+        rewardCode: 'LP-50',
+        guest: null,
+        profile: {
+          phoneEncrypted: 'profile-encrypted-phone',
+          contactMasked: '***3344',
+        },
+        store: {
+          externalDomain: '1337.langame.ru',
+          integrationSource: {
+            provider: IntegrationProvider.LANGAME,
+            domain: '1337.langame.ru',
+            isActive: true,
+          },
+        },
+      },
+    ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.queueApprovedRewards(user, {
+      limit: 1,
+      rewardId: 'reward-guest-portal-domain',
+    });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        rewardId: 'reward-guest-portal-domain',
+        status: 'QUEUED',
+        externalDomain: '1337.langame.ru',
+      }),
+    ]);
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          rewardId: 'reward-guest-portal-domain',
+          storeId: 'store-1337',
+          externalDomain: '1337.langame.ru',
+          metadata: expect.objectContaining({
+            langameBalanceType: 'bonus_balance',
+            phoneMasked: '***3344',
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+
   it('queues explicit money balance rewards with Langame balance type', async () => {
     const { service, prisma, secretEncryptionService } = createService();
 
@@ -956,6 +1022,122 @@ describe('GuestBonusLedgerService', () => {
       expect.objectContaining({
         status: true,
         phone: '***2233',
+      }),
+    );
+  });
+
+  it('recovers guest portal ledger domains from the reward store before dispatching', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({
+      id: 'ledger-guest-portal-domain',
+      guestId: null,
+      externalDomain: 'leetplus-guest-portal',
+      externalGuestId: null,
+      storeId: 'store-1337',
+      metadata: {
+        rewardType: 'BONUS_BALANCE',
+        langameBalanceType: 'bonus_balance',
+      },
+    });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: '1337.langame.ru',
+          baseUrl: 'https://1337.langame.ru/public_api',
+        },
+        {
+          domain: '443.langame.ru',
+          baseUrl: 'https://443.langame.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.store.findFirst.mockResolvedValue({
+      externalDomain: '1337.langame.ru',
+      integrationSource: {
+        provider: IntegrationProvider.LANGAME,
+        domain: '1337.langame.ru',
+        isActive: true,
+      },
+    });
+    prisma.guestGameProfile.findFirst.mockResolvedValue({
+      phoneEncrypted: 'profile-encrypted-phone',
+      contactMasked: '***3344',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
+    langameClient.adjustGuestBalanceByPhone.mockResolvedValue({
+      status: true,
+      phone: '79992223344',
+    });
+    jest.spyOn(service as any, 'confirmEntry').mockResolvedValue(null);
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        mode: 'READY',
+        dryRun: false,
+        ready: true,
+        enabled: true,
+        path: '/master_api/guests/balance/phone',
+        rewardTypes: ['BONUS_BALANCE'],
+        limit: 50,
+        maxAttempts: 5,
+        retryMinutes: 1,
+        staleLockMinutes: 15,
+      },
+      access,
+    );
+
+    expect(result).toMatchObject({
+      ledgerEntryId: 'ledger-guest-portal-domain',
+      status: 'CONFIRMED',
+      externalDomain: '1337.langame.ru',
+    });
+    expect(prisma.store.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'store-1337',
+        tenantId: user.tenantId,
+      },
+      select: {
+        externalDomain: true,
+        integrationSource: {
+          select: {
+            provider: true,
+            domain: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalledWith(
+      'https://1337.langame.ru/public_api',
+      'request-token',
+      {
+        phone: '79992223344',
+        type: 'bonus_balance',
+        sum: 25,
+        comment: expect.stringContaining('LeetPlus'),
+      },
+      '/master_api/guests/balance/phone',
+    );
+    expect((service as any).confirmEntry).toHaveBeenCalledWith(
+      user.id,
+      expect.objectContaining({
+        id: 'ledger-guest-portal-domain',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '1337.langame.ru',
+      }),
+      expect.objectContaining({
+        phone: '***3344',
+        type: 'bonus_balance',
+        sum: 25,
+      }),
+      expect.objectContaining({
+        status: true,
+        phone: '***3344',
       }),
     );
   });

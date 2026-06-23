@@ -33,6 +33,7 @@ const scheduledBonusLedgerActorRoles = [
   UserRole.ADMIN,
   UserRole.MANAGER,
 ] as const;
+const guestPortalExternalDomains = new Set(['leetplus-guest-portal']);
 
 type BonusLedgerMode = 'DISABLED' | 'DRY_RUN' | 'READY';
 type BonusLedgerItemStatus =
@@ -310,6 +311,18 @@ export class GuestBonusLedgerService {
             contactMasked: true,
           },
         },
+        store: {
+          select: {
+            externalDomain: true,
+            integrationSource: {
+              select: {
+                provider: true,
+                domain: true,
+                isActive: true,
+              },
+            },
+          },
+        },
       },
       orderBy: [{ qualifiedAt: 'asc' }, { createdAt: 'asc' }],
       take: limit,
@@ -322,8 +335,9 @@ export class GuestBonusLedgerService {
         nullableString(reward.guestExternalId) ??
         nullableString(reward.guest?.externalGuestId);
       const externalDomain =
-        nullableString(reward.externalDomain) ??
-        nullableString(reward.guest?.externalDomain);
+        langameExternalDomain(reward.externalDomain) ??
+        langameExternalDomain(reward.guest?.externalDomain) ??
+        this.resolveStoreLangameDomain(reward.store);
       const externalProvider =
         reward.externalProvider ??
         reward.guest?.externalProvider ??
@@ -840,10 +854,13 @@ export class GuestBonusLedgerService {
     config: BonusLedgerConfig,
     access: TenantAccess,
   ): Promise<GuestGameBonusLedgerDispatchItem> {
+    let sourcedEntry = entry;
+
     try {
-      const source = this.resolveEntrySource(entry, access);
-      const phone = await this.resolveEntryPhone(entry);
-      const payload = this.buildLangamePayload(entry, phone.value);
+      const source = await this.resolveEntrySource(entry, access);
+      sourcedEntry = this.withResolvedEntrySource(entry, source.domain);
+      const phone = await this.resolveEntryPhone(sourcedEntry);
+      const payload = this.buildLangamePayload(sourcedEntry, phone.value);
       const response = await this.langameClient.adjustGuestBalanceByPhone(
         source.baseUrl,
         access.apiKey,
@@ -853,30 +870,30 @@ export class GuestBonusLedgerService {
 
       await this.confirmEntry(
         actorUserId,
-        entry,
+        sourcedEntry,
         this.buildLangameAuditPayload(payload, phone.masked),
         sanitizeLangameBalanceResponse(response),
       );
 
       return {
-        ledgerEntryId: entry.id,
-        rewardId: entry.rewardId,
+        ledgerEntryId: sourcedEntry.id,
+        rewardId: sourcedEntry.rewardId,
         status: 'CONFIRMED',
-        amount: decimalToNumber(entry.amount),
-        externalDomain: entry.externalDomain,
-        externalGuestId: entry.externalGuestId,
-        note: langameBalanceConfirmationNote(entry),
+        amount: decimalToNumber(sourcedEntry.amount),
+        externalDomain: sourcedEntry.externalDomain,
+        externalGuestId: sourcedEntry.externalGuestId,
+        note: langameBalanceConfirmationNote(sourcedEntry),
       };
     } catch (error) {
-      await this.failEntry(actorUserId, entry, config, error);
+      await this.failEntry(actorUserId, sourcedEntry, config, error);
 
       return {
-        ledgerEntryId: entry.id,
-        rewardId: entry.rewardId,
+        ledgerEntryId: sourcedEntry.id,
+        rewardId: sourcedEntry.rewardId,
         status: 'FAILED',
-        amount: decimalToNumber(entry.amount),
-        externalDomain: entry.externalDomain,
-        externalGuestId: entry.externalGuestId,
+        amount: decimalToNumber(sourcedEntry.amount),
+        externalDomain: sourcedEntry.externalDomain,
+        externalGuestId: sourcedEntry.externalGuestId,
         note: errorMessage(error),
       };
     }
@@ -938,6 +955,8 @@ export class GuestBonusLedgerService {
         data: {
           status: 'CONFIRMED',
           processedByUserId: actorUserId,
+          externalProvider: entry.externalProvider,
+          externalDomain: entry.externalDomain,
           lockedAt: null,
           nextAttemptAt: null,
           processedAt: now,
@@ -1031,6 +1050,8 @@ export class GuestBonusLedgerService {
       data: {
         status: 'FAILED',
         processedByUserId: actorUserId,
+        externalProvider: entry.externalProvider,
+        externalDomain: entry.externalDomain,
         lockedAt: null,
         failedAt: now,
         nextAttemptAt,
@@ -1153,13 +1174,15 @@ export class GuestBonusLedgerService {
     return profilePhone;
   }
 
-  private resolveEntrySource(
+  private async resolveEntrySource(
     entry: ClaimedBonusLedgerEntry,
     access: TenantAccess,
   ) {
-    if (entry.externalDomain) {
+    const externalDomain = await this.resolveEntryLangameDomain(entry);
+
+    if (externalDomain) {
       const matched = access.sources.find(
-        (source) => source.domain === entry.externalDomain,
+        (source) => source.domain === externalDomain,
       );
 
       if (matched) {
@@ -1167,7 +1190,7 @@ export class GuestBonusLedgerService {
       }
 
       throw new BadRequestException(
-        `Langame domain ${entry.externalDomain} is not active for this tenant.`,
+        `Langame domain ${externalDomain} is not active for this tenant.`,
       );
     }
 
@@ -1178,6 +1201,67 @@ export class GuestBonusLedgerService {
     throw new BadRequestException(
       'Ledger-запись не привязана к Langame domain, а у tenant несколько источников.',
     );
+  }
+
+  private async resolveEntryLangameDomain(entry: ClaimedBonusLedgerEntry) {
+    const entryDomain = langameExternalDomain(entry.externalDomain);
+
+    if (entryDomain) {
+      return entryDomain;
+    }
+
+    if (!entry.storeId) {
+      return null;
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: {
+        id: entry.storeId,
+        tenantId: entry.tenantId,
+      },
+      select: {
+        externalDomain: true,
+        integrationSource: {
+          select: {
+            provider: true,
+            domain: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+
+    return this.resolveStoreLangameDomain(store);
+  }
+
+  private resolveStoreLangameDomain(
+    store: {
+      externalDomain: string | null;
+      integrationSource: {
+        provider: IntegrationProvider;
+        domain: string;
+        isActive: boolean;
+      } | null;
+    } | null,
+  ) {
+    const source = store?.integrationSource;
+
+    if (source?.provider === IntegrationProvider.LANGAME && source.isActive) {
+      return langameExternalDomain(source.domain);
+    }
+
+    return langameExternalDomain(store?.externalDomain);
+  }
+
+  private withResolvedEntrySource(
+    entry: ClaimedBonusLedgerEntry,
+    externalDomain: string,
+  ): ClaimedBonusLedgerEntry {
+    return {
+      ...entry,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain,
+    };
   }
 
   private buildLangamePayload(
@@ -1572,6 +1656,14 @@ function positiveInt(value: unknown, fallback: number, max: number) {
 
 function nullableString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function langameExternalDomain(value: unknown) {
+  const domain = nullableString(value);
+
+  return domain && !guestPortalExternalDomains.has(domain.toLowerCase())
+    ? domain
+    : null;
 }
 
 function decimalToNumber(value: Prisma.Decimal | number | string) {

@@ -45,6 +45,7 @@ function createPrismaMock() {
     },
     guestGameReward: {
       count: jest.fn(),
+      findMany: jest.fn(),
       updateMany: jest.fn(),
     },
     guestGameVisualDraft: {
@@ -125,6 +126,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameProfile.create.mockResolvedValue(null);
   prisma.guestGameProfile.update.mockResolvedValue(null);
   prisma.guestGameReward.count.mockResolvedValue(0);
+  prisma.guestGameReward.findMany.mockResolvedValue([]);
   prisma.guestGameVisualDraft.findFirst.mockResolvedValue(null);
   prisma.guestGameLootBox.findFirst.mockResolvedValue(null);
   prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue(null);
@@ -1205,6 +1207,7 @@ describe('GuestPortalService', () => {
         triggerKind: 'APP_OPEN',
       });
       prisma.guestGameReward.count.mockResolvedValue(0);
+      prisma.guestGameEvent.count.mockResolvedValue(1);
       guestGamificationService.dryRun.mockResolvedValue({
         rules: [
           {
@@ -1240,6 +1243,9 @@ describe('GuestPortalService', () => {
           lootBoxId: 'loot-app',
           storeId: portal.store.id,
           eventType: 'APP_OPEN',
+          sourceFactId: expect.stringMatching(
+            /^profile-1:store-1:loot-app:\d{4}-\d{2}-\d{2}:2$/,
+          ),
           sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
         }),
       );
@@ -1248,6 +1254,9 @@ describe('GuestPortalService', () => {
         expect.objectContaining({
           lootBoxId: 'loot-app',
           eventType: 'APP_OPEN',
+          sourceFactId: expect.stringMatching(
+            /^profile-1:store-1:loot-app:\d{4}-\d{2}-\d{2}:2$/,
+          ),
           sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
         }),
       );
@@ -1292,23 +1301,42 @@ describe('GuestPortalService', () => {
         status: 'ACTIVE',
         storeIds: [portal.store.id],
         triggerKind: 'APP_OPEN',
+        limits: { perGuestPerWeek: 2 },
       });
-      prisma.guestGameReward.count.mockResolvedValue(2);
-      guestGamificationService.dryRun.mockResolvedValue({
-        rules: [
-          {
-            kind: 'LOOT_BOX',
-            id: 'loot-app',
-            eligible: false,
-            blockers: ['Лимит на гостя за неделю исчерпан: 2/2'],
-          },
-        ],
-      });
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-1',
+          status: 'APPROVED',
+          lootBoxId: 'loot-app',
+          missionId: null,
+          seasonId: null,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: new Prisma.Decimal(50),
+          rewardLabel: '50 бонусов',
+          rewardCode: null,
+          qualifiedAt: new Date(),
+          expiresAt: null,
+        },
+        {
+          id: 'reward-2',
+          status: 'APPROVED',
+          lootBoxId: 'loot-app',
+          missionId: null,
+          seasonId: null,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: new Prisma.Decimal(50),
+          rewardLabel: '50 бонусов',
+          rewardCode: null,
+          qualifiedAt: new Date(),
+          expiresAt: null,
+        },
+      ]);
 
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-app'),
       ).rejects.toThrow('Лимит на гостя за неделю исчерпан');
 
+      expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
     });
 

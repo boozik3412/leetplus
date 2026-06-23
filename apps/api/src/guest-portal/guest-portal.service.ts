@@ -3370,13 +3370,25 @@ export class GuestPortalService {
 
     if (lootBox.triggerKind !== GAME_APP_OPEN_EVENT_TYPE) {
       throw new BadRequestException(
-        `Лутбокс откроется после события: ${guestGameTriggerLabel(
-          lootBox.triggerKind,
-        )}.`,
+        lootBoxWaitingEventMessage(lootBox.triggerKind),
       );
     }
 
     const openedAt = new Date();
+    const currentRewards = await this.findPortalRewards(
+      context.tenant.id,
+      context.store.id,
+      guest?.id ?? profile.guestId ?? null,
+      profile.id,
+    );
+    const openState = buildLootBoxOpenState(lootBox, currentRewards);
+
+    if (!openState.openable) {
+      throw new BadRequestException(
+        openState.openBlocker ?? 'Лутбокс сейчас недоступен.',
+      );
+    }
+
     const sourceFactId = await this.buildLootBoxOpenSourceFactId(
       context.tenant.id,
       profile.id,
@@ -5975,16 +5987,39 @@ export class GuestPortalService {
     openedAt: Date,
   ) {
     const weekStart = startOfRollingWeek(openedAt);
-    const openedCount = await this.prisma.guestGameReward.count({
-      where: {
-        tenantId,
-        lootBoxId,
-        storeId,
-        qualifiedAt: { gte: weekStart },
-        status: { in: ['PENDING', 'APPROVED', 'PAID', 'EXPIRED'] },
-        OR: [{ profileId }, ...(guestId ? [{ guestId }] : [])],
-      },
-    });
+    const sourceFactPrefix = [
+      'guest-game',
+      GAME_LOOT_BOX_OPEN_SOURCE_KIND,
+      GAME_APP_OPEN_EVENT_TYPE,
+      profileId,
+      storeId,
+      lootBoxId,
+    ].join(':');
+    const [openedRewardCount, openedEventCount] = await Promise.all([
+      this.prisma.guestGameReward.count({
+        where: {
+          tenantId,
+          lootBoxId,
+          storeId,
+          qualifiedAt: { gte: weekStart },
+          status: { in: ['PENDING', 'APPROVED', 'PAID', 'EXPIRED'] },
+          OR: [{ profileId }, ...(guestId ? [{ guestId }] : [])],
+        },
+      }),
+      this.prisma.guestGameEvent.count({
+        where: {
+          tenantId,
+          profileId,
+          lootBoxId,
+          eventType: GAME_APP_OPEN_EVENT_TYPE,
+          occurredAt: { gte: weekStart },
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: GAME_APP_OPEN_EXTERNAL_DOMAIN,
+          externalId: { startsWith: `${sourceFactPrefix}:` },
+        },
+      }),
+    ]);
+    const openedCount = Math.max(openedRewardCount, openedEventCount);
 
     return [
       profileId,
@@ -5993,6 +6028,41 @@ export class GuestPortalService {
       openedAt.toISOString().slice(0, 10),
       openedCount + 1,
     ].join(':');
+  }
+
+  private async findPortalRewards(
+    tenantId: string,
+    storeId: string,
+    guestId: string | null,
+    profileId: string | null,
+  ): Promise<GuestPortalRewardRow[]> {
+    const ownerFilters: Prisma.GuestGameRewardWhereInput[] = [
+      ...(guestId ? [{ guestId }] : []),
+      ...(profileId ? [{ profileId }] : []),
+    ];
+
+    if (!ownerFilters.length) {
+      return [];
+    }
+
+    return this.prisma.guestGameReward.findMany({
+      where: {
+        tenantId,
+        AND: [
+          { OR: ownerFilters },
+          {
+            OR: [{ storeId: null }, { storeId }],
+          },
+        ],
+      },
+      include: {
+        lootBox: { select: { name: true } },
+        mission: { select: { name: true } },
+        season: { select: { name: true } },
+      },
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 1000,
+    });
   }
 
   private async buildPortalPayload(
@@ -6101,31 +6171,12 @@ export class GuestPortalService {
           { createdAt: 'desc' },
         ],
       }),
-      guest || profile
-        ? this.prisma.guestGameReward.findMany({
-            where: {
-              tenantId: context.tenant.id,
-              AND: [
-                {
-                  OR: [
-                    ...(guest ? [{ guestId: guest.id }] : []),
-                    ...(profile ? [{ profileId: profile.id }] : []),
-                  ],
-                },
-                {
-                  OR: [{ storeId: null }, { storeId: context.store.id }],
-                },
-              ],
-            },
-            include: {
-              lootBox: { select: { name: true } },
-              mission: { select: { name: true } },
-              season: { select: { name: true } },
-            },
-            orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
-            take: 1000,
-          })
-        : [],
+      this.findPortalRewards(
+        context.tenant.id,
+        context.store.id,
+        guest?.id ?? null,
+        profile?.id ?? null,
+      ),
       guest || profile
         ? this.prisma.guestBonusLedgerEntry.findMany({
             where: {
@@ -10342,9 +10393,7 @@ function buildLootBoxOpenState(
     return {
       openState: 'WAITING_EVENT',
       openable: false,
-      openBlocker: `Лутбокс откроется после события: ${guestGameTriggerLabel(
-        row.triggerKind,
-      )}.`,
+      openBlocker: lootBoxWaitingEventMessage(row.triggerKind),
       weeklyOpenedCount,
       weeklyLimit,
       dailyOpenedCount,
@@ -10361,6 +10410,12 @@ function buildLootBoxOpenState(
     dailyOpenedCount,
     dailyLimit,
   };
+}
+
+function lootBoxWaitingEventMessage(triggerKind: string) {
+  return `Чтобы открыть этот лутбокс, выполните задание: ${guestGameTriggerLabel(
+    triggerKind,
+  )}.`;
 }
 
 function buildLootBoxRewardState(

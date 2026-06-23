@@ -99,6 +99,9 @@ const GAME_APP_OPEN_EVENT_TYPE = 'APP_OPEN';
 const GAME_APP_OPEN_SOURCE_KIND = 'GUEST_APP_OPEN';
 const GAME_APP_OPEN_EXTERNAL_DOMAIN = 'leetplus-guest-portal';
 const GAME_LOOT_BOX_OPEN_SOURCE_KIND = 'GUEST_LOOT_BOX_OPEN';
+const GAME_PROFILE_STAFF_TEST_REASON_STAFF_PHONE = 'STAFF_PHONE_MATCH';
+const GAME_PROFILE_STAFF_TEST_REASON_LANGAME_STAFF_PHONE =
+  'LANGAME_STAFF_PHONE_MATCH';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 type GuestPortalAppOpenSurface = 'WEB' | 'SITE' | 'TG_MINI_APP';
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
@@ -139,6 +142,10 @@ type GuestPortalPhoneIdentity = {
   normalized: string;
   hash: string;
   masked: string;
+};
+type GuestPortalStaffTestMatch = {
+  reason: string;
+  matchedAt: Date;
 };
 type GuestPortalUserCallProvider =
   | typeof USER_CALL_PROVIDER_MANUAL
@@ -629,6 +636,7 @@ export type GuestPortalPayload = {
     id: string | null;
     displayName: string;
     contactMasked: string | null;
+    isStaffTest: boolean;
     xp: number;
     level: number;
     nextLevelXp: number;
@@ -2895,6 +2903,11 @@ export class GuestPortalService {
       GAME_PROFILE_CONSENT_SOURCE,
       challenge.gameConsentAcceptedAt,
     );
+    const staffTestMatch = await this.resolveStaffTestMatch(
+      challenge.tenantId,
+      this.phoneIdentityFromEncrypted(challenge.phoneEncrypted),
+    );
+    const staffTestData = this.staffTestProfilePatch(staffTestMatch);
 
     return this.prisma.$transaction(async (tx) => {
       const guest = challenge.guestId
@@ -2935,6 +2948,7 @@ export class GuestPortalService {
                 guest?.externalGuestId ??
                 'Гость клуба',
               ...profileConsentData,
+              ...staffTestData,
               status: 'ACTIVE',
               lastActivityAt: now,
             },
@@ -2955,6 +2969,7 @@ export class GuestPortalService {
               phoneHash: challenge.phoneHash,
               phoneEncrypted: challenge.phoneEncrypted,
               ...profileConsentData,
+              ...staffTestData,
               status: 'ACTIVE',
               lastActivityAt: now,
             },
@@ -3540,6 +3555,12 @@ export class GuestPortalService {
             sourceGuest?.emailMasked ??
             null,
           phoneHash: payload.phoneHash,
+          ...(sourceProfile?.phoneEncrypted
+            ? { phoneEncrypted: sourceProfile.phoneEncrypted }
+            : {}),
+          ...(sourceProfile?.isStaffTest
+            ? this.copyStaffTestProfileData(sourceProfile)
+            : {}),
           phoneConsentStatus:
             sourceProfile?.phoneConsentStatus ??
             GuestCommunicationConsentStatus.UNKNOWN,
@@ -3557,6 +3578,12 @@ export class GuestPortalService {
         data: {
           guestId: targetProfile.guestId ?? targetGuest?.id ?? undefined,
           phoneHash: targetProfile.phoneHash ?? payload.phoneHash,
+          ...(sourceProfile?.phoneEncrypted && !targetProfile.phoneEncrypted
+            ? { phoneEncrypted: sourceProfile.phoneEncrypted }
+            : {}),
+          ...(sourceProfile?.isStaffTest
+            ? this.copyStaffTestProfileData(sourceProfile)
+            : {}),
           status: 'ACTIVE',
           lastActivityAt: now,
         },
@@ -4416,6 +4443,12 @@ export class GuestPortalService {
       };
     }
 
+    const staffTestMatch = await this.resolveStaffTestMatch(
+      challenge.tenantId,
+      phone,
+    );
+    const staffTestData = this.staffTestProfilePatch(staffTestMatch);
+
     const result = await this.prisma.$transaction(async (tx) => {
       const guest = await tx.guest.findFirst({
         where: {
@@ -4469,6 +4502,7 @@ export class GuestPortalService {
           guest?.externalGuestId ??
           'Гость клуба',
         ...gameProfileConsentGrantData(TELEGRAM_AUTH_CONSENT_SOURCE, now),
+        ...staffTestData,
         status: 'ACTIVE',
         lastActivityAt: now,
       };
@@ -4501,6 +4535,7 @@ export class GuestPortalService {
             phoneHash: phone.hash,
             phoneEncrypted: this.encryptPhone(phone),
             contactMasked: phone.masked,
+            ...staffTestData,
             lastActivityAt: now,
           },
         });
@@ -6336,6 +6371,7 @@ export class GuestPortalService {
           crmLead?.phoneMasked ??
           crmLead?.emailMasked ??
           null,
+        isStaffTest: profile?.isStaffTest ?? false,
         xp,
         level,
         nextLevelXp,
@@ -6956,6 +6992,95 @@ export class GuestPortalService {
 
   private encryptPhone(phone: GuestPortalPhoneIdentity) {
     return this.secretEncryptionService.encrypt(phone.normalized);
+  }
+
+  private phoneIdentityFromEncrypted(
+    value: string | null,
+  ): GuestPortalPhoneIdentity | null {
+    if (!value) {
+      return null;
+    }
+
+    try {
+      return this.phoneIdentity(this.secretEncryptionService.decrypt(value));
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveStaffTestMatch(
+    tenantId: string,
+    phone: GuestPortalPhoneIdentity | null,
+  ): Promise<GuestPortalStaffTestMatch | null> {
+    if (!phone) {
+      return null;
+    }
+
+    const [staffMembers, langameStaffUsers] = await Promise.all([
+      this.prisma.staffMember.findMany({
+        where: {
+          tenantId,
+          status: { notIn: ['DISMISSED', 'ARCHIVED'] },
+          phone: { not: null },
+        },
+        select: { phone: true },
+        take: 1000,
+      }),
+      this.prisma.langameStaffUser.findMany({
+        where: {
+          tenantId,
+          phone: { not: null },
+        },
+        select: { phone: true },
+        take: 1000,
+      }),
+    ]);
+
+    if (
+      staffMembers.some((member) =>
+        phonesMatch(phone.normalized, normalizePhoneDigits(member.phone)),
+      )
+    ) {
+      return {
+        reason: GAME_PROFILE_STAFF_TEST_REASON_STAFF_PHONE,
+        matchedAt: new Date(),
+      };
+    }
+
+    if (
+      langameStaffUsers.some((staffUser) =>
+        phonesMatch(phone.normalized, normalizePhoneDigits(staffUser.phone)),
+      )
+    ) {
+      return {
+        reason: GAME_PROFILE_STAFF_TEST_REASON_LANGAME_STAFF_PHONE,
+        matchedAt: new Date(),
+      };
+    }
+
+    return null;
+  }
+
+  private staffTestProfilePatch(match: GuestPortalStaffTestMatch | null) {
+    return match
+      ? {
+          isStaffTest: true,
+          staffTestReason: match.reason,
+          staffTestMatchedAt: match.matchedAt,
+        }
+      : {};
+  }
+
+  private copyStaffTestProfileData(profile: {
+    isStaffTest: boolean;
+    staffTestReason: string | null;
+    staffTestMatchedAt: Date | null;
+  }) {
+    return {
+      isStaffTest: profile.isStaffTest,
+      staffTestReason: profile.staffTestReason,
+      staffTestMatchedAt: profile.staffTestMatchedAt,
+    };
   }
 
   private validateTelegramMiniAppInitData(
@@ -8608,6 +8733,33 @@ function mapTelegramMiniAppClub(
     clubId: `${candidate.tenant.slug}:${publicStoreId}`,
     profileId: candidate.profile.id,
   };
+}
+
+function normalizePhoneDigits(value: string | null | undefined) {
+  const digits = value?.replace(/\D/g, '') ?? '';
+  return digits.length >= 6 ? digits : null;
+}
+
+function phonesMatch(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  const normalizedLeft = normalizePhoneDigits(left);
+  const normalizedRight = normalizePhoneDigits(right);
+
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  return (
+    normalizedLeft.length >= 10 &&
+    normalizedRight.length >= 10 &&
+    normalizedLeft.slice(-10) === normalizedRight.slice(-10)
+  );
 }
 
 function parseTelegramMiniAppUser(

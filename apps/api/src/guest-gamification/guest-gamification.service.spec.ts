@@ -211,6 +211,9 @@ function profileFixture(
     phoneEncrypted: null,
     telegramIdentity: 'tg:123456',
     maxIdentity: null,
+    isStaffTest: false,
+    staffTestReason: null,
+    staffTestMatchedAt: null,
     xp: 120,
     level: 2,
     status: 'ACTIVE',
@@ -3615,6 +3618,50 @@ describe('GuestGamificationService', () => {
           status: 'APPROVED',
           rewardType: 'BONUS',
           rewardAmount: 50,
+        }),
+      );
+    });
+
+    it('creates process rewards as canceled for staff test profiles', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        isStaffTest: true,
+        staffTestReason: 'STAFF_PHONE_MATCH',
+      });
+      jest.spyOn(service as any, 'createReward').mockResolvedValue(
+        rewardResult({
+          status: 'CANCELED',
+          walletState: 'CANCELED',
+        }),
+      );
+
+      await (service as any).createProcessRewards(
+        user,
+        {
+          eventType: 'SESSION_START',
+          storeId: null,
+        },
+        dryRunResult(),
+        'profile-1',
+        {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-1',
+        },
+      );
+
+      expect((service as any).createReward).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          status: 'CANCELED',
+          rewardType: 'BONUS',
+          rewardAmount: 50,
+          note: expect.stringContaining('тест сотрудника'),
+          evidence: expect.objectContaining({
+            staffTestBlocked: true,
+            staffTestReason: 'STAFF_PHONE_MATCH',
+          }),
         }),
       );
     });

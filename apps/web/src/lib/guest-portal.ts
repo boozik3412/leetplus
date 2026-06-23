@@ -189,6 +189,7 @@ export type GuestPortalPayload = {
     id: string | null;
     displayName: string;
     contactMasked: string | null;
+    isStaffTest: boolean;
     xp: number;
     level: number;
     nextLevelXp: number;

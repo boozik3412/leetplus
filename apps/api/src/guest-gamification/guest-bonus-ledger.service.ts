@@ -35,6 +35,11 @@ const scheduledBonusLedgerActorRoles = [
 ] as const;
 const guestPortalExternalDomain = 'leetplus-guest-portal';
 const guestPortalExternalDomains = new Set([guestPortalExternalDomain]);
+const staffTestProfileErrorCode = 'STAFF_TEST_PROFILE';
+const staffTestProfileReasons = {
+  staffPhone: 'STAFF_PHONE_MATCH',
+  langameStaffPhone: 'LANGAME_STAFF_PHONE_MATCH',
+} as const;
 
 type BonusLedgerMode = 'DISABLED' | 'DRY_RUN' | 'READY';
 type BonusLedgerItemStatus =
@@ -310,6 +315,8 @@ export class GuestBonusLedgerService {
           select: {
             phoneEncrypted: true,
             contactMasked: true,
+            isStaffTest: true,
+            staffTestReason: true,
           },
         },
         store: {
@@ -330,6 +337,7 @@ export class GuestBonusLedgerService {
     });
     const items: GuestGameBonusLedgerQueueItem[] = [];
     const data: Prisma.GuestBonusLedgerEntryCreateManyInput[] = [];
+    const staffTestRewardIds: string[] = [];
 
     for (const reward of rewards) {
       const externalGuestId =
@@ -348,6 +356,32 @@ export class GuestBonusLedgerService {
         this.resolveEncryptedPhone(reward.guest) ??
         this.resolveEncryptedPhone(reward.profile);
       const balanceType = langameBalanceTypeForRewardType(reward.rewardType);
+      const staffTestReason = reward.profile?.isStaffTest
+        ? (reward.profile.staffTestReason ?? staffTestProfileReasons.staffPhone)
+        : phone
+          ? await this.resolveStaffTestReason(user.tenantId, phone.value)
+          : null;
+
+      if (staffTestReason) {
+        if (reward.profileId) {
+          await this.markProfileStaffTest(
+            user.tenantId,
+            reward.profileId,
+            staffTestReason,
+          );
+        }
+        staffTestRewardIds.push(reward.id);
+        items.push({
+          rewardId: reward.id,
+          status: 'SKIPPED',
+          reason:
+            'Профиль определен как тест сотрудника; автоначисление в Langame заблокировано.',
+          externalDomain,
+          externalGuestId,
+          amount,
+        });
+        continue;
+      }
 
       if (!phone) {
         items.push({
@@ -404,6 +438,10 @@ export class GuestBonusLedgerService {
             skipDuplicates: true,
           })
         : { count: 0 };
+
+    if (staffTestRewardIds.length > 0) {
+      await this.cancelStaffTestRewards(user.tenantId, staffTestRewardIds);
+    }
 
     return {
       checkedRewards: rewards.length,
@@ -510,7 +548,9 @@ export class GuestBonusLedgerService {
       checked: entries.length,
       confirmed: items.filter((item) => item.status === 'CONFIRMED').length,
       failed: items.filter((item) => item.status === 'FAILED').length,
-      skipped: items.filter((item) => item.status === 'SKIPPED').length,
+      skipped: items.filter((item) =>
+        ['SKIPPED', 'CANCELED'].includes(item.status),
+      ).length,
       blocked: items.filter((item) => item.status === 'BLOCKED').length,
       items,
       status,
@@ -758,6 +798,14 @@ export class GuestBonusLedgerService {
         OR: rewardTypes.map((type) => ({
           rewardType: { equals: type, mode: 'insensitive' as const },
         })),
+        AND: [
+          {
+            OR: [
+              { profileId: null },
+              { profile: { is: { isStaffTest: false } } },
+            ],
+          },
+        ],
         bonusLedgerEntries: {
           none: {
             tenantId,
@@ -867,6 +915,29 @@ export class GuestBonusLedgerService {
       const source = await this.resolveEntrySource(entry, access);
       sourcedEntry = this.withResolvedEntrySource(entry, source.domain);
       const phone = await this.resolveEntryPhone(sourcedEntry);
+      const staffTestReason = await this.resolveEntryStaffTestReason(
+        sourcedEntry,
+        phone.value,
+      );
+
+      if (staffTestReason) {
+        await this.cancelStaffTestEntry(
+          actorUserId,
+          sourcedEntry,
+          staffTestReason,
+        );
+
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'CANCELED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: staffTestLedgerNote(),
+        };
+      }
+
       const payload = this.buildLangamePayload(sourcedEntry, phone.value);
       const response = await this.langameClient.adjustGuestBalanceByPhone(
         source.baseUrl,
@@ -1179,6 +1250,166 @@ export class GuestBonusLedgerService {
     }
 
     return profilePhone;
+  }
+
+  private async resolveEntryStaffTestReason(
+    entry: ClaimedBonusLedgerEntry,
+    phone: string,
+  ) {
+    if (entry.profileId) {
+      const profile = await this.prisma.guestGameProfile.findFirst({
+        where: {
+          id: entry.profileId,
+          tenantId: entry.tenantId,
+        },
+        select: {
+          isStaffTest: true,
+          staffTestReason: true,
+        },
+      });
+
+      if (profile?.isStaffTest) {
+        return profile.staffTestReason ?? staffTestProfileReasons.staffPhone;
+      }
+    }
+
+    const reason = await this.resolveStaffTestReason(entry.tenantId, phone);
+
+    if (reason && entry.profileId) {
+      await this.markProfileStaffTest(entry.tenantId, entry.profileId, reason);
+    }
+
+    return reason;
+  }
+
+  private async resolveStaffTestReason(tenantId: string, phone: string) {
+    const [staffMembers, langameStaffUsers] = await Promise.all([
+      this.prisma.staffMember.findMany({
+        where: {
+          tenantId,
+          status: { notIn: ['DISMISSED', 'ARCHIVED'] },
+          phone: { not: null },
+        },
+        select: { phone: true },
+        take: 1000,
+      }),
+      this.prisma.langameStaffUser.findMany({
+        where: {
+          tenantId,
+          phone: { not: null },
+        },
+        select: { phone: true },
+        take: 1000,
+      }),
+    ]);
+
+    if (
+      staffMembers.some((member) =>
+        phonesMatch(phone, normalizePhoneDigits(member.phone)),
+      )
+    ) {
+      return staffTestProfileReasons.staffPhone;
+    }
+
+    if (
+      langameStaffUsers.some((staffUser) =>
+        phonesMatch(phone, normalizePhoneDigits(staffUser.phone)),
+      )
+    ) {
+      return staffTestProfileReasons.langameStaffPhone;
+    }
+
+    return null;
+  }
+
+  private async markProfileStaffTest(
+    tenantId: string,
+    profileId: string,
+    reason: string,
+  ) {
+    await this.prisma.guestGameProfile.updateMany({
+      where: {
+        id: profileId,
+        tenantId,
+      },
+      data: {
+        isStaffTest: true,
+        staffTestReason: reason,
+        staffTestMatchedAt: new Date(),
+      },
+    });
+  }
+
+  private async cancelStaffTestRewards(tenantId: string, rewardIds: string[]) {
+    await this.prisma.guestGameReward.updateMany({
+      where: {
+        tenantId,
+        id: { in: [...new Set(rewardIds)] },
+        status: 'APPROVED',
+      },
+      data: {
+        status: 'CANCELED',
+      },
+    });
+  }
+
+  private async cancelStaffTestEntry(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    reason: string,
+  ) {
+    const now = new Date();
+    const metadata = {
+      ...jsonRecord(entry.metadata),
+      staffTestBlocked: true,
+      staffTestReason: reason,
+    };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.guestBonusLedgerEntry.update({
+        where: { id: entry.id },
+        data: {
+          status: 'CANCELED',
+          processedByUserId: actorUserId,
+          externalProvider: entry.externalProvider,
+          externalDomain: entry.externalDomain,
+          lockedAt: null,
+          nextAttemptAt: null,
+          canceledAt: now,
+          failedAt: null,
+          errorCode: staffTestProfileErrorCode,
+          errorMessage: staffTestLedgerNote(),
+          metadata: metadata,
+        },
+      });
+
+      if (entry.rewardId) {
+        await tx.guestGameReward.updateMany({
+          where: {
+            id: entry.rewardId,
+            tenantId: entry.tenantId,
+            status: { in: ['PENDING', 'APPROVED'] },
+          },
+          data: {
+            status: 'CANCELED',
+          },
+        });
+      }
+
+      if (entry.profileId) {
+        await tx.guestGameProfile.updateMany({
+          where: {
+            id: entry.profileId,
+            tenantId: entry.tenantId,
+          },
+          data: {
+            isStaffTest: true,
+            staffTestReason: reason,
+            staffTestMatchedAt: now,
+          },
+        });
+      }
+    });
   }
 
   private async resolveEntrySource(
@@ -1540,6 +1771,10 @@ function langameBalanceConfirmationNote(entry: ClaimedBonusLedgerEntry) {
   return `Langame подтвердил ${actionLabel} ${balanceLabel}.`;
 }
 
+function staffTestLedgerNote() {
+  return 'Профиль определен как тест сотрудника; автоначисление в Langame заблокировано.';
+}
+
 function bonusLedgerCancelNote(
   reason: string,
   canceled: { rewards: number; deliveries: number },
@@ -1582,6 +1817,33 @@ function normalizeLangamePhone(value: string | null) {
   }
 
   return digits.length >= 11 && digits.length <= 15 ? digits : null;
+}
+
+function normalizePhoneDigits(value: string | null | undefined) {
+  const digits = value?.replace(/\D/g, '') ?? '';
+  return digits.length >= 6 ? digits : null;
+}
+
+function phonesMatch(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  const normalizedLeft = normalizePhoneDigits(left);
+  const normalizedRight = normalizePhoneDigits(right);
+
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  return (
+    normalizedLeft.length >= 10 &&
+    normalizedRight.length >= 10 &&
+    normalizedLeft.slice(-10) === normalizedRight.slice(-10)
+  );
 }
 
 function maskPhoneForAudit(value: string) {

@@ -8331,7 +8331,14 @@ function ProfileCard({
             {profile.contactMasked ?? profile.guest?.externalGuestId ?? "контакт не задан"}
           </p>
         </div>
-        <StatusPill label={profileStatusLabels[profile.status]} />
+        <div className="flex flex-wrap justify-end gap-2">
+          {profile.isStaffTest ? (
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+              Тест сотрудника
+            </span>
+          ) : null}
+          <StatusPill label={profileStatusLabels[profile.status]} />
+        </div>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
         <MiniMetric label="XP" value={profile.xp} />

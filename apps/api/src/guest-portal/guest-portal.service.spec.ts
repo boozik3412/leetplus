@@ -76,6 +76,12 @@ function createPrismaMock() {
     guestGameSeason: {
       findMany: jest.fn(),
     },
+    staffMember: {
+      findMany: jest.fn(),
+    },
+    langameStaffUser: {
+      findMany: jest.fn(),
+    },
   } as any;
 
   return prisma;
@@ -148,6 +154,8 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameMission.findMany.mockResolvedValue([]);
   prisma.guestGameLootBox.findMany.mockResolvedValue([]);
   prisma.guestGameSeason.findMany.mockResolvedValue([]);
+  prisma.staffMember.findMany.mockResolvedValue([]);
+  prisma.langameStaffUser.findMany.mockResolvedValue([]);
   langameSettingsService.searchGuestByPhoneForPortal.mockResolvedValue({
     checkedAt: '2026-06-15T08:00:00.000Z',
     sources: [],

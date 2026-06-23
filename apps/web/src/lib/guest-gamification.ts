@@ -39,6 +39,9 @@ export type GuestGameProfile = {
   xp: number;
   level: number;
   status: GuestGameProfileStatus;
+  isStaffTest: boolean;
+  staffTestReason: string | null;
+  staffTestMatchedAt: string | null;
   lastActivityAt: string | null;
   createdAt: string;
   updatedAt: string;

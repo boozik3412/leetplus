@@ -777,6 +777,9 @@ export type GuestGameProfile = {
   xp: number;
   level: number;
   status: ProfileStatus;
+  isStaffTest: boolean;
+  staffTestReason: string | null;
+  staffTestMatchedAt: string | null;
   lastActivityAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -7749,6 +7752,21 @@ export class GuestGamificationService {
     const guestExternalId = dryRun.guest?.externalGuestId ?? null;
     const eligibleRules = dryRun.rules.filter(shouldQueueProcessReward);
     const rewards: GuestGameReward[] = [];
+    const profileStaffTest = eligibleRules.length
+      ? await this.prisma.guestGameProfile.findFirst({
+          where: {
+            id: profileId,
+            tenantId: user.tenantId,
+          },
+          select: {
+            isStaffTest: true,
+            staffTestReason: true,
+          },
+        })
+      : null;
+    const staffTestReason = profileStaffTest?.isStaffTest
+      ? (profileStaffTest.staffTestReason ?? 'STAFF_PHONE_MATCH')
+      : null;
 
     for (const rule of eligibleRules) {
       const link = rewardRuleLink(rule);
@@ -7761,7 +7779,11 @@ export class GuestGamificationService {
           profileId,
           guestId,
           storeId: nullableId(dto.storeId),
-          status: rule.manualApprovalRequired ? 'PENDING' : 'APPROVED',
+          status: staffTestReason
+            ? 'CANCELED'
+            : rule.manualApprovalRequired
+              ? 'PENDING'
+              : 'APPROVED',
           source: 'API_IMPORT',
           externalProvider: eventReference?.externalProvider ?? null,
           externalDomain: eventReference?.externalDomain ?? null,
@@ -7776,7 +7798,9 @@ export class GuestGamificationService {
             rule.rewardLabel ??
             `${processRuleKindLabel(rule.kind)}: ${rule.name}`,
           qualifiedAt: dryRun.occurredAt,
-          note: 'Создано подтвержденным запуском события геймификации.',
+          note: staffTestReason
+            ? 'Создано как тест сотрудника; автоматическое начисление в Langame заблокировано.'
+            : 'Создано подтвержденным запуском события геймификации.',
           evidence: {
             source: 'guest_gamification_process_event',
             langameWrite: false,
@@ -7786,6 +7810,12 @@ export class GuestGamificationService {
             occurredAt: dryRun.occurredAt,
             input: dryRun.input,
             rule,
+            ...(staffTestReason
+              ? {
+                  staffTestBlocked: true,
+                  staffTestReason,
+                }
+              : {}),
           },
           ...link,
         });
@@ -9857,6 +9887,9 @@ function mapProfile(row: ProfileRow): GuestGameProfile {
     xp: row.xp,
     level: row.level,
     status: row.status as ProfileStatus,
+    isStaffTest: row.isStaffTest,
+    staffTestReason: row.staffTestReason,
+    staffTestMatchedAt: iso(row.staffTestMatchedAt),
     lastActivityAt: iso(row.lastActivityAt),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -16210,6 +16243,7 @@ function buildVisualEditorPreviewSummary(
       id: null,
       displayName: 'Гость клуба',
       contactMasked: null,
+      isStaffTest: false,
       xp: 0,
       level: 1,
       nextLevelXp: 500,

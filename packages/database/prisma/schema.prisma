@@ -1481,6 +1481,9 @@ model GuestGameProfile {
   xp              Int       @default(0)
   level           Int       @default(1)
   status          String    @default("ACTIVE")
+  isStaffTest        Boolean   @default(false)
+  staffTestReason    String?
+  staffTestMatchedAt DateTime?
   lastActivityAt  DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -1499,6 +1502,7 @@ model GuestGameProfile {
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
   @@index([tenantId, status, updatedAt], map: "guest_game_profile_status_idx")
+  @@index([tenantId, isStaffTest], map: "guest_game_profile_staff_test_idx")
   @@index([tenantId, phoneHash], map: "guest_game_profile_phone_idx")
   @@index([tenantId, level], map: "guest_game_profile_level_idx")
   @@index([createdByUserId], map: "guest_game_profile_created_by_idx")

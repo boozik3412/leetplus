@@ -1233,11 +1233,8 @@ describe('GuestPortalService', () => {
         'loot-app',
       );
 
-      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-        maxWait: 10_000,
-        timeout: 60_000,
-      });
-      expect(prisma.$queryRaw).toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: tokenPayload.tenantId,

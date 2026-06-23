@@ -3325,22 +3325,7 @@ export class GuestPortalService {
     }
 
     const payload = await this.verifyGuestToken(authorization);
-
-    return this.prisma.$transaction(
-      async (tx) => {
-        const lockKey = [
-          'guest-lootbox-open',
-          payload.tenantId,
-          payload.storeId,
-          id,
-        ].join(':');
-
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
-
-        return this.openLootBoxForPayload(payload, id);
-      },
-      { maxWait: 10_000, timeout: 60_000 },
-    );
+    return this.openLootBoxForPayload(payload, id);
   }
 
   private async openLootBoxForPayload(

@@ -354,7 +354,7 @@ export class GuestBonusLedgerService {
         profileId: reward.profileId,
         rewardId: reward.id,
         storeId: reward.storeId,
-        createdByUserId: user.id,
+        createdByUserId: ledgerActorUserId(user),
         externalProvider,
         externalDomain,
         externalGuestId,
@@ -469,10 +469,11 @@ export class GuestBonusLedgerService {
     );
     const entries = await this.claimReadyEntries(user.tenantId, config);
     const items: GuestGameBonusLedgerDispatchItem[] = [];
+    const actorUserId = ledgerActorUserId(user);
 
     for (const entry of entries) {
       items.push(
-        await this.processClaimedEntry(user.id, entry, config, access),
+        await this.processClaimedEntry(actorUserId, entry, config, access),
       );
     }
 
@@ -834,7 +835,7 @@ export class GuestBonusLedgerService {
   }
 
   private async processClaimedEntry(
-    actorUserId: string,
+    actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
     config: BonusLedgerConfig,
     access: TenantAccess,
@@ -882,7 +883,7 @@ export class GuestBonusLedgerService {
   }
 
   private async confirmEntry(
-    actorUserId: string,
+    actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
     request: Record<string, unknown>,
     response: unknown,
@@ -1014,7 +1015,7 @@ export class GuestBonusLedgerService {
   }
 
   private async failEntry(
-    actorUserId: string,
+    actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
     config: BonusLedgerConfig,
     error: unknown,
@@ -1364,6 +1365,12 @@ function bonusLedgerModeLabel(mode: BonusLedgerMode) {
     default:
       return 'Запись в Langame выключена';
   }
+}
+
+function ledgerActorUserId(user: Pick<AuthenticatedUser, 'id'>) {
+  const id = user.id?.trim();
+
+  return id && !id.startsWith('guest-portal:') ? id : null;
 }
 
 function bonusLedgerStatusNote(config: BonusLedgerConfig) {

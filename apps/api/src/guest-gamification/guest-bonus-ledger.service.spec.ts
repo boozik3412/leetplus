@@ -376,6 +376,50 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('does not pass guest portal pseudo-user as ledger processor id', async () => {
+    const { service, prisma, langameSettingsService } = createService({
+      LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+    });
+    const guestPortalUser: AuthenticatedUser = {
+      ...user,
+      id: 'guest-portal:profile-1',
+      email: 'guest-portal@leetplus.local',
+    };
+    const entry = ledgerEntry();
+    const access = {
+      apiKey: 'secret',
+      sources: [],
+    };
+
+    prisma.guestBonusLedgerEntry.groupBy.mockResolvedValue([
+      { status: 'PENDING', _count: { _all: 1 } },
+    ]);
+    langameSettingsService.resolveTenantAccess.mockResolvedValue(access);
+    jest.spyOn(service as any, 'claimReadyEntries').mockResolvedValue([entry]);
+    jest.spyOn(service as any, 'processClaimedEntry').mockResolvedValue({
+      ledgerEntryId: 'ledger-1',
+      rewardId: 'reward-1',
+      status: 'CONFIRMED',
+      amount: 25,
+      externalDomain: 'club-1',
+      externalGuestId: 'lg-guest-1',
+      note: 'confirmed',
+    });
+
+    await service.dispatch(guestPortalUser, {
+      dryRun: false,
+      queueApprovedRewards: false,
+      limit: 1,
+    });
+
+    expect((service as any).processClaimedEntry).toHaveBeenCalledWith(
+      null,
+      entry,
+      expect.objectContaining({ path: '/master_api/guests/balance/phone' }),
+      access,
+    );
+  });
+
   it('forces canary dispatch to one existing ledger entry without auto-queueing rewards', async () => {
     const { service, prisma, langameSettingsService } = createService({
       LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
@@ -666,6 +710,56 @@ describe('GuestBonusLedgerService', () => {
     expect(
       JSON.stringify(prisma.guestBonusLedgerEntry.createMany.mock.calls[0][0]),
     ).not.toContain('79991112233');
+  });
+
+  it('does not persist guest portal pseudo-user as ledger creator', async () => {
+    const { service, prisma, secretEncryptionService } = createService();
+    const guestPortalUser: AuthenticatedUser = {
+      ...user,
+      id: 'guest-portal:profile-1',
+      email: 'guest-portal@leetplus.local',
+    };
+
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    prisma.guestGameReward.findMany.mockResolvedValue([
+      {
+        id: 'reward-guest-portal-ledger',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1337',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        guestExternalId: null,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+        rewardLabel: '50 bonuses',
+        rewardCode: 'LP-50',
+        guest: {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalGuestId: null,
+          phoneEncrypted: 'encrypted-phone',
+          phoneMasked: '+7 *** **-33',
+        },
+        profile: null,
+      },
+    ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
+
+    await service.queueApprovedRewards(guestPortalUser, {
+      limit: 1,
+      rewardId: 'reward-guest-portal-ledger',
+    });
+
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          rewardId: 'reward-guest-portal-ledger',
+          createdByUserId: null,
+        }),
+      ],
+      skipDuplicates: true,
+    });
   });
 
   it('queues approved game rewards by encrypted profile phone when no shared guest is linked', async () => {

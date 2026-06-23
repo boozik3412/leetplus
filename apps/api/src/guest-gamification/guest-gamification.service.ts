@@ -9217,7 +9217,9 @@ export class GuestGamificationService {
       storeId: nullableId(dto.storeId),
       createdByUserId: isCreate ? actorUserId(user) : undefined,
       approvedByUserId:
-        status === 'APPROVED' || status === 'PAID' ? user.id : undefined,
+        status === 'APPROVED' || status === 'PAID'
+          ? actorUserId(user)
+          : undefined,
       status,
       source: enumValue(
         dto.source,

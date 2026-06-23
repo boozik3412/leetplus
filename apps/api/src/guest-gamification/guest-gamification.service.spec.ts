@@ -1279,6 +1279,58 @@ describe('GuestGamificationService', () => {
         queueApprovedRewards: false,
       });
     });
+
+    it('does not write guest portal pseudo-user as approvedByUserId', async () => {
+      const { service, prisma } = createService();
+      const guestPortalUser: AuthenticatedUser = {
+        ...user,
+        id: 'guest-portal:profile-1',
+        email: 'guest-portal@leetplus.local',
+        fullName: 'Гостевой портал',
+        role: UserRole.CLUB_MANAGER,
+      };
+
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        tenantId: user.tenantId,
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-box-1',
+        tenantId: user.tenantId,
+      });
+      prisma.store.findFirst.mockResolvedValue({
+        id: 'store-1',
+        tenantId: user.tenantId,
+      });
+      prisma.guestGameReward.create.mockResolvedValue(
+        rewardRow({
+          id: 'reward-guest-portal-approved',
+          status: 'APPROVED',
+          approvedByUserId: null,
+          createdByUserId: null,
+        }),
+      );
+      prisma.guestGameEvent.create.mockResolvedValue({});
+
+      await service.createReward(guestPortalUser, {
+        profileId: 'profile-1',
+        lootBoxId: 'loot-box-1',
+        storeId: 'store-1',
+        rewardType: 'BONUS_BALANCE',
+        rewardLabel: '50 бонусов',
+        rewardAmount: 50,
+        status: 'APPROVED',
+      });
+
+      expect(prisma.guestGameReward.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            approvedByUserId: null,
+            createdByUserId: null,
+          }),
+        }),
+      );
+    });
   });
 
   describe('integration readiness', () => {

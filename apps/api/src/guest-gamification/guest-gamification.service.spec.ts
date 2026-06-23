@@ -48,6 +48,7 @@ function createPrismaMock() {
     guestGameReward: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -3248,7 +3249,7 @@ describe('GuestGamificationService', () => {
         user,
         expect.objectContaining({
           profileId: profile.id,
-          guestId: null,
+          guestId: 'guest-1',
         }),
       );
       expect((service as any).createProcessEvent).toHaveBeenCalledWith(
@@ -3351,6 +3352,105 @@ describe('GuestGamificationService', () => {
           idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
           idempotent: true,
           langameWrite: false,
+        },
+      });
+    });
+
+    it('repairs a loot box opening when the event exists but the reward is missing', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const eventExternalId =
+        'guest-game:GUEST_LOOT_BOX_OPEN:APP_OPEN:loot-open-1';
+      const repairedReward = rewardResult({
+        id: 'reward-loot-repaired',
+        externalDomain: 'leetplus-game-app-open',
+        externalId: `${eventExternalId}:reward:LOOT_BOX:loot-box-1`,
+        rewardType: 'BONUS_BALANCE',
+        rewardLabel: '50 bonuses',
+        lootBox: {
+          id: 'loot-box-1',
+          name: 'Auto loot box',
+          status: 'ACTIVE',
+          triggerKind: 'APP_OPEN',
+          segment: null,
+          sessionType: null,
+          periodRules: {},
+          limits: { perGuestPerWeek: 2 },
+          manualApprovalRequired: false,
+          note: null,
+        },
+      });
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(
+        dryRunResult({
+          eventType: 'APP_OPEN',
+          rules: [
+            {
+              ...dryRunResult().rules[0],
+              id: 'loot-box-1',
+              kind: 'LOOT_BOX',
+              name: 'Auto loot box',
+              rewardType: 'BONUS_BALANCE',
+              rewardAmount: 50,
+              rewardLabel: '50 bonuses',
+              selectedRewardLabel: '50 bonuses',
+              manualApprovalRequired: false,
+            },
+          ],
+        }),
+      );
+      jest
+        .spyOn(service as any, 'createProcessRewards')
+        .mockResolvedValue([repairedReward]);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(
+        eventResult({
+          id: 'event-existing',
+          eventType: 'APP_OPEN',
+          externalDomain: 'leetplus-game-app-open',
+          externalId: eventExternalId,
+          occurredAt: now as unknown as string,
+          createdAt: now as unknown as string,
+          lootBox: { id: 'loot-box-1', name: 'Auto loot box' },
+        }),
+      );
+      prisma.guestGameReward.findMany.mockResolvedValue([]);
+
+      const result = await service.processEvent(user, {
+        profileId: profile.id,
+        guestId: 'guest-1',
+        lootBoxId: 'loot-box-1',
+        storeId: 'store-1',
+        eventType: 'APP_OPEN',
+        sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        sourceFactId: 'loot-open-1',
+        externalDomain: 'leetplus-game-app-open',
+      });
+
+      expect((service as any).createProcessRewards).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          lootBoxId: 'loot-box-1',
+          sourceFactId: 'loot-open-1',
+        }),
+        expect.objectContaining({ eventType: 'APP_OPEN' }),
+        profile.id,
+        expect.objectContaining({
+          externalId: eventExternalId,
+          externalDomain: 'leetplus-game-app-open',
+        }),
+      );
+      expect(result).toMatchObject({
+        processed: true,
+        event: { id: 'event-existing' },
+        rewards: [{ id: 'reward-loot-repaired' }],
+        summary: {
+          createdRewards: 1,
+          queuedRewardAmount: 50,
+          idempotent: true,
         },
       });
     });

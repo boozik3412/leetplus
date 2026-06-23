@@ -7435,7 +7435,7 @@ export class GuestGamificationService {
     const dryRun = await this.dryRun(user, {
       ...dto,
       profileId: profile.id,
-      guestId: null,
+      guestId: nullableId(dto.guestId) ?? profile.guest?.id ?? null,
     });
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
     const processPayload = buildProcessPayload(dto, dryRun);
@@ -7444,16 +7444,35 @@ export class GuestGamificationService {
       : null;
 
     if (eventReference && existingEvent) {
+      const rewards = await this.findProcessRewardsByReference(
+        user,
+        eventReference,
+      );
+      const repairedRewards =
+        rewards.length === 0 && nullableId(dto.lootBoxId)
+          ? await this.createProcessRewards(
+              user,
+              dto,
+              dryRun,
+              profile.id,
+              eventReference,
+            )
+          : [];
+      const processRewards =
+        repairedRewards.length > 0 ? repairedRewards : rewards;
+
       return {
         processed: true,
         dryRun,
         event: mapEvent(existingEvent),
-        rewards: [],
+        rewards: processRewards,
         summary: {
           profileCreated: false,
           appliedXpDelta: 0,
-          createdRewards: 0,
-          queuedRewardAmount: 0,
+          createdRewards: repairedRewards.length,
+          queuedRewardAmount: sum(
+            processRewards.map((reward) => reward.rewardAmount),
+          ),
           idempotencyKey: eventReference.externalId,
           idempotent: true,
           langameWrite: false,
@@ -7493,16 +7512,35 @@ export class GuestGamificationService {
         );
 
         if (duplicateEvent) {
+          const rewards = await this.findProcessRewardsByReference(
+            user,
+            eventReference,
+          );
+          const repairedRewards =
+            rewards.length === 0 && nullableId(dto.lootBoxId)
+              ? await this.createProcessRewards(
+                  user,
+                  dto,
+                  dryRun,
+                  profile.id,
+                  eventReference,
+                )
+              : [];
+          const processRewards =
+            repairedRewards.length > 0 ? repairedRewards : rewards;
+
           return {
             processed: true,
             dryRun,
             event: mapEvent(duplicateEvent),
-            rewards: [],
+            rewards: processRewards,
             summary: {
               profileCreated: false,
               appliedXpDelta: 0,
-              createdRewards: 0,
-              queuedRewardAmount: 0,
+              createdRewards: repairedRewards.length,
+              queuedRewardAmount: sum(
+                processRewards.map((reward) => reward.rewardAmount),
+              ),
               idempotencyKey: eventReference.externalId,
               idempotent: true,
               langameWrite: false,
@@ -7660,6 +7698,46 @@ export class GuestGamificationService {
     });
   }
 
+  private async findProcessRewardsByReference(
+    user: AuthenticatedUser,
+    eventReference: ProcessExternalReference,
+  ): Promise<GuestGameReward[]> {
+    const rows = await this.prisma.guestGameReward.findMany({
+      where: {
+        tenantId: user.tenantId,
+        source: 'API_IMPORT',
+        externalProvider: eventReference.externalProvider,
+        externalDomain: eventReference.externalDomain,
+        externalId: {
+          startsWith: `${eventReference.externalId}:reward:`,
+        },
+      },
+      include: rewardInclude,
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return rows.map(mapReward);
+  }
+
+  private async findProcessRewardByExternalId(
+    user: AuthenticatedUser,
+    eventReference: ProcessExternalReference,
+    externalId: string,
+  ): Promise<GuestGameReward | null> {
+    const row = await this.prisma.guestGameReward.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        source: 'API_IMPORT',
+        externalProvider: eventReference.externalProvider,
+        externalDomain: eventReference.externalDomain,
+        externalId,
+      },
+      include: rewardInclude,
+    });
+
+    return row ? mapReward(row) : null;
+  }
+
   private async createProcessRewards(
     user: AuthenticatedUser,
     dto: GuestGameProcessEventDto,
@@ -7667,7 +7745,7 @@ export class GuestGamificationService {
     profileId: string,
     eventReference: ProcessExternalReference | null,
   ): Promise<GuestGameReward[]> {
-    const guestId = dryRun.guest?.id ?? null;
+    const guestId = dryRun.guest?.id ?? nullableId(dto.guestId) ?? null;
     const guestExternalId = dryRun.guest?.externalGuestId ?? null;
     const eligibleRules = dryRun.rules.filter(shouldQueueProcessReward);
     const rewards: GuestGameReward[] = [];
@@ -7714,6 +7792,19 @@ export class GuestGamificationService {
         rewards.push(reward);
       } catch (error) {
         if (isUniqueConstraintError(error)) {
+          if (eventReference && externalId) {
+            const existingReward = await this.findProcessRewardByExternalId(
+              user,
+              eventReference,
+              externalId,
+            );
+
+            if (existingReward) {
+              rewards.push(existingReward);
+              continue;
+            }
+          }
+
           throw new ConflictException(
             'Одна из наград по этому snapshot уже создана. Обновите очередь наград.',
           );

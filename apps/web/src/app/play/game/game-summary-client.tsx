@@ -216,7 +216,9 @@ function ReadyGameView({
   summary: GuestPortalGameSummary;
   onSummaryChange: (summary: GuestPortalGameSummary) => void;
 }) {
-  const primaryAction = summary.nextActions[0] ?? null;
+  const primaryAction =
+    summary.nextActions.find((action) => !isGuestInternalNextAction(action)) ??
+    null;
   const primaryActionHref = primaryAction ? gameActionHref(primaryAction) : null;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedLootId, setSelectedLootId] = useState<string | null>(null);
@@ -383,7 +385,12 @@ function ReadyGameView({
           </Link>
         </div>
 
-        <div className="lp-club-session-state">Игровая сессия активна</div>
+        <div
+          className="lp-club-session-state"
+          title="Телефон подтвержден, клуб выбран"
+        >
+          Профиль активен
+        </div>
       </header>
 
       <div className="lp-club-shell">
@@ -444,50 +451,6 @@ function ReadyGameView({
           onPromoSubmit={handlePromoSubmit}
         />
       </div>
-
-      <section className="lp-club-detail-stack" aria-label="Подробности игрового профиля">
-        <div className="lp-club-detail-head">
-          <span>
-            <span className="lp-club-small-label">Подробности</span>
-            <h2>Квесты, награды и связь с клубом</h2>
-          </span>
-          <Link href="/game/clubs" className="lp-club-ghost-link">
-            Сменить клуб
-          </Link>
-        </div>
-
-        <JourneyPanel
-          journey={summary.journey}
-        />
-
-        <ReferralPanel referral={summary.referral} />
-
-        <ProgressPanel progress={summary.progress} />
-
-        <NextActionsPanel
-          actions={summary.nextActions}
-        />
-
-        <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <RewardResultPanel summary={summary} />
-          <MissionsPanel missions={summary.missions.featured} />
-        </section>
-
-        <MissionHistoryPanel
-          missions={summary.missions.history}
-          total={summary.missions.total}
-        />
-
-        <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-          <LootBoxesPanel lootBoxes={summary.lootBoxes.featured} />
-          <BattlePassPanel battlePass={summary.battlePass.active} />
-        </section>
-
-        <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          <ChannelsPanel summary={summary} />
-          <ActivityPanel activity={summary.activity} />
-        </section>
-      </section>
 
       <div
         className={[
@@ -838,8 +801,8 @@ function PlayerProfilePanel({
           <ProfileIcon />
         </div>
         <span>
-          <strong>{profileInitials(summary.profile.displayName)}</strong>
-          <span>Гость клуба</span>
+          <strong>Игровой профиль</strong>
+          <span>{summary.profile.displayName}</span>
         </span>
       </div>
 
@@ -1107,13 +1070,15 @@ function lootboxCardHint(card: HomeLootCard) {
 }
 
 function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest[] {
-  const journeyQuests: HomeBattleQuest[] = summary.journey.steps.map((step) => ({
-    id: step.id,
-    title: step.label,
-    description: step.hint,
-    state: homeQuestState(step.status),
-    label: homeQuestStateLabel(step.status),
-  }));
+  const journeyQuests: HomeBattleQuest[] = summary.journey.steps
+    .filter((step) => !isGuestInternalJourneyStep(step))
+    .map((step) => ({
+      id: step.id,
+      title: step.label,
+      description: guestJourneyHint(step),
+      state: homeQuestState(step.status),
+      label: homeQuestStateLabel(step.status),
+    }));
   const missionQuests: HomeBattleQuest[] = summary.missions.featured.map((mission) => ({
     id: mission.id,
     title: mission.name,
@@ -1139,6 +1104,22 @@ function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest
   ];
 
   return [...journeyQuests, ...missionQuests, ...fallback].slice(0, 6);
+}
+
+function isGuestInternalJourneyStep(step: GameJourneyStep) {
+  return step.id === "LANGAME" || step.id === "BONUS";
+}
+
+function guestJourneyHint(step: GameJourneyStep) {
+  if (step.hint.toLocaleLowerCase("ru-RU").includes("langame")) {
+    return "Мы сверяем профиль автоматически. Когда данные будут готовы, задание откроется.";
+  }
+
+  return step.hint;
+}
+
+function isGuestInternalNextAction(action: GameNextAction) {
+  return action.kind === "MATCH_LANGAME";
 }
 
 function homeQuestState(
@@ -1178,18 +1159,6 @@ function buildRankPercent(summary: GuestPortalGameSummary) {
   const readiness = summary.account.readinessPercent;
 
   return clampPercent(Math.max(explicitProgress, Math.min(100, readiness)));
-}
-
-function profileInitials(name: string) {
-  const letters = name
-    .trim()
-    .split(/\s+/)
-    .map((part) => part[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("");
-
-  return letters.toUpperCase() || "LP";
 }
 
 function BrandMark() {
@@ -3543,7 +3512,7 @@ const clubHomeCss = `
   max-width: 560px;
   margin-top: 34px;
   color: var(--text);
-  font-size: clamp(42px, 5.2vw, 76px);
+  font-size: 68px;
   line-height: 0.92;
   font-weight: 760;
 }
@@ -4908,6 +4877,74 @@ const clubHomeCss = `
   height: 64px;
   margin-top: 0;
   border-radius: 8px;
+}
+
+@media (max-width: 1320px) {
+  .lp-club-shell {
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 16px;
+    padding-right: clamp(16px, 2vw, 28px);
+    padding-left: clamp(16px, 2vw, 28px);
+  }
+
+  .lp-club-stage {
+    grid-template-columns: minmax(230px, 0.82fr) minmax(420px, 1.18fr);
+    gap: 14px;
+  }
+
+  .lp-club-card {
+    min-height: 230px;
+    padding: 20px;
+  }
+
+  .lp-club-card h1 {
+    margin-top: 28px;
+    font-size: 54px;
+    line-height: 0.94;
+  }
+
+  .lp-club-card p {
+    margin-top: 16px;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .lp-club-quick-metrics {
+    gap: 10px;
+    margin-top: 22px;
+  }
+
+  .lp-club-metric {
+    min-width: 76px;
+    padding: 10px;
+  }
+
+  .lp-club-banner-grid {
+    gap: 12px;
+  }
+
+  .lp-club-banner {
+    min-height: 230px;
+  }
+
+  .lp-club-banner-content {
+    padding: 16px;
+  }
+
+  .lp-club-banner-title {
+    margin-top: 15px;
+    font-size: 21px;
+  }
+
+  .lp-club-banner-copy {
+    font-size: 11px;
+  }
+
+  .lp-club-lootboxes,
+  .lp-club-battlepass,
+  .lp-club-profile-panel {
+    padding: 16px;
+  }
 }
 
 @media (max-width: 1180px) {

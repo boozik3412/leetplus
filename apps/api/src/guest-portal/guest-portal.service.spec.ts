@@ -10,6 +10,7 @@ function createPrismaMock() {
     $transaction: jest.fn((input) =>
       typeof input === 'function' ? input(prisma) : Promise.all(input),
     ),
+    $queryRaw: jest.fn(),
     tenant: {
       findFirst: jest.fn(),
     },
@@ -1232,6 +1233,11 @@ describe('GuestPortalService', () => {
         'loot-app',
       );
 
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        maxWait: 10_000,
+        timeout: 60_000,
+      });
+      expect(prisma.$queryRaw).toHaveBeenCalled();
       expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: tokenPayload.tenantId,
@@ -1338,6 +1344,110 @@ describe('GuestPortalService', () => {
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
+    });
+
+    it('ignores lootbox openings made before the rule was restarted', async () => {
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-app',
+        tenantId: 'tenant-1',
+        name: 'Daily app lootbox',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'APP_OPEN',
+        limits: {
+          perGuestPerWeek: 2,
+          restartedAt: '2026-06-22T00:00:00.000Z',
+        },
+      });
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-1',
+          status: 'APPROVED',
+          lootBoxId: 'loot-app',
+          missionId: null,
+          seasonId: null,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: new Prisma.Decimal(50),
+          rewardLabel: '50 бонусов',
+          rewardCode: null,
+          qualifiedAt: new Date('2026-06-21T12:00:00.000Z'),
+          expiresAt: null,
+        },
+        {
+          id: 'reward-2',
+          status: 'APPROVED',
+          lootBoxId: 'loot-app',
+          missionId: null,
+          seasonId: null,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: new Prisma.Decimal(50),
+          rewardLabel: '50 бонусов',
+          rewardCode: null,
+          qualifiedAt: new Date('2026-06-21T13:00:00.000Z'),
+          expiresAt: null,
+        },
+      ]);
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-app',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 50,
+        },
+        rewards: [{ rewardLabel: '50 бонусов' }],
+      });
+
+      const result = await service.openLootBox(
+        'Bearer guest-token',
+        'loot-app',
+      );
+
+      expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-app',
+          sourceFactId: expect.stringMatching(
+            /^profile-1:store-1:loot-app:20260622000000:\d{4}-\d{2}-\d{2}:1$/,
+          ),
+        }),
+      );
+      expect(result).toMatchObject({
+        processed: true,
+        createdRewards: 1,
+      });
     });
 
     it('limits bonus ledger history in compact game summary', async () => {

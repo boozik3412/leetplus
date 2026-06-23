@@ -3325,6 +3325,28 @@ export class GuestPortalService {
     }
 
     const payload = await this.verifyGuestToken(authorization);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const lockKey = [
+          'guest-lootbox-open',
+          payload.tenantId,
+          payload.storeId,
+          id,
+        ].join(':');
+
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+        return this.openLootBoxForPayload(payload, id);
+      },
+      { maxWait: 10_000, timeout: 60_000 },
+    );
+  }
+
+  private async openLootBoxForPayload(
+    payload: GuestPortalTokenPayload,
+    id: string,
+  ): Promise<GuestPortalLootBoxOpenResponse> {
     const context = await this.getTenantStoreByIds(
       payload.tenantId,
       payload.storeId,
@@ -3395,6 +3417,7 @@ export class GuestPortalService {
       guest?.id ?? profile.guestId ?? null,
       context.store.id,
       lootBox.id,
+      lootBox.limits,
       openedAt,
     );
     const actor: AuthenticatedUser = {
@@ -5984,9 +6007,13 @@ export class GuestPortalService {
     guestId: string | null,
     storeId: string,
     lootBoxId: string,
+    lootBoxLimits: Prisma.JsonValue | null,
     openedAt: Date,
   ) {
-    const weekStart = startOfRollingWeek(openedAt);
+    const limits = jsonRecord(lootBoxLimits);
+    const restartedAt = lootBoxRestartedAt(limits);
+    const weekStart = maxDate(startOfRollingWeek(openedAt), restartedAt);
+    const resetToken = lootBoxResetToken(limits);
     const sourceFactPrefix = [
       'guest-game',
       GAME_LOOT_BOX_OPEN_SOURCE_KIND,
@@ -5994,6 +6021,7 @@ export class GuestPortalService {
       profileId,
       storeId,
       lootBoxId,
+      ...(resetToken ? [resetToken] : []),
     ].join(':');
     const [openedRewardCount, openedEventCount] = await Promise.all([
       this.prisma.guestGameReward.count({
@@ -6025,6 +6053,7 @@ export class GuestPortalService {
       profileId,
       storeId,
       lootBoxId,
+      ...(resetToken ? [resetToken] : []),
       openedAt.toISOString().slice(0, 10),
       openedCount + 1,
     ].join(':');
@@ -10351,8 +10380,9 @@ function buildLootBoxOpenState(
   const weeklyLimit = positiveIntOrNull(limits.perGuestPerWeek);
   const dailyLimit = positiveIntOrNull(limits.totalPerDay);
   const now = new Date();
-  const weekStart = startOfRollingWeek(now);
-  const dayStart = startOfDay(now);
+  const restartedAt = lootBoxRestartedAt(limits);
+  const weekStart = maxDate(startOfRollingWeek(now), restartedAt);
+  const dayStart = maxDate(startOfDay(now), restartedAt);
   const lootBoxRewards = rewards.filter(
     (reward) =>
       reward.lootBoxId === row.id &&
@@ -12344,6 +12374,32 @@ function startOfDay(value: Date) {
   return new Date(
     Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
   );
+}
+
+function maxDate(left: Date, right: Date | null) {
+  return right && right.getTime() > left.getTime() ? right : left;
+}
+
+function lootBoxRestartedAt(limits: Record<string, unknown>) {
+  const value = limits.restartedAt;
+
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function lootBoxResetToken(limits: Record<string, unknown>) {
+  const restartedAt = lootBoxRestartedAt(limits);
+
+  if (!restartedAt) {
+    return null;
+  }
+
+  return restartedAt.toISOString().replace(/\D/g, '').slice(0, 14);
 }
 
 function buildGuestPortalGameExternalId(

@@ -49,6 +49,7 @@ function createPrismaMock() {
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestGameDelivery: {
       create: jest.fn(),
@@ -102,6 +103,7 @@ function createPrismaMock() {
     },
     guestGameLootBox: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -2962,6 +2964,65 @@ describe('GuestGamificationService', () => {
     });
   });
 
+  describe('restartLootBox', () => {
+    it('resets lootbox limits from now and closes unfinished rewards', async () => {
+      const { service, prisma } = createService();
+      const existingLootBox = activeLootBox({
+        id: 'loot-restart',
+        limits: { perGuestPerWeek: 2 },
+      });
+      const row = {
+        ...existingLootBox,
+        tenantId: user.tenantId,
+        createdAt: now,
+        updatedAt: now,
+        createdByUser: null,
+      };
+
+      prisma.guestGameLootBox.findFirst.mockResolvedValue(row);
+      prisma.guestGameReward.updateMany.mockResolvedValue({ count: 2 });
+      prisma.guestGameLootBox.update.mockImplementation(({ data }) =>
+        Promise.resolve({
+          ...row,
+          limits: data.limits,
+          updatedAt: now,
+        }),
+      );
+
+      const result = await service.restartLootBox(user, 'loot-restart');
+
+      expect(prisma.guestGameLootBox.findFirst).toHaveBeenCalledWith({
+        where: { id: 'loot-restart', tenantId: user.tenantId },
+      });
+      expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: user.tenantId,
+          lootBoxId: 'loot-restart',
+          status: { in: ['PENDING', 'APPROVED', 'EXPIRED'] },
+        },
+        data: expect.objectContaining({
+          status: 'CANCELED',
+        }),
+      });
+      expect(prisma.guestGameLootBox.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'loot-restart' },
+          data: {
+            limits: expect.objectContaining({
+              perGuestPerWeek: 2,
+              restartedAt: expect.any(String),
+            }),
+          },
+        }),
+      );
+      expect(result.canceledRewards).toBe(2);
+      expect(result.lootBox.limits).toMatchObject({
+        perGuestPerWeek: 2,
+        restartedAt: expect.any(String),
+      });
+    });
+  });
+
   describe('dryRun', () => {
     it('evaluates eligible rules without creating events, rewards, or Langame writes', async () => {
       const { service, prisma, langameClient } = createService();
@@ -3276,6 +3337,84 @@ describe('GuestGamificationService', () => {
       expect(createEventSpy).not.toHaveBeenCalled();
       expect(createRewardsSpy).not.toHaveBeenCalled();
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        processed: true,
+        event: {
+          id: 'event-existing',
+          externalId: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+        },
+        rewards: [],
+        summary: {
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+          idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          idempotent: true,
+          langameWrite: false,
+        },
+      });
+    });
+
+    it('treats a parallel unique event conflict as idempotent without creating duplicate rewards', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const createRewardsSpy = jest.spyOn(
+        service as any,
+        'createProcessRewards',
+      );
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      jest
+        .spyOn(service as any, 'createProcessEvent')
+        .mockRejectedValue(new ConflictException('duplicate event'));
+      prisma.guestGameEvent.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'event-existing',
+          eventType: 'SESSION_START',
+          source: 'API_IMPORT',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          xpDelta: 30,
+          occurredAt: now,
+          payload: null,
+          note: null,
+          createdAt: now,
+          profile: {
+            id: profile.id,
+            displayName: profile.displayName,
+            contactMasked: profile.contactMasked,
+            xp: profile.xp,
+            level: profile.level,
+          },
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'lg-guest-1',
+            fullNameMasked: 'Guest One',
+            phoneMasked: '+7 *** **-11',
+          },
+          lootBox: null,
+          mission: null,
+          season: null,
+          createdByUser: null,
+        });
+
+      const result = await service.processEvent(user, {
+        eventType: 'SESSION_START',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'fact-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-1',
+      });
+
+      expect(createRewardsSpy).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         processed: true,
         event: {

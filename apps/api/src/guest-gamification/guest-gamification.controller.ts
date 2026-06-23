@@ -208,6 +208,18 @@ export class GuestGamificationController {
     return this.gamificationService.updateLootBox(user, id, dto);
   }
 
+  @Post('loot-boxes/:id/restart')
+  restartLootBox(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<{
+    lootBox: GuestGameLootBox;
+    restartedAt: string;
+    canceledRewards: number;
+  }> {
+    return this.gamificationService.restartLootBox(user, id);
+  }
+
   @Get('missions')
   getMissions(
     @CurrentUser() user: AuthenticatedUser,

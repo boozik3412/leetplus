@@ -5758,6 +5758,47 @@ export class GuestGamificationService {
     return mapLootBox(row);
   }
 
+  async restartLootBox(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<{
+    lootBox: GuestGameLootBox;
+    restartedAt: string;
+    canceledRewards: number;
+  }> {
+    const lootBox = await this.assertLootBox(user, id);
+    const restartedAt = new Date().toISOString();
+    const limits = jsonRecord(lootBox.limits);
+    const nextLimits = {
+      ...limits,
+      restartedAt,
+    } as Prisma.InputJsonObject;
+
+    const canceledRewards = await this.prisma.guestGameReward.updateMany({
+      where: {
+        tenantId: user.tenantId,
+        lootBoxId: lootBox.id,
+        status: { in: ['PENDING', 'APPROVED', 'EXPIRED'] },
+      },
+      data: {
+        status: 'CANCELED',
+        note: 'Лутбокс перезапущен: старая невыданная награда закрыта.',
+      },
+    });
+
+    const row = await this.prisma.guestGameLootBox.update({
+      where: { id: lootBox.id },
+      data: { limits: nextLimits },
+      include: lootBoxInclude,
+    });
+
+    return {
+      lootBox: mapLootBox(row),
+      restartedAt,
+      canceledRewards: canceledRewards.count,
+    };
+  }
+
   async getMissions(user: AuthenticatedUser): Promise<GuestGameMission[]> {
     const rows = await this.prisma.guestGameMission.findMany({
       where: { tenantId: user.tenantId },
@@ -7399,15 +7440,7 @@ export class GuestGamificationService {
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
     const processPayload = buildProcessPayload(dto, dryRun);
     const existingEvent = eventReference
-      ? await this.prisma.guestGameEvent.findFirst({
-          where: {
-            tenantId: user.tenantId,
-            externalProvider: eventReference.externalProvider,
-            externalDomain: eventReference.externalDomain,
-            externalId: eventReference.externalId,
-          },
-          include: eventInclude,
-        })
+      ? await this.findProcessEventByReference(user, eventReference)
       : null;
 
     if (eventReference && existingEvent) {
@@ -7433,22 +7466,54 @@ export class GuestGamificationService {
       nullableString(dto.sourceFactKind) === 'LIVE_CHECK_IN'
         ? 'CHECK_IN'
         : 'API_IMPORT';
-    const event = await this.createProcessEvent(user, {
-      profileId: profile.id,
-      guestId: profile.guest?.id ?? dryRun.guest?.id ?? null,
-      lootBoxId: nullableId(dto.lootBoxId),
-      eventType: dryRun.eventType,
-      source,
-      externalProvider: eventReference?.externalProvider ?? null,
-      externalDomain: eventReference?.externalDomain ?? null,
-      externalId: eventReference?.externalId ?? null,
-      xpDelta: dryRun.summary.projectedXpDelta,
-      occurredAt: dryRun.occurredAt,
-      payload: processPayload,
-      note:
-        nullableString(dto.note) ??
-        'Подтвержденный запуск события геймификации в LeetPlus.',
-    });
+    let event: GuestGameEvent;
+
+    try {
+      event = await this.createProcessEvent(user, {
+        profileId: profile.id,
+        guestId: profile.guest?.id ?? dryRun.guest?.id ?? null,
+        lootBoxId: nullableId(dto.lootBoxId),
+        eventType: dryRun.eventType,
+        source,
+        externalProvider: eventReference?.externalProvider ?? null,
+        externalDomain: eventReference?.externalDomain ?? null,
+        externalId: eventReference?.externalId ?? null,
+        xpDelta: dryRun.summary.projectedXpDelta,
+        occurredAt: dryRun.occurredAt,
+        payload: processPayload,
+        note:
+          nullableString(dto.note) ??
+          'Подтвержденный запуск события геймификации в LeetPlus.',
+      });
+    } catch (error) {
+      if (eventReference && error instanceof ConflictException) {
+        const duplicateEvent = await this.findProcessEventByReference(
+          user,
+          eventReference,
+        );
+
+        if (duplicateEvent) {
+          return {
+            processed: true,
+            dryRun,
+            event: mapEvent(duplicateEvent),
+            rewards: [],
+            summary: {
+              profileCreated: false,
+              appliedXpDelta: 0,
+              createdRewards: 0,
+              queuedRewardAmount: 0,
+              idempotencyKey: eventReference.externalId,
+              idempotent: true,
+              langameWrite: false,
+            },
+            note: 'Событие уже было обработано параллельным запросом; повторный запуск не создал XP, события или награды.',
+          };
+        }
+      }
+
+      throw error;
+    }
     const rewards = await this.createProcessRewards(
       user,
       dto,
@@ -7578,6 +7643,21 @@ export class GuestGamificationService {
 
       throw error;
     }
+  }
+
+  private findProcessEventByReference(
+    user: AuthenticatedUser,
+    eventReference: ProcessExternalReference,
+  ) {
+    return this.prisma.guestGameEvent.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        externalProvider: eventReference.externalProvider,
+        externalDomain: eventReference.externalDomain,
+        externalId: eventReference.externalId,
+      },
+      include: eventInclude,
+    });
   }
 
   private async createProcessRewards(
@@ -14579,9 +14659,16 @@ function appendDryRunLootBoxLimits(
   const limits = dryRunRecord(rule.limits);
   const perGuestPerWeek = dryRunOptionalNumber(limits.perGuestPerWeek);
   const totalPerDay = dryRunOptionalNumber(limits.totalPerDay);
+  const restartedAt = dryRunDateOrNull(limits.restartedAt);
+  const limitRewards = restartedAt
+    ? rewards.filter(
+        (reward) =>
+          new Date(reward.qualifiedAt).getTime() >= restartedAt.getTime(),
+      )
+    : rewards;
 
   if (perGuestPerWeek != null) {
-    const guestRewards = rewards.filter((reward) =>
+    const guestRewards = limitRewards.filter((reward) =>
       dryRunRewardMatchesGuest(reward, context),
     );
     const weeklyCount = guestRewards.filter((reward) =>
@@ -14602,7 +14689,7 @@ function appendDryRunLootBoxLimits(
   }
 
   if (totalPerDay != null) {
-    const dayCount = rewards.filter((reward) =>
+    const dayCount = limitRewards.filter((reward) =>
       dryRunIsSameDay(reward.qualifiedAt, context.occurredAt),
     ).length;
 
@@ -14956,6 +15043,20 @@ function dryRunOptionalNumber(
 
 function dryRunNumber(value: unknown, fallback: number) {
   return dryRunOptionalNumber(value, fallback) ?? fallback;
+}
+
+function dryRunDateOrNull(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function dryRunIsWithinTimeWindow(date: Date, window: string) {
@@ -15628,7 +15729,10 @@ function visualLootBoxFromRule(
     rewardType: rule.rewardType,
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel ?? rule.name,
-    condition: visualString(periodRules.condition, rule.triggerKind),
+    condition: visualLootBoxCondition(
+      visualString(periodRules.condition, ''),
+      rule.triggerKind,
+    ),
     limitPerGuest: visualIntOrNull(
       limits.perGuest ?? limits.perGuestPerWeek,
       1,
@@ -15765,7 +15869,7 @@ function buildVisualLootBoxData(
     storeIds,
     periodRules: {
       source: 'visual_editor',
-      condition: item.condition,
+      condition: visualLootBoxCondition(item.condition, item.triggerKind),
       ...buildVisualLootBoxPeriodRules(item),
     },
     limits: {
@@ -16391,6 +16495,24 @@ function visualStatus(value: unknown, fallback: StatusValue): StatusValue {
 function visualRewardMode(value: unknown): GuestGameVisualEditorRewardMode {
   const parsed = visualString(value, '').toUpperCase();
   return parsed === 'XP' || parsed === 'BONUS' ? parsed : '';
+}
+
+function visualLootBoxCondition(
+  value: string | null | undefined,
+  triggerKind: string,
+) {
+  const normalized = value?.trim();
+  const triggerLabel = rewardApprovalEventLabels[triggerKind] ?? triggerKind;
+
+  if (
+    !normalized ||
+    normalized === triggerKind ||
+    rewardApprovalEventLabels[normalized] != null
+  ) {
+    return triggerLabel;
+  }
+
+  return normalized;
 }
 
 function visualNumberOrNull(value: unknown) {

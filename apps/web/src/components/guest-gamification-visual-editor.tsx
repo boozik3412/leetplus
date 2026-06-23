@@ -24,6 +24,8 @@ type Props = {
   stores: Store[];
   canManage: boolean;
   onPublished: () => Promise<void>;
+  onRestartLootBox?: (lootBoxId: string) => Promise<void>;
+  restartingLootBoxId?: string | null;
 };
 
 type EditorSection =
@@ -192,6 +194,8 @@ export function GuestGamificationVisualEditor({
   stores,
   canManage,
   onPublished,
+  onRestartLootBox,
+  restartingLootBoxId = null,
 }: Props) {
   const selectableStores = useMemo(
     () =>
@@ -446,6 +450,8 @@ export function GuestGamificationVisualEditor({
               workspace={workspace}
               storeId={storeId}
               canManage={canManage}
+              onRestartLootBox={onRestartLootBox}
+              restartingLootBoxId={restartingLootBoxId}
             />
           ) : (
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -693,6 +699,8 @@ function Inspector({
   workspace,
   storeId,
   canManage,
+  onRestartLootBox,
+  restartingLootBoxId,
 }: {
   payload: GuestGameVisualEditorPayload;
   activeSection: EditorSection;
@@ -703,6 +711,8 @@ function Inspector({
   workspace: GuestGamificationWorkspace;
   storeId: string;
   canManage: boolean;
+  onRestartLootBox?: (lootBoxId: string) => Promise<void>;
+  restartingLootBoxId?: string | null;
 }) {
   return (
     <div className="space-y-4">
@@ -741,6 +751,8 @@ function Inspector({
             workspace={workspace}
             storeId={storeId}
             disabled={!canManage}
+            onRestartLootBox={onRestartLootBox}
+            restartingLootBoxId={restartingLootBoxId}
           />
         ) : null}
         {activeSection === "missions" ? (
@@ -912,6 +924,8 @@ function LootBoxInspector({
   workspace,
   storeId,
   disabled,
+  onRestartLootBox,
+  restartingLootBoxId,
 }: InspectorProps) {
   const lootBoxTemplates = templatesForStore(workspace.lootBoxes, storeId);
 
@@ -941,65 +955,110 @@ function LootBoxInspector({
         />
       }
       createItem={createVisualLootBox}
-      renderItem={(item, index, update, remove) => (
-        <div className="space-y-3">
-          <TextField
-            label="Название"
-            value={item.title}
-            disabled={disabled}
-            onChange={(title) => update({ ...item, title })}
-          />
-          <TriggerField
-            value={item.triggerKind}
-            disabled={disabled}
-            onChange={(triggerKind) => update({ ...item, triggerKind })}
-          />
-          <LootBoxScheduleField
-            item={item}
-            disabled={disabled}
-            onChange={(patch) => update({ ...item, ...patch })}
-          />
-          <AudienceScopeHint />
-          <TextField
-            label="Приз"
-            value={item.rewardLabel}
-            disabled={disabled}
-            onChange={(rewardLabel) => update({ ...item, rewardLabel })}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <NumberField
-              label="Сумма"
-              value={item.rewardAmount ?? 0}
-              min={0}
-              disabled={disabled}
-              onChange={(rewardAmount) => update({ ...item, rewardAmount })}
-            />
-            <LootBoxLimitField
-              value={item.limitPerGuest}
-              disabled={disabled}
-              onChange={(limitPerGuest) =>
-                update({ ...item, limitPerGuest })
-              }
-            />
+      renderItem={(item, _index, update, remove) => {
+        const isRestarting = Boolean(
+          item.id && restartingLootBoxId === item.id,
+        );
+
+        return (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Основное
+              </p>
+              <div className="grid gap-3">
+                <TextField
+                  label="Название"
+                  value={item.title}
+                  disabled={disabled}
+                  onChange={(title) => update({ ...item, title })}
+                />
+                <StatusField
+                  value={item.status}
+                  disabled={disabled}
+                  onChange={(status) => update({ ...item, status })}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Условие появления
+              </p>
+              <TriggerField
+                value={item.triggerKind}
+                disabled={disabled}
+                onChange={(triggerKind) =>
+                  update({
+                    ...item,
+                    triggerKind,
+                    condition: visualTriggerLabel(triggerKind),
+                  })
+                }
+              />
+              <div className="mt-3">
+                <LootBoxScheduleField
+                  item={item}
+                  disabled={disabled}
+                  onChange={(patch) => update({ ...item, ...patch })}
+                />
+              </div>
+            </div>
+
+            <AudienceScopeHint />
+
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Приз и лимит
+              </p>
+              <TextField
+                label="Приз"
+                value={item.rewardLabel}
+                disabled={disabled}
+                onChange={(rewardLabel) => update({ ...item, rewardLabel })}
+              />
+              <div className="mt-3 grid gap-3">
+                <NumberField
+                  label="Сумма"
+                  value={item.rewardAmount ?? 0}
+                  min={0}
+                  disabled={disabled}
+                  onChange={(rewardAmount) => update({ ...item, rewardAmount })}
+                />
+                <LootBoxLimitField
+                  value={item.limitPerGuest}
+                  disabled={disabled}
+                  onChange={(limitPerGuest) =>
+                    update({ ...item, limitPerGuest })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {item.id && onRestartLootBox ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-bold text-amber-700 transition hover:border-amber-400 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-800 dark:text-amber-200 dark:hover:bg-amber-950/30"
+                  disabled={disabled || isRestarting}
+                  onClick={() => {
+                    if (item.id) {
+                      void onRestartLootBox(item.id);
+                    }
+                  }}
+                >
+                  {isRestarting ? "Перезапуск..." : "Перезапустить"}
+                </button>
+              ) : null}
+              <RemoveButton
+                disabled={disabled}
+                label="Удалить лутбокс"
+                onClick={remove}
+              />
+            </div>
           </div>
-          <TextField
-            label="Условие получения"
-            value={item.condition}
-            disabled={disabled}
-            onChange={(condition) => update({ ...item, condition })}
-          />
-          <StatusField
-            value={item.status}
-            disabled={disabled}
-            onChange={(status) => update({ ...item, status })}
-          />
-          <RemoveButton
-            disabled={disabled}
-            label="Удалить лутбокс"
-            onClick={remove}
-          />
-        </div>
-      )}
+        );
+      }}
       onChange={(lootBoxes) =>
         onChange((current) => ({ ...current, lootBoxes }))
       }
@@ -1314,6 +1373,8 @@ type InspectorProps = {
   workspace: GuestGamificationWorkspace;
   storeId: string;
   disabled: boolean;
+  onRestartLootBox?: (lootBoxId: string) => Promise<void>;
+  restartingLootBoxId?: string | null;
 };
 
 function CollectionInspector<T>({
@@ -1660,7 +1721,7 @@ function LootBoxScheduleField({
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3">
         <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
           Когда показывать
           <select
@@ -1705,7 +1766,7 @@ function LootBoxScheduleField({
         </label>
       </div>
       {hasTimeWindow ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="mt-3 grid gap-3">
           <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
             Начало окна
             <input
@@ -1770,7 +1831,7 @@ function LootBoxLimitField({
   return (
     <div className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
       Лутбоксов на одного гостя в неделю
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      <div className="mt-2 grid gap-2">
         <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case tracking-normal text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
           <input
             type="radio"
@@ -2018,6 +2079,30 @@ function sortVisualWeekdays(value: number[]) {
     .sort((left, right) => (order.get(left) ?? 0) - (order.get(right) ?? 0));
 }
 
+function visualTriggerLabel(value: string) {
+  return (
+    visualTriggerOptions.find((option) => option.value === value)?.label ??
+    value
+  );
+}
+
+function visualLootBoxConditionLabel(
+  value: string | null | undefined,
+  triggerKind: string,
+) {
+  const normalized = value?.trim();
+
+  if (
+    !normalized ||
+    normalized === triggerKind ||
+    visualTriggerOptions.some((option) => option.value === normalized)
+  ) {
+    return visualTriggerLabel(triggerKind);
+  }
+
+  return normalized;
+}
+
 function createVisualLootBox(): GuestGameVisualEditorLootBox {
   return {
     id: null,
@@ -2027,7 +2112,7 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
     rewardType: "BONUS",
     rewardAmount: 100,
     rewardLabel: "Бонус клуба",
-    condition: "Активность в клубе",
+    condition: visualTriggerLabel("SESSION_START"),
     limitPerGuest: 1,
     timeWindowMode: "ANY",
     weekdayMode: "ANY",
@@ -2147,7 +2232,10 @@ function visualLootBoxFromTemplate(
     rewardType: lootBox.rewardType,
     rewardAmount: lootBox.rewardAmount,
     rewardLabel: lootBox.rewardLabel ?? lootBox.name,
-    condition: templateString(periodRules.condition, lootBox.triggerKind),
+    condition: visualLootBoxConditionLabel(
+      templateString(periodRules.condition, lootBox.triggerKind),
+      lootBox.triggerKind,
+    ),
     limitPerGuest: templateNumberOrNull(
       limits.perGuest ?? limits.perGuestPerWeek,
     ),

@@ -1751,6 +1751,18 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function restartLootBox(id: string) {
+    await saveAction(`loot-boxes-restart-${id}`, async () => {
+      assertCan(
+        access.canManageRules,
+        "Для перезапуска лутбокса нужно право `Геймификация: правила`.",
+      );
+
+      await postJson(`/api/guests/gamification/loot-boxes/${id}/restart`, {});
+      await reloadWorkspace();
+    });
+  }
+
   async function saveAction(key: string, action: () => Promise<void>) {
     setSaving(key);
     setError(null);
@@ -1882,6 +1894,12 @@ export function GuestGamificationPanel({
           stores={stores}
           canManage={access.canManageRules}
           onPublished={reloadWorkspace}
+          onRestartLootBox={restartLootBox}
+          restartingLootBoxId={
+            saving?.startsWith("loot-boxes-restart-")
+              ? saving.replace("loot-boxes-restart-", "")
+              : null
+          }
         />
       ) : null}
 
@@ -1969,6 +1987,7 @@ export function GuestGamificationPanel({
           onEdit={editLootBox}
           onReset={resetLootBoxForm}
           onStatus={updateRuleStatus}
+          onRestart={restartLootBox}
           saving={saving}
           canManage={access.canManageRules}
         />
@@ -6013,6 +6032,7 @@ function LootBoxesTab({
   onEdit,
   onReset,
   onStatus,
+  onRestart,
   saving,
   canManage,
 }: {
@@ -6032,6 +6052,7 @@ function LootBoxesTab({
     id: string,
     status: GuestGameStatus,
   ) => Promise<void>;
+  onRestart: (id: string) => Promise<void>;
   saving: string | null;
   canManage: boolean;
 }) {
@@ -6174,6 +6195,8 @@ function LootBoxesTab({
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("loot-boxes", item.id, status)}
           saving={saving === `loot-boxes-${item.id}`}
+          onRestart={() => onRestart(item.id)}
+          restartSaving={saving === `loot-boxes-restart-${item.id}`}
           canManage={canManage}
         />
       )}
@@ -8353,7 +8376,9 @@ function RuleCard({
   meta,
   onEdit,
   onStatus,
+  onRestart,
   saving,
+  restartSaving,
   canManage,
 }: {
   eyebrow?: string;
@@ -8363,7 +8388,9 @@ function RuleCard({
   meta: string[];
   onEdit: () => void;
   onStatus: (status: GuestGameStatus) => Promise<void>;
+  onRestart?: () => Promise<void>;
   saving: boolean;
+  restartSaving?: boolean;
   canManage: boolean;
 }) {
   return (
@@ -8399,12 +8426,22 @@ function RuleCard({
         <button type="button" className={smallButtonClass} onClick={onEdit}>
           Редактировать
         </button>
+        {onRestart ? (
+          <button
+            type="button"
+            className={smallButtonClass}
+            disabled={saving || restartSaving}
+            onClick={onRestart}
+          >
+            {restartSaving ? "Перезапуск..." : "Перезапустить"}
+          </button>
+        ) : null}
         {statusOptions.map((nextStatus) => (
           <button
             key={nextStatus}
             type="button"
             className={smallButtonClass}
-            disabled={saving || status === nextStatus}
+            disabled={saving || restartSaving || status === nextStatus}
             onClick={() => onStatus(nextStatus)}
           >
             {statusLabels[nextStatus]}

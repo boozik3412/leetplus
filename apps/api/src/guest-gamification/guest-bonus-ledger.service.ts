@@ -1261,7 +1261,7 @@ export class GuestBonusLedgerService {
       ),
       retryMinutes: positiveInt(
         this.configService.get<string>('LANGAME_BONUS_ACCRUAL_RETRY_MINUTES'),
-        15,
+        1,
         24 * 60,
       ),
       staleLockMinutes: positiveInt(

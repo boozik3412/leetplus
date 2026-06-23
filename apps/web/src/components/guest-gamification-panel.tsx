@@ -2037,7 +2037,6 @@ export function GuestGamificationPanel({
           audiences={audiences}
           stores={stores}
           tariffSnapshots={workspace.tariffSnapshots}
-          guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingSeasonId}
           onSave={saveSeason}
           onEdit={editSeason}
@@ -6445,7 +6444,6 @@ function SeasonsTab({
   audiences,
   stores,
   tariffSnapshots,
-  guestLogCatalog,
   editingId,
   onSave,
   onEdit,
@@ -6460,7 +6458,6 @@ function SeasonsTab({
   audiences: GuestAudience[];
   stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
-  guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
   onSave: () => Promise<void>;
   onEdit: (season: GuestGameSeason) => void;
@@ -6542,7 +6539,6 @@ function SeasonsTab({
           <SeasonBusinessRules
             form={form}
             tariffSnapshots={tariffSnapshots}
-            guestLogCatalog={guestLogCatalog}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -7644,12 +7640,6 @@ function MissionBusinessRules({
         tariffTypeId={form.tariffTypeId}
         onChange={onChange}
       />
-      <GuestLogConditionFields
-        guestLogTypes={form.guestLogTypes}
-        blockedGuestLogTypes={form.blockedGuestLogTypes}
-        catalog={guestLogCatalog}
-        onChange={onChange}
-      />
       <div className="rounded-lg border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
         <p className="text-sm font-semibold text-zinc-950 dark:text-white">
           Метрика прогресса
@@ -7812,12 +7802,10 @@ function MissionBusinessRules({
 function SeasonBusinessRules({
   form,
   tariffSnapshots,
-  guestLogCatalog,
   onChange,
 }: {
   form: SeasonForm;
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
-  guestLogCatalog: GuestGameGuestLogCatalog;
   onChange: (patch: Partial<SeasonForm>) => void;
 }) {
   return (
@@ -7929,12 +7917,6 @@ function SeasonBusinessRules({
         tariffGroupId={form.tariffGroupId}
         tariffPeriodId={form.tariffPeriodId}
         tariffTypeId={form.tariffTypeId}
-        onChange={onChange}
-      />
-      <GuestLogConditionFields
-        guestLogTypes={form.guestLogTypes}
-        blockedGuestLogTypes={form.blockedGuestLogTypes}
-        catalog={guestLogCatalog}
         onChange={onChange}
       />
       <div className="grid gap-3 sm:grid-cols-4">

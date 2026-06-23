@@ -194,8 +194,11 @@ type MissionForm = {
   minSpendAmount: string;
   questEnabled: boolean;
   questStepOne: string;
+  questStepOneMissionId: string;
   questStepTwo: string;
+  questStepTwoMissionId: string;
   questStepThree: string;
+  questStepThreeMissionId: string;
   requireLangameFact: boolean;
   denySameDayRepeat: boolean;
   requireCashierConfirmation: boolean;
@@ -847,8 +850,11 @@ const defaultMissionForm: MissionForm = {
   minSpendAmount: "0",
   questEnabled: false,
   questStepOne: "Сыграть сессию от 90 минут",
+  questStepOneMissionId: "",
   questStepTwo: "Купить напиток или снек",
+  questStepTwoMissionId: "",
   questStepThree: "Вернуться в будний день",
+  questStepThreeMissionId: "",
   requireLangameFact: true,
   denySameDayRepeat: true,
   requireCashierConfirmation: true,
@@ -6255,6 +6261,8 @@ function MissionsTab({
   saving: string | null;
   canManage: boolean;
 }) {
+  const missionTemplates = missions.filter((mission) => mission.id !== editingId);
+
   return (
     <RulesLayout
       canManage={canManage}
@@ -6389,6 +6397,7 @@ function MissionsTab({
           </div>
           <MissionBusinessRules
             form={form}
+            missionTemplates={missionTemplates}
             tariffSnapshots={tariffSnapshots}
             guestLogCatalog={guestLogCatalog}
             products={products}
@@ -7589,12 +7598,14 @@ function LootBoxPrizesEditor({
 
 function MissionBusinessRules({
   form,
+  missionTemplates,
   tariffSnapshots,
   guestLogCatalog,
   products,
   onChange,
 }: {
   form: MissionForm;
+  missionTemplates: GuestGameMission[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   guestLogCatalog: GuestGameGuestLogCatalog;
   products: Product[];
@@ -7745,43 +7756,25 @@ function MissionBusinessRules({
           />
         </div>
         {form.questEnabled ? (
-          <div className="mt-3 grid gap-3 lg:grid-cols-3">
-            <Field label="Шаг 1">
-              <input
-                className={fieldClass}
-                value={form.questStepOne}
-                onChange={(event) =>
-                  onChange({ questStepOne: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Шаг 2">
-              <input
-                className={fieldClass}
-                value={form.questStepTwo}
-                onChange={(event) =>
-                  onChange({ questStepTwo: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Шаг 3">
-              <input
-                className={fieldClass}
-                value={form.questStepThree}
-                onChange={(event) =>
-                  onChange({ questStepThree: event.target.value })
-                }
-              />
-            </Field>
-          </div>
+          <MissionQuestChainFields
+            form={form}
+            missionTemplates={missionTemplates}
+            onChange={onChange}
+          />
         ) : null}
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
-        <ToggleField
-          label="Нужен факт Langame"
-          checked={form.requireLangameFact}
-          onChange={(requireLangameFact) => onChange({ requireLangameFact })}
-        />
+        <div>
+          <ToggleField
+            label="Нужен факт Langame"
+            checked={form.requireLangameFact}
+            onChange={(requireLangameFact) => onChange({ requireLangameFact })}
+          />
+          <OptionHelp>
+            Миссия засчитывается только по подтвержденному сохраненному факту:
+            визиту, сессии, чеку, пополнению или другому событию из Langame.
+          </OptionHelp>
+        </div>
         <ToggleField
           label="Без повтора в тот же день"
           checked={form.denySameDayRepeat}
@@ -7796,6 +7789,129 @@ function MissionBusinessRules({
         />
       </div>
     </BusinessRuleSection>
+  );
+}
+
+const missionQuestStepFields = [
+  {
+    label: "Шаг 1",
+    titleKey: "questStepOne",
+    missionIdKey: "questStepOneMissionId",
+  },
+  {
+    label: "Шаг 2",
+    titleKey: "questStepTwo",
+    missionIdKey: "questStepTwoMissionId",
+  },
+  {
+    label: "Шаг 3",
+    titleKey: "questStepThree",
+    missionIdKey: "questStepThreeMissionId",
+  },
+] as const;
+
+function MissionQuestChainFields({
+  form,
+  missionTemplates,
+  onChange,
+}: {
+  form: MissionForm;
+  missionTemplates: GuestGameMission[];
+  onChange: (patch: Partial<MissionForm>) => void;
+}) {
+  const missionTemplateById = new Map(
+    missionTemplates.map((mission) => [mission.id, mission]),
+  );
+
+  const selectTemplate = (
+    titleKey: (typeof missionQuestStepFields)[number]["titleKey"],
+    missionIdKey: (typeof missionQuestStepFields)[number]["missionIdKey"],
+    missionId: string,
+  ) => {
+    const mission = missionTemplateById.get(missionId);
+
+    onChange({
+      [missionIdKey]: missionId,
+      [titleKey]: mission?.name ?? form[titleKey],
+    } as Partial<MissionForm>);
+  };
+
+  const clearStep = (
+    titleKey: (typeof missionQuestStepFields)[number]["titleKey"],
+    missionIdKey: (typeof missionQuestStepFields)[number]["missionIdKey"],
+  ) =>
+    onChange({
+      [missionIdKey]: "",
+      [titleKey]: "",
+    } as Partial<MissionForm>);
+
+  return (
+    <div className="mt-3 space-y-3">
+      <OptionHelp>
+        Шаг можно связать с сохраненной миссией-шаблоном или оставить ручной
+        подписью. В цепочке сохраняется ссылка на выбранную миссию и текст,
+        который увидит гость.
+      </OptionHelp>
+      {missionQuestStepFields.map(({ label, titleKey, missionIdKey }) => {
+        const selectedMission = missionTemplateById.get(form[missionIdKey]);
+        const hasStepValue =
+          form[titleKey].trim().length > 0 || form[missionIdKey].length > 0;
+
+        return (
+          <div
+            key={label}
+            className="grid gap-3 border-t border-zinc-200 pt-3 first:border-t-0 first:pt-0 dark:border-zinc-800 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_auto]"
+          >
+            <Field label={`${label}: шаблон`}>
+              <select
+                className={fieldClass}
+                value={form[missionIdKey]}
+                onChange={(event) =>
+                  selectTemplate(titleKey, missionIdKey, event.target.value)
+                }
+              >
+                <option value="">
+                  {missionTemplates.length
+                    ? "Без шаблона"
+                    : "Сначала сохраните миссию"}
+                </option>
+                {missionTemplates.map((mission) => (
+                  <option key={mission.id} value={mission.id}>
+                    {mission.name} · {missionTypeLabel(mission.missionType)}
+                  </option>
+                ))}
+              </select>
+              <OptionHelp>
+                {selectedMission
+                  ? `${selectedMission.xpReward} XP · ${
+                      selectedMission.progressTarget ?? 1
+                    } ${selectedMission.progressUnit ?? "шаг"}`
+                  : "Шаблон необязателен: можно оставить шаг простым текстом."}
+              </OptionHelp>
+            </Field>
+            <Field label={`${label}: подпись для гостя`}>
+              <input
+                className={fieldClass}
+                value={form[titleKey]}
+                onChange={(event) =>
+                  onChange({ [titleKey]: event.target.value } as Partial<MissionForm>)
+                }
+              />
+            </Field>
+            <div className="flex items-end">
+              <button
+                type="button"
+                className={`${smallButtonClass} w-full justify-center lg:h-10`}
+                disabled={!hasStepValue}
+                onClick={() => clearStep(titleKey, missionIdKey)}
+              >
+                Очистить
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -10270,16 +10386,19 @@ function missionToForm(mission: GuestGameMission): MissionForm {
       0,
       defaultMissionForm.questStepOne,
     ),
+    questStepOneMissionId: missionQuestStepMissionId(mission.conditions, 0),
     questStepTwo: missionQuestStepTitle(
       mission.conditions,
       1,
       defaultMissionForm.questStepTwo,
     ),
+    questStepTwoMissionId: missionQuestStepMissionId(mission.conditions, 1),
     questStepThree: missionQuestStepTitle(
       mission.conditions,
       2,
       defaultMissionForm.questStepThree,
     ),
+    questStepThreeMissionId: missionQuestStepMissionId(mission.conditions, 2),
     requireLangameFact: booleanRule(
       mission.conditions,
       "requiresLangameFact",
@@ -10613,13 +10732,33 @@ function buildMissionQuestSteps(form: MissionForm) {
   }
 
   const unit = nullable(form.progressUnit) ?? "шаг";
+  const steps = [
+    {
+      title: form.questStepOne,
+      missionId: nullable(form.questStepOneMissionId),
+    },
+    {
+      title: form.questStepTwo,
+      missionId: nullable(form.questStepTwoMissionId),
+    },
+    {
+      title: form.questStepThree,
+      missionId: nullable(form.questStepThreeMissionId),
+    },
+  ];
 
-  return [form.questStepOne, form.questStepTwo, form.questStepThree]
-    .map((title, index) => ({
+  return steps
+    .map(({ title, missionId }, index) => ({
       id: `step-${index + 1}`,
       title: title.trim(),
       target: index + 1,
       unit,
+      ...(missionId
+        ? {
+            missionId,
+            templateMissionId: missionId,
+          }
+        : {}),
     }))
     .filter((step) => step.title.length > 0);
 }
@@ -10962,10 +11101,20 @@ function missionQuestSteps(value: unknown) {
         typeof record.id === "string" && record.id.trim()
           ? record.id
           : title;
+      const missionId =
+        typeof record.missionId === "string" && record.missionId.trim()
+          ? record.missionId.trim()
+          : typeof record.templateMissionId === "string" &&
+              record.templateMissionId.trim()
+            ? record.templateMissionId.trim()
+            : "";
 
-      return title ? { id, title } : null;
+      return title ? { id, title, missionId } : null;
     })
-    .filter((item): item is { id: string; title: string } => Boolean(item))
+    .filter(
+      (item): item is { id: string; title: string; missionId: string } =>
+        Boolean(item),
+    )
     .slice(0, 3);
 }
 
@@ -10977,9 +11126,21 @@ function missionQuestStepTitle(value: unknown, index: number, fallback: string) 
   return missionQuestSteps(value)[index]?.title ?? fallback;
 }
 
+function missionQuestStepMissionId(value: unknown, index: number) {
+  return missionQuestSteps(value)[index]?.missionId ?? "";
+}
+
 function questRuleSummary(value: unknown) {
   const steps = missionQuestSteps(value);
-  return steps.length ? `квест: ${steps.length} шага` : "один шаг";
+  const templateCount = steps.filter((step) => step.missionId).length;
+
+  if (!steps.length) {
+    return "один шаг";
+  }
+
+  return templateCount
+    ? `квест: ${steps.length} шага, ${templateCount} шабл.`
+    : `квест: ${steps.length} шага`;
 }
 
 function missionMetricSummary(value: unknown) {

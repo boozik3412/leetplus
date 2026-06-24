@@ -412,6 +412,7 @@ export type GuestPortalPayload = {
       rewardRarity: GuestPortalLootBoxRarity | null;
       rewardRarityLabel: string | null;
       rewardDropChance: number | null;
+      sourceId: string | null;
       sourceKind: "LOOT_BOX" | "MISSION" | "BATTLE_PASS" | "MANUAL";
       sourceLabel: string | null;
       rewardCode: string | null;
@@ -600,6 +601,7 @@ export type GuestPortalGameSummary = {
         | "rewardRarity"
         | "rewardRarityLabel"
         | "rewardDropChance"
+        | "sourceId"
         | "sourceKind"
         | "sourceLabel"
         | "rewardCode"

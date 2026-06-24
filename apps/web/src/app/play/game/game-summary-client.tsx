@@ -20,6 +20,8 @@ type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
 type GameRewardWalletState =
   GuestPortalGameSummary["rewards"]["recent"][number]["walletState"];
+type GameRewardHistoryItem =
+  GuestPortalGameSummary["rewards"]["recent"][number];
 type GameBonusHistoryItem =
   GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
 type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
@@ -83,11 +85,50 @@ type HomeBattleQuest = {
   label: string;
 };
 type QuestStatus = "done" | "live" | "next";
+type RewardHistorySource = "lootbox" | "battlepass" | "quest" | "promo";
+type RewardHistorySourceFilter = RewardHistorySource | "all";
+type RewardHistoryRarityFilter = GuestPortalLootBoxRarity | "all";
+type RewardHistoryGroup = "source" | "rarity" | "date";
 const LOOTBOX_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
   common: "Обычная",
   rare: "Редкая",
   epic: "Эпическая",
   legendary: "Легендарная",
+};
+const REWARD_HISTORY_SOURCE_ORDER: RewardHistorySource[] = [
+  "lootbox",
+  "battlepass",
+  "quest",
+  "promo",
+];
+const REWARD_HISTORY_SOURCE_LABELS: Record<RewardHistorySource, string> = {
+  lootbox: "Лутбоксы",
+  battlepass: "Баттлпасс",
+  quest: "Квесты",
+  promo: "Промокоды",
+};
+const REWARD_HISTORY_RARITY_ORDER: GuestPortalLootBoxRarity[] = [
+  "common",
+  "rare",
+  "epic",
+  "legendary",
+];
+const REWARD_HISTORY_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
+  common: "Обычные",
+  rare: "Редкие",
+  epic: "Эпические",
+  legendary: "Легендарные",
+};
+const REWARD_HISTORY_GROUP_TITLES: Record<RewardHistoryGroup, string> = {
+  source: "Группировка по блокам",
+  rarity: "Группировка по редкости",
+  date: "Хронология наград",
+};
+const REWARD_HISTORY_SOURCE_TONES: Record<RewardHistorySource, string> = {
+  lootbox: "131 228 236",
+  battlepass: "208 170 108",
+  quest: "148 214 184",
+  promo: "158 181 183",
 };
 const LOOTBOX_RARITY_OPEN_MS: Record<GuestPortalLootBoxRarity, number> = {
   common: 1420,
@@ -731,6 +772,8 @@ function ReadyGameView({
             seasonName={summary.battlePass.active?.name ?? "Сезон клуба"}
             onToast={showToast}
           />
+
+          <RewardJournalPanel summary={summary} />
         </div>
 
         <PlayerProfilePanel
@@ -2480,6 +2523,467 @@ function NextActionsPanel({
   );
 }
 
+type RewardCollectionMark = {
+  kind: "new" | "repeat";
+  label: string;
+};
+
+type RewardCollectionItem = {
+  key: string;
+  title: string;
+  value: string;
+  source: RewardHistorySource;
+  rarity: GuestPortalLootBoxRarity;
+  count: number;
+  latestAt: string;
+};
+
+function RewardJournalPanel({ summary }: { summary: GuestPortalGameSummary }) {
+  const [activeClub, setActiveClub] = useState("all");
+  const [activeSourceFilter, setActiveSourceFilter] =
+    useState<RewardHistorySourceFilter>("all");
+  const [activeRarityFilter, setActiveRarityFilter] =
+    useState<RewardHistoryRarityFilter>("all");
+  const [activeGroup, setActiveGroup] = useState<RewardHistoryGroup>("source");
+  const [searchQuery, setSearchQuery] = useState("");
+  const currentClubId = summary.store.id;
+  const currentClubScope = summary.store.address
+    ? `${summary.store.name} / ${summary.store.address}`
+    : summary.store.name;
+  const clubOptions = useMemo(
+    () => [
+      { id: "all", label: "Итого по всем клубам", scope: "Итого по всем клубам" },
+      { id: currentClubId, label: summary.store.name, scope: currentClubScope },
+    ],
+    [currentClubId, currentClubScope, summary.store.name],
+  );
+
+  const scopedRewards = useMemo(
+    () =>
+      [...summary.rewards.recent].sort(
+        (left, right) =>
+          Date.parse(right.qualifiedAt) - Date.parse(left.qualifiedAt),
+      ),
+    [summary.rewards.recent],
+  );
+  const totals = useMemo(
+    () => buildRewardHistoryTotals(scopedRewards),
+    [scopedRewards],
+  );
+  const collection = useMemo(
+    () => buildRewardCollection(scopedRewards),
+    [scopedRewards],
+  );
+  const collectionIndex = useMemo(
+    () => buildRewardCollectionIndex(scopedRewards),
+    [scopedRewards],
+  );
+  const filteredRewards = useMemo(
+    () =>
+      filterRewardHistory(scopedRewards, {
+        sourceFilter: activeSourceFilter,
+        rarityFilter: activeRarityFilter,
+        query: searchQuery,
+        clubName: summary.store.name,
+      }),
+    [
+      activeSourceFilter,
+      activeRarityFilter,
+      scopedRewards,
+      searchQuery,
+      summary.store.name,
+    ],
+  );
+  const groupedRewards = useMemo(
+    () => groupRewardHistory(filteredRewards, activeGroup),
+    [activeGroup, filteredRewards],
+  );
+  const selectedClubScope =
+    clubOptions.find((option) => option.id === activeClub)?.scope ??
+    "Итого по всем клубам";
+  const collectionTarget = Math.max(12, collection.length);
+  const collectionPercent = clampPercent((collection.length / collectionTarget) * 100);
+  const activeFilterLabel = rewardHistoryActiveFilterLabel({
+    activeClub,
+    clubName: summary.store.name,
+    sourceFilter: activeSourceFilter,
+    rarityFilter: activeRarityFilter,
+  });
+  const hasRewards = scopedRewards.length > 0;
+
+  function toggleSourceFilter(source: RewardHistorySource) {
+    setActiveSourceFilter((current) => (current === source ? "all" : source));
+    setActiveRarityFilter("all");
+    setActiveGroup("source");
+  }
+
+  function toggleRarityFilter(rarity: GuestPortalLootBoxRarity) {
+    setActiveRarityFilter((current) => (current === rarity ? "all" : rarity));
+    setActiveSourceFilter("all");
+    setActiveGroup("rarity");
+  }
+
+  function resetRewardHistoryFilters() {
+    setActiveSourceFilter("all");
+    setActiveRarityFilter("all");
+    setSearchQuery("");
+  }
+
+  return (
+    <section
+      id="rewards"
+      className="lp-club-panel lp-reward-journal"
+      aria-label="Журнал полученных наград"
+    >
+      <header className="lp-reward-journal-head">
+        <div>
+          <div className="lp-club-label">История наград</div>
+          <h2>Журнал полученных наград</h2>
+          <p>
+            Карточки достижений, редкость и коллекционный прогресс по наградам
+            игрового модуля.
+          </p>
+        </div>
+        <div className="lp-reward-journal-side">
+          <span className="lp-reward-sync-pill">История синхронизирована</span>
+          <Link href="#profile" className="lp-club-ghost-link">
+            Назад в модуль
+          </Link>
+        </div>
+      </header>
+
+      <div className="lp-reward-scope-row">
+        <label className="lp-reward-scope-field">
+          <span className="lp-club-small-label">Область истории</span>
+          <select
+            value={activeClub}
+            onChange={(event) => setActiveClub(event.target.value)}
+          >
+            {clubOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.scope}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="lp-reward-total-card">
+          <strong>{formatNumber(totals.total)}</strong>
+          <span>{selectedClubScope}</span>
+        </div>
+      </div>
+
+      <div className="lp-reward-counter-band" aria-label="Счетчики наград">
+        <RewardHistoryCounterPanel
+          title="По типам"
+          hint="4 источника"
+          counters={REWARD_HISTORY_SOURCE_ORDER.map((source) => ({
+            key: source,
+            label: REWARD_HISTORY_SOURCE_LABELS[source],
+            value: totals.source[source],
+            tone: REWARD_HISTORY_SOURCE_TONES[source],
+            active: activeSourceFilter === source,
+            onClick: () => toggleSourceFilter(source),
+          }))}
+          total={totals.total}
+        />
+        <RewardHistoryCounterPanel
+          title="По редкости"
+          hint="Баланс выпадений"
+          counters={REWARD_HISTORY_RARITY_ORDER.map((rarity) => ({
+            key: rarity,
+            label: REWARD_HISTORY_RARITY_LABELS[rarity],
+            value: totals.rarity[rarity],
+            tone: rewardRarityTone(rarity),
+            active: activeRarityFilter === rarity,
+            rarity,
+            onClick: () => toggleRarityFilter(rarity),
+          }))}
+          total={totals.total}
+        />
+      </div>
+
+      <section className="lp-reward-collection" aria-label="Коллекция наград">
+        <div className="lp-reward-collection-head">
+          <div>
+            <span className="lp-club-small-label">Коллекция наград</span>
+            <h3>
+              Собрано {formatNumber(collection.length)} /{" "}
+              {formatNumber(collectionTarget)} наград сезона
+            </h3>
+          </div>
+          <div className="lp-reward-collection-progress" aria-hidden="true">
+            <span style={{ width: `${collectionPercent}%` }} />
+          </div>
+        </div>
+        {collection.length ? (
+          <div className="lp-reward-collection-grid">
+            {collection.slice(0, 12).map((item) => (
+              <RewardCollectionCard key={item.key} item={item} />
+            ))}
+          </div>
+        ) : (
+          <p className="lp-reward-empty-copy">
+            Коллекция начнется после первой полученной награды.
+          </p>
+        )}
+      </section>
+
+      <div className="lp-reward-command" aria-label="Управление журналом наград">
+        <div className="lp-reward-group-switch">
+          {(["source", "rarity", "date"] as RewardHistoryGroup[]).map((group) => (
+            <button
+              key={group}
+              type="button"
+              className={activeGroup === group ? "is-active" : ""}
+              onClick={() => setActiveGroup(group)}
+            >
+              {group === "source" ? "Блоки" : group === "rarity" ? "Редкость" : "Дата"}
+            </button>
+          ))}
+        </div>
+        <label className="lp-reward-search">
+          <span className="sr-only">Поиск по наградам</span>
+          <input
+            type="search"
+            value={searchQuery}
+            placeholder="Найти достижение"
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className="lp-reward-reset"
+          onClick={resetRewardHistoryFilters}
+        >
+          Сброс
+        </button>
+        <span className="lp-reward-active-filter">{activeFilterLabel}</span>
+      </div>
+
+      <section className="lp-reward-list-panel" aria-label="Список наград">
+        <div className="lp-reward-list-toolbar">
+          <strong>{REWARD_HISTORY_GROUP_TITLES[activeGroup]}</strong>
+          <span>{formatNumber(filteredRewards.length)} записей</span>
+        </div>
+        {filteredRewards.length ? (
+          <div className="lp-reward-list">
+            {groupedRewards.map((group) => (
+              <section key={group.key} className="lp-reward-group">
+                <header className="lp-reward-group-head">
+                  <h3>{group.title}</h3>
+                  <span>
+                    {formatNumber(group.items.length)}{" "}
+                    {pluralRewards(group.items.length)}
+                  </span>
+                </header>
+                {group.items.map((item) => (
+                  <RewardAchievementCard
+                    key={item.id}
+                    item={item}
+                    clubName={summary.store.name}
+                    collectionMark={collectionIndex.get(item.id) ?? null}
+                  />
+                ))}
+              </section>
+            ))}
+          </div>
+        ) : (
+          <p className="lp-reward-empty-copy">
+            {hasRewards
+              ? "Наград по выбранным условиям пока нет."
+              : "Полученные награды появятся здесь после лутбоксов, квестов, баттлпасса или промокодов."}
+          </p>
+        )}
+      </section>
+
+      <div className="lp-reward-ledger-row">
+        <div className="lp-reward-balance-card">
+          <span className="lp-club-small-label">Бонусный баланс</span>
+          <strong>
+            {summary.loyalty.bonusBalance !== null
+              ? formatNumber(summary.loyalty.bonusBalance)
+              : "Нет данных"}
+          </strong>
+          <p>
+            {summary.loyalty.bonusBalanceSource ??
+              "Ожидаем первый snapshot Langame"}
+          </p>
+        </div>
+        {summary.rewards.bonusHistory.items.length ? (
+          <BonusHistoryPanel history={summary.rewards.bonusHistory} />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function RewardHistoryCounterPanel({
+  title,
+  hint,
+  counters,
+  total,
+}: {
+  title: string;
+  hint: string;
+  counters: Array<{
+    key: string;
+    label: string;
+    value: number;
+    tone: string;
+    active: boolean;
+    rarity?: GuestPortalLootBoxRarity;
+    onClick: () => void;
+  }>;
+  total: number;
+}) {
+  const totalBase = Math.max(total, 1);
+
+  return (
+    <div className="lp-reward-counter-panel">
+      <div className="lp-reward-counter-title">
+        <strong>{title}</strong>
+        <span>{hint}</span>
+      </div>
+      <div className="lp-reward-counter-grid">
+        {counters.map((counter) => {
+          const share = Math.round((counter.value / totalBase) * 100);
+
+          return (
+            <button
+              key={counter.key}
+              type="button"
+              aria-pressed={counter.active}
+              className={[
+                "lp-reward-counter-cell",
+                counter.active ? "is-active" : "",
+                counter.rarity ? `rarity-${counter.rarity}` : "",
+              ].join(" ")}
+              style={rewardCounterStyle(counter.tone, share)}
+              onClick={counter.onClick}
+            >
+              <i className="lp-reward-counter-dot" aria-hidden="true" />
+              <span>{counter.label}</span>
+              <strong>{formatNumber(counter.value)}</strong>
+              <em>{share}%</em>
+              <b aria-hidden="true">
+                <span />
+              </b>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RewardCollectionCard({ item }: { item: RewardCollectionItem }) {
+  return (
+    <article className={`lp-reward-collection-card rarity-${item.rarity}`}>
+      <div className="lp-reward-collection-icon">
+        <RewardSourceIcon source={item.source} />
+      </div>
+      <div>
+        <small>
+          {REWARD_HISTORY_SOURCE_LABELS[item.source]} /{" "}
+          {REWARD_HISTORY_RARITY_LABELS[item.rarity]}
+        </small>
+        <strong>{item.title}</strong>
+        <span>{item.value}</span>
+      </div>
+      <em>
+        {item.count === 1
+          ? "Новая"
+          : `Повтор x${formatNumber(item.count - 1)}`}
+      </em>
+    </article>
+  );
+}
+
+function RewardAchievementCard({
+  item,
+  clubName,
+  collectionMark,
+}: {
+  item: GameRewardHistoryItem;
+  clubName: string;
+  collectionMark: RewardCollectionMark | null;
+}) {
+  const source = rewardHistorySource(item);
+  const rarity = rewardHistoryRarity(item);
+
+  return (
+    <article className={`lp-reward-achievement-card rarity-${rarity}`}>
+      <span className="lp-reward-achievement-icon" aria-hidden="true">
+        <RewardSourceIcon source={source} />
+      </span>
+      <span className="lp-reward-achievement-main">
+        <small>
+          {clubName} / {item.sourceLabel ?? REWARD_HISTORY_SOURCE_LABELS[source]}
+        </small>
+        <strong>{item.rewardLabel}</strong>
+        <span>
+          {rewardHistoryDescription(item)} · {walletStateLabel(item.walletState)}
+        </span>
+      </span>
+      <span className="lp-reward-achievement-meta">
+        <span className="lp-reward-value">{rewardHistoryValue(item)}</span>
+        <span className={`lp-reward-rarity-chip rarity-${rarity}`}>
+          {REWARD_HISTORY_RARITY_LABELS[rarity]}
+        </span>
+        {collectionMark ? (
+          <span className={`lp-reward-collection-mark ${collectionMark.kind}`}>
+            {collectionMark.label}
+          </span>
+        ) : null}
+        <span className="lp-reward-date">
+          {formatRewardHistoryDay(item.qualifiedAt)}
+          <br />
+          {formatRewardHistoryTime(item.qualifiedAt)}
+        </span>
+      </span>
+    </article>
+  );
+}
+
+function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
+  if (source === "battlepass") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <path d="M6 5h12v14H6z" />
+        <path d="M9 9h6" />
+        <path d="M9 13h4" />
+      </svg>
+    );
+  }
+
+  if (source === "quest") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <path d="M5 5h14v14H5z" />
+        <path d="m8 12 2.5 2.5L16 9" />
+      </svg>
+    );
+  }
+
+  if (source === "promo") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <path d="M4 8h16v8H4z" />
+        <path d="M8 8v8" />
+        <path d="M16 8v8" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M5 8h14v10H5z" />
+      <path d="m7 6 10 0 2 2H5z" />
+      <path d="M12 8v10" />
+    </svg>
+  );
+}
+
 function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
   const reward = summary.rewards.ready[0] ?? null;
   const recentRewards = summary.rewards.recent;
@@ -3790,6 +4294,338 @@ function rewardSourceKindLabel(
   >;
 
   return labels[kind];
+}
+
+function rewardHistorySource(item: GameRewardHistoryItem): RewardHistorySource {
+  if (item.sourceKind === "LOOT_BOX") {
+    return "lootbox";
+  }
+
+  if (item.sourceKind === "BATTLE_PASS") {
+    return "battlepass";
+  }
+
+  if (item.sourceKind === "MISSION") {
+    return "quest";
+  }
+
+  return "promo";
+}
+
+function rewardHistoryRarity(
+  item: Pick<GameRewardHistoryItem, "rewardRarity">,
+): GuestPortalLootBoxRarity {
+  return normalizeLootboxRarity(item.rewardRarity) ?? "common";
+}
+
+function rewardHistoryCollectionKey(item: GameRewardHistoryItem) {
+  const rarity = rewardHistoryRarity(item);
+  const source = rewardHistorySource(item);
+  const sourceId =
+    source === "lootbox"
+      ? item.sourceId ?? item.sourceLabel ?? item.sourceKind
+      : item.sourceId ?? item.sourceKind;
+
+  return [item.rewardLabel, rarity, sourceId].join("::");
+}
+
+function rewardHistoryValue(item: GameRewardHistoryItem) {
+  const amount = formatNumber(item.rewardAmount);
+  const type = item.rewardType.toLocaleUpperCase("ru-RU");
+
+  if (type.includes("XP")) {
+    return `${amount} XP`;
+  }
+
+  if (type.includes("BONUS")) {
+    return `${amount} бонусов`;
+  }
+
+  if (type.includes("HOUR")) {
+    return `${amount} ч`;
+  }
+
+  if (item.rewardAmount > 0) {
+    return `${amount} ${item.rewardType}`;
+  }
+
+  return item.rewardLabel;
+}
+
+function rewardHistoryDescription(item: GameRewardHistoryItem) {
+  const source = rewardHistorySource(item);
+  const label = item.sourceLabel ?? REWARD_HISTORY_SOURCE_LABELS[source];
+  const chance = item.rewardDropChance;
+
+  if (source === "lootbox" && chance !== null) {
+    return `${label} · шанс ${formatRewardChance(chance)}`;
+  }
+
+  return label;
+}
+
+function buildRewardHistoryTotals(items: GameRewardHistoryItem[]) {
+  const source = {
+    lootbox: 0,
+    battlepass: 0,
+    quest: 0,
+    promo: 0,
+  } satisfies Record<RewardHistorySource, number>;
+  const rarity = {
+    common: 0,
+    rare: 0,
+    epic: 0,
+    legendary: 0,
+  } satisfies Record<GuestPortalLootBoxRarity, number>;
+
+  for (const item of items) {
+    source[rewardHistorySource(item)] += 1;
+    rarity[rewardHistoryRarity(item)] += 1;
+  }
+
+  return {
+    total: items.length,
+    source,
+    rarity,
+  };
+}
+
+function buildRewardCollection(items: GameRewardHistoryItem[]): RewardCollectionItem[] {
+  const collection = new Map<string, RewardCollectionItem>();
+
+  for (const item of items) {
+    const key = rewardHistoryCollectionKey(item);
+    const current = collection.get(key);
+
+    if (current) {
+      current.count += 1;
+      if (Date.parse(item.qualifiedAt) > Date.parse(current.latestAt)) {
+        current.latestAt = item.qualifiedAt;
+      }
+      continue;
+    }
+
+    collection.set(key, {
+      key,
+      title: item.rewardLabel,
+      value: rewardHistoryValue(item),
+      source: rewardHistorySource(item),
+      rarity: rewardHistoryRarity(item),
+      count: 1,
+      latestAt: item.qualifiedAt,
+    });
+  }
+
+  return [...collection.values()].sort((left, right) => {
+    const rarityDelta =
+      rewardRarityWeight(right.rarity) - rewardRarityWeight(left.rarity);
+
+    if (rarityDelta !== 0) {
+      return rarityDelta;
+    }
+
+    return Date.parse(right.latestAt) - Date.parse(left.latestAt);
+  });
+}
+
+function buildRewardCollectionIndex(items: GameRewardHistoryItem[]) {
+  const firstByKey = new Map<string, string>();
+  const seenByKey = new Map<string, number>();
+  const sortedAsc = [...items].sort(
+    (left, right) => Date.parse(left.qualifiedAt) - Date.parse(right.qualifiedAt),
+  );
+
+  for (const item of sortedAsc) {
+    const key = rewardHistoryCollectionKey(item);
+    const count = seenByKey.get(key) ?? 0;
+
+    seenByKey.set(key, count + 1);
+    if (!firstByKey.has(key)) {
+      firstByKey.set(key, item.id);
+    }
+  }
+
+  const marks = new Map<string, RewardCollectionMark>();
+  for (const item of sortedAsc) {
+    const key = rewardHistoryCollectionKey(item);
+    const firstId = firstByKey.get(key);
+
+    marks.set(
+      item.id,
+      firstId === item.id
+        ? { kind: "new", label: "Новая в коллекции" }
+        : { kind: "repeat", label: "Повтор" },
+    );
+  }
+
+  return marks;
+}
+
+function filterRewardHistory(
+  items: GameRewardHistoryItem[],
+  filters: {
+    sourceFilter: RewardHistorySourceFilter;
+    rarityFilter: RewardHistoryRarityFilter;
+    query: string;
+    clubName: string;
+  },
+) {
+  const query = filters.query.trim().toLocaleLowerCase("ru-RU");
+
+  return items.filter((item) => {
+    const source = rewardHistorySource(item);
+    const rarity = rewardHistoryRarity(item);
+    const sourceMatches =
+      filters.sourceFilter === "all" || filters.sourceFilter === source;
+    const rarityMatches =
+      filters.rarityFilter === "all" || filters.rarityFilter === rarity;
+    const queryMatches =
+      !query ||
+      [
+        item.rewardLabel,
+        item.sourceLabel,
+        item.rewardType,
+        REWARD_HISTORY_SOURCE_LABELS[source],
+        REWARD_HISTORY_RARITY_LABELS[rarity],
+        filters.clubName,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("ru-RU")
+        .includes(query);
+
+    return sourceMatches && rarityMatches && queryMatches;
+  });
+}
+
+function groupRewardHistory(
+  items: GameRewardHistoryItem[],
+  groupBy: RewardHistoryGroup,
+) {
+  if (groupBy === "source") {
+    return REWARD_HISTORY_SOURCE_ORDER.map((source) => ({
+      key: source,
+      title: REWARD_HISTORY_SOURCE_LABELS[source],
+      items: items.filter((item) => rewardHistorySource(item) === source),
+    })).filter((group) => group.items.length);
+  }
+
+  if (groupBy === "rarity") {
+    return [...REWARD_HISTORY_RARITY_ORDER]
+      .reverse()
+      .map((rarity) => ({
+        key: rarity,
+        title: REWARD_HISTORY_RARITY_LABELS[rarity],
+        items: items.filter((item) => rewardHistoryRarity(item) === rarity),
+      }))
+      .filter((group) => group.items.length);
+  }
+
+  const groups = new Map<string, GameRewardHistoryItem[]>();
+  for (const item of items) {
+    const key = formatRewardHistoryDay(item.qualifiedAt);
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+
+  return [...groups.entries()]
+    .map(([key, groupItems]) => ({
+      key,
+      title: key,
+      items: groupItems,
+    }))
+    .sort(
+      (left, right) =>
+        Date.parse(right.items[0]?.qualifiedAt ?? "") -
+        Date.parse(left.items[0]?.qualifiedAt ?? ""),
+    );
+}
+
+function rewardHistoryActiveFilterLabel({
+  activeClub,
+  clubName,
+  sourceFilter,
+  rarityFilter,
+}: {
+  activeClub: string;
+  clubName: string;
+  sourceFilter: RewardHistorySourceFilter;
+  rarityFilter: RewardHistoryRarityFilter;
+}) {
+  const parts = [activeClub === "all" ? "Все клубы" : clubName];
+
+  if (sourceFilter !== "all") {
+    parts.push(REWARD_HISTORY_SOURCE_LABELS[sourceFilter]);
+  }
+
+  if (rarityFilter !== "all") {
+    parts.push(REWARD_HISTORY_RARITY_LABELS[rarityFilter]);
+  }
+
+  return parts.join(" / ");
+}
+
+function rewardCounterStyle(tone: string, share: number) {
+  return {
+    "--tone": tone,
+    "--share": `${share}%`,
+  } as CSSProperties & Record<"--tone" | "--share", string>;
+}
+
+function rewardRarityTone(rarity: GuestPortalLootBoxRarity) {
+  const tones = {
+    common: "158 181 183",
+    rare: "131 228 236",
+    epic: "175 164 255",
+    legendary: "208 170 108",
+  } satisfies Record<GuestPortalLootBoxRarity, string>;
+
+  return tones[rarity];
+}
+
+function rewardRarityWeight(rarity: GuestPortalLootBoxRarity) {
+  const weights = {
+    common: 1,
+    rare: 2,
+    epic: 3,
+    legendary: 4,
+  } satisfies Record<GuestPortalLootBoxRarity, number>;
+
+  return weights[rarity];
+}
+
+function pluralRewards(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+
+  if (mod10 === 1 && mod100 !== 11) {
+    return "награда";
+  }
+
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return "награды";
+  }
+
+  return "наград";
+}
+
+function formatRewardChance(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 2,
+  }).format(value) + "%";
+}
+
+function formatRewardHistoryDay(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+  }).format(new Date(value));
+}
+
+function formatRewardHistoryTime(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function bonusStatusBadgeClass(status: GameBonusHistoryItem["status"]) {
@@ -6207,6 +7043,756 @@ const clubHomeCss = `
 
 .lp-club-quest-full-state {
   color: var(--cyan);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.lp-reward-journal {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: clamp(18px, 2.4vw, 28px);
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.055), transparent 30%),
+    linear-gradient(180deg, rgba(8, 14, 18, 0.96), rgba(2, 7, 9, 0.96));
+}
+
+.lp-reward-journal::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.58;
+  background:
+    linear-gradient(rgba(196, 224, 225, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(196, 224, 225, 0.02) 1px, transparent 1px);
+  background-size: 76px 76px;
+  mask-image: radial-gradient(circle at 52% 48%, #000, transparent 84%);
+}
+
+.lp-reward-journal > * {
+  position: relative;
+  z-index: 1;
+}
+
+.lp-reward-journal-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.1);
+}
+
+.lp-reward-journal-head h2 {
+  margin-top: 12px;
+  color: var(--text);
+  font-size: clamp(26px, 3.6vw, 52px);
+  line-height: 0.98;
+  font-weight: 780;
+}
+
+.lp-reward-journal-head p {
+  max-width: 740px;
+  margin-top: 12px;
+  color: #c2d0d1;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.lp-reward-journal-side {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+  min-width: 178px;
+}
+
+.lp-reward-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 12, 16, 0.56);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-reward-sync-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 16px rgba(131, 228, 236, 0.64);
+}
+
+.lp-reward-scope-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(178px, auto);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.lp-reward-scope-field,
+.lp-reward-total-card,
+.lp-reward-counter-panel,
+.lp-reward-collection,
+.lp-reward-command,
+.lp-reward-list-panel,
+.lp-reward-balance-card {
+  border: 1px solid rgba(196, 224, 225, 0.1);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.045), transparent 34%),
+    rgba(2, 8, 11, 0.28);
+}
+
+.lp-reward-scope-field {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.lp-reward-scope-field select,
+.lp-reward-search input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 7px;
+  color: var(--text);
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.08), transparent 64%),
+    rgba(0, 0, 0, 0.24);
+  outline: none;
+}
+
+.lp-reward-scope-field select {
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.lp-reward-scope-field option {
+  color: var(--text);
+  background: #071014;
+}
+
+.lp-reward-search input {
+  padding: 0 12px;
+}
+
+.lp-reward-scope-field select:focus,
+.lp-reward-search input:focus {
+  border-color: rgba(131, 228, 236, 0.56);
+  box-shadow: 0 0 0 3px rgba(131, 228, 236, 0.08);
+}
+
+.lp-reward-total-card {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-width: 190px;
+  padding: 14px;
+}
+
+.lp-reward-total-card strong {
+  color: var(--cyan);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.lp-reward-total-card span {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-reward-counter-band {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(280px, 1.1fr);
+  gap: 14px;
+}
+
+.lp-reward-counter-panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.lp-reward-counter-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+.lp-reward-counter-title strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-reward-counter-title span {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-reward-counter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.lp-reward-counter-cell {
+  --tone: 131 228 236;
+  --share: 0%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "dot label value"
+    "percent meter meter";
+  align-items: center;
+  gap: 8px 9px;
+  min-height: 72px;
+  padding: 11px 12px 10px;
+  border: 1px solid rgba(196, 224, 225, 0.08);
+  border-radius: 8px;
+  color: inherit;
+  text-align: left;
+  background:
+    radial-gradient(circle at 14% 20%, rgb(var(--tone) / 0.12), transparent 42%),
+    rgba(196, 224, 225, 0.025);
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-reward-counter-cell:hover,
+.lp-reward-counter-cell:focus-visible,
+.lp-reward-counter-cell.is-active {
+  border-color: rgb(var(--tone) / 0.58);
+  background:
+    radial-gradient(circle at 14% 20%, rgb(var(--tone) / 0.18), transparent 44%),
+    rgba(196, 224, 225, 0.045);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.lp-reward-counter-dot {
+  grid-area: dot;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--tone));
+  box-shadow: 0 0 16px rgb(var(--tone) / 0.54);
+}
+
+.lp-reward-counter-cell span {
+  grid-area: label;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-reward-counter-cell strong {
+  grid-area: value;
+  color: rgb(var(--tone));
+  font-size: 21px;
+  line-height: 1;
+  text-align: right;
+}
+
+.lp-reward-counter-cell em {
+  grid-area: percent;
+  color: var(--quiet);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.lp-reward-counter-cell b {
+  grid-area: meter;
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.08);
+  overflow: hidden;
+}
+
+.lp-reward-counter-cell b span {
+  display: block;
+  width: var(--share);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgb(var(--tone) / 0.92), rgb(var(--tone) / 0.28));
+  box-shadow: 0 0 14px rgb(var(--tone) / 0.26);
+}
+
+.lp-reward-collection {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.lp-reward-collection-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 240px);
+  gap: 14px;
+  align-items: end;
+}
+
+.lp-reward-collection-head h3 {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.lp-reward-collection-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.08);
+  overflow: hidden;
+}
+
+.lp-reward-collection-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--amber));
+  box-shadow: 0 0 18px rgba(131, 228, 236, 0.2);
+}
+
+.lp-reward-collection-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lp-reward-collection-card,
+.lp-reward-achievement-card {
+  --rarity: var(--cyan);
+  --rarity-soft: rgba(131, 228, 236, 0.1);
+  border: 1px solid rgba(196, 224, 225, 0.1);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 8% 16%, var(--rarity-soft), transparent 42%),
+    rgba(196, 224, 225, 0.026);
+}
+
+.lp-reward-collection-card.rarity-common,
+.lp-reward-achievement-card.rarity-common {
+  --rarity: #9eb5b7;
+  --rarity-soft: rgba(158, 181, 183, 0.1);
+}
+
+.lp-reward-collection-card.rarity-rare,
+.lp-reward-achievement-card.rarity-rare {
+  --rarity: var(--cyan);
+  --rarity-soft: rgba(131, 228, 236, 0.12);
+}
+
+.lp-reward-collection-card.rarity-epic,
+.lp-reward-achievement-card.rarity-epic {
+  --rarity: #afa4ff;
+  --rarity-soft: rgba(175, 164, 255, 0.13);
+}
+
+.lp-reward-collection-card.rarity-legendary,
+.lp-reward-achievement-card.rarity-legendary {
+  --rarity: var(--amber);
+  --rarity-soft: rgba(208, 170, 108, 0.14);
+}
+
+.lp-reward-collection-card {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 86px;
+  padding: 10px;
+}
+
+.lp-reward-collection-icon,
+.lp-reward-achievement-icon {
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--rarity) 46%, transparent);
+  border-radius: 8px;
+  color: var(--rarity);
+  background: color-mix(in srgb, var(--rarity) 10%, transparent);
+}
+
+.lp-reward-collection-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.lp-reward-collection-card small,
+.lp-reward-achievement-main small {
+  display: block;
+  overflow: hidden;
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lp-reward-collection-card strong,
+.lp-reward-achievement-main strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.lp-reward-collection-card strong {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.lp-reward-collection-card span,
+.lp-reward-achievement-main span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.lp-reward-collection-card em {
+  align-self: start;
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: var(--rarity);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--rarity) 12%, transparent);
+}
+
+.lp-reward-command {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.lp-reward-group-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lp-reward-group-switch button,
+.lp-reward-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(196, 224, 225, 0.12);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: rgba(196, 224, 225, 0.025);
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease;
+}
+
+.lp-reward-group-switch button:hover,
+.lp-reward-group-switch button:focus-visible,
+.lp-reward-group-switch button.is-active,
+.lp-reward-reset:hover,
+.lp-reward-reset:focus-visible {
+  border-color: rgba(131, 228, 236, 0.5);
+  color: var(--text);
+  background: rgba(131, 228, 236, 0.07);
+  outline: none;
+}
+
+.lp-reward-active-filter {
+  justify-self: end;
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lp-reward-list-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.lp-reward-list-toolbar,
+.lp-reward-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lp-reward-list-toolbar {
+  min-height: 52px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.08);
+}
+
+.lp-reward-list-toolbar strong,
+.lp-reward-group-head h3 {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-reward-list-toolbar span,
+.lp-reward-group-head span {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-reward-list {
+  display: grid;
+  gap: 12px;
+  max-height: min(680px, 68vh);
+  padding: 14px;
+  overflow: auto;
+  scrollbar-color: rgba(131, 228, 236, 0.62) rgba(196, 224, 225, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.lp-reward-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.lp-reward-list::-webkit-scrollbar-track {
+  background: rgba(196, 224, 225, 0.06);
+}
+
+.lp-reward-list::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(2, 8, 11, 0.96);
+  border-radius: 999px;
+  background: rgba(131, 228, 236, 0.62);
+}
+
+.lp-reward-group {
+  display: grid;
+  gap: 8px;
+}
+
+.lp-reward-achievement-card {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  min-height: 104px;
+  padding: 12px;
+}
+
+.lp-reward-achievement-icon {
+  width: 46px;
+  height: 46px;
+}
+
+.lp-reward-achievement-main strong {
+  margin-top: 5px;
+  font-size: 16px;
+}
+
+.lp-reward-achievement-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+  max-width: 260px;
+}
+
+.lp-reward-value,
+.lp-reward-rarity-chip,
+.lp-reward-collection-mark,
+.lp-reward-date {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 9px;
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lp-reward-value {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lp-reward-rarity-chip {
+  color: var(--rarity);
+  background: color-mix(in srgb, var(--rarity) 13%, transparent);
+}
+
+.lp-reward-collection-mark.new {
+  color: #06100d;
+  background: var(--good);
+}
+
+.lp-reward-collection-mark.repeat {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lp-reward-date {
+  height: auto;
+  min-height: 32px;
+  color: var(--quiet);
+  text-align: right;
+  line-height: 1.2;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lp-reward-empty-copy {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lp-reward-ledger-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.lp-reward-balance-card {
+  display: grid;
+  gap: 8px;
+  min-height: 126px;
+  padding: 14px;
+}
+
+.lp-reward-balance-card strong {
+  color: var(--text);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.lp-reward-balance-card p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 1180px) {
+  .lp-reward-counter-band,
+  .lp-reward-ledger-row {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-reward-command {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-reward-active-filter {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 760px) {
+  .lp-reward-journal-head,
+  .lp-reward-scope-row,
+  .lp-reward-collection-head {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-reward-journal-side {
+    justify-items: start;
+  }
+
+  .lp-reward-counter-grid,
+  .lp-reward-collection-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lp-reward-achievement-card {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .lp-reward-achievement-meta {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .lp-reward-counter-grid,
+  .lp-reward-collection-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-reward-journal {
+    padding: 16px;
+  }
 }
 
 .lp-club-detail-stack {

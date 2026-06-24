@@ -773,6 +773,7 @@ export type GuestPortalGameSummary = {
         | 'rewardRarity'
         | 'rewardRarityLabel'
         | 'rewardDropChance'
+        | 'sourceId'
         | 'sourceKind'
         | 'sourceLabel'
         | 'rewardCode'
@@ -1222,6 +1223,7 @@ export type GuestPortalReward = {
   rewardRarity: string | null;
   rewardRarityLabel: string | null;
   rewardDropChance: number | null;
+  sourceId: string | null;
   sourceKind: 'LOOT_BOX' | 'MISSION' | 'BATTLE_PASS' | 'MANUAL';
   sourceLabel: string | null;
   rewardCode: string | null;
@@ -8458,7 +8460,7 @@ function buildGameSummaryFromPortal(
       (left, right) =>
         Date.parse(right.qualifiedAt) - Date.parse(left.qualifiedAt),
     )
-    .slice(0, 5)
+    .slice(0, 50)
     .map((reward) => ({
       id: reward.id,
       walletState: reward.walletState,
@@ -8468,6 +8470,7 @@ function buildGameSummaryFromPortal(
       rewardRarity: reward.rewardRarity,
       rewardRarityLabel: reward.rewardRarityLabel,
       rewardDropChance: reward.rewardDropChance,
+      sourceId: reward.sourceId,
       sourceKind: reward.sourceKind,
       sourceLabel: reward.sourceLabel,
       rewardCode: reward.rewardCode,
@@ -11048,6 +11051,7 @@ function mapReward(row: {
     rewardRarity: row.rewardRarity,
     rewardRarityLabel: row.rewardRarityLabel,
     rewardDropChance: decimalNumber(row.rewardDropChance),
+    sourceId: row.lootBoxId ?? row.missionId ?? row.seasonId ?? null,
     sourceKind: source.sourceKind,
     sourceLabel: source.sourceLabel,
     rewardCode: row.rewardCode,

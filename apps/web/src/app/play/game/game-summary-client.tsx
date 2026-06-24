@@ -249,6 +249,94 @@ export function GameSummaryClient() {
   );
 }
 
+export function GameRewardsClient() {
+  const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadRewardsSummary() {
+      try {
+        const nextSummary = await recordGameAppOpen("WEB");
+
+        if (!isActive) {
+          return;
+        }
+
+        setSummary(nextSummary);
+        setLoadState("ready");
+        setMessage(null);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        if (error instanceof EmptySessionError) {
+          setSummary(null);
+          setLoadState("empty");
+          setMessage(error.message);
+          return;
+        }
+
+        setLoadState("error");
+        setMessage(
+          getErrorMessage(error, "Не удалось загрузить журнал наград."),
+        );
+      }
+    }
+
+    void loadRewardsSummary();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  if (loadState === "loading") {
+    return <GameShell body={<LoadingView />} />;
+  }
+
+  if (loadState === "empty" || !summary) {
+    return (
+      <GameShell
+        body={
+          <EmptySessionView
+            title="Журнал наград пока недоступен"
+            message={message ?? "Подтвердите телефон, чтобы увидеть историю наград."}
+          />
+        }
+      />
+    );
+  }
+
+  if (loadState === "error") {
+    return (
+      <GameShell
+        body={
+          <EmptySessionView
+            title="Не удалось открыть журнал"
+            message={message ?? "Попробуйте обновить страницу чуть позже."}
+          />
+        }
+      />
+    );
+  }
+
+  return (
+    <GameShell
+      body={
+        <div className="lp-club-home lp-reward-standalone-page">
+          <div className="lp-reward-standalone-shell">
+            <RewardJournalPanel summary={summary} standalone />
+          </div>
+        </div>
+      }
+    />
+  );
+}
+
 function GameShell({ body }: { body: ReactNode }) {
   return (
     <main className="lp-club-home-page">
@@ -772,8 +860,6 @@ function ReadyGameView({
             seasonName={summary.battlePass.active?.name ?? "Сезон клуба"}
             onToast={showToast}
           />
-
-          <RewardJournalPanel summary={summary} />
         </div>
 
         <PlayerProfilePanel
@@ -844,6 +930,8 @@ function HomeBannerGrid({
         <Link
           key={banner.id}
           href={banner.href}
+          target={banner.href === "/play/game/rewards" ? "_blank" : undefined}
+          rel={banner.href === "/play/game/rewards" ? "noreferrer" : undefined}
           className={[
             "lp-club-banner",
             banner.featured ? "is-featured" : "",
@@ -1268,7 +1356,12 @@ function PlayerProfilePanel({
           onChange={(event) => onPromoCodeChange(event.target.value)}
         />
         <button type="submit">Активировать</button>
-        <Link className="lp-club-side-link" href="#rewards">
+        <Link
+          className="lp-club-side-link"
+          href="/play/game/rewards"
+          target="_blank"
+          rel="noreferrer"
+        >
           История наград
         </Link>
       </form>
@@ -1530,7 +1623,7 @@ function buildHomeBanners(
         summary.referral.channelHint ??
         "Лимитированные предметы и бонусы для гостей клуба.",
       tag: secondMission ? "квест" : "получить",
-      href: "#rewards",
+      href: "/play/game/rewards",
     },
   ];
   const promoBanners = summary.promoCards.featured.slice(0, 3).map(
@@ -2538,7 +2631,13 @@ type RewardCollectionItem = {
   latestAt: string;
 };
 
-function RewardJournalPanel({ summary }: { summary: GuestPortalGameSummary }) {
+function RewardJournalPanel({
+  summary,
+  standalone = false,
+}: {
+  summary: GuestPortalGameSummary;
+  standalone?: boolean;
+}) {
   const [activeClub, setActiveClub] = useState("all");
   const [activeSourceFilter, setActiveSourceFilter] =
     useState<RewardHistorySourceFilter>("all");
@@ -2632,7 +2731,10 @@ function RewardJournalPanel({ summary }: { summary: GuestPortalGameSummary }) {
   return (
     <section
       id="rewards"
-      className="lp-club-panel lp-reward-journal"
+      className={[
+        "lp-club-panel lp-reward-journal",
+        standalone ? "is-standalone" : "",
+      ].join(" ")}
       aria-label="Журнал полученных наград"
     >
       <header className="lp-reward-journal-head">
@@ -2646,7 +2748,10 @@ function RewardJournalPanel({ summary }: { summary: GuestPortalGameSummary }) {
         </div>
         <div className="lp-reward-journal-side">
           <span className="lp-reward-sync-pill">История синхронизирована</span>
-          <Link href="#profile" className="lp-club-ghost-link">
+          <Link
+            href={standalone ? "/play/game" : "#profile"}
+            className="lp-club-ghost-link"
+          >
             Назад в модуль
           </Link>
         </div>
@@ -7057,6 +7162,17 @@ const clubHomeCss = `
   border: 0;
 }
 
+.lp-reward-standalone-page {
+  min-height: 100vh;
+}
+
+.lp-reward-standalone-shell {
+  width: min(1480px, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: clamp(18px, 3.4vw, 46px);
+}
+
 .lp-reward-journal {
   display: grid;
   gap: 16px;
@@ -7066,6 +7182,10 @@ const clubHomeCss = `
   background:
     linear-gradient(135deg, rgba(131, 228, 236, 0.055), transparent 30%),
     linear-gradient(180deg, rgba(8, 14, 18, 0.96), rgba(2, 7, 9, 0.96));
+}
+
+.lp-reward-journal.is-standalone {
+  min-height: calc(100vh - clamp(36px, 6.8vw, 92px));
 }
 
 .lp-reward-journal::after {

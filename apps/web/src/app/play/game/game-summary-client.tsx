@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
@@ -9,7 +10,10 @@ import type {
   ReactNode,
   RefObject,
 } from "react";
-import type { GuestPortalGameSummary } from "@/lib/guest-portal";
+import type {
+  GuestPortalCheckInResponse,
+  GuestPortalGameSummary,
+} from "@/lib/guest-portal";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
@@ -244,6 +248,7 @@ function ReadyGameView({
   summary: GuestPortalGameSummary;
   onSummaryChange: (summary: GuestPortalGameSummary) => void;
 }) {
+  const router = useRouter();
   const primaryAction =
     summary.nextActions.find((action) => !isGuestInternalNextAction(action)) ??
     null;
@@ -259,6 +264,8 @@ function ReadyGameView({
   const lootBoxesRef = useRef<HTMLElement | null>(null);
   const battlePassRef = useRef<HTMLElement | null>(null);
   const [promoCode, setPromoCode] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [checkInPending, setCheckInPending] = useState(false);
   const [questsExpanded, setQuestsExpanded] = useState(false);
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
@@ -270,6 +277,9 @@ function ReadyGameView({
   const lootCards = buildHomeLootCards(summary, selectedLootId);
   const battleQuests = buildHomeBattleQuests(summary);
   const playerQuests = useMemo(() => buildPlayerQuests(summary), [summary]);
+  const checkInAction =
+    summary.nextActions.find((action) => action.kind === "CHECK_IN") ?? null;
+  const checkInAvailable = isCheckInAvailable(summary);
   const completedQuestCount = summary.progress.summary.missionsCompleted;
   const questTotalCount = summary.missions.total || playerQuests.length;
   const battlePassProgress = clampPercent(
@@ -318,6 +328,22 @@ function ReadyGameView({
 
     return () => window.clearTimeout(timerId);
   }, [toastMessage]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (lootboxOverlayPhase !== "open") {
@@ -409,6 +435,58 @@ function ReadyGameView({
     showToast(`${quest.title}: ${quest.description}`);
   }
 
+  function focusPlayerProfile() {
+    setMenuOpen(false);
+    document.querySelector(".lp-club-profile-panel")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
+  async function handleCheckIn() {
+    if (checkInPending) {
+      return;
+    }
+
+    setCheckInPending(true);
+    showToast("Проверяем чекин в Langame.");
+
+    try {
+      const result = await checkInGameSession();
+      const nextSummary = await loadGameSummary();
+      const xpDelta = result.checkIn.processResult.summary.appliedXpDelta;
+      const createdRewards = result.checkIn.processResult.summary.createdRewards;
+      const details = [
+        xpDelta > 0 ? `${formatNumber(xpDelta)} XP` : null,
+        createdRewards > 0 ? `${formatNumber(createdRewards)} наград` : null,
+      ].filter(Boolean);
+
+      onSummaryChange(nextSummary);
+      showToast(
+        details.length
+          ? `Чекин засчитан: ${details.join(", ")}.`
+          : "Чекин засчитан.",
+      );
+    } catch (error) {
+      showToast(getErrorMessage(error, "Не удалось сделать чекин."));
+    } finally {
+      setCheckInPending(false);
+    }
+  }
+
+  async function handleLogout() {
+    setMenuOpen(false);
+
+    try {
+      await logoutGameSession();
+    } catch {
+      // Even if the local session endpoint is unavailable, send the guest to auth.
+    }
+
+    router.push("/game/auth");
+    router.refresh();
+  }
+
   function openLootboxOverlay(card: HomeLootCard) {
     setSelectedLootId(card.id);
 
@@ -486,14 +564,41 @@ function ReadyGameView({
   return (
     <div className="lp-club-home">
       <header className="lp-club-topbar">
-        <button
-          type="button"
-          className="lp-club-menu-button"
-          aria-label="Открыть меню"
-          onClick={() => showToast("Меню игрового модуля скоро появится.")}
-        >
-          <MenuIcon />
-        </button>
+        <div className="lp-club-menu">
+          <button
+            type="button"
+            className="lp-club-menu-button"
+            aria-label="Открыть меню"
+            aria-expanded={menuOpen}
+            aria-controls="gameModuleMenu"
+            onClick={() => setMenuOpen((value) => !value)}
+          >
+            <MenuIcon />
+          </button>
+
+          <nav
+            id="gameModuleMenu"
+            className={[
+              "lp-club-menu-panel",
+              menuOpen ? "is-open" : "",
+            ].join(" ")}
+            aria-label="Меню игрового модуля"
+            hidden={!menuOpen}
+          >
+            <button type="button" onClick={focusPlayerProfile}>
+              <ProfileIcon />
+              <span>Профиль</span>
+            </button>
+            <Link href="/game/clubs" onClick={() => setMenuOpen(false)}>
+              <ClubIcon />
+              <span>Сменить клуб</span>
+            </Link>
+            <button type="button" onClick={handleLogout}>
+              <ExitIcon />
+              <span>Выйти</span>
+            </button>
+          </nav>
+        </div>
 
         <div className="lp-club-network">
           <Link href="/start" className="lp-club-brand" aria-label="LeetPlus">
@@ -576,11 +681,15 @@ function ReadyGameView({
           completedQuestCount={completedQuestCount}
           questTotalCount={questTotalCount}
           quests={playerQuests}
+          checkInAction={checkInAction}
+          checkInAvailable={checkInAvailable}
+          checkInPending={checkInPending}
           questsExpanded={questsExpanded}
           selectedQuestId={selectedQuestId}
           promoCode={promoCode}
           onPromoCodeChange={setPromoCode}
           onPromoSubmit={handlePromoSubmit}
+          onCheckIn={handleCheckIn}
           onQuestClick={handleQuestClick}
           onQuestsToggle={toggleQuestsExpanded}
         />
@@ -939,11 +1048,15 @@ function PlayerProfilePanel({
   completedQuestCount,
   questTotalCount,
   quests,
+  checkInAction,
+  checkInAvailable,
+  checkInPending,
   questsExpanded,
   selectedQuestId,
   promoCode,
   onPromoCodeChange,
   onPromoSubmit,
+  onCheckIn,
   onQuestClick,
   onQuestsToggle,
 }: {
@@ -953,15 +1066,21 @@ function PlayerProfilePanel({
   completedQuestCount: number;
   questTotalCount: number;
   quests: PlayerQuest[];
+  checkInAction: GameNextAction | null;
+  checkInAvailable: boolean;
+  checkInPending: boolean;
   questsExpanded: boolean;
   selectedQuestId: string | null;
   promoCode: string;
   onPromoCodeChange: (value: string) => void;
   onPromoSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCheckIn: () => void;
   onQuestClick: (quest: PlayerQuest) => void;
   onQuestsToggle: () => void;
 }) {
   const compactQuests = quests.slice(0, 5);
+  const checkInDescription =
+    checkInAction?.description ?? "Зафиксируйте присутствие в выбранном клубе.";
 
   return (
     <aside className="lp-club-profile-panel" aria-label="Профиль игрока">
@@ -1002,6 +1121,17 @@ function PlayerProfilePanel({
           />
         </div>
       </div>
+
+      {checkInAvailable ? (
+        <section className="lp-club-checkin-card" aria-label="Чекин в клубе">
+          <span className="lp-club-small-label">Чекин</span>
+          <strong>{checkInAction?.title ?? "Чекин в клубе"}</strong>
+          <p>{checkInDescription}</p>
+          <button type="button" disabled={checkInPending} onClick={onCheckIn}>
+            {checkInPending ? "Проверяем" : "Сделать чекин"}
+          </button>
+        </section>
+      ) : null}
 
       <form className="lp-club-promo" onSubmit={onPromoSubmit}>
         <label className="lp-club-small-label" htmlFor="promoCode">
@@ -1049,42 +1179,76 @@ function PlayerProfilePanel({
 
         <div className="lp-club-side-quest-list">
           {compactQuests.length ? (
-            compactQuests.map((quest) => (
-              <button
-                key={quest.id}
-                type="button"
-                className={[
-                  "lp-club-side-quest",
-                  quest.status === "done" ? "is-done" : "",
-                  quest.status === "live" ? "is-current" : "",
-                  selectedQuestId === quest.id ? "is-selected" : "",
-                ].join(" ")}
-                onClick={() => onQuestClick(quest)}
-              >
-                <span className="lp-club-side-quest-icon" aria-hidden="true">
-                  {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
-                </span>
-                <span className="lp-club-side-quest-copy">
-                  <strong>{quest.title}</strong>
-                  <span>{quest.progress?.label ?? quest.description}</span>
-                  {quest.progress ? (
+            compactQuests.map((quest) => {
+              const isExpanded = selectedQuestId === quest.id;
+
+              return (
+                <button
+                  key={quest.id}
+                  type="button"
+                  className={[
+                    "lp-club-side-quest",
+                    quest.status === "done" ? "is-done" : "",
+                    quest.status === "live" ? "is-current" : "",
+                    isExpanded ? "is-selected is-expanded" : "",
+                  ].join(" ")}
+                  aria-expanded={isExpanded}
+                  aria-controls={`side-quest-details-${quest.id}`}
+                  onClick={() => onQuestClick(quest)}
+                >
+                  <span className="lp-club-side-quest-icon" aria-hidden="true">
+                    {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
+                  </span>
+                  <span className="lp-club-side-quest-copy">
+                    <strong>{quest.title}</strong>
+                    <span>{quest.progress?.label ?? quest.description}</span>
+                    {quest.progress ? (
+                      <span
+                        className="lp-club-side-quest-progress"
+                        aria-hidden="true"
+                      >
+                        <i
+                          style={
+                            {
+                              "--value": `${quest.progress.percent}%`,
+                            } as CSSProperties
+                          }
+                        />
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="lp-club-side-quest-state">{quest.label}</span>
+                  {isExpanded ? (
                     <span
-                      className="lp-club-side-quest-progress"
-                      aria-hidden="true"
+                      id={`side-quest-details-${quest.id}`}
+                      className="lp-club-side-quest-details"
                     >
-                      <i
-                        style={
-                          {
-                            "--value": `${quest.progress.percent}%`,
-                          } as CSSProperties
-                        }
-                      />
+                      <span>{quest.description}</span>
+                      {quest.progress ? (
+                        <span className="lp-club-side-quest-detail-progress">
+                          <span
+                            className="lp-club-side-quest-progress"
+                            aria-hidden="true"
+                          >
+                            <i
+                              style={
+                                {
+                                  "--value": `${quest.progress.percent}%`,
+                                } as CSSProperties
+                              }
+                            />
+                          </span>
+                          <span>{quest.progress.label}</span>
+                        </span>
+                      ) : null}
+                      {quest.reward ? (
+                        <span>Награда: {quest.reward.value}</span>
+                      ) : null}
                     </span>
                   ) : null}
-                </span>
-                <span className="lp-club-side-quest-state">{quest.label}</span>
-              </button>
-            ))
+                </button>
+              );
+            })
           ) : (
             <p className="lp-club-quest-empty">
               Квесты появятся после настройки клуба.
@@ -1694,6 +1858,16 @@ function QuestIcon() {
       <path d="M4 7h16v10H4z" />
       <path d="M8 7v10" />
       <path d="M16 7v10" />
+    </svg>
+  );
+}
+
+function ExitIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M10 6H6v12h4" />
+      <path d="M13 8l4 4-4 4" />
+      <path d="M8 12h9" />
     </svg>
   );
 }
@@ -3774,11 +3948,76 @@ const clubHomeCss = `
   cursor: pointer;
 }
 
+.lp-club-menu {
+  position: relative;
+}
+
 .lp-club-menu-button:hover,
 .lp-club-icon-badge:hover {
   border-color: rgba(131, 228, 236, 0.58);
   background: rgba(131, 228, 236, 0.08);
   transform: translateY(-1px);
+}
+
+.lp-club-menu-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  width: min(220px, calc(100vw - 36px));
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.08), transparent 42%),
+    rgba(4, 10, 13, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.58);
+}
+
+.lp-club-menu-panel[hidden] {
+  display: none;
+}
+
+.lp-club-menu-panel a,
+.lp-club-menu-panel button {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 780;
+  text-align: left;
+  text-decoration: none;
+  background: transparent;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-menu-panel a:hover,
+.lp-club-menu-panel button:hover,
+.lp-club-menu-panel a:focus-visible,
+.lp-club-menu-panel button:focus-visible {
+  border-color: rgba(131, 228, 236, 0.34);
+  outline: none;
+  background: rgba(131, 228, 236, 0.08);
+  transform: translateY(-1px);
+}
+
+.lp-club-menu-panel svg {
+  width: 18px;
+  height: 18px;
+  color: var(--cyan);
 }
 
 .lp-club-home svg,
@@ -4815,18 +5054,41 @@ const clubHomeCss = `
 }
 
 .lp-club-battle-track {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(104px, 1fr)) 178px;
-  align-items: center;
+  display: flex;
+  align-items: stretch;
   gap: 12px;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 8px;
+  overscroll-behavior-inline: contain;
+  scroll-padding-inline: 2px;
+  scroll-snap-type: x proximity;
+  scrollbar-color: rgba(131, 228, 236, 0.42) rgba(196, 224, 225, 0.08);
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lp-club-battle-track::-webkit-scrollbar {
+  height: 7px;
+}
+
+.lp-club-battle-track::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.08);
+}
+
+.lp-club-battle-track::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(131, 228, 236, 0.42);
 }
 
 .lp-club-quest {
   position: relative;
   display: grid;
   align-content: space-between;
-  min-height: 96px;
+  flex: 0 0 clamp(132px, 14vw, 170px);
+  min-height: 154px;
   padding: 13px;
   border: 1px solid rgba(196, 224, 225, 0.16);
   border-radius: 7px;
@@ -4834,6 +5096,7 @@ const clubHomeCss = `
   text-align: left;
   background: rgba(2, 8, 11, 0.58);
   cursor: pointer;
+  scroll-snap-align: start;
   transition:
     border-color 180ms ease,
     background 180ms ease,
@@ -4897,8 +5160,10 @@ const clubHomeCss = `
 .lp-club-reward {
   position: relative;
   display: grid;
+  flex: 0 0 188px;
   place-items: center;
-  min-height: 176px;
+  min-height: 154px;
+  scroll-snap-align: end;
 }
 
 .lp-club-reward-shape {
@@ -5027,6 +5292,55 @@ const clubHomeCss = `
 
 .lp-club-profile-section.rank .lp-club-progress span {
   background: linear-gradient(90deg, var(--amber), rgba(208, 170, 108, 0.48));
+}
+
+.lp-club-checkin-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 0 18px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-club-checkin-card strong {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.lp-club-checkin-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.lp-club-checkin-card button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(131, 228, 236, 0.4);
+  border-radius: 7px;
+  color: #001012;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 860;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #83e4ec, #94d6b8);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-checkin-card button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.lp-club-checkin-card button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .lp-club-promo {
@@ -5235,6 +5549,37 @@ const clubHomeCss = `
   font-weight: 860;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.lp-club-side-quest.is-expanded {
+  align-items: start;
+}
+
+.lp-club-side-quest-details {
+  display: grid;
+  grid-column: 2 / -1;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(196, 224, 225, 0.1);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.lp-club-side-quest-details > span {
+  display: block;
+  white-space: normal;
+}
+
+.lp-club-side-quest-detail-progress {
+  display: grid;
+  gap: 5px;
+}
+
+.lp-club-side-quest-detail-progress .lp-club-side-quest-progress {
+  margin-top: 0;
 }
 
 .lp-club-side-quest.is-current .lp-club-side-quest-state,
@@ -5751,7 +6096,8 @@ const clubHomeCss = `
   }
 
   .lp-club-profile-logo,
-  .lp-club-profile-section {
+  .lp-club-profile-section,
+  .lp-club-checkin-card {
     padding: 0;
     border-bottom: 0;
   }
@@ -5934,6 +6280,44 @@ function gameActionButtonLabel(action: GameNextAction) {
   return labels[action.kind];
 }
 
+function isCheckInAvailable(summary: GuestPortalGameSummary) {
+  return (
+    summary.nextActions.some((action) => action.kind === "CHECK_IN") ||
+    summary.missions.featured.some(isCheckInMission)
+  );
+}
+
+function isCheckInMission(mission: GameMission) {
+  const progressUnit = mission.progressUnit?.trim().toLocaleLowerCase("ru-RU");
+  const missionName = mission.name.toLocaleLowerCase("ru-RU");
+
+  return (
+    progressUnit === "check-in" ||
+    progressUnit === "checkin" ||
+    progressUnit === "чекин" ||
+    progressUnit === "чек-ин" ||
+    missionName.includes("чекин")
+  );
+}
+
+async function loadGameSummary() {
+  const response = await fetch("/api/guest-portal/session/game-summary", {
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(response, "Не удалось обновить игровой экран."),
+    );
+  }
+
+  return (await response.json()) as GuestPortalGameSummary;
+}
+
 async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
   const response = await fetch("/api/guest-portal/session/app-open", {
     method: "POST",
@@ -5953,6 +6337,27 @@ async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
   }
 
   return ((await response.json()) as { summary: GuestPortalGameSummary }).summary;
+}
+
+async function checkInGameSession(): Promise<GuestPortalCheckInResponse> {
+  const response = await fetch("/api/guest-portal/session/check-in", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note: "Чекин гостя из игрового модуля." }),
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(response, "Не удалось сделать чекин."),
+    );
+  }
+
+  return (await response.json()) as GuestPortalCheckInResponse;
 }
 
 async function openGameLootBox(
@@ -5977,6 +6382,19 @@ async function openGameLootBox(
   }
 
   return (await response.json()) as GuestPortalLootBoxOpenResponse;
+}
+
+async function logoutGameSession() {
+  const response = await fetch("/api/guest-portal/session/logout", {
+    method: "POST",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(response, "Не удалось завершить сессию."),
+    );
+  }
 }
 
 async function readResponseMessage(

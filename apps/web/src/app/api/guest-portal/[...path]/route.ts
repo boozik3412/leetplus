@@ -53,6 +53,23 @@ export async function GET(request: Request, { params }: RouteContext) {
 
 export async function POST(request: Request, { params }: RouteContext) {
   const { path } = await params;
+
+  if (path.length === 2 && path[0] === "session" && path[1] === "logout") {
+    const response = NextResponse.json({
+      message: "Гостевая сессия завершена",
+    });
+
+    response.cookies.set(GUEST_AUTH_COOKIE_NAME, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 0,
+    });
+
+    return response;
+  }
+
   const body = await request.text();
   const miniAppEdgePayload = maybeBuildMiniAppEdgePayload(path, body);
   if (miniAppEdgePayload?.ok === false) {

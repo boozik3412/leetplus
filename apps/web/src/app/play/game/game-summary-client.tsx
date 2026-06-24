@@ -13,6 +13,7 @@ import type {
 import type {
   GuestPortalCheckInResponse,
   GuestPortalGameSummary,
+  GuestPortalLootBoxRarity,
 } from "@/lib/guest-portal";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -45,18 +46,32 @@ type HomeLootCard = {
   openable: boolean;
   openBlocker: string | null;
   rewardLabel: string | null;
+  rewardRarity?: GuestPortalLootBoxRarity | null;
+  rewardRarityLabel?: string | null;
+  rewardDropChance?: number | null;
   weeklyOpenedCount: number;
   weeklyLimit: number | null;
   dailyOpenedCount: number;
   dailyLimit: number | null;
 };
-type LootboxOverlayPhase = "ready" | "opening" | "open" | "collected";
+type LootboxOverlayPhase =
+  | "ready"
+  | "charging"
+  | "revealing"
+  | "opening"
+  | "open"
+  | "collected";
 type GuestPortalLootBoxOpenResponse = {
   processed: true;
   idempotent: boolean;
   createdRewards: number;
   queuedRewardAmount: number;
-  rewards: Array<{ rewardLabel?: string | null }>;
+  rewards: Array<{
+    rewardLabel?: string | null;
+    rewardRarity?: GuestPortalLootBoxRarity | null;
+    rewardRarityLabel?: string | null;
+    rewardDropChance?: number | null;
+  }>;
   summary: GuestPortalGameSummary;
   message: string;
 };
@@ -68,6 +83,19 @@ type HomeBattleQuest = {
   label: string;
 };
 type QuestStatus = "done" | "live" | "next";
+const LOOTBOX_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
+  common: "Обычная",
+  rare: "Редкая",
+  epic: "Эпическая",
+  legendary: "Легендарная",
+};
+const LOOTBOX_RARITY_OPEN_MS: Record<GuestPortalLootBoxRarity, number> = {
+  common: 1420,
+  rare: 1540,
+  epic: 1660,
+  legendary: 1780,
+};
+const LOOTBOX_RARITY_REVEAL_MIN_MS = 760;
 type PlayerQuest = {
   id: string;
   title: string;
@@ -506,30 +534,61 @@ function ReadyGameView({
     }
 
     const currentCard = lootboxOverlayCard;
-    setLootboxOverlayPhase("opening");
-    showToast("Контейнер открывается.");
+    setLootboxOverlayPhase("charging");
+    showToast("Контейнер активируется.");
 
     try {
       const [result] = await Promise.all([
         openGameLootBox(currentCard.id),
-        wait(1250),
+        wait(LOOTBOX_RARITY_REVEAL_MIN_MS),
       ]);
       const updatedLootBox = result.summary.lootBoxes.featured.find(
         (item) => item.id === currentCard.id,
       );
+      const openedReward = result.rewards[0] ?? null;
       const rewardLabel =
-        result.rewards[0]?.rewardLabel ??
+        openedReward?.rewardLabel ??
         updatedLootBox?.latestReward?.rewardLabel ??
         updatedLootBox?.rewardLabel ??
         currentCard.rewardLabel ??
         currentCard.description;
-
-      onSummaryChange(result.summary);
-      setLootboxOverlayCard({
+      const rewardRarity =
+        normalizeLootboxRarity(openedReward?.rewardRarity) ??
+        normalizeLootboxRarity(updatedLootBox?.latestReward?.rewardRarity) ??
+        normalizeLootboxRarity(currentCard.rewardRarity) ??
+        null;
+      const rewardRarityLabel =
+        openedReward?.rewardRarityLabel ??
+        updatedLootBox?.latestReward?.rewardRarityLabel ??
+        currentCard.rewardRarityLabel ??
+        (rewardRarity ? LOOTBOX_RARITY_LABELS[rewardRarity] : null);
+      const rewardDropChance =
+        openedReward?.rewardDropChance ??
+        updatedLootBox?.latestReward?.rewardDropChance ??
+        currentCard.rewardDropChance ??
+        null;
+      const nextCard = {
         ...currentCard,
         description: rewardLabel,
         rewardLabel,
+        rewardRarity,
+        rewardRarityLabel,
+        rewardDropChance,
+      };
+
+      onSummaryChange(result.summary);
+      setLootboxOverlayCard(nextCard);
+      revealLootboxRarity({
+        lootBoxId: currentCard.id,
+        rewardLabel,
+        rewardRarity,
+        rewardRarityLabel,
+        rewardDropChance,
       });
+      setLootboxOverlayPhase("revealing");
+      await wait(260);
+      setLootboxOverlayPhase("opening");
+      await wait(lootboxOpenAnimationMs(rewardRarity));
       setLootboxOverlayPhase("open");
       showToast(result.message);
     } catch (error) {
@@ -845,21 +904,31 @@ function LootboxOpeningOverlay({
   onCollect: () => void;
 }) {
   const isReady = phase === "ready";
+  const isCharging = phase === "charging";
+  const isRevealing = phase === "revealing";
   const isOpening = phase === "opening";
   const isOpen = phase === "open";
   const isCollected = phase === "collected";
+  const rewardRarity = normalizeLootboxRarity(card.rewardRarity) ?? "common";
+  const rewardRarityLabel =
+    card.rewardRarityLabel ?? LOOTBOX_RARITY_LABELS[rewardRarity];
+  const rarityRevealed = isRevealing || isOpening || isOpen || isCollected;
   const statusLabel = isCollected
     ? "Награда сохранена"
     : isOpen
       ? "Контейнер открыт"
       : isOpening
         ? "Идет открытие"
-        : "Нажмите на контейнер, чтобы открыть";
+        : isRevealing
+          ? `Редкость: ${rewardRarityLabel}`
+          : isCharging
+          ? "Контейнер активируется"
+          : "Нажмите на контейнер, чтобы открыть";
   const primaryActionLabel = isCollected
     ? "Готово"
     : isOpen
       ? "Забрать результат"
-      : isOpening
+      : isOpening || isCharging || isRevealing
         ? "Открывается"
         : "Открыть контейнер";
   const handlePrimaryAction = isCollected
@@ -882,7 +951,11 @@ function LootboxOpeningOverlay({
   return (
     <div
       id="lootboxOverlay"
-      className="lp-lootbox-overlay"
+      className={[
+        "lp-lootbox-overlay",
+        `rarity-${rewardRarity}`,
+        rarityRevealed ? "rarity-revealed" : "rarity-hidden",
+      ].join(" ")}
       role="dialog"
       aria-modal="true"
       aria-labelledby="lootboxOverlayTitle"
@@ -907,6 +980,8 @@ function LootboxOpeningOverlay({
           className={[
             "lp-lootbox-machine",
             isReady ? "is-ready" : "",
+            isCharging ? "is-charging" : "",
+            isRevealing ? "is-revealing" : "",
             isOpening ? "is-opening" : "",
             isOpen || isCollected ? "is-open" : "",
             isCollected ? "is-collected" : "",
@@ -918,6 +993,8 @@ function LootboxOpeningOverlay({
           onKeyDown={handleMachineKeyDown}
         >
           <span className="lp-lootbox-energy-field" aria-hidden="true" />
+          <span className="lp-lootbox-shock-ring" aria-hidden="true" />
+          <span className="lp-lootbox-energy-slit" aria-hidden="true" />
           <span className="lp-lootbox-beam" />
           <span className="lp-lootbox-case lp-lootbox-case-lid" />
           <span className="lp-lootbox-case lp-lootbox-case-base" />
@@ -954,7 +1031,9 @@ function LootboxOpeningOverlay({
             <small>
               {isCollected
                 ? "Результат сохранен в игровом профиле."
-                : "Нажмите, чтобы забрать результат."}
+                : rarityRevealed
+                  ? `${rewardRarityLabel}. Нажмите, чтобы забрать результат.`
+                  : "Редкость скрыта до открытия."}
             </small>
           </button>
         </div>
@@ -966,7 +1045,7 @@ function LootboxOpeningOverlay({
           <button
             type="button"
             className="lp-club-primary-link"
-            disabled={isOpening}
+            disabled={isOpening || isCharging || isRevealing}
             onClick={handlePrimaryAction}
           >
             {primaryActionLabel}
@@ -1493,6 +1572,9 @@ function buildHomeLootCards(
     openable: lootBox.openable,
     openBlocker: lootBox.openBlocker,
     rewardLabel: lootBox.rewardLabel,
+    rewardRarity: lootBox.latestReward?.rewardRarity ?? null,
+    rewardRarityLabel: lootBox.latestReward?.rewardRarityLabel ?? null,
+    rewardDropChance: lootBox.latestReward?.rewardDropChance ?? null,
     weeklyOpenedCount: lootBox.weeklyOpenedCount,
     weeklyLimit: lootBox.weeklyLimit,
     dailyOpenedCount: lootBox.dailyOpenedCount,
@@ -2504,6 +2586,11 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                 {reward.sourceLabel ?? reward.sourceKind} ·{" "}
                 {formatNumber(reward.rewardAmount)}
               </p>
+              {lootboxRewardRarityLabel(reward) ? (
+                <p className="mt-2 text-xs font-black uppercase tracking-wide text-cyan-200">
+                  Редкость: {lootboxRewardRarityLabel(reward)}
+                </p>
+              ) : null}
               <div className="mt-4 rounded-lg border border-white/10 bg-zinc-950/60 p-4">
                 <p className="text-xs text-zinc-400">Код для кассы</p>
                 <p className="mt-1 break-all text-2xl font-black tracking-wider">
@@ -2555,6 +2642,7 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                     item.walletState === "READY"
                       ? item.rewardCode ?? item.claimPayload
                       : null;
+                  const rarityLabel = lootboxRewardRarityLabel(item);
 
                   return (
                     <div
@@ -2571,6 +2659,11 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                             {" · "}
                             {formatDate(item.qualifiedAt)}
                           </p>
+                          {rarityLabel ? (
+                            <p className="mt-1 text-[11px] font-black uppercase tracking-wide text-cyan-200">
+                              {rarityLabel}
+                            </p>
+                          ) : null}
                         </div>
                         <span
                           className={[
@@ -2739,6 +2832,9 @@ function LootBoxesPanel({
         <div className="mt-5 grid gap-3 lg:grid-cols-3">
           {lootBoxes.map((lootBox) => {
             const latestReward = lootBox.latestReward;
+            const latestRarityLabel = latestReward
+              ? lootboxRewardRarityLabel(latestReward)
+              : null;
             const isOpened = openedLootBoxId === lootBox.id;
 
             return (
@@ -2783,6 +2879,11 @@ function LootBoxesPanel({
 
                 {latestReward ? (
                   <div className="mt-4 rounded-lg border border-emerald-300/25 bg-zinc-950/50 p-3">
+                    {latestRarityLabel ? (
+                      <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-cyan-200">
+                        {latestRarityLabel}
+                      </p>
+                    ) : null}
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
@@ -4540,6 +4641,20 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-overlay {
+  --rarity-accent: #83e4ec;
+  --rarity-accent-rgb: 131 228 236;
+  --rarity-warm: #d0aa6c;
+  --rarity-warm-rgb: 208 170 108;
+  --rarity-grid-opacity: 0.16;
+  --rarity-field-opacity: 0.34;
+  --rarity-field-scale: 0.98;
+  --rarity-beam-width: min(220px, 48%);
+  --rarity-beam-height: 330px;
+  --rarity-beam-opacity: 0.46;
+  --rarity-reward-lift: 0px;
+  --rarity-glow: 0.16;
+  --rarity-shock-scale: 2.6;
+  --rarity-particle-opacity: 0.9;
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -4547,16 +4662,84 @@ const clubHomeCss = `
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(circle at 50% 44%, rgba(131, 228, 236, 0.12), transparent 34%),
+    radial-gradient(circle at 50% 44%, rgb(var(--rarity-accent-rgb) / 0.12), transparent 34%),
     rgba(0, 0, 0, 0.82);
   backdrop-filter: blur(10px);
+}
+
+.lp-lootbox-overlay.rarity-common {
+  --rarity-accent: #9eb5b7;
+  --rarity-accent-rgb: 158 181 183;
+  --rarity-warm: #b2a37f;
+  --rarity-warm-rgb: 178 163 127;
+  --rarity-grid-opacity: 0.1;
+  --rarity-field-opacity: 0.22;
+  --rarity-field-scale: 0.9;
+  --rarity-beam-width: min(170px, 42%);
+  --rarity-beam-height: 270px;
+  --rarity-beam-opacity: 0.28;
+  --rarity-reward-lift: -6px;
+  --rarity-glow: 0.08;
+  --rarity-shock-scale: 1.8;
+  --rarity-particle-opacity: 0.58;
+}
+
+.lp-lootbox-overlay.rarity-epic {
+  --rarity-accent: #afa4ff;
+  --rarity-accent-rgb: 175 164 255;
+  --rarity-warm: #83e4ec;
+  --rarity-warm-rgb: 131 228 236;
+  --rarity-grid-opacity: 0.2;
+  --rarity-field-opacity: 0.44;
+  --rarity-field-scale: 1.08;
+  --rarity-beam-width: min(258px, 54%);
+  --rarity-beam-height: 370px;
+  --rarity-beam-opacity: 0.58;
+  --rarity-reward-lift: 12px;
+  --rarity-glow: 0.24;
+  --rarity-shock-scale: 3.1;
+  --rarity-particle-opacity: 1;
+}
+
+.lp-lootbox-overlay.rarity-legendary {
+  --rarity-accent: #d0aa6c;
+  --rarity-accent-rgb: 208 170 108;
+  --rarity-warm: #d0fbff;
+  --rarity-warm-rgb: 208 251 255;
+  --rarity-grid-opacity: 0.24;
+  --rarity-field-opacity: 0.54;
+  --rarity-field-scale: 1.16;
+  --rarity-beam-width: min(306px, 62%);
+  --rarity-beam-height: 420px;
+  --rarity-beam-opacity: 0.72;
+  --rarity-reward-lift: 26px;
+  --rarity-glow: 0.34;
+  --rarity-shock-scale: 3.7;
+  --rarity-particle-opacity: 1;
+}
+
+.lp-lootbox-overlay.rarity-hidden {
+  --rarity-accent: #9eb5b7;
+  --rarity-accent-rgb: 158 181 183;
+  --rarity-warm: #b9c5c6;
+  --rarity-warm-rgb: 185 197 198;
+  --rarity-grid-opacity: 0.1;
+  --rarity-field-opacity: 0.2;
+  --rarity-field-scale: 0.9;
+  --rarity-beam-width: min(178px, 42%);
+  --rarity-beam-height: 278px;
+  --rarity-beam-opacity: 0.24;
+  --rarity-reward-lift: -12px;
+  --rarity-glow: 0.07;
+  --rarity-shock-scale: 1.9;
+  --rarity-particle-opacity: 0.52;
 }
 
 .lp-lootbox-dialog {
   position: relative;
   width: min(780px, 100%);
   max-height: min(780px, calc(100dvh - 40px));
-  overflow: auto;
+  overflow: visible;
   padding: clamp(20px, 3vw, 32px);
   border: 1px solid rgba(131, 228, 236, 0.3);
   border-radius: var(--radius);
@@ -4574,7 +4757,7 @@ const clubHomeCss = `
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(90deg, transparent 0 49.8%, rgba(131, 228, 236, 0.07) 49.8% 50%, transparent 50%),
+    linear-gradient(90deg, transparent 0 49.8%, rgb(var(--rarity-accent-rgb) / var(--rarity-grid-opacity)) 49.8% 50%, transparent 50%),
     linear-gradient(rgba(196, 224, 225, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(196, 224, 225, 0.035) 1px, transparent 1px);
   background-size: auto, 76px 76px, 76px 76px;
@@ -4643,6 +4826,7 @@ const clubHomeCss = `
   margin: 18px 0 10px;
   isolation: isolate;
   perspective: 1200px;
+  overflow: visible;
   animation: lootboxFloat 3.8s ease-in-out infinite;
 }
 
@@ -4677,7 +4861,7 @@ const clubHomeCss = `
   width: min(280px, 58%);
   aspect-ratio: 1;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(208, 251, 255, 0.72), rgba(131, 228, 236, 0.28) 32%, transparent 68%);
+  background: radial-gradient(circle, rgb(var(--rarity-warm-rgb) / 0.72), rgb(var(--rarity-accent-rgb) / 0.28) 32%, transparent 68%);
   opacity: 0.22;
   filter: blur(12px);
   transform: translate(-50%, -50%) scale(0.88);
@@ -4686,17 +4870,48 @@ const clubHomeCss = `
     transform 500ms ease;
 }
 
+.lp-lootbox-shock-ring {
+  position: absolute;
+  left: 50%;
+  bottom: 104px;
+  z-index: 2;
+  width: min(240px, 58%);
+  aspect-ratio: 1;
+  border: 1px solid rgb(var(--rarity-accent-rgb) / 0.48);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translateX(-50%) scale(0.72);
+  pointer-events: none;
+}
+
+.lp-lootbox-energy-slit {
+  position: absolute;
+  left: 50%;
+  bottom: 198px;
+  z-index: 9;
+  width: min(220px, 52%);
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(var(--rarity-warm-rgb) / 0.88), rgb(var(--rarity-accent-rgb) / 0.84), transparent);
+  box-shadow: 0 0 24px rgb(var(--rarity-accent-rgb) / 0.42);
+  opacity: 0;
+  transform: translateX(-50%) scaleX(0.16);
+  pointer-events: none;
+}
+
 .lp-lootbox-beam {
   position: absolute;
   left: 50%;
   bottom: 166px;
   z-index: 1;
-  width: min(210px, 48%);
-  height: 250px;
+  width: var(--rarity-beam-width);
+  height: var(--rarity-beam-height);
   opacity: 0;
   transform: translateX(-50%) scaleY(0.2);
   transform-origin: bottom;
-  background: linear-gradient(180deg, rgba(208, 251, 255, 0.64), rgba(131, 228, 236, 0.18), transparent);
+  background:
+    linear-gradient(180deg, rgb(var(--rarity-warm-rgb) / 0.54), rgb(var(--rarity-accent-rgb) / 0.14) 46%, transparent),
+    linear-gradient(90deg, transparent, rgb(var(--rarity-warm-rgb) / 0.16), transparent);
   clip-path: polygon(44% 0, 56% 0, 100% 100%, 0 100%);
   filter: blur(3px);
 }
@@ -4827,13 +5042,41 @@ const clubHomeCss = `
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--cyan);
+  background: var(--rarity-accent);
   opacity: 0;
-  box-shadow: 0 0 16px rgba(131, 228, 236, 0.86);
+  box-shadow: 0 0 18px rgb(var(--rarity-accent-rgb) / 0.75);
+}
+
+.lp-lootbox-machine.is-charging {
+  animation: lootboxChargeKick 720ms cubic-bezier(0.2, 0.86, 0.2, 1) both;
+}
+
+.lp-lootbox-machine.is-charging .lp-lootbox-shock-ring {
+  animation: lootboxShockWave 900ms cubic-bezier(0.16, 0.84, 0.2, 1) both;
+}
+
+.lp-lootbox-machine.is-charging .lp-lootbox-energy-slit {
+  animation: lootboxSlitCharge 900ms cubic-bezier(0.16, 0.84, 0.2, 1) both;
+}
+
+.lp-lootbox-machine.is-revealing .lp-lootbox-energy-field {
+  opacity: var(--rarity-field-opacity);
+  transform: translate(-50%, -50%) scale(var(--rarity-field-scale));
+}
+
+.lp-lootbox-machine.is-revealing .lp-lootbox-energy-slit {
+  opacity: 0.72;
+  transform: translateX(-50%) scaleX(0.88);
 }
 
 .lp-lootbox-machine.is-opening {
-  animation: lootboxKick 900ms ease both;
+  animation: lootboxKick 1320ms cubic-bezier(0.16, 0.9, 0.18, 1) both;
+}
+
+.lp-lootbox-machine.is-open,
+.lp-lootbox-machine.is-collected {
+  animation: none;
+  transform: translateY(-7px) scale(1) rotateX(0deg);
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-lock-open,
@@ -4846,58 +5089,64 @@ const clubHomeCss = `
 
 .lp-lootbox-machine.is-opening .lp-lootbox-case-lid,
 .lp-lootbox-machine.is-open .lp-lootbox-case-lid {
-  transform: translateX(-50%) translateY(-90px) rotateX(-58deg);
+  transform: translateX(-50%) translateY(-122px) rotateX(-66deg) rotateZ(-1deg);
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-case-left,
 .lp-lootbox-machine.is-open .lp-lootbox-case-left {
-  transform: translateX(-50%) translateX(-52px) rotateY(18deg);
+  transform: translateX(-50%) translateX(-78px) rotateY(24deg);
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-case-right,
 .lp-lootbox-machine.is-open .lp-lootbox-case-right {
-  transform: translateX(-50%) translateX(52px) rotateY(-18deg);
+  transform: translateX(-50%) translateX(78px) rotateY(-24deg);
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-energy-field,
 .lp-lootbox-machine.is-open .lp-lootbox-energy-field,
 .lp-lootbox-machine.is-collected .lp-lootbox-energy-field {
-  opacity: 0.85;
-  transform: translate(-50%, -50%) scale(1.2);
+  opacity: var(--rarity-field-opacity);
+  transform: translate(-50%, -50%) scale(var(--rarity-field-scale));
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-beam,
 .lp-lootbox-machine.is-open .lp-lootbox-beam {
-  animation: lootboxBeamRise 1100ms ease 180ms both;
+  animation: lootboxBeamRise 1320ms cubic-bezier(0.16, 0.84, 0.2, 1) 220ms both;
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-particle,
 .lp-lootbox-machine.is-open .lp-lootbox-particle {
-  animation: lootboxParticleBurst 900ms ease calc(180ms + var(--particle-index) * 52ms) both;
+  animation: lootboxParticleBurst 1180ms cubic-bezier(0.18, 0.84, 0.18, 1) calc(260ms + var(--particle-index) * 46ms) both;
 }
 
 .lp-lootbox-reward-card {
   position: absolute;
   left: 50%;
-  bottom: 128px;
-  z-index: 10;
+  bottom: 140px;
+  z-index: 120;
   display: grid;
   width: min(220px, 64%);
   min-height: 164px;
   place-items: center;
   padding: 16px;
-  border: 1px solid rgba(208, 170, 108, 0.34);
+  overflow: hidden;
+  border: 1px solid rgb(var(--rarity-warm-rgb) / 0.78);
   border-radius: 8px;
   color: var(--text);
   text-align: left;
   background:
-    linear-gradient(135deg, rgba(208, 170, 108, 0.18), transparent 42%),
-    rgba(6, 10, 12, 0.92);
-  box-shadow: 0 28px 86px rgba(0, 0, 0, 0.45);
+    linear-gradient(145deg, rgb(var(--rarity-warm-rgb) / 0.22), transparent 42%),
+    radial-gradient(circle at 50% 30%, rgb(var(--rarity-accent-rgb) / 0.18), transparent 40%),
+    linear-gradient(180deg, rgba(17, 32, 36, 0.99), rgba(3, 8, 10, 0.98));
+  box-shadow:
+    0 0 52px rgb(var(--rarity-warm-rgb) / 0.22),
+    0 0 96px rgb(var(--rarity-accent-rgb) / var(--rarity-glow)),
+    0 28px 86px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px rgb(var(--rarity-accent-rgb) / 0.1);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transform: translate3d(-50%, 42px, 120px) scale(0.84) rotateX(18deg);
+  transform: translate3d(-50%, 72px, 180px) scale(0.62) rotateX(18deg) rotateZ(-2deg);
   transition:
     border-color 180ms ease,
     opacity 260ms ease,
@@ -4906,7 +5155,9 @@ const clubHomeCss = `
 
 .lp-lootbox-reward-card.is-visible {
   pointer-events: auto;
-  animation: lootboxRewardRise 1200ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+  animation:
+    lootboxRewardRise 1420ms cubic-bezier(0.16, 0.9, 0.18, 1) both,
+    lootboxRewardIdle 3.8s ease-in-out 1420ms infinite;
 }
 
 .lp-lootbox-reward-card:disabled {
@@ -4915,7 +5166,7 @@ const clubHomeCss = `
 
 .lp-lootbox-reward-card:focus-visible,
 .lp-lootbox-reward-card:hover {
-  border-color: rgba(208, 170, 108, 0.72);
+  border-color: rgb(var(--rarity-warm-rgb) / 0.92);
   outline: none;
 }
 
@@ -4927,7 +5178,7 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-reward-card span {
-  color: var(--amber);
+  color: var(--rarity-warm);
   font-size: 10px;
   font-weight: 860;
   letter-spacing: 0;
@@ -4941,6 +5192,7 @@ const clubHomeCss = `
   font-size: 19px;
   line-height: 1.08;
   text-align: center;
+  text-shadow: 0 0 16px rgb(var(--rarity-accent-rgb) / 0.26);
 }
 
 .lp-lootbox-reward-card small {
@@ -4986,30 +5238,81 @@ const clubHomeCss = `
 
 @keyframes lootboxKick {
   0% {
-    transform: translateY(0) scale(1);
+    transform: translateY(0) scale(1) rotateX(0deg);
   }
 
-  34% {
-    transform: translateY(10px) scale(0.98);
+  24% {
+    transform: translateY(6px) scale(0.988) rotateX(1deg);
+  }
+
+  52% {
+    transform: translateY(-13px) scale(1.014) rotateX(-1.2deg);
+  }
+
+  74% {
+    transform: translateY(-5px) scale(1.004) rotateX(0.4deg);
   }
 
   100% {
-    transform: translateY(-6px) scale(1.01);
+    transform: translateY(-7px) scale(1) rotateX(0deg);
+  }
+}
+
+@keyframes lootboxChargeKick {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  55% {
+    transform: translateY(5px) scale(0.992);
+  }
+}
+
+@keyframes lootboxShockWave {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.72);
+  }
+
+  22% {
+    opacity: 0.9;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(var(--rarity-shock-scale));
+  }
+}
+
+@keyframes lootboxSlitCharge {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scaleX(0.16);
+  }
+
+  38% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.72;
+    transform: translateX(-50%) scaleX(0.88);
   }
 }
 
 @keyframes lootboxBeamRise {
   0% {
     opacity: 0;
-    transform: translateX(-50%) scaleY(0.2);
+    transform: translateX(-50%) scaleY(0.08);
   }
 
-  34% {
-    opacity: 0.9;
+  30% {
+    opacity: 0.92;
   }
 
   100% {
-    opacity: 0.42;
+    opacity: var(--rarity-beam-opacity);
     transform: translateX(-50%) scaleY(1);
   }
 }
@@ -5017,33 +5320,53 @@ const clubHomeCss = `
 @keyframes lootboxRewardRise {
   0% {
     opacity: 0;
-    transform: translate3d(-50%, 48px, 120px) scale(0.74) rotateX(22deg);
+    transform: translate3d(-50%, 72px, 180px) scale(0.62) rotateX(18deg) rotateZ(-2deg);
   }
 
-  54% {
+  38% {
     opacity: 1;
-    transform: translate3d(-50%, -76px, 120px) scale(1.06) rotateX(0deg);
+    transform: translate3d(-50%, calc(-112px - var(--rarity-reward-lift)), 180px) scale(1.045) rotateX(0deg) rotateZ(1.2deg);
+  }
+
+  68% {
+    opacity: 1;
+    transform: translate3d(-50%, calc(-86px - var(--rarity-reward-lift)), 180px) scale(0.992) rotateX(0deg) rotateZ(-0.4deg);
   }
 
   100% {
     opacity: 1;
-    transform: translate3d(-50%, -58px, 120px) scale(1) rotateX(0deg);
+    transform: translate3d(-50%, calc(-92px - var(--rarity-reward-lift)), 180px) scale(1) rotateX(0deg) rotateZ(0deg);
+  }
+}
+
+@keyframes lootboxRewardIdle {
+  0%,
+  100% {
+    transform: translate3d(-50%, calc(-92px - var(--rarity-reward-lift)), 180px) scale(1) rotateX(0deg);
+  }
+
+  50% {
+    transform: translate3d(-50%, calc(-101px - var(--rarity-reward-lift)), 180px) scale(1.015) rotateX(0deg);
   }
 }
 
 @keyframes lootboxParticleBurst {
   0% {
     opacity: 0;
-    transform: translate(-50%, 0) rotate(calc((var(--particle-index) - 4) * 28deg)) translateY(0) scale(0.4);
+    transform: translate(-50%, 0) rotate(calc((var(--particle-index) - 4) * 28deg)) translateY(0) scale(0.28);
   }
 
-  20% {
-    opacity: 1;
+  16% {
+    opacity: var(--rarity-particle-opacity);
+  }
+
+  62% {
+    opacity: var(--rarity-particle-opacity);
   }
 
   100% {
     opacity: 0;
-    transform: translate(-50%, 0) rotate(calc((var(--particle-index) - 4) * 28deg)) translateY(-162px) scale(1);
+    transform: translate(-50%, 0) rotate(calc((var(--particle-index) - 4) * 28deg)) translateY(-172px) scale(1.08);
   }
 }
 
@@ -6415,6 +6738,56 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function normalizeLootboxRarity(
+  value: string | null | undefined,
+): GuestPortalLootBoxRarity | null {
+  return value === "common" ||
+    value === "rare" ||
+    value === "epic" ||
+    value === "legendary"
+    ? value
+    : null;
+}
+
+function lootboxOpenAnimationMs(rarity: GuestPortalLootBoxRarity | null) {
+  return rarity ? LOOTBOX_RARITY_OPEN_MS[rarity] : LOOTBOX_RARITY_OPEN_MS.common;
+}
+
+function lootboxRewardRarityLabel(value: {
+  rewardRarity?: string | null;
+  rewardRarityLabel?: string | null;
+}) {
+  const rarity = normalizeLootboxRarity(value.rewardRarity);
+
+  return value.rewardRarityLabel ?? (rarity ? LOOTBOX_RARITY_LABELS[rarity] : null);
+}
+
+function revealLootboxRarity({
+  lootBoxId,
+  rewardLabel,
+  rewardRarity,
+  rewardRarityLabel,
+  rewardDropChance,
+}: {
+  lootBoxId: string;
+  rewardLabel: string;
+  rewardRarity: GuestPortalLootBoxRarity | null;
+  rewardRarityLabel: string | null;
+  rewardDropChance: number | null;
+}) {
+  window.dispatchEvent(
+    new CustomEvent("leetplus:lootbox:rarity-reveal", {
+      detail: {
+        lootBoxId,
+        rewardLabel,
+        rarity: rewardRarity,
+        rarityLabel: rewardRarityLabel,
+        chancePercent: rewardDropChance,
+      },
+    }),
+  );
 }
 
 function clampPercent(value: number) {

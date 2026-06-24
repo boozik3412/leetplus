@@ -529,6 +529,9 @@ function rewardResult(
     rewardType: 'BONUS',
     rewardAmount: 50,
     rewardLabel: '50 bonus points',
+    rewardRarity: null,
+    rewardRarityLabel: null,
+    rewardDropChance: null,
     rewardCode: 'LP-TEST',
     claimPayload: 'LEETPLUS_REWARD:reward-1:LP-TEST',
     qualifiedAt: isoNow,
@@ -894,6 +897,9 @@ function rewardRow(overrides: Record<string, unknown> = {}) {
     rewardType: 'BONUS',
     rewardAmount: new Prisma.Decimal(100),
     rewardLabel: '100 bonus points',
+    rewardRarity: null,
+    rewardRarityLabel: null,
+    rewardDropChance: null,
     rewardCode: 'LP-100',
     qualifiedAt: now,
     expiresAt: null,
@@ -3172,6 +3178,8 @@ describe('GuestGamificationService', () => {
             rewardAmount: 200,
             rewardLabel: '200 бонусов',
             chancePercent: 15,
+            rewardRarity: 'rare',
+            rewardRarityLabel: 'Редкая',
           },
         });
       } finally {
@@ -3221,6 +3229,9 @@ describe('GuestGamificationService', () => {
           rewardType: 'BONUS_BALANCE',
           rewardAmount: 50,
           rewardLabel: '50 бонусов',
+          chancePercent: 100,
+          rewardRarity: 'common',
+          rewardRarityLabel: 'Обычная',
         },
       });
     });

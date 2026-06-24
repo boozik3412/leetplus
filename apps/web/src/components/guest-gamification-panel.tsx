@@ -655,6 +655,16 @@ const rewardWalletStateLabels: Record<GuestGameReward["walletState"], string> = 
   EXPIRED: "срок истек",
 };
 
+const rewardRarityLabels: Record<
+  NonNullable<GuestGameReward["rewardRarity"]>,
+  string
+> = {
+  common: "Обычная",
+  rare: "Редкая",
+  epic: "Эпическая",
+  legendary: "Легендарная",
+};
+
 const rewardStatusActionLabels: Record<GuestGameRewardStatus, string> = {
   PENDING: "Вернуть к выдаче",
   APPROVED: "Согласовать",
@@ -8706,6 +8716,7 @@ function rewardSearchTokens(reward: GuestGameReward) {
     reward.guest?.contact,
     reward.profile?.contactMasked,
     reward.rewardLabel,
+    rewardRarityLabel(reward),
     reward.rewardCode,
     rewardActivityLabel(reward),
     reward.store?.name,
@@ -8720,6 +8731,12 @@ function isAutomaticLedgerReward(reward: GuestGameReward) {
   return (
     reward.rewardAmount > 0 &&
     automaticLedgerRewardTypes.has(reward.rewardType.toUpperCase())
+  );
+}
+
+function rewardRarityLabel(reward: GuestGameReward) {
+  return reward.rewardRarityLabel ?? (
+    reward.rewardRarity ? rewardRarityLabels[reward.rewardRarity] : null
   );
 }
 
@@ -8789,6 +8806,7 @@ function RewardRow({
   const storeName = reward.store?.name ?? "любой клуб";
   const qualifiedAt = formatDate(reward.qualifiedAt);
   const rewardTypeLabel = rewardTypeLabelFromValue(reward.rewardType);
+  const rarityLabel = rewardRarityLabel(reward);
 
   return (
     <details className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -8830,6 +8848,7 @@ function RewardRow({
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
+            {rarityLabel ? <StatusPill label={rarityLabel} /> : null}
             <StatusPill label={rewardStatusLabels[reward.status]} />
             <StatusPill label={rewardWalletLabel(reward)} />
           </div>
@@ -8844,6 +8863,7 @@ function RewardRow({
               </h3>
               <StatusPill label={rewardStatusLabels[reward.status]} />
               <StatusPill label={rewardWalletLabel(reward)} />
+              {rarityLabel ? <StatusPill label={rarityLabel} /> : null}
             </div>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               {guestName} · телефон: {guestContact}
@@ -8855,6 +8875,7 @@ function RewardRow({
             ) : null}
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               {rewardTypeLabel} · {formatMoney(reward.rewardAmount)}
+              {rarityLabel ? ` · ${rarityLabel}` : ""}
             </p>
             <p className="mt-1 text-xs text-zinc-400">
               {storeName} · {qualifiedAt}

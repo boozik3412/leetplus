@@ -770,6 +770,9 @@ export type GuestPortalGameSummary = {
         | 'rewardType'
         | 'rewardAmount'
         | 'rewardLabel'
+        | 'rewardRarity'
+        | 'rewardRarityLabel'
+        | 'rewardDropChance'
         | 'sourceKind'
         | 'sourceLabel'
         | 'rewardCode'
@@ -1117,6 +1120,9 @@ export type GuestPortalLootBoxReward = {
     | 'CANCELED'
     | 'EXPIRED';
   rewardLabel: string;
+  rewardRarity: string | null;
+  rewardRarityLabel: string | null;
+  rewardDropChance: number | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
@@ -1213,6 +1219,9 @@ export type GuestPortalReward = {
   rewardType: string;
   rewardAmount: number;
   rewardLabel: string;
+  rewardRarity: string | null;
+  rewardRarityLabel: string | null;
+  rewardDropChance: number | null;
   sourceKind: 'LOOT_BOX' | 'MISSION' | 'BATTLE_PASS' | 'MANUAL';
   sourceLabel: string | null;
   rewardCode: string | null;
@@ -1367,6 +1376,9 @@ type GuestPortalRewardRow = {
   rewardType: string;
   rewardAmount: Prisma.Decimal;
   rewardLabel: string;
+  rewardRarity: string | null;
+  rewardRarityLabel: string | null;
+  rewardDropChance: Prisma.Decimal | null;
   rewardCode: string | null;
   qualifiedAt: Date;
   expiresAt: Date | null;
@@ -8453,6 +8465,9 @@ function buildGameSummaryFromPortal(
       rewardType: reward.rewardType,
       rewardAmount: reward.rewardAmount,
       rewardLabel: reward.rewardLabel,
+      rewardRarity: reward.rewardRarity,
+      rewardRarityLabel: reward.rewardRarityLabel,
+      rewardDropChance: reward.rewardDropChance,
       sourceKind: reward.sourceKind,
       sourceLabel: reward.sourceLabel,
       rewardCode: reward.rewardCode,
@@ -10623,6 +10638,9 @@ function buildLootBoxRewardState(
             id: latest.id,
             walletState: latestState,
             rewardLabel: latest.rewardLabel,
+            rewardRarity: latest.rewardRarity,
+            rewardRarityLabel: latest.rewardRarityLabel,
+            rewardDropChance: decimalNumber(latest.rewardDropChance),
             rewardCode: latest.rewardCode,
             claimPayload:
               latest.rewardCode && latestState === 'READY'
@@ -11007,6 +11025,9 @@ function mapReward(row: {
   rewardType: string;
   rewardAmount: Prisma.Decimal;
   rewardLabel: string;
+  rewardRarity: string | null;
+  rewardRarityLabel: string | null;
+  rewardDropChance: Prisma.Decimal | null;
   rewardCode: string | null;
   qualifiedAt: Date;
   expiresAt: Date | null;
@@ -11024,6 +11045,9 @@ function mapReward(row: {
     rewardType: row.rewardType,
     rewardAmount: Number(row.rewardAmount),
     rewardLabel: row.rewardLabel,
+    rewardRarity: row.rewardRarity,
+    rewardRarityLabel: row.rewardRarityLabel,
+    rewardDropChance: decimalNumber(row.rewardDropChance),
     sourceKind: source.sourceKind,
     sourceLabel: source.sourceLabel,
     rewardCode: row.rewardCode,

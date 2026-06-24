@@ -16,6 +16,12 @@ export type GuestGameRewardStatus =
   | "CANCELED"
   | "EXPIRED";
 
+export type GuestGameRewardRarity =
+  | "common"
+  | "rare"
+  | "epic"
+  | "legendary";
+
 export type GuestGameUser = {
   id: string;
   displayName: string;
@@ -282,6 +288,9 @@ export type GuestGameReward = {
   rewardType: string;
   rewardAmount: number;
   rewardLabel: string;
+  rewardRarity: GuestGameRewardRarity | null;
+  rewardRarityLabel: string | null;
+  rewardDropChance: number | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
@@ -344,6 +353,8 @@ export type GuestGameDryRunRule = {
     rewardLabel: string;
     weight: number;
     chancePercent: number;
+    rewardRarity: GuestGameRewardRarity;
+    rewardRarityLabel: string;
   } | null;
   xpDelta: number;
   budgetAmount: number | null;

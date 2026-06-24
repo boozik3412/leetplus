@@ -39,6 +39,12 @@ export type GuestPortalGamificationClubDirectory = {
   clubs: GuestPortalGamificationClub[];
 };
 
+export type GuestPortalLootBoxRarity =
+  | "common"
+  | "rare"
+  | "epic"
+  | "legendary";
+
 export type GuestPortalVerificationChannel =
   | "TELEGRAM_BOT"
   | "USER_CALL"
@@ -314,6 +320,9 @@ export type GuestPortalPayload = {
           | "CANCELED"
           | "EXPIRED";
         rewardLabel: string;
+        rewardRarity: GuestPortalLootBoxRarity | null;
+        rewardRarityLabel: string | null;
+        rewardDropChance: number | null;
         rewardCode: string | null;
         claimPayload: string | null;
         qualifiedAt: string;
@@ -400,6 +409,9 @@ export type GuestPortalPayload = {
       rewardType: string;
       rewardAmount: number;
       rewardLabel: string;
+      rewardRarity: GuestPortalLootBoxRarity | null;
+      rewardRarityLabel: string | null;
+      rewardDropChance: number | null;
       sourceKind: "LOOT_BOX" | "MISSION" | "BATTLE_PASS" | "MANUAL";
       sourceLabel: string | null;
       rewardCode: string | null;
@@ -585,6 +597,9 @@ export type GuestPortalGameSummary = {
         | "rewardType"
         | "rewardAmount"
         | "rewardLabel"
+        | "rewardRarity"
+        | "rewardRarityLabel"
+        | "rewardDropChance"
         | "sourceKind"
         | "sourceLabel"
         | "rewardCode"

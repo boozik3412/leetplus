@@ -1688,6 +1688,9 @@ model GuestGameReward {
   rewardType       String
   rewardAmount     Decimal              @default(0) @db.Decimal(12, 2)
   rewardLabel      String
+  rewardRarity     String?
+  rewardRarityLabel String?
+  rewardDropChance Decimal?             @db.Decimal(8, 4)
   rewardCode       String?
   qualifiedAt      DateTime             @default(now())
   expiresAt        DateTime?

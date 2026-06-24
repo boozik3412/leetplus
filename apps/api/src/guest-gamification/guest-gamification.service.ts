@@ -51,6 +51,12 @@ const rewardStatuses = [
   'EXPIRED',
 ] as const;
 const rewardSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'CASHIER'] as const;
+const lootBoxRewardRarityLabels: Record<GuestGameRewardRarity, string> = {
+  common: 'Обычная',
+  rare: 'Редкая',
+  epic: 'Эпическая',
+  legendary: 'Легендарная',
+};
 const eventSources = [
   'MANUAL',
   'LANGAME',
@@ -1015,6 +1021,9 @@ export type GuestGameReward = {
   rewardType: string;
   rewardAmount: number;
   rewardLabel: string;
+  rewardRarity: GuestGameRewardRarity | null;
+  rewardRarityLabel: string | null;
+  rewardDropChance: number | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
@@ -1887,6 +1896,9 @@ export type GuestGameRewardDto = {
   rewardType?: string;
   rewardAmount?: number | string | null;
   rewardLabel?: string;
+  rewardRarity?: string | null;
+  rewardRarityLabel?: string | null;
+  rewardDropChance?: number | string | null;
   rewardCode?: string | null;
   qualifiedAt?: string | null;
   expiresAt?: string | null;
@@ -2159,7 +2171,16 @@ export type GuestGameSelectedReward = {
   rewardLabel: string;
   weight: number;
   chancePercent: number;
+  rewardRarity: GuestGameRewardRarity;
+  rewardRarityLabel: string;
 };
+
+export type GuestGameRewardRarity = 'common' | 'rare' | 'epic' | 'legendary';
+
+type GuestGameLootBoxRewardCandidate = Omit<
+  GuestGameSelectedReward,
+  'chancePercent' | 'rewardRarity' | 'rewardRarityLabel'
+>;
 
 export type GuestGameDryRunRule = {
   id: string;
@@ -7828,6 +7849,16 @@ export class GuestGamificationService {
             rule.selectedRewardLabel ??
             rule.rewardLabel ??
             `${processRuleKindLabel(rule.kind)}: ${rule.name}`,
+          rewardRarity:
+            rule.kind === 'LOOT_BOX' ? rule.selectedReward?.rewardRarity : null,
+          rewardRarityLabel:
+            rule.kind === 'LOOT_BOX'
+              ? rule.selectedReward?.rewardRarityLabel
+              : null,
+          rewardDropChance:
+            rule.kind === 'LOOT_BOX'
+              ? rule.selectedReward?.chancePercent
+              : null,
           qualifiedAt: dryRun.occurredAt,
           note: staffTestReason
             ? 'Создано как тест сотрудника; автоматическое начисление в Langame заблокировано.'
@@ -9268,6 +9299,7 @@ export class GuestGamificationService {
       rewardStatuses,
       isCreate ? 'PENDING' : undefined,
     );
+    const rewardRarity = lootBoxRewardRarityCode(dto.rewardRarity);
 
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
@@ -9301,6 +9333,11 @@ export class GuestGamificationService {
         'Название награды',
         isCreate,
       ),
+      rewardRarity,
+      rewardRarityLabel:
+        nullableString(dto.rewardRarityLabel) ??
+        (rewardRarity ? lootBoxRewardRarityLabels[rewardRarity] : undefined),
+      rewardDropChance: decimalValue(dto.rewardDropChance),
       rewardCode:
         nullableString(dto.rewardCode) ??
         (isCreate ? generateRewardCode() : undefined),
@@ -10208,6 +10245,9 @@ function mapReward(row: RewardRow): GuestGameReward {
     rewardType: row.rewardType,
     rewardAmount: numberValue(row.rewardAmount),
     rewardLabel: row.rewardLabel,
+    rewardRarity: lootBoxRewardRarityCode(row.rewardRarity) ?? null,
+    rewardRarityLabel: row.rewardRarityLabel,
+    rewardDropChance: numberOrNull(row.rewardDropChance),
     rewardCode: row.rewardCode,
     claimPayload:
       row.rewardCode && walletState !== 'REDEEMED'
@@ -15033,7 +15073,7 @@ function lootBoxRewards(rule: GuestGameLootBox): GuestGameSelectedReward[] {
     ? rawPrizes.map((item) => lootBoxRewardFromPrize(rule, item))
     : rawItems.map((item) => lootBoxRewardFromLegacyItem(rule, item));
   const validPrizes = prizes.filter(
-    (item): item is Omit<GuestGameSelectedReward, 'chancePercent'> =>
+    (item): item is GuestGameLootBoxRewardCandidate =>
       item !== null && Boolean(item.rewardLabel) && item.weight > 0,
   );
   const fallbackPrize = lootBoxFallbackReward(rule);
@@ -15044,19 +15084,26 @@ function lootBoxRewards(rule: GuestGameLootBox): GuestGameSelectedReward[] {
       : [];
   const totalWeight = sum(weightedPrizes.map((item) => item.weight));
 
-  return weightedPrizes.map((item) => ({
-    ...item,
-    chancePercent:
+  return weightedPrizes.map((item) => {
+    const chancePercent =
       totalWeight > 0
         ? roundMoney((item.weight / totalWeight) * 100)
-        : roundMoney(100 / weightedPrizes.length),
-  }));
+        : roundMoney(100 / weightedPrizes.length);
+    const rarity = lootBoxRewardRarityFromChance(chancePercent);
+
+    return {
+      ...item,
+      chancePercent,
+      rewardRarity: rarity,
+      rewardRarityLabel: lootBoxRewardRarityLabels[rarity],
+    };
+  });
 }
 
 function lootBoxRewardFromPrize(
   rule: GuestGameLootBox,
   value: unknown,
-): Omit<GuestGameSelectedReward, 'chancePercent'> | null {
+): GuestGameLootBoxRewardCandidate | null {
   const record = dryRunRecord(value);
   const rewardLabel =
     dryRunString(record.rewardLabel) ??
@@ -15094,7 +15141,7 @@ function lootBoxRewardFromPrize(
 function lootBoxRewardFromLegacyItem(
   rule: GuestGameLootBox,
   value: unknown,
-): Omit<GuestGameSelectedReward, 'chancePercent'> | null {
+): GuestGameLootBoxRewardCandidate | null {
   const record = dryRunRecord(value);
   const rewardLabel =
     dryRunString(record.label) ?? rule.rewardLabel ?? rule.name;
@@ -15113,7 +15160,7 @@ function lootBoxRewardFromLegacyItem(
 
 function lootBoxFallbackReward(
   rule: GuestGameLootBox,
-): Omit<GuestGameSelectedReward, 'chancePercent'> | null {
+): GuestGameLootBoxRewardCandidate | null {
   const rewardLabel = rule.rewardLabel ?? rule.name;
 
   if (!rewardLabel && !rule.rewardType && !rule.rewardAmount) {
@@ -15126,6 +15173,38 @@ function lootBoxFallbackReward(
     rewardLabel,
     weight: 100,
   };
+}
+
+function lootBoxRewardRarityFromChance(
+  chancePercent: number,
+): GuestGameRewardRarity {
+  if (chancePercent <= 1) {
+    return 'legendary';
+  }
+
+  if (chancePercent <= 4) {
+    return 'epic';
+  }
+
+  if (chancePercent <= 15) {
+    return 'rare';
+  }
+
+  return 'common';
+}
+
+function lootBoxRewardRarityCode(
+  value: unknown,
+): GuestGameRewardRarity | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = stringValue(value)?.toLowerCase();
+
+  return parsed && parsed in lootBoxRewardRarityLabels
+    ? (parsed as GuestGameRewardRarity)
+    : undefined;
 }
 
 function dryRunGuestSummary(row: {

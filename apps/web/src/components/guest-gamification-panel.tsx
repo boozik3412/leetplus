@@ -3119,7 +3119,7 @@ function OverviewTab({
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-5">
           <ScenarioStepCard
             step="1"
             title="Игровые профили"
@@ -5136,22 +5136,22 @@ function ScenarioStepCard({
   onClick: () => void;
 }) {
   return (
-    <div className="flex min-h-56 flex-col rounded-lg border border-zinc-200 bg-zinc-50 p-4 transition hover:border-emerald-300 hover:bg-white hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-emerald-800 dark:hover:bg-zinc-950">
-      <div className="flex items-center justify-between gap-3">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+    <div className="flex min-h-40 flex-col rounded-lg border border-zinc-200 bg-zinc-50 p-3 transition hover:border-emerald-300 hover:bg-white hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-emerald-800 dark:hover:bg-zinc-950">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
           {step}
         </span>
-        <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+        <span className="truncate rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
           {metric}
         </span>
       </div>
-      <h3 className="mt-4 text-base font-bold text-zinc-950 dark:text-white">
+      <h3 className="mt-3 text-sm font-bold text-zinc-950 dark:text-white">
         {title}
       </h3>
-      <p className="mt-2 flex-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+      <p className="mt-1 flex-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
         {text}
       </p>
-      <button type="button" className={`${smallButtonClass} mt-4`} onClick={onClick}>
+      <button type="button" className={`${smallButtonClass} mt-3 w-full justify-center px-2 py-1.5`} onClick={onClick}>
         {action}
       </button>
     </div>

@@ -51,8 +51,10 @@ type ActiveSessionState = "loading" | "ready" | "empty" | "error";
 type VerificationStatus =
   GuestPortalGamificationClubDirectory["verification"]["options"][number]["status"];
 const GAME_AUTH_VERIFICATION_CHANNELS = new Set<GuestPortalVerificationChannel>(
-  ["TELEGRAM_BOT", "USER_CALL", "SMS_CODE"],
+  ["TELEGRAM_BOT", "USER_CALL"],
 );
+const HIDDEN_PUBLIC_VERIFICATION_CHANNELS =
+  new Set<GuestPortalVerificationChannel>(["SMS_CODE"]);
 
 export function PlayRegistrationClient({
   initialDirectory,
@@ -2134,7 +2136,7 @@ function UserCallAuthPanel({
       ) : !ready ? (
         <p className="lp-game-auth-channel-note mt-2 text-xs leading-5 text-amber-100">
           Звонок включится после настройки провайдера подтверждения;
-          используйте SMS-код.
+          попробуйте другой доступный способ или повторите позже.
         </p>
       ) : null}
     </div>
@@ -2666,13 +2668,17 @@ function getVisibleVerificationPlan(
   verification: GuestPortalGamificationClubDirectory["verification"],
   surface: PlayRegistrationSurface,
 ): GuestPortalGamificationClubDirectory["verification"] {
-  if (surface !== "game-auth") {
-    return verification;
-  }
+  const options = verification.options.filter((option) => {
+    if (HIDDEN_PUBLIC_VERIFICATION_CHANNELS.has(option.channel)) {
+      return false;
+    }
 
-  const options = verification.options.filter((option) =>
-    GAME_AUTH_VERIFICATION_CHANNELS.has(option.channel),
-  );
+    if (surface === "game-auth") {
+      return GAME_AUTH_VERIFICATION_CHANNELS.has(option.channel);
+    }
+
+    return true;
+  });
   const recommendedChannel =
     options.find((option) => option.channel === verification.recommendedChannel)
       ?.channel ??

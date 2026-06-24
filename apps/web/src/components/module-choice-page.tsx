@@ -114,7 +114,7 @@ export function ModuleChoicePage({ analyticsHref }: ModuleChoicePageProps) {
               <h1>Игровой модуль</h1>
               <p className="lp-start-lead">
                 Гостевой режим для игроков клуба: задания, рейтинги, награды и
-                быстрый вход через Telegram, звонок или SMS.
+                быстрый вход через Telegram или звонок.
               </p>
 
               <GamePreview />

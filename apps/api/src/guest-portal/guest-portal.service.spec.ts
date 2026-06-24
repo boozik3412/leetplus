@@ -767,6 +767,44 @@ function mockTelegramBotLinkedProfile(
   return { buildPortalPayload, portal };
 }
 
+function telegramBotClubProfilesFixture() {
+  return [
+    {
+      id: 'profile-1',
+      tenantId: 'tenant-1',
+      guestId: 'guest-1',
+      phoneHash: 'phone-hash',
+      contactMasked: '+7 *** **-11',
+      unsubscribedAt: null,
+      tenant: {
+        id: 'tenant-1',
+        name: 'LeetPlus',
+        slug: 'demo',
+      },
+      telegramLinkChallenges: [
+        {
+          id: 'telegram-link-1',
+          store: {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337 Радищева',
+            address: 'Радищева, 25',
+          },
+        },
+        {
+          id: 'telegram-link-2',
+          store: {
+            id: 'store-2',
+            publicSlug: 'club-arena',
+            name: 'Arena',
+            address: 'Мира, 7',
+          },
+        },
+      ],
+    },
+  ];
+}
+
 describe('GuestPortalService', () => {
   describe('getGameSummary', () => {
     it('returns compact game state from the existing guest session payload', async () => {
@@ -2707,6 +2745,12 @@ describe('GuestPortalService', () => {
               ],
               [
                 {
+                  text: 'Выбрать клуб',
+                  callback_data: 'bot:clubs',
+                },
+              ],
+              [
+                {
                   text: 'Открыть Mini App',
                   web_app: {
                     url: 'https://tg.leetplus.ru/game/app',
@@ -3036,6 +3080,168 @@ describe('GuestPortalService', () => {
       );
       expect(result.reply?.text).toEqual(
         expect.not.stringContaining('claimPayload'),
+      );
+    });
+
+    it('answers Telegram clubs callback with safe linked club choices', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      prisma.guestGameProfile.findMany.mockResolvedValue(
+        telegramBotClubProfilesFixture(),
+      );
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-clubs',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: 'bot:clubs',
+        },
+      });
+      const buttons = (result.reply?.replyMarkup as any).inline_keyboard.flat();
+      const clubButtons = buttons.filter((button: any) =>
+        String(button.callback_data ?? '').startsWith('bot:club:'),
+      );
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CLUBS',
+        profileId: 'profile-1',
+        telegramIdentityMasked: 'ch...56',
+        reply: {
+          text: expect.stringContaining('Выберите клуб'),
+        },
+      });
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('1337 Радищева'),
+      );
+      expect(result.reply?.text).toEqual(expect.stringContaining('Arena'));
+      expect(clubButtons).toHaveLength(2);
+      expect(clubButtons[0]).toMatchObject({
+        text: '1337 Радищева, Радищева, 25',
+        callback_data: expect.stringMatching(/^bot:club:[A-Za-z0-9_-]{12,32}$/),
+      });
+      expect(JSON.stringify(result.reply)).toEqual(
+        expect.not.stringContaining('profile-1'),
+      );
+      expect(JSON.stringify(result.reply)).toEqual(
+        expect.not.stringContaining('store-1'),
+      );
+      expect(JSON.stringify(result.reply)).toEqual(
+        expect.not.stringContaining('telegram-link-1'),
+      );
+      expect(JSON.stringify(result.reply)).toEqual(
+        expect.not.stringContaining('chat:'),
+      );
+      expect(JSON.stringify(result.reply)).toEqual(
+        expect.not.stringContaining('123456'),
+      );
+    });
+
+    it('selects a Telegram bot club callback and returns the scoped bot menu', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      portal.store.id = 'store-2';
+      portal.store.publicSlug = 'club-arena';
+      portal.store.name = 'Arena';
+      prisma.guestGameProfile.findMany.mockResolvedValue(
+        telegramBotClubProfilesFixture(),
+      );
+      const buildPortalPayload = jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portal);
+      const listResult = await service.handleTelegramWebhook(
+        'telegram-secret',
+        {
+          callback_query: {
+            id: 'callback-clubs',
+            from: { id: 123456 },
+            message: {
+              chat: { id: 123456 },
+            },
+            data: 'bot:clubs',
+          },
+        },
+      );
+      const buttons = (listResult.reply?.replyMarkup as any).inline_keyboard
+        .flat()
+        .filter((button: any) =>
+          String(button.callback_data ?? '').startsWith('bot:club:'),
+        );
+      const arenaCallbackData = buttons.find(
+        (button: any) => button.text === 'Arena, Мира, 7',
+      ).callback_data;
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-club-select',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: arenaCallbackData,
+        },
+      });
+
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'profile-1' },
+          data: expect.objectContaining({
+            lastActivityAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(prisma.guestGameTelegramLinkChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'telegram-link-2' },
+          data: expect.objectContaining({
+            updatedAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(buildPortalPayload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'telegram-bot:profile-1:store-2',
+          guestId: 'guest-1',
+          phoneHash: 'phone-hash',
+          profileId: 'profile-1',
+          storeId: 'store-2',
+          tenantId: 'tenant-1',
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CLUB_SELECTED',
+        profileId: 'profile-1',
+        reply: {
+          text: expect.stringContaining('Клуб выбран: Arena.'),
+          replyMarkup: {
+            inline_keyboard: expect.any(Array),
+          },
+        },
+      });
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Клуб: Arena'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('store-2'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('telegram-link-2'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('profile-1'),
       );
     });
 

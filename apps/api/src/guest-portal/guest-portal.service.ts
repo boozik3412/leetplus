@@ -136,7 +136,13 @@ type GuestPortalVerificationStatus =
   | 'READY_AFTER_OTP'
   | 'NOT_CONFIGURED'
   | 'PLANNED';
-type TelegramBotCommand = 'MENU' | 'PROFILE' | 'QUESTS' | 'REWARDS' | 'HELP';
+type TelegramBotCommand =
+  | 'MENU'
+  | 'PROFILE'
+  | 'QUESTS'
+  | 'REWARDS'
+  | 'CLUBS'
+  | 'HELP';
 type TelegramMiniAppTab = 'quests' | 'rewards' | 'profile';
 type GuestPortalPhoneIdentity = {
   normalized: string;
@@ -235,6 +241,7 @@ type TelegramMiniAppClubCandidate = {
     guestId: string | null;
     phoneHash: string;
     contactMasked: string | null;
+    unsubscribedAt: Date | null;
   };
   tenant: {
     id: string;
@@ -247,6 +254,7 @@ type TelegramMiniAppClubCandidate = {
     name: string;
     address: string | null;
   };
+  telegramLinkChallengeId: string;
 };
 
 type GuestPortalGameProfileLinkStatus =
@@ -574,6 +582,8 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_PROFILE'
     | 'TELEGRAM_BOT_QUESTS'
     | 'TELEGRAM_BOT_REWARDS'
+    | 'TELEGRAM_BOT_CLUBS'
+    | 'TELEGRAM_BOT_CLUB_SELECTED'
     | 'TELEGRAM_BOT_HELP'
     | 'UNSUBSCRIBE'
     | 'UNKNOWN';
@@ -4289,11 +4299,20 @@ export class GuestPortalService {
     }
 
     if (update.callbackData) {
-      const response = await this.buildTelegramBotCommandResponse(
-        'MENU',
-        update.telegramChatId,
-        telegramIdentityMasked,
+      const clubCallbackToken = telegramBotClubCallbackToken(
+        update.callbackData,
       );
+      const response = clubCallbackToken
+        ? await this.buildTelegramBotClubSelectResponse(
+            clubCallbackToken,
+            update.telegramChatId,
+            telegramIdentityMasked,
+          )
+        : await this.buildTelegramBotCommandResponse(
+            'MENU',
+            update.telegramChatId,
+            telegramIdentityMasked,
+          );
 
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
@@ -4737,11 +4756,18 @@ export class GuestPortalService {
           telegramIdentityMasked,
           [
             'LeetPlus bot: здесь можно продолжить игру после Telegram-входа.',
-            'Доступные действия: профиль, квесты, награды, Mini App, сайт и отписка от уведомлений.',
+            'Доступные действия: профиль, квесты, награды, выбор клуба, Mini App, сайт и отписка от уведомлений.',
             'Для входа заново выберите клуб на сайте и нажмите "Войти через Telegram".',
           ].join('\n'),
         ),
       };
+    }
+
+    if (command === 'CLUBS') {
+      return this.buildTelegramBotClubListResponse(
+        telegramChatIdValue,
+        telegramIdentityMasked,
+      );
     }
 
     const telegramIdentity = `chat:${telegramChatIdValue}`;
@@ -4852,6 +4878,106 @@ export class GuestPortalService {
         telegramIdentityMasked,
         replyText,
         telegramBotMiniAppTab(command),
+      ),
+    };
+  }
+
+  private async buildTelegramBotClubListResponse(
+    telegramChatIdValue: string,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const telegramIdentity = `chat:${telegramChatIdValue}`;
+    const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
+
+    return {
+      status: candidates.length ? 'CONFIRMED' : 'IGNORED',
+      action: 'TELEGRAM_BOT_CLUBS',
+      profileId: candidates[0]?.profile.id ?? null,
+      telegramIdentityMasked,
+      message: candidates.length
+        ? 'Telegram bot club selection returned safe choices.'
+        : 'Telegram bot club selection has no linked game clubs.',
+      reply: this.telegramWebhookBotClubSelectionReply(
+        telegramIdentityMasked,
+        telegramBotClubSelectionText(candidates),
+        candidates,
+      ),
+    };
+  }
+
+  private async buildTelegramBotClubSelectResponse(
+    clubCallbackToken: string,
+    telegramChatIdValue: string,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const telegramIdentity = `chat:${telegramChatIdValue}`;
+    const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
+    const selectedCandidate =
+      candidates.find(
+        (candidate) =>
+          this.telegramBotClubCallbackTokenForCandidate(candidate) ===
+          clubCallbackToken,
+      ) ?? null;
+
+    if (!selectedCandidate) {
+      return {
+        status: candidates.length ? 'CONFIRMED' : 'IGNORED',
+        action: 'TELEGRAM_BOT_CLUBS',
+        profileId: candidates[0]?.profile.id ?? null,
+        telegramIdentityMasked,
+        message:
+          'Telegram bot club callback was not found in safe linked choices.',
+        reply: this.telegramWebhookBotClubSelectionReply(
+          telegramIdentityMasked,
+          [
+            'Список клубов обновился.',
+            'Выберите клуб заново кнопками ниже.',
+          ].join('\n'),
+          candidates,
+        ),
+      };
+    }
+
+    const now = new Date();
+
+    await this.prisma.$transaction([
+      this.prisma.guestGameProfile.update({
+        where: { id: selectedCandidate.profile.id },
+        data: { lastActivityAt: now },
+      }),
+      this.prisma.guestGameTelegramLinkChallenge.update({
+        where: { id: selectedCandidate.telegramLinkChallengeId },
+        data: { updatedAt: now },
+      }),
+    ]);
+
+    const portal = await this.buildPortalPayload({
+      sub: `telegram-bot:${selectedCandidate.profile.id}:${selectedCandidate.store.id}`,
+      purpose: GUEST_PORTAL_PURPOSE,
+      tenantId: selectedCandidate.tenant.id,
+      storeId: selectedCandidate.store.id,
+      guestId: selectedCandidate.profile.guestId,
+      profileId: selectedCandidate.profile.id,
+      phoneHash: selectedCandidate.profile.phoneHash,
+    });
+    const replyText = [
+      `Клуб выбран: ${selectedCandidate.store.name}.`,
+      telegramBotReplyText(
+        'MENU',
+        portal,
+        selectedCandidate.profile.unsubscribedAt,
+      ),
+    ].join('\n');
+
+    return {
+      status: 'CONFIRMED',
+      action: 'TELEGRAM_BOT_CLUB_SELECTED',
+      profileId: selectedCandidate.profile.id,
+      telegramIdentityMasked,
+      message: 'Telegram bot club selected without exposing raw identifiers.',
+      reply: this.telegramWebhookBotMenuReply(
+        telegramIdentityMasked,
+        replyText,
       ),
     };
   }
@@ -4976,6 +5102,12 @@ export class GuestPortalService {
           ],
           [
             {
+              text: 'Выбрать клуб',
+              callback_data: 'bot:clubs',
+            },
+          ],
+          [
+            {
               text: 'Открыть Mini App',
               web_app: {
                 url: this.telegramMiniAppUrl(miniAppTab),
@@ -5001,6 +5133,70 @@ export class GuestPortalService {
         ],
       },
     };
+  }
+
+  private telegramWebhookBotClubSelectionReply(
+    chatIdMasked: string | null,
+    text: string,
+    candidates: TelegramMiniAppClubCandidate[],
+  ): GuestPortalTelegramWebhookResponse['reply'] {
+    const visibleCandidates = candidates.slice(0, 8);
+
+    return {
+      provider: 'TELEGRAM',
+      method: 'sendMessage',
+      chatIdMasked,
+      text,
+      replyMarkup: {
+        inline_keyboard: [
+          ...visibleCandidates.map((candidate) => [
+            {
+              text: telegramBotClubChoiceLabel(candidate),
+              callback_data: `bot:club:${this.telegramBotClubCallbackTokenForCandidate(
+                candidate,
+              )}`,
+            },
+          ]),
+          [
+            {
+              text: 'Меню',
+              callback_data: 'bot:menu',
+            },
+          ],
+          [
+            {
+              text: 'Открыть Mini App',
+              web_app: {
+                url: this.telegramMiniAppUrl(),
+              },
+            },
+          ],
+          [
+            {
+              text: 'Вернуться на сайт LeetPlus',
+              url: `${this.publicWebUrl().replace(/\/$/, '')}/game/clubs`,
+            },
+          ],
+        ],
+      },
+    };
+  }
+
+  private telegramBotClubCallbackTokenForCandidate(
+    candidate: TelegramMiniAppClubCandidate,
+  ) {
+    return createHmac('sha256', this.referralSecret())
+      .update(
+        [
+          'telegram-bot-club',
+          candidate.profile.id,
+          candidate.tenant.id,
+          candidate.store.id,
+          candidate.telegramLinkChallengeId,
+        ].join(':'),
+      )
+      .digest('base64url')
+      .slice(0, 18);
   }
 
   private async dispatchTelegramWebhookReply(
@@ -7336,9 +7532,11 @@ export class GuestPortalService {
             guestId: profile.guestId,
             phoneHash: profile.phoneHash,
             contactMasked: profile.contactMasked,
+            unsubscribedAt: profile.unsubscribedAt,
           },
           tenant: profile.tenant,
           store: challenge.store,
+          telegramLinkChallengeId: challenge.id,
         });
       }
     }
@@ -8291,6 +8489,8 @@ function telegramBotAction(
       return 'TELEGRAM_BOT_QUESTS';
     case 'REWARDS':
       return 'TELEGRAM_BOT_REWARDS';
+    case 'CLUBS':
+      return 'TELEGRAM_BOT_CLUBS';
     case 'HELP':
       return 'TELEGRAM_BOT_HELP';
     default:
@@ -8321,9 +8521,54 @@ function telegramBotTitle(command: TelegramBotCommand) {
       return 'Квесты LeetPlus';
     case 'REWARDS':
       return 'Награды LeetPlus';
+    case 'CLUBS':
+      return 'Клубы LeetPlus';
     default:
       return 'LeetPlus bot: игровое меню.';
   }
+}
+
+function telegramBotClubSelectionText(
+  candidates: TelegramMiniAppClubCandidate[],
+) {
+  if (!candidates.length) {
+    return [
+      'Клубы LeetPlus',
+      'Для этого Telegram пока нет подтвержденных игровых клубов.',
+      'Откройте сайт LeetPlus, выберите клуб и нажмите "Войти через Telegram".',
+    ].join('\n');
+  }
+
+  const visibleCandidates = candidates.slice(0, 8);
+  const lines = [
+    'Клубы LeetPlus',
+    'Выберите клуб кнопкой ниже.',
+    ...visibleCandidates.map(
+      (candidate, index) =>
+        `${index + 1}. ${telegramBotClubChoiceLabel(candidate)}`,
+    ),
+  ];
+
+  if (candidates.length > visibleCandidates.length) {
+    lines.push(
+      `Показаны первые ${formatTelegramBotInteger(
+        visibleCandidates.length,
+      )} клубов. Остальные доступны на сайте или в Mini App.`,
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function telegramBotClubChoiceLabel(candidate: TelegramMiniAppClubCandidate) {
+  const address = candidate.store.address?.trim();
+  const tenant =
+    candidate.tenant.name.trim() &&
+    candidate.tenant.name.trim() !== candidate.store.name.trim()
+      ? ` · ${candidate.tenant.name.trim()}`
+      : '';
+
+  return `${candidate.store.name}${address ? `, ${address}` : tenant}`;
 }
 
 function telegramBotFeaturedMissions(missions: GuestPortalMission[]) {
@@ -9962,6 +10207,10 @@ function telegramWebhookBotCommand(
     return 'REWARDS';
   }
 
+  if (/^(bot:)?clubs?$/i.test(trimmed)) {
+    return 'CLUBS';
+  }
+
   if (
     /^(bot:)?menu$/i.test(trimmed) ||
     /^\/status(@[A-Za-z0-9_]{3,64})?$/i.test(command)
@@ -9981,6 +10230,10 @@ function telegramWebhookBotCommand(
     return 'REWARDS';
   }
 
+  if (/^\/clubs?(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
+    return 'CLUBS';
+  }
+
   if (/^\/menu(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
     return 'MENU';
   }
@@ -9997,7 +10250,19 @@ function telegramWebhookBotCommand(
     return 'REWARDS';
   }
 
+  if (/^(клубы|клуб|выбрать клуб|сменить клуб)$/i.test(normalized)) {
+    return 'CLUBS';
+  }
+
   return /^(продолжить в боте|статус|меню)$/i.test(normalized) ? 'MENU' : null;
+}
+
+function telegramBotClubCallbackToken(callbackData: string | null) {
+  const match = /^bot:club:([A-Za-z0-9_-]{12,32})$/.exec(
+    callbackData?.trim() ?? '',
+  );
+
+  return match?.[1] ?? null;
 }
 
 function telegramBotMissionLine(mission: {

@@ -174,20 +174,7 @@ describe('API routes (e2e)', () => {
       .expect('Hello World!');
   });
 
-  it('/auth/register (POST)', () => {
-    authService.register.mockResolvedValue({
-      accessToken: 'signed-token',
-      user: {
-        id: 'user-1',
-        email: 'owner@club-a.leetplus.ru',
-        fullName: 'Owner',
-        role: 'OWNER',
-        isPlatformAdmin: false,
-        tenantId: 'tenant-1',
-        tenantSlug: 'club-a',
-      },
-    });
-
+  it('/auth/register (POST) blocks public self-registration', () => {
     return request(app.getHttpServer())
       .post('/auth/register')
       .send({
@@ -197,18 +184,12 @@ describe('API routes (e2e)', () => {
         tenantSlug: 'club-a',
         fullName: 'Owner',
       })
-      .expect(201)
-      .expect({
-        accessToken: 'signed-token',
-        user: {
-          id: 'user-1',
-          email: 'owner@club-a.leetplus.ru',
-          fullName: 'Owner',
-          role: 'OWNER',
-          isPlatformAdmin: false,
-          tenantId: 'tenant-1',
-          tenantSlug: 'club-a',
-        },
+      .expect(403)
+      .expect(({ body }: { body: { message?: string } }) => {
+        expect(body.message).toBe(
+          'Самостоятельная регистрация временно отключена. Получите приглашение от администратора.',
+        );
+        expect(authService.register).not.toHaveBeenCalled();
       });
   });
 

@@ -537,22 +537,22 @@ export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
               : "Загружаем дашборд..."
             : isSubmitting
               ? "Отправка..."
-              : isInviteRegister
+              : isRegister
                 ? "Завершить регистрацию"
-                : isRegister
-                ? "Создать организацию"
                 : "Войти"}
         </button>
 
-      <p className="text-center text-sm text-zinc-500">
-        {isRegister ? "Уже есть аккаунт?" : "Еще нет аккаунта?"}{" "}
-        <a
-          href={isRegister ? "/login" : "/register"}
-          className="font-medium text-zinc-900 underline-offset-4 hover:underline"
-        >
-          {isRegister ? "Войти" : "Зарегистрироваться"}
-        </a>
-      </p>
+      {isRegister ? (
+        <p className="text-center text-sm text-zinc-500">
+          Уже есть аккаунт?{" "}
+          <a
+            href="/login"
+            className="font-medium text-zinc-900 underline-offset-4 hover:underline"
+          >
+            Войти
+          </a>
+        </p>
+      ) : null}
       </form>
     </>
   );

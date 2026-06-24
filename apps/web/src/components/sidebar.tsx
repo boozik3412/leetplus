@@ -989,12 +989,6 @@ function UserPanel({
       >
         Войти
       </Link>
-      <Link
-        href="/register"
-        className="block rounded-xl border border-zinc-200 bg-white px-3 py-2 text-center text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
-      >
-        Регистрация
-      </Link>
     </div>
   );
 }

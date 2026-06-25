@@ -8,7 +8,7 @@ export type StaffChecklistStatus =
   | "RETURNED"
   | "ESCALATED"
   | "CANCELED";
-export type StaffChecklistFilterStatus = StaffChecklistStatus | "OVERDUE" | "all";
+export type StaffChecklistFilterStatus = StaffChecklistStatus | "OVERDUE" | "OTHER" | "all";
 export type StaffChecklistShiftKind =
   | "OPENING"
   | "CLOSING"

@@ -26,11 +26,12 @@ type ReportFilterState =
 
 const statusLabels: Record<StaffChecklistFilterStatus, string> = {
   all: "Все статусы",
-  OPEN: "Новые",
   IN_PROGRESS: "В работе",
   ON_REVIEW: "На проверке",
-  ACCEPTED: "Приняты",
-  RETURNED: "Возвращены",
+  ACCEPTED: "Принят",
+  RETURNED: "Возвращен в работу",
+  OTHER: "Прочие",
+  OPEN: "Новые",
   ESCALATED: "Эскалированы",
   CANCELED: "Отменены",
   OVERDUE: "Просрочены",
@@ -41,7 +42,7 @@ const runStatusLabels: Record<StaffChecklistStatus, string> = {
   IN_PROGRESS: "В работе",
   ON_REVIEW: "На проверке",
   ACCEPTED: "Принят",
-  RETURNED: "Возвращен",
+  RETURNED: "Возвращен в работу",
   ESCALATED: "Эскалирован",
   CANCELED: "Отменен",
 };
@@ -101,6 +102,7 @@ function isStatus(value: string | undefined): value is StaffChecklistFilterStatu
     value === "RETURNED" ||
     value === "ESCALATED" ||
     value === "CANCELED" ||
+    value === "OTHER" ||
     value === "OVERDUE"
   );
 }

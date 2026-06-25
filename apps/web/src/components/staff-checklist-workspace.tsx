@@ -24,7 +24,7 @@ const statusLabels: Record<StaffChecklistStatus, string> = {
   IN_PROGRESS: "В работе",
   ON_REVIEW: "На проверке",
   ACCEPTED: "Принят",
-  RETURNED: "Возвращен",
+  RETURNED: "Возвращен в работу",
   ESCALATED: "Эскалирован",
   CANCELED: "Отменен",
 };
@@ -56,6 +56,34 @@ type ChecklistSourceOption =
       key: string;
       kind: "TEMPLATE";
     });
+
+type RunStatusGroupKey =
+  | "IN_PROGRESS"
+  | "ON_REVIEW"
+  | "ACCEPTED"
+  | "RETURNED"
+  | "OTHER";
+
+const runStatusGroups: Array<{ key: RunStatusGroupKey; label: string }> = [
+  { key: "IN_PROGRESS", label: "В работе" },
+  { key: "ON_REVIEW", label: "На проверке" },
+  { key: "ACCEPTED", label: "Принят" },
+  { key: "RETURNED", label: "Возвращен в работу" },
+  { key: "OTHER", label: "Прочие" },
+];
+
+function getRunStatusGroupKey(status: StaffChecklistStatus): RunStatusGroupKey {
+  if (
+    status === "IN_PROGRESS" ||
+    status === "ON_REVIEW" ||
+    status === "ACCEPTED" ||
+    status === "RETURNED"
+  ) {
+    return status;
+  }
+
+  return "OTHER";
+}
 
 function answerKey(answer: Pick<StaffChecklistAnswer, "sectionId" | "itemId">) {
   return `${answer.sectionId}::${answer.itemId}`;
@@ -240,6 +268,20 @@ export function StaffChecklistWorkspace({
     setOpenedRunId(runId);
   }
 
+  function toggleRunGroup(groupKey: RunStatusGroupKey) {
+    setExpandedRunGroups((current) => {
+      const next = new Set(current);
+
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+
+      return next;
+    });
+  }
+
   const sourceOptions = useMemo<ChecklistSourceOption[]>(
     () =>
       canCreateRuns
@@ -276,6 +318,21 @@ export function StaffChecklistWorkspace({
   const [scheduledAt, setScheduledAt] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+  const [expandedRunGroups, setExpandedRunGroups] = useState<
+    Set<RunStatusGroupKey>
+  >(() => new Set<RunStatusGroupKey>());
+  const runGroups = useMemo(
+    () =>
+      runStatusGroups
+        .map((group) => ({
+          ...group,
+          runs: report.rows.filter(
+            (run) => getRunStatusGroupKey(run.status) === group.key,
+          ),
+        }))
+        .filter((group) => group.runs.length > 0),
+    [report.rows],
+  );
 
   async function createRun() {
     if (!canCreateRuns) {
@@ -475,42 +532,70 @@ export function StaffChecklistWorkspace({
                   : "Текущих чек-листов пока нет."}
               </p>
             ) : null}
-            {report.rows.map((run) => (
-              <button
-                key={run.id}
-                id={`run-${run.id}`}
-                type="button"
-                onClick={() => openRun(run.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openRun(run.id);
-                  }
-                }}
-                title="Открыть чек-лист"
-                className={[
-                  "scroll-mt-24 w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
-                  selectedRun?.id === run.id
-                    ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-                    : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
-                ].join(" ")}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">{run.title}</p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {run.assignedToUser?.fullName ??
-                        run.assignedToUser?.email ??
-                        "Не назначен"} · {run.store?.name ?? "Вся сеть"} ·{" "}
-                      {formatDateTime(run.startedAt ?? run.scheduledAt)}
-                    </p>
-                  </div>
-                  <span className={statusClass(run.status, run.isOverdue)}>
-                    {run.isOverdue ? "Просрочен" : statusLabels[run.status]}
-                  </span>
+            {runGroups.map((group) => {
+              const isOpen = expandedRunGroups.has(group.key);
+
+              return (
+                <div key={group.key} className="space-y-2">
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    onClick={() => toggleRunGroup(group.key)}
+                    className="flex min-h-11 w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-sm font-semibold transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:bg-emerald-500/10"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <DisclosureChevron isOpen={isOpen} />
+                      <span className="truncate">{group.label}</span>
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+                      {formatNumber(group.runs.length)}
+                    </span>
+                  </button>
+                  {isOpen ? (
+                    <div className="space-y-2">
+                      {group.runs.map((run) => (
+                        <button
+                          key={run.id}
+                          id={`run-${run.id}`}
+                          type="button"
+                          onClick={() => openRun(run.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openRun(run.id);
+                            }
+                          }}
+                          title="Открыть чек-лист"
+                          className={[
+                            "scroll-mt-24 w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
+                            selectedRun?.id === run.id
+                              ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                              : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
+                          ].join(" ")}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold">{run.title}</p>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {run.assignedToUser?.fullName ??
+                                  run.assignedToUser?.email ??
+                                  "Не назначен"} · {run.store?.name ?? "Вся сеть"} ·{" "}
+                                {formatDateTime(run.startedAt ?? run.scheduledAt)}
+                              </p>
+                            </div>
+                            <span className={statusClass(run.status, run.isOverdue)}>
+                              {run.isOverdue
+                                ? "Просрочен"
+                                : statusLabels[run.status]}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
@@ -531,6 +616,28 @@ export function StaffChecklistWorkspace({
         )}
       </section>
     </div>
+  );
+}
+
+function DisclosureChevron({ isOpen }: { isOpen: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={[
+        "h-4 w-4 shrink-0 transition-transform duration-200",
+        isOpen ? "rotate-180" : "-rotate-90",
+      ].join(" ")}
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="m7 10 5 5 5-5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
   );
 }
 
@@ -589,6 +696,10 @@ function ChecklistRunEditor({
       ),
     [answersByKey, run.sections],
   );
+  const canCancelRun =
+    run.status !== "ACCEPTED" &&
+    run.status !== "CANCELED" &&
+    (canReviewRun || run.status === "OPEN" || run.status === "IN_PROGRESS");
   const discussionContext = useMemo(() => {
     if (!discussionTarget) {
       return null;
@@ -834,12 +945,29 @@ function ChecklistRunEditor({
       ACCEPTED: "Чеклист принят.",
       RETURNED: "Чеклист возвращен на доработку.",
       ESCALATED: "Чеклист эскалирован и отправлен в командный чат.",
+      CANCELED: "Чеклист отменен.",
     };
     const fallbackMessage = status
       ? (successMessages[status] ?? "Чеклист обновлен.")
       : "Чеклист обновлен.";
     setMessage(successMessage ?? fallbackMessage);
     router.refresh();
+  }
+
+  async function cancelRun() {
+    const confirmed = window.confirm(
+      "Отменить некорректный чек-лист? Он останется в отчете со статусом \"Отменен\".",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await updateRun(
+      "CANCELED",
+      answers,
+      "Чеклист отменен. Он останется в отчете со статусом \"Отменен\".",
+    );
   }
 
   async function submitAnswer(
@@ -1258,6 +1386,17 @@ function ChecklistRunEditor({
           >
             Отправить на проверку
           </button>
+          {canCancelRun ? (
+            <button
+              type="button"
+              onClick={cancelRun}
+              disabled={isPending}
+              title="Отменить некорректный чек-лист"
+              className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-red-500/40 dark:hover:bg-red-500/10 dark:hover:text-red-100"
+            >
+              Отменить
+            </button>
+          ) : null}
           {canReviewRun ? (
             <>
               <button

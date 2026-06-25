@@ -18,6 +18,9 @@ import type {
   LangameEndpointSnapshotResult,
   LangameEndpointSnapshotRunSummary,
   LangameEndpointSnapshotSource,
+  LangameGuestBalance,
+  LangameGuestBalancesPortalResult,
+  LangameGuestBonusBalance,
   LangameGuestSearchDiagnosticsResult,
   LangameGuestSearchField,
   LangameGuestSearchQuery,
@@ -31,6 +34,8 @@ import type {
 
 const CREDENTIAL_NAME = 'Langame API key';
 const ENDPOINT_PROFILE_FRESH_MS = 24 * 60 * 60 * 1000;
+const PORTAL_BALANCE_PAGE_LIMIT = 200;
+const PORTAL_BALANCE_MAX_PAGES = 50;
 
 const SERVICE_DIAGNOSTIC_ENDPOINTS: LangameServiceEndpointDefinition[] = [
   {
@@ -1126,6 +1131,123 @@ export class LangameSettingsService {
         details: null,
       };
     }
+  }
+
+  async getGuestBalancesForPortal(
+    tenantId: string,
+    sourceDomain: string,
+    externalGuestId: string,
+  ): Promise<LangameGuestBalancesPortalResult> {
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const source = sources.find((item) => item.domain === sourceDomain);
+    const guestId = externalGuestId.trim();
+
+    if (!source) {
+      throw new BadRequestException('Langame source for guest is not found');
+    }
+
+    if (!guestId) {
+      throw new BadRequestException('Guest id is required');
+    }
+
+    const checkedAt = new Date().toISOString();
+    const [balanceResult, bonusBalanceResult] = await Promise.allSettled([
+      this.findPortalBalanceRow<LangameGuestBalance>(
+        (params) =>
+          this.langameClient.listGuestBalances(source.baseUrl, apiKey, params),
+        guestId,
+      ),
+      this.findPortalBalanceRow<LangameGuestBonusBalance>(
+        (params) =>
+          this.langameClient.listGuestBonusBalances(
+            source.baseUrl,
+            apiKey,
+            params,
+          ),
+        guestId,
+      ),
+    ]);
+    const balanceRow =
+      balanceResult.status === 'fulfilled' ? balanceResult.value : null;
+    const bonusBalanceRow =
+      bonusBalanceResult.status === 'fulfilled'
+        ? bonusBalanceResult.value
+        : null;
+    const failedErrors = [balanceResult, bonusBalanceResult]
+      .filter((result) => result.status === 'rejected')
+      .map((result) =>
+        result.status === 'rejected'
+          ? result.reason instanceof Error
+            ? result.reason.message
+            : 'Unknown Langame balance portal error'
+          : null,
+      )
+      .filter((message): message is string => Boolean(message));
+    const status =
+      failedErrors.length === 0
+        ? 'SUCCESS'
+        : failedErrors.length === 2
+          ? 'FAILED'
+          : 'PARTIAL';
+
+    return {
+      checkedAt,
+      externalGuestId: guestId,
+      source: {
+        id: source.id,
+        name: source.name,
+        domain: source.domain,
+        status,
+        errorMessage: failedErrors.length ? failedErrors.join('; ') : null,
+      },
+      balance: balanceRow ? this.numberFromScalar(balanceRow.balance) : null,
+      bonusBalance: bonusBalanceRow
+        ? this.numberFromScalar(bonusBalanceRow.bonus_balance)
+        : null,
+      balanceFound: Boolean(balanceRow),
+      bonusBalanceFound: Boolean(bonusBalanceRow),
+    };
+  }
+
+  private async findPortalBalanceRow<
+    T extends { guest_id?: number | string | null },
+  >(
+    fetchPage: (params: { page: number; pageLimit: number }) => Promise<T[]>,
+    externalGuestId: string,
+  ) {
+    for (let page = 1; page <= PORTAL_BALANCE_MAX_PAGES; page += 1) {
+      const rows = await fetchPage({
+        page,
+        pageLimit: PORTAL_BALANCE_PAGE_LIMIT,
+      });
+      const found = rows.find(
+        (row) => this.scalarToString(row.guest_id) === externalGuestId,
+      );
+
+      if (found) {
+        return found;
+      }
+
+      if (rows.length < PORTAL_BALANCE_PAGE_LIMIT) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  private numberFromScalar(value: unknown) {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const parsed = Number(value.trim().replace(',', '.'));
+
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   private toServiceEndpointDiagnostics(

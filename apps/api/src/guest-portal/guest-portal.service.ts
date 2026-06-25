@@ -39,6 +39,7 @@ import {
 } from '../guest-gamification/guest-game-progress';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
+  LangameGuestBalancesPortalResult,
   LangameGuestDetailsPortalResult,
   LangameGuestSearchResultItem,
 } from '../integrations/langame.types';
@@ -142,6 +143,7 @@ type TelegramBotCommand =
   | 'QUESTS'
   | 'REWARDS'
   | 'CLUBS'
+  | 'CHECK_IN'
   | 'HELP';
 type TelegramMiniAppTab = 'quests' | 'rewards' | 'profile';
 type GuestPortalPhoneIdentity = {
@@ -252,9 +254,15 @@ type TelegramMiniAppClubCandidate = {
     id: string;
     publicSlug: string | null;
     name: string;
+    city: string | null;
     address: string | null;
   };
   telegramLinkChallengeId: string;
+};
+
+type TelegramBotCityGroup = {
+  city: string;
+  candidates: TelegramMiniAppClubCandidate[];
 };
 
 type GuestPortalGameProfileLinkStatus =
@@ -313,8 +321,43 @@ type TenantStoreContext = {
     name: string;
     address: string | null;
     externalDomain: string | null;
+    externalClubId: string | null;
     integrationSourceId: string | null;
   };
+};
+
+type GuestPortalBuildOptions = {
+  refreshLiveBalances?: boolean;
+};
+
+type GuestPortalBalanceScope = {
+  sourceDomain: string;
+  externalClubId: string | null;
+  externalGuestId: string;
+};
+
+type GuestPortalBalanceSnapshotRow = {
+  balance: Prisma.Decimal;
+  snapshotDate: Date;
+};
+
+type GuestPortalBonusBalanceCurrentRow = {
+  bonusBalance: Prisma.Decimal;
+  snapshotDate: Date;
+  source: string;
+  lastSyncedAt: Date | null;
+  updatedAt: Date;
+};
+
+type GuestPortalBonusBalanceSnapshotRow = {
+  bonusBalance: Prisma.Decimal;
+  snapshotDate: Date;
+};
+
+type GuestPortalLiveBalanceRefresh = {
+  balanceSnapshot: GuestPortalBalanceSnapshotRow | null;
+  bonusBalanceCurrent: GuestPortalBonusBalanceCurrentRow | null;
+  bonusBalanceSnapshot: GuestPortalBonusBalanceSnapshotRow | null;
 };
 
 export type GuestPortalPublicConfig = {
@@ -582,6 +625,9 @@ export type GuestPortalTelegramWebhookResponse = {
     | 'TELEGRAM_BOT_PROFILE'
     | 'TELEGRAM_BOT_QUESTS'
     | 'TELEGRAM_BOT_REWARDS'
+    | 'TELEGRAM_BOT_CHECK_IN'
+    | 'TELEGRAM_BOT_CITIES'
+    | 'TELEGRAM_BOT_CITY_CLUBS'
     | 'TELEGRAM_BOT_CLUBS'
     | 'TELEGRAM_BOT_CLUB_SELECTED'
     | 'TELEGRAM_BOT_HELP'
@@ -4299,20 +4345,33 @@ export class GuestPortalService {
     }
 
     if (update.callbackData) {
+      const cityCallbackToken = telegramBotCityCallbackToken(
+        update.callbackData,
+      );
       const clubCallbackToken = telegramBotClubCallbackToken(
         update.callbackData,
       );
-      const response = clubCallbackToken
-        ? await this.buildTelegramBotClubSelectResponse(
-            clubCallbackToken,
-            update.telegramChatId,
-            telegramIdentityMasked,
-          )
-        : await this.buildTelegramBotCommandResponse(
-            'MENU',
-            update.telegramChatId,
-            telegramIdentityMasked,
-          );
+      let response: GuestPortalTelegramWebhookResponse;
+
+      if (cityCallbackToken) {
+        response = await this.buildTelegramBotCityClubListResponse(
+          cityCallbackToken,
+          update.telegramChatId,
+          telegramIdentityMasked,
+        );
+      } else if (clubCallbackToken) {
+        response = await this.buildTelegramBotClubSelectResponse(
+          clubCallbackToken,
+          update.telegramChatId,
+          telegramIdentityMasked,
+        );
+      } else {
+        response = await this.buildTelegramBotCommandResponse(
+          'MENU',
+          update.telegramChatId,
+          telegramIdentityMasked,
+        );
+      }
 
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
@@ -4834,15 +4893,18 @@ export class GuestPortalService {
 
     if (club && profile.phoneHash) {
       try {
-        portal = await this.buildPortalPayload({
-          sub: `telegram-bot:${profile.id}:${club.storeId}`,
-          purpose: GUEST_PORTAL_PURPOSE,
-          tenantId: profile.tenantId,
-          storeId: club.storeId,
-          guestId: profile.guestId,
-          profileId: profile.id,
-          phoneHash: profile.phoneHash,
-        });
+        portal = await this.buildPortalPayload(
+          {
+            sub: `telegram-bot:${profile.id}:${club.storeId}`,
+            purpose: GUEST_PORTAL_PURPOSE,
+            tenantId: profile.tenantId,
+            storeId: club.storeId,
+            guestId: profile.guestId,
+            profileId: profile.id,
+            phoneHash: profile.phoneHash,
+          },
+          { refreshLiveBalances: true },
+        );
       } catch {
         portal = null;
       }
@@ -4867,6 +4929,7 @@ export class GuestPortalService {
           unsubscribedAt: profile.unsubscribedAt,
           xp,
         });
+    const showCheckIn = portal ? telegramBotCheckInAvailable(portal) : false;
 
     return {
       status: 'CONFIRMED',
@@ -4878,6 +4941,7 @@ export class GuestPortalService {
         telegramIdentityMasked,
         replyText,
         telegramBotMiniAppTab(command),
+        { showCheckIn },
       ),
     };
   }
@@ -4888,19 +4952,72 @@ export class GuestPortalService {
   ): Promise<GuestPortalTelegramWebhookResponse> {
     const telegramIdentity = `chat:${telegramChatIdValue}`;
     const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
+    const cityGroups = telegramBotCityGroups(candidates);
 
     return {
       status: candidates.length ? 'CONFIRMED' : 'IGNORED',
-      action: 'TELEGRAM_BOT_CLUBS',
+      action: 'TELEGRAM_BOT_CITIES',
       profileId: candidates[0]?.profile.id ?? null,
       telegramIdentityMasked,
       message: candidates.length
-        ? 'Telegram bot club selection returned safe choices.'
+        ? 'Telegram bot city selection returned safe choices.'
         : 'Telegram bot club selection has no linked game clubs.',
+      reply: this.telegramWebhookBotCitySelectionReply(
+        telegramIdentityMasked,
+        telegramBotCitySelectionText(cityGroups),
+        cityGroups,
+      ),
+    };
+  }
+
+  private async buildTelegramBotCityClubListResponse(
+    cityCallbackToken: string,
+    telegramChatIdValue: string,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const telegramIdentity = `chat:${telegramChatIdValue}`;
+    const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
+    const cityGroups = telegramBotCityGroups(candidates);
+    const selectedGroup =
+      cityGroups.find(
+        (group) =>
+          this.telegramBotCityCallbackTokenForGroup(group) ===
+          cityCallbackToken,
+      ) ?? null;
+
+    if (!selectedGroup) {
+      return {
+        status: candidates.length ? 'CONFIRMED' : 'IGNORED',
+        action: 'TELEGRAM_BOT_CITIES',
+        profileId: candidates[0]?.profile.id ?? null,
+        telegramIdentityMasked,
+        message:
+          'Telegram bot city callback was not found in safe linked choices.',
+        reply: this.telegramWebhookBotCitySelectionReply(
+          telegramIdentityMasked,
+          [
+            'Список городов обновился.',
+            'Выберите город заново кнопками ниже.',
+          ].join('\n'),
+          cityGroups,
+        ),
+      };
+    }
+
+    return {
+      status: 'CONFIRMED',
+      action: 'TELEGRAM_BOT_CITY_CLUBS',
+      profileId: selectedGroup.candidates[0]?.profile.id ?? null,
+      telegramIdentityMasked,
+      message: 'Telegram bot city selected without exposing raw identifiers.',
       reply: this.telegramWebhookBotClubSelectionReply(
         telegramIdentityMasked,
-        telegramBotClubSelectionText(candidates),
-        candidates,
+        telegramBotClubSelectionText(
+          selectedGroup.candidates,
+          selectedGroup.city,
+        ),
+        selectedGroup.candidates,
+        { showBackToCities: cityGroups.length > 1 },
       ),
     };
   }
@@ -4912,6 +5029,7 @@ export class GuestPortalService {
   ): Promise<GuestPortalTelegramWebhookResponse> {
     const telegramIdentity = `chat:${telegramChatIdValue}`;
     const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
+    const cityGroups = telegramBotCityGroups(candidates);
     const selectedCandidate =
       candidates.find(
         (candidate) =>
@@ -4922,18 +5040,18 @@ export class GuestPortalService {
     if (!selectedCandidate) {
       return {
         status: candidates.length ? 'CONFIRMED' : 'IGNORED',
-        action: 'TELEGRAM_BOT_CLUBS',
+        action: 'TELEGRAM_BOT_CITIES',
         profileId: candidates[0]?.profile.id ?? null,
         telegramIdentityMasked,
         message:
           'Telegram bot club callback was not found in safe linked choices.',
-        reply: this.telegramWebhookBotClubSelectionReply(
+        reply: this.telegramWebhookBotCitySelectionReply(
           telegramIdentityMasked,
           [
             'Список клубов обновился.',
-            'Выберите клуб заново кнопками ниже.',
+            'Выберите город заново кнопками ниже.',
           ].join('\n'),
-          candidates,
+          cityGroups,
         ),
       };
     }
@@ -4951,15 +5069,18 @@ export class GuestPortalService {
       }),
     ]);
 
-    const portal = await this.buildPortalPayload({
-      sub: `telegram-bot:${selectedCandidate.profile.id}:${selectedCandidate.store.id}`,
-      purpose: GUEST_PORTAL_PURPOSE,
-      tenantId: selectedCandidate.tenant.id,
-      storeId: selectedCandidate.store.id,
-      guestId: selectedCandidate.profile.guestId,
-      profileId: selectedCandidate.profile.id,
-      phoneHash: selectedCandidate.profile.phoneHash,
-    });
+    const portal = await this.buildPortalPayload(
+      {
+        sub: `telegram-bot:${selectedCandidate.profile.id}:${selectedCandidate.store.id}`,
+        purpose: GUEST_PORTAL_PURPOSE,
+        tenantId: selectedCandidate.tenant.id,
+        storeId: selectedCandidate.store.id,
+        guestId: selectedCandidate.profile.guestId,
+        profileId: selectedCandidate.profile.id,
+        phoneHash: selectedCandidate.profile.phoneHash,
+      },
+      { refreshLiveBalances: true },
+    );
     const replyText = [
       `Клуб выбран: ${selectedCandidate.store.name}.`,
       telegramBotReplyText(
@@ -4978,6 +5099,8 @@ export class GuestPortalService {
       reply: this.telegramWebhookBotMenuReply(
         telegramIdentityMasked,
         replyText,
+        undefined,
+        { showCheckIn: telegramBotCheckInAvailable(portal) },
       ),
     };
   }
@@ -5072,7 +5195,19 @@ export class GuestPortalService {
     chatIdMasked: string | null,
     text: string,
     miniAppTab?: TelegramMiniAppTab,
+    options: { showCheckIn?: boolean } = {},
   ): GuestPortalTelegramWebhookResponse['reply'] {
+    const checkInRow = options.showCheckIn
+      ? [
+          [
+            {
+              text: 'Чекин',
+              callback_data: 'bot:checkin',
+            },
+          ],
+        ]
+      : [];
+
     return {
       provider: 'TELEGRAM',
       method: 'sendMessage',
@@ -5100,6 +5235,7 @@ export class GuestPortalService {
               callback_data: 'bot:menu',
             },
           ],
+          ...checkInRow,
           [
             {
               text: 'Выбрать клуб',
@@ -5135,12 +5271,70 @@ export class GuestPortalService {
     };
   }
 
+  private telegramWebhookBotCitySelectionReply(
+    chatIdMasked: string | null,
+    text: string,
+    cityGroups: TelegramBotCityGroup[],
+  ): GuestPortalTelegramWebhookResponse['reply'] {
+    const visibleGroups = cityGroups.slice(0, 8);
+
+    return {
+      provider: 'TELEGRAM',
+      method: 'sendMessage',
+      chatIdMasked,
+      text,
+      replyMarkup: {
+        inline_keyboard: [
+          ...visibleGroups.map((group) => [
+            {
+              text: telegramBotCityChoiceLabel(group),
+              callback_data: `bot:city:${this.telegramBotCityCallbackTokenForGroup(
+                group,
+              )}`,
+            },
+          ]),
+          [
+            {
+              text: 'Меню',
+              callback_data: 'bot:menu',
+            },
+          ],
+          [
+            {
+              text: 'Открыть Mini App',
+              web_app: {
+                url: this.telegramMiniAppUrl(),
+              },
+            },
+          ],
+          [
+            {
+              text: 'Вернуться на сайт LeetPlus',
+              url: `${this.publicWebUrl().replace(/\/$/, '')}/game/clubs`,
+            },
+          ],
+        ],
+      },
+    };
+  }
+
   private telegramWebhookBotClubSelectionReply(
     chatIdMasked: string | null,
     text: string,
     candidates: TelegramMiniAppClubCandidate[],
+    options: { showBackToCities?: boolean } = {},
   ): GuestPortalTelegramWebhookResponse['reply'] {
     const visibleCandidates = candidates.slice(0, 8);
+    const backRows = options.showBackToCities
+      ? [
+          [
+            {
+              text: 'Назад к городам',
+              callback_data: 'bot:clubs',
+            },
+          ],
+        ]
+      : [];
 
     return {
       provider: 'TELEGRAM',
@@ -5157,6 +5351,7 @@ export class GuestPortalService {
               )}`,
             },
           ]),
+          ...backRows,
           [
             {
               text: 'Меню',
@@ -5192,7 +5387,24 @@ export class GuestPortalService {
           candidate.profile.id,
           candidate.tenant.id,
           candidate.store.id,
-          candidate.telegramLinkChallengeId,
+        ].join(':'),
+      )
+      .digest('base64url')
+      .slice(0, 18);
+  }
+
+  private telegramBotCityCallbackTokenForGroup(group: TelegramBotCityGroup) {
+    return createHmac('sha256', this.referralSecret())
+      .update(
+        [
+          'telegram-bot-city',
+          group.city,
+          ...group.candidates
+            .map(
+              (candidate) =>
+                `${candidate.profile.id}:${candidate.tenant.id}:${candidate.store.id}`,
+            )
+            .sort(),
         ].join(':'),
       )
       .digest('base64url')
@@ -6324,8 +6536,255 @@ export class GuestPortalService {
     });
   }
 
+  private portalBalanceScope(
+    store: Pick<
+      TenantStoreContext['store'],
+      'externalDomain' | 'externalClubId'
+    >,
+    guest: {
+      externalProvider: IntegrationProvider | null;
+      externalGuestId: string | null;
+    } | null,
+  ): GuestPortalBalanceScope | null {
+    const sourceDomain = store.externalDomain?.trim() ?? '';
+    const externalGuestId = guest?.externalGuestId?.trim() ?? '';
+
+    if (
+      !sourceDomain ||
+      !externalGuestId ||
+      guest?.externalProvider !== IntegrationProvider.LANGAME
+    ) {
+      return null;
+    }
+
+    return {
+      sourceDomain,
+      externalClubId: store.externalClubId?.trim() || null,
+      externalGuestId,
+    };
+  }
+
+  private portalBalanceSnapshotWhere(
+    tenantId: string,
+    guestId: string,
+    scope: GuestPortalBalanceScope | null,
+  ): Prisma.GuestBalanceSnapshotWhereInput {
+    if (!scope) {
+      return { tenantId, guestId };
+    }
+
+    return {
+      tenantId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: scope.sourceDomain,
+      externalGuestId: scope.externalGuestId,
+    };
+  }
+
+  private portalBonusBalanceSnapshotWhere(
+    tenantId: string,
+    guestId: string,
+    scope: GuestPortalBalanceScope | null,
+  ): Prisma.GuestBonusBalanceSnapshotWhereInput {
+    if (!scope) {
+      return { tenantId, guestId };
+    }
+
+    return {
+      tenantId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: scope.sourceDomain,
+      externalGuestId: scope.externalGuestId,
+    };
+  }
+
+  private portalBonusBalanceCurrentWhere(
+    tenantId: string,
+    guest: {
+      id: string;
+      externalProvider: IntegrationProvider | null;
+      externalDomain: string | null;
+      externalGuestId: string | null;
+    },
+    scope: GuestPortalBalanceScope | null,
+  ): Prisma.GuestBonusBalanceCurrentWhereInput {
+    if (scope) {
+      return {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: scope.sourceDomain,
+        externalGuestId: scope.externalGuestId,
+      };
+    }
+
+    return {
+      tenantId,
+      OR: [
+        { guestId: guest.id },
+        ...(guest.externalProvider &&
+        guest.externalDomain &&
+        guest.externalGuestId
+          ? [
+              {
+                externalProvider: guest.externalProvider,
+                externalDomain: guest.externalDomain,
+                externalGuestId: guest.externalGuestId,
+              },
+            ]
+          : []),
+      ],
+    };
+  }
+
+  private async refreshPortalLiveBalances(input: {
+    tenantId: string;
+    guestId: string;
+    sourceDomain: string;
+    externalClubId: string | null;
+    externalGuestId: string;
+  }): Promise<GuestPortalLiveBalanceRefresh | null> {
+    let live: LangameGuestBalancesPortalResult;
+
+    try {
+      live = await this.langameSettingsService.getGuestBalancesForPortal(
+        input.tenantId,
+        input.sourceDomain,
+        input.externalGuestId,
+      );
+    } catch {
+      return null;
+    }
+
+    const checkedAt = validDateOrNow(live.checkedAt);
+    const snapshotDate = minutePrecisionDate(checkedAt);
+    let balanceSnapshot: GuestPortalBalanceSnapshotRow | null = null;
+    let bonusBalanceCurrent: GuestPortalBonusBalanceCurrentRow | null = null;
+    let bonusBalanceSnapshot: GuestPortalBonusBalanceSnapshotRow | null = null;
+
+    if (live.balanceFound && live.balance !== null) {
+      const balance = new Prisma.Decimal(live.balance);
+      balanceSnapshot = await this.prisma.guestBalanceSnapshot.upsert({
+        where: {
+          tenantId_externalProvider_externalDomain_externalGuestId_snapshotDate:
+            {
+              tenantId: input.tenantId,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: input.sourceDomain,
+              externalGuestId: input.externalGuestId,
+              snapshotDate,
+            },
+        },
+        create: {
+          tenantId: input.tenantId,
+          guestId: input.guestId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: input.sourceDomain,
+          externalGuestId: input.externalGuestId,
+          snapshotDate,
+          balance,
+          sourcePayloadHash: portalLiveBalancePayloadHash({
+            kind: 'balance',
+            sourceDomain: input.sourceDomain,
+            externalClubId: input.externalClubId,
+            externalGuestId: input.externalGuestId,
+            value: live.balance,
+          }),
+        },
+        update: {
+          guestId: input.guestId,
+          balance,
+          sourcePayloadHash: portalLiveBalancePayloadHash({
+            kind: 'balance',
+            sourceDomain: input.sourceDomain,
+            externalClubId: input.externalClubId,
+            externalGuestId: input.externalGuestId,
+            value: live.balance,
+          }),
+        },
+      });
+    }
+
+    if (live.bonusBalanceFound && live.bonusBalance !== null) {
+      const bonusBalance = new Prisma.Decimal(live.bonusBalance);
+      const sourcePayloadHash = portalLiveBalancePayloadHash({
+        kind: 'bonus_balance',
+        sourceDomain: input.sourceDomain,
+        externalClubId: input.externalClubId,
+        externalGuestId: input.externalGuestId,
+        value: live.bonusBalance,
+      });
+
+      [bonusBalanceCurrent, bonusBalanceSnapshot] = await Promise.all([
+        this.prisma.guestBonusBalanceCurrent.upsert({
+          where: {
+            tenantId_externalProvider_externalDomain_externalGuestId: {
+              tenantId: input.tenantId,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: input.sourceDomain,
+              externalGuestId: input.externalGuestId,
+            },
+          },
+          create: {
+            tenantId: input.tenantId,
+            guestId: null,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: input.sourceDomain,
+            externalGuestId: input.externalGuestId,
+            bonusBalance,
+            snapshotDate,
+            source: 'LANGAME_LIVE',
+            sourcePayloadHash,
+            lastSyncedAt: checkedAt,
+          },
+          update: {
+            guestId: null,
+            bonusBalance,
+            snapshotDate,
+            source: 'LANGAME_LIVE',
+            sourcePayloadHash,
+            lastSyncedAt: checkedAt,
+          },
+        }),
+        this.prisma.guestBonusBalanceSnapshot.upsert({
+          where: {
+            tenantId_externalProvider_externalDomain_externalGuestId_snapshotDate:
+              {
+                tenantId: input.tenantId,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: input.sourceDomain,
+                externalGuestId: input.externalGuestId,
+                snapshotDate,
+              },
+          },
+          create: {
+            tenantId: input.tenantId,
+            guestId: input.guestId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: input.sourceDomain,
+            externalGuestId: input.externalGuestId,
+            snapshotDate,
+            bonusBalance,
+            sourcePayloadHash,
+          },
+          update: {
+            guestId: input.guestId,
+            bonusBalance,
+            sourcePayloadHash,
+          },
+        }),
+      ]);
+    }
+
+    return {
+      balanceSnapshot,
+      bonusBalanceCurrent,
+      bonusBalanceSnapshot,
+    };
+  }
+
   private async buildPortalPayload(
     tokenPayload: GuestPortalTokenPayload,
+    options: GuestPortalBuildOptions = {},
   ): Promise<GuestPortalPayload> {
     const context = await this.getTenantStoreByIds(
       tokenPayload.tenantId,
@@ -6341,6 +6800,7 @@ export class GuestPortalService {
     if (!profile && crmLead) {
       profile = await this.findProfileByLead(context.tenant.id, crmLead.id);
     }
+    const balanceScope = this.portalBalanceScope(context.store, guest);
     const [
       groups,
       balanceSnapshot,
@@ -6363,25 +6823,22 @@ export class GuestPortalService {
       guest
         ? this.prisma.guestBalanceSnapshot.findFirst({
             where: {
-              tenantId: context.tenant.id,
-              guestId: guest.id,
+              ...this.portalBalanceSnapshotWhere(
+                context.tenant.id,
+                guest.id,
+                balanceScope,
+              ),
             },
             orderBy: { snapshotDate: 'desc' },
           })
         : null,
       guest
         ? this.prisma.guestBonusBalanceCurrent.findFirst({
-            where: {
-              tenantId: context.tenant.id,
-              OR: [
-                { guestId: guest.id },
-                {
-                  externalProvider: guest.externalProvider,
-                  externalDomain: guest.externalDomain,
-                  externalGuestId: guest.externalGuestId,
-                },
-              ],
-            },
+            where: this.portalBonusBalanceCurrentWhere(
+              context.tenant.id,
+              guest,
+              balanceScope,
+            ),
             orderBy: [
               { snapshotDate: 'desc' },
               { lastSyncedAt: 'desc' },
@@ -6392,8 +6849,11 @@ export class GuestPortalService {
       guest
         ? this.prisma.guestBonusBalanceSnapshot.findFirst({
             where: {
-              tenantId: context.tenant.id,
-              guestId: guest.id,
+              ...this.portalBonusBalanceSnapshotWhere(
+                context.tenant.id,
+                guest.id,
+                balanceScope,
+              ),
             },
             orderBy: { snapshotDate: 'desc' },
           })
@@ -6510,12 +6970,22 @@ export class GuestPortalService {
     const nextLevelXp = level * 500;
     const levelProgressPercent = percent(xp - currentLevelXp, 500);
     const currentHours = decimalNumber(guest?.currentCountHours ?? null);
+    const liveBalanceRefresh =
+      options.refreshLiveBalances && guest && balanceScope
+        ? await this.refreshPortalLiveBalances({
+            tenantId: context.tenant.id,
+            guestId: guest.id,
+            sourceDomain: balanceScope.sourceDomain,
+            externalClubId: balanceScope.externalClubId,
+            externalGuestId: balanceScope.externalGuestId,
+          })
+        : null;
     const loyalty = this.buildLoyalty(
       guest,
       groups,
-      balanceSnapshot,
-      bonusBalanceCurrent,
-      bonusBalanceSnapshot,
+      liveBalanceRefresh?.balanceSnapshot ?? balanceSnapshot,
+      liveBalanceRefresh?.bonusBalanceCurrent ?? bonusBalanceCurrent,
+      liveBalanceRefresh?.bonusBalanceSnapshot ?? bonusBalanceSnapshot,
       currentHours,
     );
     const visibleMissions = missions
@@ -7113,6 +7583,7 @@ export class GuestPortalService {
             name: true,
             address: true,
             externalDomain: true,
+            externalClubId: true,
             integrationSourceId: true,
           },
           take: 1,
@@ -7160,6 +7631,7 @@ export class GuestPortalService {
             name: true,
             address: true,
             externalDomain: true,
+            externalClubId: true,
             integrationSourceId: true,
           },
           take: 1,
@@ -7504,6 +7976,7 @@ export class GuestPortalService {
                 id: true,
                 publicSlug: true,
                 name: true,
+                city: true,
                 address: true,
               },
             },
@@ -8323,6 +8796,8 @@ function telegramBotReplyText(
       return telegramBotQuestsText(portal);
     case 'REWARDS':
       return telegramBotRewardsText(portal);
+    case 'CHECK_IN':
+      return telegramBotCheckInText(portal);
     default:
       return telegramBotMenuText(portal, unsubscribedAt);
   }
@@ -8339,6 +8814,8 @@ function telegramBotMenuText(
     'LeetPlus bot: игровое меню.',
     `Клуб: ${portal.store.name}.`,
     `Прогресс: ${formatTelegramBotInteger(portal.profile.xp)} XP, уровень ${formatTelegramBotInteger(portal.profile.level)}.`,
+    `Баланс: ${formatTelegramBotMoney(portal.loyalty.balance)}; бонусы: ${formatTelegramBotBalance(portal.loyalty.bonusBalance)}.`,
+    telegramBotBalanceSyncedLine(portal),
     nextAction
       ? `Ближайшее действие: ${nextAction.title} (${nextAction.statusLabel}).`
       : mission
@@ -8365,6 +8842,9 @@ function telegramBotProfileText(
     `Клуб: ${portal.store.name}.`,
     `Уровень: ${formatTelegramBotInteger(portal.profile.level)}.`,
     `XP: ${formatTelegramBotInteger(portal.profile.xp)} из ${formatTelegramBotInteger(portal.profile.nextLevelXp)}.`,
+    `Баланс: ${formatTelegramBotMoney(portal.loyalty.balance)}.`,
+    `Бонусные баллы: ${formatTelegramBotBalance(portal.loyalty.bonusBalance)}.`,
+    telegramBotBalanceSyncedLine(portal),
     `Телефон: ${phone ?? 'скрыт'}.`,
     `Согласие: ${telegramBotConsentLabel(portal.communications.phone.consentStatus)}.`,
     `Telegram: ${telegramBotCommunicationLabel(portal.communications.telegram.status)}.`,
@@ -8415,6 +8895,43 @@ function telegramBotRewardsText(portal: GuestPortalPayload) {
   ].filter((line): line is string => Boolean(line));
 
   return lines.join('\n');
+}
+
+function telegramBotCheckInText(portal: GuestPortalPayload) {
+  const action =
+    portal.gamification.nextActions.find((item) => item.kind === 'CHECK_IN') ??
+    null;
+  const mission = portal.gamification.missions.find(
+    (item) =>
+      item.missionType === 'CHECK_IN' &&
+      item.rewardStatus.state === 'IN_PROGRESS',
+  );
+
+  if (!action && !mission) {
+    return [
+      'Чекин LeetPlus',
+      `Клуб: ${portal.store.name}.`,
+      'Сейчас чекин для этого клуба недоступен.',
+      'Проверьте активные квесты или откройте Mini App позже.',
+    ].join('\n');
+  }
+
+  const reward = mission?.rewardLabel ?? action?.description ?? null;
+  const progress =
+    mission && mission.progressTarget
+      ? `${formatTelegramBotInteger(mission.progressCurrent)}/${formatTelegramBotInteger(mission.progressTarget)}${mission.progressUnit ? ` ${mission.progressUnit}` : ''}`
+      : action?.statusLabel;
+
+  return [
+    'Чекин LeetPlus',
+    `Клуб: ${portal.store.name}.`,
+    action?.title ?? mission?.name ?? 'Чекин доступен.',
+    reward ? `Награда/условие: ${reward}` : null,
+    progress ? `Прогресс: ${progress}.` : null,
+    'Откройте Mini App или игровой экран, чтобы выполнить чекин в подтвержденном клубном контексте.',
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
 }
 
 function telegramBotFallbackReplyText(
@@ -8468,6 +8985,12 @@ function telegramBotFallbackReplyText(
     );
   }
 
+  if (command === 'CHECK_IN') {
+    lines.push(
+      'Чекин появится после выбора клуба с доступным check-in квестом.',
+    );
+  }
+
   if (input.unsubscribedAt) {
     lines.push(
       'Уведомления: отключены. Игровой статус доступен, новые Telegram-доставки заблокированы.',
@@ -8489,8 +9012,10 @@ function telegramBotAction(
       return 'TELEGRAM_BOT_QUESTS';
     case 'REWARDS':
       return 'TELEGRAM_BOT_REWARDS';
+    case 'CHECK_IN':
+      return 'TELEGRAM_BOT_CHECK_IN';
     case 'CLUBS':
-      return 'TELEGRAM_BOT_CLUBS';
+      return 'TELEGRAM_BOT_CITIES';
     case 'HELP':
       return 'TELEGRAM_BOT_HELP';
     default:
@@ -8521,6 +9046,8 @@ function telegramBotTitle(command: TelegramBotCommand) {
       return 'Квесты LeetPlus';
     case 'REWARDS':
       return 'Награды LeetPlus';
+    case 'CHECK_IN':
+      return 'Чекин LeetPlus';
     case 'CLUBS':
       return 'Клубы LeetPlus';
     default:
@@ -8528,10 +9055,8 @@ function telegramBotTitle(command: TelegramBotCommand) {
   }
 }
 
-function telegramBotClubSelectionText(
-  candidates: TelegramMiniAppClubCandidate[],
-) {
-  if (!candidates.length) {
+function telegramBotCitySelectionText(cityGroups: TelegramBotCityGroup[]) {
+  if (!cityGroups.length) {
     return [
       'Клубы LeetPlus',
       'Для этого Telegram пока нет подтвержденных игровых клубов.',
@@ -8539,9 +9064,43 @@ function telegramBotClubSelectionText(
     ].join('\n');
   }
 
+  const visibleGroups = cityGroups.slice(0, 8);
+  const lines = [
+    'Клубы LeetPlus',
+    'Выберите город, в котором есть подключенные клубы.',
+    ...visibleGroups.map(
+      (group, index) => `${index + 1}. ${telegramBotCityChoiceLabel(group)}`,
+    ),
+  ];
+
+  if (cityGroups.length > visibleGroups.length) {
+    lines.push(
+      `Показаны первые ${formatTelegramBotInteger(
+        visibleGroups.length,
+      )} городов. Остальные доступны на сайте или в Mini App.`,
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function telegramBotClubSelectionText(
+  candidates: TelegramMiniAppClubCandidate[],
+  city: string,
+) {
+  if (!candidates.length) {
+    return [
+      'Клубы LeetPlus',
+      `Город: ${city}.`,
+      'В этом городе нет доступных клубов для вашего Telegram-профиля.',
+      'Вернитесь к выбору города или откройте Mini App.',
+    ].join('\n');
+  }
+
   const visibleCandidates = candidates.slice(0, 8);
   const lines = [
     'Клубы LeetPlus',
+    `Город: ${city}.`,
     'Выберите клуб кнопкой ниже.',
     ...visibleCandidates.map(
       (candidate, index) =>
@@ -8558,6 +9117,57 @@ function telegramBotClubSelectionText(
   }
 
   return lines.join('\n');
+}
+
+function telegramBotCityChoiceLabel(group: TelegramBotCityGroup) {
+  return `${group.city} (${formatTelegramBotInteger(group.candidates.length)} ${telegramBotClubCountLabel(group.candidates.length)})`;
+}
+
+function telegramBotCityGroups(
+  candidates: TelegramMiniAppClubCandidate[],
+): TelegramBotCityGroup[] {
+  const groups = new Map<string, TelegramMiniAppClubCandidate[]>();
+
+  for (const candidate of candidates) {
+    const city =
+      publicStoreCity(candidate.store.city, candidate.store.address) ??
+      'Город не указан';
+    const items = groups.get(city) ?? [];
+    items.push(candidate);
+    groups.set(city, items);
+  }
+
+  return [...groups.entries()]
+    .map(([city, groupCandidates]) => ({
+      city,
+      candidates: groupCandidates.sort(telegramBotCandidateSort),
+    }))
+    .sort((left, right) => left.city.localeCompare(right.city, 'ru'));
+}
+
+function telegramBotCandidateSort(
+  left: TelegramMiniAppClubCandidate,
+  right: TelegramMiniAppClubCandidate,
+) {
+  return (
+    left.store.name.localeCompare(right.store.name, 'ru') ||
+    (left.store.address ?? '').localeCompare(right.store.address ?? '', 'ru')
+  );
+}
+
+function telegramBotClubCountLabel(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+
+  if (mod10 === 1 && mod100 !== 11) {
+    return 'клуб';
+  }
+
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+    return 'клуба';
+  }
+
+  return 'клубов';
 }
 
 function telegramBotClubChoiceLabel(candidate: TelegramMiniAppClubCandidate) {
@@ -10207,6 +10817,10 @@ function telegramWebhookBotCommand(
     return 'REWARDS';
   }
 
+  if (/^(bot:)?check-?in$/i.test(trimmed)) {
+    return 'CHECK_IN';
+  }
+
   if (/^(bot:)?clubs?$/i.test(trimmed)) {
     return 'CLUBS';
   }
@@ -10230,6 +10844,10 @@ function telegramWebhookBotCommand(
     return 'REWARDS';
   }
 
+  if (/^\/check-?in(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
+    return 'CHECK_IN';
+  }
+
   if (/^\/clubs?(@[A-Za-z0-9_]{3,64})?$/i.test(command)) {
     return 'CLUBS';
   }
@@ -10250,6 +10868,10 @@ function telegramWebhookBotCommand(
     return 'REWARDS';
   }
 
+  if (/^(чекин|чек-ин|checkin|check-in)$/i.test(normalized)) {
+    return 'CHECK_IN';
+  }
+
   if (/^(клубы|клуб|выбрать клуб|сменить клуб)$/i.test(normalized)) {
     return 'CLUBS';
   }
@@ -10259,6 +10881,14 @@ function telegramWebhookBotCommand(
 
 function telegramBotClubCallbackToken(callbackData: string | null) {
   const match = /^bot:club:([A-Za-z0-9_-]{12,32})$/.exec(
+    callbackData?.trim() ?? '',
+  );
+
+  return match?.[1] ?? null;
+}
+
+function telegramBotCityCallbackToken(callbackData: string | null) {
+  const match = /^bot:city:([A-Za-z0-9_-]{12,32})$/.exec(
     callbackData?.trim() ?? '',
   );
 
@@ -10289,6 +10919,62 @@ function formatTelegramBotInteger(value: number) {
   return new Intl.NumberFormat('ru-RU', {
     maximumFractionDigits: 0,
   }).format(Math.max(0, Math.floor(value)));
+}
+
+function formatTelegramBotMoney(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return 'нет данных';
+  }
+
+  return `${new Intl.NumberFormat('ru-RU', {
+    maximumFractionDigits: 0,
+  }).format(value)} ₽`;
+}
+
+function telegramBotBalanceSyncedLine(portal: GuestPortalPayload) {
+  const syncedAt = formatTelegramBotDateTime(portal.loyalty.lastSyncedAt);
+
+  return syncedAt
+    ? `Баланс обновлен: ${syncedAt}.`
+    : 'Баланс обновлен: нет данных.';
+}
+
+function formatTelegramBotDateTime(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function formatTelegramBotBalance(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return 'нет данных';
+  }
+
+  return `${new Intl.NumberFormat('ru-RU', {
+    maximumFractionDigits: 0,
+  }).format(value)}`;
+}
+
+function telegramBotCheckInAvailable(portal: GuestPortalPayload) {
+  return (
+    portal.gamification.nextActions.some((item) => item.kind === 'CHECK_IN') ||
+    portal.gamification.missions.some(
+      (item) =>
+        item.missionType === 'CHECK_IN' &&
+        item.rewardStatus.state === 'IN_PROGRESS',
+    )
+  );
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -12946,6 +13632,23 @@ function booleanField(value: unknown) {
 
 function decimalNumber(value: Prisma.Decimal | null | undefined) {
   return value == null ? null : Number(value);
+}
+
+function validDateOrNow(value: string) {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function minutePrecisionDate(value: Date) {
+  const date = new Date(value);
+  date.setSeconds(0, 0);
+
+  return date;
+}
+
+function portalLiveBalancePayloadHash(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 function moneyNumber(value: number) {

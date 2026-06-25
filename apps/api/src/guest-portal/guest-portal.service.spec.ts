@@ -59,6 +59,18 @@ function createPrismaMock() {
       findMany: jest.fn(),
       updateMany: jest.fn(),
     },
+    guestBalanceSnapshot: {
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
+    },
+    guestBonusBalanceSnapshot: {
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
+    },
+    guestBonusBalanceCurrent: {
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
+    },
     guestGameEvent: {
       count: jest.fn(),
       create: jest.fn(),
@@ -98,6 +110,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   };
   const langameSettingsService = {
     searchGuestByPhoneForPortal: jest.fn(),
+    getGuestBalancesForPortal: jest.fn(),
   };
   const guestGamificationService = {
     createEvent: jest.fn(),
@@ -146,6 +159,34 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestBonusLedgerEntry.findMany.mockResolvedValue([]);
   prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestBalanceSnapshot.findFirst.mockResolvedValue(null);
+  prisma.guestBalanceSnapshot.upsert.mockImplementation(({ create }: any) =>
+    Promise.resolve({
+      id: 'balance-snapshot-1',
+      createdAt: new Date('2026-06-15T08:00:00.000Z'),
+      updatedAt: new Date('2026-06-15T08:00:00.000Z'),
+      ...create,
+    }),
+  );
+  prisma.guestBonusBalanceSnapshot.findFirst.mockResolvedValue(null);
+  prisma.guestBonusBalanceSnapshot.upsert.mockImplementation(
+    ({ create }: any) =>
+      Promise.resolve({
+        id: 'bonus-balance-snapshot-1',
+        createdAt: new Date('2026-06-15T08:00:00.000Z'),
+        updatedAt: new Date('2026-06-15T08:00:00.000Z'),
+        ...create,
+      }),
+  );
+  prisma.guestBonusBalanceCurrent.findFirst.mockResolvedValue(null);
+  prisma.guestBonusBalanceCurrent.upsert.mockImplementation(({ create }: any) =>
+    Promise.resolve({
+      id: 'bonus-balance-current-1',
+      createdAt: new Date('2026-06-15T08:00:00.000Z'),
+      updatedAt: new Date('2026-06-15T08:00:00.000Z'),
+      ...create,
+    }),
+  );
   prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guestGameEvent.count.mockResolvedValue(0);
@@ -159,6 +200,21 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   langameSettingsService.searchGuestByPhoneForPortal.mockResolvedValue({
     checkedAt: '2026-06-15T08:00:00.000Z',
     sources: [],
+  });
+  langameSettingsService.getGuestBalancesForPortal.mockResolvedValue({
+    checkedAt: '2026-06-15T08:00:00.000Z',
+    externalGuestId: 'guest-ext-1',
+    source: {
+      id: 'source-1',
+      name: '443.langame.ru',
+      domain: '443.langame.ru',
+      status: 'FAILED',
+      errorMessage: null,
+    },
+    balance: null,
+    bonusBalance: null,
+    balanceFound: false,
+    bonusBalanceFound: false,
   });
 
   return {
@@ -788,6 +844,7 @@ function telegramBotClubProfilesFixture() {
             id: 'store-1',
             publicSlug: 'club-1337',
             name: '1337 Радищева',
+            city: 'Екатеринбург',
             address: 'Радищева, 25',
           },
         },
@@ -797,6 +854,7 @@ function telegramBotClubProfilesFixture() {
             id: 'store-2',
             publicSlug: 'club-arena',
             name: 'Arena',
+            city: 'Челябинск',
             address: 'Мира, 7',
           },
         },
@@ -2922,11 +2980,15 @@ describe('GuestPortalService', () => {
           profileId: 'profile-1',
           storeId: 'store-1',
         }),
+        { refreshLiveBalances: true },
       );
       expect(result.reply?.text).toEqual(
         expect.stringContaining('Клуб: 1337.'),
       );
       expect(result.reply?.text).toEqual(expect.stringContaining('уровень 3'));
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Баланс: 100 ₽; бонусы: 250.'),
+      );
       expect(result.reply?.text).toEqual(
         expect.stringContaining('Награды: готово 1'),
       );
@@ -2970,6 +3032,12 @@ describe('GuestPortalService', () => {
       );
       expect(result.reply?.text).toEqual(
         expect.stringContaining('Согласие: подтверждено.'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Баланс: 100 ₽.'),
+      );
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Бонусные баллы: 250.'),
       );
       expect(
         buttons.find((button: any) => button.text === 'Открыть Mini App'),
@@ -3083,7 +3151,60 @@ describe('GuestPortalService', () => {
       );
     });
 
-    it('answers Telegram clubs callback with safe linked club choices', async () => {
+    it('answers Telegram check-in callback when the selected club supports it', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      portal.gamification.nextActions.unshift({
+        id: 'check-in:mission-check-in',
+        kind: 'CHECK_IN',
+        title: 'Сделайте чекин в клубе',
+        description: '50 XP за чекин.',
+        priority: 'HIGH',
+        statusLabel: 'доступно',
+        progressPercent: 0,
+        anchor: 'progress',
+      });
+      mockTelegramBotLinkedProfile(prisma, service, portal);
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-check-in',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: 'bot:checkin',
+        },
+      });
+      const buttons = (result.reply?.replyMarkup as any).inline_keyboard.flat();
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CHECK_IN',
+        reply: {
+          text: expect.stringContaining('Чекин LeetPlus'),
+        },
+      });
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Сделайте чекин в клубе'),
+      );
+      expect(result.reply?.text).toEqual(expect.stringContaining('50 XP'));
+      expect(
+        buttons.find((button: any) => button.text === 'Чекин'),
+      ).toMatchObject({
+        callback_data: 'bot:checkin',
+      });
+      expect(result.reply?.text).toEqual(expect.not.stringContaining('chat:'));
+      expect(result.reply?.text).toEqual(
+        expect.not.stringContaining('mission-check-in'),
+      );
+    });
+
+    it('answers Telegram clubs callback with safe linked city choices', async () => {
       const { prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
@@ -3105,27 +3226,27 @@ describe('GuestPortalService', () => {
         },
       });
       const buttons = (result.reply?.replyMarkup as any).inline_keyboard.flat();
-      const clubButtons = buttons.filter((button: any) =>
-        String(button.callback_data ?? '').startsWith('bot:club:'),
+      const cityButtons = buttons.filter((button: any) =>
+        String(button.callback_data ?? '').startsWith('bot:city:'),
       );
 
       expect(result).toMatchObject({
         status: 'CONFIRMED',
-        action: 'TELEGRAM_BOT_CLUBS',
+        action: 'TELEGRAM_BOT_CITIES',
         profileId: 'profile-1',
         telegramIdentityMasked: 'ch...56',
         reply: {
-          text: expect.stringContaining('Выберите клуб'),
+          text: expect.stringContaining('Выберите город'),
         },
       });
       expect(result.reply?.text).toEqual(
-        expect.stringContaining('1337 Радищева'),
+        expect.stringContaining('Екатеринбург'),
       );
-      expect(result.reply?.text).toEqual(expect.stringContaining('Arena'));
-      expect(clubButtons).toHaveLength(2);
-      expect(clubButtons[0]).toMatchObject({
-        text: '1337 Радищева, Радищева, 25',
-        callback_data: expect.stringMatching(/^bot:club:[A-Za-z0-9_-]{12,32}$/),
+      expect(result.reply?.text).toEqual(expect.stringContaining('Челябинск'));
+      expect(cityButtons).toHaveLength(2);
+      expect(cityButtons[0]).toMatchObject({
+        text: 'Екатеринбург (1 клуб)',
+        callback_data: expect.stringMatching(/^bot:city:[A-Za-z0-9_-]{12,32}$/),
       });
       expect(JSON.stringify(result.reply)).toEqual(
         expect.not.stringContaining('profile-1'),
@@ -3174,12 +3295,34 @@ describe('GuestPortalService', () => {
           },
         },
       );
-      const buttons = (listResult.reply?.replyMarkup as any).inline_keyboard
+      const cityButtons = (listResult.reply?.replyMarkup as any).inline_keyboard
+        .flat()
+        .filter((button: any) =>
+          String(button.callback_data ?? '').startsWith('bot:city:'),
+        );
+      const chelyabinskCallbackData = cityButtons.find(
+        (button: any) => button.text === 'Челябинск (1 клуб)',
+      ).callback_data;
+
+      const cityResult = await service.handleTelegramWebhook(
+        'telegram-secret',
+        {
+          callback_query: {
+            id: 'callback-city',
+            from: { id: 123456 },
+            message: {
+              chat: { id: 123456 },
+            },
+            data: chelyabinskCallbackData,
+          },
+        },
+      );
+      const clubButtons = (cityResult.reply?.replyMarkup as any).inline_keyboard
         .flat()
         .filter((button: any) =>
           String(button.callback_data ?? '').startsWith('bot:club:'),
         );
-      const arenaCallbackData = buttons.find(
+      const arenaCallbackData = clubButtons.find(
         (button: any) => button.text === 'Arena, Мира, 7',
       ).callback_data;
 
@@ -3194,6 +3337,15 @@ describe('GuestPortalService', () => {
         },
       });
 
+      expect(cityResult).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CITY_CLUBS',
+        profileId: 'profile-1',
+        reply: {
+          text: expect.stringContaining('Город: Челябинск.'),
+        },
+      });
+      expect(clubButtons).toHaveLength(1);
       expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'profile-1' },
@@ -3219,6 +3371,7 @@ describe('GuestPortalService', () => {
           storeId: 'store-2',
           tenantId: 'tenant-1',
         }),
+        { refreshLiveBalances: true },
       );
       expect(result).toMatchObject({
         status: 'CONFIRMED',
@@ -4399,6 +4552,86 @@ describe('GuestPortalService', () => {
         externalId: 'incoming-call-last4:incoming-call-1:referral',
         referralCode,
       });
+    });
+  });
+
+  describe('refreshPortalLiveBalances', () => {
+    it('stores scoped Langame balances and returns fresh rows for bot replies', async () => {
+      const { langameSettingsService, prisma, service } = createService();
+
+      langameSettingsService.getGuestBalancesForPortal.mockResolvedValue({
+        checkedAt: '2026-06-15T08:05:30.000Z',
+        externalGuestId: '42',
+        source: {
+          id: 'source-1',
+          name: '443.langame.ru',
+          domain: '443.langame.ru',
+          status: 'SUCCESS',
+          errorMessage: null,
+        },
+        balance: 1234.56,
+        bonusBalance: 250,
+        balanceFound: true,
+        bonusBalanceFound: true,
+      });
+
+      const result = await (service as any).refreshPortalLiveBalances({
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+        sourceDomain: '443.langame.ru',
+        externalClubId: '1337',
+        externalGuestId: '42',
+      });
+
+      expect(
+        langameSettingsService.getGuestBalancesForPortal,
+      ).toHaveBeenCalledWith('tenant-1', '443.langame.ru', '42');
+      expect(prisma.guestBalanceSnapshot.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            tenantId_externalProvider_externalDomain_externalGuestId_snapshotDate:
+              {
+                tenantId: 'tenant-1',
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: '443.langame.ru',
+                externalGuestId: '42',
+                snapshotDate: new Date('2026-06-15T08:05:00.000Z'),
+              },
+          },
+          create: expect.objectContaining({
+            guestId: 'guest-1',
+            balance: expect.any(Prisma.Decimal),
+          }),
+        }),
+      );
+      expect(prisma.guestBonusBalanceCurrent.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            tenantId: 'tenant-1',
+            guestId: null,
+            externalDomain: '443.langame.ru',
+            externalGuestId: '42',
+            bonusBalance: expect.any(Prisma.Decimal),
+            source: 'LANGAME_LIVE',
+            lastSyncedAt: new Date('2026-06-15T08:05:30.000Z'),
+          }),
+        }),
+      );
+      expect(prisma.guestBonusBalanceSnapshot.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            tenantId: 'tenant-1',
+            guestId: 'guest-1',
+            externalDomain: '443.langame.ru',
+            externalGuestId: '42',
+            bonusBalance: expect.any(Prisma.Decimal),
+          }),
+        }),
+      );
+      expect(result?.balanceSnapshot?.balance.toFixed(2)).toBe('1234.56');
+      expect(result?.bonusBalanceCurrent?.bonusBalance.toFixed(2)).toBe(
+        '250.00',
+      );
     });
   });
 

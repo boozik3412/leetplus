@@ -47,6 +47,8 @@ type LangameClientMock = {
   getRoutes: jest.Mock;
   getDiagnosticEndpoint: jest.Mock;
   searchGuests: jest.Mock;
+  listGuestBalances: jest.Mock;
+  listGuestBonusBalances: jest.Mock;
 };
 
 type SnapshotCreateCall = {
@@ -131,6 +133,8 @@ describe('LangameSettingsService', () => {
       getRoutes: jest.fn(),
       getDiagnosticEndpoint: jest.fn(),
       searchGuests: jest.fn(),
+      listGuestBalances: jest.fn(),
+      listGuestBonusBalances: jest.fn(),
     };
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
@@ -737,5 +741,79 @@ describe('LangameSettingsService', () => {
     expect(JSON.stringify(result)).not.toContain('+7 999 123-45-67');
     expect(JSON.stringify(result)).not.toContain('guest@example.com');
     expect(JSON.stringify(result)).not.toContain('Иван Петров');
+  });
+
+  it('returns safe live guest balances for portal scope', async () => {
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    langameClient.listGuestBalances.mockResolvedValue([
+      { guest_id: 111, balance: '10' },
+      { guest_id: 123, balance: '1200.50', phone: '+7 999 123-45-67' },
+    ]);
+    langameClient.listGuestBonusBalances.mockResolvedValue([
+      { guest_id: '123', bonus_balance: '250' },
+    ]);
+
+    const result = await service.getGuestBalancesForPortal(
+      'tenant-1',
+      '443.langame.ru',
+      '123',
+    );
+
+    expect(result).toMatchObject({
+      externalGuestId: '123',
+      source: {
+        domain: '443.langame.ru',
+        status: 'SUCCESS',
+        errorMessage: null,
+      },
+      balance: 1200.5,
+      bonusBalance: 250,
+      balanceFound: true,
+      bonusBalanceFound: true,
+    });
+    expect(langameClient.listGuestBalances).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'secret-key',
+      { page: 1, pageLimit: 200 },
+    );
+    expect(langameClient.listGuestBonusBalances).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'secret-key',
+      { page: 1, pageLimit: 200 },
+    );
+    expect(JSON.stringify(result)).not.toContain('+7 999 123-45-67');
+    expect(JSON.stringify(result)).not.toContain('secret-key');
+  });
+
+  it('keeps portal balance lookup safe on partial Langame failures', async () => {
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    langameClient.listGuestBalances.mockRejectedValue(new Error('timeout'));
+    langameClient.listGuestBonusBalances.mockResolvedValue([
+      { guest_id: '123', bonus_balance: '250' },
+    ]);
+
+    const result = await service.getGuestBalancesForPortal(
+      'tenant-1',
+      '443.langame.ru',
+      '123',
+    );
+
+    expect(result).toMatchObject({
+      source: {
+        domain: '443.langame.ru',
+        status: 'PARTIAL',
+        errorMessage: 'timeout',
+      },
+      balance: null,
+      bonusBalance: 250,
+      balanceFound: false,
+      bonusBalanceFound: true,
+    });
   });
 });

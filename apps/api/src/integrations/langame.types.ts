@@ -300,6 +300,22 @@ export type LangameGuestDetailsPortalResult = {
   } | null;
 };
 
+export type LangameGuestBalancesPortalResult = {
+  checkedAt: string;
+  externalGuestId: string;
+  source: {
+    id: string;
+    name: string;
+    domain: string;
+    status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
+    errorMessage: string | null;
+  };
+  balance: number | null;
+  bonusBalance: number | null;
+  balanceFound: boolean;
+  bonusBalanceFound: boolean;
+};
+
 export type LangameEndpointProfileKey =
   | 'allOperationsLog'
   | 'transactions'

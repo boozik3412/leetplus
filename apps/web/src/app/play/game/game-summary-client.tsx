@@ -83,6 +83,13 @@ type HomeBattleQuest = {
   description: string;
   state: "complete" | "current" | "locked";
   label: string;
+  step: string;
+  status: string;
+  condition: string;
+  reward: string;
+  preview: string;
+  x: string;
+  y: string;
 };
 type QuestStatus = "done" | "live" | "next";
 type RewardHistorySource = "lootbox" | "battlepass" | "quest" | "promo";
@@ -1202,55 +1209,175 @@ function HomeBattlePass({
   seasonName: string;
   onToast: (message: string) => void;
 }) {
+  const [activeQuestId, setActiveQuestId] = useState<string | null>(null);
+  const activeQuest = quests.find((quest) => quest.id === activeQuestId) ?? null;
+
+  useEffect(() => {
+    if (!activeQuestId) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveQuestId(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [activeQuestId]);
+
+  const toggleQuestDetail = (quest: HomeBattleQuest) => {
+    setActiveQuestId((current) => {
+      const next = current === quest.id ? null : quest.id;
+
+      if (next) {
+        onToast(`${quest.title}: ${quest.description}`);
+      }
+
+      return next;
+    });
+  };
+
   return (
     <section
       id="battlePass"
       ref={sectionRef}
       className="lp-club-panel lp-club-battlepass"
-      aria-label="Батлпасс"
+      aria-label="Баттлпасс"
     >
       <div className="lp-club-section-head">
         <span>
-          <h2>Батлпасс клуба</h2>
-          <p>Цепочка заданий ведет к главной награде текущего сезона.</p>
+          <h2>Баттлпасс клуба</h2>
+          <p>Сезонная карта заданий ведет к главной награде текущего сезона.</p>
         </span>
         <span className="lp-club-small-label">
           {seasonName} / {formatNumber(progress)}% завершено
         </span>
       </div>
 
-      <div className="lp-club-battle-track">
-        {quests.map((quest) => (
-          <button
-            key={quest.id}
-            type="button"
-            className={[
-              "lp-club-quest",
-              quest.state === "complete" ? "is-complete" : "",
-              quest.state === "current" ? "is-current" : "",
-            ].join(" ")}
-            onClick={() => onToast(`${quest.title}: ${quest.description}`)}
-          >
-            <span>
-              <strong>{quest.title}</strong>
-              <span>{quest.description}</span>
-            </span>
-            <small>{quest.label}</small>
-          </button>
-        ))}
+      <div
+        className="lp-club-battle-track"
+        onClick={(event) => {
+          const target = event.target as HTMLElement;
 
-        <div className="lp-club-reward" aria-label="Главная награда">
-          <span className="lp-club-reward-shape" aria-hidden="true" />
-          <span className="lp-club-reward-content">
-            <strong>{rewardLabel}</strong>
-            <span>season drop</span>
+          if (
+            activeQuestId &&
+            !target.closest(".lp-club-pass-detail") &&
+            !target.closest(".lp-club-pass-node")
+          ) {
+            setActiveQuestId(null);
+          }
+        }}
+      >
+        <div className="lp-club-pass-map" aria-label="Карта прогресса Battle Pass">
+          <svg
+            className="lp-club-pass-route"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <defs>
+              <linearGradient id="lpClubBattleRouteGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="rgba(148, 214, 184, 0.9)" />
+                <stop offset="52%" stopColor="rgba(131, 228, 236, 0.88)" />
+                <stop offset="100%" stopColor="rgba(208, 170, 108, 0.82)" />
+              </linearGradient>
+            </defs>
+            <path
+              className="lp-club-route-base"
+              d="M 7 72 C 18 34, 30 34, 39 58 S 56 82, 65 48 S 80 19, 93 36"
+              pathLength="100"
+            />
+            <path
+              className="lp-club-route-progress"
+              d="M 7 72 C 18 34, 30 34, 39 58 S 56 82, 65 48 S 80 19, 93 36"
+              pathLength="100"
+              style={{ strokeDasharray: `${formatNumber(progress)} 100` }}
+            />
+          </svg>
+
+          {quests.map((quest) => {
+            const isActive = activeQuestId === quest.id;
+
+            return (
+              <button
+                key={quest.id}
+                type="button"
+                className={[
+                  "lp-club-pass-node",
+                  quest.state === "complete" ? "is-complete" : "",
+                  quest.state === "current" ? "is-current" : "",
+                  quest.state === "locked" ? "is-locked" : "",
+                  isActive ? "is-active" : "",
+                ].join(" ")}
+                style={{ "--x": quest.x, "--y": quest.y } as CSSProperties}
+                aria-expanded={isActive}
+                data-step={quest.step}
+                data-status={quest.status}
+                data-condition={quest.condition}
+                data-reward={quest.reward}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleQuestDetail(quest);
+                }}
+              >
+                <span className="lp-club-node-mark">{quest.step}</span>
+                <span className="lp-club-node-copy">
+                  <strong>{quest.title}</strong>
+                  <small>{quest.label}</small>
+                  <span className="lp-club-node-preview">{quest.preview}</span>
+                </span>
+              </button>
+            );
+          })}
+
+          {activeQuest ? (
+            <div
+              className="lp-club-pass-detail is-open"
+              role="dialog"
+              aria-hidden="false"
+              aria-live="polite"
+              aria-labelledby="lpClubPassDetailTitle"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <span className="lp-club-detail-mark">{activeQuest.step}</span>
+              <span className="lp-club-detail-copy">
+                <small>{activeQuest.status}</small>
+                <strong id="lpClubPassDetailTitle">{activeQuest.title}</strong>
+                <span>{activeQuest.condition}</span>
+                <span className="lp-club-detail-reward">
+                  <b>Награда:</b>{" "}
+                  <span>{activeQuest.reward.replace(/^Награда:\s*/i, "")}</span>
+                </span>
+              </span>
+              <button
+                className="lp-club-detail-close"
+                type="button"
+                onClick={() => setActiveQuestId(null)}
+              >
+                Закрыть
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="lp-club-season-drop" aria-label="Главная награда">
+          <span className="lp-club-season-crest" aria-hidden="true">
+            <i />
+          </span>
+          <span className="lp-club-season-copy">
+            <small>season drop</small>
+            <strong>Главная награда</strong>
+            <span>{rewardLabel}</span>
           </span>
         </div>
       </div>
     </section>
   );
 }
-
 function PlayerProfilePanel({
   summary,
   rankLabel,
@@ -1917,7 +2044,7 @@ function playerQuestDescription(
 }
 
 function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest[] {
-  const journeyQuests: HomeBattleQuest[] = summary.journey.steps
+  const journeyQuests = summary.journey.steps
     .filter((step) => !isGuestInternalJourneyStep(step))
     .map((step) => ({
       id: step.id,
@@ -1925,34 +2052,111 @@ function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest
       description: guestJourneyHint(step),
       state: homeQuestState(step.status),
       label: homeQuestStateLabel(step.status),
+      reward: "Награда: прогресс сезона и доступ к следующему этапу.",
     }));
-  const missionQuests: HomeBattleQuest[] = summary.missions.featured.map((mission) => ({
+  const missionQuests = summary.missions.featured.map((mission) => ({
     id: mission.id,
     title: mission.name,
     description: mission.rewardLabel ?? "Клубный квест с XP и наградой.",
     state: mission.progressPercent >= 100 ? "complete" : "locked",
     label: mission.progressPercent >= 100 ? "готово" : "квест",
+    reward: mission.rewardLabel
+      ? `Награда: ${mission.rewardLabel}.`
+      : mission.xpReward > 0
+        ? `Награда: ${formatNumber(mission.xpReward)} XP.`
+        : "Награда: прогресс сезона.",
   }));
-  const fallback: HomeBattleQuest[] = [
+  const fallback = [
     {
       id: "promo",
       title: "Промокод",
       description: "Активировать клубный код.",
-      state: "locked",
-      label: "next",
+      state: "locked" as const,
+      label: "следующий",
+      reward: "Награда: бонус бара или скидка на следующую сессию.",
     },
     {
       id: "season-final",
       title: "Финальный чек",
       description: "Забрать сезонный дроп.",
-      state: "locked",
-      label: "reward",
+      state: "locked" as const,
+      label: "главная награда",
+      reward: "Награда: главный приз сезона.",
     },
   ];
 
-  return [...journeyQuests, ...missionQuests, ...fallback].slice(0, 6);
+  const quests = [...journeyQuests, ...missionQuests, ...fallback].slice(0, 6);
+  const firstOpenIndex = quests.findIndex((quest) => quest.state !== "complete");
+  const currentIndex = quests.findIndex((quest) => quest.state === "current");
+  const resolvedCurrentIndex = currentIndex >= 0 ? currentIndex : Math.max(0, firstOpenIndex);
+
+  return quests.map((quest, index) => {
+    const state =
+      index < resolvedCurrentIndex
+        ? "complete"
+        : index === resolvedCurrentIndex
+          ? "current"
+          : "locked";
+    const coordinates = homeBattlePassCoordinates(index, quests.length);
+    const status = homeBattlePassStatusLabel(state);
+    const condition = quest.description.startsWith("Условие:")
+      ? quest.description
+      : `Условие: ${quest.description}`;
+    const reward = quest.reward.startsWith("Награда:")
+      ? quest.reward
+      : `Награда: ${quest.reward}`;
+
+    return {
+      ...quest,
+      state,
+      label: state === "current" ? "текущая задача" : state === "complete" ? "готово" : quest.label,
+      step: String(index + 1).padStart(2, "0"),
+      status,
+      condition,
+      reward,
+      preview: homeBattlePassPreview(condition),
+      x: coordinates.x,
+      y: coordinates.y,
+    };
+  });
 }
 
+function homeBattlePassCoordinates(index: number, total: number) {
+  const preset = [
+    { x: "11%", y: "72%" },
+    { x: "28%", y: "38%" },
+    { x: "45%", y: "58%" },
+    { x: "63%", y: "70%" },
+    { x: "78%", y: "38%" },
+    { x: "86%", y: "54%" },
+  ];
+
+  if (index < preset.length) {
+    return preset[index];
+  }
+
+  const safeTotal = Math.max(1, total - 1);
+  const x = 9 + (index / safeTotal) * 82;
+  const y = index % 2 === 0 ? 64 : 38;
+
+  return { x: `${Math.round(x)}%`, y: `${y}%` };
+}
+
+function homeBattlePassStatusLabel(state: HomeBattleQuest["state"]) {
+  if (state === "complete") {
+    return "выполнено";
+  }
+
+  if (state === "current") {
+    return "текущая задача";
+  }
+
+  return "следующий этап";
+}
+
+function homeBattlePassPreview(condition: string) {
+  return condition.replace(/^Условие:\s*/i, "").replace(/\s+/g, " ").slice(0, 118);
+}
 function isGuestInternalJourneyStep(step: GameJourneyStep) {
   return step.id === "LANGAME" || step.id === "BONUS";
 }
@@ -6315,26 +6519,32 @@ const clubHomeCss = `
   display: grid;
   gap: 18px;
   min-width: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(131, 228, 236, 0.1), transparent 30%),
+    radial-gradient(circle at 86% 18%, rgba(208, 170, 108, 0.09), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent 26%),
+    var(--club-panel, rgba(2, 8, 11, 0.82));
 }
 
 .lp-club-battle-track {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(680px, 1fr) minmax(210px, 280px);
+  gap: 16px;
   align-items: stretch;
-  gap: 12px;
   min-width: 0;
+  padding: 0;
   overflow-x: auto;
-  overflow-y: hidden;
-  padding: 2px 2px 8px;
+  overflow-y: visible;
   overscroll-behavior-inline: contain;
-  scroll-padding-inline: 2px;
-  scroll-snap-type: x proximity;
   scrollbar-color: rgba(131, 228, 236, 0.42) rgba(196, 224, 225, 0.08);
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
 
 .lp-club-battle-track::-webkit-scrollbar {
-  height: 7px;
+  height: 8px;
 }
 
 .lp-club-battle-track::-webkit-scrollbar-track {
@@ -6344,95 +6554,373 @@ const clubHomeCss = `
 
 .lp-club-battle-track::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(131, 228, 236, 0.42);
+  background: rgba(131, 228, 236, 0.46);
 }
 
-.lp-club-quest {
+.lp-club-pass-map {
   position: relative;
+  min-height: 286px;
+  min-width: 680px;
+  overflow: visible;
+  isolation: isolate;
+  border: 1px solid rgba(196, 224, 225, 0.12);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 16% 82%, rgba(148, 214, 184, 0.12), transparent 24%),
+    radial-gradient(circle at 46% 40%, rgba(131, 228, 236, 0.14), transparent 28%),
+    radial-gradient(circle at 90% 30%, rgba(208, 170, 108, 0.13), transparent 26%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 36%),
+    rgba(1, 7, 10, 0.58);
+}
+
+.lp-club-pass-map::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent 0 49.8%, rgba(131, 228, 236, 0.06) 49.8% 50%, transparent 50%),
+    linear-gradient(rgba(196, 224, 225, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(196, 224, 225, 0.03) 1px, transparent 1px);
+  background-size: auto, 58px 58px, 58px 58px;
+  mask-image: radial-gradient(circle at 54% 50%, #000, transparent 78%);
+  pointer-events: none;
+}
+
+.lp-club-pass-route {
+  position: absolute;
+  inset: 20px 24px;
+  width: calc(100% - 48px);
+  height: calc(100% - 40px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.lp-club-pass-route path {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lp-club-route-base {
+  stroke: rgba(196, 224, 225, 0.14);
+  stroke-width: 2;
+}
+
+.lp-club-route-progress {
+  stroke: url("#lpClubBattleRouteGradient");
+  stroke-width: 3;
+  filter: drop-shadow(0 0 12px rgba(131, 228, 236, 0.32));
+}
+
+.lp-club-pass-node {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  z-index: 2;
   display: grid;
-  align-content: space-between;
-  flex: 0 0 clamp(132px, 14vw, 170px);
-  min-height: 154px;
-  padding: 13px;
-  border: 1px solid rgba(196, 224, 225, 0.16);
-  border-radius: 7px;
-  color: inherit;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  width: 150px;
+  min-height: 62px;
+  padding: 9px 10px;
+  border: 1px solid rgba(196, 224, 225, 0.13);
+  border-radius: 8px;
+  color: var(--text);
   text-align: left;
-  background: rgba(2, 8, 11, 0.58);
+  background:
+    linear-gradient(135deg, rgba(196, 224, 225, 0.05), transparent 58%),
+    rgba(2, 8, 11, 0.94);
   cursor: pointer;
-  scroll-snap-align: start;
+  transform: translate(-50%, var(--lift, -50%));
+  backdrop-filter: blur(10px);
   transition:
     border-color 180ms ease,
     background 180ms ease,
-    transform 180ms ease;
+    width 180ms ease,
+    min-height 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
 }
 
-.lp-club-quest:hover,
-.lp-club-quest.is-complete,
-.lp-club-quest.is-current {
-  transform: translateY(-1px);
-}
-
-.lp-club-quest.is-complete {
-  border-color: rgba(148, 214, 184, 0.54);
-  background: rgba(23, 48, 40, 0.38);
-}
-
-.lp-club-quest.is-current {
-  border-color: rgba(131, 228, 236, 0.68);
+.lp-club-pass-node:hover,
+.lp-club-pass-node:focus-visible,
+.lp-club-pass-node.is-active {
+  z-index: 20;
+  width: 218px;
+  min-height: 108px;
+  border-color: rgba(131, 228, 236, 0.54);
   background:
-    linear-gradient(90deg, rgba(131, 228, 236, 0.12), transparent),
-    rgba(8, 18, 22, 0.86);
+    radial-gradient(circle at 14% 28%, rgba(131, 228, 236, 0.2), transparent 44%),
+    linear-gradient(135deg, rgba(131, 228, 236, 0.1), transparent 62%),
+    rgba(2, 9, 12, 0.99);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.74),
+    0 0 0 999px rgba(0, 0, 0, 0.03),
+    0 0 30px rgba(131, 228, 236, 0.12);
+  outline: none;
+  --lift: -58%;
 }
 
-.lp-club-quest:not(:last-of-type)::after {
+.lp-club-node-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: 50%;
+  color: var(--quiet);
+  background: rgba(0, 0, 0, 0.3);
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0.08em;
+}
+
+.lp-club-node-mark::after {
   content: "";
   position: absolute;
-  top: calc(50% - 7px);
-  right: -19px;
-  z-index: 2;
-  width: 14px;
-  height: 14px;
-  border-top: 2px solid rgba(196, 224, 225, 0.7);
-  border-right: 2px solid rgba(196, 224, 225, 0.7);
-  transform: rotate(45deg);
+  inset: -5px;
+  border: 1px solid rgba(196, 224, 225, 0.08);
+  border-radius: inherit;
 }
 
-.lp-club-quest strong {
+.lp-club-node-copy {
+  min-width: 0;
+}
+
+.lp-club-pass-node strong {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.22;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
-.lp-club-quest span span {
+.lp-club-pass-node small {
   display: block;
-  margin-top: 9px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.lp-club-quest small {
-  color: var(--cyan);
-  font-size: 9px;
+  margin-top: 4px;
+  color: var(--quiet);
+  font-size: 8px;
   font-weight: 860;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
 }
 
-.lp-club-reward {
-  position: relative;
-  display: grid;
-  flex: 0 0 188px;
-  place-items: center;
-  min-height: 154px;
-  scroll-snap-align: end;
+.lp-club-node-preview {
+  display: block;
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.38;
+  opacity: 0;
+  transition:
+    max-height 180ms ease,
+    margin-top 180ms ease,
+    opacity 180ms ease;
 }
 
-.lp-club-reward-shape {
+.lp-club-pass-node:hover .lp-club-node-preview,
+.lp-club-pass-node:focus-visible .lp-club-node-preview,
+.lp-club-pass-node.is-active .lp-club-node-preview {
+  max-height: 46px;
+  margin-top: 7px;
+  opacity: 1;
+}
+
+.lp-club-pass-node.is-complete {
+  border-color: rgba(148, 214, 184, 0.42);
+  background:
+    radial-gradient(circle at 18% 50%, rgba(148, 214, 184, 0.16), transparent 42%),
+    rgba(8, 24, 19, 0.94);
+}
+
+.lp-club-pass-node.is-complete .lp-club-node-mark {
+  border-color: rgba(148, 214, 184, 0.54);
+  color: var(--good);
+  background: rgba(22, 58, 46, 0.72);
+}
+
+.lp-club-pass-node.is-current {
+  z-index: 8;
+  width: 184px;
+  min-height: 76px;
+  border-color: rgba(131, 228, 236, 0.72);
+  background:
+    radial-gradient(circle at 20% 50%, rgba(131, 228, 236, 0.24), transparent 48%),
+    linear-gradient(135deg, rgba(131, 228, 236, 0.12), transparent 62%),
+    rgba(5, 19, 23, 0.98);
+  box-shadow:
+    inset 0 0 0 1px rgba(131, 228, 236, 0.09),
+    0 0 38px rgba(131, 228, 236, 0.12);
+  --lift: -62%;
+}
+
+.lp-club-pass-node.is-current .lp-club-node-mark {
+  border-color: rgba(131, 228, 236, 0.84);
+  color: var(--cyan);
+  box-shadow: 0 0 24px rgba(131, 228, 236, 0.2);
+}
+
+.lp-club-pass-node.is-current.is-active,
+.lp-club-pass-node.is-current:hover,
+.lp-club-pass-node.is-current:focus-visible {
+  z-index: 24;
+  width: 218px;
+  min-height: 108px;
+  background:
+    radial-gradient(circle at 18% 34%, rgba(131, 228, 236, 0.25), transparent 46%),
+    linear-gradient(135deg, rgba(131, 228, 236, 0.14), transparent 62%),
+    rgba(2, 10, 13, 1);
+  --lift: -68%;
+}
+
+.lp-club-pass-node.is-locked {
+  opacity: 0.62;
+}
+
+.lp-club-pass-node.is-locked:hover,
+.lp-club-pass-node.is-locked:focus-visible,
+.lp-club-pass-node.is-locked.is-active {
+  opacity: 1;
+}
+
+.lp-club-pass-detail {
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: 50%;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  width: min(430px, calc(100% - 32px));
+  padding: 17px;
+  border: 1px solid rgba(131, 228, 236, 0.34);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 8% 14%, rgba(131, 228, 236, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 42%),
+    rgba(2, 9, 12, 0.985);
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.82),
+    0 0 42px rgba(131, 228, 236, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(20px);
+}
+
+.lp-club-pass-detail::before {
+  content: "";
+  position: absolute;
+  inset: -999px;
+  z-index: -2;
+  background: rgba(0, 0, 0, 0.34);
+  pointer-events: none;
+}
+
+.lp-club-pass-detail::after {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  z-index: -1;
+  border: 1px solid rgba(196, 224, 225, 0.08);
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, transparent 0 49.6%, rgba(131, 228, 236, 0.13) 49.6% 50.3%, transparent 50.3%),
+    linear-gradient(rgba(196, 224, 225, 0.04) 1px, transparent 1px);
+  background-size: auto, 100% 28px;
+  mask-image: radial-gradient(circle at 50% 50%, #000, transparent 82%);
+  pointer-events: none;
+}
+
+.lp-club-detail-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(131, 228, 236, 0.5);
+  border-radius: 50%;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+  font-size: 12px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+}
+
+.lp-club-detail-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lp-club-detail-copy small {
+  color: var(--amber);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.lp-club-detail-copy strong {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.lp-club-detail-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lp-club-detail-reward b {
+  color: var(--text);
+}
+
+.lp-club-detail-close {
+  grid-column: 2;
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(131, 228, 236, 0.22);
+  border-radius: 7px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.06);
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.lp-club-season-drop {
+  position: relative;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-height: 286px;
+  padding: 18px;
+  border: 1px solid rgba(196, 224, 225, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(208, 170, 108, 0.18), transparent 42%),
+    linear-gradient(135deg, rgba(208, 170, 108, 0.08), transparent 46%),
+    rgba(2, 8, 11, 0.62);
+}
+
+.lp-club-season-crest {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 120px;
+  height: 120px;
   background:
     linear-gradient(135deg, rgba(208, 170, 108, 0.26), rgba(131, 228, 236, 0.12)),
     rgba(7, 13, 16, 0.98);
@@ -6440,40 +6928,39 @@ const clubHomeCss = `
   filter: drop-shadow(0 0 32px rgba(208, 170, 108, 0.16));
 }
 
-.lp-club-reward::before {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border: 1px solid rgba(208, 170, 108, 0.6);
-  clip-path: polygon(50% 0%, 62% 30%, 96% 21%, 76% 50%, 96% 79%, 62% 70%, 50% 100%, 38% 70%, 4% 79%, 24% 50%, 4% 21%, 38% 30%);
-  pointer-events: none;
+.lp-club-season-crest i {
+  width: 54px;
+  height: 54px;
+  border: 1px solid rgba(208, 170, 108, 0.62);
+  transform: rotate(45deg);
 }
 
-.lp-club-reward-content {
-  position: relative;
-  z-index: 1;
-  max-width: 128px;
-  text-align: center;
+.lp-club-season-copy {
+  display: grid;
+  gap: 7px;
+  max-width: 180px;
+  margin-top: 14px;
 }
 
-.lp-club-reward-content strong {
-  display: block;
-  color: var(--text);
-  font-size: 17px;
-  line-height: 1.1;
-  font-weight: 860;
-}
-
-.lp-club-reward-content span {
-  display: block;
-  margin-top: 9px;
+.lp-club-season-copy small {
   color: var(--amber);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 860;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
+.lp-club-season-copy strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.05;
+}
+
+.lp-club-season-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
 .lp-club-profile-panel {
   align-self: start;
   min-height: 100%;
@@ -8173,22 +8660,23 @@ const clubHomeCss = `
   }
 
   .lp-club-battle-track {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(680px, 1fr) minmax(210px, 260px);
     align-items: stretch;
     overflow-x: auto;
-    padding-bottom: 6px;
-    scroll-snap-type: x proximity;
+    overflow-y: visible;
+    padding-bottom: 8px;
+    scroll-snap-type: none;
   }
 
-  .lp-club-quest {
-    min-width: 132px;
-    scroll-snap-align: start;
+  .lp-club-pass-map {
+    min-width: 680px;
+    min-height: 286px;
   }
 
-  .lp-club-reward {
-    min-width: 170px;
+  .lp-club-season-drop {
+    min-width: 210px;
   }
-
   .lp-club-quest-widget {
     grid-column: auto;
     margin-top: 18px;

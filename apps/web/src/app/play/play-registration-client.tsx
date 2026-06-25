@@ -2058,38 +2058,22 @@ function UserCallAuthPanel({
         </p>
       ) : null}
 
-      <div
-        className={`lp-game-auth-channel-actions mt-3 grid gap-2 ${
-          userCallAuth?.callHref ? "sm:grid-cols-[0.8fr_1.2fr]" : "sm:grid-cols-2"
-        }`}
-      >
-        <button
-          className="lp-game-auth-channel-primary min-h-11 rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={disabled || !ready || isStarting || Boolean(userCallAuth?.callHref)}
-          onClick={onStart}
-          type="button"
-        >
-          {userCallAuth?.callHref
-            ? "Вход создан"
-            : isStarting
-              ? "Создаем..."
-              : "Создать вход по звонку"}
-        </button>
-
+      <div className="lp-game-auth-channel-actions mt-3">
         {userCallAuth?.callHref ? (
           <a
-            className="lp-game-auth-call-action flex min-h-11 items-center justify-center rounded-lg border border-cyan-300/35 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300"
+            className="lp-game-auth-call-action lp-game-auth-channel-primary flex min-h-11 w-full items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
             href={userCallAuth.callHref}
           >
             Позвонить бесплатно: {userCallAuth.callNumber}
           </a>
         ) : (
           <button
-            className="lp-game-auth-channel-secondary min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
-            disabled
+            className="lp-game-auth-channel-primary min-h-11 w-full rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={disabled || !ready || isStarting}
+            onClick={onStart}
             type="button"
           >
-            Номер появится после старта
+            {isStarting ? "Создаем..." : "Создать вход по звонку"}
           </button>
         )}
       </div>

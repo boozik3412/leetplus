@@ -17,6 +17,9 @@ type LoadState =
   | "error";
 type SubmitState = "idle" | "submitting";
 type MiniAppTab = "home" | "quests" | "rewards" | "profile";
+const TELEGRAM_INIT_DATA_WAIT_MS = 1200;
+const TELEGRAM_INIT_DATA_POLL_MS = 80;
+
 type TelegramWebApp = {
   initData?: string;
   ready?: () => void;
@@ -102,7 +105,7 @@ export function TelegramMiniAppClient() {
     telegramWebApp?.ready?.();
     telegramWebApp?.expand?.();
 
-    const initData = readTelegramInitData();
+    const initData = await waitForTelegramInitData();
     initDataRef.current = initData;
 
     try {
@@ -1133,13 +1136,40 @@ function readTelegramInitData() {
     return fromTelegram;
   }
 
-  const params = new URLSearchParams(window.location.search);
+  const queryParams = new URLSearchParams(window.location.search);
+  const hashParams = readTelegramHashParams();
 
   return (
-    params.get("tgWebAppData")?.trim() ||
-    params.get("initData")?.trim() ||
+    queryParams.get("tgWebAppData")?.trim() ||
+    queryParams.get("initData")?.trim() ||
+    hashParams.get("tgWebAppData")?.trim() ||
+    hashParams.get("initData")?.trim() ||
     null
   );
+}
+
+async function waitForTelegramInitData() {
+  const deadline = Date.now() + TELEGRAM_INIT_DATA_WAIT_MS;
+
+  while (Date.now() <= deadline) {
+    const initData = readTelegramInitData();
+
+    if (initData) {
+      return initData;
+    }
+
+    await sleep(TELEGRAM_INIT_DATA_POLL_MS);
+  }
+
+  return readTelegramInitData();
+}
+
+function readTelegramHashParams() {
+  if (typeof window === "undefined" || !window.location.hash) {
+    return new URLSearchParams();
+  }
+
+  return new URLSearchParams(window.location.hash.replace(/^#/, ""));
 }
 
 function readMiniAppTabFromLocation(): MiniAppTab {
@@ -1147,11 +1177,17 @@ function readMiniAppTabFromLocation(): MiniAppTab {
     return "home";
   }
 
-  const params = new URLSearchParams(window.location.search);
-  const queryTab = params.get("tab");
-  const hashTab = window.location.hash.replace(/^#/, "");
+  const queryParams = new URLSearchParams(window.location.search);
+  const hashValue = window.location.hash.replace(/^#/, "");
+  const hashParams = readTelegramHashParams();
+  const queryTab = queryParams.get("tab");
+  const hashTab = hashParams.get("tab") ?? hashValue;
 
   return miniAppTabValue(queryTab) ?? miniAppTabValue(hashTab) ?? "home";
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function writeMiniAppTabToUrl(tab: MiniAppTab) {

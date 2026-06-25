@@ -257,7 +257,7 @@ type TelegramMiniAppClubCandidate = {
     city: string | null;
     address: string | null;
   };
-  telegramLinkChallengeId: string;
+  telegramLinkChallengeId: string | null;
 };
 
 type TelegramBotCityGroup = {
@@ -5070,10 +5070,14 @@ export class GuestPortalService {
         where: { id: selectedCandidate.profile.id },
         data: { lastActivityAt: now },
       }),
-      this.prisma.guestGameTelegramLinkChallenge.update({
-        where: { id: selectedCandidate.telegramLinkChallengeId },
-        data: { updatedAt: now },
-      }),
+      ...(selectedCandidate.telegramLinkChallengeId
+        ? [
+            this.prisma.guestGameTelegramLinkChallenge.update({
+              where: { id: selectedCandidate.telegramLinkChallengeId },
+              data: { updatedAt: now },
+            }),
+          ]
+        : []),
     ]);
 
     const portal = await this.buildPortalPayload(
@@ -7992,33 +7996,77 @@ export class GuestPortalService {
       },
       orderBy: { updatedAt: 'desc' },
     });
-    const candidates = new Map<string, TelegramMiniAppClubCandidate>();
+    const profileByTenantId = new Map<
+      (typeof profiles)[number]['tenant']['id'],
+      (typeof profiles)[number]
+    >();
 
     for (const profile of profiles) {
-      if (!profile.phoneHash) {
+      if (!profile.phoneHash || profileByTenantId.has(profile.tenant.id)) {
         continue;
       }
 
-      for (const challenge of profile.telegramLinkChallenges) {
-        const key = `${profile.id}:${challenge.store.id}`;
+      profileByTenantId.set(profile.tenant.id, profile);
+    }
 
-        if (candidates.has(key)) {
-          continue;
-        }
+    if (!profileByTenantId.size) {
+      return [];
+    }
 
-        candidates.set(key, {
-          profile: {
-            id: profile.id,
-            guestId: profile.guestId,
-            phoneHash: profile.phoneHash,
-            contactMasked: profile.contactMasked,
-            unsubscribedAt: profile.unsubscribedAt,
-          },
-          tenant: profile.tenant,
-          store: challenge.store,
-          telegramLinkChallengeId: challenge.id,
-        });
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: { in: [...profileByTenantId.keys()] },
+        isActive: true,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        publicSlug: true,
+        name: true,
+        city: true,
+        address: true,
+      },
+      orderBy: [{ city: 'asc' }, { name: 'asc' }, { address: 'asc' }],
+    });
+    const directoryStores = stores.length
+      ? stores
+      : profiles.flatMap((profile) =>
+          profile.telegramLinkChallenges.map((challenge) => ({
+            ...challenge.store,
+            tenantId: profile.tenant.id,
+          })),
+        );
+    const candidates = new Map<string, TelegramMiniAppClubCandidate>();
+
+    for (const store of directoryStores) {
+      const profile = profileByTenantId.get(store.tenantId);
+
+      if (!profile?.phoneHash) {
+        continue;
       }
+
+      const challenge =
+        profile.telegramLinkChallenges.find(
+          (item) => item.store.id === store.id,
+        ) ?? null;
+      const key = `${profile.id}:${store.id}`;
+
+      if (candidates.has(key)) {
+        continue;
+      }
+
+      candidates.set(key, {
+        profile: {
+          id: profile.id,
+          guestId: profile.guestId,
+          phoneHash: profile.phoneHash,
+          contactMasked: profile.contactMasked,
+          unsubscribedAt: profile.unsubscribedAt,
+        },
+        tenant: profile.tenant,
+        store,
+        telegramLinkChallengeId: challenge?.id ?? null,
+      });
     }
 
     return [...candidates.values()];

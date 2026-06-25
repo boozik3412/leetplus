@@ -2038,6 +2038,11 @@ function UserCallAuthPanel({
           <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
             Звонок на бесплатный номер
           </h3>
+          {freeCall ? (
+            <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">
+              Звонок будет сброшен сразу после проверки
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -2050,12 +2055,6 @@ function UserCallAuthPanel({
             {userCallAuthStatus.message}
           </p>
         </div>
-      ) : null}
-
-      {freeCall ? (
-        <p className="lp-game-auth-channel-note mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.07] px-3 py-2 text-xs font-semibold leading-5 text-cyan-100">
-          Звонок будет сброшен сразу после проверки
-        </p>
       ) : null}
 
       <div className="lp-game-auth-channel-actions mt-3">

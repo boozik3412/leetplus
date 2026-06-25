@@ -168,9 +168,7 @@ export function PlayRegistrationClient({
     : resolveInitialVerificationChannel(visibleVerification);
   const normalizedPhone = normalizeGuestPhoneForSubmit(phone);
   const canUsePhoneAuth = Boolean(normalizedPhone);
-  const activeVerificationOption = visibleVerification.options.find(
-    (option) => option.channel === activeVerificationChannel,
-  );
+
   const switchFromTelegramToFallback = useCallback(() => {
     const fallback =
       visibleVerification.options.find(
@@ -1268,7 +1266,7 @@ export function PlayRegistrationClient({
                       >
                         <label className="block">
                           <span className="text-xs font-bold uppercase text-slate-400">
-                            Мобильный телефон
+                            Введите свой номер телефона
                           </span>
                           <input
                             className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 text-base font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-emerald-300/70"
@@ -1300,23 +1298,10 @@ export function PlayRegistrationClient({
                           <div className="lp-game-auth-channel-detail rounded-lg border border-emerald-300/25 bg-emerald-300/[0.06] p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
-                                <p className="lp-game-auth-channel-kicker text-xs font-bold uppercase text-emerald-200">
-                                  3 место
-                                </p>
                                 <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
                                   SMS-код
                                 </h3>
                               </div>
-                              <StatusPill
-                                className="lp-game-auth-channel-pill"
-                                tone={verificationStatusTone(
-                                  activeVerificationOption?.status ??
-                                    "NOT_CONFIGURED",
-                                )}
-                              >
-                                {activeVerificationOption?.statusLabel ??
-                                  "резерв"}
-                              </StatusPill>
                             </div>
                             <button
                               className="lp-game-auth-channel-primary mt-3 min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1470,8 +1455,7 @@ function GameAuthIntro() {
       <div className="lp-game-auth-chapter">Сессия входа</div>
       <h2>Вход в игровой модуль</h2>
       <p>
-        Подтвердите доступ удобным способом, чтобы открыть задания, рейтинг и
-        награды выбранного игрового контура.
+        Подтвердите доступ удобным способом, чтобы открыть задания, рейтинг и награды.
       </p>
       <div className="lp-game-auth-rank-strip" aria-label="Прогресс доступа">
         <div>
@@ -1921,16 +1905,10 @@ function TelegramAuthPanel({
     <div className="lp-game-auth-channel-detail rounded-lg border border-emerald-300/25 bg-emerald-300/[0.07] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="lp-game-auth-channel-kicker text-xs font-bold uppercase text-emerald-200">
-            1 место
-          </p>
           <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
             Telegram-бот
           </h3>
         </div>
-        <StatusPill className="lp-game-auth-channel-pill" tone={ready ? "emerald" : "amber"}>
-          {telegramOption?.statusLabel ?? "целевой канал"}
-        </StatusPill>
       </div>
 
       {telegramAuthStatus ? (
@@ -2057,16 +2035,10 @@ function UserCallAuthPanel({
     <div className="lp-game-auth-channel-detail rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="lp-game-auth-channel-kicker text-xs font-bold uppercase text-cyan-200">
-            2 место
-          </p>
           <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
-            Звонок на телефон
+            Звонок на бесплатный номер
           </h3>
         </div>
-        <StatusPill className="lp-game-auth-channel-pill" tone={ready ? "cyan" : "amber"}>
-          {userCallOption?.statusLabel ?? "fallback"}
-        </StatusPill>
       </div>
 
       {userCallAuthStatus ? (
@@ -2165,16 +2137,10 @@ function IncomingCallLast4Panel({
     <div className="rounded-lg border border-fuchsia-300/25 bg-fuchsia-300/[0.05] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase text-fuchsia-200">
-            4 место
-          </p>
           <h3 className="mt-1 text-lg font-black text-white">
             Входящий звонок
           </h3>
         </div>
-        <StatusPill tone={ready ? "cyan" : "amber"}>
-          {option?.statusLabel ?? "позже"}
-        </StatusPill>
       </div>
 
       <button
@@ -2554,7 +2520,7 @@ function gameAuthMethodTitle(
   }
 
   if (channel === "USER_CALL") {
-    return "Звонок на телефон";
+    return "Звонок на бесплатный номер";
   }
 
   if (channel === "SMS_CODE") {
@@ -2592,7 +2558,7 @@ function gameAuthMethodSummary(channel: GuestPortalVerificationChannel) {
   }
 
   if (channel === "USER_CALL") {
-    return "Получите звонок и подтвердите телефон, чтобы открыть игровой модуль.";
+    return "Введите номер, позвоните на бесплатный номер и подтвердите вход в игровой модуль.";
   }
 
   if (channel === "SMS_CODE") {

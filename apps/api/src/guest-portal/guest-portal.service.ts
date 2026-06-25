@@ -4333,17 +4333,6 @@ export class GuestPortalService {
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
 
-    const botCommand = telegramWebhookBotCommand(update.text);
-    if (botCommand) {
-      const response = await this.buildTelegramBotCommandResponse(
-        botCommand,
-        update.telegramChatId,
-        telegramIdentityMasked,
-      );
-
-      return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
-    }
-
     if (update.callbackData) {
       const cityCallbackToken = telegramBotCityCallbackToken(
         update.callbackData,
@@ -4351,6 +4340,7 @@ export class GuestPortalService {
       const clubCallbackToken = telegramBotClubCallbackToken(
         update.callbackData,
       );
+      const callbackCommand = telegramWebhookBotCommand(update.callbackData);
       let response: GuestPortalTelegramWebhookResponse;
 
       if (cityCallbackToken) {
@@ -4365,6 +4355,12 @@ export class GuestPortalService {
           update.telegramChatId,
           telegramIdentityMasked,
         );
+      } else if (callbackCommand) {
+        response = await this.buildTelegramBotCommandResponse(
+          callbackCommand,
+          update.telegramChatId,
+          telegramIdentityMasked,
+        );
       } else {
         response = await this.buildTelegramBotCommandResponse(
           'MENU',
@@ -4372,6 +4368,17 @@ export class GuestPortalService {
           telegramIdentityMasked,
         );
       }
+
+      return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
+    }
+
+    const botCommand = telegramWebhookBotCommand(update.text);
+    if (botCommand) {
+      const response = await this.buildTelegramBotCommandResponse(
+        botCommand,
+        update.telegramChatId,
+        telegramIdentityMasked,
+      );
 
       return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }

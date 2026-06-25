@@ -145,6 +145,10 @@ type TelegramBotCommand =
   | 'CLUBS'
   | 'CHECK_IN'
   | 'HELP';
+type TelegramBotCommandContext = {
+  command: TelegramBotCommand;
+  clubCallbackToken: string | null;
+};
 type TelegramMiniAppTab = 'quests' | 'rewards' | 'profile';
 type GuestPortalPhoneIdentity = {
   normalized: string;
@@ -3594,7 +3598,11 @@ export class GuestPortalService {
       profileId:
         context.tenant.id === payload.tenantId ? payload.profileId : null,
     };
-    const targetGuest = await this.findGuest(targetPayloadBase);
+    const targetGuest = await this.findGuest(
+      targetPayloadBase,
+      context.store,
+      sourceProfile,
+    );
     const targetGuestProfile = targetGuest
       ? await this.prisma.guestGameProfile.findFirst({
           where: {
@@ -3831,7 +3839,14 @@ export class GuestPortalService {
       payload.tenantId,
       payload.storeId,
     );
-    const guest = await this.findGuest(payload);
+    let guest = await this.findGuest(payload, context.store);
+
+    if (!guest) {
+      const profile = await this.findProfile(payload, null);
+      guest = profile
+        ? await this.findGuest(payload, context.store, profile)
+        : null;
+    }
 
     if (!guest) {
       throw new BadRequestException(
@@ -4340,7 +4355,9 @@ export class GuestPortalService {
       const clubCallbackToken = telegramBotClubCallbackToken(
         update.callbackData,
       );
-      const callbackCommand = telegramWebhookBotCommand(update.callbackData);
+      const callbackCommandContext = telegramWebhookBotCommandContext(
+        update.callbackData,
+      );
       let response: GuestPortalTelegramWebhookResponse;
 
       if (cityCallbackToken) {
@@ -4355,11 +4372,12 @@ export class GuestPortalService {
           update.telegramChatId,
           telegramIdentityMasked,
         );
-      } else if (callbackCommand) {
+      } else if (callbackCommandContext) {
         response = await this.buildTelegramBotCommandResponse(
-          callbackCommand,
+          callbackCommandContext.command,
           update.telegramChatId,
           telegramIdentityMasked,
+          callbackCommandContext.clubCallbackToken,
         );
       } else {
         response = await this.buildTelegramBotCommandResponse(
@@ -4807,6 +4825,7 @@ export class GuestPortalService {
     command: TelegramBotCommand,
     telegramChatIdValue: string,
     telegramIdentityMasked: string | null,
+    clubCallbackToken: string | null = null,
   ): Promise<GuestPortalTelegramWebhookResponse> {
     const action = telegramBotAction(command);
 
@@ -4837,8 +4856,15 @@ export class GuestPortalService {
     }
 
     const telegramIdentity = `chat:${telegramChatIdValue}`;
+    const commandCandidate = clubCallbackToken
+      ? await this.findTelegramBotClubCandidateByToken(
+          telegramIdentity,
+          clubCallbackToken,
+        )
+      : null;
     const profile = await this.prisma.guestGameProfile.findFirst({
       where: {
+        ...(commandCandidate ? { id: commandCandidate.profile.id } : {}),
         telegramIdentity,
         status: { not: 'ARCHIVED' },
       },
@@ -4893,7 +4919,16 @@ export class GuestPortalService {
       };
     }
 
-    const club = await this.findTelegramBotLatestClub(profile.id);
+    const scopedClub =
+      commandCandidate && commandCandidate.profile.id === profile.id
+        ? {
+            storeId: commandCandidate.store.id,
+            name: commandCandidate.store.name,
+            callbackToken: clubCallbackToken,
+          }
+        : null;
+    const club =
+      scopedClub ?? (await this.findTelegramBotLatestClub(profile.id));
     const xp = Math.max(0, profile.xp ?? 0);
     const level = Math.max(1, profile.level ?? levelFromXp(xp));
     let portal: GuestPortalPayload | null = null;
@@ -4948,7 +4983,7 @@ export class GuestPortalService {
         telegramIdentityMasked,
         replyText,
         telegramBotMiniAppTab(command),
-        { showCheckIn },
+        { showCheckIn, clubCallbackToken: club?.callbackToken ?? null },
       ),
     };
   }
@@ -5111,14 +5146,33 @@ export class GuestPortalService {
         telegramIdentityMasked,
         replyText,
         undefined,
-        { showCheckIn: telegramBotCheckInAvailable(portal) },
+        {
+          clubCallbackToken,
+          showCheckIn: telegramBotCheckInAvailable(portal),
+        },
       ),
     };
+  }
+
+  private async findTelegramBotClubCandidateByToken(
+    telegramIdentity: string,
+    clubCallbackToken: string,
+  ): Promise<TelegramMiniAppClubCandidate | null> {
+    const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
+
+    return (
+      candidates.find(
+        (candidate) =>
+          this.telegramBotClubCallbackTokenForCandidate(candidate) ===
+          clubCallbackToken,
+      ) ?? null
+    );
   }
 
   private async findTelegramBotLatestClub(profileId: string): Promise<{
     storeId: string;
     name: string;
+    callbackToken?: string | null;
   } | null> {
     const link = await this.prisma.guestGameTelegramLinkChallenge.findFirst({
       where: {
@@ -5206,14 +5260,20 @@ export class GuestPortalService {
     chatIdMasked: string | null,
     text: string,
     miniAppTab?: TelegramMiniAppTab,
-    options: { showCheckIn?: boolean } = {},
+    options: {
+      clubCallbackToken?: string | null;
+      showCheckIn?: boolean;
+    } = {},
   ): GuestPortalTelegramWebhookResponse['reply'] {
+    const commandCallbackSuffix = options.clubCallbackToken
+      ? `:${options.clubCallbackToken}`
+      : '';
     const checkInRow = options.showCheckIn
       ? [
           [
             {
               text: 'Чекин',
-              callback_data: 'bot:checkin',
+              callback_data: `bot:checkin${commandCallbackSuffix}`,
             },
           ],
         ]
@@ -5229,21 +5289,21 @@ export class GuestPortalService {
           [
             {
               text: 'Профиль',
-              callback_data: 'bot:profile',
+              callback_data: `bot:profile${commandCallbackSuffix}`,
             },
             {
               text: 'Квесты',
-              callback_data: 'bot:quests',
+              callback_data: `bot:quests${commandCallbackSuffix}`,
             },
           ],
           [
             {
               text: 'Награды',
-              callback_data: 'bot:rewards',
+              callback_data: `bot:rewards${commandCallbackSuffix}`,
             },
             {
               text: 'Меню',
-              callback_data: 'bot:menu',
+              callback_data: `bot:menu${commandCallbackSuffix}`,
             },
           ],
           ...checkInRow,
@@ -6801,8 +6861,11 @@ export class GuestPortalService {
       tokenPayload.tenantId,
       tokenPayload.storeId,
     );
-    const guest = await this.findGuest(tokenPayload);
+    let guest = await this.findGuest(tokenPayload, context.store);
     let profile = await this.findProfile(tokenPayload, guest?.id ?? null);
+    if (!guest && profile) {
+      guest = await this.findGuest(tokenPayload, context.store, profile);
+    }
     const crmLead = await this.findCrmLead(
       tokenPayload,
       profile?.leadId ?? null,
@@ -7460,24 +7523,60 @@ export class GuestPortalService {
     return buildBonusLedgerHistory(rows);
   }
 
-  private async findGuest(payload: GuestPortalTokenPayload) {
+  private async findGuest(
+    payload: GuestPortalTokenPayload,
+    store?: Pick<TenantStoreContext['store'], 'externalDomain'> | null,
+    profile?: { phoneEncrypted?: string | null } | null,
+  ) {
+    const preferredExternalDomain = store?.externalDomain?.trim() || null;
+
     if (payload.guestId) {
       const guest = await this.prisma.guest.findFirst({
         where: {
           id: payload.guestId,
           tenantId: payload.tenantId,
+          isDisabled: false,
         },
       });
 
-      if (guest) {
+      if (
+        guest &&
+        (!preferredExternalDomain ||
+          guest.externalDomain === preferredExternalDomain)
+      ) {
         return guest;
+      }
+    }
+
+    const phoneHashes = this.guestPhoneHashCandidates(
+      payload.phoneHash,
+      profile?.phoneEncrypted ?? null,
+    );
+    const phoneHashWhere =
+      phoneHashes.length === 1
+        ? { phoneHash: phoneHashes[0] }
+        : { phoneHash: { in: phoneHashes } };
+
+    if (preferredExternalDomain) {
+      const scopedGuest = await this.prisma.guest.findFirst({
+        where: {
+          tenantId: payload.tenantId,
+          ...phoneHashWhere,
+          externalDomain: preferredExternalDomain,
+          isDisabled: false,
+        },
+        orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+      });
+
+      if (scopedGuest) {
+        return scopedGuest;
       }
     }
 
     return this.prisma.guest.findFirst({
       where: {
         tenantId: payload.tenantId,
-        phoneHash: payload.phoneHash,
+        ...phoneHashWhere,
         isDisabled: false,
       },
       orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
@@ -7699,6 +7798,39 @@ export class GuestPortalService {
     } catch {
       return null;
     }
+  }
+
+  private guestPhoneHashCandidates(
+    primaryPhoneHash: string,
+    phoneEncrypted: string | null,
+  ) {
+    const hashes = new Set([primaryPhoneHash]);
+    const phone = this.phoneIdentityFromEncrypted(phoneEncrypted);
+
+    if (!phone) {
+      return [...hashes];
+    }
+
+    const variants = new Set([phone.normalized]);
+    if (
+      phone.normalized.length === 11 &&
+      ['7', '8'].includes(phone.normalized[0])
+    ) {
+      variants.add(phone.normalized.slice(1));
+    }
+
+    if (phone.normalized.length === 10) {
+      variants.add(`7${phone.normalized}`);
+      variants.add(`8${phone.normalized}`);
+    }
+
+    for (const variant of variants) {
+      hashes.add(
+        createHmac('sha256', this.piiSecret()).update(variant).digest('hex'),
+      );
+    }
+
+    return [...hashes];
   }
 
   private async resolveStaffTestMatch(
@@ -10932,6 +11064,26 @@ function telegramWebhookBotCommand(
   }
 
   return /^(продолжить в боте|статус|меню)$/i.test(normalized) ? 'MENU' : null;
+}
+
+function telegramWebhookBotCommandContext(
+  text: string | null,
+): TelegramBotCommandContext | null {
+  const trimmed = text?.trim() ?? '';
+  const scopedCallback =
+    /^(bot:(?:profile|quests|rewards|check-?in|menu)):([A-Za-z0-9_-]{12,32})$/i.exec(
+      trimmed,
+    );
+
+  if (scopedCallback) {
+    const command = telegramWebhookBotCommand(scopedCallback[1]);
+
+    return command ? { command, clubCallbackToken: scopedCallback[2] } : null;
+  }
+
+  const command = telegramWebhookBotCommand(text);
+
+  return command ? { command, clubCallbackToken: null } : null;
 }
 
 function telegramBotClubCallbackToken(callbackData: string | null) {

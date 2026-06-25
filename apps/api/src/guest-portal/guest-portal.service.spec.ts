@@ -22,6 +22,12 @@ function createPrismaMock() {
       findFirst: jest.fn(),
       update: jest.fn(),
     },
+    guestCrmEvent: {
+      findMany: jest.fn(),
+    },
+    guestGroup: {
+      findMany: jest.fn(),
+    },
     store: {
       findMany: jest.fn(),
     },
@@ -72,11 +78,25 @@ function createPrismaMock() {
       upsert: jest.fn(),
     },
     guestGameEvent: {
+      aggregate: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
       createMany: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestSession: {
+      aggregate: jest.fn(),
+      findMany: jest.fn(),
+    },
+    guestLog: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
+    guestTransaction: {
+      aggregate: jest.fn(),
+      findMany: jest.fn(),
     },
     guestGameMission: {
       findMany: jest.fn(),
@@ -86,6 +106,9 @@ function createPrismaMock() {
       findMany: jest.fn(),
     },
     guestGameSeason: {
+      findMany: jest.fn(),
+    },
+    guestGamePromoCard: {
       findMany: jest.fn(),
     },
     staffMember: {
@@ -135,6 +158,8 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guest.findMany.mockResolvedValue([]);
   prisma.guestCrmLead.findFirst.mockResolvedValue(null);
   prisma.guestCrmLead.update.mockResolvedValue({});
+  prisma.guestCrmEvent.findMany.mockResolvedValue([]);
+  prisma.guestGroup.findMany.mockResolvedValue([]);
   prisma.store.findMany.mockResolvedValue([]);
   prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
   prisma.guestPortalOtpChallenge.count.mockResolvedValue(0);
@@ -190,11 +215,30 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guestGameEvent.count.mockResolvedValue(0);
+  prisma.guestGameEvent.aggregate.mockResolvedValue({
+    _count: { id: 0 },
+    _max: { occurredAt: null },
+  });
   prisma.guestGameEvent.findFirst.mockResolvedValue(null);
+  prisma.guestGameEvent.findMany.mockResolvedValue([]);
   prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestSession.aggregate.mockResolvedValue({
+    _count: { id: 0 },
+    _sum: { durationMinutes: 0 },
+    _max: { startedAt: null },
+  });
+  prisma.guestSession.findMany.mockResolvedValue([]);
+  prisma.guestLog.count.mockResolvedValue(0);
+  prisma.guestLog.findMany.mockResolvedValue([]);
+  prisma.guestTransaction.aggregate.mockResolvedValue({
+    _count: { id: 0 },
+    _max: { happenedAt: null },
+  });
+  prisma.guestTransaction.findMany.mockResolvedValue([]);
   prisma.guestGameMission.findMany.mockResolvedValue([]);
   prisma.guestGameLootBox.findMany.mockResolvedValue([]);
   prisma.guestGameSeason.findMany.mockResolvedValue([]);
+  prisma.guestGamePromoCard.findMany.mockResolvedValue([]);
   prisma.staffMember.findMany.mockResolvedValue([]);
   prisma.langameStaffUser.findMany.mockResolvedValue([]);
   langameSettingsService.searchGuestByPhoneForPortal.mockResolvedValue({
@@ -222,6 +266,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     jwtService,
     langameSettingsService,
     prisma,
+    secretEncryptionService,
     service,
   };
 }
@@ -3323,6 +3368,29 @@ describe('GuestPortalService', () => {
       portal.store.id = 'store-3';
       portal.store.publicSlug = 'club-izhevsk-center';
       portal.store.name = '1337 Izhevsk Center';
+      portal.gamification.nextActions.unshift({
+        id: 'check-in:mission-check-in',
+        kind: 'CHECK_IN',
+        title: 'Check in at Izhevsk Center',
+        description: '50 XP for check-in.',
+        priority: 'HIGH',
+        statusLabel: 'available',
+        progressPercent: 0,
+        anchor: 'progress',
+      });
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+        phoneHash: 'phone-hash',
+        contactMasked: '+7 *** **-11',
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentAt: new Date('2026-06-15T08:00:00.000Z'),
+        xp: 1250,
+        level: 3,
+        status: 'ACTIVE',
+        unsubscribedAt: null,
+      });
       prisma.guestGameProfile.findMany.mockResolvedValue(
         telegramBotClubProfilesFixture(),
       );
@@ -3420,6 +3488,42 @@ describe('GuestPortalService', () => {
           guestId: 'guest-1',
           phoneHash: 'phone-hash',
           profileId: 'profile-1',
+          storeId: 'store-3',
+          tenantId: 'tenant-1',
+        }),
+        { refreshLiveBalances: true },
+      );
+      const selectedButtons = (
+        result.reply?.replyMarkup as any
+      ).inline_keyboard.flat();
+      const checkInCallbackData = selectedButtons.find(
+        (button: any) => button.text === 'Чекин',
+      ).callback_data;
+
+      expect(checkInCallbackData).toMatch(/^bot:checkin:[A-Za-z0-9_-]{12,32}$/);
+
+      const checkInResult = await service.handleTelegramWebhook(
+        'telegram-secret',
+        {
+          callback_query: {
+            id: 'callback-check-in-scoped',
+            from: { id: 123456 },
+            message: {
+              chat: { id: 123456 },
+            },
+            data: checkInCallbackData,
+          },
+        },
+      );
+
+      expect(checkInResult).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CHECK_IN',
+        profileId: 'profile-1',
+      });
+      expect(buildPortalPayload).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sub: 'telegram-bot:profile-1:store-3',
           storeId: 'store-3',
           tenantId: 'tenant-1',
         }),
@@ -4801,6 +4905,127 @@ describe('GuestPortalService', () => {
       expect(result?.bonusBalanceCurrent?.bonusBalance.toFixed(2)).toBe(
         '250.00',
       );
+    });
+  });
+
+  describe('buildPortalPayload guest matching', () => {
+    it('matches a scoped Langame guest by local RU phone hash variant', async () => {
+      const {
+        langameSettingsService,
+        prisma,
+        secretEncryptionService,
+        service,
+      } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+      const phoneHashTelegram = createHmac('sha256', 'test-secret')
+        .update('79225219799')
+        .digest('hex');
+      const phoneHashLocal = createHmac('sha256', 'test-secret')
+        .update('9225219799')
+        .digest('hex');
+
+      secretEncryptionService.decrypt.mockReturnValue('79225219799');
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'LeetPlus',
+        slug: 'demo',
+        stores: [
+          {
+            id: 'store-pushkinskaya',
+            publicSlug: 'pushkinskaya',
+            name: '1337-Pushkinskaya',
+            address: 'Pushkinskaya, 217',
+            externalDomain: '46.langamepro.ru',
+            externalClubId: '1',
+            integrationSourceId: null,
+          },
+        ],
+      });
+      prisma.guest.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'guest-pushkinskaya',
+          tenantId: 'tenant-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '46.langamepro.ru',
+          externalGuestTypeId: null,
+          externalGuestId: '633280',
+          phoneHash: phoneHashLocal,
+          phoneMasked: '***9799',
+          currentCountHours: null,
+          lastSyncedAt: new Date('2026-06-24T23:51:58.104Z'),
+          isDisabled: false,
+        });
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-telegram',
+        tenantId: 'tenant-1',
+        guestId: null,
+        leadId: null,
+        displayName: null,
+        contactMasked: '***9799',
+        phoneHash: phoneHashTelegram,
+        phoneEncrypted: 'encrypted-phone',
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentSource: 'telegram',
+        phoneConsentAt: new Date('2026-06-25T08:00:00.000Z'),
+        telegramIdentity: 'chat:123456',
+        maxIdentity: null,
+        unsubscribedAt: null,
+        xp: 0,
+        level: 1,
+        status: 'ACTIVE',
+        isStaffTest: false,
+        staffTestReason: null,
+        staffTestMatchedAt: null,
+        lastActivityAt: null,
+      });
+      langameSettingsService.getGuestBalancesForPortal.mockResolvedValue({
+        checkedAt: '2026-06-25T09:00:30.000Z',
+        externalGuestId: '633280',
+        source: {
+          id: 'source-46',
+          name: '46.langamepro.ru',
+          domain: '46.langamepro.ru',
+          status: 'SUCCESS',
+          errorMessage: null,
+        },
+        balance: 321.5,
+        bonusBalance: 42,
+        balanceFound: true,
+        bonusBalanceFound: true,
+      });
+
+      const portal = await (service as any).buildPortalPayload(
+        {
+          sub: 'telegram-bot:profile-telegram:store-pushkinskaya',
+          purpose: 'guest_portal',
+          tenantId: 'tenant-1',
+          storeId: 'store-pushkinskaya',
+          guestId: null,
+          profileId: 'profile-telegram',
+          phoneHash: phoneHashTelegram,
+        },
+        { refreshLiveBalances: true },
+      );
+
+      expect(prisma.guest.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            externalDomain: '46.langamepro.ru',
+            phoneHash: {
+              in: expect.arrayContaining([phoneHashTelegram, phoneHashLocal]),
+            },
+          }),
+        }),
+      );
+      expect(
+        langameSettingsService.getGuestBalancesForPortal,
+      ).toHaveBeenCalledWith('tenant-1', '46.langamepro.ru', '633280');
+      expect(portal.guestFound).toBe(true);
+      expect(portal.loyalty.balance).toBe(321.5);
+      expect(portal.loyalty.bonusBalance).toBe(42);
     });
   });
 

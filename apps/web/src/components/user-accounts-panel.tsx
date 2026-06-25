@@ -1407,11 +1407,23 @@ export function UserAccountsPanel({
               {invites.map((invite) => (
                 <div
                   key={invite.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Открыть приглашение ${
+                    invite.fullName || invite.email || "без email"
+                  }`}
+                  onClick={() => startEditInvite(invite)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      startEditInvite(invite);
+                    }
+                  }}
                   className={[
-                    "rounded-md border bg-white p-3 text-sm transition dark:bg-zinc-950",
+                    "cursor-pointer rounded-md border bg-white p-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500/40 dark:bg-zinc-950",
                     selectedInviteId === invite.id
                       ? "border-emerald-500 ring-1 ring-emerald-500/30 dark:border-emerald-400"
-                      : "border-zinc-200 dark:border-zinc-800",
+                      : "border-zinc-200 hover:border-emerald-400 dark:border-zinc-800 dark:hover:border-emerald-500/70",
                   ].join(" ")}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1429,14 +1441,20 @@ export function UserAccountsPanel({
                       </span>
                       <button
                         type="button"
-                        onClick={() => startEditInvite(invite)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          startEditInvite(invite);
+                        }}
                         className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
                       >
                         Открыть
                       </button>
                       <button
                         type="button"
-                        onClick={() => copyInviteUrl(invite.registrationUrl ?? null)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          copyInviteUrl(invite.registrationUrl ?? null);
+                        }}
                         disabled={!invite.registrationUrl}
                         className="rounded-md bg-zinc-950 px-2 py-1 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
                       >

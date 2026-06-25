@@ -172,6 +172,7 @@ export type StaffChecklistItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  dueOffsetMinutes: number | null;
 };
 
 export type StaffChecklistEvidenceAttachment = {
@@ -265,6 +266,7 @@ export type StaffChecklistExecutionMetrics = {
   escalated: number;
   canceled: number;
   overdue: number;
+  overdueItems: number;
   failedItems: number;
   blockingIssues: number;
   scoreTotal: number;
@@ -443,6 +445,11 @@ type Metrics = {
   blockingIssues: StaffChecklistBlockingIssue[];
 };
 
+type StaffChecklistAnswerTiming = {
+  isAnswered: boolean;
+  completedAt: string | null;
+};
+
 type ChecklistSource = {
   kind: 'REGULATION' | 'TEMPLATE';
   id: string;
@@ -612,6 +619,7 @@ export class StaffChecklistsService {
       }),
     ]);
     const reportRows = this.applyExecutionTableFilters(rows, filters);
+    const now = new Date();
 
     const summary = this.createExecutionMetrics();
     const byClub = new Map<string, StaffChecklistExecutionGroup>();
@@ -620,7 +628,7 @@ export class StaffChecklistsService {
     const byChecklist = new Map<string, StaffChecklistExecutionGroup>();
 
     reportRows.forEach((row) => {
-      this.addRunToExecutionMetrics(summary, row);
+      this.addRunToExecutionMetrics(summary, row, now);
 
       const clubGroup = this.getExecutionGroup(
         byClub,
@@ -628,7 +636,7 @@ export class StaffChecklistsService {
         row.store?.name ?? 'Вся сеть / клуб не указан',
         row.store?.isActive === false ? 'неактивный клуб' : null,
       );
-      this.addRunToExecutionMetrics(clubGroup, row);
+      this.addRunToExecutionMetrics(clubGroup, row, now);
 
       const shiftGroup = this.getExecutionGroup(
         byShift,
@@ -638,7 +646,7 @@ export class StaffChecklistsService {
           : 'Без привязки к смене',
         row.shift?.store?.name ?? row.store?.name ?? null,
       );
-      this.addRunToExecutionMetrics(shiftGroup, row);
+      this.addRunToExecutionMetrics(shiftGroup, row, now);
 
       const employeeGroup = this.getExecutionGroup(
         byEmployee,
@@ -648,7 +656,7 @@ export class StaffChecklistsService {
           'Не назначен',
         row.assignedToUser?.email ?? null,
       );
-      this.addRunToExecutionMetrics(employeeGroup, row);
+      this.addRunToExecutionMetrics(employeeGroup, row, now);
 
       const source = this.resolveChecklistSource(row);
       const checklistGroup = this.getExecutionGroup(
@@ -661,7 +669,7 @@ export class StaffChecklistsService {
             ? 'шаблон чеклиста'
             : 'разовое выполнение',
       );
-      this.addRunToExecutionMetrics(checklistGroup, row);
+      this.addRunToExecutionMetrics(checklistGroup, row, now);
     });
 
     return {
@@ -671,7 +679,9 @@ export class StaffChecklistsService {
       byShift: this.finalizeExecutionGroups(byShift),
       byEmployee: this.finalizeExecutionGroups(byEmployee),
       byChecklist: this.finalizeExecutionGroups(byChecklist),
-      runs: reportRows.slice(0, 300).map((row) => this.toExecutionRun(row)),
+      runs: reportRows
+        .slice(0, 300)
+        .map((row) => this.toExecutionRun(row, now)),
       stores,
       users,
       checklistTemplates: checklistTemplates.map((row) =>
@@ -698,6 +708,7 @@ export class StaffChecklistsService {
       take: 10000,
     });
     const reportRows = this.applyExecutionTableFilters(rows, filters);
+    const now = new Date();
 
     return buildStaffExportFile({
       format,
@@ -716,15 +727,18 @@ export class StaffChecklistsService {
           'Отправлено',
           'Смена',
           'Просрочено',
+          'Просрочено пунктов',
           'Проблемных пунктов',
           'Блокирующих проблем',
           'Оценка, %',
           'Обязательные, %',
           'Доказательства, %',
         ],
-        ...reportRows.map((row) => this.toExecutionExportRow(row)),
+        ...reportRows.map((row) => this.toExecutionExportRow(row, now)),
       ],
-      widths: [36, 34, 18, 18, 24, 28, 20, 20, 20, 22, 14, 18, 18, 14, 16, 18],
+      widths: [
+        36, 34, 18, 18, 24, 28, 20, 20, 20, 22, 14, 18, 18, 18, 14, 16, 18,
+      ],
     });
   }
 
@@ -1774,6 +1788,7 @@ export class StaffChecklistsService {
       escalated: 0,
       canceled: 0,
       overdue: 0,
+      overdueItems: 0,
       failedItems: 0,
       blockingIssues: 0,
       scoreTotal: 0,
@@ -1814,6 +1829,7 @@ export class StaffChecklistsService {
   private addRunToExecutionMetrics(
     metrics: StaffChecklistExecutionMetrics,
     row: StaffChecklistRunRow,
+    now = new Date(),
   ) {
     metrics.total += 1;
 
@@ -1833,10 +1849,11 @@ export class StaffChecklistsService {
       metrics.canceled += 1;
     }
 
-    if (this.isRunOverdue(row.status, row.scheduledAt)) {
+    if (this.isRunOverdue(row.status, row.scheduledAt, now)) {
       metrics.overdue += 1;
     }
 
+    metrics.overdueItems += this.executionOverdueItemCount(row, now);
     metrics.failedItems += row.failedItems;
     metrics.blockingIssues += this.normalizeBlockingIssues(
       row.blockingIssues,
@@ -2010,9 +2027,10 @@ export class StaffChecklistsService {
 
   private toExecutionRun(
     row: StaffChecklistRunRow,
+    now = new Date(),
   ): StaffChecklistExecutionRun {
     const metrics = this.createExecutionMetrics();
-    this.addRunToExecutionMetrics(metrics, row);
+    this.addRunToExecutionMetrics(metrics, row, now);
     const source = this.resolveChecklistSource(row);
 
     return {
@@ -2042,8 +2060,11 @@ export class StaffChecklistsService {
     };
   }
 
-  private toExecutionExportRow(row: StaffChecklistRunRow): StaffExportCell[] {
-    const run = this.toExecutionRun(row);
+  private toExecutionExportRow(
+    row: StaffChecklistRunRow,
+    now = new Date(),
+  ): StaffExportCell[] {
+    const run = this.toExecutionRun(row, now);
 
     return [
       run.id,
@@ -2057,6 +2078,7 @@ export class StaffChecklistsService {
       formatStaffDateTime(run.submittedAt),
       run.shift ? `Смена ${run.shift.externalShiftId}` : null,
       staffYesNo(run.overdue > 0),
+      run.overdueItems,
       run.failedItems,
       run.blockingIssues,
       run.scorePercent,
@@ -2125,6 +2147,99 @@ export class StaffChecklistsService {
     return row.startedAt ?? row.scheduledAt ?? row.createdAt;
   }
 
+  private executionItemDeadlineBase(row: StaffChecklistRunRow) {
+    return (
+      row.shift?.startedAt ?? row.startedAt ?? row.scheduledAt ?? row.createdAt
+    );
+  }
+
+  private executionOverdueItemCount(
+    row: StaffChecklistRunRow,
+    now = new Date(),
+  ) {
+    const sections = this.normalizeSections(row.sectionsSnapshot);
+    const answerTimingByKey = this.normalizeAnswerTimingByKey(row.answers);
+
+    return this.countOverdueItems(
+      sections,
+      answerTimingByKey,
+      this.executionItemDeadlineBase(row),
+      now,
+    );
+  }
+
+  private countOverdueItems(
+    sections: StaffChecklistSection[],
+    answerTimingByKey: Map<string, StaffChecklistAnswerTiming>,
+    baseDate: Date,
+    now: Date,
+  ) {
+    const baseTime = baseDate.getTime();
+
+    if (Number.isNaN(baseTime)) {
+      return 0;
+    }
+
+    const nowTime = now.getTime();
+    let overdueItems = 0;
+
+    sections.forEach((section) => {
+      section.items.forEach((item) => {
+        if (!item.dueOffsetMinutes || item.dueOffsetMinutes <= 0) {
+          return;
+        }
+
+        const deadlineTime = baseTime + item.dueOffsetMinutes * 60 * 1000;
+        const timing = answerTimingByKey.get(`${section.id}::${item.id}`);
+        const completedTime = this.parseOptionalTimestamp(timing?.completedAt);
+
+        if (completedTime !== null) {
+          if (completedTime > deadlineTime) {
+            overdueItems += 1;
+          }
+
+          return;
+        }
+
+        if (!timing?.isAnswered && nowTime > deadlineTime) {
+          overdueItems += 1;
+        }
+      });
+    });
+
+    return overdueItems;
+  }
+
+  private normalizeAnswerTimingByKey(value: unknown) {
+    const timingByKey = new Map<string, StaffChecklistAnswerTiming>();
+
+    if (!Array.isArray(value)) {
+      return timingByKey;
+    }
+
+    value.forEach((answer) => {
+      const record = this.asRecord(answer);
+      const sectionId = this.normalizeOptionalString(record.sectionId);
+      const itemId = this.normalizeOptionalString(record.itemId);
+
+      if (!sectionId || !itemId) {
+        return;
+      }
+
+      const rawStatus = this.normalizeOptionalString(record.status);
+      const isAnswered = rawStatus
+        ? answerStatuses.includes(rawStatus as StaffChecklistAnswerStatus)
+        : false;
+
+      timingByKey.set(`${sectionId}::${itemId}`, {
+        isAnswered,
+        completedAt: this.normalizeOptionalString(record.completedAt),
+      });
+    });
+
+    return timingByKey;
+  }
+
   private normalizeSections(value: unknown): StaffChecklistSection[] {
     const rawSections = Array.isArray(value) ? value : [];
     const sections = rawSections.slice(0, 20).map((section, sectionIndex) => {
@@ -2177,6 +2292,7 @@ export class StaffChecklistsService {
       required: this.normalizeBoolean(item.required, true),
       evidenceRequired: this.normalizeBoolean(item.evidenceRequired, false),
       score: this.normalizeScore(item.score),
+      dueOffsetMinutes: this.normalizeDueOffsetMinutes(item.dueOffsetMinutes),
     };
   }
 
@@ -2971,6 +3087,25 @@ export class StaffChecklistsService {
     return normalized;
   }
 
+  private normalizeDueOffsetMinutes(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const minutes =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number.parseInt(value, 10)
+          : Number.NaN;
+
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return null;
+    }
+
+    return Math.min(Math.trunc(minutes), 24 * 60);
+  }
+
   private normalizeScore(value: unknown) {
     const score =
       typeof value === 'number'
@@ -3000,6 +3135,17 @@ export class StaffChecklistsService {
     }
 
     return date;
+  }
+
+  private parseOptionalTimestamp(value: string | null | undefined) {
+    if (!value) {
+      return null;
+    }
+
+    const date = new Date(value);
+    const timestamp = date.getTime();
+
+    return Number.isNaN(timestamp) ? null : timestamp;
   }
 
   private answerHasEvidence(answer: StaffChecklistAnswer | undefined) {

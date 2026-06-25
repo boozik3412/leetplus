@@ -312,6 +312,7 @@ export default async function StaffChecklistExecutionReportPage({
     { label: "Принято", value: report.summary.accepted },
     { label: "Эскалировано", value: report.summary.escalated },
     { label: "Просрочено", value: report.summary.overdue },
+    { label: "Просрочено пунктов", value: report.summary.overdueItems },
     { label: "Проблемных пунктов", value: report.summary.failedItems },
     { label: "Средняя оценка", value: `${report.summary.scorePercent}%` },
   ];
@@ -370,7 +371,7 @@ export default async function StaffChecklistExecutionReportPage({
           </div>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
           {summaryCards.map((card) => (
             <div
               key={card.label}
@@ -677,6 +678,9 @@ export default async function StaffChecklistExecutionReportPage({
                       />
                     </HeaderFilterForm>
                   </TableHeaderMenu>
+                  <th className="px-4 py-3 text-right font-medium">
+                    Просрочено пунктов
+                  </th>
                   <TableHeaderMenu
                     label="Проблемы"
                     sort="problems"
@@ -703,7 +707,7 @@ export default async function StaffChecklistExecutionReportPage({
                 {report.runs.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-sm text-zinc-500"
                     >
                       Выполнений по выбранным фильтрам пока нет.
@@ -922,6 +926,9 @@ function GroupTable({
               <th className="px-4 py-3 text-right font-medium">Всего</th>
               <th className="px-4 py-3 text-right font-medium">Принято</th>
               <th className="px-4 py-3 text-right font-medium">Эскалации</th>
+              <th className="px-4 py-3 text-right font-medium">
+                Просрочено пунктов
+              </th>
               <th className="px-4 py-3 text-right font-medium">Проблемы</th>
               <th className="px-4 py-3 text-right font-medium">Оценка</th>
             </tr>
@@ -930,7 +937,7 @@ function GroupTable({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-4 py-6 text-center text-sm text-zinc-500"
                 >
                   Нет данных в выбранном периоде.
@@ -958,6 +965,17 @@ function GroupTable({
                     }
                   >
                     {formatNumber(row.escalated)}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <span
+                    className={
+                      row.overdueItems > 0
+                        ? "font-semibold text-red-600 dark:text-red-300"
+                        : "text-zinc-500"
+                    }
+                  >
+                    {formatNumber(row.overdueItems)}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right">
@@ -1021,6 +1039,17 @@ function ExecutionRow({ run }: { run: StaffChecklistExecutionRun }) {
       <td className="px-4 py-3 text-right">
         {formatNumber(run.scoreEarned)}/{formatNumber(run.scoreTotal)}
         <p className="mt-1 text-xs text-zinc-500">{run.scorePercent}%</p>
+      </td>
+      <td className="px-4 py-3 text-right">
+        <span
+          className={
+            run.overdueItems > 0
+              ? "font-semibold text-red-600 dark:text-red-300"
+              : "text-zinc-500"
+          }
+        >
+          {formatNumber(run.overdueItems)}
+        </span>
       </td>
       <td className="px-4 py-3 text-right">
         <span

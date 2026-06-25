@@ -64,6 +64,7 @@ export type StaffShiftRegulationItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  dueOffsetMinutes?: number | null;
 };
 
 export type StaffShiftRegulationSection = {

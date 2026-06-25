@@ -104,6 +104,20 @@ function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function parseDueOffsetMinutes(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
+
+  const minutes = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return null;
+  }
+
+  return Math.min(minutes, 24 * 60);
+}
+
 function attachmentTypeFromUpload(
   attachment: StaffAttachmentUploadResult,
 ): StaffShiftRegulationAttachmentType {
@@ -129,7 +143,10 @@ function attachmentTypeFromUpload(
 function cloneSections(sections: StaffShiftRegulationSection[]) {
   return sections.map((section) => ({
     ...section,
-    items: section.items.map((item) => ({ ...item })),
+    items: section.items.map((item) => ({
+      ...item,
+      dueOffsetMinutes: item.dueOffsetMinutes ?? null,
+    })),
   }));
 }
 
@@ -180,6 +197,7 @@ function defaultDraft(): DraftRegulation {
             required: true,
             evidenceRequired: false,
             score: 2,
+            dueOffsetMinutes: null,
           },
           {
             id: uid("item"),
@@ -190,6 +208,7 @@ function defaultDraft(): DraftRegulation {
             required: true,
             evidenceRequired: false,
             score: 2,
+            dueOffsetMinutes: null,
           },
         ],
       },
@@ -410,6 +429,7 @@ export function StaffShiftRegulationBuilder({
               required: true,
               evidenceRequired: false,
               score: 1,
+              dueOffsetMinutes: null,
             },
           ],
         },
@@ -441,6 +461,7 @@ export function StaffShiftRegulationBuilder({
                   required: true,
                   evidenceRequired: false,
                   score: 1,
+                  dueOffsetMinutes: null,
                 },
               ],
             }
@@ -1545,7 +1566,7 @@ export function StaffShiftRegulationBuilder({
                     key={item.id}
                     className="rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50"
                   >
-                    <div className="grid gap-3 xl:grid-cols-[1.2fr_1.5fr_150px_100px_auto]">
+                    <div className="grid gap-3 xl:grid-cols-[1.1fr_1.35fr_140px_100px_120px_auto]">
                       <label className="space-y-1">
                         <span className="text-xs font-bold uppercase text-zinc-500">
                           Пункт {itemIndex + 1}
@@ -1609,6 +1630,25 @@ export function StaffShiftRegulationBuilder({
                           onChange={(event) =>
                             updateItem(section.id, item.id, {
                               score: Number.parseInt(event.target.value, 10) || 0,
+                            })
+                          }
+                          className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs font-bold uppercase text-zinc-500">
+                          Срок, мин.
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1440}
+                          value={item.dueOffsetMinutes ?? ""}
+                          onChange={(event) =>
+                            updateItem(section.id, item.id, {
+                              dueOffsetMinutes: parseDueOffsetMinutes(
+                                event.target.value,
+                              ),
                             })
                           }
                           className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"

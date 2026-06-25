@@ -96,6 +96,7 @@ function defaultSections(): StaffChecklistTemplateSection[] {
           required: true,
           evidenceRequired: false,
           score: 2,
+          dueOffsetMinutes: null,
         },
         {
           id: createId("item"),
@@ -105,6 +106,7 @@ function defaultSections(): StaffChecklistTemplateSection[] {
           required: true,
           evidenceRequired: false,
           score: 2,
+          dueOffsetMinutes: null,
         },
       ],
     },
@@ -119,6 +121,7 @@ function clonePackSections(
     id: createId(section.id || "section"),
     items: section.items.map((item) => ({
       ...item,
+      dueOffsetMinutes: item.dueOffsetMinutes ?? null,
       id: createId(item.id || "item"),
     })),
   }));
@@ -134,6 +137,7 @@ function cloneRegulationSections(
     id: createId(section.id || "section"),
     items: section.items.map((item) => ({
       ...item,
+      dueOffsetMinutes: item.dueOffsetMinutes ?? null,
       id: createId(item.id || "item"),
     })),
   }));
@@ -189,6 +193,20 @@ function draftSnapshot(draft: DraftTemplate) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
+}
+
+function parseDueOffsetMinutes(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
+
+  const minutes = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return null;
+  }
+
+  return Math.min(minutes, 24 * 60);
 }
 
 function getPackItemsCount(pack: StaffChecklistTemplatePack) {
@@ -340,6 +358,7 @@ export function StaffChecklistTemplateBuilder({
               required: true,
               evidenceRequired: false,
               score: 1,
+              dueOffsetMinutes: null,
             },
           ],
         },
@@ -393,6 +412,7 @@ export function StaffChecklistTemplateBuilder({
                   required: true,
                   evidenceRequired: false,
                   score: 1,
+                  dueOffsetMinutes: null,
                 },
               ],
             }
@@ -1017,7 +1037,7 @@ export function StaffChecklistTemplateBuilder({
                     }}
                     onDrop={(event) => handleItemDrop(event, section.id, item.id)}
                     className={[
-                      "grid gap-3 p-3 transition lg:grid-cols-[2.75rem_minmax(0,1.2fr)_minmax(0,1.4fr)_8rem_8rem_7rem_auto]",
+                      "grid gap-3 p-3 transition lg:grid-cols-[2.75rem_minmax(0,1.15fr)_minmax(0,1.35fr)_8rem_7rem_8rem_7rem_auto]",
                       draggedItem?.itemId === item.id
                         ? "opacity-60"
                         : "",
@@ -1116,6 +1136,21 @@ export function StaffChecklistTemplateBuilder({
                           score: Number(event.target.value),
                         })
                       }
+                      className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={item.dueOffsetMinutes ?? ""}
+                      onChange={(event) =>
+                        patchItem(section.id, item.id, {
+                          dueOffsetMinutes: parseDueOffsetMinutes(
+                            event.target.value,
+                          ),
+                        })
+                      }
+                      placeholder="Срок, мин."
                       className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                     />
                     <div className="flex items-center gap-2">

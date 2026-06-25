@@ -70,6 +70,7 @@ export type StaffChecklistItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  dueOffsetMinutes?: number | null;
 };
 
 export type StaffChecklistEvidenceAttachment = {
@@ -259,6 +260,7 @@ export type StaffChecklistExecutionMetrics = {
   escalated: number;
   canceled: number;
   overdue: number;
+  overdueItems: number;
   failedItems: number;
   blockingIssues: number;
   scoreTotal: number;

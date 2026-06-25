@@ -48,6 +48,7 @@ const emptyChecklistMetrics: StaffChecklistExecutionMetrics = {
   escalated: 0,
   canceled: 0,
   overdue: 0,
+  overdueItems: 0,
   failedItems: 0,
   blockingIssues: 0,
   scoreTotal: 0,

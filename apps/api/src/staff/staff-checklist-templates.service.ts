@@ -76,6 +76,7 @@ export type StaffChecklistTemplateItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  dueOffsetMinutes: number | null;
 };
 
 export type StaffChecklistTemplateReport = {
@@ -734,6 +735,7 @@ export class StaffChecklistTemplatesService {
       required: this.normalizeBoolean(item.required, true),
       evidenceRequired: this.normalizeBoolean(item.evidenceRequired, false),
       score: this.normalizeScore(item.score),
+      dueOffsetMinutes: this.normalizeDueOffsetMinutes(item.dueOffsetMinutes),
     };
   }
 
@@ -767,6 +769,7 @@ export class StaffChecklistTemplatesService {
             required: true,
             evidenceRequired: false,
             score: 2,
+            dueOffsetMinutes: null,
           },
           {
             id: 'guest-zone-ready',
@@ -777,6 +780,7 @@ export class StaffChecklistTemplatesService {
             required: true,
             evidenceRequired: false,
             score: 2,
+            dueOffsetMinutes: null,
           },
         ],
       },
@@ -845,6 +849,25 @@ export class StaffChecklistTemplatesService {
     }
 
     return fallback;
+  }
+
+  private normalizeDueOffsetMinutes(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const minutes =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number.parseInt(value, 10)
+          : Number.NaN;
+
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return null;
+    }
+
+    return Math.min(Math.trunc(minutes), 24 * 60);
   }
 
   private normalizeScore(value: unknown) {

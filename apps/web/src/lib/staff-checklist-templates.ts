@@ -23,6 +23,7 @@ export type StaffChecklistTemplateItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  dueOffsetMinutes?: number | null;
 };
 
 export type StaffChecklistTemplateSection = {

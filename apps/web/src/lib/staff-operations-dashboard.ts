@@ -38,7 +38,21 @@ export type StaffOperationsSummary = {
 
 export type StaffOperationsStaffControl = {
   summary: StaffOperationsStaffControlSummary;
+  shifts: StaffOperationsStaffControlShift[];
   anomalies: StaffOperationsStaffControlAnomaly[];
+};
+
+export type StaffOperationsStaffControlShift = {
+  id: string;
+  externalDomain: string | null;
+  externalUserId: string | null;
+  externalShiftId: string | null;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  durationHours: number;
+  store: StaffTaskStore | null;
+  employee: Pick<StaffTrainingProfileUser, "id" | "email" | "fullName"> | null;
+  staffLabel: string | null;
 };
 
 export type StaffOperationsStaffControlSummary = {

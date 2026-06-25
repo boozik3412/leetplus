@@ -76,6 +76,15 @@ const shiftDashboardSelect = {
   },
 } satisfies Prisma.GuestWorkingShiftSelect;
 
+const staffControlStaffMemberSelect = {
+  id: true,
+  displayName: true,
+  email: true,
+  externalDomain: true,
+  externalUserId: true,
+  user: { select: { id: true, email: true, fullName: true } },
+} satisfies Prisma.StaffMemberSelect;
+
 type TaskDashboardRow = Prisma.StaffTaskGetPayload<{
   select: typeof taskDashboardSelect;
 }>;
@@ -86,6 +95,10 @@ type ChecklistDashboardRow = Prisma.StaffChecklistRunGetPayload<{
 
 type ShiftDashboardRow = Prisma.GuestWorkingShiftGetPayload<{
   select: typeof shiftDashboardSelect;
+}>;
+
+type StaffControlStaffMemberRow = Prisma.StaffMemberGetPayload<{
+  select: typeof staffControlStaffMemberSelect;
 }>;
 
 type StoreOption = { id: string; name: string; isActive: boolean };
@@ -158,7 +171,21 @@ export type StaffOperationsSummary = {
 
 export type StaffOperationsStaffControl = {
   summary: StaffOperationsStaffControlSummary;
+  shifts: StaffOperationsStaffControlShift[];
   anomalies: StaffOperationsStaffControlAnomaly[];
+};
+
+export type StaffOperationsStaffControlShift = {
+  id: string;
+  externalDomain: string | null;
+  externalUserId: string | null;
+  externalShiftId: string | null;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  durationHours: number;
+  store: StoreOption | null;
+  employee: UserOption | null;
+  staffLabel: string | null;
 };
 
 export type StaffOperationsStaffControlSummary = {
@@ -315,48 +342,66 @@ export class StaffOperationsDashboardService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
 
-    const [tasks, checklists, shifts, stores, users, readiness] =
-      await Promise.all([
-        this.prisma.staffTask.findMany({
-          where: this.buildTaskWhere(tenantId, filters),
-          select: taskDashboardSelect,
-          orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
-          take: 5000,
-        }),
-        this.prisma.staffChecklistRun.findMany({
-          where: this.buildChecklistWhere(tenantId, filters),
-          select: checklistDashboardSelect,
-          orderBy: [
-            { submittedAt: 'desc' },
-            { scheduledAt: 'desc' },
-            { createdAt: 'desc' },
-          ],
-          take: 5000,
-        }),
-        this.prisma.guestWorkingShift.findMany({
-          where: this.buildShiftWhere(tenantId, filters),
-          select: shiftDashboardSelect,
-          orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
-          take: 5000,
-        }),
-        this.prisma.store.findMany({
-          where: { tenantId },
-          select: { id: true, name: true, isActive: true },
-          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-        }),
-        this.prisma.user.findMany({
-          where: { tenantId, isActive: true },
-          select: { id: true, email: true, fullName: true },
-          orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
-        }),
-        this.staffReadinessReportService.getReport(user, {
-          storeId: filters.storeId ?? undefined,
-          userId: filters.userId ?? undefined,
-          search: filters.search ?? undefined,
-          status: 'all',
-          role: 'all',
-        }),
-      ]);
+    const [
+      tasks,
+      checklists,
+      shifts,
+      currentOpenShifts,
+      stores,
+      users,
+      readiness,
+    ] = await Promise.all([
+      this.prisma.staffTask.findMany({
+        where: this.buildTaskWhere(tenantId, filters),
+        select: taskDashboardSelect,
+        orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+        take: 5000,
+      }),
+      this.prisma.staffChecklistRun.findMany({
+        where: this.buildChecklistWhere(tenantId, filters),
+        select: checklistDashboardSelect,
+        orderBy: [
+          { submittedAt: 'desc' },
+          { scheduledAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: 5000,
+      }),
+      this.prisma.guestWorkingShift.findMany({
+        where: this.buildShiftWhere(tenantId, filters),
+        select: shiftDashboardSelect,
+        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 5000,
+      }),
+      this.prisma.guestWorkingShift.findMany({
+        where: this.buildCurrentOpenShiftWhere(tenantId, filters),
+        select: shiftDashboardSelect,
+        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 1000,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, email: true, fullName: true },
+        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      }),
+      this.staffReadinessReportService.getReport(user, {
+        storeId: filters.storeId ?? undefined,
+        userId: filters.userId ?? undefined,
+        search: filters.search ?? undefined,
+        status: 'all',
+        role: 'all',
+      }),
+    ]);
+
+    const currentOpenShiftStaffMembers = await this.findStaffMembersForShifts(
+      tenantId,
+      currentOpenShifts,
+    );
 
     const now = new Date();
     const summaryMetrics = this.createMetrics();
@@ -418,7 +463,13 @@ export class StaffOperationsDashboardService {
       filters,
     );
     summaryMetrics.repeatedIssues = recurringIssues.length;
-    const staffControl = this.buildStaffControl(shifts, checklists, filters);
+    const staffControl = this.buildStaffControl(
+      shifts,
+      checklists,
+      filters,
+      currentOpenShifts,
+      currentOpenShiftStaffMembers,
+    );
 
     return {
       filters: {
@@ -626,6 +677,77 @@ export class StaffOperationsDashboardService {
     }
 
     return where;
+  }
+
+  private buildCurrentOpenShiftWhere(
+    tenantId: string,
+    filters: ResolvedStaffOperationsDashboardFilters,
+  ): Prisma.GuestWorkingShiftWhereInput {
+    const where: Prisma.GuestWorkingShiftWhereInput = {
+      tenantId,
+      stoppedAt: null,
+    };
+
+    if (filters.storeId) {
+      where.storeId = filters.storeId;
+    }
+
+    if (filters.search) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { externalShiftId: { contains: filters.search } },
+            { externalUserId: { contains: filters.search } },
+            { guest: { fullNameMasked: { contains: filters.search } } },
+            { guest: { emailMasked: { contains: filters.search } } },
+          ],
+        },
+      ];
+    }
+
+    return where;
+  }
+
+  private async findStaffMembersForShifts(
+    tenantId: string,
+    shifts: ShiftDashboardRow[],
+  ) {
+    const identities = new Map<
+      string,
+      { externalDomain: string | null; externalUserId: string }
+    >();
+
+    shifts.forEach((shift) => {
+      if (!shift.externalUserId) {
+        return;
+      }
+
+      const key = this.staffControlIdentityKey(
+        shift.externalDomain,
+        shift.externalUserId,
+      );
+
+      if (key) {
+        identities.set(key, {
+          externalDomain: shift.externalDomain,
+          externalUserId: shift.externalUserId,
+        });
+      }
+    });
+
+    if (identities.size === 0) {
+      return [];
+    }
+
+    return this.prisma.staffMember.findMany({
+      where: {
+        tenantId,
+        OR: Array.from(identities.values()),
+      },
+      select: staffControlStaffMemberSelect,
+      orderBy: [{ updatedAt: 'desc' }],
+    });
   }
 
   private createMetrics(): DisciplineMetrics {
@@ -959,6 +1081,8 @@ export class StaffOperationsDashboardService {
     shifts: ShiftDashboardRow[],
     checklists: ChecklistDashboardRow[],
     filters: ResolvedStaffOperationsDashboardFilters,
+    currentOpenShifts: ShiftDashboardRow[] = [],
+    currentOpenShiftStaffMembers: StaffControlStaffMemberRow[] = [],
   ): StaffOperationsStaffControl {
     const summary = this.emptyStaffControlSummary();
     let middleCheckSum = 0;
@@ -1241,6 +1365,10 @@ export class StaffOperationsDashboardService {
 
     return {
       summary,
+      shifts: this.buildStaffControlShifts(
+        currentOpenShifts,
+        currentOpenShiftStaffMembers,
+      ),
       anomalies: anomalies
         .sort(
           (first, second) =>
@@ -1251,6 +1379,72 @@ export class StaffOperationsDashboardService {
         )
         .slice(0, 10),
     };
+  }
+
+  private buildStaffControlShifts(
+    shifts: ShiftDashboardRow[],
+    staffMembers: StaffControlStaffMemberRow[],
+  ): StaffOperationsStaffControlShift[] {
+    const staffByIdentity = new Map<string, StaffControlStaffMemberRow>();
+
+    staffMembers.forEach((member) => {
+      const key = this.staffControlIdentityKey(
+        member.externalDomain,
+        member.externalUserId,
+      );
+
+      if (key && !staffByIdentity.has(key)) {
+        staffByIdentity.set(key, member);
+      }
+    });
+
+    return shifts.map((shift) => {
+      const key = this.staffControlIdentityKey(
+        shift.externalDomain,
+        shift.externalUserId,
+      );
+      const member = key ? staffByIdentity.get(key) : undefined;
+      const employee = member?.user
+        ? {
+            id: member.user.id,
+            email: member.user.email,
+            fullName: member.user.fullName,
+          }
+        : null;
+
+      return {
+        id: shift.id,
+        externalDomain: shift.externalDomain,
+        externalUserId: shift.externalUserId,
+        externalShiftId: shift.externalShiftId,
+        startedAt: this.dateToIso(shift.startedAt),
+        stoppedAt: this.dateToIso(shift.stoppedAt),
+        durationHours: this.round(this.shiftHours(shift), 1),
+        store: shift.store,
+        employee,
+        staffLabel:
+          employee?.fullName ??
+          employee?.email ??
+          member?.displayName ??
+          member?.email ??
+          this.shiftOperatorLabel(shift),
+      };
+    });
+  }
+
+  private staffControlIdentityKey(
+    externalDomain: string | null,
+    externalUserId: string | null,
+  ) {
+    if (!externalUserId) {
+      return null;
+    }
+
+    return `${externalDomain ?? 'unknown'}::${externalUserId}`;
+  }
+
+  private dateToIso(value: Date | null) {
+    return value ? value.toISOString() : null;
   }
 
   private emptyStaffControlSummary(): StaffOperationsStaffControlSummary {
@@ -1328,10 +1522,11 @@ export class StaffOperationsDashboardService {
       return shift.durationMinutes / 60;
     }
 
-    if (shift.startedAt && shift.stoppedAt) {
+    if (shift.startedAt) {
+      const stoppedAt = shift.stoppedAt ?? new Date();
+
       return Math.max(
-        (shift.stoppedAt.getTime() - shift.startedAt.getTime()) /
-          (1000 * 60 * 60),
+        (stoppedAt.getTime() - shift.startedAt.getTime()) / (1000 * 60 * 60),
         0,
       );
     }

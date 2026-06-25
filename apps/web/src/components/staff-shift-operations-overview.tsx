@@ -7,6 +7,7 @@ import type {
   StaffChecklistExecutionRun,
   StaffChecklistStatus,
 } from "@/lib/staff-checklists";
+import type { StaffOperationsStaffControlShift } from "@/lib/staff-operations-dashboard";
 import type {
   StaffTask,
   StaffTaskGroup,
@@ -21,6 +22,8 @@ type OverviewGroup = {
   checklist: StaffChecklistExecutionMetrics;
   tasks: StaffTaskGroup;
   activeAdmins: number;
+  shiftIds: string[];
+  missingChecklistShifts: number;
   kind: "club" | "employee";
 };
 
@@ -36,6 +39,7 @@ type ShiftSnapshot = {
   storeName: string | null;
   admins: string[];
   runs: StaffChecklistExecutionRun[];
+  missingChecklist: boolean;
 };
 
 const emptyChecklistMetrics: StaffChecklistExecutionMetrics = {
@@ -112,14 +116,6 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
-function userName(user: StaffChecklistExecutionRun["assignedToUser"]) {
-  return user?.fullName ?? user?.email ?? "Сотрудник не указан";
-}
-
-function uniqueStrings(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
 function formatPercent(value: number) {
   if (!Number.isFinite(value)) {
     return "0%";
@@ -190,44 +186,32 @@ function taskDetailHref(userId: string) {
   )}&view=byShift`;
 }
 
-function isActiveChecklistRun(run: StaffChecklistExecutionRun) {
-  return ["OPEN", "IN_PROGRESS", "ON_REVIEW", "RETURNED", "ESCALATED"].includes(
-    run.status,
-  );
-}
-
-function isActiveTask(task: StaffTask) {
-  return !["DONE", "CANCELED"].includes(task.status);
-}
-
-function getTaskStoreKey(task: StaffTask) {
-  return task.store?.id ?? task.shift?.store?.id ?? "network";
-}
-
-function getChecklistStoreKey(run: StaffChecklistExecutionRun) {
-  return run.store?.id ?? run.shift?.store?.id ?? "network";
-}
-
 function getClubRuns(
   checklists: StaffChecklistExecutionReport,
   group: OverviewGroup,
 ) {
-  return checklists.runs.filter((run) => getChecklistStoreKey(run) === group.key);
+  const shiftIds = getGroupShiftIds(group);
+
+  return checklists.runs.filter(
+    (run) => run.shift?.id && shiftIds.has(run.shift.id),
+  );
 }
 
 function getClubTasks(tasks: StaffTaskReport, group: OverviewGroup) {
-  return tasks.rows.filter((task) => getTaskStoreKey(task) === group.key);
+  const shiftIds = getGroupShiftIds(group);
+
+  return tasks.rows.filter((task) => task.shift?.id && shiftIds.has(task.shift.id));
 }
 
 function getEmployeeRuns(
   checklists: StaffChecklistExecutionReport,
   group: OverviewGroup,
 ) {
-  return checklists.runs.filter((run) => run.assignedToUser?.id === group.key);
+  return getClubRuns(checklists, group);
 }
 
 function getEmployeeTasks(tasks: StaffTaskReport, group: OverviewGroup) {
-  return tasks.rows.filter((task) => task.assignedToUser?.id === group.key);
+  return getClubTasks(tasks, group);
 }
 
 function taskTime(task: StaffTask) {
@@ -261,41 +245,82 @@ function taskAssigneeName(task: StaffTask) {
 }
 
 function hasChecklistControlGap(group: OverviewGroup) {
+  return group.missingChecklistShifts > 0;
+}
+
+function staffShiftStoreKey(shift: StaffOperationsStaffControlShift) {
+  return shift.store?.id ?? "network";
+}
+
+function staffShiftEmployeeKey(shift: StaffOperationsStaffControlShift) {
+  if (shift.employee?.id) {
+    return shift.employee.id;
+  }
+
+  if (shift.externalUserId) {
+    return `external:${shift.externalDomain ?? "unknown"}:${shift.externalUserId}`;
+  }
+
+  return `shift:${shift.id}`;
+}
+
+function staffShiftLabel(shift: StaffOperationsStaffControlShift) {
   return (
-    group.kind === "club" &&
-    group.activeAdmins > 0 &&
-    activeChecklistCount(group.checklist) === 0
+    shift.staffLabel ??
+    shift.employee?.fullName ??
+    shift.employee?.email ??
+    (shift.externalUserId ? `user_id ${shift.externalUserId}` : null) ??
+    "Администратор не определен"
   );
 }
 
-function buildShiftSnapshots(runs: StaffChecklistExecutionRun[]) {
-  const shifts = new Map<string, ShiftSnapshot>();
+function staffShiftCaption(shift: StaffOperationsStaffControlShift) {
+  return (
+    shift.employee?.email ??
+    (shift.externalUserId ? `Langame user_id ${shift.externalUserId}` : null)
+  );
+}
+
+function getGroupShiftIds(group: OverviewGroup) {
+  return new Set(group.shiftIds);
+}
+
+function buildShiftSnapshots(
+  shifts: StaffOperationsStaffControlShift[],
+  runs: StaffChecklistExecutionRun[],
+) {
+  const runsByShift = new Map<string, StaffChecklistExecutionRun[]>();
 
   runs.forEach((run) => {
-    const key = run.shift?.id ?? `run:${run.id}`;
-    const current = shifts.get(key) ?? {
-      key,
-      startedAt: run.shift?.startedAt ?? checklistRunTime(run),
-      stoppedAt: run.shift?.stoppedAt ?? null,
-      storeName: run.shift?.store?.name ?? run.store?.name ?? null,
-      admins: [],
-      runs: [],
-    };
+    if (!run.shift?.id) {
+      return;
+    }
 
-    current.runs.push(run);
-    current.admins = uniqueStrings([
-      ...current.admins,
-      userName(run.assignedToUser),
-    ]);
-    shifts.set(key, current);
+    const current = runsByShift.get(run.shift.id) ?? [];
+    current.push(run);
+    runsByShift.set(run.shift.id, current);
   });
 
-  return Array.from(shifts.values()).sort((left, right) => {
-    const leftTime = left.startedAt ? new Date(left.startedAt).getTime() : 0;
-    const rightTime = right.startedAt ? new Date(right.startedAt).getTime() : 0;
+  return shifts
+    .map((shift): ShiftSnapshot => {
+      const shiftRuns = sortRunsByRecent(runsByShift.get(shift.id) ?? []);
 
-    return rightTime - leftTime;
-  });
+      return {
+        key: shift.id,
+        startedAt: shift.startedAt,
+        stoppedAt: shift.stoppedAt,
+        storeName: shift.store?.name ?? null,
+        admins: [staffShiftLabel(shift)],
+        runs: shiftRuns,
+        missingChecklist: !shiftRuns.some((run) => run.status !== "CANCELED"),
+      };
+    })
+    .sort((left, right) => {
+      const leftTime = left.startedAt ? new Date(left.startedAt).getTime() : 0;
+      const rightTime = right.startedAt ? new Date(right.startedAt).getTime() : 0;
+
+      return rightTime - leftTime;
+    });
 }
 
 function checklistStatusClass(status: StaffChecklistStatus, overdue: number) {
@@ -334,139 +359,198 @@ function taskStatusClass(status: StaffTaskStatus, isOverdue: boolean) {
   return "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700";
 }
 
-function buildActiveAdminSets(
-  checklists: StaffChecklistExecutionReport,
-  tasks: StaffTaskReport,
+function mergeChecklistRunsForShifts(
+  actualShifts: StaffOperationsStaffControlShift[],
+  reports: Array<StaffChecklistExecutionReport | undefined>,
 ) {
-  const total = new Set<string>();
-  const byClub = new Map<string, Set<string>>();
+  const shiftIds = new Set(actualShifts.map((shift) => shift.id));
+  const runs = new Map<string, StaffChecklistExecutionRun>();
 
-  checklists.runs.forEach((run) => {
-    const userId = run.assignedToUser?.id;
+  reports.forEach((report) => {
+    report?.runs.forEach((run) => {
+      if (run.shift?.id && shiftIds.has(run.shift.id)) {
+        runs.set(run.id, run);
+      }
+    });
+  });
 
-    if (!userId || !isActiveChecklistRun(run)) {
+  return Array.from(runs.values());
+}
+
+function mergeTasksForShifts(
+  actualShifts: StaffOperationsStaffControlShift[],
+  reports: Array<StaffTaskReport | undefined>,
+) {
+  const shiftIds = new Set(actualShifts.map((shift) => shift.id));
+  const rows = new Map<string, StaffTask>();
+
+  reports.forEach((report) => {
+    report?.rows.forEach((task) => {
+      if (task.shift?.id && shiftIds.has(task.shift.id)) {
+        rows.set(task.id, task);
+      }
+    });
+  });
+
+  return Array.from(rows.values());
+}
+
+function addChecklistRunToMetrics(
+  metrics: StaffChecklistExecutionMetrics,
+  run: StaffChecklistExecutionRun,
+) {
+  metrics.total += 1;
+  metrics.open += run.status === "OPEN" ? 1 : 0;
+  metrics.inProgress += run.status === "IN_PROGRESS" ? 1 : 0;
+  metrics.onReview += run.status === "ON_REVIEW" ? 1 : 0;
+  metrics.accepted += run.status === "ACCEPTED" ? 1 : 0;
+  metrics.returned += run.status === "RETURNED" ? 1 : 0;
+  metrics.escalated += run.status === "ESCALATED" ? 1 : 0;
+  metrics.canceled += run.status === "CANCELED" ? 1 : 0;
+  metrics.overdue += run.overdue;
+  metrics.failedItems += run.failedItems;
+  metrics.blockingIssues += run.blockingIssues;
+  metrics.scoreTotal += run.scoreTotal;
+  metrics.scoreEarned += run.scoreEarned;
+  metrics.requiredItemsTotal += run.requiredItemsTotal;
+  metrics.requiredItemsDone += run.requiredItemsDone;
+  metrics.evidenceTotal += run.evidenceTotal;
+  metrics.evidenceDone += run.evidenceDone;
+}
+
+function finalizeChecklistMetrics(metrics: StaffChecklistExecutionMetrics) {
+  metrics.scorePercent = ratioPercent(metrics.scoreEarned, metrics.scoreTotal);
+  metrics.requiredPercent = ratioPercent(
+    metrics.requiredItemsDone,
+    metrics.requiredItemsTotal,
+  );
+  metrics.evidencePercent = ratioPercent(metrics.evidenceDone, metrics.evidenceTotal);
+
+  return metrics;
+}
+
+function buildChecklistMetricsFromRuns(runs: StaffChecklistExecutionRun[]) {
+  const metrics = { ...emptyChecklistMetrics };
+
+  runs.forEach((run) => addChecklistRunToMetrics(metrics, run));
+
+  return finalizeChecklistMetrics(metrics);
+}
+
+function buildTaskGroupFromRows(
+  key: string,
+  label: string,
+  hint: string | null,
+  rows: StaffTask[],
+): StaffTaskGroup {
+  return rows.reduce<StaffTaskGroup>(
+    (group, task) => {
+      group.total += 1;
+      group.open += task.status === "OPEN" ? 1 : 0;
+      group.inProgress += task.status === "IN_PROGRESS" ? 1 : 0;
+      group.onReview += task.status === "ON_REVIEW" ? 1 : 0;
+      group.done += task.status === "DONE" ? 1 : 0;
+      group.canceled += task.status === "CANCELED" ? 1 : 0;
+      group.overdue += task.isOverdue ? 1 : 0;
+
+      return group;
+    },
+    { ...emptyTaskGroup, key, label, hint },
+  );
+}
+
+function groupRowsByShiftId<T extends { shift: { id: string } | null }>(rows: T[]) {
+  const byShift = new Map<string, T[]>();
+
+  rows.forEach((row) => {
+    if (!row.shift?.id) {
       return;
     }
 
-    total.add(userId);
-
-    const storeKey = getChecklistStoreKey(run);
-    const clubSet = byClub.get(storeKey) ?? new Set<string>();
-    clubSet.add(userId);
-    byClub.set(storeKey, clubSet);
+    const current = byShift.get(row.shift.id) ?? [];
+    current.push(row);
+    byShift.set(row.shift.id, current);
   });
 
-  tasks.rows.forEach((task) => {
-    const userId = task.assignedToUser?.id;
-
-    if (!userId || !isActiveTask(task)) {
-      return;
-    }
-
-    total.add(userId);
-
-    const storeKey = getTaskStoreKey(task);
-    const clubSet = byClub.get(storeKey) ?? new Set<string>();
-    clubSet.add(userId);
-    byClub.set(storeKey, clubSet);
-  });
-
-  return { total, byClub };
+  return byShift;
 }
 
-function activeShiftCount(
-  checklists: StaffChecklistExecutionReport,
-  tasks: StaffTaskReport,
-) {
-  const shifts = new Set<string>();
-
-  checklists.runs.forEach((run) => {
-    if (run.shift && !run.shift.stoppedAt) {
-      shifts.add(run.shift.id);
-    }
-  });
-
-  tasks.rows.forEach((task) => {
-    if (task.shift && !task.shift.stoppedAt) {
-      shifts.add(task.shift.id);
-    }
-  });
-
-  return shifts.size;
-}
-
-function mergeByClub(
-  checklists: StaffChecklistExecutionReport,
-  tasks: StaffTaskReport,
-  activeAdminsByClub: Map<string, Set<string>>,
+function buildActualShiftGroups(
+  actualShifts: StaffOperationsStaffControlShift[],
+  runs: StaffChecklistExecutionRun[],
+  taskRows: StaffTask[],
+  kind: OverviewGroup["kind"],
 ) {
   const groups = new Map<string, OverviewGroup>();
+  const runsByShift = groupRowsByShiftId(runs);
+  const tasksByShift = groupRowsByShiftId(taskRows);
 
-  checklists.byClub.forEach((group) => {
-    groups.set(group.key, {
-      key: group.key,
-      label: group.label,
-      caption: group.caption,
-      checklist: group,
-      tasks: { ...emptyTaskGroup, key: group.key, label: group.label },
-      activeAdmins: activeAdminsByClub.get(group.key)?.size ?? 0,
-      kind: "club",
+  actualShifts.forEach((shift) => {
+    const key = kind === "club" ? staffShiftStoreKey(shift) : staffShiftEmployeeKey(shift);
+    const label =
+      kind === "club" ? shift.store?.name ?? "Клуб не указан" : staffShiftLabel(shift);
+    const caption =
+      kind === "club"
+        ? shift.store?.isActive === false
+          ? "неактивный клуб"
+          : null
+        : staffShiftCaption(shift);
+    const current = groups.get(key);
+
+    if (current) {
+      current.shiftIds.push(shift.id);
+      current.activeAdmins =
+        kind === "club"
+          ? new Set([
+              ...current.shiftIds
+                .map((shiftId) =>
+                  actualShifts.find((actualShift) => actualShift.id === shiftId),
+                )
+                .filter(Boolean)
+                .map((actualShift) =>
+                  staffShiftEmployeeKey(actualShift as StaffOperationsStaffControlShift),
+                ),
+            ]).size
+          : current.shiftIds.length;
+      return;
+    }
+
+    groups.set(key, {
+      key,
+      label,
+      caption,
+      checklist: emptyChecklistMetrics,
+      tasks: { ...emptyTaskGroup, key, label, hint: caption },
+      activeAdmins: 1,
+      shiftIds: [shift.id],
+      missingChecklistShifts: 0,
+      kind,
     });
   });
 
-  tasks.groups.byClub.forEach((group) => {
-    const current = groups.get(group.key);
+  groups.forEach((group) => {
+    const groupRuns = group.shiftIds.flatMap(
+      (shiftId) => runsByShift.get(shiftId) ?? [],
+    );
+    const groupTasks = group.shiftIds.flatMap(
+      (shiftId) => tasksByShift.get(shiftId) ?? [],
+    );
 
-    groups.set(group.key, {
-      key: group.key,
-      label: current?.label ?? group.label,
-      caption: current?.caption ?? group.hint,
-      checklist: current?.checklist ?? emptyChecklistMetrics,
-      tasks: group,
-      activeAdmins: activeAdminsByClub.get(group.key)?.size ?? current?.activeAdmins ?? 0,
-      kind: "club",
-    });
+    group.checklist = buildChecklistMetricsFromRuns(groupRuns);
+    group.tasks = buildTaskGroupFromRows(
+      group.key,
+      group.label,
+      group.caption,
+      groupTasks,
+    );
+    group.missingChecklistShifts = group.shiftIds.filter((shiftId) => {
+      const shiftRuns = runsByShift.get(shiftId) ?? [];
+
+      return !shiftRuns.some((run) => run.status !== "CANCELED");
+    }).length;
   });
 
   return Array.from(groups.values()).sort(compareOverviewGroups);
-}
-
-function mergeByEmployee(
-  checklists: StaffChecklistExecutionReport,
-  tasks: StaffTaskReport,
-) {
-  const groups = new Map<string, OverviewGroup>();
-
-  checklists.byEmployee.forEach((group) => {
-    groups.set(group.key, {
-      key: group.key,
-      label: group.label,
-      caption: group.caption,
-      checklist: group,
-      tasks: { ...emptyTaskGroup, key: group.key, label: group.label },
-      activeAdmins: activeChecklistCount(group) > 0 ? 1 : 0,
-      kind: "employee",
-    });
-  });
-
-  tasks.groups.byEmployee.forEach((group) => {
-    const current = groups.get(group.key);
-
-    groups.set(group.key, {
-      key: group.key,
-      label: current?.label ?? group.label,
-      caption: current?.caption ?? group.hint,
-      checklist: current?.checklist ?? emptyChecklistMetrics,
-      tasks: group,
-      activeAdmins:
-        current?.activeAdmins ?? (activeTaskCount(group) > 0 ? 1 : 0),
-      kind: "employee",
-    });
-  });
-
-  return Array.from(groups.values())
-    .filter((group) => group.key !== "unassigned")
-    .sort(compareOverviewGroups);
 }
 
 function compareOverviewGroups(left: OverviewGroup, right: OverviewGroup) {
@@ -484,11 +568,19 @@ function compareOverviewGroups(left: OverviewGroup, right: OverviewGroup) {
   }
 
   const rightActive =
-    activeChecklistCount(right.checklist) + activeTaskCount(right.tasks);
+    right.activeAdmins +
+    activeChecklistCount(right.checklist) +
+    activeTaskCount(right.tasks);
   const leftActive =
-    activeChecklistCount(left.checklist) + activeTaskCount(left.tasks);
+    left.activeAdmins +
+    activeChecklistCount(left.checklist) +
+    activeTaskCount(left.tasks);
 
-  return rightActive - leftActive || left.label.localeCompare(right.label);
+  return (
+    rightActive - leftActive ||
+    right.shiftIds.length - left.shiftIds.length ||
+    left.label.localeCompare(right.label)
+  );
 }
 
 function progressTone(value: number) {
@@ -540,7 +632,7 @@ function MiniProgress({
 }
 
 function operationsActivityTitle(kind: OverviewGroup["kind"]) {
-  return kind === "club" ? "Админы на смене" : "Активные работы";
+  return kind === "club" ? "Админы на смене" : "Открытые смены";
 }
 
 function RowProgress({
@@ -592,9 +684,7 @@ function OperationsRow({
   const checklistPercent = group.checklist.requiredPercent;
   const taskPercent = taskCompletionPercent(group.tasks);
   const activityCount =
-    group.kind === "club"
-      ? group.activeAdmins
-      : activeChecklistCount(group.checklist) + activeTaskCount(group.tasks);
+    group.kind === "club" ? group.activeAdmins : group.shiftIds.length;
   const checklistGap = hasChecklistControlGap(group);
 
   return (
@@ -623,12 +713,24 @@ function OperationsRow({
       >
         {formatNumber(activityCount)}
       </div>
-      <RowProgress
-        value={checklistPercent}
-        detail={`${formatNumber(group.checklist.requiredItemsDone)}/${formatNumber(
-          group.checklist.requiredItemsTotal,
-        )} пунктов`}
-      />
+      {checklistGap ? (
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-amber-700 dark:text-amber-200">
+            Смена без чек-листа
+          </p>
+          <p className="mt-1 truncate text-xs text-zinc-500">
+            {formatNumber(group.missingChecklistShifts)} из{" "}
+            {formatNumber(group.shiftIds.length)} открытых смен
+          </p>
+        </div>
+      ) : (
+        <RowProgress
+          value={checklistPercent}
+          detail={`${formatNumber(group.checklist.requiredItemsDone)}/${formatNumber(
+            group.checklist.requiredItemsTotal,
+          )} пунктов`}
+        />
+      )}
       <RowProgress
         value={taskPercent}
         detail={`${formatNumber(group.tasks.done)}/${formatNumber(
@@ -863,7 +965,7 @@ function ClubModal({
   recentChecklists,
   tasks,
   recentTasks,
-  fallbackMode,
+  actualShifts,
   onClose,
 }: {
   group: OverviewGroup;
@@ -871,28 +973,33 @@ function ClubModal({
   recentChecklists: StaffChecklistExecutionReport;
   tasks: StaffTaskReport;
   recentTasks: StaffTaskReport;
-  fallbackMode: boolean;
+  actualShifts: StaffOperationsStaffControlShift[];
   onClose: () => void;
 }) {
   const currentRuns = sortRunsByRecent(getClubRuns(checklists, group));
   const currentTasks = sortTasksByRecent(getClubTasks(tasks, group));
   const recentRuns = sortRunsByRecent(getClubRuns(recentChecklists, group));
-  const fallbackRuns = currentRuns.length > 0 ? currentRuns : recentRuns;
-  const fallbackTasks =
-    currentTasks.length > 0
-      ? currentTasks
-      : sortTasksByRecent(getClubTasks(recentTasks, group));
-  const shifts = buildShiftSnapshots(fallbackRuns).slice(0, 3);
-  const showingFallback = fallbackMode || currentRuns.length === 0 || currentTasks.length === 0;
+  const fallbackRuns = sortRunsByRecent(
+    Array.from(new Map([...currentRuns, ...recentRuns].map((run) => [run.id, run])).values()),
+  );
+  const fallbackTasks = sortTasksByRecent(
+    Array.from(
+      new Map(
+        [...currentTasks, ...sortTasksByRecent(getClubTasks(recentTasks, group))].map(
+          (task) => [task.id, task],
+        ),
+      ).values(),
+    ),
+  );
+  const groupShiftIds = getGroupShiftIds(group);
+  const shifts = buildShiftSnapshots(
+    actualShifts.filter((shift) => groupShiftIds.has(shift.id)),
+    fallbackRuns,
+  ).slice(0, 6);
 
   return (
     <ModalShell title={group.label} subtitle={group.caption} onClose={onClose}>
       <div className="mb-4 space-y-3">
-        {showingFallback ? (
-          <AttentionNote title="За сегодня мало данных">
-            Показываем последнюю активность за период: до 2 чек-листов и до 2 задач, чтобы было видно, когда клуб последний раз работал по контролю.
-          </AttentionNote>
-        ) : null}
         {hasChecklistControlGap(group) ? (
           <AttentionNote title="Нужна проверка чек-листа">
             В клубе есть активный администратор, но нет активного чек-листа на смене. Это точка внимания: администраторы не должны работать без чек-листа.
@@ -963,7 +1070,7 @@ function ClubModal({
       {shifts.length > 0 ? (
         <div className="mt-5">
           <h4 className="text-sm font-semibold uppercase text-zinc-500">
-            Последние смены
+            Текущие открытые смены
           </h4>
           <div className="mt-3 space-y-2">
             {shifts.map((shift) => (
@@ -983,6 +1090,11 @@ function ClubModal({
                 <p className="mt-1 text-xs text-zinc-500">
                   {shift.admins.join(", ")}
                 </p>
+                {shift.missingChecklist ? (
+                  <p className="mt-2 inline-flex w-fit rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-900/70">
+                    Смена без чек-листа
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>
@@ -998,7 +1110,6 @@ function EmployeeModal({
   recentChecklists,
   tasks,
   recentTasks,
-  fallbackMode,
   onClose,
 }: {
   group: OverviewGroup;
@@ -1006,18 +1117,23 @@ function EmployeeModal({
   recentChecklists: StaffChecklistExecutionReport;
   tasks: StaffTaskReport;
   recentTasks: StaffTaskReport;
-  fallbackMode: boolean;
   onClose: () => void;
 }) {
   const currentRuns = sortRunsByRecent(getEmployeeRuns(checklists, group));
   const currentTasks = sortTasksByRecent(getEmployeeTasks(tasks, group));
   const recentRuns = sortRunsByRecent(getEmployeeRuns(recentChecklists, group));
-  const displayRuns = currentRuns.length > 0 ? currentRuns : recentRuns;
-  const displayTasks =
-    currentTasks.length > 0
-      ? currentTasks
-      : sortTasksByRecent(getEmployeeTasks(recentTasks, group));
-  const showingFallback = fallbackMode || currentRuns.length === 0 || currentTasks.length === 0;
+  const displayRuns = sortRunsByRecent(
+    Array.from(new Map([...currentRuns, ...recentRuns].map((run) => [run.id, run])).values()),
+  );
+  const displayTasks = sortTasksByRecent(
+    Array.from(
+      new Map(
+        [...currentTasks, ...sortTasksByRecent(getEmployeeTasks(recentTasks, group))].map(
+          (task) => [task.id, task],
+        ),
+      ).values(),
+    ),
+  );
 
   return (
     <ModalShell
@@ -1025,10 +1141,10 @@ function EmployeeModal({
       subtitle={group.caption}
       onClose={onClose}
     >
-      {showingFallback ? (
+      {hasChecklistControlGap(group) ? (
         <div className="mb-4">
-          <AttentionNote title="За сегодня мало данных">
-            Показываем последнюю активность сотрудника за период: до 2 чек-листов и до 2 задач. Полную историю можно открыть через детализацию.
+          <AttentionNote title="Нужна проверка чек-листа">
+            У администратора есть открытая смена без сопоставленного чек-листа.
           </AttentionNote>
         </div>
       ) : null}
@@ -1133,50 +1249,60 @@ export function StaffShiftOperationsOverview({
   recentChecklists,
   tasks,
   recentTasks,
-  dateLabel,
+  actualShifts = [],
 }: {
   checklists: StaffChecklistExecutionReport;
   recentChecklists?: StaffChecklistExecutionReport;
   tasks: StaffTaskReport;
   recentTasks?: StaffTaskReport;
-  dateLabel: string;
+  actualShifts?: StaffOperationsStaffControlShift[];
 }) {
   const [modal, setModal] = useState<ModalState>(null);
-  const activeAdmins = buildActiveAdminSets(checklists, tasks);
-  const clubGroups = mergeByClub(checklists, tasks, activeAdmins.byClub);
-  const employeeGroups = mergeByEmployee(checklists, tasks);
-  const modalChecklists = recentChecklists ?? checklists;
-  const modalTasks = recentTasks ?? tasks;
-  const recentActiveAdmins = buildActiveAdminSets(modalChecklists, modalTasks);
-  const recentClubGroups = mergeByClub(
-    modalChecklists,
-    modalTasks,
-    recentActiveAdmins.byClub,
+  const actualRuns = mergeChecklistRunsForShifts(actualShifts, [
+    checklists,
+    recentChecklists,
+  ]);
+  const actualTasks = mergeTasksForShifts(actualShifts, [tasks, recentTasks]);
+  const clubGroups = buildActualShiftGroups(
+    actualShifts,
+    actualRuns,
+    actualTasks,
+    "club",
   );
-  const recentEmployeeGroups = mergeByEmployee(modalChecklists, modalTasks);
-  const hasCurrentRows = checklists.summary.total > 0 || tasks.summary.total > 0;
-  const useFallbackGroups =
-    !hasCurrentRows && (recentClubGroups.length > 0 || recentEmployeeGroups.length > 0);
-  const displayClubGroups = useFallbackGroups ? recentClubGroups : clubGroups;
-  const displayEmployeeGroups = useFallbackGroups
-    ? recentEmployeeGroups
-    : employeeGroups;
+  const employeeGroups = buildActualShiftGroups(
+    actualShifts,
+    actualRuns,
+    actualTasks,
+    "employee",
+  );
   const selectedGroup = modal
-    ? (modal.type === "club" ? displayClubGroups : displayEmployeeGroups).find(
+    ? (modal.type === "club" ? clubGroups : employeeGroups).find(
         (group) => group.key === modal.key,
       ) ?? null
     : null;
-  const shiftsCount = activeShiftCount(checklists, tasks);
-  const taskWorkTotal = Math.max(tasks.summary.total - tasks.summary.canceled, 0);
-  const taskPercent = ratioPercent(tasks.summary.done, taskWorkTotal);
-  const checklistActive = activeChecklistCount(checklists.summary);
-  const taskActive = activeTaskCount(tasks.summary);
-  const noChecklistWorkflow =
-    checklists.summary.accepted + checklistActive === 0;
+  const activeAdminKeys = new Set(actualShifts.map(staffShiftEmployeeKey));
+  const shiftsCount = actualShifts.length;
+  const checklistMetrics = buildChecklistMetricsFromRuns(actualRuns);
+  const taskMetrics = buildTaskGroupFromRows(
+    "actual-shifts",
+    "Открытые смены",
+    null,
+    actualTasks,
+  );
+  const taskWorkTotal = Math.max(taskMetrics.total - taskMetrics.canceled, 0);
+  const taskPercent = taskCompletionPercent(taskMetrics);
+  const checklistActive = activeChecklistCount(checklistMetrics);
+  const taskActive = activeTaskCount(taskMetrics);
+  const missingChecklistShifts = clubGroups.reduce(
+    (sum, group) => sum + group.missingChecklistShifts,
+    0,
+  );
+  const noChecklistWorkflow = shiftsCount > 0 && checklistMetrics.total === 0;
   const riskCount =
-    checklists.summary.overdue +
-    checklists.summary.blockingIssues +
-    tasks.summary.overdue;
+    missingChecklistShifts +
+    checklistMetrics.overdue +
+    checklistMetrics.blockingIssues +
+    taskMetrics.overdue;
 
   return (
     <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-200/40 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-none">
@@ -1189,36 +1315,47 @@ export function StaffShiftOperationsOverview({
             Администраторы на сменах
           </h2>
           <p className="mt-1 max-w-3xl text-sm text-zinc-500">
-            Текущий срез по чек-листам и задачам за {dateLabel}: сначала
-            общий итог, ниже раскрытие по клубам и сотрудникам.
+            Текущий срез по открытым сменам Langame: чек-листы и задачи
+            учитываются только когда они сопоставлены с конкретной открытой
+            сменой.
           </p>
         </div>
         <div className="inline-flex w-fit rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-          Сегодня
+          Сейчас
         </div>
       </div>
 
       <div className="grid gap-4 py-4 lg:grid-cols-4">
         <Metric
           label="Админы в работе"
-          value={formatNumber(activeAdmins.total.size)}
+          value={formatNumber(activeAdminKeys.size)}
           caption={`${formatNumber(shiftsCount)} смен Langame, ${formatNumber(
             clubGroups.length,
           )} клуба`}
-          tone={activeAdmins.total.size > 0 ? "good" : "default"}
+          tone={activeAdminKeys.size > 0 ? "good" : "default"}
         />
         <Metric
           label="Чек-листы"
-          value={formatPercent(checklists.summary.requiredPercent)}
-          caption={`${formatNumber(
-            checklists.summary.requiredItemsDone,
-          )}/${formatNumber(checklists.summary.requiredItemsTotal)} пунктов`}
-          tone={checklists.summary.requiredPercent >= 85 ? "good" : "warn"}
+          value={formatPercent(checklistMetrics.requiredPercent)}
+          caption={
+            missingChecklistShifts > 0
+              ? `${formatNumber(missingChecklistShifts)} смен без чек-листа`
+              : `${formatNumber(
+                  checklistMetrics.requiredItemsDone,
+                )}/${formatNumber(checklistMetrics.requiredItemsTotal)} пунктов`
+          }
+          tone={
+            missingChecklistShifts > 0
+              ? "bad"
+              : checklistMetrics.requiredPercent >= 85
+                ? "good"
+                : "warn"
+          }
         />
         <Metric
           label="Задачи"
           value={formatPercent(taskPercent)}
-          caption={`${formatNumber(tasks.summary.done)}/${formatNumber(
+          caption={`${formatNumber(taskMetrics.done)}/${formatNumber(
             taskWorkTotal,
           )} закрыто`}
           tone={taskPercent >= 85 ? "good" : "warn"}
@@ -1226,7 +1363,9 @@ export function StaffShiftOperationsOverview({
         <Metric
           label="Требуют внимания"
           value={formatNumber(riskCount)}
-          caption={`${formatNumber(checklists.summary.overdue + tasks.summary.overdue)} просрочено`}
+          caption={`${formatNumber(
+            checklistMetrics.overdue + taskMetrics.overdue,
+          )} просрочено`}
           tone={riskCount > 0 ? "bad" : "good"}
         />
       </div>
@@ -1234,41 +1373,35 @@ export function StaffShiftOperationsOverview({
       <div className="grid gap-4 border-t border-zinc-100 pt-4 dark:border-zinc-800 lg:grid-cols-2">
         <MiniProgress
           label="Выполнение чек-листов"
-          value={checklists.summary.requiredPercent}
-          detail={`${formatNumber(checklists.summary.accepted)} принято, ${formatNumber(
+          value={checklistMetrics.requiredPercent}
+          detail={`${formatNumber(checklistMetrics.accepted)} принято, ${formatNumber(
             checklistActive,
-          )} в работе, ${formatNumber(checklists.summary.onReview)} на проверке`}
+          )} в работе, ${formatNumber(checklistMetrics.onReview)} на проверке`}
         />
         <MiniProgress
           label="Выполнение задач"
           value={taskPercent}
           detail={`${formatNumber(taskActive)} активных, ${formatNumber(
-            tasks.summary.onReview,
-          )} на проверке, ${formatNumber(tasks.summary.overdue)} просрочено`}
+            taskMetrics.onReview,
+          )} на проверке, ${formatNumber(taskMetrics.overdue)} просрочено`}
         />
       </div>
 
       {noChecklistWorkflow ? (
         <div className="mt-3">
-          <AttentionNote title="Чек-листы не запущены">
-            В текущем срезе нет принятых, активных или отправленных на проверку чек-листов. Если администраторы находятся на смене, это некорректный режим работы и требует проверки.
+          <AttentionNote title="Смены без чек-листов">
+            Сейчас есть открытые смены Langame, но нет сопоставленных запусков
+            чек-листов. Такие смены показаны ниже как проблема контроля.
           </AttentionNote>
         </div>
       ) : null}
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <DetailsBlock title="По клубам" count={displayClubGroups.length} open>
-          {useFallbackGroups ? (
-            <div className="mb-2">
-              <AttentionNote title="Сегодня нет активного контроля">
-                Ниже показана последняя активность за период. Откройте клуб, чтобы увидеть последние 2 чек-листа и 2 задачи.
-              </AttentionNote>
-            </div>
-          ) : null}
-          {displayClubGroups.length > 0 ? (
+        <DetailsBlock title="По клубам" count={clubGroups.length} open>
+          {clubGroups.length > 0 ? (
             <>
               <OperationsRowsHeader kind="club" />
-              {displayClubGroups.map((group) => (
+              {clubGroups.map((group) => (
                 <OperationsRow
                   key={group.key}
                   group={group}
@@ -1278,23 +1411,16 @@ export function StaffShiftOperationsOverview({
             </>
           ) : (
             <p className="py-3 text-sm text-zinc-500">
-              За сегодня нет сменных чек-листов и задач.
+              Сейчас нет открытых смен Langame.
             </p>
           )}
         </DetailsBlock>
 
-        <DetailsBlock title="По администраторам" count={displayEmployeeGroups.length}>
-          {useFallbackGroups ? (
-            <div className="mb-2">
-              <AttentionNote title="Сегодня нет активного контроля">
-                Ниже показаны сотрудники с последней активностью за период. В детализации видны последние чек-листы и задачи.
-              </AttentionNote>
-            </div>
-          ) : null}
-          {displayEmployeeGroups.length > 0 ? (
+        <DetailsBlock title="По администраторам" count={employeeGroups.length}>
+          {employeeGroups.length > 0 ? (
             <>
               <OperationsRowsHeader kind="employee" />
-              {displayEmployeeGroups.slice(0, 12).map((group) => (
+              {employeeGroups.slice(0, 12).map((group) => (
                 <OperationsRow
                   key={group.key}
                   group={group}
@@ -1304,7 +1430,7 @@ export function StaffShiftOperationsOverview({
             </>
           ) : (
             <p className="py-3 text-sm text-zinc-500">
-              Пока нет назначенных чек-листов или задач.
+              Сейчас нет администраторов на открытых сменах.
             </p>
           )}
         </DetailsBlock>
@@ -1314,10 +1440,10 @@ export function StaffShiftOperationsOverview({
         <ClubModal
           group={selectedGroup}
           checklists={checklists}
-          recentChecklists={modalChecklists}
+          recentChecklists={recentChecklists ?? checklists}
           tasks={tasks}
-          recentTasks={modalTasks}
-          fallbackMode={useFallbackGroups}
+          recentTasks={recentTasks ?? tasks}
+          actualShifts={actualShifts}
           onClose={() => setModal(null)}
         />
       ) : null}
@@ -1326,10 +1452,9 @@ export function StaffShiftOperationsOverview({
         <EmployeeModal
           group={selectedGroup}
           checklists={checklists}
-          recentChecklists={modalChecklists}
+          recentChecklists={recentChecklists ?? checklists}
           tasks={tasks}
-          recentTasks={modalTasks}
-          fallbackMode={useFallbackGroups}
+          recentTasks={recentTasks ?? tasks}
           onClose={() => setModal(null)}
         />
       ) : null}

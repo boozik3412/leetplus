@@ -6,6 +6,7 @@ import { StaffShiftRegulationCatalog } from "@/components/staff-shift-regulation
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { getStaffChecklistExecutionReport } from "@/lib/staff-checklists";
+import { getStaffOperationsDashboard } from "@/lib/staff-operations-dashboard";
 import {
   getStaffChecklistTemplateReport,
   type StaffChecklistTemplateFilterStatus,
@@ -127,14 +128,6 @@ function operationalDateOffset(value: string, days: number) {
   return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
 }
 
-function operationalDateLabel(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    timeZone: "Asia/Yekaterinburg",
-    day: "2-digit",
-    month: "long",
-  }).format(new Date(`${value}T00:00:00+05:00`));
-}
-
 function checklistStatusFromRegulationStatus(
   status: StaffShiftRegulationFilterStatus,
 ): StaffChecklistTemplateFilterStatus {
@@ -174,6 +167,7 @@ export default async function StaffShiftRegulationsPage({
     recentChecklistExecution,
     taskReport,
     recentTaskReport,
+    operationsDashboard,
   ] = await Promise.all([
     getStaffShiftRegulationReport(filters),
     getStaffChecklistTemplateReport({
@@ -217,6 +211,14 @@ export default async function StaffShiftRegulationsPage({
           sort: "dueAt",
           direction: "desc",
           pageSize: "500",
+        })
+      : Promise.resolve(null),
+    canManageRegulations
+      ? getStaffOperationsDashboard({
+          dateFrom: operationalDate,
+          dateTo: operationalDate,
+          storeId: filters.storeId,
+          search: filters.search,
         })
       : Promise.resolve(null),
   ]);
@@ -284,7 +286,7 @@ export default async function StaffShiftRegulationsPage({
             recentChecklists={recentChecklistExecution ?? undefined}
             tasks={taskReport}
             recentTasks={recentTaskReport ?? undefined}
-            dateLabel={operationalDateLabel(operationalDate)}
+            actualShifts={operationsDashboard?.staffControl.shifts ?? []}
           />
         ) : null}
 

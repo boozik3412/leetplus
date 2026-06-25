@@ -8990,6 +8990,19 @@ function telegramBotReplyText(
   }
 }
 
+function telegramBotParagraphs(lines: Array<string | null | undefined>) {
+  return lines.filter((line): line is string => Boolean(line)).join('\n\n');
+}
+
+function telegramBotSection(
+  title: string,
+  lines: Array<string | null | undefined>,
+) {
+  const visibleLines = lines.filter((line): line is string => Boolean(line));
+
+  return [`[${title}]`, ...visibleLines.map((line) => `- ${line}`)].join('\n');
+}
+
 function telegramBotMenuText(
   portal: GuestPortalPayload,
   unsubscribedAt: Date | null,
@@ -8997,25 +9010,36 @@ function telegramBotMenuText(
   const nextAction = portal.gamification.nextActions[0] ?? null;
   const mission = telegramBotFeaturedMissions(portal.gamification.missions)[0];
   const summary = portal.gamification.rewardSummary;
-  const lines = [
-    'LeetPlus bot: игровое меню.',
-    `Клуб: ${portal.store.name}.`,
-    `Прогресс: ${formatTelegramBotInteger(portal.profile.xp)} XP, уровень ${formatTelegramBotInteger(portal.profile.level)}.`,
-    `Баланс: ${formatTelegramBotMoney(portal.loyalty.balance)}; бонусы: ${formatTelegramBotBalance(portal.loyalty.bonusBalance)}.`,
-    telegramBotBalanceSyncedLine(portal),
-    nextAction
-      ? `Ближайшее действие: ${nextAction.title} (${nextAction.statusLabel}).`
-      : mission
-        ? telegramBotMissionLine(mission)
-        : 'Ближайшее действие: откройте Mini App и проверьте клубную карту.',
-    `Награды: готово ${formatTelegramBotInteger(summary.ready)}, на проверке ${formatTelegramBotInteger(summary.waitingApproval)}, получено ${formatTelegramBotInteger(summary.redeemed)}.`,
-    unsubscribedAt || portal.communications.phone.unsubscribedAt
-      ? 'Уведомления: отключены. Игровой статус доступен, новые Telegram-доставки заблокированы.'
-      : 'Уведомления: включены для подтвержденных игровых доставок.',
-    'Выберите раздел кнопками ниже.',
-  ];
 
-  return lines.join('\n');
+  return telegramBotParagraphs([
+    'LeetPlus bot',
+    'Игровое меню',
+    telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
+    telegramBotSection('ПРОГРЕСС', [
+      `XP: ${formatTelegramBotInteger(portal.profile.xp)}.`,
+      `Уровень: ${formatTelegramBotInteger(portal.profile.level)}.`,
+    ]),
+    telegramBotSection('БАЛАНС', [
+      `Баланс: ${formatTelegramBotMoney(portal.loyalty.balance)}; бонусы: ${formatTelegramBotBalance(portal.loyalty.bonusBalance)}.`,
+      telegramBotBalanceSyncedLine(portal),
+    ]),
+    telegramBotSection('СЛЕДУЮЩЕЕ ДЕЙСТВИЕ', [
+      nextAction
+        ? `${nextAction.title} (${nextAction.statusLabel}).`
+        : mission
+          ? telegramBotMissionLine(mission)
+          : 'Откройте Mini App и проверьте клубную карту.',
+    ]),
+    telegramBotSection('НАГРАДЫ', [
+      `Награды: готово ${formatTelegramBotInteger(summary.ready)}, на проверке ${formatTelegramBotInteger(summary.waitingApproval)}, получено ${formatTelegramBotInteger(summary.redeemed)}.`,
+    ]),
+    telegramBotSection('УВЕДОМЛЕНИЯ', [
+      unsubscribedAt || portal.communications.phone.unsubscribedAt
+        ? 'Отключены. Игровой статус доступен, новые Telegram-доставки заблокированы.'
+        : 'Включены для подтвержденных игровых доставок.',
+    ]),
+    'Выберите раздел кнопками ниже.',
+  ]);
 }
 
 function telegramBotProfileText(
@@ -9024,64 +9048,80 @@ function telegramBotProfileText(
 ) {
   const phone =
     portal.communications.phone.masked ?? portal.profile.contactMasked;
-  const lines = [
-    'Профиль LeetPlus',
-    `Клуб: ${portal.store.name}.`,
-    `Уровень: ${formatTelegramBotInteger(portal.profile.level)}.`,
-    `XP: ${formatTelegramBotInteger(portal.profile.xp)} из ${formatTelegramBotInteger(portal.profile.nextLevelXp)}.`,
-    `Баланс: ${formatTelegramBotMoney(portal.loyalty.balance)}.`,
-    `Бонусные баллы: ${formatTelegramBotBalance(portal.loyalty.bonusBalance)}.`,
-    telegramBotBalanceSyncedLine(portal),
-    `Телефон: ${phone ?? 'скрыт'}.`,
-    `Согласие: ${telegramBotConsentLabel(portal.communications.phone.consentStatus)}.`,
-    `Telegram: ${telegramBotCommunicationLabel(portal.communications.telegram.status)}.`,
-    unsubscribedAt || portal.communications.phone.unsubscribedAt
-      ? 'Уведомления: отключены.'
-      : 'Уведомления: активны.',
-  ];
 
-  return lines.join('\n');
+  return telegramBotParagraphs([
+    'Профиль LeetPlus',
+    telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
+    telegramBotSection('ПРОГРЕСС', [
+      `Уровень: ${formatTelegramBotInteger(portal.profile.level)}.`,
+      `XP: ${formatTelegramBotInteger(portal.profile.xp)} из ${formatTelegramBotInteger(portal.profile.nextLevelXp)}.`,
+    ]),
+    telegramBotSection('БАЛАНС', [
+      `Баланс: ${formatTelegramBotMoney(portal.loyalty.balance)}.`,
+      `Бонусные баллы: ${formatTelegramBotBalance(portal.loyalty.bonusBalance)}.`,
+      telegramBotBalanceSyncedLine(portal),
+    ]),
+    telegramBotSection('КОНТАКТЫ', [
+      `Телефон: ${phone ?? 'скрыт'}.`,
+      `Согласие: ${telegramBotConsentLabel(portal.communications.phone.consentStatus)}.`,
+      `Telegram: ${telegramBotCommunicationLabel(portal.communications.telegram.status)}.`,
+      unsubscribedAt || portal.communications.phone.unsubscribedAt
+        ? 'Уведомления: отключены.'
+        : 'Уведомления: активны.',
+    ]),
+  ]);
 }
 
 function telegramBotQuestsText(portal: GuestPortalPayload) {
   const missions = telegramBotFeaturedMissions(portal.gamification.missions);
 
   if (!missions.length) {
-    return [
+    return telegramBotParagraphs([
       'Квесты LeetPlus',
-      `Клуб: ${portal.store.name}.`,
-      'Активных квестов сейчас нет. Новые задания появятся в Mini App после публикации клубом.',
-    ].join('\n');
+      telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
+      telegramBotSection('КВЕСТЫ', [
+        'Активных квестов сейчас нет. Новые задания появятся в Mini App после публикации клубом.',
+      ]),
+    ]);
   }
 
-  return [
+  return telegramBotParagraphs([
     'Квесты LeetPlus',
-    `Клуб: ${portal.store.name}.`,
-    ...missions
-      .slice(0, 4)
-      .map((mission) => telegramBotMissionDetailLine(mission)),
+    telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
+    telegramBotSection(
+      'АКТИВНЫЕ КВЕСТЫ',
+      missions
+        .slice(0, 4)
+        .map((mission) => telegramBotMissionDetailLine(mission)),
+    ),
     'Полные условия и шаги открываются в Mini App.',
-  ].join('\n');
+  ]);
 }
 
 function telegramBotRewardsText(portal: GuestPortalPayload) {
   const summary = portal.gamification.rewardSummary;
   const rewards = telegramBotFeaturedRewards(portal.gamification.rewards);
   const bonus = portal.gamification.bonusHistory.items[0] ?? null;
-  const lines = [
-    'Награды LeetPlus',
-    `Готово: ${formatTelegramBotInteger(summary.ready)}. На проверке: ${formatTelegramBotInteger(summary.waitingApproval)}. Получено: ${formatTelegramBotInteger(summary.redeemed)}. Истекло: ${formatTelegramBotInteger(summary.expired)}.`,
-    rewards.length
-      ? 'Последние награды:'
-      : 'Наград пока нет. Выполняйте квесты, и они появятся здесь.',
-    ...rewards.slice(0, 4).map((reward) => telegramBotRewardLine(reward)),
-    bonus
-      ? `Последнее начисление: ${formatTelegramBotInteger(bonus.amount)} бонусов, ${bonus.statusLabel.toLowerCase()}.`
-      : null,
-    'Коды, claim payload и история выдачи доступны только в защищенном Mini App.',
-  ].filter((line): line is string => Boolean(line));
+  const rewardLines = rewards.length
+    ? [
+        'Последние награды:',
+        ...rewards.slice(0, 4).map((reward) => telegramBotRewardLine(reward)),
+      ]
+    : ['Наград пока нет. Выполняйте квесты, и они появятся здесь.'];
 
-  return lines.join('\n');
+  return telegramBotParagraphs([
+    'Награды LeetPlus',
+    telegramBotSection('ИТОГО', [
+      `Готово: ${formatTelegramBotInteger(summary.ready)}. На проверке: ${formatTelegramBotInteger(summary.waitingApproval)}. Получено: ${formatTelegramBotInteger(summary.redeemed)}. Истекло: ${formatTelegramBotInteger(summary.expired)}.`,
+    ]),
+    telegramBotSection('СПИСОК', rewardLines),
+    telegramBotSection('БОНУСЫ', [
+      bonus
+        ? `Последнее начисление: ${formatTelegramBotInteger(bonus.amount)} бонусов, ${bonus.statusLabel.toLowerCase()}.`
+        : 'Последних начислений пока нет.',
+    ]),
+    'Коды, claim payload и история выдачи доступны только в защищенном Mini App.',
+  ]);
 }
 
 function telegramBotCheckInText(portal: GuestPortalPayload) {
@@ -9095,12 +9135,14 @@ function telegramBotCheckInText(portal: GuestPortalPayload) {
   );
 
   if (!action && !mission) {
-    return [
+    return telegramBotParagraphs([
       'Чекин LeetPlus',
-      `Клуб: ${portal.store.name}.`,
-      'Сейчас чекин для этого клуба недоступен.',
-      'Проверьте активные квесты или откройте Mini App позже.',
-    ].join('\n');
+      telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
+      telegramBotSection('СТАТУС', [
+        'Сейчас чекин для этого клуба недоступен.',
+        'Проверьте активные квесты или откройте Mini App позже.',
+      ]),
+    ]);
   }
 
   const reward = mission?.rewardLabel ?? action?.description ?? null;
@@ -9109,16 +9151,16 @@ function telegramBotCheckInText(portal: GuestPortalPayload) {
       ? `${formatTelegramBotInteger(mission.progressCurrent)}/${formatTelegramBotInteger(mission.progressTarget)}${mission.progressUnit ? ` ${mission.progressUnit}` : ''}`
       : action?.statusLabel;
 
-  return [
+  return telegramBotParagraphs([
     'Чекин LeetPlus',
-    `Клуб: ${portal.store.name}.`,
-    action?.title ?? mission?.name ?? 'Чекин доступен.',
-    reward ? `Награда/условие: ${reward}` : null,
-    progress ? `Прогресс: ${progress}.` : null,
+    telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
+    telegramBotSection('ЗАДАНИЕ', [
+      action?.title ?? mission?.name ?? 'Чекин доступен.',
+      reward ? `Награда/условие: ${reward}` : null,
+      progress ? `Прогресс: ${progress}.` : null,
+    ]),
     'Откройте Mini App или игровой экран, чтобы выполнить чекин в подтвержденном клубном контексте.',
-  ]
-    .filter((line): line is string => Boolean(line))
-    .join('\n');
+  ]);
 }
 
 function telegramBotFallbackReplyText(

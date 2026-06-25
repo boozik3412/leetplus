@@ -3058,7 +3058,7 @@ describe('GuestPortalService', () => {
         profileId: 'profile-1',
         telegramIdentityMasked: 'ch...56',
         reply: {
-          text: expect.stringContaining('LeetPlus bot: игровое меню.'),
+          text: expect.stringContaining('LeetPlus bot'),
           replyMarkup: {
             inline_keyboard: expect.any(Array),
           },
@@ -3076,7 +3076,9 @@ describe('GuestPortalService', () => {
       expect(result.reply?.text).toEqual(
         expect.stringContaining('Клуб: 1337.'),
       );
-      expect(result.reply?.text).toEqual(expect.stringContaining('уровень 3'));
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('Уровень: 3.'),
+      );
       expect(result.reply?.text).toEqual(
         expect.stringContaining('Баланс: 100 ₽; бонусы: 250.'),
       );

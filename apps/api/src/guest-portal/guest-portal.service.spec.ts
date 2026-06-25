@@ -136,6 +136,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     getGuestBalancesForPortal: jest.fn(),
   };
   const guestGamificationService = {
+    checkIn: jest.fn(),
     createEvent: jest.fn(),
     dryRun: jest.fn(),
     processEvent: jest.fn(),
@@ -241,6 +242,30 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGamePromoCard.findMany.mockResolvedValue([]);
   prisma.staffMember.findMany.mockResolvedValue([]);
   prisma.langameStaffUser.findMany.mockResolvedValue([]);
+  guestGamificationService.checkIn.mockResolvedValue({
+    checkedIn: true,
+    checkedAt: '2026-06-15T08:10:00.000Z',
+    liveSession: {
+      externalDomain: '1337.langame.ru',
+      externalSessionId: 'session-1',
+      externalUuid: null,
+      startedAt: '2026-06-15T08:00:00.000Z',
+      durationMinutes: 10,
+      sessionType: 'COMMON',
+      sessionPacket: false,
+      store: { id: 'store-1', name: '1337' },
+    },
+    processResult: {
+      event: {
+        profile: { id: 'profile-1' },
+      },
+      summary: {
+        appliedXpDelta: 50,
+        createdRewards: 1,
+        idempotent: false,
+      },
+    },
+  });
   langameSettingsService.searchGuestByPhoneForPortal.mockResolvedValue({
     checkedAt: '2026-06-15T08:00:00.000Z',
     sources: [],
@@ -3245,12 +3270,41 @@ describe('GuestPortalService', () => {
     });
 
     it('answers Telegram check-in callback when the selected club supports it', async () => {
-      const { prisma, service } = createService({
+      const { guestGamificationService, prisma, service } = createService({
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
         GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
         WEB_URL: 'https://leetplus.ru',
       });
       const portal = portalPayloadFixture();
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'LeetPlus',
+        slug: 'demo',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+            externalDomain: '1337.langame.ru',
+            externalClubId: '1',
+            integrationSourceId: null,
+          },
+        ],
+      });
+      prisma.guest.findFirst.mockResolvedValue({
+        id: 'guest-1',
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '1337.langame.ru',
+        externalGuestTypeId: null,
+        externalGuestId: '42',
+        phoneHash: 'phone-hash',
+        phoneMasked: '+7 *** **-11',
+        currentCountHours: null,
+        lastSyncedAt: new Date('2026-06-15T08:00:00.000Z'),
+        isDisabled: false,
+      });
       portal.gamification.nextActions.unshift({
         id: 'check-in:mission-check-in',
         kind: 'CHECK_IN',
@@ -3283,9 +3337,23 @@ describe('GuestPortalService', () => {
         },
       });
       expect(result.reply?.text).toEqual(
-        expect.stringContaining('Сделайте чекин в клубе'),
+        expect.stringContaining('Чекин подтвержден и учтен.'),
       );
-      expect(result.reply?.text).toEqual(expect.stringContaining('50 XP'));
+      expect(result.reply?.text).toEqual(
+        expect.stringContaining('XP начислено: +50.'),
+      );
+      expect(guestGamificationService.checkIn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'telegram-bot:profile-1:store-1',
+          tenantId: 'tenant-1',
+          tenantSlug: 'demo',
+        }),
+        {
+          guestId: 'guest-1',
+          note: 'Чекин гостя из Telegram-бота.',
+          storeId: 'store-1',
+        },
+      );
       expect(
         buttons.find((button: any) => button.text === 'Чекин'),
       ).toMatchObject({
@@ -3360,7 +3428,7 @@ describe('GuestPortalService', () => {
     });
 
     it('shows all active tenant clubs for a linked Telegram profile', async () => {
-      const { prisma, service } = createService({
+      const { guestGamificationService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
         GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
@@ -3370,6 +3438,59 @@ describe('GuestPortalService', () => {
       portal.store.id = 'store-3';
       portal.store.publicSlug = 'club-izhevsk-center';
       portal.store.name = '1337 Izhevsk Center';
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'LeetPlus',
+        slug: 'demo',
+        stores: [
+          {
+            id: 'store-3',
+            publicSlug: 'club-izhevsk-center',
+            name: '1337 Izhevsk Center',
+            address: 'Pushkinskaya, 1',
+            externalDomain: '46.langamepro.ru',
+            externalClubId: '1',
+            integrationSourceId: null,
+          },
+        ],
+      });
+      prisma.guest.findFirst.mockResolvedValue({
+        id: 'guest-1',
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '46.langamepro.ru',
+        externalGuestTypeId: null,
+        externalGuestId: '633280',
+        phoneHash: 'phone-hash',
+        phoneMasked: '+7 *** **-11',
+        currentCountHours: null,
+        lastSyncedAt: new Date('2026-06-15T08:00:00.000Z'),
+        isDisabled: false,
+      });
+      guestGamificationService.checkIn.mockResolvedValue({
+        checkedIn: true,
+        checkedAt: '2026-06-15T08:10:00.000Z',
+        liveSession: {
+          externalDomain: '46.langamepro.ru',
+          externalSessionId: 'session-izhevsk-1',
+          externalUuid: null,
+          startedAt: '2026-06-15T08:00:00.000Z',
+          durationMinutes: 10,
+          sessionType: 'COMMON',
+          sessionPacket: false,
+          store: { id: 'store-3', name: '1337 Izhevsk Center' },
+        },
+        processResult: {
+          event: {
+            profile: { id: 'profile-1' },
+          },
+          summary: {
+            appliedXpDelta: 50,
+            createdRewards: 1,
+            idempotent: false,
+          },
+        },
+      });
       portal.gamification.nextActions.unshift({
         id: 'check-in:mission-check-in',
         kind: 'CHECK_IN',
@@ -3523,6 +3644,22 @@ describe('GuestPortalService', () => {
         action: 'TELEGRAM_BOT_CHECK_IN',
         profileId: 'profile-1',
       });
+      expect(guestGamificationService.checkIn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'telegram-bot:profile-1:store-3',
+          tenantId: 'tenant-1',
+        }),
+        expect.objectContaining({
+          guestId: 'guest-1',
+          storeId: 'store-3',
+        }),
+      );
+      expect(checkInResult.reply?.text).toEqual(
+        expect.stringContaining('Чекин подтвержден и учтен.'),
+      );
+      expect(checkInResult.reply?.text).toEqual(
+        expect.stringContaining('Клуб: 1337 Izhevsk Center.'),
+      );
       expect(buildPortalPayload).toHaveBeenLastCalledWith(
         expect.objectContaining({
           sub: 'telegram-bot:profile-1:store-3',

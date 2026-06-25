@@ -4874,6 +4874,7 @@ export class GuestPortalService {
         tenantId: true,
         guestId: true,
         phoneHash: true,
+        phoneEncrypted: true,
         contactMasked: true,
         phoneConsentStatus: true,
         phoneConsentAt: true,
@@ -4949,6 +4950,20 @@ export class GuestPortalService {
         );
       } catch {
         portal = null;
+      }
+    }
+
+    if (command === 'CHECK_IN' && portal && club && profile.phoneHash) {
+      if (telegramBotCheckInAvailable(portal)) {
+        return this.buildTelegramBotCheckInActionResponse({
+          club,
+          portal,
+          profile: {
+            ...profile,
+            phoneHash: profile.phoneHash,
+          },
+          telegramIdentityMasked,
+        });
       }
     }
 
@@ -5167,6 +5182,127 @@ export class GuestPortalService {
           clubCallbackToken,
       ) ?? null
     );
+  }
+
+  private async buildTelegramBotCheckInActionResponse(input: {
+    club: {
+      callbackToken?: string | null;
+      name: string;
+      storeId: string;
+    };
+    portal: GuestPortalPayload;
+    profile: {
+      id: string;
+      tenantId: string;
+      guestId: string | null;
+      phoneHash: string;
+      phoneEncrypted?: string | null;
+      unsubscribedAt: Date | null;
+    };
+    telegramIdentityMasked: string | null;
+  }): Promise<GuestPortalTelegramWebhookResponse> {
+    const payload: GuestPortalTokenPayload = {
+      sub: `telegram-bot:${input.profile.id}:${input.club.storeId}`,
+      purpose: GUEST_PORTAL_PURPOSE,
+      tenantId: input.profile.tenantId,
+      storeId: input.club.storeId,
+      guestId: input.profile.guestId,
+      profileId: input.profile.id,
+      phoneHash: input.profile.phoneHash,
+    };
+    const context = await this.getTenantStoreByIds(
+      input.profile.tenantId,
+      input.club.storeId,
+    );
+    const guest = await this.findGuest(payload, context.store, input.profile);
+
+    if (!guest) {
+      return {
+        status: 'FAILED',
+        action: 'TELEGRAM_BOT_CHECK_IN',
+        profileId: input.profile.id,
+        telegramIdentityMasked: input.telegramIdentityMasked,
+        message:
+          'Telegram bot check-in could not match the selected guest with Langame.',
+        reply: this.telegramWebhookBotMenuReply(
+          input.telegramIdentityMasked,
+          telegramBotCheckInFailedText(
+            input.portal,
+            'Профиль пока не сопоставлен с Langame в выбранном клубе.',
+          ),
+          undefined,
+          {
+            clubCallbackToken: input.club.callbackToken ?? null,
+            showCheckIn: true,
+          },
+        ),
+      };
+    }
+
+    const actor: AuthenticatedUser = {
+      id: `telegram-bot:${input.profile.id}:${input.club.storeId}`,
+      email: 'telegram-bot@leetplus.local',
+      fullName: 'Telegram bot',
+      role: UserRole.CLUB_MANAGER,
+      isPlatformAdmin: false,
+      tenantId: context.tenant.id,
+      tenantSlug: context.tenant.slug,
+      tenantStatus: TenantLifecycleStatus.ACTIVE,
+    };
+
+    try {
+      const checkIn = await this.guestGamificationService.checkIn(actor, {
+        guestId: guest.id,
+        storeId: context.store.id,
+        note: 'Чекин гостя из Telegram-бота.',
+      });
+      const updatedPortal = await this.buildPortalPayload(
+        {
+          ...payload,
+          guestId: guest.id,
+          profileId:
+            checkIn.processResult.event.profile?.id ?? input.profile.id,
+        },
+        { refreshLiveBalances: true },
+      );
+
+      return {
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CHECK_IN',
+        profileId: input.profile.id,
+        telegramIdentityMasked: input.telegramIdentityMasked,
+        message: 'Telegram bot check-in processed.',
+        reply: this.telegramWebhookBotMenuReply(
+          input.telegramIdentityMasked,
+          telegramBotCheckInSuccessText(updatedPortal, checkIn),
+          undefined,
+          {
+            clubCallbackToken: input.club.callbackToken ?? null,
+            showCheckIn: telegramBotCheckInAvailable(updatedPortal),
+          },
+        ),
+      };
+    } catch (error) {
+      return {
+        status: 'FAILED',
+        action: 'TELEGRAM_BOT_CHECK_IN',
+        profileId: input.profile.id,
+        telegramIdentityMasked: input.telegramIdentityMasked,
+        message: 'Telegram bot check-in failed safely.',
+        reply: this.telegramWebhookBotMenuReply(
+          input.telegramIdentityMasked,
+          telegramBotCheckInFailedText(
+            input.portal,
+            telegramBotSafeCheckInError(error),
+          ),
+          undefined,
+          {
+            clubCallbackToken: input.club.callbackToken ?? null,
+            showCheckIn: true,
+          },
+        ),
+      };
+    }
   }
 
   private async findTelegramBotLatestClub(profileId: string): Promise<{
@@ -9161,6 +9297,95 @@ function telegramBotCheckInText(portal: GuestPortalPayload) {
     ]),
     'Откройте Mini App или игровой экран, чтобы выполнить чекин в подтвержденном клубном контексте.',
   ]);
+}
+
+function telegramBotCheckInSuccessText(
+  portal: GuestPortalPayload,
+  checkIn: GuestGameCheckInResult,
+) {
+  const summary = checkIn.processResult.summary;
+  const checkedAt = formatTelegramBotDateTime(checkIn.checkedAt);
+  const sessionStartedAt = formatTelegramBotDateTime(
+    checkIn.liveSession.startedAt,
+  );
+  const xpDelta = summary.appliedXpDelta;
+  const createdRewards = summary.createdRewards;
+
+  return telegramBotParagraphs([
+    'Чекин LeetPlus',
+    telegramBotSection('СТАТУС', [
+      summary.idempotent
+        ? 'Этот чекин уже был учтен ранее.'
+        : 'Чекин подтвержден и учтен.',
+      checkedAt ? `Время чекина: ${checkedAt}.` : null,
+      sessionStartedAt ? `Сессия началась: ${sessionStartedAt}.` : null,
+    ]),
+    telegramBotSection('КЛУБ', [
+      `Клуб: ${checkIn.liveSession.store?.name ?? portal.store.name}.`,
+    ]),
+    telegramBotSection('РЕЗУЛЬТАТ', [
+      xpDelta > 0
+        ? `XP начислено: +${formatTelegramBotInteger(xpDelta)}.`
+        : 'XP: без новых начислений.',
+      createdRewards > 0
+        ? `Новых наград: ${formatTelegramBotInteger(createdRewards)}.`
+        : 'Новых наград: 0.',
+      `Текущий уровень: ${formatTelegramBotInteger(portal.profile.level)}.`,
+    ]),
+    telegramBotSection('БАЛАНС', [
+      `Баланс: ${formatTelegramBotMoney(portal.loyalty.balance)}; бонусы: ${formatTelegramBotBalance(portal.loyalty.bonusBalance)}.`,
+      telegramBotBalanceSyncedLine(portal),
+    ]),
+    'Можно продолжить в разделах ниже.',
+  ]);
+}
+
+function telegramBotCheckInFailedText(
+  portal: GuestPortalPayload,
+  reason: string,
+) {
+  return telegramBotParagraphs([
+    'Чекин LeetPlus',
+    telegramBotSection('СТАТУС', [
+      'Не удалось выполнить чекин из бота.',
+      `Причина: ${reason}`,
+    ]),
+    telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
+    telegramBotSection('ЧТО ПРОВЕРИТЬ', [
+      'Выбран правильный клуб.',
+      'У вас сейчас открыта активная сессия в этом клубе.',
+      'Если сессия только началась, попробуйте еще раз через минуту.',
+    ]),
+  ]);
+}
+
+function telegramBotSafeCheckInError(error: unknown) {
+  if (error instanceof HttpException) {
+    const response = error.getResponse();
+
+    if (typeof response === 'string' && response.trim()) {
+      return response.slice(0, 300);
+    }
+
+    if (response && typeof response === 'object' && 'message' in response) {
+      const message = (response as { message?: unknown }).message;
+
+      if (Array.isArray(message)) {
+        return message
+          .map((item) => String(item))
+          .join(' ')
+          .slice(0, 300);
+      }
+
+      if (typeof message === 'string' && message.trim()) {
+        return message.slice(0, 300);
+      }
+    }
+  }
+
+  const message = safeDeliveryErrorMessage(error);
+
+  return message || 'Временная ошибка проверки активной сессии.';
 }
 
 function telegramBotFallbackReplyText(

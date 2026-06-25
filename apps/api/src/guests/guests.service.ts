@@ -870,6 +870,7 @@ export type StaffOperatorReportRow = {
   guestVisitsCount: number;
   uniqueGuestsCount: number;
   averageShiftMiddleCheck: number;
+  signals: StaffControlAnomalyType[];
   shiftDetails: StaffOperatorShiftDetail[];
 };
 
@@ -5640,8 +5641,23 @@ export class GuestsService {
         metrics.middleCheckCount > 0
           ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)
           : 0,
+      signals: this.staffOperatorMetricSignals(metrics),
       shiftDetails: this.prepareStaffOperatorShiftDetails(metrics),
     };
+  }
+
+  private staffOperatorMetricSignals(
+    metrics: StaffOperatorMetrics,
+  ): StaffControlAnomalyType[] {
+    const signals = new Set<StaffControlAnomalyType>();
+
+    for (const shift of metrics.shiftDetails) {
+      for (const signal of this.staffOperatorShiftSignals(shift, metrics)) {
+        signals.add(signal);
+      }
+    }
+
+    return Array.from(signals);
   }
 
   private prepareStaffOperatorShiftDetails(
@@ -5970,21 +5986,21 @@ export class GuestsService {
       return true;
     }
 
+    if (row.signals.includes(anomaly)) {
+      return true;
+    }
+
     switch (anomaly) {
       case 'refunds':
         return row.shiftRefundAmount > 0;
       case 'missing-incassation':
-        return row.shiftPaymentAmount >= 10_000 && row.shiftIncassAmount <= 0;
+        return false;
       case 'long-shift':
-        return row.shiftsCount > 0 && row.shiftHours / row.shiftsCount >= 14;
+        return false;
       case 'low-middle-check':
-        return (
-          row.averageShiftMiddleCheck > 0 &&
-          row.averageShiftMiddleCheck < 100 &&
-          row.shiftPaymentAmount >= 5_000
-        );
+        return false;
       case 'unmapped-operator':
-        return !row.linkedGuest && row.shiftPaymentAmount >= 10_000;
+        return false;
     }
   }
 

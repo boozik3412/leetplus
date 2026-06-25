@@ -600,6 +600,7 @@ export type StaffOperatorReportRow = {
   guestVisitsCount: number;
   uniqueGuestsCount: number;
   averageShiftMiddleCheck: number;
+  signals: StaffControlAnomalyType[];
   shiftDetails: StaffOperatorShiftDetail[];
 };
 

@@ -863,6 +863,52 @@ function telegramBotClubProfilesFixture() {
   ];
 }
 
+function telegramBotTenantStoresFixture() {
+  return [
+    {
+      id: 'store-1',
+      tenantId: 'tenant-1',
+      publicSlug: 'club-radischeva',
+      name: '1337 Radischeva',
+      city: 'Ekaterinburg',
+      address: 'Radischeva, 12',
+    },
+    {
+      id: 'store-2',
+      tenantId: 'tenant-1',
+      publicSlug: 'club-lenina',
+      name: '1337 Lenina',
+      city: 'Ekaterinburg',
+      address: 'Lenina, 1',
+    },
+    {
+      id: 'store-3',
+      tenantId: 'tenant-1',
+      publicSlug: 'club-izhevsk-center',
+      name: '1337 Izhevsk Center',
+      city: 'Izhevsk',
+      address: 'Pushkinskaya, 1',
+    },
+    {
+      id: 'store-4',
+      tenantId: 'tenant-1',
+      publicSlug: 'club-izhevsk-mall',
+      name: '1337 Izhevsk Mall',
+      city: 'Izhevsk',
+      address: 'Sovetskaya, 2',
+    },
+  ];
+}
+
+function telegramBotLinkedStoresFixture() {
+  return telegramBotClubProfilesFixture()[0].telegramLinkChallenges.map(
+    (challenge) => ({
+      ...challenge.store,
+      tenantId: 'tenant-1',
+    }),
+  );
+}
+
 describe('GuestPortalService', () => {
   describe('getGameSummary', () => {
     it('returns compact game state from the existing guest session payload', async () => {
@@ -3214,6 +3260,7 @@ describe('GuestPortalService', () => {
       prisma.guestGameProfile.findMany.mockResolvedValue(
         telegramBotClubProfilesFixture(),
       );
+      prisma.store.findMany.mockResolvedValue(telegramBotLinkedStoresFixture());
 
       const result = await service.handleTelegramWebhook('telegram-secret', {
         callback_query: {
@@ -3265,6 +3312,127 @@ describe('GuestPortalService', () => {
       );
     });
 
+    it('shows all active tenant clubs for a linked Telegram profile', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      portal.store.id = 'store-3';
+      portal.store.publicSlug = 'club-izhevsk-center';
+      portal.store.name = '1337 Izhevsk Center';
+      prisma.guestGameProfile.findMany.mockResolvedValue(
+        telegramBotClubProfilesFixture(),
+      );
+      prisma.store.findMany.mockResolvedValue(telegramBotTenantStoresFixture());
+      const buildPortalPayload = jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portal);
+
+      const listResult = await service.handleTelegramWebhook(
+        'telegram-secret',
+        {
+          callback_query: {
+            id: 'callback-clubs',
+            from: { id: 123456 },
+            message: {
+              chat: { id: 123456 },
+            },
+            data: 'bot:clubs',
+          },
+        },
+      );
+      const cityButtons = (listResult.reply?.replyMarkup as any).inline_keyboard
+        .flat()
+        .filter((button: any) =>
+          String(button.callback_data ?? '').startsWith('bot:city:'),
+        );
+
+      expect(cityButtons).toHaveLength(2);
+      expect(cityButtons.map((button: any) => button.text)).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/^Ekaterinburg \(2 /),
+          expect.stringMatching(/^Izhevsk \(2 /),
+        ]),
+      );
+      const izhevskCallbackData = cityButtons.find((button: any) =>
+        String(button.text).startsWith('Izhevsk '),
+      ).callback_data;
+
+      const cityResult = await service.handleTelegramWebhook(
+        'telegram-secret',
+        {
+          callback_query: {
+            id: 'callback-city',
+            from: { id: 123456 },
+            message: {
+              chat: { id: 123456 },
+            },
+            data: izhevskCallbackData,
+          },
+        },
+      );
+      const clubButtons = (cityResult.reply?.replyMarkup as any).inline_keyboard
+        .flat()
+        .filter((button: any) =>
+          String(button.callback_data ?? '').startsWith('bot:club:'),
+        );
+
+      expect(cityResult).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CITY_CLUBS',
+        profileId: 'profile-1',
+      });
+      expect(clubButtons.map((button: any) => button.text)).toEqual(
+        expect.arrayContaining([
+          '1337 Izhevsk Center, Pushkinskaya, 1',
+          '1337 Izhevsk Mall, Sovetskaya, 2',
+        ]),
+      );
+      const izhevskCenterCallbackData = clubButtons.find(
+        (button: any) => button.text === '1337 Izhevsk Center, Pushkinskaya, 1',
+      ).callback_data;
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        callback_query: {
+          id: 'callback-club-select',
+          from: { id: 123456 },
+          message: {
+            chat: { id: 123456 },
+          },
+          data: izhevskCenterCallbackData,
+        },
+      });
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_BOT_CLUB_SELECTED',
+        profileId: 'profile-1',
+      });
+      expect(
+        prisma.guestGameTelegramLinkChallenge.update,
+      ).not.toHaveBeenCalled();
+      expect(buildPortalPayload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'telegram-bot:profile-1:store-3',
+          guestId: 'guest-1',
+          phoneHash: 'phone-hash',
+          profileId: 'profile-1',
+          storeId: 'store-3',
+          tenantId: 'tenant-1',
+        }),
+        { refreshLiveBalances: true },
+      );
+      expect(JSON.stringify(result.reply)).toEqual(
+        expect.not.stringContaining('store-3'),
+      );
+      expect(JSON.stringify(result.reply)).toEqual(
+        expect.not.stringContaining('profile-1'),
+      );
+    });
+
     it('selects a Telegram bot club callback and returns the scoped bot menu', async () => {
       const { prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',
@@ -3279,6 +3447,7 @@ describe('GuestPortalService', () => {
       prisma.guestGameProfile.findMany.mockResolvedValue(
         telegramBotClubProfilesFixture(),
       );
+      prisma.store.findMany.mockResolvedValue(telegramBotLinkedStoresFixture());
       const buildPortalPayload = jest
         .spyOn(service as any, 'buildPortalPayload')
         .mockResolvedValue(portal);

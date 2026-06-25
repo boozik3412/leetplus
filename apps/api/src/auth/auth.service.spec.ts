@@ -91,6 +91,7 @@ describe('AuthService', () => {
       passwordService,
       jwtService as unknown as JwtService,
       emailVerificationService as unknown as EmailVerificationService,
+      { get: jest.fn() } as never,
     );
   });
 

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -58,6 +59,23 @@ export class UsersController {
     @Body() dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
     return this.usersService.createInvite(user, dto);
+  }
+
+  @Patch('invites/:id')
+  updateInvite(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UserInviteDto,
+  ): Promise<UserInviteAccount> {
+    return this.usersService.updateInvite(user, id, dto);
+  }
+
+  @Delete('invites/:id')
+  cancelInvite(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<{ id: string }> {
+    return this.usersService.cancelInvite(user, id);
   }
 
   @Patch('system-roles/:role')

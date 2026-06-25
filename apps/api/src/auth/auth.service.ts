@@ -5,10 +5,12 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'node:crypto';
 import { TenantLifecycleStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveSignedUserInviteToken } from '../users/user-invite-token';
 import { AcceptUserInviteDto, LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
@@ -76,6 +78,7 @@ export class AuthService {
     private readonly passwordService: PasswordService,
     private readonly jwtService: JwtService,
     private readonly emailVerificationService: EmailVerificationService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -354,8 +357,14 @@ export class AuthService {
       throw new BadRequestException('Токен приглашения обязателен');
     }
 
+    const signedInviteId = resolveSignedUserInviteToken(
+      normalizedToken,
+      this.configService,
+    );
     const invite = await this.prisma.userInvite.findUnique({
-      where: { tokenHash: this.hashInviteToken(normalizedToken) },
+      where: signedInviteId
+        ? { id: signedInviteId }
+        : { tokenHash: this.hashInviteToken(normalizedToken) },
       include: {
         tenant: {
           select: {

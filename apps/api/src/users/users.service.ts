@@ -20,6 +20,7 @@ import {
 import { PasswordService } from '../auth/password.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { createSignedUserInviteToken } from './user-invite-token';
 
 const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.OWNER]: [
@@ -350,7 +351,13 @@ export class UsersService {
       stores,
       roleOptions: this.toRoleOptions(roleOverridesByRole),
       customRoles: customRoles.map((role) => this.toAccessRole(role)),
-      invites: invites.map((invite) => this.toInvite(invite, storesById)),
+      invites: invites.map((invite) =>
+        this.toInvite(
+          invite,
+          storesById,
+          this.registrationUrlForInvite(invite.id),
+        ),
+      ),
       capabilityOptions: accessCapabilityCatalog,
     };
   }
@@ -456,8 +463,132 @@ export class UsersService {
     return this.toInvite(
       invite,
       this.createStoreMap(stores),
-      this.buildInviteUrl(rawToken),
+      this.registrationUrlForInvite(invite.id),
     );
+  }
+
+  async updateInvite(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: UserInviteDto,
+  ): Promise<UserInviteAccount> {
+    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const existing = await this.prisma.userInvite.findFirst({
+      where: { id, tenantId },
+      include: userInviteInclude,
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Invite not found');
+    }
+
+    if (existing.acceptedAt) {
+      throw new BadRequestException('Invite is already used');
+    }
+
+    if (existing.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Invite is expired');
+    }
+
+    const email =
+      dto.email === undefined
+        ? existing.email
+        : this.normalizeOptionalEmail(dto.email);
+    const fullName =
+      dto.fullName === undefined
+        ? existing.fullName
+        : this.normalizeNullableText(dto.fullName);
+    const customRoleId =
+      dto.customRoleId === undefined
+        ? existing.customRoleId
+        : this.normalizeOptionalId(dto.customRoleId);
+    const customRole =
+      dto.customRoleId === undefined
+        ? existing.customRole
+        : await this.resolveCustomRole(tenantId, customRoleId);
+    const role = customRole
+      ? UserRole.CLUB_ADMINISTRATOR
+      : dto.role
+        ? this.parseRole(dto.role)
+        : existing.role;
+    const storeIds =
+      dto.storeIds === undefined
+        ? existing.storeIds
+        : await this.resolveStoreIds(tenantId, dto.storeIds);
+    const expiresAt =
+      dto.expiresInDays === undefined
+        ? existing.expiresAt
+        : this.resolveInviteExpiry(dto.expiresInDays);
+
+    this.assertCanAssignAccountRole(actor, role, customRole);
+
+    if (email && email !== existing.email) {
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email },
+        select: { id: true },
+      });
+
+      if (existingUser) {
+        throw new ConflictException(
+          'Пользователь с таким email уже существует',
+        );
+      }
+    }
+
+    const [updated, stores] = await Promise.all([
+      this.prisma.userInvite.update({
+        where: { id: existing.id },
+        data: {
+          email,
+          fullName,
+          role,
+          customRoleId: customRole?.id ?? null,
+          storeIds,
+          expiresAt,
+        },
+        include: userInviteInclude,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+
+    return this.toInvite(
+      updated,
+      this.createStoreMap(stores),
+      this.registrationUrlForInvite(updated.id),
+    );
+  }
+
+  async cancelInvite(actor: AuthenticatedUser, id: string) {
+    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const existing = await this.prisma.userInvite.findFirst({
+      where: { id, tenantId },
+      include: userInviteInclude,
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Invite not found');
+    }
+
+    if (existing.acceptedAt) {
+      throw new BadRequestException('Invite is already used');
+    }
+
+    this.assertCanAssignAccountRole(actor, existing.role, existing.customRole);
+
+    if (existing.expiresAt.getTime() <= Date.now()) {
+      return { id: existing.id };
+    }
+
+    await this.prisma.userInvite.update({
+      where: { id: existing.id },
+      data: { expiresAt: new Date() },
+    });
+
+    return { id: existing.id };
   }
 
   async updateUser(
@@ -904,6 +1035,12 @@ export class UsersService {
     const base = configuredBase.replace(/\/+$/, '');
 
     return `${base}/register?invite=${encodeURIComponent(token)}`;
+  }
+
+  private registrationUrlForInvite(inviteId: string) {
+    return this.buildInviteUrl(
+      createSignedUserInviteToken(inviteId, this.configService),
+    );
   }
 
   private async resolveStoreIds(tenantId: string, storeIds: unknown) {

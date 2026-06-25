@@ -58,6 +58,19 @@ function formFromAccount(account: UserAccount): FormState {
   };
 }
 
+function formFromInvite(invite: UserInvite): FormState {
+  return {
+    email: invite.email ?? "",
+    fullName: invite.fullName ?? "",
+    role: invite.role,
+    customRoleId: invite.customRoleId,
+    isActive: true,
+    password: "",
+    scope: invite.scope,
+    storeIds: invite.stores.map((store) => store.id),
+  };
+}
+
 type AccessRoleFormState = {
   name: string;
   description: string;
@@ -359,6 +372,7 @@ export function UserAccountsPanel({
     Record<string, boolean>
   >(defaultOpenPermissionSections);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedInviteId, setSelectedInviteId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<{
     type: "idle" | "success" | "error";
@@ -373,6 +387,9 @@ export function UserAccountsPanel({
 
   const selectedUser = selectedId
     ? users.find((account) => account.id === selectedId) ?? null
+    : null;
+  const selectedInvite = selectedInviteId
+    ? invites.find((invite) => invite.id === selectedInviteId) ?? null
     : null;
   const roleOptions = systemRoles.filter((option) =>
     assignableRoles.includes(option.role),
@@ -531,8 +548,11 @@ export function UserAccountsPanel({
     roleOptions.unshift(selectedRoleOption);
   }
 
-  const canSaveSelected =
-    !selectedUser || assignableRoles.includes(selectedUser.role);
+  const canSaveSelected = selectedUser
+    ? assignableRoles.includes(selectedUser.role)
+    : selectedInvite
+      ? assignableRoles.includes(selectedInvite.role)
+      : true;
   const filteredUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
@@ -556,7 +576,18 @@ export function UserAccountsPanel({
   }, [query, users]);
   function startCreate() {
     setSelectedId(null);
+    setSelectedInviteId(null);
     setAccountFormMode("account");
+    setForm(createEmptyForm(defaultRole));
+    setCreatedInviteUrl(null);
+    setCopyStatus("");
+    setStatus({ type: "idle", message: "" });
+  }
+
+  function startCreateInvite() {
+    setSelectedId(null);
+    setSelectedInviteId(null);
+    setAccountFormMode("invite");
     setForm(createEmptyForm(defaultRole));
     setCreatedInviteUrl(null);
     setCopyStatus("");
@@ -565,9 +596,20 @@ export function UserAccountsPanel({
 
   function startEdit(account: UserAccount) {
     setSelectedId(account.id);
+    setSelectedInviteId(null);
     setAccountFormMode("account");
     setForm(formFromAccount(account));
     setCreatedInviteUrl(null);
+    setCopyStatus("");
+    setStatus({ type: "idle", message: "" });
+  }
+
+  function startEditInvite(invite: UserInvite) {
+    setSelectedId(null);
+    setSelectedInviteId(invite.id);
+    setAccountFormMode("invite");
+    setForm(formFromInvite(invite));
+    setCreatedInviteUrl(invite.registrationUrl ?? null);
     setCopyStatus("");
     setStatus({ type: "idle", message: "" });
   }
@@ -599,13 +641,13 @@ export function UserAccountsPanel({
     }));
   }
 
-  async function copyInviteUrl() {
-    if (!createdInviteUrl) {
+  async function copyInviteUrl(url: string | null = createdInviteUrl) {
+    if (!url) {
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(createdInviteUrl);
+      await navigator.clipboard.writeText(url);
       setCopyStatus("Ссылка скопирована");
     } catch {
       setCopyStatus("Скопируйте ссылку из поля вручную");
@@ -786,7 +828,7 @@ export function UserAccountsPanel({
     setIsSaving(true);
     setStatus({ type: "idle", message: "" });
     setCopyStatus("");
-    setCreatedInviteUrl(null);
+    setCreatedInviteUrl(selectedInvite?.registrationUrl ?? null);
 
     const payload = {
       email: form.email,
@@ -797,6 +839,40 @@ export function UserAccountsPanel({
       ...(form.password.trim() ? { password: form.password.trim() } : {}),
       storeIds: form.scope === "STORES" ? form.storeIds : [],
     };
+    if (selectedInvite && accountFormMode === "invite") {
+      const response = await fetch(`/api/users/invites/${selectedInvite.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: form.email || undefined,
+          fullName: form.fullName || undefined,
+          role: form.role,
+          customRoleId: form.customRoleId,
+          storeIds: payload.storeIds,
+        }),
+      });
+
+      if (!response.ok) {
+        setStatus({ type: "error", message: await readResponseError(response) });
+        setIsSaving(false);
+        return;
+      }
+
+      const invite = (await response.json()) as UserInvite;
+      setInvites((current) =>
+        current.map((item) => (item.id === invite.id ? invite : item)),
+      );
+      setSelectedInviteId(invite.id);
+      setForm(formFromInvite(invite));
+      setCreatedInviteUrl(invite.registrationUrl ?? null);
+      setStatus({
+        type: "success",
+        message: "Приглашение обновлено.",
+      });
+      setIsSaving(false);
+      return;
+    }
+
     if (!selectedUser && accountFormMode === "invite") {
       const response = await fetch("/api/users/invites", {
         method: "POST",
@@ -861,6 +937,44 @@ export function UserAccountsPanel({
         ? "Учетная запись обновлена"
         : "Учетная запись создана",
     });
+    setIsSaving(false);
+  }
+
+  async function cancelInvite() {
+    if (!selectedInvite) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Отменить приглашение? Ссылка перестанет работать.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsSaving(true);
+    setStatus({ type: "idle", message: "" });
+    setCopyStatus("");
+
+    const response = await fetch(`/api/users/invites/${selectedInvite.id}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      setStatus({ type: "error", message: await readResponseError(response) });
+      setIsSaving(false);
+      return;
+    }
+
+    setInvites((current) =>
+      current.filter((invite) => invite.id !== selectedInvite.id),
+    );
+    setSelectedInviteId(null);
+    setAccountFormMode("invite");
+    setForm(createEmptyForm(defaultRole));
+    setCreatedInviteUrl(null);
+    setStatus({ type: "success", message: "Приглашение отменено." });
     setIsSaving(false);
   }
 
@@ -945,23 +1059,33 @@ export function UserAccountsPanel({
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div>
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-            {selectedUser ? "Редактирование" : "Выдача доступа"}
+            {selectedUser
+              ? "Редактирование"
+              : selectedInvite
+                ? "Приглашение"
+                : "Выдача доступа"}
           </p>
           <h2 className="mt-1 text-xl font-semibold">
             {selectedUser
               ? selectedUser.fullName || selectedUser.email
+              : selectedInvite
+                ? selectedInvite.fullName ||
+                  selectedInvite.email ||
+                  "Ссылка-приглашение"
               : accountFormMode === "invite"
                 ? "Ссылка для регистрации"
                 : "Новая учетная запись"}
           </h2>
           <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             {accountFormMode === "invite" && !selectedUser
-              ? "Настройте роль и клубы, создайте ссылку и передайте ее сотруднику. Он сам задаст email и пароль при регистрации."
+              ? selectedInvite
+                ? "Проверьте данные приглашения, скопируйте ссылку повторно, измените роль или отмените доступ."
+                : "Настройте роль и клубы, создайте ссылку и передайте ее сотруднику. Он сам задаст email и пароль при регистрации."
               : "Роль определяет доступ к разделам LeetPlus. Клубы задают рабочий контур сотрудника и будут использоваться для дальнейшего ограничения операционных данных."}
           </p>
         </div>
 
-        {!selectedUser ? (
+        {!selectedUser && !selectedInvite ? (
           <div className="mt-5 inline-flex rounded-md border border-zinc-300 bg-zinc-50 p-1 text-sm dark:border-zinc-700 dark:bg-zinc-900/60">
             {(
               [
@@ -973,6 +1097,7 @@ export function UserAccountsPanel({
                 key={mode}
                 type="button"
                 onClick={() => {
+                  setSelectedInviteId(null);
                   setAccountFormMode(mode);
                   setStatus({ type: "idle", message: "" });
                   setCreatedInviteUrl(null);
@@ -1200,7 +1325,7 @@ export function UserAccountsPanel({
                 />
                 <button
                   type="button"
-                  onClick={copyInviteUrl}
+                  onClick={() => copyInviteUrl()}
                   className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
                 >
                   Скопировать
@@ -1216,7 +1341,7 @@ export function UserAccountsPanel({
 
           {!canSaveSelected ? (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-200">
-              Ваша роль не может менять доступы этой учетной записи.
+              Ваша роль не может менять этот доступ.
             </div>
           ) : null}
 
@@ -1234,17 +1359,29 @@ export function UserAccountsPanel({
                 ? "Сохраняем..."
                 : selectedUser
                   ? "Сохранить изменения"
+                  : selectedInvite
+                    ? "Сохранить приглашение"
                   : accountFormMode === "invite"
                     ? "Создать ссылку"
                     : "Создать учетную запись"}
             </button>
-            {selectedUser ? (
+            {selectedInvite ? (
               <button
                 type="button"
-                onClick={startCreate}
+                onClick={cancelInvite}
+                disabled={isSaving || !canSaveSelected}
+                className="inline-flex h-11 items-center justify-center rounded-md border border-red-300 px-4 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:text-red-200 dark:hover:bg-red-500/10"
+              >
+                Отменить приглашение
+              </button>
+            ) : null}
+            {selectedUser || selectedInvite ? (
+              <button
+                type="button"
+                onClick={selectedInvite ? startCreateInvite : startCreate}
                 className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
-                Создать другую
+                {selectedInvite ? "Новая ссылка" : "Создать другую"}
               </button>
             ) : null}
           </div>
@@ -1261,14 +1398,24 @@ export function UserAccountsPanel({
             <p className="text-xs font-bold uppercase text-zinc-500">
               Активные ссылки
             </p>
-            <div className="mt-3 space-y-2">
-              {invites.slice(0, 4).map((invite) => (
+            {copyStatus ? (
+              <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
+                {copyStatus}
+              </p>
+            ) : null}
+            <div className="mt-3 max-h-[22rem] space-y-2 overflow-y-auto pr-1">
+              {invites.map((invite) => (
                 <div
                   key={invite.id}
-                  className="rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                  className={[
+                    "rounded-md border bg-white p-3 text-sm transition dark:bg-zinc-950",
+                    selectedInviteId === invite.id
+                      ? "border-emerald-500 ring-1 ring-emerald-500/30 dark:border-emerald-400"
+                      : "border-zinc-200 dark:border-zinc-800",
+                  ].join(" ")}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
+                    <div className="min-w-0">
                       <p className="font-semibold">
                         {invite.fullName || invite.email || "Без привязки к email"}
                       </p>
@@ -1276,9 +1423,26 @@ export function UserAccountsPanel({
                         {inviteRoleLabel(invite)} - {scopeLabel(invite)}
                       </p>
                     </div>
-                    <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                      до {formatDate(invite.expiresAt)}
-                    </span>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        до {formatDate(invite.expiresAt)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => startEditInvite(invite)}
+                        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                      >
+                        Открыть
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => copyInviteUrl(invite.registrationUrl ?? null)}
+                        disabled={!invite.registrationUrl}
+                        className="rounded-md bg-zinc-950 px-2 py-1 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+                      >
+                        Копировать
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

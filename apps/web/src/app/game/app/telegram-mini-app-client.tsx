@@ -211,7 +211,7 @@ export function TelegramMiniAppClient() {
   return (
     <main className="min-h-dvh overflow-x-hidden bg-black text-[#edf7f8] [color-scheme:dark]">
       <div className="relative isolate min-h-dvh bg-[radial-gradient(circle_at_88%_8%,rgba(131,228,236,0.11),transparent_28%),radial-gradient(circle_at_10%_52%,rgba(208,170,108,0.04),transparent_28%),#000] before:fixed before:inset-0 before:-z-10 before:bg-[linear-gradient(rgba(160,223,225,0.032)_1px,transparent_1px),linear-gradient(90deg,rgba(160,223,225,0.026)_1px,transparent_1px)] before:bg-[length:72px_72px] before:opacity-[0.62] before:[mask-image:linear-gradient(180deg,#000,#000_76%,transparent)]">
-        <div className="mx-auto min-h-dvh w-full max-w-[430px] bg-black/30 sm:border-x sm:border-[#c4e0e114]">
+        <div className="mx-auto min-h-dvh w-full max-w-[430px] bg-black/30 [@media_(min-width:520px)]:max-w-[1180px] [@media_(min-width:520px)]:px-4 [@media_(min-width:520px)]:py-4 [@media_(min-width:520px)]:bg-transparent sm:border-x sm:border-[#c4e0e114] [@media_(min-width:520px)]:border-x-0">
           {loadState === "ready" && summary ? (
             <ReadyMiniApp
               selectedTab={selectedTab}
@@ -266,7 +266,8 @@ function ReadyMiniApp({
   return (
     <>
       <TopBar summary={summary} showToast={showToast} />
-      <div className="grid gap-3 px-3 pb-[calc(92px+env(safe-area-inset-bottom,0px))] pt-2">
+      <DesktopNav selectedTab={selectedTab} onSelectTab={onSelectTab} />
+      <div className="mx-auto grid w-full max-w-[1120px] gap-3 px-3 pb-[calc(92px+env(safe-area-inset-bottom,0px))] pt-2 [@media_(min-width:520px)]:px-0 [@media_(min-width:520px)]:pb-6 [@media_(min-width:520px)]:pt-3 [@media_(min-width:900px)]:grid-cols-2 [@media_(min-width:900px)]:items-start">
         <HeroPanel summary={summary} />
         <EventsRail summary={summary} showToast={showToast} />
         <QuestPanel summary={summary} showToast={showToast} />
@@ -281,7 +282,7 @@ function ReadyMiniApp({
 
 function StateShell({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-dvh place-items-center px-4 py-[calc(32px+env(safe-area-inset-top,0px))]">
+    <div className="grid min-h-dvh place-items-center px-4 py-[calc(32px+env(safe-area-inset-top,0px))] [@media_(min-width:520px)]:min-h-[calc(100dvh-32px)] [@media_(min-width:520px)]:px-0">
       {children}
     </div>
   );
@@ -289,7 +290,7 @@ function StateShell({ children }: { children: ReactNode }) {
 
 function LoadingView() {
   return (
-    <div className="w-full rounded-lg border border-[#c4e0e529] bg-[#080e12ef] p-5 shadow-[0_28px_84px_rgba(0,0,0,0.5)]">
+    <div className="w-full max-w-[720px] rounded-lg border border-[#c4e0e529] bg-[#080e12ef] p-5 shadow-[0_28px_84px_rgba(0,0,0,0.5)]">
       <div className="h-3 w-28 rounded bg-[#c4e0e51a]" />
       <div className="mt-5 h-10 w-56 rounded bg-[#c4e0e514]" />
       <div className="mt-6 grid gap-2">
@@ -309,7 +310,7 @@ function AuthRequiredView({
   message: string;
 }) {
   return (
-    <section className="w-full rounded-lg border border-[#c4e0e529] bg-[#080e12ef] p-5 shadow-[0_28px_84px_rgba(0,0,0,0.5)]">
+    <section className="w-full max-w-[720px] rounded-lg border border-[#c4e0e529] bg-[#080e12ef] p-5 shadow-[0_28px_84px_rgba(0,0,0,0.5)]">
       <div className="text-[9px] font-black uppercase tracking-[0.13em] text-[#71878a]">
         Игровой модуль
       </div>
@@ -374,7 +375,7 @@ function ClubSelectionView({
   }, [activeCity, clubs]);
 
   return (
-    <section className="w-full rounded-lg border border-[#c4e0e529] bg-[#080e12ef] p-5 shadow-[0_28px_84px_rgba(0,0,0,0.5)]">
+    <section className="w-full max-w-[900px] rounded-lg border border-[#c4e0e529] bg-[#080e12ef] p-5 shadow-[0_28px_84px_rgba(0,0,0,0.5)]">
       <div className="text-[9px] font-black uppercase tracking-[0.13em] text-[#71878a]">
         Выбор клуба
       </div>
@@ -428,7 +429,7 @@ function ClubSelectionView({
           </div>
         </div>
       ) : null}
-      <div className="mt-5 grid gap-2">
+      <div className="mt-5 grid gap-2 [@media_(min-width:720px)]:grid-cols-2">
         {filteredClubs.map((club) => (
           <button
             className="grid min-h-16 grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-[#c4e0e524] bg-[#02080b8a] p-3 text-left transition hover:border-[#83e4ec94] disabled:cursor-wait disabled:opacity-60"
@@ -493,7 +494,7 @@ function TopBar({
   showToast: (message: string) => void;
 }) {
   return (
-    <header className="sticky top-0 z-20 grid min-h-[calc(62px+env(safe-area-inset-top,0px))] grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2.5 bg-[linear-gradient(180deg,rgba(0,0,0,0.96),rgba(0,0,0,0.82),transparent)] px-3 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))] backdrop-blur-xl">
+    <header className="sticky top-0 z-20 mx-auto grid min-h-[calc(62px+env(safe-area-inset-top,0px))] w-full max-w-[1120px] grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2.5 bg-[linear-gradient(180deg,rgba(0,0,0,0.96),rgba(0,0,0,0.82),transparent)] px-3 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))] backdrop-blur-xl [@media_(min-width:520px)]:rounded-lg [@media_(min-width:520px)]:border [@media_(min-width:520px)]:border-[#c4e0e51f] [@media_(min-width:520px)]:bg-[#050a0de8] [@media_(min-width:520px)]:px-4 [@media_(min-width:520px)]:pt-3">
       <button
         aria-label="Открыть меню"
         className="grid size-10 place-items-center rounded-lg border border-[#c4e0e52e] bg-[#c4e0e509] text-[#edf7f8]"
@@ -525,10 +526,48 @@ function TopBar({
   );
 }
 
+function DesktopNav({
+  selectedTab,
+  onSelectTab,
+}: {
+  selectedTab: MiniAppTab;
+  onSelectTab: (tab: MiniAppTab) => void;
+}) {
+  const items = getMiniAppNavigationItems();
+
+  return (
+    <nav
+      aria-label="Навигация по Mini App"
+      className="mx-auto hidden w-full max-w-[1120px] pt-3 [@media_(min-width:520px)]:block"
+    >
+      <div className="grid grid-cols-4 gap-2 rounded-lg border border-[#c4e0e529] bg-[#04080ae8] p-1.5 shadow-[0_18px_54px_rgba(0,0,0,0.36)] backdrop-blur-xl">
+        {items.map((item) => (
+          <button
+            className={[
+              "grid min-h-11 min-w-0 place-items-center rounded-[7px] px-3 text-xs font-black uppercase tracking-[0.05em] transition",
+              selectedTab === item.id
+                ? "bg-[#83e4ec] text-[#041012]"
+                : "bg-transparent text-[#a8b9ba] hover:bg-[#c4e0e50d] hover:text-[#edf7f8]",
+            ].join(" ")}
+            key={item.id}
+            type="button"
+            onClick={() => onSelectTab(item.id)}
+          >
+            <span className="inline-flex min-w-0 items-center gap-2">
+              {item.icon}
+              <span className="truncate">{item.label}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
 function HeroPanel({ summary }: { summary: GuestPortalGameSummary }) {
   return (
     <section
-      className="relative overflow-hidden rounded-lg border border-[#c4e0e529] bg-[linear-gradient(135deg,rgba(255,255,255,0.045),transparent_28%),rgba(8,14,18,0.94)] p-4 shadow-[0_28px_84px_rgba(0,0,0,0.5)] before:absolute before:left-[-1px] before:top-[-1px] before:size-[42px] before:rounded-tl-lg before:border-l before:border-t before:border-[#83e4ec]"
+      className="relative overflow-hidden rounded-lg border border-[#c4e0e529] bg-[linear-gradient(135deg,rgba(255,255,255,0.045),transparent_28%),rgba(8,14,18,0.94)] p-4 shadow-[0_28px_84px_rgba(0,0,0,0.5)] before:absolute before:left-[-1px] before:top-[-1px] before:size-[42px] before:rounded-tl-lg before:border-l before:border-t before:border-[#83e4ec] [@media_(min-width:900px)]:min-h-[250px]"
       id="home"
     >
       <div className="inline-flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.13em] text-[#71878a] before:h-px before:w-8 before:bg-[linear-gradient(90deg,#83e4ec,transparent)]">
@@ -578,11 +617,11 @@ function EventsRail({
   return (
     <section aria-label="Баннеры клуба" className="grid gap-2.5">
       <SectionHead count={`${events.length} активны`} title="События" />
-      <div className="-mx-0.5 flex snap-x snap-proximity gap-2.5 overflow-x-auto px-0.5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="-mx-0.5 flex snap-x snap-proximity gap-2.5 overflow-x-auto px-0.5 pb-1 [scrollbar-width:none] [@media_(min-width:520px)]:mx-0 [@media_(min-width:520px)]:grid [@media_(min-width:520px)]:grid-cols-2 [@media_(min-width:520px)]:overflow-visible [@media_(min-width:520px)]:px-0 [@media_(min-width:520px)]:pb-0 [@media_(min-width:1040px)]:grid-cols-3 [&::-webkit-scrollbar]:hidden">
         {events.map((event, index) => (
           <button
             className={[
-              "relative min-h-[120px] w-[78%] shrink-0 snap-start overflow-hidden rounded-lg border border-[#c4e0e529] p-4 text-left",
+              "relative min-h-[120px] w-[78%] shrink-0 snap-start overflow-hidden rounded-lg border border-[#c4e0e529] p-4 text-left [@media_(min-width:520px)]:w-full",
               "after:absolute after:inset-0 after:bg-[linear-gradient(135deg,transparent_0_38%,rgba(131,228,236,0.13)_38%_39%,transparent_39%),radial-gradient(circle_at_78%_16%,rgba(131,228,236,0.14),transparent_28%)]",
               index === 0
                 ? "bg-[linear-gradient(180deg,rgba(208,170,108,0.18),transparent_46%),rgba(7,12,16,0.86)]"
@@ -720,12 +759,12 @@ function BattlePassPanel({
           title="Батлпасс"
         />
       </div>
-      <div className="mt-3 flex snap-x snap-proximity gap-2.5 overflow-x-auto pb-1 pr-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="mt-3 flex snap-x snap-proximity gap-2.5 overflow-x-auto pb-1 pr-3 [scrollbar-width:none] [@media_(min-width:520px)]:grid [@media_(min-width:520px)]:grid-cols-[repeat(auto-fit,minmax(124px,1fr))] [@media_(min-width:520px)]:overflow-visible [@media_(min-width:520px)]:pb-0 [&::-webkit-scrollbar]:hidden">
         {steps.length ? (
           steps.map((step) => (
             <button
               className={[
-                "relative min-h-[126px] w-[124px] shrink-0 snap-start rounded-[7px] border p-3 text-left",
+                "relative min-h-[126px] w-[124px] shrink-0 snap-start rounded-[7px] border p-3 text-left [@media_(min-width:520px)]:w-full",
                 step.current
                   ? "border-[#83e4ec9e] bg-[linear-gradient(180deg,rgba(131,228,236,0.12),transparent),rgba(8,18,22,0.82)]"
                   : step.reached
@@ -749,7 +788,7 @@ function BattlePassPanel({
           ))
         ) : (
           <button
-            className="grid min-h-[126px] w-[140px] shrink-0 place-items-center rounded-[7px] border border-[#d0aa6c61] bg-[linear-gradient(135deg,rgba(208,170,108,0.18),rgba(131,228,236,0.08)),rgba(7,13,16,0.92)] p-3 text-center"
+            className="grid min-h-[126px] w-[140px] shrink-0 place-items-center rounded-[7px] border border-[#d0aa6c61] bg-[linear-gradient(135deg,rgba(208,170,108,0.18),rgba(131,228,236,0.08)),rgba(7,13,16,0.92)] p-3 text-center [@media_(min-width:520px)]:w-full"
             type="button"
             onClick={() => showToast("Сезон батлпасса еще не опубликован.")}
           >
@@ -1013,17 +1052,12 @@ function BottomNav({
   selectedTab: MiniAppTab;
   onSelectTab: (tab: MiniAppTab) => void;
 }) {
-  const items = [
-    { id: "home" as const, label: "Главная", icon: <HomeIcon /> },
-    { id: "quests" as const, label: "Квесты", icon: <CheckIcon /> },
-    { id: "rewards" as const, label: "Награды", icon: <RewardIcon /> },
-    { id: "profile" as const, label: "Профиль", icon: <ProfileIcon /> },
-  ];
+  const items = getMiniAppNavigationItems();
 
   return (
     <nav
       aria-label="Навигация"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-2.5 pb-[calc(8px+env(safe-area-inset-bottom,0px))]"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-2.5 pb-[calc(8px+env(safe-area-inset-bottom,0px))] [@media_(min-width:520px)]:hidden"
     >
       <div className="pointer-events-auto grid w-full max-w-[406px] grid-cols-4 gap-1 rounded-[10px] border border-[#c4e0e529] bg-[#04080aeb] p-[5px] shadow-[0_-18px_58px_rgba(0,0,0,0.48)] backdrop-blur-xl">
         {items.map((item) => (
@@ -1045,6 +1079,19 @@ function BottomNav({
       </div>
     </nav>
   );
+}
+
+function getMiniAppNavigationItems(): Array<{
+  id: MiniAppTab;
+  label: string;
+  icon: ReactNode;
+}> {
+  return [
+    { id: "home", label: "Главная", icon: <HomeIcon /> },
+    { id: "quests", label: "Квесты", icon: <CheckIcon /> },
+    { id: "rewards", label: "Награды", icon: <RewardIcon /> },
+    { id: "profile", label: "Профиль", icon: <ProfileIcon /> },
+  ];
 }
 
 function Panel({
@@ -1112,7 +1159,7 @@ function Toast({ message }: { message: string | null }) {
     <div
       aria-live="polite"
       className={[
-        "fixed inset-x-3 bottom-[calc(78px+env(safe-area-inset-bottom,0px))] z-40 mx-auto max-w-[406px] rounded-[7px] border border-[#83e4ec47] bg-[#070d10f0] px-3.5 py-3 text-[13px] leading-5 text-[#d7e5e6] shadow-[0_28px_84px_rgba(0,0,0,0.5)] backdrop-blur-xl transition",
+        "fixed inset-x-3 bottom-[calc(78px+env(safe-area-inset-bottom,0px))] z-40 mx-auto max-w-[406px] rounded-[7px] border border-[#83e4ec47] bg-[#070d10f0] px-3.5 py-3 text-[13px] leading-5 text-[#d7e5e6] shadow-[0_28px_84px_rgba(0,0,0,0.5)] backdrop-blur-xl transition [@media_(min-width:520px)]:bottom-5 [@media_(min-width:520px)]:left-auto [@media_(min-width:520px)]:right-5 [@media_(min-width:520px)]:mx-0 [@media_(min-width:520px)]:w-[360px]",
         message
           ? "translate-y-0 opacity-100"
           : "pointer-events-none translate-y-3 opacity-0",

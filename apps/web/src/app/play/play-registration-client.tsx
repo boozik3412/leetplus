@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { LegalEntityInfo } from "@/components/legal-entity-info";
 import type {
   GuestPortalGamificationClub,
   GuestPortalGamificationClubDirectory,
@@ -1443,6 +1444,10 @@ export function PlayRegistrationClient({
             )}
           </aside>
         </section>
+
+        {isGameAuth ? (
+          <LegalEntityInfo compact className="lp-game-auth-legal" />
+        ) : null}
       </div>
       {isGameAuth ? <style>{gameAuthCss}</style> : null}
     </main>
@@ -3018,6 +3023,29 @@ const gameAuthCss = `
 .lp-game-auth-shell {
   position: relative;
   z-index: 1;
+}
+
+.lp-game-auth-legal {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+  padding: 18px 0 4px;
+  border-top-color: rgba(196, 224, 225, 0.16) !important;
+  color: rgba(168, 185, 186, 0.78) !important;
+}
+
+.lp-game-auth-legal > div {
+  justify-content: center;
+}
+
+.lp-game-auth-legal p,
+.lp-game-auth-legal dt,
+.lp-game-auth-legal dd {
+  color: rgba(168, 185, 186, 0.78) !important;
+}
+
+.lp-game-auth-legal p {
+  color: rgba(237, 247, 248, 0.78) !important;
 }
 
 .lp-game-auth-page::before {

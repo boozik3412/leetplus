@@ -17,6 +17,7 @@ type LoadState =
   | "error";
 type SubmitState = "idle" | "submitting";
 type MiniAppTab = "home" | "quests" | "rewards" | "profile";
+const ALL_CLUB_CITY_FILTER = "__all";
 const TELEGRAM_INIT_DATA_WAIT_MS = 1200;
 const TELEGRAM_INIT_DATA_POLL_MS = 80;
 
@@ -345,6 +346,33 @@ function ClubSelectionView({
   message: string | null;
   onSelectClub: (clubId: string) => void;
 }) {
+  const [selectedCity, setSelectedCity] = useState(ALL_CLUB_CITY_FILTER);
+  const cityOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const club of clubs) {
+      const city = getMiniAppClubCity(club);
+      counts.set(city, (counts.get(city) ?? 0) + 1);
+    }
+
+    return Array.from(counts, ([city, count]) => ({ city, count })).sort(
+      (first, second) => first.city.localeCompare(second.city, "ru"),
+    );
+  }, [clubs]);
+  const selectedCityIsAvailable =
+    selectedCity === ALL_CLUB_CITY_FILTER ||
+    cityOptions.some((option) => option.city === selectedCity);
+  const activeCity = selectedCityIsAvailable
+    ? selectedCity
+    : ALL_CLUB_CITY_FILTER;
+  const filteredClubs = useMemo(() => {
+    if (activeCity === ALL_CLUB_CITY_FILTER) {
+      return clubs;
+    }
+
+    return clubs.filter((club) => getMiniAppClubCity(club) === activeCity);
+  }, [activeCity, clubs]);
+
   return (
     <section className="w-full rounded-lg border border-[#c4e0e529] bg-[#080e12ef] p-5 shadow-[0_28px_84px_rgba(0,0,0,0.5)]">
       <div className="text-[9px] font-black uppercase tracking-[0.13em] text-[#71878a]">
@@ -356,8 +384,52 @@ function ClubSelectionView({
       <p className="mt-3 text-sm leading-6 text-[#c2d0d1]">
         {message ?? "Выберите клуб для игровой сессии Mini App."}
       </p>
+      {cityOptions.length > 1 ? (
+        <div className="mt-5">
+          <div className="flex items-center justify-between gap-3 text-[9px] font-black uppercase tracking-[0.12em] text-[#71878a]">
+            <span>Город</span>
+            <span>
+              {filteredClubs.length} из {clubs.length}
+            </span>
+          </div>
+          <div
+            aria-label="Фильтр клубов по городу"
+            className="mt-2 flex flex-wrap gap-2"
+          >
+            <button
+              aria-pressed={activeCity === ALL_CLUB_CITY_FILTER}
+              className={`min-h-9 rounded-lg border px-3 text-xs font-black transition ${
+                activeCity === ALL_CLUB_CITY_FILTER
+                  ? "border-[#83e4ec] bg-[#83e4ec] text-[#041012]"
+                  : "border-[#c4e0e524] bg-[#02080b8a] text-[#c2d0d1] hover:border-[#83e4ec94]"
+              }`}
+              disabled={isSubmitting}
+              type="button"
+              onClick={() => setSelectedCity(ALL_CLUB_CITY_FILTER)}
+            >
+              Все ({clubs.length})
+            </button>
+            {cityOptions.map((option) => (
+              <button
+                aria-pressed={activeCity === option.city}
+                className={`min-h-9 rounded-lg border px-3 text-xs font-black transition ${
+                  activeCity === option.city
+                    ? "border-[#83e4ec] bg-[#83e4ec] text-[#041012]"
+                    : "border-[#c4e0e524] bg-[#02080b8a] text-[#c2d0d1] hover:border-[#83e4ec94]"
+                }`}
+                disabled={isSubmitting}
+                key={option.city}
+                type="button"
+                onClick={() => setSelectedCity(option.city)}
+              >
+                {option.city} ({option.count})
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-5 grid gap-2">
-        {clubs.map((club) => (
+        {filteredClubs.map((club) => (
           <button
             className="grid min-h-16 grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-[#c4e0e524] bg-[#02080b8a] p-3 text-left transition hover:border-[#83e4ec94] disabled:cursor-wait disabled:opacity-60"
             disabled={isSubmitting}
@@ -379,6 +451,38 @@ function ClubSelectionView({
       </div>
     </section>
   );
+}
+
+function getMiniAppClubCity(club: GuestPortalTelegramMiniAppClub) {
+  return (
+    extractMiniAppClubCity(club.storeAddress, true) ??
+    extractMiniAppClubCity(club.tenantName, false) ??
+    "Город не указан"
+  );
+}
+
+function extractMiniAppClubCity(
+  value: string | null | undefined,
+  useFirstPartFallback: boolean,
+) {
+  const normalizedValue = value?.trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const parts = normalizedValue
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const explicitCity = parts.find((part) => /^(г\.?|город)\s+/i.test(part));
+  const rawCity = explicitCity ?? (useFirstPartFallback ? parts[0] : null);
+  const city = rawCity
+    ?.replace(/^(г\.?|город)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return city || null;
 }
 
 function TopBar({

@@ -271,6 +271,12 @@ export function StaffChecklistWorkspace({
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
+  function openRun(runId: string) {
+    setSelectedRunId(runId);
+    setOpenedRunId(runId);
+    setMessage(null);
+  }
+
   async function createRun() {
     if (!canCreateRuns) {
       setMessage("Создание чек-листов недоступно для вашей роли.");
@@ -475,19 +481,14 @@ export function StaffChecklistWorkspace({
                 key={run.id}
                 id={`run-${run.id}`}
                 type="button"
-                onClick={() => setSelectedRunId(run.id)}
-                onDoubleClick={() => {
-                  setSelectedRunId(run.id);
-                  setOpenedRunId(run.id);
-                }}
+                onClick={() => openRun(run.id)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    setSelectedRunId(run.id);
-                    setOpenedRunId(run.id);
+                    openRun(run.id);
                   }
                 }}
-                title="Один клик выберет чек-лист, двойной клик откроет его"
+                title="Открыть чек-лист"
                 className={[
                   "scroll-mt-24 w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
                   selectedRun?.id === run.id

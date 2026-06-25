@@ -271,6 +271,12 @@ export function StaffChecklistWorkspace({
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
+  function openRun(runId: string) {
+    setSelectedRunId(runId);
+    setOpenedRunId(runId);
+    setMessage(null);
+  }
+
   async function createRun() {
     if (!canCreateRuns) {
       setMessage("Создание чек-листов недоступно для вашей роли.");
@@ -475,19 +481,14 @@ export function StaffChecklistWorkspace({
                 key={run.id}
                 id={`run-${run.id}`}
                 type="button"
-                onClick={() => setSelectedRunId(run.id)}
-                onDoubleClick={() => {
-                  setSelectedRunId(run.id);
-                  setOpenedRunId(run.id);
-                }}
+                onClick={() => openRun(run.id)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    setSelectedRunId(run.id);
-                    setOpenedRunId(run.id);
+                    openRun(run.id);
                   }
                 }}
-                title="Один клик выберет чек-лист, двойной клик откроет его"
+                title="Открыть чек-лист"
                 className={[
                   "scroll-mt-24 w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
                   selectedRun?.id === run.id
@@ -834,12 +835,29 @@ function ChecklistRunEditor({
       ACCEPTED: "Чеклист принят.",
       RETURNED: "Чеклист возвращен на доработку.",
       ESCALATED: "Чеклист эскалирован и отправлен в командный чат.",
+      CANCELED: "Чеклист отменен.",
     };
     const fallbackMessage = status
       ? (successMessages[status] ?? "Чеклист обновлен.")
       : "Чеклист обновлен.";
     setMessage(successMessage ?? fallbackMessage);
     router.refresh();
+  }
+
+  async function cancelRun() {
+    const confirmed = window.confirm(
+      "Отменить ошибочно активированный чек-лист? Он останется в отчете со статусом \"Отменен\".",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await updateRun(
+      "CANCELED",
+      answers,
+      "Чеклист отменен. Он останется в отчете со статусом \"Отменен\".",
+    );
   }
 
   async function submitAnswer(
@@ -1258,6 +1276,17 @@ function ChecklistRunEditor({
           >
             Отправить на проверку
           </button>
+          {run.status === "OPEN" || run.status === "IN_PROGRESS" ? (
+            <button
+              type="button"
+              onClick={cancelRun}
+              disabled={isPending}
+              title="Отменить ошибочно активированный чек-лист"
+              className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-red-500/40 dark:hover:bg-red-500/10 dark:hover:text-red-100"
+            >
+              Отменить
+            </button>
+          ) : null}
           {canReviewRun ? (
             <>
               <button

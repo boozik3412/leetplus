@@ -1362,12 +1362,21 @@ export class StaffChecklistsService {
       throw new ForbiddenException('Закрытый чек-лист нельзя изменить');
     }
 
+    if (nextStatus === 'CANCELED') {
+      if (currentStatus === 'OPEN' || currentStatus === 'IN_PROGRESS') {
+        return;
+      }
+
+      throw new ForbiddenException(
+        'Отменить можно только новый чек-лист или чек-лист в работе',
+      );
+    }
+
     const isReviewTransition =
       nextStatus !== currentStatus &&
       (nextStatus === 'ACCEPTED' ||
         nextStatus === 'RETURNED' ||
-        nextStatus === 'ESCALATED' ||
-        nextStatus === 'CANCELED');
+        nextStatus === 'ESCALATED');
 
     if (isReviewTransition) {
       throw new ForbiddenException(

@@ -3926,6 +3926,59 @@ describe('GuestGamificationService', () => {
         }),
       );
     });
+
+    it('allows process rewards for staff test profiles when pilot accrual flag is enabled', async () => {
+      const { service, prisma, configService } = createService();
+
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED'
+          ? 'true'
+          : undefined,
+      );
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        isStaffTest: true,
+        staffTestReason: 'STAFF_PHONE_MATCH',
+      });
+      jest.spyOn(service as any, 'createReward').mockResolvedValue(
+        rewardResult({
+          status: 'APPROVED',
+          walletState: 'PENDING',
+        }),
+      );
+
+      await (service as any).createProcessRewards(
+        user,
+        {
+          eventType: 'SESSION_START',
+          storeId: null,
+        },
+        dryRunResult(),
+        'profile-1',
+        {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-1',
+        },
+      );
+
+      expect((service as any).createReward).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          status: 'APPROVED',
+          rewardType: 'BONUS',
+          rewardAmount: 50,
+          note: expect.stringContaining('пилотным флагом'),
+          evidence: expect.objectContaining({
+            staffTestBlocked: false,
+            staffTestReason: 'STAFF_PHONE_MATCH',
+            staffTestAccrualOverride: true,
+            staffTestRewardAccrualEnabled: true,
+            staffTestRewardAccrualEnv:
+              'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED',
+          }),
+        }),
+      );
+    });
   });
 
   describe('getSnapshotFacts', () => {

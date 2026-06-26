@@ -72,6 +72,8 @@ const deliveryStatuses = [
   'FAILED',
   'CANCELED',
 ] as const;
+const staffTestRewardAccrualEnabledEnv =
+  'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED';
 const otpSmsRateLimitDefaults = {
   phoneWindowMinutes: 60,
   phoneMax: 3,
@@ -7819,6 +7821,14 @@ export class GuestGamificationService {
     const staffTestReason = profileStaffTest?.isStaffTest
       ? (profileStaffTest.staffTestReason ?? 'STAFF_PHONE_MATCH')
       : null;
+    const staffTestRewardAccrualEnabled =
+      Boolean(staffTestReason) &&
+      booleanValue(
+        this.configService.get<string>(staffTestRewardAccrualEnabledEnv),
+      );
+    const staffTestBlocked = Boolean(
+      staffTestReason && !staffTestRewardAccrualEnabled,
+    );
 
     for (const rule of eligibleRules) {
       const link = rewardRuleLink(rule);
@@ -7831,7 +7841,7 @@ export class GuestGamificationService {
           profileId,
           guestId,
           storeId: nullableId(dto.storeId),
-          status: staffTestReason
+          status: staffTestBlocked
             ? 'CANCELED'
             : rule.manualApprovalRequired
               ? 'PENDING'
@@ -7860,9 +7870,11 @@ export class GuestGamificationService {
               ? rule.selectedReward?.chancePercent
               : null,
           qualifiedAt: dryRun.occurredAt,
-          note: staffTestReason
+          note: staffTestBlocked
             ? 'Создано как тест сотрудника; автоматическое начисление в Langame заблокировано.'
-            : 'Создано подтвержденным запуском события геймификации.',
+            : staffTestReason
+              ? 'Создано как тест сотрудника; автоматическое начисление в Langame разрешено пилотным флагом.'
+              : 'Создано подтвержденным запуском события геймификации.',
           evidence: {
             source: 'guest_gamification_process_event',
             langameWrite: false,
@@ -7874,8 +7886,16 @@ export class GuestGamificationService {
             rule,
             ...(staffTestReason
               ? {
-                  staffTestBlocked: true,
+                  staffTestBlocked,
                   staffTestReason,
+                  ...(staffTestRewardAccrualEnabled
+                    ? {
+                        staffTestAccrualOverride: true,
+                        staffTestRewardAccrualEnabled: true,
+                        staffTestRewardAccrualEnv:
+                          staffTestRewardAccrualEnabledEnv,
+                      }
+                    : {}),
                 }
               : {}),
           },

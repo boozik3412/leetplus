@@ -40,6 +40,8 @@ const staffTestProfileReasons = {
   staffPhone: 'STAFF_PHONE_MATCH',
   langameStaffPhone: 'LANGAME_STAFF_PHONE_MATCH',
 } as const;
+const staffTestRewardAccrualEnabledEnv =
+  'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED';
 
 type BonusLedgerMode = 'DISABLED' | 'DRY_RUN' | 'READY';
 type BonusLedgerItemStatus =
@@ -174,6 +176,7 @@ type BonusLedgerConfig = {
   maxAttempts: number;
   retryMinutes: number;
   staleLockMinutes: number;
+  staffTestRewardAccrualEnabled: boolean;
 };
 
 type ClaimedBonusLedgerEntry = {
@@ -261,6 +264,8 @@ export class GuestBonusLedgerService {
     const storeId = nullableString(dto.storeId);
     const rewardId = nullableString(dto.rewardId);
     const limit = positiveInt(dto.limit, 500, 1000);
+    const staffTestRewardAccrualEnabled =
+      this.isStaffTestRewardAccrualEnabled();
 
     if (rewardTypes.length === 0) {
       return {
@@ -370,17 +375,19 @@ export class GuestBonusLedgerService {
             staffTestReason,
           );
         }
-        staffTestRewardIds.push(reward.id);
-        items.push({
-          rewardId: reward.id,
-          status: 'SKIPPED',
-          reason:
-            'Профиль определен как тест сотрудника; автоначисление в Langame заблокировано.',
-          externalDomain,
-          externalGuestId,
-          amount,
-        });
-        continue;
+        if (!staffTestRewardAccrualEnabled) {
+          staffTestRewardIds.push(reward.id);
+          items.push({
+            rewardId: reward.id,
+            status: 'SKIPPED',
+            reason:
+              'Профиль определен как тест сотрудника; автоначисление в Langame заблокировано.',
+            externalDomain,
+            externalGuestId,
+            amount,
+          });
+          continue;
+        }
       }
 
       if (!phone) {
@@ -419,12 +426,23 @@ export class GuestBonusLedgerService {
           rewardLabel: reward.rewardLabel,
           rewardCode: reward.rewardCode,
           phoneMasked: phone.masked,
+          ...(staffTestReason && staffTestRewardAccrualEnabled
+            ? {
+                staffTestReason,
+                staffTestAccrualOverride: true,
+                staffTestRewardAccrualEnabled: true,
+                staffTestRewardAccrualEnv: staffTestRewardAccrualEnabledEnv,
+              }
+            : {}),
         },
       });
       items.push({
         rewardId: reward.id,
         status: 'QUEUED',
-        reason: null,
+        reason:
+          staffTestReason && staffTestRewardAccrualEnabled
+            ? `Staff/test награда поставлена в ledger по пилотному флагу ${staffTestRewardAccrualEnabledEnv}.`
+            : null,
         externalDomain,
         externalGuestId,
         amount,
@@ -920,7 +938,7 @@ export class GuestBonusLedgerService {
         phone.value,
       );
 
-      if (staffTestReason) {
+      if (staffTestReason && !config.staffTestRewardAccrualEnabled) {
         await this.cancelStaffTestEntry(
           actorUserId,
           sourcedEntry,
@@ -939,6 +957,17 @@ export class GuestBonusLedgerService {
       }
 
       const payload = this.buildLangamePayload(sourcedEntry, phone.value);
+      const auditPayload = {
+        ...this.buildLangameAuditPayload(payload, phone.masked),
+        ...(staffTestReason && config.staffTestRewardAccrualEnabled
+          ? {
+              staffTestReason,
+              staffTestAccrualOverride: true,
+              staffTestRewardAccrualEnabled: true,
+              staffTestRewardAccrualEnv: staffTestRewardAccrualEnabledEnv,
+            }
+          : {}),
+      };
       const response = await this.langameClient.adjustGuestBalanceByPhone(
         source.baseUrl,
         access.apiKey,
@@ -949,7 +978,7 @@ export class GuestBonusLedgerService {
       await this.confirmEntry(
         actorUserId,
         sourcedEntry,
-        this.buildLangameAuditPayload(payload, phone.masked),
+        auditPayload,
         sanitizeLangameBalanceResponse(response),
       );
 
@@ -1539,6 +1568,13 @@ export class GuestBonusLedgerService {
     };
   }
 
+  private isStaffTestRewardAccrualEnabled() {
+    return booleanValue(
+      this.configService.get<string>(staffTestRewardAccrualEnabledEnv),
+      false,
+    );
+  }
+
   private resolveConfig(
     dto: GuestGameBonusLedgerDispatchDto | GuestGameBonusLedgerQueueDto = {},
     forceDryRun = false,
@@ -1594,6 +1630,7 @@ export class GuestBonusLedgerService {
         15,
         24 * 60,
       ),
+      staffTestRewardAccrualEnabled: this.isStaffTestRewardAccrualEnabled(),
     };
   }
 

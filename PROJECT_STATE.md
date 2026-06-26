@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-21
+Last updated: 2026-06-26
 
 ## Current Workflow
 
@@ -29,7 +29,7 @@ Last updated: 2026-06-21
 - Guest Game Hub pilot readiness no longer treats a checked-empty `guests/logs` endpoint as a pilot stop-blocker after a successful foundation sync returned 0 rows. It remains a visible diagnostic warning for rules that depend on `guests/logs`, while the first-bonus path should use rules without that dependency until Langame payload is confirmed.
 - Guest Game Hub now gives the VDS `bot-consumer` a concrete tenant-scope hint based on the current tenant slug, and the static tariff snapshot block links directly to the matching `/sync` endpoint profile/snapshot workflow.
 - The technical Langame bonus ledger warning in `/guests/gamification` is platform-admin only; club roles should work with the business controls without seeing backend-mode details.
-- Guest Game staff/test separation is active in code: OTP/call/Telegram game login marks profiles whose phone matches tenant staff or Langame staff, staff/test rewards are canceled before auto-accrual, and bonus ledger also blocks matching phones before live Langame dispatch.
+- Guest Game staff/test separation is active in code: OTP/call/Telegram game login marks profiles whose phone matches tenant staff or Langame staff. By default staff/test rewards are canceled before auto-accrual and bonus ledger blocks matching phones before live Langame dispatch; for a controlled pilot this can be temporarily overridden with `GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED=true`, while keeping the profile marked as staff/test and preserving the override in reward evidence, ledger metadata, and Langame audit payload.
 
 ## Product Context
 

@@ -941,6 +941,81 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('queues approved staff test rewards when pilot accrual flag is enabled', async () => {
+    const { service, prisma, secretEncryptionService } = createService({
+      GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'true',
+    });
+
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
+    prisma.guestGameReward.findMany.mockResolvedValue([
+      {
+        id: 'reward-staff-test',
+        profileId: 'profile-staff',
+        guestId: null,
+        storeId: 'store-1337',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        guestExternalId: null,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+        rewardLabel: '50 bonuses',
+        rewardCode: 'LP-50',
+        guest: null,
+        profile: {
+          phoneEncrypted: 'profile-encrypted-phone',
+          contactMasked: '***3344',
+          isStaffTest: true,
+          staffTestReason: 'STAFF_PHONE_MATCH',
+        },
+      },
+    ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.queueApprovedRewards(user, {
+      limit: 1,
+      rewardId: 'reward-staff-test',
+    });
+
+    expect(result).toMatchObject({
+      checkedRewards: 1,
+      queued: 1,
+      skipped: 0,
+      items: [
+        expect.objectContaining({
+          rewardId: 'reward-staff-test',
+          status: 'QUEUED',
+          reason: expect.stringContaining('пилотному флагу'),
+        }),
+      ],
+    });
+    expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'profile-staff', tenantId: user.tenantId },
+        data: expect.objectContaining({
+          isStaffTest: true,
+          staffTestReason: 'STAFF_PHONE_MATCH',
+        }),
+      }),
+    );
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          rewardId: 'reward-staff-test',
+          status: 'PENDING',
+          metadata: expect.objectContaining({
+            staffTestReason: 'STAFF_PHONE_MATCH',
+            staffTestAccrualOverride: true,
+            staffTestRewardAccrualEnabled: true,
+            staffTestRewardAccrualEnv:
+              'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED',
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
+  });
+
   it('detects staff phones before queueing rewards to Langame ledger', async () => {
     const { service, prisma, secretEncryptionService } = createService();
 
@@ -998,6 +1073,72 @@ describe('GuestBonusLedgerService', () => {
         data: { status: 'CANCELED' },
       }),
     );
+  });
+
+  it('queues detected staff phone rewards when pilot accrual flag is enabled', async () => {
+    const { service, prisma, secretEncryptionService } = createService({
+      GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'true',
+    });
+
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
+    prisma.staffMember.findMany.mockResolvedValue([{ phone: '79992223344' }]);
+    prisma.guestGameReward.findMany.mockResolvedValue([
+      {
+        id: 'reward-staff-phone',
+        profileId: 'profile-staff-phone',
+        guestId: null,
+        storeId: 'store-1337',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        guestExternalId: null,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+        rewardLabel: '50 bonuses',
+        rewardCode: 'LP-50',
+        guest: null,
+        profile: {
+          phoneEncrypted: 'profile-encrypted-phone',
+          contactMasked: '***3344',
+          isStaffTest: false,
+          staffTestReason: null,
+        },
+      },
+    ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.queueApprovedRewards(user, {
+      limit: 1,
+      rewardId: 'reward-staff-phone',
+    });
+
+    expect(result).toMatchObject({
+      checkedRewards: 1,
+      queued: 1,
+      skipped: 0,
+    });
+    expect(prisma.guestGameProfile.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'profile-staff-phone', tenantId: user.tenantId },
+        data: expect.objectContaining({
+          isStaffTest: true,
+          staffTestReason: 'STAFF_PHONE_MATCH',
+        }),
+      }),
+    );
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          rewardId: 'reward-staff-phone',
+          status: 'PENDING',
+          metadata: expect.objectContaining({
+            staffTestReason: 'STAFF_PHONE_MATCH',
+            staffTestAccrualOverride: true,
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
   });
 
   it('queues guest portal profile rewards through the store Langame domain', async () => {
@@ -1283,6 +1424,85 @@ describe('GuestBonusLedgerService', () => {
           isStaffTest: true,
           staffTestReason: 'STAFF_PHONE_MATCH',
         }),
+      }),
+    );
+  });
+
+  it('dispatches staff test ledger entries when pilot accrual flag is enabled', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({
+      id: 'ledger-staff-test',
+      profileId: 'profile-staff',
+      rewardId: 'reward-staff',
+      metadata: { rewardType: 'BONUS_BALANCE' },
+    });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    prisma.guestGameProfile.findFirst.mockResolvedValue({
+      isStaffTest: true,
+      staffTestReason: 'STAFF_PHONE_MATCH',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    langameClient.adjustGuestBalanceByPhone.mockResolvedValue({
+      status: true,
+      phone: '79991112233',
+    });
+    jest.spyOn(service as any, 'confirmEntry').mockResolvedValue(null);
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        ready: true,
+        path: '/master_api/guests/balance/phone',
+        maxAttempts: 3,
+        staffTestRewardAccrualEnabled: true,
+      },
+      access,
+    );
+
+    expect(result).toMatchObject({
+      ledgerEntryId: 'ledger-staff-test',
+      rewardId: 'reward-staff',
+      status: 'CONFIRMED',
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalledWith(
+      'https://46.langamepro.ru/public_api',
+      'request-token',
+      expect.objectContaining({
+        phone: '79991112233',
+        type: 'bonus_balance',
+        sum: 25,
+      }),
+      '/master_api/guests/balance/phone',
+    );
+    expect((service as any).confirmEntry).toHaveBeenCalledWith(
+      user.id,
+      entry,
+      expect.objectContaining({
+        phone: '+7 *** **-33',
+        staffTestReason: 'STAFF_PHONE_MATCH',
+        staffTestAccrualOverride: true,
+        staffTestRewardAccrualEnabled: true,
+        staffTestRewardAccrualEnv:
+          'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED',
+      }),
+      expect.objectContaining({
+        status: true,
+        phone: '***2233',
       }),
     );
   });

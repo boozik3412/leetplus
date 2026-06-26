@@ -71,6 +71,7 @@ const runStatusGroups: Array<{ key: RunStatusGroupKey; label: string }> = [
   { key: "RETURNED", label: "Возвращен в работу" },
   { key: "OTHER", label: "Прочие" },
 ];
+const STAFF_TIME_ZONE = "Asia/Yekaterinburg";
 
 function getRunStatusGroupKey(status: StaffChecklistStatus): RunStatusGroupKey {
   if (
@@ -196,6 +197,7 @@ function formatDateTime(value: string | null) {
   }
 
   return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: STAFF_TIME_ZONE,
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -210,6 +212,7 @@ function formatCompletionDateTime(value: string | null) {
   }
 
   return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: STAFF_TIME_ZONE,
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

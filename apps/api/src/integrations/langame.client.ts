@@ -26,6 +26,9 @@ type LangameResponse<T> = {
 };
 
 type LangameQueryParams = Record<string, string>;
+type LangameRequestOptions = {
+  timeoutMs?: number;
+};
 type LangameBalanceType = 'balance' | 'bonus_balance';
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -136,6 +139,7 @@ export class LangameClient {
       dateFrom: string;
       dateTo: string;
     },
+    options: LangameRequestOptions = {},
   ) {
     return this.getListWithDateFallback<LangameGuestSession>(
       baseUrl,
@@ -147,6 +151,7 @@ export class LangameClient {
         date_from: params.dateFrom,
         date_to: params.dateTo,
       },
+      options,
     );
   }
 
@@ -518,6 +523,7 @@ export class LangameClient {
     path: string,
     apiKey: string,
     params: LangameQueryParams = {},
+    options: LangameRequestOptions = {},
   ): Promise<T[]> {
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${path}`);
 
@@ -525,12 +531,16 @@ export class LangameClient {
       url.searchParams.set(key, value);
     });
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-API-KEY': apiKey,
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': apiKey,
+        },
       },
-    });
+      options.timeoutMs,
+    );
 
     if (!response.ok) {
       const errorDetails = await this.readErrorDetails(response);
@@ -562,9 +572,16 @@ export class LangameClient {
     path: string,
     apiKey: string,
     params: LangameQueryParams = {},
+    options: LangameRequestOptions = {},
   ): Promise<T[]> {
     try {
-      const rows = await this.getList<T>(baseUrl, path, apiKey, params);
+      const rows = await this.getList<T>(
+        baseUrl,
+        path,
+        apiKey,
+        params,
+        options,
+      );
 
       if (rows.length > 0 || !this.shouldRetryEmptyWithEuropeanDates(params)) {
         return rows;
@@ -575,6 +592,7 @@ export class LangameClient {
         path,
         apiKey,
         this.toEuropeanDateParams(params),
+        options,
       );
     } catch (error) {
       if (!this.shouldRetryWithEuropeanDates(error, params)) {
@@ -586,7 +604,30 @@ export class LangameClient {
         path,
         apiKey,
         this.toEuropeanDateParams(params),
+        options,
       );
+    }
+  }
+
+  private async fetchWithTimeout(
+    url: URL,
+    init: RequestInit,
+    timeoutMs?: number,
+  ) {
+    if (!timeoutMs || timeoutMs <= 0) {
+      return fetch(url, init);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

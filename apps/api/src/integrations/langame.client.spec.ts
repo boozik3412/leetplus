@@ -64,6 +64,29 @@ describe('LangameClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('passes an abort signal when guest session requests are bounded by timeout', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(responseWithRows([{ id: 1 }]));
+    global.fetch = fetchMock as typeof fetch;
+
+    await client.listGuestSessions(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      {
+        page: 1,
+        pageLimit: 200,
+        dateFrom: '2026-05-21',
+        dateTo: '2026-05-21',
+      },
+      { timeoutMs: 123 },
+    );
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit?]>;
+
+    expect(calls[0][1]?.signal).toBeDefined();
+  });
+
   it('retries operation log requests with European dates when ISO dates return 400', async () => {
     const fetchMock = jest
       .fn()

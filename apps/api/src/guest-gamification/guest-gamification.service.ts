@@ -74,6 +74,9 @@ const deliveryStatuses = [
 ] as const;
 const staffTestRewardAccrualEnabledEnv =
   'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED';
+const liveSessionStartCacheDefaultTtlMs = 30_000;
+const liveSessionStartLookupDefaultTimeoutMs = 4_000;
+const liveSessionStartCacheMaxEntries = 1_000;
 const otpSmsRateLimitDefaults = {
   phoneWindowMinutes: 60,
   phoneMax: 3,
@@ -2389,6 +2392,16 @@ type CheckInLiveSession = {
   raw: LangameGuestSession;
 };
 
+type LiveSessionStartCacheEntry = {
+  expiresAt: number;
+  result: GuestGameProcessEventResult | null;
+};
+
+type LiveSessionStartProcessOutcome = {
+  result: GuestGameProcessEventResult | null;
+  cache: boolean;
+};
+
 export type GuestGamePipelineRunResult = {
   dryRunOnly: boolean;
   langameWrite: false;
@@ -3194,6 +3207,14 @@ function isPilotFirstBonusLedgerRow(row: BonusLedgerAuditRow) {
 @Injectable()
 export class GuestGamificationService {
   private readonly logger = new Logger(GuestGamificationService.name);
+  private readonly liveSessionStartCache = new Map<
+    string,
+    LiveSessionStartCacheEntry
+  >();
+  private readonly liveSessionStartInFlight = new Map<
+    string,
+    Promise<GuestGameProcessEventResult | null>
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -7742,28 +7763,91 @@ export class GuestGamificationService {
     }
 
     const guest = await this.getTenantGuest(user, guestId);
+    const externalGuestId = nullableString(guest.externalGuestId);
 
-    if (!nullableString(guest.externalGuestId)) {
+    if (!externalGuestId) {
       return null;
     }
 
-    const expectedStoreId = nullableId(dto.storeId);
+    const expectedStoreId = nullableId(dto.storeId) ?? null;
+    const cacheKey = this.liveSessionStartCacheKey(
+      user.tenantId,
+      guestId,
+      expectedStoreId,
+    );
+    const cached = this.readLiveSessionStartCache(cacheKey);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const pending = this.liveSessionStartInFlight.get(cacheKey);
+
+    if (pending) {
+      return pending;
+    }
+
+    const promise = this.processLiveSessionStartUncached(
+      user,
+      dto,
+      {
+        externalDomain: guest.externalDomain,
+        externalGuestId,
+      },
+      guestId,
+      expectedStoreId,
+    )
+      .then((outcome) => {
+        if (outcome.cache) {
+          this.writeLiveSessionStartCache(cacheKey, outcome.result);
+        }
+
+        return outcome.result;
+      })
+      .finally(() => {
+        this.liveSessionStartInFlight.delete(cacheKey);
+      });
+
+    this.liveSessionStartInFlight.set(cacheKey, promise);
+
+    return promise;
+  }
+
+  private async processLiveSessionStartUncached(
+    user: AuthenticatedUser,
+    dto: Pick<
+      GuestGameProcessEventDto,
+      'profileId' | 'guestId' | 'storeId' | 'note'
+    >,
+    guest: {
+      externalDomain: string | null;
+      externalGuestId: string;
+    },
+    guestId: string,
+    expectedStoreId: string | null,
+  ): Promise<LiveSessionStartProcessOutcome> {
+    if (!(await this.hasActiveSessionStartRules(user))) {
+      return { result: null, cache: true };
+    }
+
     const expectedStore = expectedStoreId
       ? await this.assertStore(user, expectedStoreId)
       : null;
     let liveSession: CheckInLiveSession | null;
 
     try {
-      liveSession = await this.findActiveCheckInSession(user.tenantId, guest);
+      liveSession = await this.findActiveCheckInSession(user.tenantId, guest, {
+        timeoutMs: this.liveSessionStartLookupTimeoutMs(),
+      });
     } catch (error) {
       this.logger.warn(
         `Failed to check live session start for guest ${guestId}: ${this.checkInErrorMessage(error)}`,
       );
-      return null;
+      return { result: null, cache: false };
     }
 
     if (!liveSession?.externalSessionId) {
-      return null;
+      return { result: null, cache: false };
     }
 
     const storeId = this.liveSessionStartStoreId(
@@ -7778,12 +7862,30 @@ export class GuestGamificationService {
     );
 
     if (expectedStoreId && !storeId) {
-      return null;
+      return { result: null, cache: false };
     }
 
     const occurredAt = liveSession.startedAt ?? new Date();
+    const eventReference = buildProcessExternalReference(
+      {
+        eventType: 'SESSION_START',
+        sourceFactId: liveSession.externalSessionId,
+        sourceFactKind: 'GUEST_SESSION',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: liveSession.externalDomain,
+        externalId: liveSession.externalSessionId,
+      },
+      'SESSION_START',
+    );
 
-    return this.processEvent(user, {
+    if (
+      eventReference &&
+      (await this.findProcessEventByReference(user, eventReference))
+    ) {
+      return { result: null, cache: true };
+    }
+
+    const result = await this.processEvent(user, {
       profileId: nullableId(dto.profileId),
       guestId,
       storeId,
@@ -7802,6 +7904,128 @@ export class GuestGamificationService {
         nullableString(dto.note) ??
         'Гость открыл игровой модуль во время активной Langame-сессии; старт сессии обработан live-проверкой.',
     });
+
+    return { result, cache: true };
+  }
+
+  private async hasActiveSessionStartRules(user: AuthenticatedUser) {
+    const [lootBoxes, missions, seasons] = await Promise.all([
+      this.prisma.guestGameLootBox.findMany({
+        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        select: { triggerKind: true },
+      }),
+      this.prisma.guestGameMission.findMany({
+        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        select: { triggerKind: true },
+      }),
+      this.prisma.guestGameSeason.findMany({
+        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        select: { xpRules: true },
+      }),
+    ]);
+
+    return (
+      lootBoxes.some((rule) =>
+        guestGameTriggerMatches(rule.triggerKind, 'SESSION_START'),
+      ) ||
+      missions.some((rule) =>
+        guestGameTriggerMatches(rule.triggerKind, 'SESSION_START'),
+      ) ||
+      seasons.some((season) =>
+        this.seasonXpRulesMatchLiveSessionStart(season.xpRules),
+      )
+    );
+  }
+
+  private seasonXpRulesMatchLiveSessionStart(value: unknown) {
+    const rules = dryRunRecord(value);
+
+    return (
+      dryRunNumber(rules.visit, 0) > 0 ||
+      dryRunNumber(rules.packetSessionBonus, 0) > 0
+    );
+  }
+
+  private liveSessionStartCacheKey(
+    tenantId: string,
+    guestId: string,
+    storeId: string | null,
+  ) {
+    return [tenantId, guestId, storeId ?? 'any-store'].join(':');
+  }
+
+  private readLiveSessionStartCache(
+    key: string,
+  ): GuestGameProcessEventResult | null | undefined {
+    const entry = this.liveSessionStartCache.get(key);
+
+    if (!entry) {
+      return undefined;
+    }
+
+    if (entry.expiresAt <= Date.now()) {
+      this.liveSessionStartCache.delete(key);
+      return undefined;
+    }
+
+    return entry.result;
+  }
+
+  private writeLiveSessionStartCache(
+    key: string,
+    result: GuestGameProcessEventResult | null,
+  ) {
+    const ttlMs = this.liveSessionStartCacheTtlMs();
+
+    if (ttlMs <= 0) {
+      return;
+    }
+
+    if (this.liveSessionStartCache.size >= liveSessionStartCacheMaxEntries) {
+      const oldestKey = this.liveSessionStartCache.keys().next();
+
+      if (!oldestKey.done) {
+        this.liveSessionStartCache.delete(oldestKey.value);
+      }
+    }
+
+    this.liveSessionStartCache.set(key, {
+      expiresAt: Date.now() + ttlMs,
+      result,
+    });
+  }
+
+  private liveSessionStartCacheTtlMs() {
+    return this.configMilliseconds(
+      'GUEST_GAME_LIVE_SESSION_START_CACHE_TTL_MS',
+      liveSessionStartCacheDefaultTtlMs,
+      0,
+      5 * 60_000,
+    );
+  }
+
+  private liveSessionStartLookupTimeoutMs() {
+    return this.configMilliseconds(
+      'GUEST_GAME_LIVE_SESSION_START_LOOKUP_TIMEOUT_MS',
+      liveSessionStartLookupDefaultTimeoutMs,
+      1_000,
+      15_000,
+    );
+  }
+
+  private configMilliseconds(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ) {
+    const configured = intValue(this.configService.get<string>(key));
+
+    if (configured == null) {
+      return fallback;
+    }
+
+    return Math.min(max, Math.max(min, configured));
   }
 
   async checkIn(
@@ -9819,6 +10043,7 @@ export class GuestGamificationService {
       externalDomain: string | null;
       externalGuestId: string;
     },
+    options: { timeoutMs?: number } = {},
   ): Promise<CheckInLiveSession | null> {
     const externalGuestId = nullableString(guest.externalGuestId);
 
@@ -9844,6 +10069,7 @@ export class GuestGamificationService {
           source,
           externalGuestId,
           period,
+          timeoutMs: options.timeoutMs,
         });
 
         if (session) {
@@ -9870,6 +10096,7 @@ export class GuestGamificationService {
     source: { id: string; domain: string; baseUrl: string };
     externalGuestId: string;
     period: { dateFrom: string; dateTo: string };
+    timeoutMs?: number;
   }): Promise<CheckInLiveSession | null> {
     const pageLimit = 200;
     const maxPages = 5;
@@ -9884,6 +10111,7 @@ export class GuestGamificationService {
           dateFrom: params.period.dateFrom,
           dateTo: params.period.dateTo,
         },
+        { timeoutMs: params.timeoutMs },
       );
 
       for (const row of rows) {

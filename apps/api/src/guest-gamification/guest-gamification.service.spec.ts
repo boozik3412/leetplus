@@ -3507,6 +3507,9 @@ describe('GuestGamificationService', () => {
         externalDomain: 'club-1',
         externalGuestId: 'lg-guest-1',
       });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
       jest.spyOn(service as any, 'assertStore').mockResolvedValue({
         id: 'store-1',
         externalDomain: 'club-1',
@@ -3552,6 +3555,118 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(result).toBe(processResult);
+    });
+
+    it('skips the Langame lookup when there are no active SESSION_START rules', async () => {
+      const { service } = createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(false);
+      const findActiveSessionSpy = jest.spyOn(
+        service as any,
+        'findActiveCheckInSession',
+      );
+
+      const result = await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(result).toBeNull();
+      expect(findActiveSessionSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not cache a missing live session so a fresh session can be picked up immediately', async () => {
+      const { service } = createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+      });
+      const findActiveSessionSpy = jest
+        .spyOn(service as any, 'findActiveCheckInSession')
+        .mockResolvedValue(null);
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(findActiveSessionSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('caches an already processed live session and skips processEvent', async () => {
+      const { service } = createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+      });
+      const findActiveSessionSpy = jest
+        .spyOn(service as any, 'findActiveCheckInSession')
+        .mockResolvedValue({
+          externalDomain: 'club-1',
+          externalSessionId: 'session-1',
+          externalGuestId: 'lg-guest-1',
+          externalClubId: 'club-external-1',
+          externalUuid: 'uuid-1',
+          startedAt: new Date('2026-06-10T09:45:00.000Z'),
+          durationMinutes: 15,
+          sessionType: 'regular_session',
+          sessionPacket: false,
+          store: null,
+          raw: {},
+        });
+      const existingEventSpy = jest
+        .spyOn(service as any, 'findProcessEventByReference')
+        .mockResolvedValue({ id: 'event-1' });
+      const processEventSpy = jest.spyOn(service, 'processEvent');
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(findActiveSessionSpy).toHaveBeenCalledTimes(1);
+      expect(existingEventSpy).toHaveBeenCalledTimes(1);
+      expect(processEventSpy).not.toHaveBeenCalled();
     });
   });
 

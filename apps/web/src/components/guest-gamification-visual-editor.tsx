@@ -1066,6 +1066,9 @@ function LootBoxInspector({
               <div className="mt-3">
                 <LootBoxPrizeDistribution prizes={item.prizes} />
               </div>
+              <p className="mt-3 text-xs font-medium leading-relaxed text-zinc-500 dark:text-zinc-400">
+                Настроить награды и другие фишки можно в расширенном редакторе.
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">

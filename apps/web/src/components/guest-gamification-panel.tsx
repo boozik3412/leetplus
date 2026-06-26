@@ -6290,6 +6290,7 @@ function LootBoxesTab({
             guestLogRuleSummary(item.periodRules),
             formatMoney(item.budgetAmount ?? 0),
           ]}
+          details={<LootBoxRulePrizeSummary lootBox={item} />}
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("loot-boxes", item.id, status)}
           saving={saving === `loot-boxes-${item.id}`}
@@ -7549,15 +7550,21 @@ function LootBoxPrizesEditor({
     (total, prize) => total + Math.max(0, numeric(prize.chancePercent, 0)),
     0,
   );
+  const sortedPrizes = [...prizes].sort(
+    (left, right) =>
+      numeric(right.chancePercent, 0) - numeric(left.chancePercent, 0),
+  );
+  const topPrize = sortedPrizes[0] ?? null;
   const chanceDiff = Math.round((100 - chanceTotal) * 100) / 100;
+  const isChanceBalanced = Math.abs(chanceDiff) < 0.01;
   const chanceStatus =
-    Math.abs(chanceDiff) < 0.01
+    isChanceBalanced
       ? "Сумма шансов 100%"
       : chanceDiff > 0
         ? `Осталось ${formatChanceNumber(chanceDiff)}%`
         : `Превышение ${formatChanceNumber(Math.abs(chanceDiff))}%`;
   const chanceStatusClass =
-    Math.abs(chanceDiff) < 0.01
+    isChanceBalanced
       ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
       : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
 
@@ -7622,6 +7629,64 @@ function LootBoxPrizesEditor({
         </div>
       </div>
 
+      <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Варианты наград
+            </p>
+            <p className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              {prizes.length === 1 ? "1 приз" : `${prizes.length} призов`}
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Самый частый приз
+            </p>
+            <p className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              {topPrize?.rewardLabel || "Не задан"}
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Итоговая сумма
+            </p>
+            <p className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              {formatChanceNumber(chanceTotal)}%
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+          {sortedPrizes.map((prize, index) => {
+            const chance = Math.max(0, numeric(prize.chancePercent, 0));
+
+            return (
+              <div
+                key={prize.id}
+                className={[
+                  "h-full",
+                  index % 4 === 0
+                    ? "bg-cyan-500"
+                    : index % 4 === 1
+                      ? "bg-emerald-500"
+                      : index % 4 === 2
+                        ? "bg-amber-500"
+                        : "bg-fuchsia-500",
+                ].join(" ")}
+                style={{ width: `${chance}%` }}
+                title={`${prize.rewardLabel}: ${formatChanceNumber(chance)}%`}
+              />
+            );
+          })}
+        </div>
+        {!isChanceBalanced ? (
+          <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-200">
+            Сумма должна быть 100%. Сейчас шанс будет работать как вес, но
+            оператору проще проверять шаблон, когда проценты выровнены.
+          </p>
+        ) : null}
+      </div>
+
       <div className="mt-3 space-y-3">
         {prizes.map((prize, index) => (
           <div
@@ -7680,6 +7745,75 @@ function LootBoxPrizesEditor({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function LootBoxRulePrizeSummary({ lootBox }: { lootBox: GuestGameLootBox }) {
+  const prizes = lootBoxPrizesToForm(lootBox.probabilityRules, {
+    rewardType: lootBox.rewardType,
+    rewardAmount: String(lootBox.rewardAmount ?? 0),
+    rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+  });
+  const sortedPrizes = [...prizes].sort(
+    (left, right) =>
+      numeric(right.chancePercent, 0) - numeric(left.chancePercent, 0),
+  );
+  const chanceTotal = prizes.reduce(
+    (total, prize) => total + Math.max(0, numeric(prize.chancePercent, 0)),
+    0,
+  );
+  const isChanceBalanced = Math.abs(100 - chanceTotal) < 0.01;
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Распределение призов
+        </p>
+        <span
+          className={[
+            "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+            isChanceBalanced
+              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+          ].join(" ")}
+        >
+          {formatChanceNumber(chanceTotal)}%
+        </span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {sortedPrizes.slice(0, 3).map((prize) => {
+          const chance = Math.max(0, numeric(prize.chancePercent, 0));
+
+          return (
+            <div
+              key={prize.id}
+              className="rounded-md border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="truncate font-semibold text-zinc-700 dark:text-zinc-200">
+                  {prize.rewardLabel}
+                </span>
+                <span className="shrink-0 font-bold text-zinc-950 dark:text-white">
+                  {formatChanceNumber(chance)}%
+                </span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
+                <div
+                  className="h-full rounded-full bg-cyan-500"
+                  style={{ width: `${Math.max(2, chance)}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {sortedPrizes.length > 3 ? (
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          Еще призов: {sortedPrizes.length - 3}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -8603,6 +8737,7 @@ function RuleCard({
   status,
   subtitle,
   meta,
+  details,
   onEdit,
   onStatus,
   onDelete,
@@ -8617,6 +8752,7 @@ function RuleCard({
   status: GuestGameStatus;
   subtitle: string;
   meta: string[];
+  details?: ReactNode;
   onEdit: () => void;
   onStatus: (status: GuestGameStatus) => Promise<void>;
   onDelete?: () => Promise<void>;
@@ -8654,43 +8790,49 @@ function RuleCard({
           </span>
         ))}
       </div>
+      {details ? <div className="mt-3">{details}</div> : null}
       {canManage ? (
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" className={smallButtonClass} onClick={onEdit}>
-          Редактировать
-        </button>
-        {onDelete ? (
-          <button
-            type="button"
-            className={dangerButtonClass}
-            disabled={saving || restartSaving || deleteSaving}
-            onClick={onDelete}
-          >
-            {deleteSaving ? "Удаление..." : "Удалить"}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" className={smallButtonClass} onClick={onEdit}>
+            Редактировать
           </button>
-        ) : null}
-        {onRestart ? (
-          <button
-            type="button"
-            className={smallButtonClass}
-            disabled={saving || restartSaving || deleteSaving}
-            onClick={onRestart}
-          >
-            {restartSaving ? "Перезапуск..." : "Перезапустить"}
-          </button>
-        ) : null}
-        {statusOptions.map((nextStatus) => (
-          <button
-            key={nextStatus}
-            type="button"
-            className={smallButtonClass}
-            disabled={saving || restartSaving || deleteSaving || status === nextStatus}
-            onClick={() => onStatus(nextStatus)}
-          >
-            {statusLabels[nextStatus]}
-          </button>
-        ))}
-      </div>
+          {onDelete ? (
+            <button
+              type="button"
+              className={dangerButtonClass}
+              disabled={saving || restartSaving || deleteSaving}
+              onClick={onDelete}
+            >
+              {deleteSaving ? "Удаление..." : "Удалить"}
+            </button>
+          ) : null}
+          {onRestart ? (
+            <button
+              type="button"
+              className={smallButtonClass}
+              disabled={saving || restartSaving || deleteSaving}
+              onClick={onRestart}
+            >
+              {restartSaving ? "Перезапуск..." : "Перезапустить"}
+            </button>
+          ) : null}
+          {statusOptions.map((nextStatus) => (
+            <button
+              key={nextStatus}
+              type="button"
+              className={smallButtonClass}
+              disabled={
+                saving ||
+                restartSaving ||
+                deleteSaving ||
+                status === nextStatus
+              }
+              onClick={() => onStatus(nextStatus)}
+            >
+              {statusLabels[nextStatus]}
+            </button>
+          ))}
+        </div>
       ) : (
         <p className="mt-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
           Только просмотр правила: редактирование и смена статуса недоступны.

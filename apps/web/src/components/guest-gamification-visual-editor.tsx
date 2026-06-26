@@ -10,6 +10,7 @@ import type {
   GuestGameVisualDraft,
   GuestGameVisualEditorCheckIn,
   GuestGameVisualEditorLootBox,
+  GuestGameVisualEditorLootBoxPrize,
   GuestGameVisualEditorMission,
   GuestGameVisualEditorPayload,
   GuestGameVisualEditorPromoCard,
@@ -587,6 +588,7 @@ function VisualPreview({
                   <p className="mt-2 text-sm text-[#a8b9ba]">
                     {lootBox.rewardLabel || lootBox.condition || "Награда за активность"}
                   </p>
+                  <LootBoxPrizePreview prizes={lootBox.prizes} />
                 </div>
               ))}
             </div>
@@ -941,6 +943,18 @@ function LootBoxInspector({
           items={lootBoxTemplates}
           emptyLabel="Готовых лутбоксов для выбранного клуба пока нет."
           getLabel={(lootBox) => `${lootBox.name} · ${statusLabel(lootBox.status)}`}
+          renderDetails={(lootBox) => (
+            <LootBoxPrizeDistribution
+              prizes={visualLootBoxPrizesFromRules({
+                rewardType: lootBox.rewardType,
+                rewardAmount: lootBox.rewardAmount,
+                rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+                prizes: templateRecord(lootBox.probabilityRules).prizes,
+                items: templateRecord(lootBox.probabilityRules).items,
+              })}
+              compact
+            />
+          )}
           disabled={disabled}
           actionLabel="Добавить шаблон"
           onApply={(lootBox) =>
@@ -1015,7 +1029,15 @@ function LootBoxInspector({
                 label="Приз"
                 value={item.rewardLabel}
                 disabled={disabled}
-                onChange={(rewardLabel) => update({ ...item, rewardLabel })}
+                onChange={(rewardLabel) =>
+                  update({
+                    ...item,
+                    rewardLabel,
+                    prizes: syncSingleVisualLootBoxPrize(item.prizes, {
+                      rewardLabel,
+                    }),
+                  })
+                }
               />
               <div className="mt-3 grid gap-3">
                 <NumberField
@@ -1023,7 +1045,15 @@ function LootBoxInspector({
                   value={item.rewardAmount ?? 0}
                   min={0}
                   disabled={disabled}
-                  onChange={(rewardAmount) => update({ ...item, rewardAmount })}
+                  onChange={(rewardAmount) =>
+                    update({
+                      ...item,
+                      rewardAmount,
+                      prizes: syncSingleVisualLootBoxPrize(item.prizes, {
+                        rewardAmount,
+                      }),
+                    })
+                  }
                 />
                 <LootBoxLimitField
                   value={item.limitPerGuest}
@@ -1032,6 +1062,9 @@ function LootBoxInspector({
                     update({ ...item, limitPerGuest })
                   }
                 />
+              </div>
+              <div className="mt-3">
+                <LootBoxPrizeDistribution prizes={item.prizes} />
               </div>
             </div>
 
@@ -1529,12 +1562,108 @@ function InspectorTitle({ title }: { title: string }) {
   );
 }
 
+function LootBoxPrizePreview({
+  prizes,
+}: {
+  prizes: GuestGameVisualEditorLootBoxPrize[];
+}) {
+  const summary = lootBoxPrizeSummary(prizes);
+  const shownPrizes = summary.sortedPrizes.slice(0, 2);
+
+  return (
+    <div className="mt-3 rounded-lg border border-[#c4e0e51c] bg-[#071215] p-2">
+      <div className="flex items-center justify-between gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[#83e4ec]">
+        <span>{summary.countLabel}</span>
+        <span>{summary.statusLabel}</span>
+      </div>
+      <div className="mt-2 space-y-1">
+        {shownPrizes.map((prize) => (
+          <div
+            key={prize.id}
+            className="flex items-center justify-between gap-2 text-xs text-[#d8f8f9]"
+          >
+            <span className="truncate">{prize.rewardLabel}</span>
+            <span className="shrink-0 text-[#83e4ec]">
+              {formatVisualChance(prize.chancePercent)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LootBoxPrizeDistribution({
+  prizes,
+  compact = false,
+}: {
+  prizes: GuestGameVisualEditorLootBoxPrize[];
+  compact?: boolean;
+}) {
+  const summary = lootBoxPrizeSummary(prizes);
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Распределение наград
+          </p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            {summary.countLabel}
+            {summary.topPrize
+              ? ` · чаще всего: ${summary.topPrize.rewardLabel}`
+              : ""}
+          </p>
+        </div>
+        <span
+          className={[
+            "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+            summary.isBalanced
+              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+          ].join(" ")}
+        >
+          {summary.statusLabel}
+        </span>
+      </div>
+      <div className={compact ? "mt-3 space-y-2" : "mt-4 space-y-3"}>
+        {summary.sortedPrizes.map((prize) => (
+          <div key={prize.id}>
+            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+              <span className="truncate font-semibold text-zinc-700 dark:text-zinc-200">
+                {prize.rewardLabel}
+              </span>
+              <span className="shrink-0 font-bold text-zinc-900 dark:text-white">
+                {formatVisualChance(prize.chancePercent)}%
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
+              <div
+                className="h-full rounded-full bg-cyan-500"
+                style={{ width: `${Math.max(2, prize.chancePercent)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      {!summary.isBalanced ? (
+        <p className="mt-3 text-xs leading-relaxed text-amber-700 dark:text-amber-200">
+          Сумма шансов отличается от 100%. Такой шаблон сохранится как веса, но
+          оператору лучше выровнять проценты перед публикацией.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function TemplatePicker<T extends { id: string }>({
   title,
   description,
   items,
   emptyLabel,
   getLabel,
+  renderDetails,
   disabled,
   actionLabel,
   onApply,
@@ -1544,6 +1673,7 @@ function TemplatePicker<T extends { id: string }>({
   items: T[];
   emptyLabel: string;
   getLabel: (item: T) => string;
+  renderDetails?: (item: T) => ReactNode;
   disabled: boolean;
   actionLabel: string;
   onApply: (item: T) => void;
@@ -1599,6 +1729,9 @@ function TemplatePicker<T extends { id: string }>({
           {actionLabel}
         </button>
       </div>
+      {selected && renderDetails ? (
+        <div className="mt-3">{renderDetails(selected)}</div>
+      ) : null}
     </div>
   );
 }
@@ -2112,6 +2245,15 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
     rewardType: "BONUS_BALANCE",
     rewardAmount: 100,
     rewardLabel: "Бонусы Langame",
+    prizes: [
+      {
+        id: "prize-1",
+        rewardType: "BONUS_BALANCE",
+        rewardAmount: 100,
+        rewardLabel: "Бонусы Langame",
+        chancePercent: 100,
+      },
+    ],
     condition: visualTriggerLabel("SESSION_START"),
     limitPerGuest: 1,
     timeWindowMode: "ANY",
@@ -2222,6 +2364,7 @@ function visualLootBoxFromTemplate(
 ): GuestGameVisualEditorLootBox {
   const periodRules = templateRecord(lootBox.periodRules);
   const limits = templateRecord(lootBox.limits);
+  const probabilityRules = templateRecord(lootBox.probabilityRules);
 
   return {
     ...createVisualLootBox(),
@@ -2232,6 +2375,13 @@ function visualLootBoxFromTemplate(
     rewardType: canonicalVisualLootBoxRewardType(lootBox.rewardType),
     rewardAmount: lootBox.rewardAmount,
     rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+    prizes: visualLootBoxPrizesFromRules({
+      rewardType: lootBox.rewardType,
+      rewardAmount: lootBox.rewardAmount,
+      rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+      prizes: probabilityRules.prizes,
+      items: probabilityRules.items,
+    }),
     condition: visualLootBoxConditionLabel(
       templateString(periodRules.condition, lootBox.triggerKind),
       lootBox.triggerKind,
@@ -2331,6 +2481,62 @@ function canonicalVisualLootBoxRewardType(rewardType: string) {
   return isBonusRewardType(rewardType) ? "BONUS_BALANCE" : rewardType;
 }
 
+function syncSingleVisualLootBoxPrize(
+  prizes: GuestGameVisualEditorLootBoxPrize[],
+  patch: Partial<Pick<GuestGameVisualEditorLootBoxPrize, "rewardAmount" | "rewardLabel">>,
+) {
+  if (prizes.length !== 1) {
+    return prizes;
+  }
+
+  return [{ ...prizes[0], ...patch }];
+}
+
+function lootBoxPrizeSummary(prizes: GuestGameVisualEditorLootBoxPrize[]) {
+  const safePrizes = prizes.length
+    ? prizes
+    : [
+        {
+          id: "empty-prize",
+          rewardType: "PROMOCODE",
+          rewardAmount: null,
+          rewardLabel: "Награда не задана",
+          chancePercent: 100,
+        },
+      ];
+  const sortedPrizes = [...safePrizes].sort(
+    (left, right) => right.chancePercent - left.chancePercent,
+  );
+  const totalChance = safePrizes.reduce(
+    (total, prize) => total + prize.chancePercent,
+    0,
+  );
+  const chanceDiff = Math.round((100 - totalChance) * 100) / 100;
+  const isBalanced = Math.abs(chanceDiff) < 0.01;
+  const statusLabel = isBalanced
+    ? "100%"
+    : chanceDiff > 0
+      ? `еще ${formatVisualChance(chanceDiff)}%`
+      : `+${formatVisualChance(Math.abs(chanceDiff))}%`;
+
+  return {
+    sortedPrizes,
+    topPrize: sortedPrizes[0] ?? null,
+    totalChance,
+    isBalanced,
+    statusLabel,
+    countLabel:
+      safePrizes.length === 1 ? "1 приз" : `${safePrizes.length} призов`,
+  };
+}
+
+function formatVisualChance(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : String(rounded).replace(/\.?0+$/, "");
+}
+
 function templateRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -2341,6 +2547,63 @@ function templateRecord(value: unknown): Record<string, unknown> {
 
 function templateArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function visualLootBoxPrizesFromRules(
+  value: Record<string, unknown>,
+): GuestGameVisualEditorLootBoxPrize[] {
+  const fallbackType = canonicalVisualLootBoxRewardType(
+    templateString(value.rewardType, "PROMOCODE"),
+  );
+  const fallbackAmount = templateNumberOrNull(value.rewardAmount);
+  const fallbackLabel = templateString(value.rewardLabel, "Награда клуба");
+  const source = templateArray(value.prizes).length
+    ? templateArray(value.prizes)
+    : templateArray(value.items);
+  const prizes = source
+    .map((item, index) => {
+      const record = templateRecord(item);
+      const rewardLabel = templateString(
+        record.rewardLabel ?? record.label,
+        fallbackLabel,
+      );
+
+      return {
+        id: templateString(record.id, `prize-${index + 1}`),
+        rewardType: canonicalVisualLootBoxRewardType(
+          templateString(record.rewardType ?? record.type, fallbackType),
+        ),
+        rewardAmount: templateNumberOrNull(
+          record.rewardAmount ?? record.amount ?? fallbackAmount,
+        ),
+        rewardLabel,
+        chancePercent: templateChancePercent(
+          record.chancePercent ?? record.weight ?? record.probability,
+          source.length > 1 ? 0 : 100,
+        ),
+      };
+    })
+    .filter(
+      (prize) =>
+        prize.rewardLabel.trim() ||
+        prize.rewardAmount != null ||
+        prize.rewardType,
+    )
+    .slice(0, 20);
+
+  if (prizes.length) {
+    return prizes;
+  }
+
+  return [
+    {
+      id: "prize-1",
+      rewardType: fallbackType,
+      rewardAmount: fallbackAmount,
+      rewardLabel: fallbackLabel,
+      chancePercent: 100,
+    },
+  ];
 }
 
 function templateString(value: unknown, fallback: string) {
@@ -2355,6 +2618,13 @@ function templateNumber(value: unknown, fallback: number) {
 function templateNumberOrNull(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function templateChancePercent(value: unknown, fallback: number) {
+  const parsed = templateNumberOrNull(value);
+  const safe = parsed == null ? fallback : parsed;
+
+  return Math.round(Math.min(100, Math.max(0, safe)) * 100) / 100;
 }
 
 function templateInt(
@@ -2537,6 +2807,15 @@ function fallbackLootBoxes(): GuestGameVisualEditorLootBox[] {
       rewardType: "BONUS_BALANCE",
       rewardAmount: 100,
       rewardLabel: "Бонус за визит",
+      prizes: [
+        {
+          id: "fallback-prize-1",
+          rewardType: "BONUS_BALANCE",
+          rewardAmount: 100,
+          rewardLabel: "Бонус за визит",
+          chancePercent: 100,
+        },
+      ],
       condition: "Визит в клуб",
       limitPerGuest: 1,
       timeWindowMode: "ANY",

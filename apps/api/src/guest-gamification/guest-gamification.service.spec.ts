@@ -3048,6 +3048,83 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameMission.create).not.toHaveBeenCalled();
       expect(prisma.guestGamePromoCard.create).not.toHaveBeenCalled();
     });
+
+    it('publishes visual loot boxes with multiple weighted prizes', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const payload = visualEditorPayload({
+        lootBoxes: [
+          {
+            id: null,
+            title: 'Призовой контейнер',
+            status: 'ACTIVE',
+            triggerKind: 'SESSION_START',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 50,
+            rewardLabel: 'Призовой контейнер',
+            prizes: [
+              {
+                id: 'bonus-50',
+                rewardType: 'BONUS_BALANCE',
+                rewardAmount: 50,
+                rewardLabel: '50 бонусов',
+                chancePercent: 80,
+              },
+              {
+                id: 'promo-1000',
+                rewardType: 'PROMOCODE',
+                rewardAmount: 1000,
+                rewardLabel: 'Промокод на 1000',
+                chancePercent: 20,
+              },
+            ],
+            condition: 'Старт сессии',
+            limitPerGuest: 1,
+            timeWindowMode: 'ANY',
+            weekdayMode: 'ANY',
+            weekdays: [1, 2, 3, 4, 5, 6, 0],
+            hourFrom: '10:00',
+            hourTo: '16:00',
+          },
+        ],
+      });
+
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValue(
+        visualDraftRow({ store, payload }),
+      );
+      prisma.guestGameMission.findMany.mockResolvedValue([]);
+      prisma.guestGameVisualDraft.update.mockResolvedValue(
+        visualDraftRow({ store, payload, status: 'PUBLISHED' }),
+      );
+
+      await service.publishVisualEditorDraft(user, { id: 'draft-1' });
+
+      expect(prisma.guestGameLootBox.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          name: 'Призовой контейнер',
+          probabilityRules: expect.objectContaining({
+            type: 'weighted',
+            totalChancePercent: 100,
+            prizes: [
+              expect.objectContaining({
+                rewardType: 'BONUS_BALANCE',
+                rewardAmount: 50,
+                rewardLabel: '50 бонусов',
+                weight: 80,
+                chancePercent: 80,
+              }),
+              expect.objectContaining({
+                rewardType: 'PROMOCODE',
+                rewardAmount: 1000,
+                rewardLabel: 'Промокод на 1000',
+                weight: 20,
+                chancePercent: 20,
+              }),
+            ],
+          }),
+        }),
+      });
+    });
   });
 
   describe('restartLootBox', () => {

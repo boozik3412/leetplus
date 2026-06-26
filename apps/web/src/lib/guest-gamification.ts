@@ -172,6 +172,14 @@ export type GuestGamePromoCard = {
 
 export type GuestGameVisualEditorRewardMode = "XP" | "BONUS" | "";
 
+export type GuestGameVisualEditorLootBoxPrize = {
+  id: string;
+  rewardType: string;
+  rewardAmount: number | null;
+  rewardLabel: string;
+  chancePercent: number;
+};
+
 export type GuestGameVisualEditorBattlePass = {
   id: string | null;
   enabled: boolean;
@@ -191,6 +199,7 @@ export type GuestGameVisualEditorLootBox = {
   rewardType: string;
   rewardAmount: number | null;
   rewardLabel: string;
+  prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;
   timeWindowMode: string;

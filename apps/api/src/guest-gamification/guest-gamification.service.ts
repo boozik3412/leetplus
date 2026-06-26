@@ -909,6 +909,14 @@ export type GuestGamePromoCard = {
 
 export type GuestGameVisualEditorRewardMode = 'XP' | 'BONUS' | '';
 
+export type GuestGameVisualEditorLootBoxPrize = {
+  id: string;
+  rewardType: string;
+  rewardAmount: number | null;
+  rewardLabel: string;
+  chancePercent: number;
+};
+
 export type GuestGameVisualEditorBattlePass = {
   id: string | null;
   enabled: boolean;
@@ -928,6 +936,7 @@ export type GuestGameVisualEditorLootBox = {
   rewardType: string;
   rewardAmount: number | null;
   rewardLabel: string;
+  prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;
   timeWindowMode: string;
@@ -16390,6 +16399,7 @@ function normalizeVisualEditorPayload(
           ),
           rewardAmount: visualNumberOrNull(itemRecord.rewardAmount),
           rewardLabel: visualString(itemRecord.rewardLabel, 'Награда клуба'),
+          prizes: visualLootBoxPrizes(itemRecord),
           condition: visualString(itemRecord.condition, 'Активность в клубе'),
           limitPerGuest: visualIntOrNull(itemRecord.limitPerGuest, 1, 1000),
           timeWindowMode: visualTimeWindowMode(itemRecord.timeWindowMode),
@@ -16523,6 +16533,7 @@ function visualLootBoxFromRule(
 ): GuestGameVisualEditorLootBox {
   const limits = visualRecord(rule.limits);
   const periodRules = visualRecord(rule.periodRules);
+  const probabilityRules = visualRecord(rule.probabilityRules);
 
   return {
     id: rule.id,
@@ -16532,6 +16543,13 @@ function visualLootBoxFromRule(
     rewardType: canonicalLootBoxRewardType(rule.rewardType),
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel ?? rule.name,
+    prizes: visualLootBoxPrizes({
+      rewardType: rule.rewardType,
+      rewardAmount: rule.rewardAmount,
+      rewardLabel: rule.rewardLabel ?? rule.name,
+      prizes: probabilityRules.prizes,
+      items: probabilityRules.items,
+    }),
     condition: visualLootBoxCondition(
       visualString(periodRules.condition, ''),
       rule.triggerKind,
@@ -16660,6 +16678,28 @@ function buildVisualLootBoxData(
   item: GuestGameVisualEditorLootBox,
 ) {
   const rewardType = canonicalLootBoxRewardType(item.rewardType);
+  const prizes = visualLootBoxPrizes({
+    rewardType,
+    rewardAmount: item.rewardAmount,
+    rewardLabel: item.rewardLabel,
+    prizes: item.prizes,
+  });
+  const probabilityPrizes = prizes.length
+    ? prizes
+    : [
+        {
+          id: 'visual-prize-fallback',
+          rewardType,
+          rewardAmount: item.rewardAmount,
+          rewardLabel: item.rewardLabel,
+          chancePercent: 100,
+        },
+      ];
+  const totalChancePercent = probabilityPrizes.reduce(
+    (total, prize) => total + prize.chancePercent,
+    0,
+  );
+  const probabilityType = probabilityPrizes.length > 1 ? 'weighted' : 'single';
 
   return clean({
     tenantId: user.tenantId,
@@ -16687,18 +16727,20 @@ function buildVisualLootBoxData(
           }),
     },
     probabilityRules: {
-      type: 'single',
+      type: probabilityType,
       source: 'visual_editor',
-      prizes: [
-        {
-          rewardType,
-          rewardAmount: item.rewardAmount ?? 0,
-          rewardLabel: item.rewardLabel,
-          weight: 100,
-          chancePercent: 100,
-        },
-      ],
-      items: [{ label: item.rewardLabel, weight: 100 }],
+      totalChancePercent: Math.round(totalChancePercent * 100) / 100,
+      prizes: probabilityPrizes.map((prize) => ({
+        rewardType: canonicalLootBoxRewardType(prize.rewardType),
+        rewardAmount: prize.rewardAmount ?? 0,
+        rewardLabel: prize.rewardLabel,
+        weight: prize.chancePercent,
+        chancePercent: prize.chancePercent,
+      })),
+      items: probabilityPrizes.map((prize) => ({
+        label: prize.rewardLabel,
+        weight: prize.chancePercent,
+      })),
     },
     manualApprovalRequired: false,
     note: 'Опубликовано из визуального редактора.',
@@ -17161,6 +17203,70 @@ function visualRecord(value: unknown): Record<string, unknown> {
 
 function visualArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function visualLootBoxPrizes(
+  value: Record<string, unknown>,
+): GuestGameVisualEditorLootBoxPrize[] {
+  const fallbackType = canonicalLootBoxRewardType(
+    visualString(value.rewardType, 'PROMOCODE'),
+  );
+  const fallbackAmount = visualNumberOrNull(value.rewardAmount);
+  const fallbackLabel = visualString(value.rewardLabel, 'Награда клуба');
+  const source = visualArray(value.prizes).length
+    ? visualArray(value.prizes)
+    : visualArray(value.items);
+  const prizes = source
+    .map((item, index) => {
+      const record = visualRecord(item);
+      const rewardLabel = visualString(
+        record.rewardLabel ?? record.label,
+        fallbackLabel,
+      );
+
+      return {
+        id: visualString(record.id, `prize-${index + 1}`),
+        rewardType: canonicalLootBoxRewardType(
+          visualString(record.rewardType ?? record.type, fallbackType),
+        ),
+        rewardAmount: visualNumberOrNull(
+          record.rewardAmount ?? record.amount ?? fallbackAmount,
+        ),
+        rewardLabel,
+        chancePercent: visualChancePercent(
+          record.chancePercent ?? record.weight ?? record.probability,
+          source.length > 1 ? 0 : 100,
+        ),
+      };
+    })
+    .filter(
+      (prize) =>
+        prize.rewardLabel.trim() ||
+        prize.rewardAmount != null ||
+        prize.rewardType,
+    )
+    .slice(0, 20);
+
+  if (prizes.length) {
+    return prizes;
+  }
+
+  return [
+    {
+      id: 'prize-1',
+      rewardType: fallbackType,
+      rewardAmount: fallbackAmount,
+      rewardLabel: fallbackLabel,
+      chancePercent: 100,
+    },
+  ];
+}
+
+function visualChancePercent(value: unknown, fallback: number) {
+  const parsed = visualNumberOrNull(value);
+  const safe = parsed == null ? fallback : parsed;
+
+  return Math.round(Math.min(100, Math.max(0, safe)) * 100) / 100;
 }
 
 function visualString(value: unknown, fallback: string) {

@@ -441,7 +441,7 @@ export class GuestBonusLedgerService {
         status: 'QUEUED',
         reason:
           staffTestReason && staffTestRewardAccrualEnabled
-            ? `Staff/test награда поставлена в ledger по пилотному флагу ${staffTestRewardAccrualEnabledEnv}.`
+            ? 'Staff/test награда поставлена в ledger: автоначисление разрешено для всех профилей.'
             : null,
         externalDomain,
         externalGuestId,
@@ -938,7 +938,7 @@ export class GuestBonusLedgerService {
         phone.value,
       );
 
-      if (staffTestReason && !config.staffTestRewardAccrualEnabled) {
+      if (staffTestReason && config.staffTestRewardAccrualEnabled === false) {
         await this.cancelStaffTestEntry(
           actorUserId,
           sourcedEntry,
@@ -959,7 +959,7 @@ export class GuestBonusLedgerService {
       const payload = this.buildLangamePayload(sourcedEntry, phone.value);
       const auditPayload = {
         ...this.buildLangameAuditPayload(payload, phone.masked),
-        ...(staffTestReason && config.staffTestRewardAccrualEnabled
+        ...(staffTestReason && config.staffTestRewardAccrualEnabled !== false
           ? {
               staffTestReason,
               staffTestAccrualOverride: true,
@@ -1571,7 +1571,7 @@ export class GuestBonusLedgerService {
   private isStaffTestRewardAccrualEnabled() {
     return booleanValue(
       this.configService.get<string>(staffTestRewardAccrualEnabledEnv),
-      false,
+      true,
     );
   }
 

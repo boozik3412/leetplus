@@ -875,8 +875,10 @@ describe('GuestBonusLedgerService', () => {
     ).not.toContain('79992223344');
   });
 
-  it('cancels approved rewards for profiles already marked as staff tests', async () => {
-    const { service, prisma, secretEncryptionService } = createService();
+  it('cancels approved rewards for profiles already marked as staff tests when accrual is explicitly disabled', async () => {
+    const { service, prisma, secretEncryptionService } = createService({
+      GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'false',
+    });
 
     secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
     prisma.guestGameReward.findMany.mockResolvedValue([
@@ -941,10 +943,8 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
-  it('queues approved staff test rewards when pilot accrual flag is enabled', async () => {
-    const { service, prisma, secretEncryptionService } = createService({
-      GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'true',
-    });
+  it('queues approved staff test rewards by default', async () => {
+    const { service, prisma, secretEncryptionService } = createService();
 
     secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
     prisma.guestGameReward.findMany.mockResolvedValue([
@@ -984,7 +984,7 @@ describe('GuestBonusLedgerService', () => {
         expect.objectContaining({
           rewardId: 'reward-staff-test',
           status: 'QUEUED',
-          reason: expect.stringContaining('пилотному флагу'),
+          reason: expect.stringContaining('всех профилей'),
         }),
       ],
     });
@@ -1016,8 +1016,10 @@ describe('GuestBonusLedgerService', () => {
     expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
   });
 
-  it('detects staff phones before queueing rewards to Langame ledger', async () => {
-    const { service, prisma, secretEncryptionService } = createService();
+  it('detects staff phones before canceling rewards when staff test accrual is explicitly disabled', async () => {
+    const { service, prisma, secretEncryptionService } = createService({
+      GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'false',
+    });
 
     secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
     prisma.staffMember.findMany.mockResolvedValue([{ phone: '79992223344' }]);
@@ -1075,10 +1077,8 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
-  it('queues detected staff phone rewards when pilot accrual flag is enabled', async () => {
-    const { service, prisma, secretEncryptionService } = createService({
-      GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'true',
-    });
+  it('queues detected staff phone rewards by default', async () => {
+    const { service, prisma, secretEncryptionService } = createService();
 
     secretEncryptionService.decrypt.mockReturnValue('+7 (999) 222-33-44');
     prisma.staffMember.findMany.mockResolvedValue([{ phone: '79992223344' }]);
@@ -1345,7 +1345,7 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
-  it('cancels claimed ledger entries for staff test profiles before Langame dispatch', async () => {
+  it('cancels claimed ledger entries for staff test profiles before Langame dispatch when accrual is explicitly disabled', async () => {
     const { service, prisma, langameClient, secretEncryptionService } =
       createService();
     const tx = ledgerTransactionMock();
@@ -1383,6 +1383,7 @@ describe('GuestBonusLedgerService', () => {
         ready: true,
         path: '/master_api/guests/balance/phone',
         maxAttempts: 3,
+        staffTestRewardAccrualEnabled: false,
       },
       access,
     );
@@ -1428,7 +1429,7 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
-  it('dispatches staff test ledger entries when pilot accrual flag is enabled', async () => {
+  it('dispatches staff test ledger entries by default', async () => {
     const { service, prisma, langameClient, secretEncryptionService } =
       createService();
     const entry = ledgerEntry({
@@ -1469,7 +1470,6 @@ describe('GuestBonusLedgerService', () => {
         ready: true,
         path: '/master_api/guests/balance/phone',
         maxAttempts: 3,
-        staffTestRewardAccrualEnabled: true,
       },
       access,
     );

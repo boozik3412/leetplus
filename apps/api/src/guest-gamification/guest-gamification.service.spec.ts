@@ -3883,9 +3883,14 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('creates process rewards as canceled for staff test profiles', async () => {
-      const { service, prisma } = createService();
+    it('creates process rewards as canceled for staff test profiles when accrual is explicitly disabled', async () => {
+      const { service, prisma, configService } = createService();
 
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED'
+          ? 'false'
+          : undefined,
+      );
       prisma.guestGameProfile.findFirst.mockResolvedValue({
         isStaffTest: true,
         staffTestReason: 'STAFF_PHONE_MATCH',
@@ -3927,14 +3932,9 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('allows process rewards for staff test profiles when pilot accrual flag is enabled', async () => {
-      const { service, prisma, configService } = createService();
+    it('allows process rewards for staff test profiles by default', async () => {
+      const { service, prisma } = createService();
 
-      configService.get.mockImplementation((key: string) =>
-        key === 'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED'
-          ? 'true'
-          : undefined,
-      );
       prisma.guestGameProfile.findFirst.mockResolvedValue({
         isStaffTest: true,
         staffTestReason: 'STAFF_PHONE_MATCH',
@@ -3967,7 +3967,7 @@ describe('GuestGamificationService', () => {
           status: 'APPROVED',
           rewardType: 'BONUS',
           rewardAmount: 50,
-          note: expect.stringContaining('пилотным флагом'),
+          note: expect.stringContaining('всех профилей'),
           evidence: expect.objectContaining({
             staffTestBlocked: false,
             staffTestReason: 'STAFF_PHONE_MATCH',

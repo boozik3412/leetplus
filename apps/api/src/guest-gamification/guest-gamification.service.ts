@@ -7825,6 +7825,7 @@ export class GuestGamificationService {
       Boolean(staffTestReason) &&
       booleanValue(
         this.configService.get<string>(staffTestRewardAccrualEnabledEnv),
+        true,
       );
     const staffTestBlocked = Boolean(
       staffTestReason && !staffTestRewardAccrualEnabled,
@@ -7873,7 +7874,7 @@ export class GuestGamificationService {
           note: staffTestBlocked
             ? 'Создано как тест сотрудника; автоматическое начисление в Langame заблокировано.'
             : staffTestReason
-              ? 'Создано как тест сотрудника; автоматическое начисление в Langame разрешено пилотным флагом.'
+              ? 'Создано как тест сотрудника; автоматическое начисление в Langame разрешено для всех профилей.'
               : 'Создано подтвержденным запуском события геймификации.',
           evidence: {
             source: 'guest_gamification_process_event',
@@ -13393,7 +13394,11 @@ function pipelineSourceValue(value: unknown) {
   return parsed as GuestGameSnapshotFact['source'];
 }
 
-function booleanValue(value: unknown) {
+function booleanValue(value: unknown, fallback = false) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
   if (value === true || value === 'true' || value === '1') {
     return true;
   }

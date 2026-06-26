@@ -1380,6 +1380,12 @@ export type GuestPortalAppOpenResponse = {
   message: string;
 };
 
+export type GuestPortalProfileUpdateResponse = {
+  profile: GuestPortalGameSummary['profile'];
+  summary: GuestPortalGameSummary;
+  message: string;
+};
+
 export type GuestPortalLootBoxOpenResponse = {
   processed: true;
   idempotent: boolean;
@@ -3302,6 +3308,69 @@ export class GuestPortalService {
       webUrl: this.publicWebUrl(),
       referralStats,
     });
+  }
+
+  async updateProfile(
+    authorization: string | undefined,
+    dto: { displayName?: unknown },
+  ): Promise<GuestPortalProfileUpdateResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile) {
+      throw new BadRequestException(
+        'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
+      );
+    }
+
+    const displayName = this.requiredString(dto.displayName, 'Никнейм').replace(
+      /\s+/g,
+      ' ',
+    );
+    const displayNameLength = Array.from(displayName).length;
+
+    if (displayNameLength < 2) {
+      throw new BadRequestException(
+        'Никнейм должен быть не короче 2 символов.',
+      );
+    }
+
+    if (displayNameLength > 32) {
+      throw new BadRequestException(
+        'Никнейм должен быть не длиннее 32 символов.',
+      );
+    }
+
+    await this.prisma.guestGameProfile.update({
+      where: { id: profile.id },
+      data: {
+        displayName,
+        lastActivityAt: new Date(),
+      },
+    });
+
+    const nextPayload: GuestPortalTokenPayload = {
+      ...payload,
+      guestId: guest?.id ?? profile.guestId ?? null,
+      profileId: profile.id,
+    };
+    const portal = await this.buildPortalPayload(nextPayload);
+    const referralStats = await this.getGameReferralStats(
+      nextPayload.tenantId,
+      portal.profile.id,
+    );
+    const summary = buildGameSummaryFromPortal(portal, {
+      referralSecret: this.referralSecret(),
+      webUrl: this.publicWebUrl(),
+      referralStats,
+    });
+
+    return {
+      profile: summary.profile,
+      summary,
+      message: 'Никнейм обновлен.',
+    };
   }
 
   async recordAppOpen(
@@ -9869,7 +9938,7 @@ function buildGameSummaryFromPortal(
     },
     promoCards: {
       total: portal.gamification.promoCards.length,
-      featured: portal.gamification.promoCards.slice(0, 3),
+      featured: portal.gamification.promoCards.slice(0, 4),
     },
     missions: {
       total: portal.gamification.missions.length,

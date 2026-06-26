@@ -77,6 +77,17 @@ type GuestPortalLootBoxOpenResponse = {
   summary: GuestPortalGameSummary;
   message: string;
 };
+type GuestPortalProfileUpdateResponse = {
+  summary: GuestPortalGameSummary;
+  message: string;
+};
+type BannerTitleStyle = CSSProperties &
+  Partial<
+    Record<
+      "--banner-title-size" | "--banner-title-line-height",
+      string
+    >
+  >;
 type HomeBattleQuest = {
   id: string;
   title: string;
@@ -430,6 +441,7 @@ function ReadyGameView({
   const [promoCode, setPromoCode] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [checkInPending, setCheckInPending] = useState(false);
+  const [nicknamePending, setNicknamePending] = useState(false);
   const [questsExpanded, setQuestsExpanded] = useState(false);
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
@@ -756,6 +768,32 @@ function ReadyGameView({
     );
   }
 
+  async function handleNicknameSubmit(displayName: string) {
+    const nextDisplayName = normalizeNickname(displayName);
+
+    if (
+      nicknamePending ||
+      nextDisplayName === normalizeNickname(summary.profile.displayName)
+    ) {
+      return;
+    }
+
+    setNicknamePending(true);
+    showToast("Сохраняем никнейм.");
+
+    try {
+      const nextSummary = await updateGameProfileNickname(nextDisplayName);
+
+      onSummaryChange(nextSummary);
+      showToast("Никнейм обновлен.");
+    } catch (error) {
+      showToast(getErrorMessage(error, "Не удалось сохранить никнейм."));
+      throw error;
+    } finally {
+      setNicknamePending(false);
+    }
+  }
+
   return (
     <div className="lp-club-home">
       <header className="lp-club-topbar">
@@ -823,30 +861,6 @@ function ReadyGameView({
       >
         <div className="lp-club-main-flow">
           <section className="lp-club-stage" aria-label="Главный блок клуба">
-            <div id="profile" className="lp-club-card">
-              <div className="lp-club-label">Главная геймификации</div>
-              <h1>Клубная карта игрока</h1>
-              <p>
-                {summary.profile.displayName} играет в клубе {summary.store.name}.
-                Здесь собраны активности, награды, лутбоксы и прогресс сезона.
-              </p>
-
-              <div className="lp-club-quick-metrics" aria-label="Краткая статистика">
-                <div className="lp-club-metric">
-                  <strong>{formatNumber(summary.profile.level)}</strong>
-                  <span>уровень</span>
-                </div>
-                <div className="lp-club-metric">
-                  <strong>{formatNumber(rankPercent)}%</strong>
-                  <span>ранг</span>
-                </div>
-                <div className="lp-club-metric">
-                  <strong>{formatNumber(summary.rewards.summary.ready)}</strong>
-                  <span>награды</span>
-                </div>
-              </div>
-            </div>
-
             <HomeBannerGrid
               banners={homeBanners}
               onToast={showToast}
@@ -882,8 +896,10 @@ function ReadyGameView({
           questsExpanded={questsExpanded}
           selectedQuestId={selectedQuestId}
           promoCode={promoCode}
+          nicknamePending={nicknamePending}
           onPromoCodeChange={setPromoCode}
           onPromoSubmit={handlePromoSubmit}
+          onNicknameSubmit={handleNicknameSubmit}
           onCheckIn={handleCheckIn}
           onQuestClick={handleQuestClick}
           onQuestsToggle={toggleQuestsExpanded}
@@ -933,28 +949,33 @@ function HomeBannerGrid({
 }) {
   return (
     <div className="lp-club-banner-grid" aria-label="Баннеры клуба">
-      {banners.map((banner) => (
-        <Link
-          key={banner.id}
-          href={banner.href}
-          target={banner.href === "/play/game/rewards" ? "_blank" : undefined}
-          rel={banner.href === "/play/game/rewards" ? "noreferrer" : undefined}
-          className={[
-            "lp-club-banner",
-            banner.featured ? "is-featured" : "",
-          ].join(" ")}
-          onClick={() => onToast(`Открыт раздел: ${banner.title}.`)}
-        >
-          <span className="lp-club-banner-content">
-            <span>
-              <span className="lp-club-banner-kicker">{banner.label}</span>
-              <span className="lp-club-banner-title">{banner.title}</span>
-              <span className="lp-club-banner-copy">{banner.description}</span>
+      {banners.map((banner) => {
+        const titleStyle = bannerTitleStyle(banner.title);
+
+        return (
+          <Link
+            key={banner.id}
+            href={banner.href}
+            target={banner.href === "/play/game/rewards" ? "_blank" : undefined}
+            rel={banner.href === "/play/game/rewards" ? "noreferrer" : undefined}
+            className={[
+              "lp-club-banner",
+              banner.featured ? "is-featured" : "",
+            ].join(" ")}
+            style={titleStyle}
+            onClick={() => onToast(`Открыт раздел: ${banner.title}.`)}
+          >
+            <span className="lp-club-banner-content">
+              <span>
+                <span className="lp-club-banner-kicker">{banner.label}</span>
+                <span className="lp-club-banner-title">{banner.title}</span>
+                <span className="lp-club-banner-copy">{banner.description}</span>
+              </span>
+              <span className="lp-club-banner-tag">{banner.tag}</span>
             </span>
-            <span className="lp-club-banner-tag">{banner.tag}</span>
-          </span>
-        </Link>
-      ))}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -1391,8 +1412,10 @@ function PlayerProfilePanel({
   questsExpanded,
   selectedQuestId,
   promoCode,
+  nicknamePending,
   onPromoCodeChange,
   onPromoSubmit,
+  onNicknameSubmit,
   onCheckIn,
   onQuestClick,
   onQuestsToggle,
@@ -1409,8 +1432,10 @@ function PlayerProfilePanel({
   questsExpanded: boolean;
   selectedQuestId: string | null;
   promoCode: string;
+  nicknamePending: boolean;
   onPromoCodeChange: (value: string) => void;
   onPromoSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onNicknameSubmit: (displayName: string) => Promise<void>;
   onCheckIn: () => void;
   onQuestClick: (quest: PlayerQuest) => void;
   onQuestsToggle: () => void;
@@ -1418,17 +1443,104 @@ function PlayerProfilePanel({
   const compactQuests = quests.slice(0, 5);
   const checkInDescription =
     checkInAction?.description ?? "Зафиксируйте присутствие в выбранном клубе.";
+  const [nicknameEditing, setNicknameEditing] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState(summary.profile.displayName);
+  const nicknameInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!nicknameEditing) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      nicknameInputRef.current?.focus();
+      nicknameInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [nicknameEditing]);
+
+  function startNicknameEdit() {
+    setNicknameDraft(summary.profile.displayName);
+    setNicknameEditing(true);
+  }
+
+  async function commitNickname() {
+    const nextNickname = normalizeNickname(nicknameDraft);
+
+    if (!nextNickname) {
+      setNicknameDraft(summary.profile.displayName);
+      setNicknameEditing(false);
+      return;
+    }
+
+    if (nextNickname === normalizeNickname(summary.profile.displayName)) {
+      setNicknameEditing(false);
+      return;
+    }
+
+    try {
+      await onNicknameSubmit(nextNickname);
+      setNicknameEditing(false);
+    } catch {
+      nicknameInputRef.current?.focus();
+    }
+  }
+
+  function cancelNicknameEdit() {
+    setNicknameDraft(summary.profile.displayName);
+    setNicknameEditing(false);
+  }
+
+  function handleNicknameKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void commitNickname();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelNicknameEdit();
+    }
+  }
 
   return (
-    <aside className="lp-club-profile-panel" aria-label="Профиль игрока">
+    <aside id="profile" className="lp-club-profile-panel" aria-label="Профиль игрока">
       <div className="lp-club-profile-logo">
         <div className="lp-club-avatar" aria-hidden="true">
           <ProfileIcon />
         </div>
-        <span>
-          <strong>Игровой профиль</strong>
-          <span>{summary.profile.displayName}</span>
-        </span>
+        <div className="lp-club-profile-copy">
+          {nicknameEditing ? (
+            <label className="lp-club-nickname-editor">
+              <strong>Игровой профиль</strong>
+              <input
+                ref={nicknameInputRef}
+                type="text"
+                aria-label="Никнейм"
+                autoComplete="nickname"
+                maxLength={32}
+                disabled={nicknamePending}
+                value={nicknameDraft}
+                onBlur={() => void commitNickname()}
+                onChange={(event) => setNicknameDraft(event.target.value)}
+                onKeyDown={handleNicknameKeyDown}
+              />
+            </label>
+          ) : (
+            <button
+              type="button"
+              className="lp-club-nickname-button"
+              aria-label={`Изменить никнейм ${summary.profile.displayName}`}
+              title="Изменить никнейм"
+              onClick={startNicknameEdit}
+            >
+              <strong>Игровой профиль</strong>
+              <span>{summary.profile.displayName}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="lp-club-profile-section">
@@ -1712,6 +1824,43 @@ function QuestBoard({
   );
 }
 
+function bannerTitleStyle(title: string): BannerTitleStyle {
+  const size = bannerTitleSize(title);
+
+  return {
+    "--banner-title-size": `${size}px`,
+    "--banner-title-line-height": size <= 18 ? "1.08" : "1.05",
+  };
+}
+
+function bannerTitleSize(title: string) {
+  const letterCount = Array.from(title).filter((char) =>
+    /[\p{L}\p{N}]/u.test(char),
+  ).length;
+
+  if (letterCount >= 30) {
+    return 16;
+  }
+
+  if (letterCount >= 24) {
+    return 17;
+  }
+
+  if (letterCount >= 20) {
+    return 19;
+  }
+
+  if (letterCount >= 16) {
+    return 21;
+  }
+
+  return 24;
+}
+
+function normalizeNickname(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 function buildHomeBanners(
   summary: GuestPortalGameSummary,
   primaryAction: GameNextAction | null,
@@ -1752,8 +1901,19 @@ function buildHomeBanners(
       tag: secondMission ? "квест" : "получить",
       href: "/play/game/rewards",
     },
+    {
+      id: "battlepass",
+      label: "Сезон",
+      title: summary.battlePass.active?.name ?? "Баттлпасс клуба",
+      description:
+        summary.battlePass.active?.nextRewardLabel ??
+        summary.referral.channelHint ??
+        "Проходите задания сезона и забирайте клубные награды.",
+      tag: summary.battlePass.active ? "сезон" : "активно",
+      href: "#battlePass",
+    },
   ];
-  const promoBanners = summary.promoCards.featured.slice(0, 3).map(
+  const promoBanners = summary.promoCards.featured.slice(0, 4).map(
     (card, index): HomeBanner => ({
       id: `promo-${card.id}`,
       label: card.label ?? (index === 0 ? "Акция" : "Событие"),
@@ -1770,7 +1930,7 @@ function buildHomeBanners(
     }),
   );
 
-  return [...promoBanners, ...fallbackBanners].slice(0, 3);
+  return [...promoBanners, ...fallbackBanners].slice(0, 4);
 }
 
 function buildHomeLootCards(
@@ -5379,9 +5539,7 @@ const clubHomeCss = `
 }
 
 .lp-club-stage {
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(500px, 590px);
-  gap: 20px;
+  display: block;
   min-width: 0;
 }
 
@@ -5510,14 +5668,15 @@ const clubHomeCss = `
 
 .lp-club-banner-grid {
   display: grid;
-  grid-template-columns: 1.05fr 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
   min-width: 0;
 }
 
 .lp-club-banner {
   position: relative;
-  min-height: 250px;
+  min-height: 360px;
+  aspect-ratio: 9 / 16;
   overflow: hidden;
   border: 1px solid rgba(196, 224, 225, 0.18);
   border-radius: var(--radius);
@@ -5586,8 +5745,8 @@ const clubHomeCss = `
 .lp-club-banner-title {
   margin-top: 18px;
   color: var(--text);
-  font-size: 24px;
-  line-height: 1.05;
+  font-size: var(--banner-title-size, 24px);
+  line-height: var(--banner-title-line-height, 1.05);
   font-weight: 780;
 }
 
@@ -6976,6 +7135,10 @@ const clubHomeCss = `
   border-bottom: 1px solid rgba(196, 224, 225, 0.12);
 }
 
+.lp-club-profile-copy {
+  min-width: 0;
+}
+
 .lp-club-avatar {
   position: relative;
   display: grid;
@@ -6995,6 +7158,25 @@ const clubHomeCss = `
   line-height: 1.18;
 }
 
+.lp-club-nickname-button {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.lp-club-nickname-button:focus-visible {
+  outline: 2px solid rgba(131, 228, 236, 0.8);
+  outline-offset: 5px;
+  border-radius: 6px;
+}
+
+.lp-club-nickname-button span,
 .lp-club-profile-logo span span {
   display: block;
   margin-top: 7px;
@@ -7003,6 +7185,37 @@ const clubHomeCss = `
   font-weight: 820;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.lp-club-nickname-editor {
+  display: block;
+  min-width: 0;
+}
+
+.lp-club-nickname-editor input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 7px;
+  padding: 9px 10px;
+  border: 1px solid rgba(131, 228, 236, 0.42);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.2;
+  background: rgba(0, 8, 12, 0.72);
+  box-shadow: 0 0 0 3px rgba(131, 228, 236, 0.08);
+}
+
+.lp-club-nickname-editor input:focus {
+  outline: none;
+  border-color: rgba(131, 228, 236, 0.82);
+}
+
+.lp-club-nickname-editor input:disabled {
+  opacity: 0.7;
 }
 
 .lp-club-profile-section {
@@ -8540,8 +8753,7 @@ const clubHomeCss = `
   }
 
   .lp-club-stage {
-    grid-template-columns: minmax(230px, 0.82fr) minmax(420px, 1.18fr);
-    gap: 14px;
+    display: block;
   }
 
   .lp-club-card {
@@ -8572,11 +8784,11 @@ const clubHomeCss = `
   }
 
   .lp-club-banner-grid {
-    gap: 12px;
+    gap: 14px;
   }
 
   .lp-club-banner {
-    min-height: 230px;
+    min-height: 340px;
   }
 
   .lp-club-banner-content {
@@ -8585,7 +8797,6 @@ const clubHomeCss = `
 
   .lp-club-banner-title {
     margin-top: 15px;
-    font-size: 21px;
   }
 
   .lp-club-banner-copy {
@@ -8646,6 +8857,14 @@ const clubHomeCss = `
     grid-template-columns: 1fr;
   }
 
+  .lp-club-banner-grid {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scroll-snap-type: x mandatory;
+  }
+
   .lp-club-card {
     min-height: 0;
   }
@@ -8656,7 +8875,9 @@ const clubHomeCss = `
   }
 
   .lp-club-banner {
-    min-height: 156px;
+    flex: 0 0 min(78vw, 300px);
+    min-height: 360px;
+    scroll-snap-align: start;
   }
 
   .lp-club-battle-track {
@@ -8750,6 +8971,11 @@ const clubHomeCss = `
   .lp-club-battlepass,
   .lp-club-profile-panel {
     padding: 16px;
+  }
+
+  .lp-club-banner {
+    flex-basis: min(84vw, 280px);
+    min-height: 336px;
   }
 
   .lp-club-quick-metrics,
@@ -8854,6 +9080,27 @@ async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
   }
 
   return ((await response.json()) as { summary: GuestPortalGameSummary }).summary;
+}
+
+async function updateGameProfileNickname(displayName: string) {
+  const response = await fetch("/api/guest-portal/session/profile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName }),
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(response, "Не удалось сохранить никнейм."),
+    );
+  }
+
+  return ((await response.json()) as GuestPortalProfileUpdateResponse).summary;
 }
 
 async function checkInGameSession(): Promise<GuestPortalCheckInResponse> {

@@ -24,6 +24,7 @@ import {
   type GuestPortalOtpStartResponse,
   type GuestPortalOtpVerifyResponse,
   type GuestPortalPayload,
+  type GuestPortalProfileUpdateResponse,
   type GuestPortalPublicConfig,
   type GuestPortalTelegramAuthStartResponse,
   type GuestPortalTelegramAuthStatusResponse,
@@ -171,6 +172,14 @@ export class GuestPortalController {
     @Body() dto: { surface?: unknown },
   ): Promise<GuestPortalAppOpenResponse> {
     return this.guestPortalService.recordAppOpen(authorization, dto);
+  }
+
+  @Post('session/profile')
+  updateProfile(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() dto: { displayName?: unknown },
+  ): Promise<GuestPortalProfileUpdateResponse> {
+    return this.guestPortalService.updateProfile(authorization, dto);
   }
 
   @Post('session/loot-boxes/:lootBoxId/open')

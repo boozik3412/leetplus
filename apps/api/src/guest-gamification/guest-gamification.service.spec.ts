@@ -41,11 +41,13 @@ const user: AuthenticatedUser = {
 function createPrismaMock() {
   return {
     guestGameEvent: {
+      count: jest.fn(),
       create: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     guestGameReward: {
+      count: jest.fn(),
       create: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
@@ -106,16 +108,21 @@ function createPrismaMock() {
       findMany: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
+      delete: jest.fn(),
       update: jest.fn(),
     },
     guestGameMission: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
+      delete: jest.fn(),
       update: jest.fn(),
     },
     guestGameSeason: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
+      delete: jest.fn(),
       update: jest.fn(),
     },
     guestGamePromoCard: {
@@ -3102,6 +3109,104 @@ describe('GuestGamificationService', () => {
     });
   });
 
+  describe('delete rule templates', () => {
+    it('deletes a lootbox template and reports detached records', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-delete',
+        tenantId: user.tenantId,
+      });
+      prisma.guestGameEvent.count.mockResolvedValue(2);
+      prisma.guestGameReward.count.mockResolvedValue(3);
+      prisma.guestGameLootBox.delete.mockResolvedValue({});
+
+      const result = await service.deleteLootBox(user, 'loot-delete');
+
+      expect(prisma.guestGameLootBox.findFirst).toHaveBeenCalledWith({
+        where: { id: 'loot-delete', tenantId: user.tenantId },
+      });
+      expect(prisma.guestGameEvent.count).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, lootBoxId: 'loot-delete' },
+      });
+      expect(prisma.guestGameReward.count).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, lootBoxId: 'loot-delete' },
+      });
+      expect(prisma.guestGameLootBox.delete).toHaveBeenCalledWith({
+        where: { id: 'loot-delete' },
+      });
+      expect(result).toEqual({
+        deleted: true,
+        detachedEvents: 2,
+        detachedRewards: 3,
+      });
+    });
+
+    it('deletes a mission template and reports detached records', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameMission.findFirst.mockResolvedValue({
+        id: 'mission-delete',
+        tenantId: user.tenantId,
+      });
+      prisma.guestGameEvent.count.mockResolvedValue(1);
+      prisma.guestGameReward.count.mockResolvedValue(4);
+      prisma.guestGameMission.delete.mockResolvedValue({});
+
+      const result = await service.deleteMission(user, 'mission-delete');
+
+      expect(prisma.guestGameMission.findFirst).toHaveBeenCalledWith({
+        where: { id: 'mission-delete', tenantId: user.tenantId },
+      });
+      expect(prisma.guestGameEvent.count).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, missionId: 'mission-delete' },
+      });
+      expect(prisma.guestGameReward.count).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, missionId: 'mission-delete' },
+      });
+      expect(prisma.guestGameMission.delete).toHaveBeenCalledWith({
+        where: { id: 'mission-delete' },
+      });
+      expect(result).toEqual({
+        deleted: true,
+        detachedEvents: 1,
+        detachedRewards: 4,
+      });
+    });
+
+    it('deletes a season template and reports detached records', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameSeason.findFirst.mockResolvedValue({
+        id: 'season-delete',
+        tenantId: user.tenantId,
+      });
+      prisma.guestGameEvent.count.mockResolvedValue(5);
+      prisma.guestGameReward.count.mockResolvedValue(6);
+      prisma.guestGameSeason.delete.mockResolvedValue({});
+
+      const result = await service.deleteSeason(user, 'season-delete');
+
+      expect(prisma.guestGameSeason.findFirst).toHaveBeenCalledWith({
+        where: { id: 'season-delete', tenantId: user.tenantId },
+      });
+      expect(prisma.guestGameEvent.count).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, seasonId: 'season-delete' },
+      });
+      expect(prisma.guestGameReward.count).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, seasonId: 'season-delete' },
+      });
+      expect(prisma.guestGameSeason.delete).toHaveBeenCalledWith({
+        where: { id: 'season-delete' },
+      });
+      expect(result).toEqual({
+        deleted: true,
+        detachedEvents: 5,
+        detachedRewards: 6,
+      });
+    });
+  });
+
   describe('dryRun', () => {
     it('evaluates eligible rules without creating events, rewards, or Langame writes', async () => {
       const { service, prisma, langameClient } = createService();
@@ -3185,6 +3290,45 @@ describe('GuestGamificationService', () => {
       } finally {
         randomSpy.mockRestore();
       }
+    });
+
+    it('does not grant a session-start lootbox for a session that started before rule activation', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          updatedAt: '2026-06-10T10:00:00.000Z',
+          limits: {
+            activatedAt: '2026-06-10T10:00:00.000Z',
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: '2026-06-10T09:59:59.000Z',
+        sessionType: 'regular_session',
+      });
+
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 0,
+        blockedRules: 1,
+      });
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        kind: 'LOOT_BOX',
+        eligible: false,
+        blockers: expect.arrayContaining([
+          'Событие произошло раньше активации правила',
+        ]),
+      });
     });
 
     it('normalizes legacy loot box bonus prize aliases to BONUS_BALANCE', async () => {
@@ -3345,6 +3489,69 @@ describe('GuestGamificationService', () => {
         estimatedRewardAmount: 75,
         projectedXpDelta: 40,
       });
+    });
+  });
+
+  describe('processLiveSessionStart', () => {
+    it('processes the open Langame session as SESSION_START with snapshot-compatible idempotency', async () => {
+      const { service } = createService();
+      const processResult = {
+        processed: true,
+        summary: {
+          idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+        },
+      } as GuestGameProcessEventResult;
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+      });
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+      });
+      jest.spyOn(service as any, 'findActiveCheckInSession').mockResolvedValue({
+        externalDomain: 'club-1',
+        externalSessionId: 'session-1',
+        externalGuestId: 'lg-guest-1',
+        externalClubId: 'club-external-1',
+        externalUuid: 'uuid-1',
+        startedAt: new Date('2026-06-10T09:45:00.000Z'),
+        durationMinutes: 15,
+        sessionType: 'regular_session',
+        sessionPacket: false,
+        store: null,
+        raw: {},
+      });
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue(processResult);
+
+      const result = await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          eventType: 'SESSION_START',
+          occurredAt: '2026-06-10T09:45:00.000Z',
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: 'session-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-1',
+          activeRulesOnly: true,
+        }),
+      );
+      expect(result).toBe(processResult);
     });
   });
 

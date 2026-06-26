@@ -72,6 +72,8 @@ export type TabId =
 
 export type EditorMode = "advanced" | "visual";
 
+type RuleTemplateType = "loot-boxes" | "missions" | "seasons";
+
 const editorModeOptions = [
   ["advanced", "Расширенные настройки"],
   ["visual", "Визуальный редактор"],
@@ -689,6 +691,9 @@ const fieldClass =
 
 const smallButtonClass =
   "rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/30 dark:hover:text-emerald-100";
+
+const dangerButtonClass =
+  "rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-200 dark:hover:border-red-700 dark:hover:bg-red-950/30";
 
 const primaryButtonClass =
   "rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300";
@@ -1788,7 +1793,7 @@ export function GuestGamificationPanel({
   }
 
   async function updateRuleStatus(
-    type: "loot-boxes" | "missions" | "seasons",
+    type: RuleTemplateType,
     id: string,
     status: GuestGameStatus,
   ) {
@@ -1799,6 +1804,44 @@ export function GuestGamificationPanel({
       );
 
       await patchJson(`/api/guests/gamification/${type}/${id}`, { status });
+      await reloadWorkspace();
+    });
+  }
+
+  async function deleteRuleTemplate(
+    type: RuleTemplateType,
+    id: string,
+    name: string,
+  ) {
+    const label = ruleTemplateLabel(type);
+    const confirmed = window.confirm(
+      `Удалить ${label} «${name}»?\nИстория событий и наград сохранится, но шаблон исчезнет из редактора.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await saveAction(`${type}-delete-${id}`, async () => {
+      assertCan(
+        access.canManageRules,
+        "Для удаления шаблона нужно право `Геймификация: правила`.",
+      );
+
+      await deleteJson(`/api/guests/gamification/${type}/${id}`);
+
+      if (type === "loot-boxes" && editingLootBoxId === id) {
+        resetLootBoxForm();
+      }
+
+      if (type === "missions" && editingMissionId === id) {
+        resetMissionForm();
+      }
+
+      if (type === "seasons" && editingSeasonId === id) {
+        resetSeasonForm();
+      }
+
       await reloadWorkspace();
     });
   }
@@ -2039,6 +2082,7 @@ export function GuestGamificationPanel({
           onEdit={editLootBox}
           onReset={resetLootBoxForm}
           onStatus={updateRuleStatus}
+          onDelete={deleteRuleTemplate}
           onRestart={restartLootBox}
           saving={saving}
           canManage={access.canManageRules}
@@ -2060,6 +2104,7 @@ export function GuestGamificationPanel({
           onEdit={editMission}
           onReset={resetMissionForm}
           onStatus={updateRuleStatus}
+          onDelete={deleteRuleTemplate}
           saving={saving}
           canManage={access.canManageRules}
         />
@@ -2078,6 +2123,7 @@ export function GuestGamificationPanel({
           onEdit={editSeason}
           onReset={resetSeasonForm}
           onStatus={updateRuleStatus}
+          onDelete={deleteRuleTemplate}
           saving={saving}
           canManage={access.canManageRules}
         />
@@ -6082,6 +6128,7 @@ function LootBoxesTab({
   onEdit,
   onReset,
   onStatus,
+  onDelete,
   onRestart,
   saving,
   canManage,
@@ -6098,10 +6145,11 @@ function LootBoxesTab({
   onEdit: (lootBox: GuestGameLootBox) => void;
   onReset: () => void;
   onStatus: (
-    type: "loot-boxes" | "missions" | "seasons",
+    type: RuleTemplateType,
     id: string,
     status: GuestGameStatus,
   ) => Promise<void>;
+  onDelete: (type: RuleTemplateType, id: string, name: string) => Promise<void>;
   onRestart: (id: string) => Promise<void>;
   saving: string | null;
   canManage: boolean;
@@ -6245,6 +6293,8 @@ function LootBoxesTab({
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("loot-boxes", item.id, status)}
           saving={saving === `loot-boxes-${item.id}`}
+          onDelete={() => onDelete("loot-boxes", item.id, item.name)}
+          deleteSaving={saving === `loot-boxes-delete-${item.id}`}
           onRestart={() => onRestart(item.id)}
           restartSaving={saving === `loot-boxes-restart-${item.id}`}
           canManage={canManage}
@@ -6268,6 +6318,7 @@ function MissionsTab({
   onEdit,
   onReset,
   onStatus,
+  onDelete,
   saving,
   canManage,
 }: {
@@ -6284,10 +6335,11 @@ function MissionsTab({
   onEdit: (mission: GuestGameMission) => void;
   onReset: () => void;
   onStatus: (
-    type: "loot-boxes" | "missions" | "seasons",
+    type: RuleTemplateType,
     id: string,
     status: GuestGameStatus,
   ) => Promise<void>;
+  onDelete: (type: RuleTemplateType, id: string, name: string) => Promise<void>;
   saving: string | null;
   canManage: boolean;
 }) {
@@ -6469,6 +6521,8 @@ function MissionsTab({
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("missions", item.id, status)}
           saving={saving === `missions-${item.id}`}
+          onDelete={() => onDelete("missions", item.id, item.name)}
+          deleteSaving={saving === `missions-delete-${item.id}`}
           canManage={canManage}
         />
       )}
@@ -6488,6 +6542,7 @@ function SeasonsTab({
   onEdit,
   onReset,
   onStatus,
+  onDelete,
   saving,
   canManage,
 }: {
@@ -6502,10 +6557,11 @@ function SeasonsTab({
   onEdit: (season: GuestGameSeason) => void;
   onReset: () => void;
   onStatus: (
-    type: "loot-boxes" | "missions" | "seasons",
+    type: RuleTemplateType,
     id: string,
     status: GuestGameStatus,
   ) => Promise<void>;
+  onDelete: (type: RuleTemplateType, id: string, name: string) => Promise<void>;
   saving: string | null;
   canManage: boolean;
 }) {
@@ -6664,6 +6720,8 @@ function SeasonsTab({
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("seasons", item.id, status)}
           saving={saving === `seasons-${item.id}`}
+          onDelete={() => onDelete("seasons", item.id, item.name)}
+          deleteSaving={saving === `seasons-delete-${item.id}`}
           canManage={canManage}
         />
       )}
@@ -8547,8 +8605,10 @@ function RuleCard({
   meta,
   onEdit,
   onStatus,
+  onDelete,
   onRestart,
   saving,
+  deleteSaving,
   restartSaving,
   canManage,
 }: {
@@ -8559,8 +8619,10 @@ function RuleCard({
   meta: string[];
   onEdit: () => void;
   onStatus: (status: GuestGameStatus) => Promise<void>;
+  onDelete?: () => Promise<void>;
   onRestart?: () => Promise<void>;
   saving: boolean;
+  deleteSaving?: boolean;
   restartSaving?: boolean;
   canManage: boolean;
 }) {
@@ -8597,11 +8659,21 @@ function RuleCard({
         <button type="button" className={smallButtonClass} onClick={onEdit}>
           Редактировать
         </button>
+        {onDelete ? (
+          <button
+            type="button"
+            className={dangerButtonClass}
+            disabled={saving || restartSaving || deleteSaving}
+            onClick={onDelete}
+          >
+            {deleteSaving ? "Удаление..." : "Удалить"}
+          </button>
+        ) : null}
         {onRestart ? (
           <button
             type="button"
             className={smallButtonClass}
-            disabled={saving || restartSaving}
+            disabled={saving || restartSaving || deleteSaving}
             onClick={onRestart}
           >
             {restartSaving ? "Перезапуск..." : "Перезапустить"}
@@ -8612,7 +8684,7 @@ function RuleCard({
             key={nextStatus}
             type="button"
             className={smallButtonClass}
-            disabled={saving || restartSaving || status === nextStatus}
+            disabled={saving || restartSaving || deleteSaving || status === nextStatus}
             onClick={() => onStatus(nextStatus)}
           >
             {statusLabels[nextStatus]}
@@ -10579,6 +10651,17 @@ function deleteJson<T = unknown>(url: string) {
   return fetchJson<T>(url, {
     method: "DELETE",
   });
+}
+
+function ruleTemplateLabel(type: RuleTemplateType) {
+  switch (type) {
+    case "loot-boxes":
+      return "лутбокс";
+    case "missions":
+      return "миссию";
+    case "seasons":
+      return "сезон";
+  }
 }
 
 function nullable(value: string) {

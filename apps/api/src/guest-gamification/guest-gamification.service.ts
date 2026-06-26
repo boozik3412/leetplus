@@ -880,6 +880,12 @@ export type GuestGameSeason = {
   createdBy: GuestGameUser | null;
 };
 
+export type GuestGameRuleDeleteResult = {
+  deleted: true;
+  detachedEvents: number;
+  detachedRewards: number;
+};
+
 export type GuestGamePromoCard = {
   id: string;
   title: string;
@@ -2165,6 +2171,7 @@ export type GuestGameProcessEventDto = GuestGameDryRunDto & {
   externalDomain?: string | null;
   externalId?: string | null;
   note?: string | null;
+  activeRulesOnly?: boolean | string | null;
 };
 
 export type GuestGameSelectedReward = {
@@ -5800,11 +5807,21 @@ export class GuestGamificationService {
     id: string,
     dto: GuestGameLootBoxUpdateDto,
   ): Promise<GuestGameLootBox> {
-    await this.assertLootBox(user, id);
+    const lootBox = await this.assertLootBox(user, id);
     const data = await this.buildLootBoxData(user, dto, false);
+    const nextStatus = enumValue(dto.status, statusValues, undefined);
+    const activatedNow = nextStatus === 'ACTIVE' && lootBox.status !== 'ACTIVE';
+    const nextData = activatedNow
+      ? {
+          ...data,
+          limits: ruleMetadataWithActivatedAt(
+            data.limits ?? lootBox.limits,
+          ) as Prisma.InputJsonValue,
+        }
+      : data;
     const row = await this.prisma.guestGameLootBox.update({
       where: { id },
-      data,
+      data: nextData,
       include: lootBoxInclude,
     });
 
@@ -5852,6 +5869,27 @@ export class GuestGamificationService {
     };
   }
 
+  async deleteLootBox(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    const lootBox = await this.assertLootBox(user, id);
+    const [detachedEvents, detachedRewards] = await Promise.all([
+      this.prisma.guestGameEvent.count({
+        where: { tenantId: user.tenantId, lootBoxId: lootBox.id },
+      }),
+      this.prisma.guestGameReward.count({
+        where: { tenantId: user.tenantId, lootBoxId: lootBox.id },
+      }),
+    ]);
+
+    await this.prisma.guestGameLootBox.delete({
+      where: { id: lootBox.id },
+    });
+
+    return { deleted: true, detachedEvents, detachedRewards };
+  }
+
   async getMissions(user: AuthenticatedUser): Promise<GuestGameMission[]> {
     const rows = await this.prisma.guestGameMission.findMany({
       where: { tenantId: user.tenantId },
@@ -5884,15 +5922,46 @@ export class GuestGamificationService {
     id: string,
     dto: GuestGameMissionUpdateDto,
   ): Promise<GuestGameMission> {
-    await this.assertMission(user, id);
+    const mission = await this.assertMission(user, id);
     const data = await this.buildMissionData(user, dto, false);
+    const nextStatus = enumValue(dto.status, statusValues, undefined);
+    const activatedNow = nextStatus === 'ACTIVE' && mission.status !== 'ACTIVE';
+    const nextData = activatedNow
+      ? {
+          ...data,
+          conditions: ruleMetadataWithActivatedAt(
+            data.conditions ?? mission.conditions,
+          ) as Prisma.InputJsonValue,
+        }
+      : data;
     const row = await this.prisma.guestGameMission.update({
       where: { id },
-      data,
+      data: nextData,
       include: missionInclude,
     });
 
     return mapMission(row);
+  }
+
+  async deleteMission(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    const mission = await this.assertMission(user, id);
+    const [detachedEvents, detachedRewards] = await Promise.all([
+      this.prisma.guestGameEvent.count({
+        where: { tenantId: user.tenantId, missionId: mission.id },
+      }),
+      this.prisma.guestGameReward.count({
+        where: { tenantId: user.tenantId, missionId: mission.id },
+      }),
+    ]);
+
+    await this.prisma.guestGameMission.delete({
+      where: { id: mission.id },
+    });
+
+    return { deleted: true, detachedEvents, detachedRewards };
   }
 
   async getSeasons(user: AuthenticatedUser): Promise<GuestGameSeason[]> {
@@ -5936,6 +6005,27 @@ export class GuestGamificationService {
     });
 
     return mapSeason(row);
+  }
+
+  async deleteSeason(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    const season = await this.assertSeason(user, id);
+    const [detachedEvents, detachedRewards] = await Promise.all([
+      this.prisma.guestGameEvent.count({
+        where: { tenantId: user.tenantId, seasonId: season.id },
+      }),
+      this.prisma.guestGameReward.count({
+        where: { tenantId: user.tenantId, seasonId: season.id },
+      }),
+    ]);
+
+    await this.prisma.guestGameSeason.delete({
+      where: { id: season.id },
+    });
+
+    return { deleted: true, detachedEvents, detachedRewards };
   }
 
   async getPromoCards(user: AuthenticatedUser): Promise<GuestGamePromoCard[]> {
@@ -7485,11 +7575,14 @@ export class GuestGamificationService {
       user,
       dto,
     );
-    const dryRun = await this.dryRun(user, {
+    const dryRunResult = await this.dryRun(user, {
       ...dto,
       profileId: profile.id,
       guestId: nullableId(dto.guestId) ?? profile.guest?.id ?? null,
     });
+    const dryRun = booleanValue(dto.activeRulesOnly)
+      ? activeRulesOnlyDryRun(dryRunResult)
+      : dryRunResult;
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
     const processPayload = buildProcessPayload(dto, dryRun);
     const existingEvent = eventReference
@@ -7633,6 +7726,82 @@ export class GuestGamificationService {
       },
       note: 'Событие и очередь наград созданы внутри LeetPlus. Запись в Langame не выполнялась.',
     };
+  }
+
+  async processLiveSessionStart(
+    user: AuthenticatedUser,
+    dto: Pick<
+      GuestGameProcessEventDto,
+      'profileId' | 'guestId' | 'storeId' | 'note'
+    >,
+  ): Promise<GuestGameProcessEventResult | null> {
+    const guestId = nullableId(dto.guestId);
+
+    if (!guestId) {
+      return null;
+    }
+
+    const guest = await this.getTenantGuest(user, guestId);
+
+    if (!nullableString(guest.externalGuestId)) {
+      return null;
+    }
+
+    const expectedStoreId = nullableId(dto.storeId);
+    const expectedStore = expectedStoreId
+      ? await this.assertStore(user, expectedStoreId)
+      : null;
+    let liveSession: CheckInLiveSession | null;
+
+    try {
+      liveSession = await this.findActiveCheckInSession(user.tenantId, guest);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to check live session start for guest ${guestId}: ${this.checkInErrorMessage(error)}`,
+      );
+      return null;
+    }
+
+    if (!liveSession?.externalSessionId) {
+      return null;
+    }
+
+    const storeId = this.liveSessionStartStoreId(
+      liveSession,
+      expectedStore
+        ? {
+            id: expectedStore.id,
+            externalDomain: expectedStore.externalDomain,
+            externalClubId: expectedStore.externalClubId,
+          }
+        : null,
+    );
+
+    if (expectedStoreId && !storeId) {
+      return null;
+    }
+
+    const occurredAt = liveSession.startedAt ?? new Date();
+
+    return this.processEvent(user, {
+      profileId: nullableId(dto.profileId),
+      guestId,
+      storeId,
+      eventType: 'SESSION_START',
+      occurredAt: occurredAt.toISOString(),
+      sessionType: liveSession.sessionType,
+      sessionPacket: liveSession.sessionPacket,
+      sessionMinutes: liveSession.durationMinutes ?? 0,
+      sourceFactId: liveSession.externalSessionId,
+      sourceFactKind: 'GUEST_SESSION',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: liveSession.externalDomain,
+      externalId: liveSession.externalSessionId,
+      activeRulesOnly: true,
+      note:
+        nullableString(dto.note) ??
+        'Гость открыл игровой модуль во время активной Langame-сессии; старт сессии обработан live-проверкой.',
+    });
   }
 
   async checkIn(
@@ -9165,17 +9334,19 @@ export class GuestGamificationService {
     }
 
     const rewardType = canonicalLootBoxRewardType(stringValue(dto.rewardType));
+    const status = enumValue(
+      dto.status,
+      statusValues,
+      isCreate ? 'DRAFT' : undefined,
+    );
+    const limits = jsonValue(dto.limits);
 
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
       createdByUserId: isCreate ? actorUserId(user) : undefined,
       name: requiredString(dto.name, 'Название лутбокса', isCreate),
-      status: enumValue(
-        dto.status,
-        statusValues,
-        isCreate ? 'DRAFT' : undefined,
-      ),
+      status,
       triggerKind:
         stringValue(dto.triggerKind) ??
         (isCreate ? 'SESSION_START' : undefined),
@@ -9186,7 +9357,10 @@ export class GuestGamificationService {
       sessionType: nullableString(dto.sessionType),
       storeIds: jsonValue(dto.storeIds),
       periodRules: jsonValue(dto.periodRules),
-      limits: jsonValue(dto.limits),
+      limits:
+        isCreate && status === 'ACTIVE'
+          ? ruleMetadataWithActivatedAt(limits)
+          : limits,
       probabilityRules:
         jsonValue(dto.probabilityRules) ??
         (isCreate ? defaultProbabilityRules() : undefined),
@@ -9210,16 +9384,21 @@ export class GuestGamificationService {
       await this.assertAudience(user, dto.audienceId);
     }
 
+    const status = enumValue(
+      dto.status,
+      statusValues,
+      isCreate ? 'DRAFT' : undefined,
+    );
+    const conditions =
+      jsonValue(dto.conditions) ??
+      (isCreate ? defaultMissionConditions() : undefined);
+
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
       createdByUserId: isCreate ? actorUserId(user) : undefined,
       name: requiredString(dto.name, 'Название миссии', isCreate),
-      status: enumValue(
-        dto.status,
-        statusValues,
-        isCreate ? 'DRAFT' : undefined,
-      ),
+      status,
       missionType:
         stringValue(dto.missionType) ?? (isCreate ? 'REPEAT_VISIT' : undefined),
       triggerKind:
@@ -9232,8 +9411,9 @@ export class GuestGamificationService {
       progressTarget: intValue(dto.progressTarget),
       progressUnit: nullableString(dto.progressUnit),
       conditions:
-        jsonValue(dto.conditions) ??
-        (isCreate ? defaultMissionConditions() : undefined),
+        isCreate && status === 'ACTIVE'
+          ? ruleMetadataWithActivatedAt(conditions)
+          : conditions,
       storeIds: jsonValue(dto.storeIds),
       periodFrom: dateValue(dto.periodFrom),
       periodTo: dateValue(dto.periodTo),
@@ -9899,6 +10079,36 @@ export class GuestGamificationService {
     );
 
     return Number.isFinite(minutes) ? minutes : null;
+  }
+
+  private liveSessionStartStoreId(
+    liveSession: CheckInLiveSession,
+    expectedStore: {
+      id: string;
+      externalDomain: string | null;
+      externalClubId: string | null;
+    } | null,
+  ) {
+    if (!expectedStore) {
+      return liveSession.store?.id ?? null;
+    }
+
+    if (liveSession.store?.id) {
+      return liveSession.store.id === expectedStore.id
+        ? expectedStore.id
+        : null;
+    }
+
+    if (
+      expectedStore.externalDomain &&
+      liveSession.externalDomain === expectedStore.externalDomain &&
+      expectedStore.externalClubId &&
+      liveSession.externalClubId === expectedStore.externalClubId
+    ) {
+      return expectedStore.id;
+    }
+
+    return null;
   }
 
   private checkInErrorMessage(error: unknown) {
@@ -13510,6 +13720,40 @@ function buildProcessPayload(
   };
 }
 
+function activeRulesOnlyDryRun(
+  dryRun: GuestGameDryRunResult,
+): GuestGameDryRunResult {
+  const rules = dryRun.rules.map((rule) => {
+    if (!rule.eligible || rule.status === 'ACTIVE') {
+      return rule;
+    }
+
+    return {
+      ...rule,
+      eligible: false,
+      blockers: [
+        ...rule.blockers,
+        `Статус правила не позволяет публичный запуск: ${rule.status}`,
+      ],
+    };
+  });
+  const eligibleRules = rules.filter((rule) => rule.eligible);
+
+  return {
+    ...dryRun,
+    summary: {
+      checkedRules: rules.length,
+      eligibleRules: eligibleRules.length,
+      blockedRules: rules.length - eligibleRules.length,
+      estimatedRewardAmount: sum(
+        eligibleRules.map((rule) => rule.rewardAmount ?? 0),
+      ),
+      projectedXpDelta: sum(eligibleRules.map((rule) => rule.xpDelta)),
+    },
+    rules,
+  };
+}
+
 function shouldQueueProcessReward(rule: GuestGameDryRunRule) {
   if (!rule.eligible) {
     return false;
@@ -14218,6 +14462,7 @@ function evaluateLootBoxDryRun(
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
+  appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
   appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
   appendDryRunPeriodRules(
     rule.periodRules,
@@ -14288,6 +14533,7 @@ function evaluateMissionDryRun(
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
+  appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
   appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
   appendDryRunDateBounds(
     rule.periodFrom,
@@ -14441,6 +14687,66 @@ function appendDryRunTriggerCheck(
   }
 
   blockers.push(`Триггер ${triggerKind} не совпадает с событием ${eventType}`);
+}
+
+function appendDryRunRuleActivationCheck(
+  rule: Pick<GuestGameRuleBase, 'status' | 'updatedAt'> & {
+    limits?: Prisma.JsonValue | null;
+    conditions?: Prisma.JsonValue | null;
+  },
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const activatedAt = dryRunRuleActivatedAt(rule);
+
+  if (!activatedAt) {
+    return;
+  }
+
+  if (context.occurredAt.getTime() < activatedAt.getTime()) {
+    blockers.push('Событие произошло раньше активации правила');
+    return;
+  }
+
+  reasons.push('Событие произошло после активации правила');
+}
+
+function dryRunRuleActivatedAt(
+  rule: Pick<GuestGameRuleBase, 'status' | 'updatedAt'> & {
+    limits?: Prisma.JsonValue | null;
+    conditions?: Prisma.JsonValue | null;
+  },
+) {
+  const limits = dryRunRecord(rule.limits);
+  const conditions = dryRunRecord(rule.conditions);
+  const explicitDate = [
+    dryRunDateOrNull(limits.restartedAt),
+    dryRunDateOrNull(limits.activatedAt),
+    dryRunDateOrNull(conditions.activatedAt),
+  ].reduce(maxDate, null);
+
+  if (explicitDate) {
+    return explicitDate;
+  }
+
+  if (rule.status !== 'ACTIVE') {
+    return null;
+  }
+
+  return dryRunDateOrNull(rule.updatedAt);
+}
+
+function ruleMetadataWithActivatedAt(value: unknown): Prisma.InputJsonObject {
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return {
+    ...record,
+    activatedAt: new Date().toISOString(),
+  };
 }
 
 function appendDryRunStoreCheck(

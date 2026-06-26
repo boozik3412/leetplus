@@ -54,6 +54,7 @@ import {
   type GuestGameRewardDto,
   type GuestGameRewardRedeemDto,
   type GuestGameRewardUpdateDto,
+  type GuestGameRuleDeleteResult,
   type GuestGameDelivery,
   type GuestGameDeliveryDispatchDto,
   type GuestGameDeliveryDispatchResult,
@@ -208,6 +209,14 @@ export class GuestGamificationController {
     return this.gamificationService.updateLootBox(user, id, dto);
   }
 
+  @Delete('loot-boxes/:id')
+  deleteLootBox(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    return this.gamificationService.deleteLootBox(user, id);
+  }
+
   @Post('loot-boxes/:id/restart')
   restartLootBox(
     @CurrentUser() user: AuthenticatedUser,
@@ -244,6 +253,14 @@ export class GuestGamificationController {
     return this.gamificationService.updateMission(user, id, dto);
   }
 
+  @Delete('missions/:id')
+  deleteMission(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    return this.gamificationService.deleteMission(user, id);
+  }
+
   @Get('seasons')
   getSeasons(
     @CurrentUser() user: AuthenticatedUser,
@@ -266,6 +283,14 @@ export class GuestGamificationController {
     @Body() dto: GuestGameSeasonUpdateDto,
   ): Promise<GuestGameSeason> {
     return this.gamificationService.updateSeason(user, id, dto);
+  }
+
+  @Delete('seasons/:id')
+  deleteSeason(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    return this.gamificationService.deleteSeason(user, id);
   }
 
   @Get('promo-cards')

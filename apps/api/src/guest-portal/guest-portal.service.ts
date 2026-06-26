@@ -3297,6 +3297,7 @@ export class GuestPortalService {
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
     const payload = await this.verifyGuestToken(authorization);
+    await this.processLiveSessionStartForPayload(payload);
     const portal = await this.buildPortalPayload(payload);
     const referralStats = await this.getGameReferralStats(
       payload.tenantId,
@@ -3382,7 +3383,7 @@ export class GuestPortalService {
       payload.tenantId,
       payload.storeId,
     );
-    const guest = await this.findGuest(payload);
+    const guest = await this.findGuest(payload, context.store);
     const profile = await this.findProfile(payload, guest?.id ?? null);
 
     if (!profile) {
@@ -3470,6 +3471,40 @@ export class GuestPortalService {
         ? 'Открытие уже засчитано сегодня.'
         : 'Открытие игрового модуля засчитано.',
     };
+  }
+
+  private async processLiveSessionStartForPayload(
+    payload: GuestPortalTokenPayload,
+  ) {
+    const context = await this.getTenantStoreByIds(
+      payload.tenantId,
+      payload.storeId,
+    );
+    const guest = await this.findGuest(payload, context.store);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+    const guestId = guest?.id ?? profile?.guestId ?? null;
+
+    if (!profile?.id || !guestId) {
+      return null;
+    }
+
+    const actor: AuthenticatedUser = {
+      id: `guest-portal:${payload.sub}`,
+      email: 'guest-portal@leetplus.local',
+      fullName: 'Гостевой портал',
+      role: UserRole.CLUB_MANAGER,
+      isPlatformAdmin: false,
+      tenantId: context.tenant.id,
+      tenantSlug: context.tenant.slug,
+      tenantStatus: TenantLifecycleStatus.ACTIVE,
+    };
+
+    return this.guestGamificationService.processLiveSessionStart(actor, {
+      profileId: profile.id,
+      guestId,
+      storeId: context.store.id,
+      note: 'Гость обновил игровой модуль во время активной Langame-сессии.',
+    });
   }
 
   async openLootBox(

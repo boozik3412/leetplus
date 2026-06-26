@@ -7,6 +7,7 @@ import type {
   CSSProperties,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   ReactNode,
   RefObject,
 } from "react";
@@ -59,7 +60,7 @@ type HomeLootCard = {
 type LootboxOverlayPhase =
   | "ready"
   | "charging"
-  | "revealing"
+  | "rolling"
   | "opening"
   | "open"
   | "collected";
@@ -76,6 +77,30 @@ type GuestPortalLootBoxOpenResponse = {
   }>;
   summary: GuestPortalGameSummary;
   message: string;
+};
+type LootboxOpenReward = GuestPortalLootBoxOpenResponse["rewards"][number];
+type LootboxRouletteReward = {
+  id: string;
+  reward: string;
+  caption: string;
+  rarity: GuestPortalLootBoxRarity | null;
+  rarityLabel: string | null;
+  dropChance: number | null;
+  isWinner?: boolean;
+};
+type LootboxRouletteState = {
+  runId: number;
+  lootBoxId: string;
+  items: LootboxRouletteReward[];
+  winningIndex: number;
+  durationMs: number;
+  reward: string;
+  caption: string;
+  rarity: GuestPortalLootBoxRarity | null;
+  rarityLabel: string | null;
+  dropChance: number | null;
+  message: string;
+  skipped: boolean;
 };
 type GuestPortalProfileUpdateResponse = {
   summary: GuestPortalGameSummary;
@@ -148,13 +173,46 @@ const REWARD_HISTORY_SOURCE_TONES: Record<RewardHistorySource, string> = {
   quest: "148 214 184",
   promo: "158 181 183",
 };
-const LOOTBOX_RARITY_OPEN_MS: Record<GuestPortalLootBoxRarity, number> = {
-  common: 1420,
-  rare: 1540,
-  epic: 1660,
-  legendary: 1780,
+const LOOTBOX_ROULETTE_MS: Record<GuestPortalLootBoxRarity, number> = {
+  common: 5200,
+  rare: 5400,
+  epic: 5600,
+  legendary: 5800,
 };
-const LOOTBOX_RARITY_REVEAL_MIN_MS = 760;
+const LOOTBOX_CHARGE_MIN_MS = 760;
+const LOOTBOX_CASE_OPEN_MS = 1320;
+const LOOTBOX_ROULETTE_FALLBACK_REWARDS: ReadonlyArray<
+  Omit<LootboxRouletteReward, "id">
+> = [
+  {
+    reward: "50 бонусов",
+    caption: "basic reward",
+    rarity: "common",
+    rarityLabel: LOOTBOX_RARITY_LABELS.common,
+    dropChance: 85,
+  },
+  {
+    reward: "100 бонусов",
+    caption: "club reward",
+    rarity: "rare",
+    rarityLabel: LOOTBOX_RARITY_LABELS.rare,
+    dropChance: 8,
+  },
+  {
+    reward: "200 бонусов",
+    caption: "epic reward",
+    rarity: "epic",
+    rarityLabel: LOOTBOX_RARITY_LABELS.epic,
+    dropChance: 4,
+  },
+  {
+    reward: "Промокод",
+    caption: "legend reward",
+    rarity: "legendary",
+    rarityLabel: LOOTBOX_RARITY_LABELS.legendary,
+    dropChance: 1,
+  },
+];
 type PlayerQuest = {
   id: string;
   title: string;
@@ -434,7 +492,10 @@ function ReadyGameView({
     useState<HomeLootCard | null>(null);
   const [lootboxOverlayPhase, setLootboxOverlayPhase] =
     useState<LootboxOverlayPhase>("ready");
+  const [lootboxRoulette, setLootboxRoulette] =
+    useState<LootboxRouletteState | null>(null);
   const lootboxRewardRef = useRef<HTMLButtonElement | null>(null);
+  const lootboxOpenRunRef = useRef(0);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const lootBoxesRef = useRef<HTMLElement | null>(null);
   const battlePassRef = useRef<HTMLElement | null>(null);
@@ -536,8 +597,11 @@ function ReadyGameView({
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        lootboxOpenRunRef.current += 1;
         setLootboxOverlayCard(null);
         setLootboxOverlayPhase("ready");
+        setLootboxRoulette(null);
+        emitLootboxEvent("overlay-close");
       }
     }
 
@@ -671,8 +735,11 @@ function ReadyGameView({
       return;
     }
 
+    lootboxOpenRunRef.current += 1;
     setLootboxOverlayCard(card);
     setLootboxOverlayPhase("ready");
+    setLootboxRoulette(null);
+    emitLootboxEvent("overlay-open", { lootBoxId: card.id });
     showToast("Контейнер готов к открытию.");
   }
 
@@ -682,14 +749,24 @@ function ReadyGameView({
     }
 
     const currentCard = lootboxOverlayCard;
+    const runId = lootboxOpenRunRef.current + 1;
+
+    lootboxOpenRunRef.current = runId;
+    setLootboxRoulette(null);
     setLootboxOverlayPhase("charging");
+    emitLootboxEvent("charge-start", { lootBoxId: currentCard.id });
     showToast("Контейнер активируется.");
 
     try {
       const [result] = await Promise.all([
         openGameLootBox(currentCard.id),
-        wait(LOOTBOX_RARITY_REVEAL_MIN_MS),
+        wait(LOOTBOX_CHARGE_MIN_MS),
       ]);
+
+      if (lootboxOpenRunRef.current !== runId) {
+        return;
+      }
+
       const updatedLootBox = result.summary.lootBoxes.featured.find(
         (item) => item.id === currentCard.id,
       );
@@ -723,39 +800,85 @@ function ReadyGameView({
         rewardRarityLabel,
         rewardDropChance,
       };
+      const roulette = buildLootboxRouletteState({
+        currentCard,
+        nextCard,
+        previousSummary: summary,
+        result,
+        runId,
+      });
 
       onSummaryChange(result.summary);
       setLootboxOverlayCard(nextCard);
-      revealLootboxRarity({
-        lootBoxId: currentCard.id,
-        rewardLabel,
-        rewardRarity,
-        rewardRarityLabel,
-        rewardDropChance,
-      });
-      setLootboxOverlayPhase("revealing");
-      await wait(260);
-      setLootboxOverlayPhase("opening");
-      await wait(lootboxOpenAnimationMs(rewardRarity));
-      setLootboxOverlayPhase("open");
-      showToast(result.message);
+      setLootboxRoulette(roulette);
+      setLootboxOverlayPhase("rolling");
+      showToast("Маячок выбирает награду.");
     } catch (error) {
+      if (lootboxOpenRunRef.current !== runId) {
+        return;
+      }
+
+      setLootboxRoulette(null);
       setLootboxOverlayPhase("ready");
       showToast(getErrorMessage(error, "Лутбокс сейчас недоступен."));
     }
   }
 
-  function closeLootboxOverlay() {
-    setLootboxOverlayCard(null);
-    setLootboxOverlayPhase("ready");
-  }
-
-  function collectLootboxReward() {
-    if (!lootboxOverlayCard) {
+  function finishLootboxRoulette(skipped: boolean) {
+    if (!lootboxRoulette || lootboxOverlayPhase !== "rolling") {
       return;
     }
 
+    const roulette = lootboxRoulette;
+    const eventDetail = lootboxRouletteEventDetail(roulette, skipped);
+
+    setLootboxRoulette({ ...roulette, skipped });
+    revealLootboxRarity({
+      lootBoxId: roulette.lootBoxId,
+      rewardLabel: roulette.reward,
+      rewardRarity: roulette.rarity,
+      rewardRarityLabel: roulette.rarityLabel,
+      rewardDropChance: roulette.dropChance,
+      caption: roulette.caption,
+      winningIndex: roulette.winningIndex,
+      skipped,
+    });
+    setLootboxOverlayPhase("opening");
+    emitLootboxEvent("open-start", eventDetail);
+
+    window.setTimeout(() => {
+      if (lootboxOpenRunRef.current !== roulette.runId) {
+        return;
+      }
+
+      setLootboxOverlayPhase("open");
+      emitLootboxEvent("reward-ready", eventDetail);
+      showToast(roulette.message);
+    }, LOOTBOX_CASE_OPEN_MS);
+  }
+
+  function closeLootboxOverlay() {
+    lootboxOpenRunRef.current += 1;
+    setLootboxOverlayCard(null);
+    setLootboxOverlayPhase("ready");
+    setLootboxRoulette(null);
+    emitLootboxEvent("overlay-close");
+  }
+
+  function collectLootboxReward() {
+    if (!lootboxOverlayCard || lootboxOverlayPhase !== "open") {
+      return;
+    }
+
+    const roulette = lootboxRoulette;
+
     setLootboxOverlayPhase("collected");
+    emitLootboxEvent(
+      "reward-collected",
+      roulette
+        ? lootboxRouletteEventDetail(roulette, roulette.skipped)
+        : { lootBoxId: lootboxOverlayCard.id, reward: lootboxOverlayCard.description },
+    );
     showToast(`Награда отмечена: ${lootboxOverlayCard.description}.`);
   }
 
@@ -930,10 +1053,12 @@ function ReadyGameView({
         <LootboxOpeningOverlay
           card={lootboxOverlayCard}
           phase={lootboxOverlayPhase}
+          roulette={lootboxRoulette}
           rewardRef={lootboxRewardRef}
           onOpen={beginLootboxOpening}
           onClose={closeLootboxOverlay}
           onCollect={collectLootboxReward}
+          onRouletteFinish={finishLootboxRoulette}
         />
       ) : null}
     </div>
@@ -1050,36 +1175,52 @@ function HomeLootBoxes({
 function LootboxOpeningOverlay({
   card,
   phase,
+  roulette,
   rewardRef,
   onOpen,
   onClose,
   onCollect,
+  onRouletteFinish,
 }: {
   card: HomeLootCard;
   phase: LootboxOverlayPhase;
+  roulette: LootboxRouletteState | null;
   rewardRef: RefObject<HTMLButtonElement | null>;
   onOpen: () => void;
   onClose: () => void;
   onCollect: () => void;
+  onRouletteFinish: (skipped: boolean) => void;
 }) {
+  const rouletteTrackRef = useRef<HTMLDivElement | null>(null);
+  const rouletteAnimationRef = useRef<Animation | null>(null);
+  const completeRouletteRef = useRef<((skipped: boolean) => void) | null>(null);
+  const onRouletteFinishRef = useRef(onRouletteFinish);
   const isReady = phase === "ready";
   const isCharging = phase === "charging";
-  const isRevealing = phase === "revealing";
+  const isRolling = phase === "rolling";
   const isOpening = phase === "opening";
   const isOpen = phase === "open";
   const isCollected = phase === "collected";
-  const rewardRarity = normalizeLootboxRarity(card.rewardRarity) ?? "common";
+  const rewardRarity =
+    normalizeLootboxRarity(roulette?.rarity ?? card.rewardRarity) ?? "common";
   const rewardRarityLabel =
-    card.rewardRarityLabel ?? LOOTBOX_RARITY_LABELS[rewardRarity];
-  const rarityRevealed = isRevealing || isOpening || isOpen || isCollected;
+    roulette?.rarityLabel ?? card.rewardRarityLabel ?? LOOTBOX_RARITY_LABELS[rewardRarity];
+  const rarityRevealed = isOpening || isOpen || isCollected;
+  const rouletteVisible =
+    Boolean(roulette) && (isRolling || isOpening || isOpen || isCollected);
+  const rouletteResultLabel = !roulette
+    ? "selection pending"
+    : isRolling
+      ? "selection in progress"
+      : `${roulette.reward} / ${rewardRarityLabel}`;
   const statusLabel = isCollected
     ? "Награда сохранена"
     : isOpen
       ? "Контейнер открыт"
       : isOpening
-        ? "Идет открытие"
-        : isRevealing
-          ? `Редкость: ${rewardRarityLabel}`
+        ? `Редкость: ${rewardRarityLabel}`
+        : isRolling
+          ? "Идет рулетка наград"
           : isCharging
           ? "Контейнер активируется"
           : "Нажмите на контейнер, чтобы открыть";
@@ -1087,7 +1228,7 @@ function LootboxOpeningOverlay({
     ? "Готово"
     : isOpen
       ? "Забрать результат"
-      : isOpening || isCharging || isRevealing
+      : isOpening || isCharging || isRolling
         ? "Открывается"
         : "Открыть контейнер";
   const handlePrimaryAction = isCollected
@@ -1098,6 +1239,130 @@ function LootboxOpeningOverlay({
         ? onOpen
         : undefined;
 
+  useEffect(() => {
+    onRouletteFinishRef.current = onRouletteFinish;
+  }, [onRouletteFinish]);
+
+  useEffect(() => {
+    const track = rouletteTrackRef.current;
+
+    if (!isRolling || !roulette || !track) {
+      completeRouletteRef.current = null;
+      return;
+    }
+
+    const rouletteTrack = track;
+    let animationFrameId = 0;
+    let finishTimerId = 0;
+    let settled = false;
+    const startX = 96;
+
+    function clearRouletteAnimation() {
+      if (!rouletteAnimationRef.current) {
+        return;
+      }
+
+      rouletteAnimationRef.current.onfinish = null;
+      rouletteAnimationRef.current.oncancel = null;
+      rouletteAnimationRef.current.cancel();
+      rouletteAnimationRef.current = null;
+    }
+
+    rouletteTrack.style.transform = `translate3d(${startX}px, 0, 0)`;
+
+    animationFrameId = window.requestAnimationFrame(() => {
+      const winningCard =
+        rouletteTrack.querySelector<HTMLElement>('[data-winning="true"]');
+
+      if (!winningCard) {
+        onRouletteFinishRef.current(false);
+        return;
+      }
+
+      const selectedWinningCard = winningCard;
+      const cardCenter =
+        selectedWinningCard.offsetLeft + selectedWinningCard.offsetWidth / 2;
+      const endX = -cardCenter;
+      const baseDetail = lootboxRouletteEventDetail(roulette, false);
+
+      function completeRoulette(skipped = false) {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearRouletteAnimation();
+        completeRouletteRef.current = null;
+        rouletteTrack.style.transform = `translate3d(${endX}px, 0, 0)`;
+        selectedWinningCard.classList.add("is-winning");
+
+        const finishDetail = {
+          ...baseDetail,
+          skipped,
+        };
+
+        if (skipped) {
+          emitLootboxEvent("roulette-skip", finishDetail);
+        }
+
+        emitLootboxEvent("roulette-finish", finishDetail);
+        finishTimerId = window.setTimeout(
+          () => onRouletteFinishRef.current(skipped),
+          skipped ? 60 : 540,
+        );
+      }
+
+      completeRouletteRef.current = completeRoulette;
+      emitLootboxEvent("roulette-start", {
+        lootBoxId: roulette.lootBoxId,
+        durationMs: roulette.durationMs,
+        possibleRewards: roulette.items.length,
+      });
+
+      const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      const duration = reduceMotion ? 1 : roulette.durationMs;
+
+      rouletteAnimationRef.current = track.animate(
+        [
+          { transform: `translate3d(${startX}px, 0, 0)` },
+          { transform: `translate3d(${endX + 760}px, 0, 0)`, offset: 0.54 },
+          { transform: `translate3d(${endX + 320}px, 0, 0)`, offset: 0.76 },
+          { transform: `translate3d(${endX + 118}px, 0, 0)`, offset: 0.89 },
+          { transform: `translate3d(${endX + 34}px, 0, 0)`, offset: 0.97 },
+          { transform: `translate3d(${endX}px, 0, 0)` },
+        ],
+        {
+          duration,
+          easing: "cubic-bezier(0.12, 0.02, 0.14, 1)",
+          fill: "forwards",
+        },
+      );
+
+      rouletteAnimationRef.current.onfinish = () => completeRoulette(false);
+      rouletteAnimationRef.current.oncancel = () => {
+        if (settled) {
+          return;
+        }
+
+        completeRouletteRef.current = null;
+        rouletteAnimationRef.current = null;
+      };
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.clearTimeout(finishTimerId);
+
+      if (!settled) {
+        clearRouletteAnimation();
+      }
+
+      completeRouletteRef.current = null;
+    };
+  }, [isRolling, roulette]);
+
   function handleMachineKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (!isReady || (event.key !== "Enter" && event.key !== " ")) {
       return;
@@ -1105,6 +1370,11 @@ function LootboxOpeningOverlay({
 
     event.preventDefault();
     onOpen();
+  }
+
+  function handleSkipRoulette(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    completeRouletteRef.current?.(true);
   }
 
   return (
@@ -1135,12 +1405,90 @@ function LootboxOpeningOverlay({
           <p>{statusLabel}</p>
         </div>
 
+        {rouletteVisible && roulette ? (
+          <div
+            className={[
+              "lp-lootbox-roulette",
+              isRolling ? "is-visible" : "",
+              !isRolling ? "is-finished" : "",
+            ].join(" ")}
+            aria-hidden={isCollected}
+          >
+            <div className="lp-lootbox-roulette-window">
+              <div ref={rouletteTrackRef} className="lp-lootbox-roulette-track">
+                {roulette.items.map((item, index) => {
+                  const isWinner = Boolean(item.isWinner);
+                  const canCollect = isWinner && isOpen;
+                  const itemRarity =
+                    rarityRevealed && item.rarity ? item.rarity : "hidden";
+                  const itemCaption = isWinner
+                    ? isCollected
+                      ? "Получено"
+                      : canCollect
+                        ? "Забрать"
+                        : rarityRevealed
+                          ? item.caption
+                          : "locked"
+                    : rarityRevealed
+                      ? item.caption
+                      : "locked";
+
+                  return (
+                    <button
+                      key={`${item.id}-${index}`}
+                      type="button"
+                      ref={isWinner ? rewardRef : undefined}
+                      className={[
+                        "lp-lootbox-roulette-card",
+                        isWinner && !isRolling ? "is-winning" : "",
+                        canCollect ? "can-collect" : "",
+                        isWinner && isCollected ? "is-collected" : "",
+                      ].join(" ")}
+                      data-rarity={itemRarity}
+                      data-winning={isWinner ? "true" : undefined}
+                      disabled={!canCollect}
+                      tabIndex={canCollect ? 0 : -1}
+                      aria-label={
+                        canCollect ? `Забрать награду ${item.reward}` : undefined
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        if (canCollect) {
+                          onCollect();
+                        }
+                      }}
+                    >
+                      <strong>{item.reward}</strong>
+                      <i aria-hidden="true" />
+                      <span>{itemCaption}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="lp-lootbox-roulette-marker" aria-hidden="true" />
+            </div>
+            <div className="lp-lootbox-roulette-caption">
+              <span>possible rewards</span>
+              <strong>{rouletteResultLabel}</strong>
+              <button
+                type="button"
+                className="lp-lootbox-roulette-skip"
+                hidden={!isRolling}
+                onClick={handleSkipRoulette}
+              >
+                Пропустить
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div
           className={[
             "lp-lootbox-machine",
             isReady ? "is-ready" : "",
             isCharging ? "is-charging" : "",
-            isRevealing ? "is-revealing" : "",
+            isRolling ? "is-rolling" : "",
             isOpening ? "is-opening" : "",
             isOpen || isCollected ? "is-open" : "",
             isCollected ? "is-collected" : "",
@@ -1170,31 +1518,6 @@ function LootboxOpeningOverlay({
               style={{ "--particle-index": index } as CSSProperties}
             />
           ))}
-
-          <button
-            type="button"
-            ref={rewardRef}
-            className={[
-              "lp-lootbox-reward-card",
-              isOpen || isCollected ? "is-visible" : "",
-              isCollected ? "is-collected" : "",
-            ].join(" ")}
-            disabled={!isOpen}
-            onClick={(event) => {
-              event.stopPropagation();
-              onCollect();
-            }}
-          >
-            <span>{isCollected ? "Получено" : "Выпала награда"}</span>
-            <strong>{card.description}</strong>
-            <small>
-              {isCollected
-                ? "Результат сохранен в игровом профиле."
-                : rarityRevealed
-                  ? `${rewardRarityLabel}. Нажмите, чтобы забрать результат.`
-                  : "Редкость скрыта до открытия."}
-            </small>
-          </button>
         </div>
 
         <div className="lp-lootbox-dialog-actions">
@@ -1204,7 +1527,7 @@ function LootboxOpeningOverlay({
           <button
             type="button"
             className="lp-club-primary-link"
-            disabled={isOpening || isCharging || isRevealing}
+            disabled={isOpening || isCharging || isRolling}
             onClick={handlePrimaryAction}
           >
             {primaryActionLabel}
@@ -6041,7 +6364,7 @@ const clubHomeCss = `
 
 .lp-lootbox-dialog {
   position: relative;
-  width: min(780px, 100%);
+  width: min(900px, 100%);
   max-height: min(780px, calc(100dvh - 40px));
   overflow: visible;
   padding: clamp(20px, 3vw, 32px);
@@ -6121,6 +6444,290 @@ const clubHomeCss = `
   color: #c2d0d1;
   font-size: 14px;
   line-height: 1.55;
+}
+
+.lp-lootbox-roulette {
+  position: relative;
+  z-index: 2;
+  width: min(760px, 100%);
+  margin: 18px auto 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-12px) scale(0.98);
+  transition:
+    opacity 240ms ease,
+    transform 300ms cubic-bezier(0.16, 0.86, 0.2, 1);
+}
+
+.lp-lootbox-roulette.is-visible,
+.lp-lootbox-roulette.is-finished {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.lp-lootbox-roulette.is-finished {
+  opacity: 0.96;
+}
+
+.lp-lootbox-roulette-window {
+  position: relative;
+  height: 154px;
+  overflow: hidden;
+  pointer-events: none;
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.78), transparent 16% 84%, rgba(0, 0, 0, 0.78)),
+    radial-gradient(circle at 50% 0%, rgb(var(--rarity-accent-rgb) / 0.16), transparent 40%),
+    rgba(2, 8, 11, 0.86);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 1px rgb(var(--rarity-accent-rgb) / 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.lp-lootbox-roulette-window::before,
+.lp-lootbox-roulette-window::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  width: 18%;
+  pointer-events: none;
+}
+
+.lp-lootbox-roulette-window::before {
+  left: 0;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.92), transparent);
+}
+
+.lp-lootbox-roulette-window::after {
+  right: 0;
+  background: linear-gradient(270deg, rgba(0, 0, 0, 0.92), transparent);
+}
+
+.lp-lootbox-roulette-track {
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  display: flex;
+  gap: 10px;
+  pointer-events: none;
+  will-change: transform;
+  transform: translate3d(96px, 0, 0);
+}
+
+.lp-lootbox-roulette-card {
+  --card-rgb: 158 181 183;
+  flex: 0 0 104px;
+  display: grid;
+  align-content: space-between;
+  height: 132px;
+  padding: 10px;
+  border: 1px solid rgb(var(--card-rgb) / 0.32);
+  border-radius: 7px;
+  color: var(--text);
+  text-align: left;
+  background:
+    radial-gradient(circle at 50% 12%, rgb(var(--card-rgb) / 0.2), transparent 42%),
+    linear-gradient(160deg, rgb(var(--card-rgb) / 0.11), transparent 52%),
+    rgba(5, 13, 16, 0.96);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--card-rgb) / 0.05),
+    0 14px 30px rgba(0, 0, 0, 0.28);
+  cursor: default;
+  pointer-events: none;
+  transform: translateY(0) scale(0.96);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-lootbox-roulette-card[data-rarity="common"],
+.lp-lootbox-roulette-card[data-rarity="hidden"] {
+  --card-rgb: 158 181 183;
+}
+
+.lp-lootbox-roulette-card[data-rarity="rare"] {
+  --card-rgb: 131 228 236;
+}
+
+.lp-lootbox-roulette-card[data-rarity="epic"] {
+  --card-rgb: 175 164 255;
+}
+
+.lp-lootbox-roulette-card[data-rarity="legendary"] {
+  --card-rgb: 208 170 108;
+}
+
+.lp-lootbox-roulette-card.is-winning {
+  border-color: rgb(var(--card-rgb) / 0.86);
+  box-shadow:
+    0 0 34px rgb(var(--card-rgb) / 0.28),
+    0 20px 44px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgb(var(--card-rgb) / 0.16);
+  transform: translateY(-5px) scale(1.03);
+}
+
+.lp-lootbox-roulette.is-finished .lp-lootbox-roulette-window,
+.lp-lootbox-roulette.is-finished .lp-lootbox-roulette-track {
+  pointer-events: auto;
+}
+
+.lp-lootbox-roulette-card.can-collect {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.lp-lootbox-roulette-card.can-collect:hover,
+.lp-lootbox-roulette-card.can-collect:focus-visible {
+  border-color: rgb(var(--card-rgb) / 0.98);
+  outline: none;
+  box-shadow:
+    0 0 44px rgb(var(--card-rgb) / 0.34),
+    0 22px 52px rgba(0, 0, 0, 0.48),
+    inset 0 0 0 1px rgb(var(--card-rgb) / 0.22);
+  transform: translateY(-7px) scale(1.045);
+}
+
+.lp-lootbox-roulette-card.is-collected {
+  opacity: 0.82;
+  filter: saturate(0.76);
+}
+
+.lp-lootbox-roulette-card:disabled {
+  opacity: 1;
+}
+
+.lp-lootbox-roulette-card strong,
+.lp-lootbox-roulette-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lp-lootbox-roulette-card strong {
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+.lp-lootbox-roulette-card span {
+  color: rgb(var(--card-rgb));
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-roulette-card i {
+  justify-self: center;
+  width: 38px;
+  height: 48px;
+  border: 1px solid rgb(var(--card-rgb) / 0.5);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgb(var(--card-rgb) / 0.26), transparent),
+    rgba(0, 0, 0, 0.26);
+  box-shadow: 0 0 18px rgb(var(--card-rgb) / 0.15);
+}
+
+.lp-lootbox-roulette-marker {
+  position: absolute;
+  top: -12px;
+  bottom: -12px;
+  left: 50%;
+  z-index: 6;
+  width: 2px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, var(--amber) 18%, var(--cyan) 50%, var(--amber) 82%, transparent);
+  box-shadow:
+    0 0 16px rgb(var(--rarity-accent-rgb) / 0.86),
+    0 0 36px rgb(var(--rarity-warm-rgb) / 0.36);
+  transform: translateX(-50%);
+}
+
+.lp-lootbox-roulette-marker::before,
+.lp-lootbox-roulette-marker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 22px;
+  height: 18px;
+  border: 1px solid rgb(var(--rarity-warm-rgb) / 0.72);
+  background: rgba(0, 0, 0, 0.72);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.lp-lootbox-roulette-marker::before {
+  top: -5px;
+}
+
+.lp-lootbox-roulette-marker::after {
+  bottom: -5px;
+}
+
+.lp-lootbox-roulette-caption {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 32px;
+  padding: 8px 10px 0;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-roulette-caption strong {
+  margin-left: auto;
+  max-width: min(280px, 42vw);
+  overflow: hidden;
+  color: var(--cyan);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-lootbox-roulette-skip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 13px;
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: 7px;
+  color: var(--text);
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.12), transparent),
+    rgba(196, 224, 225, 0.04);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(131, 228, 236, 0.05);
+}
+
+.lp-lootbox-roulette-skip:hover,
+.lp-lootbox-roulette-skip:focus-visible {
+  border-color: rgba(131, 228, 236, 0.58);
+  color: var(--cyan);
+  outline: none;
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.22), transparent),
+    rgba(131, 228, 236, 0.1);
+}
+
+.lp-lootbox-roulette-skip[hidden] {
+  display: none;
 }
 
 .lp-lootbox-machine {
@@ -6363,16 +6970,6 @@ const clubHomeCss = `
   animation: lootboxSlitCharge 900ms cubic-bezier(0.16, 0.84, 0.2, 1) both;
 }
 
-.lp-lootbox-machine.is-revealing .lp-lootbox-energy-field {
-  opacity: var(--rarity-field-opacity);
-  transform: translate(-50%, -50%) scale(var(--rarity-field-scale));
-}
-
-.lp-lootbox-machine.is-revealing .lp-lootbox-energy-slit {
-  opacity: 0.72;
-  transform: translateX(-50%) scaleX(0.88);
-}
-
 .lp-lootbox-machine.is-opening {
   animation: lootboxKick 1320ms cubic-bezier(0.16, 0.9, 0.18, 1) both;
 }
@@ -6421,89 +7018,6 @@ const clubHomeCss = `
 .lp-lootbox-machine.is-opening .lp-lootbox-particle,
 .lp-lootbox-machine.is-open .lp-lootbox-particle {
   animation: lootboxParticleBurst 1180ms cubic-bezier(0.18, 0.84, 0.18, 1) calc(260ms + var(--particle-index) * 46ms) both;
-}
-
-.lp-lootbox-reward-card {
-  position: absolute;
-  left: 50%;
-  bottom: 140px;
-  z-index: 120;
-  display: grid;
-  width: min(220px, 64%);
-  min-height: 164px;
-  place-items: center;
-  padding: 16px;
-  overflow: hidden;
-  border: 1px solid rgb(var(--rarity-warm-rgb) / 0.78);
-  border-radius: 8px;
-  color: var(--text);
-  text-align: left;
-  background:
-    linear-gradient(145deg, rgb(var(--rarity-warm-rgb) / 0.22), transparent 42%),
-    radial-gradient(circle at 50% 30%, rgb(var(--rarity-accent-rgb) / 0.18), transparent 40%),
-    linear-gradient(180deg, rgba(17, 32, 36, 0.99), rgba(3, 8, 10, 0.98));
-  box-shadow:
-    0 0 52px rgb(var(--rarity-warm-rgb) / 0.22),
-    0 0 96px rgb(var(--rarity-accent-rgb) / var(--rarity-glow)),
-    0 28px 86px rgba(0, 0, 0, 0.45),
-    inset 0 0 0 1px rgb(var(--rarity-accent-rgb) / 0.1);
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transform: translate3d(-50%, 72px, 180px) scale(0.62) rotateX(18deg) rotateZ(-2deg);
-  transition:
-    border-color 180ms ease,
-    opacity 260ms ease,
-    transform 320ms ease;
-}
-
-.lp-lootbox-reward-card.is-visible {
-  pointer-events: auto;
-  animation:
-    lootboxRewardRise 1420ms cubic-bezier(0.16, 0.9, 0.18, 1) both,
-    lootboxRewardIdle 3.8s ease-in-out 1420ms infinite;
-}
-
-.lp-lootbox-reward-card:disabled {
-  cursor: default;
-}
-
-.lp-lootbox-reward-card:focus-visible,
-.lp-lootbox-reward-card:hover {
-  border-color: rgb(var(--rarity-warm-rgb) / 0.92);
-  outline: none;
-}
-
-.lp-lootbox-reward-card.is-collected {
-  border-color: rgba(148, 214, 184, 0.55);
-  background:
-    linear-gradient(135deg, rgba(148, 214, 184, 0.18), transparent 42%),
-    rgba(6, 10, 12, 0.92);
-}
-
-.lp-lootbox-reward-card span {
-  color: var(--rarity-warm);
-  font-size: 10px;
-  font-weight: 860;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.lp-lootbox-reward-card strong {
-  margin-top: 7px;
-  color: var(--text);
-  max-width: 156px;
-  font-size: 19px;
-  line-height: 1.08;
-  text-align: center;
-  text-shadow: 0 0 16px rgb(var(--rarity-accent-rgb) / 0.26);
-}
-
-.lp-lootbox-reward-card small {
-  margin-top: 10px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .lp-lootbox-dialog-actions {
@@ -6618,39 +7132,6 @@ const clubHomeCss = `
   100% {
     opacity: var(--rarity-beam-opacity);
     transform: translateX(-50%) scaleY(1);
-  }
-}
-
-@keyframes lootboxRewardRise {
-  0% {
-    opacity: 0;
-    transform: translate3d(-50%, 72px, 180px) scale(0.62) rotateX(18deg) rotateZ(-2deg);
-  }
-
-  38% {
-    opacity: 1;
-    transform: translate3d(-50%, calc(-112px - var(--rarity-reward-lift)), 180px) scale(1.045) rotateX(0deg) rotateZ(1.2deg);
-  }
-
-  68% {
-    opacity: 1;
-    transform: translate3d(-50%, calc(-86px - var(--rarity-reward-lift)), 180px) scale(0.992) rotateX(0deg) rotateZ(-0.4deg);
-  }
-
-  100% {
-    opacity: 1;
-    transform: translate3d(-50%, calc(-92px - var(--rarity-reward-lift)), 180px) scale(1) rotateX(0deg) rotateZ(0deg);
-  }
-}
-
-@keyframes lootboxRewardIdle {
-  0%,
-  100% {
-    transform: translate3d(-50%, calc(-92px - var(--rarity-reward-lift)), 180px) scale(1) rotateX(0deg);
-  }
-
-  50% {
-    transform: translate3d(-50%, calc(-101px - var(--rarity-reward-lift)), 180px) scale(1.015) rotateX(0deg);
   }
 }
 
@@ -9181,6 +9662,14 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function emitLootboxEvent(name: string, detail: Record<string, unknown> = {}) {
+  window.dispatchEvent(
+    new CustomEvent(`leetplus:lootbox:${name}`, {
+      detail,
+    }),
+  );
+}
+
 function normalizeLootboxRarity(
   value: string | null | undefined,
 ): GuestPortalLootBoxRarity | null {
@@ -9192,8 +9681,243 @@ function normalizeLootboxRarity(
     : null;
 }
 
-function lootboxOpenAnimationMs(rarity: GuestPortalLootBoxRarity | null) {
-  return rarity ? LOOTBOX_RARITY_OPEN_MS[rarity] : LOOTBOX_RARITY_OPEN_MS.common;
+function lootboxRouletteMs(rarity: GuestPortalLootBoxRarity | null) {
+  return rarity ? LOOTBOX_ROULETTE_MS[rarity] : LOOTBOX_ROULETTE_MS.common;
+}
+
+function buildLootboxRouletteState({
+  currentCard,
+  nextCard,
+  previousSummary,
+  result,
+  runId,
+}: {
+  currentCard: HomeLootCard;
+  nextCard: HomeLootCard;
+  previousSummary: GuestPortalGameSummary;
+  result: GuestPortalLootBoxOpenResponse;
+  runId: number;
+}): LootboxRouletteState {
+  const openedReward = result.rewards[0] ?? null;
+  const winningReward = lootboxRouletteRewardFromOpenReward(
+    openedReward,
+    nextCard,
+    `winner-${runId}`,
+  );
+  const fallbackRewards = LOOTBOX_ROULETTE_FALLBACK_REWARDS.map((item, index) => ({
+    ...item,
+    id: `fallback-${index}`,
+  }));
+  const resultRewards = result.rewards.map((item, index) =>
+    lootboxRouletteRewardFromOpenReward(item, nextCard, `result-${index}`),
+  );
+  const recentRewards = [
+    ...result.summary.rewards.recent,
+    ...previousSummary.rewards.recent,
+  ]
+    .filter((item) => item.sourceKind === "LOOT_BOX")
+    .slice(0, 14)
+    .map((item, index) => lootboxRouletteRewardFromHistory(item, `recent-${index}`));
+  const lootBoxRewards = result.summary.lootBoxes.featured.map((item, index) =>
+    lootboxRouletteRewardFromCard(
+      {
+        id: item.id,
+        title: item.name,
+        description:
+          item.latestReward?.rewardLabel ??
+          item.rewardLabel ??
+          currentCard.description,
+        status: "",
+        active: false,
+        openable: item.openable,
+        openBlocker: item.openBlocker,
+        rewardLabel: item.rewardLabel,
+        rewardRarity: item.latestReward?.rewardRarity ?? null,
+        rewardRarityLabel: item.latestReward?.rewardRarityLabel ?? null,
+        rewardDropChance: item.latestReward?.rewardDropChance ?? null,
+        weeklyOpenedCount: item.weeklyOpenedCount,
+        weeklyLimit: item.weeklyLimit,
+        dailyOpenedCount: item.dailyOpenedCount,
+        dailyLimit: item.dailyLimit,
+      },
+      `lootbox-${index}`,
+    ),
+  );
+  const candidates = dedupeLootboxRouletteRewards([
+    ...resultRewards,
+    ...recentRewards,
+    ...lootBoxRewards,
+    ...fallbackRewards,
+  ]);
+  const pool = candidates.filter(
+    (item) => !sameLootboxRouletteReward(item, winningReward),
+  );
+  const fallbackPool = fallbackRewards.filter(
+    (item) => !sameLootboxRouletteReward(item, winningReward),
+  );
+  const spinPool = pool.length ? pool : fallbackPool.length ? fallbackPool : fallbackRewards;
+  const items: LootboxRouletteReward[] = [];
+  const cycleCount = Math.max(7, Math.ceil(44 / Math.max(1, spinPool.length)));
+
+  for (let cycle = 0; cycle < cycleCount; cycle += 1) {
+    spinPool.forEach((_, itemIndex) => {
+      const shiftedIndex = (itemIndex + cycle * 2) % spinPool.length;
+      const reward = spinPool[shiftedIndex];
+
+      items.push({
+        ...reward,
+        id: `${reward.id}-${cycle}-${itemIndex}`,
+        isWinner: false,
+      });
+    });
+  }
+
+  const winningIndex = Math.min(items.length, Math.max(30, items.length - 12));
+
+  items.splice(winningIndex, 0, {
+    ...winningReward,
+    isWinner: true,
+  });
+  items.push(
+    ...spinPool.slice(0, 7).map((item, index) => ({
+      ...item,
+      id: `${item.id}-tail-${index}`,
+      isWinner: false,
+    })),
+  );
+
+  return {
+    runId,
+    lootBoxId: currentCard.id,
+    items,
+    winningIndex,
+    durationMs: lootboxRouletteMs(winningReward.rarity),
+    reward: winningReward.reward,
+    caption: winningReward.caption,
+    rarity: winningReward.rarity,
+    rarityLabel: winningReward.rarityLabel,
+    dropChance: winningReward.dropChance,
+    message: result.message,
+    skipped: false,
+  };
+}
+
+function lootboxRouletteRewardFromOpenReward(
+  reward: LootboxOpenReward | null,
+  card: HomeLootCard,
+  id: string,
+): LootboxRouletteReward {
+  const rarity =
+    normalizeLootboxRarity(reward?.rewardRarity) ??
+    normalizeLootboxRarity(card.rewardRarity);
+  const rarityLabel =
+    reward?.rewardRarityLabel ??
+    card.rewardRarityLabel ??
+    (rarity ? LOOTBOX_RARITY_LABELS[rarity] : null);
+  const dropChance = reward?.rewardDropChance ?? card.rewardDropChance ?? null;
+  const rewardLabel =
+    reward?.rewardLabel ?? card.rewardLabel ?? card.description;
+
+  return {
+    id,
+    reward: rewardLabel,
+    caption: lootboxRouletteCaption(rarityLabel, dropChance, card.title),
+    rarity,
+    rarityLabel,
+    dropChance,
+  };
+}
+
+function lootboxRouletteRewardFromHistory(
+  item: GameRewardHistoryItem,
+  id: string,
+): LootboxRouletteReward {
+  const rarity = normalizeLootboxRarity(item.rewardRarity);
+  const rarityLabel =
+    item.rewardRarityLabel ?? (rarity ? LOOTBOX_RARITY_LABELS[rarity] : null);
+
+  return {
+    id,
+    reward: item.rewardLabel,
+    caption: lootboxRouletteCaption(
+      rarityLabel,
+      item.rewardDropChance,
+      item.sourceLabel ?? "club reward",
+    ),
+    rarity,
+    rarityLabel,
+    dropChance: item.rewardDropChance,
+  };
+}
+
+function lootboxRouletteRewardFromCard(
+  card: HomeLootCard,
+  id: string,
+): LootboxRouletteReward {
+  const rarity = normalizeLootboxRarity(card.rewardRarity);
+  const rarityLabel =
+    card.rewardRarityLabel ?? (rarity ? LOOTBOX_RARITY_LABELS[rarity] : null);
+
+  return {
+    id,
+    reward: card.rewardLabel ?? card.description,
+    caption: lootboxRouletteCaption(rarityLabel, card.rewardDropChance ?? null, card.title),
+    rarity,
+    rarityLabel,
+    dropChance: card.rewardDropChance ?? null,
+  };
+}
+
+function lootboxRouletteCaption(
+  rarityLabel: string | null,
+  dropChance: number | null,
+  fallback: string,
+) {
+  const label = rarityLabel ?? fallback;
+
+  if (typeof dropChance === "number" && Number.isFinite(dropChance)) {
+    return `${label} / ${formatChancePercent(dropChance)}`;
+  }
+
+  return label;
+}
+
+function dedupeLootboxRouletteRewards(items: LootboxRouletteReward[]) {
+  const seen = new Set<string>();
+
+  return items.filter((item) => {
+    const key = `${item.reward}::${item.rarity ?? "unknown"}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function sameLootboxRouletteReward(
+  first: LootboxRouletteReward,
+  second: LootboxRouletteReward,
+) {
+  return first.reward === second.reward && first.rarity === second.rarity;
+}
+
+function lootboxRouletteEventDetail(
+  roulette: LootboxRouletteState,
+  skipped: boolean,
+) {
+  return {
+    lootBoxId: roulette.lootBoxId,
+    rarity: roulette.rarity,
+    reward: roulette.reward,
+    caption: roulette.caption,
+    rarityLabel: roulette.rarityLabel,
+    chancePercent: roulette.dropChance,
+    winningIndex: roulette.winningIndex,
+    skipped,
+  };
 }
 
 function lootboxRewardRarityLabel(value: {
@@ -9211,24 +9935,30 @@ function revealLootboxRarity({
   rewardRarity,
   rewardRarityLabel,
   rewardDropChance,
+  caption,
+  winningIndex,
+  skipped,
 }: {
   lootBoxId: string;
   rewardLabel: string;
   rewardRarity: GuestPortalLootBoxRarity | null;
   rewardRarityLabel: string | null;
   rewardDropChance: number | null;
+  caption?: string;
+  winningIndex?: number;
+  skipped?: boolean;
 }) {
-  window.dispatchEvent(
-    new CustomEvent("leetplus:lootbox:rarity-reveal", {
-      detail: {
-        lootBoxId,
-        rewardLabel,
-        rarity: rewardRarity,
-        rarityLabel: rewardRarityLabel,
-        chancePercent: rewardDropChance,
-      },
-    }),
-  );
+  emitLootboxEvent("rarity-reveal", {
+    lootBoxId,
+    reward: rewardLabel,
+    rewardLabel,
+    caption,
+    rarity: rewardRarity,
+    rarityLabel: rewardRarityLabel,
+    chancePercent: rewardDropChance,
+    winningIndex,
+    skipped,
+  });
 }
 
 function clampPercent(value: number) {
@@ -9243,6 +9973,12 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatChancePercent(value: number) {
+  return `${new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 2,
+  }).format(value)}%`;
 }
 
 function formatSignedNumber(value: number) {

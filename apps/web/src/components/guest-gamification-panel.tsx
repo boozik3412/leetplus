@@ -6270,6 +6270,7 @@ function LootBoxesTab({
       }
       listTitle="Созданные правила лутбоксов"
       items={lootBoxes}
+      layout="stacked"
       renderItem={(item) => (
         <RuleCard
           key={item.id}
@@ -8624,6 +8625,7 @@ function RulesLayout<T>({
   listTitle,
   items,
   renderItem,
+  layout = "sidebar",
 }: {
   canManage: boolean;
   formTitle: string;
@@ -8631,12 +8633,17 @@ function RulesLayout<T>({
   listTitle: string;
   items: T[];
   renderItem: (item: T) => ReactNode;
+  layout?: "sidebar" | "stacked";
 }) {
+  const isStacked = layout === "stacked";
+
   return (
     <div
       className={
         canManage
-          ? "grid items-start gap-4 2xl:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]"
+          ? isStacked
+            ? "grid gap-5"
+            : "grid items-start gap-4 2xl:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]"
           : "grid gap-5"
       }
     >
@@ -8648,7 +8655,13 @@ function RulesLayout<T>({
             {items.length} правил
           </p>
         </div>
-        <div className="grid max-w-5xl gap-3 lg:grid-cols-2 2xl:max-w-none">
+        <div
+          className={
+            isStacked
+              ? "grid gap-3 lg:grid-cols-2"
+              : "grid max-w-5xl gap-3 lg:grid-cols-2 2xl:max-w-none"
+          }
+        >
           {items.length ? (
             items.map(renderItem)
           ) : (

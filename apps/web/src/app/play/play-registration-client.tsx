@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { FormEvent, ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LegalEntityInfo } from "@/components/legal-entity-info";
 import type {
@@ -56,6 +56,139 @@ const GAME_AUTH_VERIFICATION_CHANNELS = new Set<GuestPortalVerificationChannel>(
 );
 const HIDDEN_PUBLIC_VERIFICATION_CHANNELS =
   new Set<GuestPortalVerificationChannel>(["SMS_CODE"]);
+const AUTH_BURST_TRIGGER_CLICKS = 5;
+type AuthBurstParticleStyle = CSSProperties &
+  Record<"--x" | "--y" | "--s" | "--d" | "--c" | "--r", string>;
+const authBurstParticles: AuthBurstParticleStyle[] = [
+  {
+    "--x": "-82px",
+    "--y": "-26px",
+    "--s": "5px",
+    "--d": "720ms",
+    "--c": "#83e4ec",
+    "--r": "-80deg",
+  },
+  {
+    "--x": "76px",
+    "--y": "-42px",
+    "--s": "6px",
+    "--d": "780ms",
+    "--c": "#d0aa6c",
+    "--r": "60deg",
+  },
+  {
+    "--x": "88px",
+    "--y": "24px",
+    "--s": "4px",
+    "--d": "690ms",
+    "--c": "#83e4ec",
+    "--r": "120deg",
+  },
+  {
+    "--x": "42px",
+    "--y": "82px",
+    "--s": "6px",
+    "--d": "820ms",
+    "--c": "#d0aa6c",
+    "--r": "45deg",
+  },
+  {
+    "--x": "-46px",
+    "--y": "74px",
+    "--s": "4px",
+    "--d": "740ms",
+    "--c": "#83e4ec",
+    "--r": "-30deg",
+  },
+  {
+    "--x": "-94px",
+    "--y": "28px",
+    "--s": "6px",
+    "--d": "860ms",
+    "--c": "#d0aa6c",
+    "--r": "95deg",
+  },
+  {
+    "--x": "-28px",
+    "--y": "-88px",
+    "--s": "4px",
+    "--d": "700ms",
+    "--c": "#83e4ec",
+    "--r": "140deg",
+  },
+  {
+    "--x": "22px",
+    "--y": "-96px",
+    "--s": "5px",
+    "--d": "790ms",
+    "--c": "#d0aa6c",
+    "--r": "-130deg",
+  },
+  {
+    "--x": "-108px",
+    "--y": "-4px",
+    "--s": "3px",
+    "--d": "760ms",
+    "--c": "#d9fbff",
+    "--r": "30deg",
+  },
+  {
+    "--x": "108px",
+    "--y": "-2px",
+    "--s": "3px",
+    "--d": "760ms",
+    "--c": "#d9fbff",
+    "--r": "-30deg",
+  },
+  {
+    "--x": "-66px",
+    "--y": "-70px",
+    "--s": "4px",
+    "--d": "840ms",
+    "--c": "#d0aa6c",
+    "--r": "70deg",
+  },
+  {
+    "--x": "66px",
+    "--y": "70px",
+    "--s": "4px",
+    "--d": "840ms",
+    "--c": "#83e4ec",
+    "--r": "-70deg",
+  },
+  {
+    "--x": "4px",
+    "--y": "104px",
+    "--s": "3px",
+    "--d": "730ms",
+    "--c": "#d9fbff",
+    "--r": "0deg",
+  },
+  {
+    "--x": "-4px",
+    "--y": "-108px",
+    "--s": "3px",
+    "--d": "730ms",
+    "--c": "#d9fbff",
+    "--r": "180deg",
+  },
+  {
+    "--x": "-92px",
+    "--y": "58px",
+    "--s": "4px",
+    "--d": "880ms",
+    "--c": "#83e4ec",
+    "--r": "-110deg",
+  },
+  {
+    "--x": "92px",
+    "--y": "-58px",
+    "--s": "4px",
+    "--d": "880ms",
+    "--c": "#d0aa6c",
+    "--r": "110deg",
+  },
+];
 
 export function PlayRegistrationClient({
   initialDirectory,
@@ -121,6 +254,9 @@ export function PlayRegistrationClient({
   const [isStartingUserCallAuth, setStartingUserCallAuth] = useState(false);
   const [isPollingUserCallAuth, setPollingUserCallAuth] = useState(false);
   const [isCheckingLangame, setCheckingLangame] = useState(false);
+  const [, setAuthBurstClickCount] = useState(0);
+  const [isAuthBursting, setAuthBursting] = useState(false);
+  const [isAuthBurstGone, setAuthBurstGone] = useState(false);
   const referralCode = useMemo(
     () => normalizeReferralCode(initialReferralCode),
     [initialReferralCode],
@@ -131,6 +267,36 @@ export function PlayRegistrationClient({
   const openActiveGameAfterAuth = useCallback(() => {
     router.replace("/play/game");
   }, [router]);
+
+  useEffect(() => {
+    if (!isAuthBursting) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAuthBursting(false);
+      setAuthBurstGone(true);
+    }, 920);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isAuthBursting]);
+
+  const handleAuthBurstClick = useCallback(() => {
+    if (isAuthBursting || isAuthBurstGone) {
+      return;
+    }
+
+    setAuthBurstClickCount((currentClickCount) => {
+      const nextClickCount = currentClickCount + 1;
+
+      if (nextClickCount >= AUTH_BURST_TRIGGER_CLICKS) {
+        setAuthBursting(true);
+        return 0;
+      }
+
+      return nextClickCount;
+    });
+  }, [isAuthBurstGone, isAuthBursting]);
 
   const visibleClubs = useMemo(() => {
     const needle = normalizeSearch(query);
@@ -1178,9 +1344,20 @@ export function PlayRegistrationClient({
                     {gameAuthPanelSummary}
                   </span>
                 </span>
-                <span className="lp-game-auth-node" aria-hidden="true">
+                <button
+                  aria-label="Звездочка игрового входа"
+                  className={`lp-game-auth-node${isAuthBursting ? " is-bursting" : ""}${isAuthBurstGone ? " is-gone" : ""}`}
+                  disabled={isAuthBurstGone}
+                  onClick={handleAuthBurstClick}
+                  type="button"
+                >
                   <GameAuthNodeIcon />
-                </span>
+                  <span aria-hidden="true" className="burst-particles">
+                    {authBurstParticles.map((particle, index) => (
+                      <i key={index} style={particle} />
+                    ))}
+                  </span>
+                </button>
               </div>
             ) : (
               <div className="mb-5">
@@ -3300,22 +3477,233 @@ const gameAuthCss = `
 }
 
 .lp-game-auth-node {
+  position: relative;
   display: grid;
   place-items: center;
   width: 44px;
   height: 44px;
   flex: 0 0 auto;
+  padding: 0;
   border: 1px solid rgba(131, 228, 236, 0.28);
   border-radius: 50%;
   color: #83e4ec;
   background: rgba(131, 228, 236, 0.06);
+  cursor: pointer;
+  overflow: visible;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    opacity 220ms ease,
+    transform 220ms ease;
 }
 
-.lp-game-auth-node svg,
+.lp-game-auth-node:hover,
+.lp-game-auth-node:focus-visible {
+  outline: none;
+  border-color: rgba(131, 228, 236, 0.62);
+  background: rgba(131, 228, 236, 0.1);
+  box-shadow: 0 0 28px rgba(131, 228, 236, 0.13);
+}
+
+.lp-game-auth-node:disabled {
+  cursor: default;
+}
+
+.lp-game-auth-node svg {
+  position: relative;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.8;
+  transition:
+    opacity 160ms ease,
+    transform 180ms ease;
+}
+
 .lp-game-auth-method svg {
   width: 20px;
   height: 20px;
   stroke-width: 1.8;
+}
+
+.lp-game-auth-node::before,
+.lp-game-auth-node::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.lp-game-auth-node::before {
+  border: 1px solid rgba(131, 228, 236, 0.82);
+  box-shadow:
+    0 0 18px rgba(131, 228, 236, 0.34),
+    inset 0 0 12px rgba(208, 170, 108, 0.18);
+}
+
+.lp-game-auth-node::after {
+  inset: -8px;
+  background:
+    radial-gradient(circle, rgba(255, 245, 208, 1) 0 11%, rgba(208, 170, 108, 0.95) 16%, rgba(131, 228, 236, 0.68) 38%, transparent 70%),
+    conic-gradient(from 12deg, transparent 0 12%, rgba(131, 228, 236, 0.82) 13% 15%, transparent 16% 30%, rgba(208, 170, 108, 0.8) 31% 33%, transparent 34% 100%);
+  filter: blur(1.5px);
+}
+
+.lp-game-auth-node .burst-particles {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.lp-game-auth-node .burst-particles i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--s, 5px);
+  height: var(--s, 5px);
+  border-radius: 999px;
+  background: var(--c, #83e4ec);
+  color: var(--c, #83e4ec);
+  box-shadow:
+    0 0 16px currentColor,
+    0 0 34px currentColor;
+  transform: translate(-50%, -50%) scale(0.5);
+}
+
+.lp-game-auth-node .burst-particles i:nth-child(3n) {
+  border-radius: 2px;
+  transform: translate(-50%, -50%) rotate(45deg) scale(0.5);
+}
+
+.lp-game-auth-node.is-bursting {
+  animation: node-core-burst 860ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+  border-color: rgba(255, 228, 172, 0.82);
+  background:
+    radial-gradient(circle, rgba(255, 244, 214, 0.6), rgba(208, 170, 108, 0.22) 36%, rgba(131, 228, 236, 0.13) 68%);
+  box-shadow:
+    0 0 42px rgba(131, 228, 236, 0.62),
+    0 0 86px rgba(208, 170, 108, 0.42);
+}
+
+.lp-game-auth-node.is-bursting svg {
+  animation: node-icon-collapse 420ms ease forwards;
+}
+
+.lp-game-auth-node.is-bursting::before {
+  animation: node-burst-ring 860ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.lp-game-auth-node.is-bursting::after {
+  animation: node-burst-flash 720ms ease forwards;
+}
+
+.lp-game-auth-node.is-bursting .burst-particles {
+  opacity: 1;
+}
+
+.lp-game-auth-node.is-bursting .burst-particles i {
+  animation: node-particle-burst var(--d, 650ms) cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.lp-game-auth-node.is-gone {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.35);
+}
+
+@keyframes node-core-burst {
+  0% {
+    transform: scale(1);
+  }
+  28% {
+    transform: scale(0.82) rotate(10deg);
+  }
+  48% {
+    transform: scale(1.38) rotate(-12deg);
+  }
+  100% {
+    transform: scale(0.3) rotate(28deg);
+  }
+}
+
+@keyframes node-icon-collapse {
+  0% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+  60% {
+    opacity: 0.88;
+    transform: scale(0.38) rotate(90deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0) rotate(160deg);
+  }
+}
+
+@keyframes node-burst-ring {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.5);
+  }
+}
+
+@keyframes node-burst-flash {
+  0% {
+    opacity: 0;
+    transform: scale(0.35) rotate(0deg);
+  }
+  16% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.75) rotate(68deg);
+  }
+}
+
+@keyframes node-particle-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.35) rotate(0deg);
+  }
+  16% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform:
+      translate(calc(-50% + var(--x, 0px)), calc(-50% + var(--y, 0px)))
+      scale(1)
+      rotate(var(--r, 0deg));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-game-auth-node.is-bursting,
+  .lp-game-auth-node.is-bursting svg,
+  .lp-game-auth-node.is-bursting::before,
+  .lp-game-auth-node.is-bursting::after,
+  .lp-game-auth-node.is-bursting .burst-particles i {
+    animation: none;
+  }
+
+  .lp-game-auth-node.is-bursting {
+    opacity: 0;
+    transform: scale(0.35);
+  }
 }
 
 .lp-game-auth-method-stack {

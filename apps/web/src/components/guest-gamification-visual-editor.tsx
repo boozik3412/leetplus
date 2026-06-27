@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   GuestGameLootBox,
@@ -18,6 +19,7 @@ import type {
   GuestGameVisualEditorPreview,
   GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
+import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
 import type { Store } from "@/lib/stores";
 
 type Props = {
@@ -583,8 +585,16 @@ function VisualPreview({
                   key={lootBox.id ?? lootBox.title}
                   className="rounded-lg border border-[#c4e0e524] bg-[#02080b] p-4"
                 >
-                  <div className="mb-4 grid size-12 place-items-center rounded-lg border border-[#83e4ec42] text-[#83e4ec]">
-                    +
+                  <div className="mb-4 grid h-20 place-items-center rounded-lg border border-[#83e4ec42] bg-[#061014]">
+                    <Image
+                      src={lootboxSkinForRarity("common")}
+                      alt=""
+                      width={1024}
+                      height={1024}
+                      sizes="96px"
+                      className="h-16 w-full object-contain drop-shadow-[0_14px_18px_rgba(0,0,0,0.5)]"
+                      draggable={false}
+                    />
                   </div>
                   <h5 className="font-black">{lootBox.title}</h5>
                   <p className="mt-2 text-sm text-[#a8b9ba]">

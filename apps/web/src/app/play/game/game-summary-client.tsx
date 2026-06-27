@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +17,7 @@ import type {
   GuestPortalGameSummary,
   GuestPortalLootBoxRarity,
 } from "@/lib/guest-portal";
+import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
@@ -1169,7 +1171,16 @@ function HomeLootBoxes({
               </span>
               <span className="lp-lootbox-entry-state">{card.status}</span>
             </span>
-            <span className="lp-lootbox-entry-art" aria-hidden="true" />
+            <span className="lp-lootbox-entry-art" aria-hidden="true">
+              <Image
+                src={lootboxSkinForRarity(card.rewardRarity)}
+                alt=""
+                width={1024}
+                height={1024}
+                sizes="230px"
+                draggable={false}
+              />
+            </span>
             <span className="lp-lootbox-entry-bottom">
               <span>{lootboxCardHint(card)}</span>
               <span className="lp-lootbox-mini-lock" aria-hidden="true">
@@ -1217,6 +1228,9 @@ function LootboxOpeningOverlay({
   const rewardRarityLabel =
     roulette?.rarityLabel ?? card.rewardRarityLabel ?? LOOTBOX_RARITY_LABELS[rewardRarity];
   const rarityRevealed = isOpening || isOpen || isCollected;
+  const visibleLootboxSkin = lootboxSkinForRarity(
+    rarityRevealed ? rewardRarity : "common",
+  );
   const rouletteVisible =
     Boolean(roulette) && (isRolling || isOpening || isOpen || isCollected);
   const rouletteResultLabel = !roulette
@@ -1514,11 +1528,16 @@ function LootboxOpeningOverlay({
           <span className="lp-lootbox-shock-ring" aria-hidden="true" />
           <span className="lp-lootbox-energy-slit" aria-hidden="true" />
           <span className="lp-lootbox-beam" />
-          <span className="lp-lootbox-case lp-lootbox-case-lid" />
-          <span className="lp-lootbox-case lp-lootbox-case-base" />
-          <span className="lp-lootbox-case lp-lootbox-case-left" />
-          <span className="lp-lootbox-case lp-lootbox-case-right" />
-          <span className="lp-lootbox-core" />
+          <Image
+            className="lp-lootbox-case-image"
+            src={visibleLootboxSkin}
+            alt=""
+            width={1024}
+            height={1024}
+            sizes="(max-width: 768px) 88vw, 500px"
+            aria-hidden="true"
+            draggable={false}
+          />
           <span className="lp-lootbox-lock-open" aria-hidden="true">
             <LockIcon />
           </span>
@@ -6272,12 +6291,28 @@ const clubHomeCss = `
 
 .lp-lootbox-entry-art::before {
   content: "";
-  width: min(78%, 188px);
-  aspect-ratio: 1;
-  background: url("/assets/gamification-lootbox.svg") center / contain no-repeat;
+  position: absolute;
+  inset: 18px 11%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(131, 228, 236, 0.2), transparent 64%),
+    radial-gradient(circle, rgba(0, 0, 0, 0.42), transparent 68%);
+  filter:
+    blur(10px)
+    drop-shadow(0 0 26px rgba(131, 228, 236, 0.12));
+}
+
+.lp-lootbox-entry-art img {
+  position: relative;
+  z-index: 1;
+  width: min(94%, 230px);
+  max-height: 158px;
+  object-fit: contain;
   filter:
     drop-shadow(0 24px 36px rgba(0, 0, 0, 0.52))
-    drop-shadow(0 0 22px rgba(131, 228, 236, 0.18));
+    drop-shadow(0 0 22px rgba(131, 228, 236, 0.2));
+  transform: translateY(8px);
+  user-select: none;
 }
 
 .lp-lootbox-entry-bottom {
@@ -6866,6 +6901,27 @@ const clubHomeCss = `
   filter: blur(3px);
 }
 
+.lp-lootbox-case-image {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  z-index: 4;
+  width: min(500px, 88%);
+  max-height: 318px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  filter:
+    drop-shadow(0 32px 42px rgba(0, 0, 0, 0.58))
+    drop-shadow(0 0 28px rgb(var(--rarity-accent-rgb) / 0.18));
+  transform: translateX(-50%) translateY(0) scale(1);
+  transform-origin: 50% 62%;
+  transition:
+    filter 420ms ease,
+    opacity 320ms ease,
+    transform 760ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
 .lp-lootbox-case,
 .lp-lootbox-core,
 .lp-lootbox-particle {
@@ -7025,6 +7081,20 @@ const clubHomeCss = `
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(-30px) scale(0.72);
+}
+
+.lp-lootbox-machine.is-opening .lp-lootbox-case-image,
+.lp-lootbox-machine.is-open .lp-lootbox-case-image {
+  filter:
+    drop-shadow(0 34px 46px rgba(0, 0, 0, 0.56))
+    drop-shadow(0 0 42px rgb(var(--rarity-accent-rgb) / 0.32))
+    brightness(1.08);
+  transform: translateX(-50%) translateY(-18px) scale(1.035) rotateX(-4deg);
+}
+
+.lp-lootbox-machine.is-collected .lp-lootbox-case-image {
+  opacity: 0.72;
+  transform: translateX(-50%) translateY(-8px) scale(0.98);
 }
 
 .lp-lootbox-machine.is-opening .lp-lootbox-case-lid,

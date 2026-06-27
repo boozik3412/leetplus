@@ -2185,6 +2185,7 @@ export function GuestGamificationPanel({
           stores={stores}
           canApproveRewards={access.canApproveRewards}
           canManageRules={access.canManageRules}
+          canViewIntegrationReadiness={access.isPlatformAdmin}
           onPrepareOutbox={prepareDeliveryOutbox}
           onDispatchOutbox={dispatchDeliveryOutbox}
           deliveryDispatchResult={deliveryDispatchResult}
@@ -3295,6 +3296,7 @@ function OverviewTab({
   stores,
   canApproveRewards,
   canManageRules,
+  canViewIntegrationReadiness,
   onPrepareOutbox,
   onDispatchOutbox,
   deliveryDispatchResult,
@@ -3321,6 +3323,7 @@ function OverviewTab({
   stores: Store[];
   canApproveRewards: boolean;
   canManageRules: boolean;
+  canViewIntegrationReadiness: boolean;
   onPrepareOutbox: () => void;
   onDispatchOutbox: () => void;
   deliveryDispatchResult: GuestGameDeliveryDispatchResult | null;
@@ -3339,6 +3342,10 @@ function OverviewTab({
   onCancelBonusLedgerEntry: (entryId: string) => void;
   bonusLedgerResult: BonusLedgerActionResult | null;
 }) {
+  const activePromoCards = workspace.promoCards.filter(
+    (promoCard) => promoCard.status === "ACTIVE",
+  ).length;
+
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -3350,12 +3357,15 @@ function OverviewTab({
               блок можно настроить отдельно, а затем связать в единый сценарий.
             </p>
           </div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-            Safe-mode: bonus ledger с dry-run
+          <div
+            className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100"
+            title="Награды сначала проверяются без записи в Langame, а реальное начисление проходит только через защищенную очередь."
+          >
+            Безопасный режим: проверка перед начислением
           </div>
         </div>
 
-        <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <ScenarioStepCard
             step="1"
             title="Игровые профили"
@@ -3390,6 +3400,14 @@ function OverviewTab({
           />
           <ScenarioStepCard
             step="5"
+            title="Промо баннеры"
+            text="Показать сторис-баннеры на главном экране клуба."
+            metric={`${activePromoCards} активных`}
+            action="Открыть"
+            onClick={() => onOpenTab("promoCards")}
+          />
+          <ScenarioStepCard
+            step="6"
             title="Выдача"
             text="Проверить очередь, согласовать награду и закрыть статус."
             metric={`${workspace.summary.pendingRewards} к выдаче`}
@@ -3419,7 +3437,9 @@ function OverviewTab({
 
       <EconomyControlCard economy={workspace.economy} />
       <EffectControlCard effect={workspace.effect} />
-      <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
+      {canViewIntegrationReadiness ? (
+        <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
+      ) : null}
       <PilotReadinessCard
         readiness={workspace.pilotReadiness}
         saving={saving}
@@ -3477,7 +3497,7 @@ function OverviewTab({
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <section className="space-y-3">
           <SectionTitle title="Активные контуры" />
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <StatusMetric
               label="Лутбоксы"
               value={workspace.summary.activeLootBoxes}
@@ -3492,6 +3512,11 @@ function OverviewTab({
               label="Сезоны"
               value={workspace.summary.activeSeasons}
               hint={`${workspace.seasons.length} всего`}
+            />
+            <StatusMetric
+              label="Промо баннеры"
+              value={activePromoCards}
+              hint={`${workspace.promoCards.length} всего`}
             />
           </div>
 

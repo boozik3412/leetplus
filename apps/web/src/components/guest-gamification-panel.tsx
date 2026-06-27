@@ -109,6 +109,13 @@ type RuleDeleteBlockedModal = {
   stores: string[];
 };
 
+type RuleDeleteRequestModal = {
+  type: RuleTemplateType;
+  id: string;
+  name: string;
+  label: string;
+};
+
 type PromoBannerUsageInfo = {
   visibleStoreNames: string[];
   overflowStoreNames: string[];
@@ -1180,6 +1187,8 @@ export function GuestGamificationPanel({
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteRequestModal, setDeleteRequestModal] =
+    useState<RuleDeleteRequestModal | null>(null);
   const [deleteBlockedModal, setDeleteBlockedModal] =
     useState<RuleDeleteBlockedModal | null>(null);
 
@@ -1996,16 +2005,14 @@ export function GuestGamificationPanel({
     name: string,
   ) {
     const label = ruleTemplateLabel(type);
-    const confirmed = window.confirm(
-      `Удалить ${label} «${name}»?\nИстория событий и наград сохранится, но шаблон исчезнет из редактора.`,
-    );
+    setDeleteRequestModal({ type, id, name, label });
+  }
 
-    if (!confirmed) {
-      return;
-    }
-
+  async function confirmDeleteRuleTemplate(request: RuleDeleteRequestModal) {
+    const { type, id, name } = request;
     setSaving(`${type}-delete-${id}`);
     setError(null);
+    setDeleteRequestModal(null);
     setDeleteBlockedModal(null);
 
     try {
@@ -2407,6 +2414,15 @@ export function GuestGamificationPanel({
         </>
       ) : null}
 
+      {deleteRequestModal ? (
+        <DeleteConfirmModal
+          modal={deleteRequestModal}
+          onClose={() => setDeleteRequestModal(null)}
+          onConfirm={() => confirmDeleteRuleTemplate(deleteRequestModal)}
+          saving={saving === `${deleteRequestModal.type}-delete-${deleteRequestModal.id}`}
+        />
+      ) : null}
+
       {deleteBlockedModal ? (
         <DeleteBlockedModal
           modal={deleteBlockedModal}
@@ -2421,6 +2437,60 @@ function assertCan(allowed: boolean, message: string) {
   if (!allowed) {
     throw new Error(message);
   }
+}
+
+function DeleteConfirmModal({
+  modal,
+  saving,
+  onClose,
+  onConfirm,
+}: {
+  modal: RuleDeleteRequestModal;
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  return (
+    <div
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 p-4 backdrop-blur-sm"
+      role="dialog"
+    >
+      <div className="w-full max-w-lg rounded-lg border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-300">
+            Подтвердите удаление
+          </p>
+          <h3 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Удалить {modal.label} «{modal.name}»?
+          </h3>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          История событий и наград сохранится, но шаблон исчезнет из редактора.
+          Если он используется в опубликованной визуализации клуба, удаление
+          будет заблокировано и мы покажем, где его нужно убрать.
+        </p>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            className={smallButtonClass}
+            disabled={saving}
+            onClick={onClose}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            className={dangerButtonClass}
+            disabled={saving}
+            onClick={() => void onConfirm()}
+          >
+            {saving ? "Удаление..." : "Удалить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DeleteBlockedModal({

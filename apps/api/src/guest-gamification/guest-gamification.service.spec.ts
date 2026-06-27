@@ -126,12 +126,14 @@ function createPrismaMock() {
       update: jest.fn(),
     },
     guestGamePromoCard: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
     guestGameVisualDraft: {
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -3049,10 +3051,136 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGamePromoCard.create).not.toHaveBeenCalled();
     });
 
+    it('saves new visual loot boxes into the shared rule list and keeps their ids in the draft', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: null,
+          enabled: false,
+          title: 'Клубный сезон',
+          status: 'DRAFT',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: null,
+          levelRewards: [],
+        },
+        lootBoxes: [
+          {
+            id: null,
+            title: 'Черновой лутбокс',
+            status: 'ACTIVE',
+            triggerKind: 'SESSION_START',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 50,
+            rewardLabel: '50 бонусов',
+            prizes: [
+              {
+                id: 'bonus-50',
+                rewardType: 'BONUS_BALANCE',
+                rewardAmount: 50,
+                rewardLabel: '50 бонусов',
+                chancePercent: 100,
+              },
+            ],
+            condition: 'Старт сессии',
+            limitPerGuest: 1,
+            timeWindowMode: 'ANY',
+            weekdayMode: 'ANY',
+            weekdays: [1, 2, 3, 4, 5, 6, 0],
+            hourFrom: '10:00',
+            hourTo: '16:00',
+          },
+        ],
+      });
+      const createdLootBox = {
+        ...activeLootBox({
+          id: 'loot-created-from-visual',
+          name: 'Черновой лутбокс',
+          status: 'DRAFT',
+          rewardAmount: 50,
+          rewardLabel: '50 бонусов',
+          storeIds: [store.id],
+          periodRules: { source: 'visual_editor' },
+          limits: { source: 'visual_editor', perGuest: 1 },
+          probabilityRules: {
+            type: 'single',
+            source: 'visual_editor',
+            totalChancePercent: 100,
+            prizes: [
+              {
+                rewardType: 'BONUS_BALANCE',
+                rewardAmount: 50,
+                rewardLabel: '50 бонусов',
+                weight: 100,
+                chancePercent: 100,
+              },
+            ],
+          },
+        }),
+        tenantId: user.tenantId,
+        createdAt: now,
+        updatedAt: now,
+        createdByUser: null,
+      };
+
+      prisma.store.findFirst.mockResolvedValue(store);
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValue(
+        visualDraftRow({ store, payload }),
+      );
+      prisma.guestGameLootBox.create.mockResolvedValue(createdLootBox);
+      prisma.guestGameVisualDraft.update.mockImplementation(({ data }) =>
+        Promise.resolve(visualDraftRow({ store, payload: data.payload })),
+      );
+
+      const result = await service.updateVisualEditorDraft(user, {
+        id: 'draft-1',
+        storeId: store.id,
+        payload,
+      });
+
+      expect(prisma.guestGameLootBox.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            name: 'Черновой лутбокс',
+            status: 'DRAFT',
+            storeIds: [store.id],
+          }),
+          include: expect.any(Object),
+        }),
+      );
+      expect(prisma.guestGameVisualDraft.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            payload: expect.objectContaining({
+              lootBoxes: [
+                expect.objectContaining({
+                  id: 'loot-created-from-visual',
+                  title: 'Черновой лутбокс',
+                  status: 'DRAFT',
+                }),
+              ],
+            }),
+          }),
+        }),
+      );
+      expect(result.payload.lootBoxes[0]?.id).toBe('loot-created-from-visual');
+    });
+
     it('publishes visual loot boxes with multiple weighted prizes', async () => {
       const { service, prisma } = createService();
       const store = visualEditorStore();
       const payload = visualEditorPayload({
+        battlePass: {
+          id: null,
+          enabled: false,
+          title: 'Клубный сезон',
+          status: 'DRAFT',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: null,
+          levelRewards: [],
+        },
         lootBoxes: [
           {
             id: null,
@@ -3092,6 +3220,41 @@ describe('GuestGamificationService', () => {
       prisma.guestGameVisualDraft.findFirst.mockResolvedValue(
         visualDraftRow({ store, payload }),
       );
+      prisma.guestGameLootBox.create.mockResolvedValue({
+        ...activeLootBox({
+          id: 'loot-published',
+          name: 'Призовой контейнер',
+          status: 'ACTIVE',
+          rewardAmount: 50,
+          rewardLabel: 'Призовой контейнер',
+          storeIds: [store.id],
+          probabilityRules: {
+            type: 'weighted',
+            source: 'visual_editor',
+            totalChancePercent: 100,
+            prizes: [
+              {
+                rewardType: 'BONUS_BALANCE',
+                rewardAmount: 50,
+                rewardLabel: '50 бонусов',
+                weight: 80,
+                chancePercent: 80,
+              },
+              {
+                rewardType: 'PROMOCODE',
+                rewardAmount: 1000,
+                rewardLabel: 'Промокод на 1000',
+                weight: 20,
+                chancePercent: 20,
+              },
+            ],
+          },
+        }),
+        tenantId: user.tenantId,
+        createdAt: now,
+        updatedAt: now,
+        createdByUser: null,
+      });
       prisma.guestGameMission.findMany.mockResolvedValue([]);
       prisma.guestGameVisualDraft.update.mockResolvedValue(
         visualDraftRow({ store, payload, status: 'PUBLISHED' }),
@@ -3099,31 +3262,33 @@ describe('GuestGamificationService', () => {
 
       await service.publishVisualEditorDraft(user, { id: 'draft-1' });
 
-      expect(prisma.guestGameLootBox.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          name: 'Призовой контейнер',
-          probabilityRules: expect.objectContaining({
-            type: 'weighted',
-            totalChancePercent: 100,
-            prizes: [
-              expect.objectContaining({
-                rewardType: 'BONUS_BALANCE',
-                rewardAmount: 50,
-                rewardLabel: '50 бонусов',
-                weight: 80,
-                chancePercent: 80,
-              }),
-              expect.objectContaining({
-                rewardType: 'PROMOCODE',
-                rewardAmount: 1000,
-                rewardLabel: 'Промокод на 1000',
-                weight: 20,
-                chancePercent: 20,
-              }),
-            ],
+      expect(prisma.guestGameLootBox.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            name: 'Призовой контейнер',
+            probabilityRules: expect.objectContaining({
+              type: 'weighted',
+              totalChancePercent: 100,
+              prizes: [
+                expect.objectContaining({
+                  rewardType: 'BONUS_BALANCE',
+                  rewardAmount: 50,
+                  rewardLabel: '50 бонусов',
+                  weight: 80,
+                  chancePercent: 80,
+                }),
+                expect.objectContaining({
+                  rewardType: 'PROMOCODE',
+                  rewardAmount: 1000,
+                  rewardLabel: 'Промокод на 1000',
+                  weight: 20,
+                  chancePercent: 20,
+                }),
+              ],
+            }),
           }),
         }),
-      });
+      );
     });
   });
 
@@ -3217,6 +3382,65 @@ describe('GuestGamificationService', () => {
         detachedEvents: 2,
         detachedRewards: 3,
       });
+    });
+
+    it('blocks lootbox deletion while it is published in a club visual editor', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore({ name: '1337-Пушкинская' });
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: null,
+          enabled: false,
+          title: 'Клубный сезон',
+          status: 'DRAFT',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: null,
+          levelRewards: [],
+        },
+        lootBoxes: [
+          {
+            id: 'loot-delete',
+            title: 'Лутбокс тест автомат',
+            status: 'ACTIVE',
+            triggerKind: 'SESSION_START',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 50,
+            rewardLabel: '50 бонусов',
+            prizes: [],
+            condition: 'Старт сессии',
+            limitPerGuest: 1,
+            timeWindowMode: 'ANY',
+            weekdayMode: 'ANY',
+            weekdays: [1, 2, 3, 4, 5, 6, 0],
+            hourFrom: '10:00',
+            hourTo: '16:00',
+          },
+        ],
+      });
+
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-delete',
+        tenantId: user.tenantId,
+        name: 'Лутбокс тест автомат',
+      });
+      prisma.guestGameVisualDraft.findMany.mockResolvedValue([
+        {
+          id: 'visual-draft-published',
+          storeId: store.id,
+          payload,
+          publishedAt: now,
+          updatedAt: now,
+          store,
+        },
+      ]);
+
+      await expect(service.deleteLootBox(user, 'loot-delete')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.guestGameEvent.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameReward.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.delete).not.toHaveBeenCalled();
     });
 
     it('deletes a mission template and reports detached records', async () => {

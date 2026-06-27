@@ -308,6 +308,7 @@ export function GuestGamificationVisualEditor({
       setDraft(nextDraft);
       setDirty(false);
       setMessage("Черновик сохранен.");
+      await onPublished();
     } catch (error) {
       setMessage(errorMessage(error, "Не удалось сохранить черновик."));
     } finally {

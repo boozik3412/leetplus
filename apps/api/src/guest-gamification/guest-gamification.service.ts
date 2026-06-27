@@ -889,6 +889,16 @@ export type GuestGameRuleDeleteResult = {
   detachedRewards: number;
 };
 
+type VisualEditorUsageKind = 'lootBox' | 'mission' | 'season';
+
+type VisualEditorRuleUsage = {
+  draftId: string;
+  storeId: string | null;
+  storeName: string;
+  publishedAt: string | null;
+  updatedAt: string;
+};
+
 export type GuestGamePromoCard = {
   id: string;
   title: string;
@@ -5904,6 +5914,12 @@ export class GuestGamificationService {
     id: string,
   ): Promise<GuestGameRuleDeleteResult> {
     const lootBox = await this.assertLootBox(user, id);
+    await this.assertRuleNotPublishedInVisualEditor(
+      user,
+      'lootBox',
+      lootBox.id,
+      `лутбокс "${lootBox.name}"`,
+    );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, lootBoxId: lootBox.id },
@@ -5978,6 +5994,12 @@ export class GuestGamificationService {
     id: string,
   ): Promise<GuestGameRuleDeleteResult> {
     const mission = await this.assertMission(user, id);
+    await this.assertRuleNotPublishedInVisualEditor(
+      user,
+      'mission',
+      mission.id,
+      `миссию "${mission.name}"`,
+    );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, missionId: mission.id },
@@ -6042,6 +6064,12 @@ export class GuestGamificationService {
     id: string,
   ): Promise<GuestGameRuleDeleteResult> {
     const season = await this.assertSeason(user, id);
+    await this.assertRuleNotPublishedInVisualEditor(
+      user,
+      'season',
+      season.id,
+      `Battle Pass "${season.name}"`,
+    );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, seasonId: season.id },
@@ -6103,12 +6131,20 @@ export class GuestGamificationService {
     dto: GuestGameVisualDraftDto,
   ): Promise<GuestGameVisualDraft> {
     const store = await this.resolveVisualEditorStore(user, dto.storeId);
-    const payload = normalizeVisualEditorPayload(dto.payload);
+    const existingDraft = dto.id
+      ? await this.assertVisualDraft(user, dto.id)
+      : null;
+    const payload = await this.materializeVisualEditorPayload(
+      user,
+      store,
+      normalizeVisualEditorPayload(dto.payload),
+      'draft',
+    );
     const note = nullableString(dto.note) ?? null;
     const updatedByUserId = actorUserId(user);
-    const row = dto.id
+    const row = existingDraft
       ? await this.prisma.guestGameVisualDraft.update({
-          where: { id: (await this.assertVisualDraft(user, dto.id)).id },
+          where: { id: existingDraft.id },
           data: {
             storeId: store.id,
             payload: payload,
@@ -6137,13 +6173,18 @@ export class GuestGamificationService {
     const payload = normalizeVisualEditorPayload(dto.payload ?? draft.payload);
 
     validateVisualEditorPublish(payload);
-    await this.applyVisualEditorPayload(user, store, payload);
+    const publishedPayload = await this.materializeVisualEditorPayload(
+      user,
+      store,
+      payload,
+      'publish',
+    );
 
     const row = await this.prisma.guestGameVisualDraft.update({
       where: { id: draft.id },
       data: {
         status: 'PUBLISHED',
-        payload: payload,
+        payload: publishedPayload,
         note: nullableString(dto.note) ?? draft.note,
         updatedByUserId: actorUserId(user),
         publishedByUserId: actorUserId(user),
@@ -6155,7 +6196,11 @@ export class GuestGamificationService {
 
     return {
       draft: mapped,
-      summary: this.buildVisualEditorPreviewSummary(user, store, payload),
+      summary: this.buildVisualEditorPreviewSummary(
+        user,
+        store,
+        publishedPayload,
+      ),
     };
   }
 
@@ -6272,6 +6317,60 @@ export class GuestGamificationService {
     return row;
   }
 
+  private async assertRuleNotPublishedInVisualEditor(
+    user: AuthenticatedUser,
+    kind: VisualEditorUsageKind,
+    id: string,
+    label: string,
+  ) {
+    const usages = await this.findPublishedVisualEditorRuleUsages(
+      user,
+      kind,
+      id,
+    );
+
+    if (usages.length) {
+      throw new ConflictException(
+        visualEditorRuleDeleteBlockedMessage(label, usages),
+      );
+    }
+  }
+
+  private async findPublishedVisualEditorRuleUsages(
+    user: AuthenticatedUser,
+    kind: VisualEditorUsageKind,
+    id: string,
+  ): Promise<VisualEditorRuleUsage[]> {
+    const rows = await this.prisma.guestGameVisualDraft.findMany({
+      where: { tenantId: user.tenantId, status: 'PUBLISHED' },
+      select: {
+        id: true,
+        storeId: true,
+        payload: true,
+        publishedAt: true,
+        updatedAt: true,
+        store: {
+          select: {
+            name: true,
+            city: true,
+            address: true,
+          },
+        },
+      },
+      orderBy: [{ publishedAt: 'desc' }, { updatedAt: 'desc' }],
+    });
+
+    return rows
+      .filter((row) => visualEditorPayloadUsesRule(row.payload, kind, id))
+      .map((row) => ({
+        draftId: row.id,
+        storeId: row.storeId,
+        storeName: visualEditorUsageStoreName(row.store),
+        publishedAt: iso(row.publishedAt),
+        updatedAt: row.updatedAt.toISOString(),
+      }));
+  }
+
   private async buildVisualEditorPayloadFromLive(
     user: AuthenticatedUser,
     storeId: string,
@@ -6319,74 +6418,138 @@ export class GuestGamificationService {
     });
   }
 
-  private async applyVisualEditorPayload(
+  private async materializeVisualEditorPayload(
     user: AuthenticatedUser,
     store: PilotStoreRow,
     payload: GuestGameVisualEditorPayload,
-  ): Promise<void> {
+    mode: 'draft' | 'publish',
+  ): Promise<GuestGameVisualEditorPayload> {
     const storeIds = [store.id];
+    const publish = mode === 'publish';
+    let battlePass = payload.battlePass;
 
     if (payload.battlePass.enabled) {
-      const seasonData = buildVisualSeasonData(user, storeIds, payload);
+      const seasonPayload = publish
+        ? payload
+        : {
+            ...payload,
+            battlePass: {
+              ...payload.battlePass,
+              status: 'DRAFT' as StatusValue,
+            },
+          };
+      const seasonData = buildVisualSeasonData(user, storeIds, seasonPayload);
       if (payload.battlePass.id) {
-        await this.assertSeason(user, payload.battlePass.id);
-        await this.prisma.guestGameSeason.update({
-          where: { id: payload.battlePass.id },
-          data: seasonData,
-        });
+        if (publish) {
+          await this.assertSeason(user, payload.battlePass.id);
+          const row = await this.prisma.guestGameSeason.update({
+            where: { id: payload.battlePass.id },
+            data: seasonData,
+            include: seasonInclude,
+          });
+          battlePass = visualBattlePassFromSeason(mapSeason(row));
+        }
       } else {
-        await this.prisma.guestGameSeason.create({
+        const row = await this.prisma.guestGameSeason.create({
           data: seasonData,
+          include: seasonInclude,
         });
+        battlePass = visualBattlePassFromSeason(mapSeason(row));
       }
     }
 
+    const lootBoxes: GuestGameVisualEditorLootBox[] = [];
     for (const lootBox of payload.lootBoxes) {
-      const data = buildVisualLootBoxData(user, storeIds, lootBox);
+      const item = publish
+        ? lootBox
+        : { ...lootBox, status: 'DRAFT' as StatusValue };
+      const data = buildVisualLootBoxData(user, storeIds, item);
       if (lootBox.id) {
-        await this.assertLootBox(user, lootBox.id);
-        await this.prisma.guestGameLootBox.update({
-          where: { id: lootBox.id },
-          data,
-        });
+        if (publish) {
+          await this.assertLootBox(user, lootBox.id);
+          const row = await this.prisma.guestGameLootBox.update({
+            where: { id: lootBox.id },
+            data,
+            include: lootBoxInclude,
+          });
+          lootBoxes.push(visualLootBoxFromRule(mapLootBox(row)));
+        } else {
+          lootBoxes.push(lootBox);
+        }
       } else {
-        await this.prisma.guestGameLootBox.create({
+        const row = await this.prisma.guestGameLootBox.create({
           data: data,
+          include: lootBoxInclude,
         });
+        lootBoxes.push(visualLootBoxFromRule(mapLootBox(row)));
       }
     }
 
+    const missions: GuestGameVisualEditorMission[] = [];
     for (const mission of payload.missions) {
-      const data = buildVisualMissionData(user, storeIds, mission);
+      const item = publish
+        ? mission
+        : { ...mission, status: 'DRAFT' as StatusValue };
+      const data = buildVisualMissionData(user, storeIds, item);
       if (mission.id) {
-        await this.assertMission(user, mission.id);
-        await this.prisma.guestGameMission.update({
-          where: { id: mission.id },
-          data,
-        });
+        if (publish) {
+          await this.assertMission(user, mission.id);
+          const row = await this.prisma.guestGameMission.update({
+            where: { id: mission.id },
+            data,
+            include: missionInclude,
+          });
+          missions.push(visualMissionFromRule(mapMission(row)));
+        } else {
+          missions.push(mission);
+        }
       } else {
-        await this.prisma.guestGameMission.create({
+        const row = await this.prisma.guestGameMission.create({
           data: data,
+          include: missionInclude,
         });
+        missions.push(visualMissionFromRule(mapMission(row)));
       }
     }
 
+    const promoCards: GuestGameVisualEditorPromoCard[] = [];
     for (const promoCard of payload.promoCards) {
-      const data = buildVisualPromoCardData(user, storeIds, promoCard);
+      const item = publish
+        ? promoCard
+        : { ...promoCard, status: 'DRAFT' as StatusValue };
+      const data = buildVisualPromoCardData(user, storeIds, item);
       if (promoCard.id) {
-        await this.assertPromoCard(user, promoCard.id);
-        await this.prisma.guestGamePromoCard.update({
-          where: { id: promoCard.id },
-          data,
-        });
+        if (publish) {
+          await this.assertPromoCard(user, promoCard.id);
+          const row = await this.prisma.guestGamePromoCard.update({
+            where: { id: promoCard.id },
+            data,
+            include: promoCardInclude,
+          });
+          promoCards.push(visualPromoFromRule(mapPromoCard(row)));
+        } else {
+          promoCards.push(promoCard);
+        }
       } else {
-        await this.prisma.guestGamePromoCard.create({
+        const row = await this.prisma.guestGamePromoCard.create({
           data: data,
+          include: promoCardInclude,
         });
+        promoCards.push(visualPromoFromRule(mapPromoCard(row)));
       }
     }
 
-    await this.applyVisualCheckInRule(user, store.id, payload.checkIn);
+    if (publish) {
+      await this.applyVisualCheckInRule(user, store.id, payload.checkIn);
+    }
+
+    return normalizeVisualEditorPayload({
+      ...payload,
+      battlePass,
+      lootBoxes,
+      missions,
+      promoCards,
+    });
   }
 
   private async assertPromoCard(user: AuthenticatedUser, id: string) {
@@ -10698,6 +10861,47 @@ function mapVisualEditorStore(row: PilotStoreRow): GuestGameVisualEditorStore {
     gamificationEnabled: row.gamificationEnabled,
   };
 }
+
+function visualEditorPayloadUsesRule(
+  value: unknown,
+  kind: VisualEditorUsageKind,
+  id: string,
+) {
+  const payload = normalizeVisualEditorPayload(value);
+
+  switch (kind) {
+    case 'lootBox':
+      return payload.lootBoxes.some((item) => item.id === id);
+    case 'mission':
+      return payload.missions.some((item) => item.id === id);
+    case 'season':
+      return payload.battlePass.enabled && payload.battlePass.id === id;
+  }
+}
+
+function visualEditorUsageStoreName(
+  store: { name: string; city: string | null; address: string | null } | null,
+) {
+  if (!store) {
+    return 'общей визуализации';
+  }
+
+  const details = [store.city, store.address]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  return details.length ? `${store.name} (${details.join(', ')})` : store.name;
+}
+
+function visualEditorRuleDeleteBlockedMessage(
+  label: string,
+  usages: VisualEditorRuleUsage[],
+) {
+  const storeList = usages.map((usage) => usage.storeName).join(', ');
+
+  return `Нельзя удалить ${label}: этот элемент используется в визуальном редакторе клуба. Сначала удалите его из отображения и опубликуйте изменения для клубов: ${storeList}.`;
+}
+
 function mapReward(row: RewardRow): GuestGameReward {
   const walletState = rewardWalletState(row.status, row.expiresAt);
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   useMemo,
   useState,
+  type CSSProperties,
   type Dispatch,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -7371,8 +7372,8 @@ function PromoBannerImageEditor({
 
   return (
     <>
-      <div className="grid gap-4 lg:grid-cols-[190px_minmax(0,1fr)]">
-        <div className="mx-auto w-[170px]">
+      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <div className="mx-auto w-[240px] max-w-full">
           <PromoBannerCardPreview
             form={form}
             source={source}
@@ -7518,14 +7519,29 @@ function PromoBannerCardPreview({
   const title = form.title.trim() || "Название баннера";
   const label = form.label.trim() || "Акция";
   const description = form.description.trim() || "Короткое описание баннера.";
-  const tag = form.tag.trim();
+  const tag = form.tag.trim() || statusLabels[form.status];
+  const priority = Number(form.priority);
+  const isFeatured = Number.isFinite(priority) && priority <= 0;
+  const accent = isFeatured ? "208, 170, 108" : "131, 228, 236";
   const canTransformImage = Boolean(form.imageSource);
   const scale = clampPromoBannerScale(Number(form.imageScale) || 1);
   const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX) || 0);
   const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY) || 0);
+  const titleStyle = promoBannerPreviewTitleStyle(title);
+  const baseBackground = isFeatured
+    ? "linear-gradient(180deg, rgba(208, 170, 108, 0.17), transparent 36%), rgba(7, 12, 16, 0.86)"
+    : "linear-gradient(180deg, rgba(131, 228, 236, 0.11), transparent 34%), rgba(5, 11, 14, 0.82)";
+  const textureBackground = source
+    ? `linear-gradient(180deg, rgba(3, 7, 9, 0.08), rgba(3, 7, 9, 0.66)), linear-gradient(135deg, transparent 0 34%, rgba(${accent}, 0.12) 34% 35%, transparent 35% 100%)`
+    : isFeatured
+      ? "radial-gradient(circle at 70% 18%, rgba(208, 170, 108, 0.2), transparent 24%), linear-gradient(135deg, transparent 0 38%, rgba(208, 170, 108, 0.15) 38% 39%, transparent 39% 100%)"
+      : "linear-gradient(135deg, transparent 0 34%, rgba(131, 228, 236, 0.12) 34% 35%, transparent 35% 100%), radial-gradient(circle at 72% 18%, rgba(131, 228, 236, 0.16), transparent 24%)";
 
   return (
-    <div className="relative aspect-[9/16] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <div
+      className="relative aspect-[9/16] overflow-hidden rounded-lg border border-[#c4e0e12e] text-[#f4fbfb] shadow-sm"
+      style={{ background: baseBackground }}
+    >
       {source ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -7535,37 +7551,42 @@ function PromoBannerCardPreview({
           style={
             canTransformImage
               ? {
+                  transformOrigin: "center",
                   transform: `translate(${offsetX}%, ${offsetY}%) scale(${scale})`,
                 }
               : undefined
           }
         />
       ) : (
-        <div className="flex h-full items-center justify-center px-4 text-center text-xs font-semibold text-zinc-400">
-          9:16
-        </div>
+        <div className="absolute inset-0" />
       )}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-black/10 to-black/80" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 p-3">
-        <span className="inline-flex rounded-full border border-cyan-200/50 bg-black/35 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-cyan-100">
-          {label}
-        </span>
-      </div>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-white">
-        <h4 className="text-xl font-black uppercase leading-none">{title}</h4>
-        <p className="mt-2 line-clamp-4 text-[11px] font-semibold leading-4 text-zinc-100">
-          {description}
-        </p>
-        {tag ? (
-          <span className="mt-3 inline-flex rounded-lg border border-cyan-200/40 bg-cyan-300/15 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-cyan-100">
-            {tag}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-70"
+        style={{ background: textureBackground }}
+      />
+      <div className="pointer-events-none relative z-10 flex h-full flex-col justify-between p-[18px]">
+        <span>
+          <span className="block text-[9px] font-[820] uppercase tracking-[0.14em] text-[#7f9294]">
+            {label}
           </span>
-        ) : null}
+          <span
+            className="mt-[18px] block font-[780] text-[#f4fbfb]"
+            style={titleStyle}
+          >
+            {title}
+          </span>
+          <span className="mt-2.5 block text-xs leading-[1.45] text-[#a8b9ba]">
+            {description}
+          </span>
+        </span>
+        <span className="inline-flex w-fit items-center gap-2 rounded-lg border border-[#c4e0e124] px-2.5 py-2 text-[9px] font-[860] uppercase tracking-[0.12em] text-[#83e4ec]">
+          {tag}
+        </span>
       </div>
       {onEdit ? (
         <button
           type="button"
-          className="absolute right-2 top-2 rounded-lg bg-white px-2.5 py-1.5 text-xs font-bold text-zinc-950 shadow-sm transition hover:bg-cyan-100"
+          className="absolute right-2 top-2 z-20 rounded-lg bg-white px-2.5 py-1.5 text-xs font-bold text-zinc-950 shadow-sm transition hover:bg-cyan-100"
           onClick={onEdit}
         >
           Редактировать
@@ -7573,6 +7594,40 @@ function PromoBannerCardPreview({
       ) : null}
     </div>
   );
+}
+
+function promoBannerPreviewTitleStyle(title: string): CSSProperties {
+  const size = promoBannerPreviewTitleSize(title);
+
+  return {
+    fontSize: `${size}px`,
+    lineHeight: size <= 18 ? 1.08 : 1.05,
+    overflowWrap: "anywhere",
+  };
+}
+
+function promoBannerPreviewTitleSize(title: string) {
+  const letterCount = Array.from(title).filter((char) =>
+    /[\p{L}\p{N}]/u.test(char),
+  ).length;
+
+  if (letterCount >= 30) {
+    return 16;
+  }
+
+  if (letterCount >= 24) {
+    return 17;
+  }
+
+  if (letterCount >= 20) {
+    return 19;
+  }
+
+  if (letterCount >= 16) {
+    return 21;
+  }
+
+  return 24;
 }
 
 function clampPromoBannerScale(value: number) {

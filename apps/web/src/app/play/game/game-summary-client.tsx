@@ -110,7 +110,10 @@ type GuestPortalProfileUpdateResponse = {
 type BannerTitleStyle = CSSProperties &
   Partial<
     Record<
-      "--banner-title-size" | "--banner-title-line-height",
+      | "--banner-title-size"
+      | "--banner-title-line-height"
+      | "--banner-title-compact-size"
+      | "--banner-title-compact-line-height",
       string
     >
   >;
@@ -2157,11 +2160,18 @@ function QuestBoard({
 
 function bannerTitleStyle(title: string): BannerTitleStyle {
   const size = bannerTitleSize(title);
+  const compactSize = bannerCompactTitleSize(size);
 
   return {
     "--banner-title-size": `${size}px`,
     "--banner-title-line-height": size <= 18 ? "1.08" : "1.05",
+    "--banner-title-compact-size": `${compactSize}px`,
+    "--banner-title-compact-line-height": compactSize <= 18 ? "1.09" : "1.06",
   };
+}
+
+function bannerCompactTitleSize(size: number) {
+  return Math.max(15, Math.round(size * 0.84));
 }
 
 function bannerTitleSize(title: string) {
@@ -6099,6 +6109,7 @@ const clubHomeCss = `
   font-size: var(--banner-title-size, 24px);
   line-height: var(--banner-title-line-height, 1.05);
   font-weight: 780;
+  overflow-wrap: anywhere;
 }
 
 .lp-club-banner-copy {
@@ -9347,6 +9358,13 @@ const clubHomeCss = `
     margin-top: 0;
     padding-top: 0;
     border-top: 0;
+  }
+}
+
+@media (max-width: 1100px) {
+  .lp-club-banner-title {
+    font-size: var(--banner-title-compact-size, 20px);
+    line-height: var(--banner-title-compact-line-height, 1.08);
   }
 }
 

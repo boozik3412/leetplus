@@ -6306,7 +6306,7 @@ const clubHomeCss = `
   position: relative;
   z-index: 1;
   width: min(94%, 230px);
-  max-height: 158px;
+  height: 158px;
   object-fit: contain;
   filter:
     drop-shadow(0 24px 36px rgba(0, 0, 0, 0.52))
@@ -6907,7 +6907,7 @@ const clubHomeCss = `
   bottom: 34px;
   z-index: 4;
   width: min(500px, 88%);
-  max-height: 318px;
+  height: min(318px, 72%);
   object-fit: contain;
   pointer-events: none;
   user-select: none;

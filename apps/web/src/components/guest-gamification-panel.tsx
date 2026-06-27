@@ -1077,6 +1077,7 @@ export function GuestGamificationPanel({
     useState<GuestGameReward | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
+  const [isLootBoxFormOpen, setIsLootBoxFormOpen] = useState(false);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
   const [editingSeasonId, setEditingSeasonId] = useState<string | null>(null);
   const [editingRewardId, setEditingRewardId] = useState<string | null>(null);
@@ -1126,12 +1127,21 @@ export function GuestGamificationPanel({
   function editLootBox(lootBox: GuestGameLootBox) {
     setLootBoxForm(lootBoxToForm(lootBox));
     setEditingLootBoxId(lootBox.id);
+    setIsLootBoxFormOpen(true);
+    setActiveTab("lootBoxes");
+  }
+
+  function createLootBox() {
+    setLootBoxForm(defaultLootBoxForm);
+    setEditingLootBoxId(null);
+    setIsLootBoxFormOpen(true);
     setActiveTab("lootBoxes");
   }
 
   function resetLootBoxForm() {
     setLootBoxForm(defaultLootBoxForm);
     setEditingLootBoxId(null);
+    setIsLootBoxFormOpen(false);
   }
 
   function editMission(mission: GuestGameMission) {
@@ -2078,8 +2088,10 @@ export function GuestGamificationPanel({
           tariffSnapshots={workspace.tariffSnapshots}
           guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingLootBoxId}
+          isFormOpen={isLootBoxFormOpen}
           onSave={saveLootBox}
           onEdit={editLootBox}
+          onCreateNew={createLootBox}
           onReset={resetLootBoxForm}
           onStatus={updateRuleStatus}
           onDelete={deleteRuleTemplate}
@@ -6124,8 +6136,10 @@ function LootBoxesTab({
   tariffSnapshots,
   guestLogCatalog,
   editingId,
+  isFormOpen,
   onSave,
   onEdit,
+  onCreateNew,
   onReset,
   onStatus,
   onDelete,
@@ -6141,8 +6155,10 @@ function LootBoxesTab({
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
+  isFormOpen: boolean;
   onSave: () => Promise<void>;
   onEdit: (lootBox: GuestGameLootBox) => void;
+  onCreateNew: () => void;
   onReset: () => void;
   onStatus: (
     type: RuleTemplateType,
@@ -6154,119 +6170,137 @@ function LootBoxesTab({
   saving: string | null;
   canManage: boolean;
 }) {
+  const lootBoxTitle = form.name.trim();
+  const formTitle =
+    editingId && lootBoxTitle
+      ? `Редактирование лутбокса "${lootBoxTitle}"`
+      : editingId
+        ? "Редактирование лутбокса"
+        : "Настройка лутбокса";
+
   return (
     <RulesLayout
       canManage={canManage}
-      formTitle={
-        editingId ? "Редактирование лутбокса" : "Настройка лутбокса"
-      }
+      formTitle={formTitle}
       form={
-        <div className="space-y-4">
-          <RuleCommonFields
-            status={form.status}
-            name={form.name}
-            rewardType={form.rewardType}
-            rewardAmount={form.rewardAmount}
-            rewardLabel={form.rewardLabel}
-            audienceId={form.audienceId}
-            budgetAmount={form.budgetAmount}
-            manualApprovalRequired={form.manualApprovalRequired}
-            note={form.note}
-            audiences={audiences}
-            hideRewardFields
-            onChange={(patch) => setForm({ ...form, ...patch })}
-          />
-          <FormSection
-            title="Кому и когда открывать"
-          >
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Событие для появления">
-                <OptionSelect
-                  options={lootBoxTriggerOptions}
-                  value={form.triggerKind}
-                  preservedLabel="Сохраненное событие"
-                  onChange={(triggerKind) =>
-                    setForm({ ...form, triggerKind })
-                  }
-                />
-                <OptionHelp>
-                  {triggerHelpText[form.triggerKind] ??
-                    "LeetPlus проверит правило, когда получит событие этого типа."}
-                </OptionHelp>
-              </Field>
-              <Field label="Аудитория">
-                <OptionSelect
-                  options={lootBoxSegmentOptions}
-                  value={form.segment}
-                  preservedLabel="Сохраненная аудитория"
-                  onChange={(segment) => setForm({ ...form, segment })}
-                />
-                <OptionHelp>
-                  {audienceHelpText[form.segment] ??
-                    "Аудитория ограничивает, каким гостям доступно правило."}
-                </OptionHelp>
-              </Field>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Тип сессии">
-                <select
-                  className={fieldClass}
-                  value={form.sessionType}
-                  onChange={(event) =>
-                    setForm({ ...form, sessionType: event.target.value })
-                  }
-                >
-                  {sessionTypeOptions.map((option) => (
-                    <option key={option.value || "any"} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Пакет часов">
-                <select
-                  className={fieldClass}
-                  value={form.packetMode}
-                  onChange={(event) =>
-                    setForm({ ...form, packetMode: event.target.value })
-                  }
-                >
-                  {packetModeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-            <StoreSelect
-              stores={stores}
-              value={form.storeIds}
-              onChange={(storeIds) => setForm({ ...form, storeIds })}
+        isFormOpen ? (
+          <div className="space-y-4">
+            <RuleCommonFields
+              status={form.status}
+              name={form.name}
+              rewardType={form.rewardType}
+              rewardAmount={form.rewardAmount}
+              rewardLabel={form.rewardLabel}
+              audienceId={form.audienceId}
+              budgetAmount={form.budgetAmount}
+              manualApprovalRequired={form.manualApprovalRequired}
+              note={form.note}
+              audiences={audiences}
+              hideRewardFields
+              onChange={(patch) => setForm({ ...form, ...patch })}
             />
-          </FormSection>
-          <LootBoxBusinessRules
-            form={form}
-            tariffSnapshots={tariffSnapshots}
-            guestLogCatalog={guestLogCatalog}
-            onChange={(patch) => setForm({ ...form, ...patch })}
-          />
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <FormSection
+              title="Кому и когда открывать"
+            >
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Событие для появления">
+                  <OptionSelect
+                    options={lootBoxTriggerOptions}
+                    value={form.triggerKind}
+                    preservedLabel="Сохраненное событие"
+                    onChange={(triggerKind) =>
+                      setForm({ ...form, triggerKind })
+                    }
+                  />
+                  <OptionHelp>
+                    {triggerHelpText[form.triggerKind] ??
+                      "LeetPlus проверит правило, когда получит событие этого типа."}
+                  </OptionHelp>
+                </Field>
+                <Field label="Аудитория">
+                  <OptionSelect
+                    options={lootBoxSegmentOptions}
+                    value={form.segment}
+                    preservedLabel="Сохраненная аудитория"
+                    onChange={(segment) => setForm({ ...form, segment })}
+                  />
+                  <OptionHelp>
+                    {audienceHelpText[form.segment] ??
+                      "Аудитория ограничивает, каким гостям доступно правило."}
+                  </OptionHelp>
+                </Field>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Тип сессии">
+                  <select
+                    className={fieldClass}
+                    value={form.sessionType}
+                    onChange={(event) =>
+                      setForm({ ...form, sessionType: event.target.value })
+                    }
+                  >
+                    {sessionTypeOptions.map((option) => (
+                      <option key={option.value || "any"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Пакет часов">
+                  <select
+                    className={fieldClass}
+                    value={form.packetMode}
+                    onChange={(event) =>
+                      setForm({ ...form, packetMode: event.target.value })
+                    }
+                  >
+                    {packetModeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <StoreSelect
+                stores={stores}
+                value={form.storeIds}
+                onChange={(storeIds) => setForm({ ...form, storeIds })}
+              />
+            </FormSection>
+            <LootBoxBusinessRules
+              form={form}
+              tariffSnapshots={tariffSnapshots}
+              guestLogCatalog={guestLogCatalog}
+              onChange={(patch) => setForm({ ...form, ...patch })}
+            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                className={`${primaryButtonClass} sm:min-w-44`}
+                disabled={saving === "lootBox"}
+                onClick={onSave}
+              >
+                {editingId ? "Сохранить" : "Создать лутбокс"}
+              </button>
+              {editingId ? (
+                <button type="button" className={smallButtonClass} onClick={onReset}>
+                  Сбросить выбор
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
-              className={`${primaryButtonClass} sm:min-w-44`}
-              disabled={saving === "lootBox"}
-              onClick={onSave}
+              className={`${primaryButtonClass} sm:min-w-52`}
+              onClick={onCreateNew}
             >
-              {editingId ? "Сохранить" : "Создать лутбокс"}
+              Создать новый лутбокс
             </button>
-            {editingId ? (
-              <button type="button" className={smallButtonClass} onClick={onReset}>
-                Сбросить выбор
-              </button>
-            ) : null}
           </div>
-        </div>
+        )
       }
       listTitle="Созданные правила лутбоксов"
       items={lootBoxes}

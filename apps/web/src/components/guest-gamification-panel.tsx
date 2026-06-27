@@ -1187,6 +1187,8 @@ export function GuestGamificationPanel({
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editorModeRefreshing, setEditorModeRefreshing] =
+    useState<EditorMode | null>(null);
   const [deleteRequestModal, setDeleteRequestModal] =
     useState<RuleDeleteRequestModal | null>(null);
   const [deleteBlockedModal, setDeleteBlockedModal] =
@@ -1327,6 +1329,28 @@ export function GuestGamificationPanel({
       "/api/guests/gamification/workspace",
     );
     setWorkspace(next);
+  }
+
+  async function switchEditorMode(mode: EditorMode) {
+    if (mode === editorMode || editorModeRefreshing) {
+      return;
+    }
+
+    setEditorModeRefreshing(mode);
+    setError(null);
+
+    try {
+      await reloadWorkspace();
+      setEditorMode(mode);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось обновить данные редактора",
+      );
+    } finally {
+      setEditorModeRefreshing(null);
+    }
   }
 
   async function saveProfile() {
@@ -2103,9 +2127,10 @@ export function GuestGamificationPanel({
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setEditorMode(mode)}
+                  disabled={editorModeRefreshing !== null}
+                  onClick={() => void switchEditorMode(mode)}
                   className={[
-                    "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                    "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-70",
                     editorMode === mode
                       ? "bg-zinc-950 text-white dark:bg-cyan-300 dark:text-zinc-950"
                       : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white",

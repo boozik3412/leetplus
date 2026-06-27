@@ -45,6 +45,7 @@ const statusOptions: GuestGameStatus[] = [
   "FINISHED",
   "ARCHIVED",
 ];
+const PROMO_BANNER_ACTIVE_LIMIT = 4;
 
 const sectionLabels: Record<EditorSection, string> = {
   battlePass: "Battle Pass",
@@ -481,7 +482,7 @@ function VisualPreview({
 }) {
   const activePromos = payload.promoCards
     .filter((item) => item.status === "ACTIVE")
-    .slice(0, 4);
+    .slice(0, PROMO_BANNER_ACTIVE_LIMIT);
   const levels = Array.from(
     { length: payload.battlePass.levelCount },
     (_, index) => {
@@ -1232,15 +1233,22 @@ function PromoInspector({
   disabled,
 }: InspectorProps) {
   const promoTemplates = templatesForStore(workspace.promoCards, storeId);
-  const promoLimitReached = payload.promoCards.length >= 4;
+  const activePromoCount = payload.promoCards.filter(
+    (promoCard) => promoCard.status === "ACTIVE",
+  ).length;
+  const activePromoLimitReached =
+    activePromoCount >= PROMO_BANNER_ACTIVE_LIMIT;
 
   return (
     <CollectionInspector
       title="События и акции"
       items={payload.promoCards}
       emptyLabel="Добавить баннер"
-      maxItems={4}
-      limitReachedText="В игровом модуле можно использовать не больше 4 промо-баннеров на клуб."
+      limitReachedText={
+        activePromoLimitReached
+          ? "В игровом модуле можно держать не больше 4 активных промо-баннеров на клуб."
+          : undefined
+      }
       templateSlot={
         <TemplatePicker
           title="Шаблон акции"
@@ -1248,16 +1256,25 @@ function PromoInspector({
           items={promoTemplates}
           emptyLabel="Готовых акций для выбранного клуба пока нет."
           getLabel={(promo) => `${promo.title} · ${statusLabel(promo.status)}`}
-          disabled={disabled || promoLimitReached}
+          disabled={disabled}
           actionLabel="Добавить шаблон"
           onApply={(promo) =>
-            onChange((current) => ({
-              ...current,
-              promoCards: [
-                ...current.promoCards,
-                visualPromoFromTemplate(promo),
-              ],
-            }))
+            onChange((current) => {
+              const templatePromo = visualPromoFromTemplate(promo);
+              const activeCount = current.promoCards.filter(
+                (promoCard) => promoCard.status === "ACTIVE",
+              ).length;
+              const nextPromo =
+                templatePromo.status === "ACTIVE" &&
+                activeCount >= PROMO_BANNER_ACTIVE_LIMIT
+                  ? { ...templatePromo, status: "DRAFT" as GuestGameStatus }
+                  : templatePromo;
+
+              return {
+                ...current,
+                promoCards: [...current.promoCards, nextPromo],
+              };
+            })
           }
         />
       }
@@ -1298,6 +1315,14 @@ function PromoInspector({
           <StatusField
             value={item.status}
             disabled={disabled}
+            disabledOptions={
+              item.status !== "ACTIVE" && activePromoLimitReached
+                ? {
+                    ACTIVE:
+                      "Сначала переведите один из 4 активных баннеров в другой статус.",
+                  }
+                : undefined
+            }
             onChange={(status) => update({ ...item, status })}
           />
           <RemoveButton
@@ -1475,7 +1500,7 @@ function CollectionInspector<T>({
           {emptyLabel}
         </button>
       </div>
-      {limitReached && limitReachedText ? (
+      {limitReachedText ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           {limitReachedText}
         </p>
@@ -2028,10 +2053,12 @@ function LootBoxLimitField({
 function StatusField({
   value,
   disabled,
+  disabledOptions,
   onChange,
 }: {
   value: GuestGameStatus;
   disabled: boolean;
+  disabledOptions?: Partial<Record<GuestGameStatus, string>>;
   onChange: (value: GuestGameStatus) => void;
 }) {
   return (
@@ -2044,11 +2071,18 @@ function StatusField({
         onChange={(event) => onChange(event.target.value as GuestGameStatus)}
       >
         {statusOptions.map((status) => (
-          <option key={status} value={status}>
+          <option
+            key={status}
+            value={status}
+            disabled={Boolean(disabledOptions?.[status])}
+          >
             {statusLabel(status)}
           </option>
         ))}
       </select>
+      {disabledOptions?.[value] ? null : disabledOptions?.ACTIVE ? (
+        <EditorHint>{disabledOptions.ACTIVE}</EditorHint>
+      ) : null}
     </label>
   );
 }

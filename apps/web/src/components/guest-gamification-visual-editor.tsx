@@ -481,7 +481,7 @@ function VisualPreview({
 }) {
   const activePromos = payload.promoCards
     .filter((item) => item.status === "ACTIVE")
-    .slice(0, 3);
+    .slice(0, 4);
   const levels = Array.from(
     { length: payload.battlePass.levelCount },
     (_, index) => {
@@ -528,7 +528,7 @@ function VisualPreview({
             className={previewZoneClass(activeSection === "promoCards")}
             onClick={() => onSelect("promoCards")}
           >
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
               {(activePromos.length ? activePromos : fallbackPromos()).map(
                 (promo, index) => (
                   <article
@@ -1232,12 +1232,15 @@ function PromoInspector({
   disabled,
 }: InspectorProps) {
   const promoTemplates = templatesForStore(workspace.promoCards, storeId);
+  const promoLimitReached = payload.promoCards.length >= 4;
 
   return (
     <CollectionInspector
       title="События и акции"
       items={payload.promoCards}
       emptyLabel="Добавить баннер"
+      maxItems={4}
+      limitReachedText="В игровом модуле можно использовать не больше 4 промо-баннеров на клуб."
       templateSlot={
         <TemplatePicker
           title="Шаблон акции"
@@ -1245,7 +1248,7 @@ function PromoInspector({
           items={promoTemplates}
           emptyLabel="Готовых акций для выбранного клуба пока нет."
           getLabel={(promo) => `${promo.title} · ${statusLabel(promo.status)}`}
-          disabled={disabled}
+          disabled={disabled || promoLimitReached}
           actionLabel="Добавить шаблон"
           onApply={(promo) =>
             onChange((current) => ({
@@ -1423,6 +1426,8 @@ function CollectionInspector<T>({
   renderItem,
   onChange,
   disabled,
+  maxItems,
+  limitReachedText,
 }: {
   title: string;
   items: T[];
@@ -1437,9 +1442,12 @@ function CollectionInspector<T>({
   ) => ReactNode;
   onChange: (items: T[]) => void;
   disabled: boolean;
+  maxItems?: number;
+  limitReachedText?: string;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selected = items[selectedIndex] ?? null;
+  const limitReached = maxItems !== undefined && items.length >= maxItems;
 
   function updateAt(index: number, item: T) {
     onChange(items.map((current, currentIndex) => (currentIndex === index ? item : current)));
@@ -1458,7 +1466,7 @@ function CollectionInspector<T>({
         <button
           type="button"
           className="rounded-lg border border-cyan-300 px-3 py-2 text-xs font-bold text-cyan-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-cyan-800 dark:text-cyan-200"
-          disabled={disabled}
+          disabled={disabled || limitReached}
           onClick={() => {
             onChange([...items, createItem()]);
             setSelectedIndex(items.length);
@@ -1467,6 +1475,11 @@ function CollectionInspector<T>({
           {emptyLabel}
         </button>
       </div>
+      {limitReached && limitReachedText ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+          {limitReachedText}
+        </p>
+      ) : null}
       {templateSlot}
       {items.length ? (
         <div className="flex gap-2 overflow-x-auto pb-1">

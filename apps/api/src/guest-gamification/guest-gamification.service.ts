@@ -6481,7 +6481,7 @@ export class GuestGamificationService {
             item.status === 'ACTIVE' &&
             ruleMatchesStoreIds(item.storeIds, storeId),
         )
-        .slice(0, 6)
+        .slice(0, 4)
         .map(visualPromoFromRule),
       checkIn: visualCheckInFromMission(checkInMission ?? null),
     });
@@ -17336,7 +17336,7 @@ function buildVisualEditorPreviewSummary(
     },
     promoCards: {
       total: payload.promoCards.length,
-      featured: payload.promoCards.slice(0, 3).map((item, index) => {
+      featured: payload.promoCards.slice(0, 4).map((item, index) => {
         const metadata = jsonRecord(item.metadata);
 
         return {

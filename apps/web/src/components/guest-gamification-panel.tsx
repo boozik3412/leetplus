@@ -78,6 +78,8 @@ export type EditorMode = "advanced" | "visual";
 
 type RuleTemplateType = "loot-boxes" | "missions" | "seasons" | "promo-cards";
 
+const PROMO_BANNER_DISPLAY_LIMIT = 4;
+
 const editorModeOptions = [
   ["advanced", "Расширенные настройки"],
   ["visual", "Визуальный редактор"],
@@ -99,6 +101,33 @@ type BonusLedgerActionResult =
 type BonusLedgerActionOptions = {
   storeId?: string | null;
   limit?: number;
+};
+
+type RuleDeleteBlockedModal = {
+  title: string;
+  message: string;
+  stores: string[];
+};
+
+type PromoBannerUsageInfo = {
+  visibleStoreNames: string[];
+  overflowStoreNames: string[];
+};
+
+type PromoBannerStoreUsage = {
+  storeId: string;
+  storeName: string;
+  activeCount: number;
+  visibleCount: number;
+  overflowCount: number;
+};
+
+type PromoBannerUsageSummary = {
+  byCardId: Map<string, PromoBannerUsageInfo>;
+  visibleCardIds: Set<string>;
+  overflowCardIds: Set<string>;
+  activeCardIds: Set<string>;
+  stores: PromoBannerStoreUsage[];
 };
 
 type ProfileForm = {
@@ -1151,6 +1180,8 @@ export function GuestGamificationPanel({
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteBlockedModal, setDeleteBlockedModal] =
+    useState<RuleDeleteBlockedModal | null>(null);
 
   const filteredProfiles = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -1973,7 +2004,11 @@ export function GuestGamificationPanel({
       return;
     }
 
-    await saveAction(`${type}-delete-${id}`, async () => {
+    setSaving(`${type}-delete-${id}`);
+    setError(null);
+    setDeleteBlockedModal(null);
+
+    try {
       assertCan(
         access.canManageRules,
         "Для удаления шаблона нужно право `Геймификация: правила`.",
@@ -1998,7 +2033,19 @@ export function GuestGamificationPanel({
       }
 
       await reloadWorkspace();
-    });
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "Не удалось удалить шаблон";
+      const blockedModal = buildDeleteBlockedModal(name, message);
+
+      if (blockedModal) {
+        setDeleteBlockedModal(blockedModal);
+      } else {
+        setError(message);
+      }
+    } finally {
+      setSaving(null);
+    }
   }
 
   async function restartLootBox(id: string) {
@@ -2359,6 +2406,13 @@ export function GuestGamificationPanel({
       ) : null}
         </>
       ) : null}
+
+      {deleteBlockedModal ? (
+        <DeleteBlockedModal
+          modal={deleteBlockedModal}
+          onClose={() => setDeleteBlockedModal(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -2367,6 +2421,63 @@ function assertCan(allowed: boolean, message: string) {
   if (!allowed) {
     throw new Error(message);
   }
+}
+
+function DeleteBlockedModal({
+  modal,
+  onClose,
+}: {
+  modal: RuleDeleteBlockedModal;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 p-4 backdrop-blur-sm"
+      role="dialog"
+    >
+      <div className="w-full max-w-lg rounded-lg border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-300">
+              Удаление заблокировано
+            </p>
+            <h3 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+              {modal.title}
+            </h3>
+          </div>
+          <button type="button" className={smallButtonClass} onClick={onClose}>
+            Закрыть
+          </button>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          {modal.message}
+        </p>
+        {modal.stores.length ? (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30">
+            <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+              Где используется
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {modal.stores.map((store) => (
+                <span
+                  key={store}
+                  className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-amber-900 shadow-sm dark:bg-amber-950/70 dark:text-amber-100"
+                >
+                  {store}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="mt-5 flex justify-end">
+          <button type="button" className={primaryButtonClass} onClick={onClose}>
+            Понятно
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DryRunTab({
@@ -3342,6 +3453,10 @@ function OverviewTab({
   onCancelBonusLedgerEntry: (entryId: string) => void;
   bonusLedgerResult: BonusLedgerActionResult | null;
 }) {
+  const promoBannerUsage = useMemo(
+    () => buildPromoBannerUsage(workspace.promoCards, stores),
+    [stores, workspace.promoCards],
+  );
   const activePromoCards = workspace.promoCards.filter(
     (promoCard) => promoCard.status === "ACTIVE",
   ).length;
@@ -3402,7 +3517,7 @@ function OverviewTab({
             step="5"
             title="Промо баннеры"
             text="Показать сторис-баннеры на главном экране клуба."
-            metric={`${activePromoCards} активных`}
+            metric={`${promoBannerUsage.visibleCardIds.size} показывается`}
             action="Открыть"
             onClick={() => onOpenTab("promoCards")}
           />
@@ -3515,8 +3630,8 @@ function OverviewTab({
             />
             <StatusMetric
               label="Промо баннеры"
-              value={activePromoCards}
-              hint={`${workspace.promoCards.length} всего`}
+              value={promoBannerUsage.visibleCardIds.size}
+              hint={`${activePromoCards} активных · ${workspace.promoCards.length} всего`}
             />
           </div>
 
@@ -7047,6 +7162,13 @@ function PromoBannersTab({
   saving: string | null;
   canManage: boolean;
 }) {
+  const promoBannerUsage = useMemo(
+    () => buildPromoBannerUsage(promoCards, stores),
+    [promoCards, stores],
+  );
+  const activePromoCards = promoCards.filter(
+    (promoCard) => promoCard.status === "ACTIVE",
+  ).length;
   const promoTitle = form.title.trim();
   const formTitle =
     editingId && promoTitle
@@ -7220,11 +7342,19 @@ function PromoBannersTab({
         ) : null
       }
       listTitle="Созданные промо баннеры"
+      listSummary={
+        <PromoBannerLimitSummary
+          activeCount={activePromoCards}
+          totalCount={promoCards.length}
+          usage={promoBannerUsage}
+        />
+      }
       items={promoCards}
       layout="stacked"
       renderItem={(item) => {
         const metadata = promoCardMetadata(item);
         const imageUrl = metadataString(metadata, "imageUrl");
+        const usageInfo = promoBannerUsage.byCardId.get(item.id);
 
         return (
           <RuleCard
@@ -7236,25 +7366,28 @@ function PromoBannersTab({
               item.description ?? "без описания"
             }`}
             meta={[
-              storeScopeLabel(item.storeIds, stores),
+              ...promoBannerUsageMeta(item, promoBannerUsage, stores),
               item.tag ?? "без тега",
               `приоритет ${item.priority}`,
               formatDate(item.periodTo) || "без срока",
             ]}
             details={
-              <div className="grid gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
-                <PromoBannerThumbnail imageUrl={imageUrl} title={item.title} />
-                <div className="min-w-0 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                  <p>
-                    Формат: 9:16
-                    {imageUrl ? " · изображение загружено" : " · без изображения"}
-                  </p>
-                  <p>
-                    Действие:{" "}
-                    {metadataString(metadata, "actionLabel") ??
-                      promoTargetLabel(item.targetAnchor)}
-                  </p>
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
+                  <PromoBannerThumbnail imageUrl={imageUrl} title={item.title} />
+                  <div className="min-w-0 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    <p>
+                      Формат: 9:16
+                      {imageUrl ? " · изображение загружено" : " · без изображения"}
+                    </p>
+                    <p>
+                      Действие:{" "}
+                      {metadataString(metadata, "actionLabel") ??
+                        promoTargetLabel(item.targetAnchor)}
+                    </p>
+                  </div>
                 </div>
+                <PromoBannerVisibilityDetails usageInfo={usageInfo} />
               </div>
             }
             onEdit={() => onEdit(item)}
@@ -7267,6 +7400,77 @@ function PromoBannersTab({
         );
       }}
     />
+  );
+}
+
+function PromoBannerLimitSummary({
+  usage,
+  activeCount,
+  totalCount,
+}: {
+  usage: PromoBannerUsageSummary;
+  activeCount: number;
+  totalCount: number;
+}) {
+  const overloadedStores = usage.stores.filter(
+    (store) => store.overflowCount > 0,
+  );
+
+  return (
+    <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-3 text-sm text-cyan-950 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-100">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="font-semibold">
+            В игровом модуле показывается до {PROMO_BANNER_DISPLAY_LIMIT}{" "}
+            промо-баннеров на клуб.
+          </p>
+          <p className="mt-1 text-xs leading-5 text-cyan-800/80 dark:text-cyan-100/80">
+            Сейчас показывается {usage.visibleCardIds.size} из {activeCount}{" "}
+            активных правил. Всего создано {totalCount}.
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-cyan-800 shadow-sm dark:bg-cyan-950 dark:text-cyan-100">
+          лимит {PROMO_BANNER_DISPLAY_LIMIT}
+        </span>
+      </div>
+      {overloadedStores.length ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {overloadedStores.slice(0, 4).map((store) => (
+            <div
+              key={store.storeId}
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100"
+            >
+              <span className="font-bold">{store.storeName}</span>:{" "}
+              {store.visibleCount} показывается, {store.overflowCount} сверх
+              лимита.
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs leading-5 text-cyan-800/80 dark:text-cyan-100/80">
+          Превышений по клубам нет: все активные баннеры, подходящие по датам,
+          входят в доступные слоты.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PromoBannerVisibilityDetails({
+  usageInfo,
+}: {
+  usageInfo: PromoBannerUsageInfo | undefined;
+}) {
+  if (!usageInfo?.overflowStoreNames.length) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+      Не показывается для {compactStoreNames(usageInfo.overflowStoreNames)}:{" "}
+      в игровом модуле уже заняты {PROMO_BANNER_DISPLAY_LIMIT} слота более
+      приоритетными или более новыми баннерами.
+    </div>
   );
 }
 
@@ -9589,6 +9793,7 @@ function RulesLayout<T>({
   formAction,
   form,
   listTitle,
+  listSummary,
   items,
   renderItem,
   layout = "sidebar",
@@ -9598,6 +9803,7 @@ function RulesLayout<T>({
   formAction?: ReactNode;
   form: ReactNode;
   listTitle: string;
+  listSummary?: ReactNode;
   items: T[];
   renderItem: (item: T) => ReactNode;
   layout?: "sidebar" | "stacked";
@@ -9626,6 +9832,7 @@ function RulesLayout<T>({
             {items.length} правил
           </p>
         </div>
+        {listSummary ? <div>{listSummary}</div> : null}
         <div
           className={
             isStacked
@@ -11828,6 +12035,37 @@ function ruleTemplateLabel(type: RuleTemplateType) {
   }
 }
 
+function buildDeleteBlockedModal(
+  name: string,
+  message: string,
+): RuleDeleteBlockedModal | null {
+  if (!message.includes("используется в визуальном редакторе")) {
+    return null;
+  }
+
+  return {
+    title: `Нельзя удалить «${name}»`,
+    message,
+    stores: extractDeleteBlockedStores(message),
+  };
+}
+
+function extractDeleteBlockedStores(message: string) {
+  const marker = "для клубов:";
+  const markerIndex = message.indexOf(marker);
+
+  if (markerIndex < 0) {
+    return [];
+  }
+
+  return message
+    .slice(markerIndex + marker.length)
+    .replace(/\.$/, "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function nullable(value: string) {
   return value.trim() ? value.trim() : null;
 }
@@ -11874,6 +12112,183 @@ function storeScopeLabel(storeIds: string[], stores: Store[]) {
   return names.length > 2
     ? `${names.slice(0, 2).join(", ")} +${names.length - 2}`
     : names.join(", ");
+}
+
+function buildPromoBannerUsage(
+  promoCards: GuestGamePromoCard[],
+  stores: Store[],
+): PromoBannerUsageSummary {
+  const byCardId = new Map<string, PromoBannerUsageInfo>();
+  const visibleCardIds = new Set<string>();
+  const overflowCardIds = new Set<string>();
+  const activeCardIds = new Set<string>();
+  const nowMs = Date.now();
+  const storeTargets = stores.length
+    ? stores.map((store) => ({ id: store.id, name: store.name }))
+    : [{ id: "__all__", name: "все клубы" }];
+  const activeCards = promoCards
+    .filter((promoCard) => promoBannerCanAppear(promoCard, nowMs))
+    .sort(comparePromoBannersForPortal);
+
+  activeCards.forEach((promoCard) => activeCardIds.add(promoCard.id));
+
+  const storeUsages = storeTargets
+    .map((store) => {
+      const eligibleCards = activeCards.filter((promoCard) =>
+        promoBannerMatchesStore(promoCard, store.id),
+      );
+
+      eligibleCards.forEach((promoCard, index) => {
+        const info = promoBannerUsageInfo(byCardId, promoCard.id);
+
+        if (index < PROMO_BANNER_DISPLAY_LIMIT) {
+          visibleCardIds.add(promoCard.id);
+          info.visibleStoreNames.push(store.name);
+        } else {
+          overflowCardIds.add(promoCard.id);
+          info.overflowStoreNames.push(store.name);
+        }
+      });
+
+      return {
+        storeId: store.id,
+        storeName: store.name,
+        activeCount: eligibleCards.length,
+        visibleCount: Math.min(eligibleCards.length, PROMO_BANNER_DISPLAY_LIMIT),
+        overflowCount: Math.max(eligibleCards.length - PROMO_BANNER_DISPLAY_LIMIT, 0),
+      };
+    })
+    .filter((usage) => usage.activeCount > 0);
+
+  return {
+    byCardId,
+    visibleCardIds,
+    overflowCardIds,
+    activeCardIds,
+    stores: storeUsages,
+  };
+}
+
+function promoBannerUsageInfo(
+  map: Map<string, PromoBannerUsageInfo>,
+  promoCardId: string,
+) {
+  const current = map.get(promoCardId);
+
+  if (current) {
+    return current;
+  }
+
+  const next = { visibleStoreNames: [], overflowStoreNames: [] };
+  map.set(promoCardId, next);
+
+  return next;
+}
+
+function promoBannerCanAppear(promoCard: GuestGamePromoCard, nowMs: number) {
+  return (
+    promoCard.status === "ACTIVE" &&
+    promoBannerIsInActivePeriod(promoCard, nowMs)
+  );
+}
+
+function promoBannerIsInActivePeriod(
+  promoCard: GuestGamePromoCard,
+  nowMs = Date.now(),
+) {
+  const fromMs = dateMs(promoCard.periodFrom);
+  const toMs = dateMs(promoCard.periodTo);
+
+  if (fromMs !== null && fromMs > nowMs) {
+    return false;
+  }
+
+  if (toMs !== null && toMs < nowMs) {
+    return false;
+  }
+
+  return true;
+}
+
+function promoBannerMatchesStore(promoCard: GuestGamePromoCard, storeId: string) {
+  return (
+    storeId === "__all__" ||
+    !promoCard.storeIds.length ||
+    promoCard.storeIds.includes(storeId)
+  );
+}
+
+function comparePromoBannersForPortal(
+  left: GuestGamePromoCard,
+  right: GuestGamePromoCard,
+) {
+  const priorityDelta = right.priority - left.priority;
+
+  if (priorityDelta !== 0) {
+    return priorityDelta;
+  }
+
+  const updatedDelta = (dateMs(right.updatedAt) ?? 0) - (dateMs(left.updatedAt) ?? 0);
+
+  if (updatedDelta !== 0) {
+    return updatedDelta;
+  }
+
+  return (dateMs(right.createdAt) ?? 0) - (dateMs(left.createdAt) ?? 0);
+}
+
+function promoBannerUsageMeta(
+  promoCard: GuestGamePromoCard,
+  usage: PromoBannerUsageSummary,
+  stores: Store[],
+) {
+  const scope = storeScopeLabel(promoCard.storeIds, stores);
+
+  if (promoCard.status !== "ACTIVE") {
+    return [scope, "не показывается: статус"];
+  }
+
+  if (!promoBannerIsInActivePeriod(promoCard)) {
+    return [scope, "не показывается: вне периода"];
+  }
+
+  const info = usage.byCardId.get(promoCard.id);
+
+  if (!info) {
+    return [scope, "не показывается"];
+  }
+
+  const meta: string[] = [];
+
+  if (info.visibleStoreNames.length) {
+    meta.push(`показывается: ${compactStoreNames(info.visibleStoreNames)}`);
+  }
+
+  if (info.overflowStoreNames.length) {
+    meta.push(`сверх лимита: ${compactStoreNames(info.overflowStoreNames)}`);
+  }
+
+  return meta.length ? meta : [scope, "не показывается"];
+}
+
+function compactStoreNames(names: string[]) {
+  const uniqueNames = Array.from(new Set(names));
+
+  if (uniqueNames.length > 2) {
+    return `${uniqueNames.slice(0, 2).join(", ")} +${uniqueNames.length - 2}`;
+  }
+
+  return uniqueNames.join(", ");
+}
+
+function dateMs(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value).getTime();
+
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function promoTargetLabel(targetAnchor: string | null) {

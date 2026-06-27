@@ -7334,7 +7334,7 @@ export class GuestPortalService {
     const portalPromoCards = promoCards
       .filter((item) => matchesStore(item.storeIds, context.store.id))
       .filter((item) => activePeriod(item.periodFrom, item.periodTo))
-      .slice(0, 6)
+      .slice(0, 4)
       .map(mapPromoCard);
     const nextActions = buildNextActions({
       guestFound: Boolean(guest || profile),

@@ -3475,6 +3475,61 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('blocks mission deletion while it is published in a club visual editor', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore({ name: '1337-Пушкинская' });
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: null,
+          enabled: false,
+          title: 'Клубный сезон',
+          status: 'DRAFT',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: null,
+          levelRewards: [],
+        },
+        missions: [
+          {
+            id: 'mission-delete',
+            title: 'Чекин в клубе',
+            status: 'ACTIVE',
+            missionType: 'DAILY',
+            triggerKind: 'CHECK_IN',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 50,
+            rewardLabel: '50 бонусов',
+            xpReward: 25,
+            progressTarget: 1,
+            progressUnit: 'check-in',
+          },
+        ],
+      });
+
+      prisma.guestGameMission.findFirst.mockResolvedValue({
+        id: 'mission-delete',
+        tenantId: user.tenantId,
+        name: 'Чекин в клубе',
+      });
+      prisma.guestGameVisualDraft.findMany.mockResolvedValue([
+        {
+          id: 'visual-draft-published',
+          storeId: store.id,
+          payload,
+          publishedAt: now,
+          updatedAt: now,
+          store,
+        },
+      ]);
+
+      await expect(
+        service.deleteMission(user, 'mission-delete'),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.guestGameEvent.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameReward.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameMission.delete).not.toHaveBeenCalled();
+    });
+
     it('deletes a season template and reports detached records', async () => {
       const { service, prisma } = createService();
 
@@ -3505,6 +3560,46 @@ describe('GuestGamificationService', () => {
         detachedEvents: 5,
         detachedRewards: 6,
       });
+    });
+
+    it('blocks Battle Pass deletion while it is published in a club visual editor', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore({ name: '1337-Пушкинская' });
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: 'season-delete',
+          enabled: true,
+          title: 'Клубный сезон',
+          status: 'ACTIVE',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: 'Финальный приз',
+          levelRewards: [{ level: 2, reward: 'Промокод' }],
+        },
+      });
+
+      prisma.guestGameSeason.findFirst.mockResolvedValue({
+        id: 'season-delete',
+        tenantId: user.tenantId,
+        name: 'Клубный сезон',
+      });
+      prisma.guestGameVisualDraft.findMany.mockResolvedValue([
+        {
+          id: 'visual-draft-published',
+          storeId: store.id,
+          payload,
+          publishedAt: now,
+          updatedAt: now,
+          store,
+        },
+      ]);
+
+      await expect(service.deleteSeason(user, 'season-delete')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.guestGameEvent.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameReward.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameSeason.delete).not.toHaveBeenCalled();
     });
   });
 

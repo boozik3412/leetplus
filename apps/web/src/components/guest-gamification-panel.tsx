@@ -1079,7 +1079,9 @@ export function GuestGamificationPanel({
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
   const [isLootBoxFormOpen, setIsLootBoxFormOpen] = useState(false);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
+  const [isMissionFormOpen, setIsMissionFormOpen] = useState(false);
   const [editingSeasonId, setEditingSeasonId] = useState<string | null>(null);
+  const [isSeasonFormOpen, setIsSeasonFormOpen] = useState(false);
   const [editingRewardId, setEditingRewardId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -1147,23 +1149,41 @@ export function GuestGamificationPanel({
   function editMission(mission: GuestGameMission) {
     setMissionForm(missionToForm(mission));
     setEditingMissionId(mission.id);
+    setIsMissionFormOpen(true);
+    setActiveTab("missions");
+  }
+
+  function createMission() {
+    setMissionForm(defaultMissionForm);
+    setEditingMissionId(null);
+    setIsMissionFormOpen(true);
     setActiveTab("missions");
   }
 
   function resetMissionForm() {
     setMissionForm(defaultMissionForm);
     setEditingMissionId(null);
+    setIsMissionFormOpen(false);
   }
 
   function editSeason(season: GuestGameSeason) {
     setSeasonForm(seasonToForm(season));
     setEditingSeasonId(season.id);
+    setIsSeasonFormOpen(true);
+    setActiveTab("seasons");
+  }
+
+  function createSeason() {
+    setSeasonForm(defaultSeasonForm);
+    setEditingSeasonId(null);
+    setIsSeasonFormOpen(true);
     setActiveTab("seasons");
   }
 
   function resetSeasonForm() {
     setSeasonForm(defaultSeasonForm);
     setEditingSeasonId(null);
+    setIsSeasonFormOpen(false);
   }
 
   function editReward(reward: GuestGameReward) {
@@ -2112,8 +2132,10 @@ export function GuestGamificationPanel({
           tariffSnapshots={workspace.tariffSnapshots}
           guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingMissionId}
+          isFormOpen={isMissionFormOpen}
           onSave={saveMission}
           onEdit={editMission}
+          onCreateNew={createMission}
           onReset={resetMissionForm}
           onStatus={updateRuleStatus}
           onDelete={deleteRuleTemplate}
@@ -2131,8 +2153,10 @@ export function GuestGamificationPanel({
           stores={stores}
           tariffSnapshots={workspace.tariffSnapshots}
           editingId={editingSeasonId}
+          isFormOpen={isSeasonFormOpen}
           onSave={saveSeason}
           onEdit={editSeason}
+          onCreateNew={createSeason}
           onReset={resetSeasonForm}
           onStatus={updateRuleStatus}
           onDelete={deleteRuleTemplate}
@@ -6351,8 +6375,10 @@ function MissionsTab({
   tariffSnapshots,
   guestLogCatalog,
   editingId,
+  isFormOpen,
   onSave,
   onEdit,
+  onCreateNew,
   onReset,
   onStatus,
   onDelete,
@@ -6368,8 +6394,10 @@ function MissionsTab({
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
+  isFormOpen: boolean;
   onSave: () => Promise<void>;
   onEdit: (mission: GuestGameMission) => void;
+  onCreateNew: () => void;
   onReset: () => void;
   onStatus: (
     type: RuleTemplateType,
@@ -6381,12 +6409,31 @@ function MissionsTab({
   canManage: boolean;
 }) {
   const missionTemplates = missions.filter((mission) => mission.id !== editingId);
+  const missionTitle = form.name.trim();
+  const formTitle =
+    editingId && missionTitle
+      ? `Редактирование миссии "${missionTitle}"`
+      : editingId
+        ? "Редактирование миссии"
+        : "Настройка миссии";
 
   return (
     <RulesLayout
       canManage={canManage}
-      formTitle={editingId ? "Редактирование миссии" : "Конструктор миссии"}
+      formTitle={formTitle}
+      formAction={
+        !isFormOpen ? (
+          <button
+            type="button"
+            className={`${primaryButtonClass} sm:min-w-52`}
+            onClick={onCreateNew}
+          >
+            Создать новую миссию
+          </button>
+        ) : undefined
+      }
       form={
+        isFormOpen ? (
         <div className="space-y-3">
           <RuleCommonFields
             status={form.status}
@@ -6528,7 +6575,7 @@ function MissionsTab({
             disabled={saving === "mission"}
             onClick={onSave}
           >
-            {editingId ? "Изменить миссию" : "Создать миссию"}
+            {editingId ? "Сохранить" : "Создать миссию"}
           </button>
           {editingId ? (
             <button type="button" className={smallButtonClass} onClick={onReset}>
@@ -6536,12 +6583,15 @@ function MissionsTab({
             </button>
           ) : null}
         </div>
+        ) : null
       }
-      listTitle="Миссии"
+      listTitle="Созданные правила миссий"
       items={missions}
+      layout="stacked"
       renderItem={(item) => (
         <RuleCard
           key={item.id}
+          eyebrow="Сохраненное правило"
           title={item.name}
           status={item.status}
           subtitle={`${missionTypeLabel(item.missionType)} · ${item.xpReward} XP`}
@@ -6575,8 +6625,10 @@ function SeasonsTab({
   stores,
   tariffSnapshots,
   editingId,
+  isFormOpen,
   onSave,
   onEdit,
+  onCreateNew,
   onReset,
   onStatus,
   onDelete,
@@ -6590,8 +6642,10 @@ function SeasonsTab({
   stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   editingId: string | null;
+  isFormOpen: boolean;
   onSave: () => Promise<void>;
   onEdit: (season: GuestGameSeason) => void;
+  onCreateNew: () => void;
   onReset: () => void;
   onStatus: (
     type: RuleTemplateType,
@@ -6602,11 +6656,31 @@ function SeasonsTab({
   saving: string | null;
   canManage: boolean;
 }) {
+  const seasonTitle = form.name.trim();
+  const formTitle =
+    editingId && seasonTitle
+      ? `Редактирование Battle Pass "${seasonTitle}"`
+      : editingId
+        ? "Редактирование Battle Pass"
+        : "Настройка Battle Pass";
+
   return (
     <RulesLayout
       canManage={canManage}
-      formTitle={editingId ? "Редактирование Battle Pass" : "Сезон и Battle Pass"}
+      formTitle={formTitle}
+      formAction={
+        !isFormOpen ? (
+          <button
+            type="button"
+            className={`${primaryButtonClass} sm:min-w-52`}
+            onClick={onCreateNew}
+          >
+            Создать новый Battle Pass
+          </button>
+        ) : undefined
+      }
       form={
+        isFormOpen ? (
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Название">
@@ -6729,7 +6803,7 @@ function SeasonsTab({
             disabled={saving === "season"}
             onClick={onSave}
           >
-            {editingId ? "Изменить сезон" : "Создать сезон"}
+            {editingId ? "Сохранить" : "Создать Battle Pass"}
           </button>
           {editingId ? (
             <button type="button" className={smallButtonClass} onClick={onReset}>
@@ -6737,12 +6811,15 @@ function SeasonsTab({
             </button>
           ) : null}
         </div>
+        ) : null
       }
-      listTitle="Сезоны"
+      listTitle="Созданные правила Battle Pass"
       items={seasons}
+      layout="stacked"
       renderItem={(item) => (
         <RuleCard
           key={item.id}
+          eyebrow="Сохраненное правило"
           title={item.name}
           status={item.status}
           subtitle={`${item.seasonType} · ${item.premiumEnabled ? "premium" : "free"}`}

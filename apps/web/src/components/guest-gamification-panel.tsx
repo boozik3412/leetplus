@@ -6182,6 +6182,17 @@ function LootBoxesTab({
     <RulesLayout
       canManage={canManage}
       formTitle={formTitle}
+      formAction={
+        !isFormOpen ? (
+          <button
+            type="button"
+            className={`${primaryButtonClass} sm:min-w-52`}
+            onClick={onCreateNew}
+          >
+            Создать новый лутбокс
+          </button>
+        ) : undefined
+      }
       form={
         isFormOpen ? (
           <div className="space-y-4">
@@ -6290,17 +6301,7 @@ function LootBoxesTab({
               ) : null}
             </div>
           </div>
-        ) : (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="button"
-              className={`${primaryButtonClass} sm:min-w-52`}
-              onClick={onCreateNew}
-            >
-              Создать новый лутбокс
-            </button>
-          </div>
-        )
+        ) : null
       }
       listTitle="Созданные правила лутбоксов"
       items={lootBoxes}
@@ -8655,6 +8656,7 @@ function RuleCommonFields({
 function RulesLayout<T>({
   canManage,
   formTitle,
+  formAction,
   form,
   listTitle,
   items,
@@ -8663,6 +8665,7 @@ function RulesLayout<T>({
 }: {
   canManage: boolean;
   formTitle: string;
+  formAction?: ReactNode;
   form: ReactNode;
   listTitle: string;
   items: T[];
@@ -8681,7 +8684,11 @@ function RulesLayout<T>({
           : "grid gap-5"
       }
     >
-      {canManage ? <Panel title={formTitle}>{form}</Panel> : null}
+      {canManage ? (
+        <Panel title={formTitle} action={formAction}>
+          {form}
+        </Panel>
+      ) : null}
       <section className="min-w-0 space-y-3">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <SectionTitle title={listTitle} />
@@ -10486,13 +10493,24 @@ function JsonField({
   );
 }
 
-function Panel({ title, children }: { title: string; children: ReactNode }) {
+function Panel({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children?: ReactNode;
+}) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <h2 className="text-base font-bold text-zinc-950 dark:text-white">
-        {title}
-      </h2>
-      <div className="mt-4">{children}</div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-bold text-zinc-950 dark:text-white">
+          {title}
+        </h2>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      {children ? <div className="mt-4">{children}</div> : null}
     </section>
   );
 }

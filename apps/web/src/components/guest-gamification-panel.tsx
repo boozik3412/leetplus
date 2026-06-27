@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   type Dispatch,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -270,6 +271,14 @@ type PromoBannerForm = {
   imageScale: string;
   imageOffsetX: string;
   imageOffsetY: string;
+};
+
+type PromoBannerDragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  offsetX: number;
+  offsetY: number;
 };
 
 type RewardForm = {
@@ -7097,7 +7106,7 @@ function PromoBannersTab({
               </Field>
             </FormSection>
 
-            <FormSection title="Баннер 9:16">
+            <FormSection title="Предпросмотр карточки банера">
               <PromoBannerImageEditor form={form} setForm={setForm} />
             </FormSection>
 
@@ -7242,6 +7251,8 @@ function PromoBannerImageEditor({
   form: PromoBannerForm;
   setForm: (form: PromoBannerForm) => void;
 }) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [dragState, setDragState] = useState<PromoBannerDragState | null>(null);
   const source = form.imageSource || form.imageUrl;
   const scale = Number(form.imageScale) || 1;
   const offsetX = Number(form.imageOffsetX) || 0;
@@ -7267,116 +7278,321 @@ function PromoBannerImageEditor({
     reader.readAsDataURL(file);
   }
 
-  async function applyCrop() {
+  function openEditor() {
+    if (!source) {
+      return;
+    }
+
+    if (!form.imageSource) {
+      setForm({
+        ...form,
+        imageSource: source,
+        imageScale: "1",
+        imageOffsetX: "0",
+        imageOffsetY: "0",
+      });
+    }
+
+    setEditorOpen(true);
+  }
+
+  async function applyCrop(closeEditor = false) {
     const imageUrl = await renderPromoBannerImage(form);
     setForm({
       ...form,
       imageUrl,
       imageSource: "",
     });
+
+    if (closeEditor) {
+      setEditorOpen(false);
+    }
+  }
+
+  function updateScale(nextScale: number) {
+    setForm({
+      ...form,
+      imageScale: formatPromoBannerNumber(clampPromoBannerScale(nextScale)),
+    });
+  }
+
+  function resetCrop() {
+    setForm({
+      ...form,
+      imageScale: "1.15",
+      imageOffsetX: "0",
+      imageOffsetY: "0",
+    });
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!source) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragState({
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX,
+      offsetY,
+    });
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const nextOffsetX = clampPromoBannerOffset(
+      dragState.offsetX + ((event.clientX - dragState.startX) / rect.width) * 100,
+    );
+    const nextOffsetY = clampPromoBannerOffset(
+      dragState.offsetY + ((event.clientY - dragState.startY) / rect.height) * 100,
+    );
+
+    setForm({
+      ...form,
+      imageOffsetX: formatPromoBannerNumber(nextOffsetX),
+      imageOffsetY: formatPromoBannerNumber(nextOffsetY),
+    });
+  }
+
+  function handlePointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (dragState?.pointerId === event.pointerId) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      setDragState(null);
+    }
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)]">
-      <div className="mx-auto w-[160px]">
-        <div className="relative aspect-[9/16] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
-          {source ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover"
-              src={source}
-              style={
-                form.imageSource
-                  ? {
-                      transform: `translate(${offsetX}%, ${offsetY}%) scale(${scale})`,
-                    }
-                  : undefined
-              }
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center px-4 text-center text-xs font-semibold text-zinc-400">
-              9:16
-            </div>
-          )}
-          <div className="pointer-events-none absolute inset-0 border border-white/50" />
-        </div>
-      </div>
-      <div className="space-y-3">
-        <Field label="Изображение">
-          <input
-            className={fieldClass}
-            type="file"
-            accept="image/*"
-            onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
+    <>
+      <div className="grid gap-4 lg:grid-cols-[190px_minmax(0,1fr)]">
+        <div className="mx-auto w-[170px]">
+          <PromoBannerCardPreview
+            form={form}
+            source={source}
+            onEdit={source ? openEditor : undefined}
           />
-        </Field>
-        <div className="grid gap-3 md:grid-cols-3">
-          <Field label="Масштаб">
-            <input
-              type="range"
-              min="1"
-              max="2.5"
-              step="0.01"
-              value={form.imageScale}
-              onChange={(event) =>
-                setForm({ ...form, imageScale: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="Сдвиг X">
-            <input
-              type="range"
-              min="-35"
-              max="35"
-              step="1"
-              value={form.imageOffsetX}
-              onChange={(event) =>
-                setForm({ ...form, imageOffsetX: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="Сдвиг Y">
-            <input
-              type="range"
-              min="-35"
-              max="35"
-              step="1"
-              value={form.imageOffsetY}
-              onChange={(event) =>
-                setForm({ ...form, imageOffsetY: event.target.value })
-              }
-            />
-          </Field>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={smallButtonClass}
-            disabled={!source}
-            onClick={applyCrop}
-          >
-            Применить кадр
-          </button>
-          {source ? (
-            <button
-              type="button"
-              className={smallButtonClass}
-              onClick={() =>
-                setForm({
-                  ...form,
-                  imageUrl: "",
-                  imageSource: "",
-                })
-              }
-            >
-              Убрать изображение
-            </button>
-          ) : null}
+        <div className="space-y-3">
+          <Field label="Изображение">
+            <input
+              className={fieldClass}
+              type="file"
+              accept="image/*"
+              onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
+            />
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            {source ? (
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    imageUrl: "",
+                    imageSource: "",
+                  })
+                }
+              >
+                Убрать изображение
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
+
+      {editorOpen && source ? (
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/75 p-4 backdrop-blur-sm"
+          role="dialog"
+        >
+          <div className="w-full max-w-4xl rounded-lg border border-zinc-200 bg-white p-4 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-600 dark:text-cyan-300">
+                  Редактирование кадра
+                </p>
+                <h3 className="text-lg font-bold text-zinc-950 dark:text-white">
+                  {form.title || "Промо баннер"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={() => setEditorOpen(false)}
+              >
+                Закрыть
+              </button>
+            </div>
+
+            <div className="mt-4 flex justify-center">
+              <div
+                className={[
+                  "relative touch-none select-none overflow-hidden rounded-lg",
+                  dragState ? "cursor-grabbing" : "cursor-grab",
+                ].join(" ")}
+                onPointerCancel={handlePointerEnd}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerEnd}
+                style={{
+                  width:
+                    "min(420px, calc((100vh - 180px) * 0.5625), calc(100vw - 48px))",
+                }}
+              >
+                <PromoBannerCardPreview form={form} source={source} />
+                <div className="pointer-events-none absolute inset-0 rounded-lg ring-2 ring-cyan-300/90 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950" />
+                <div
+                  className="absolute inset-x-3 bottom-3 rounded-lg border border-white/20 bg-black/70 p-2 text-white shadow-lg backdrop-blur"
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-lg font-bold transition hover:bg-white/20"
+                      onClick={() => updateScale(scale - 0.1)}
+                    >
+                      -
+                    </button>
+                    <input
+                      aria-label="Масштаб кадра"
+                      className="min-w-0 flex-1 accent-cyan-300"
+                      max="3"
+                      min="1"
+                      step="0.01"
+                      type="range"
+                      value={form.imageScale}
+                      onChange={(event) => updateScale(Number(event.target.value))}
+                    />
+                    <button
+                      type="button"
+                      className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-lg font-bold transition hover:bg-white/20"
+                      onClick={() => updateScale(scale + 0.1)}
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-white/20 px-3 py-2 text-xs font-bold transition hover:bg-white/10"
+                      onClick={resetCrop}
+                    >
+                      Сбросить кадр
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg bg-cyan-300 px-3 py-2 text-xs font-bold text-zinc-950 transition hover:bg-cyan-200"
+                      onClick={() => applyCrop(true)}
+                    >
+                      Готово
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function PromoBannerCardPreview({
+  form,
+  source,
+  onEdit,
+}: {
+  form: PromoBannerForm;
+  source: string;
+  onEdit?: () => void;
+}) {
+  const title = form.title.trim() || "Название баннера";
+  const label = form.label.trim() || "Акция";
+  const description = form.description.trim() || "Короткое описание баннера.";
+  const tag = form.tag.trim();
+  const canTransformImage = Boolean(form.imageSource);
+  const scale = clampPromoBannerScale(Number(form.imageScale) || 1);
+  const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX) || 0);
+  const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY) || 0);
+
+  return (
+    <div className="relative aspect-[9/16] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      {source ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          alt={title}
+          className="absolute inset-0 h-full w-full object-cover"
+          src={source}
+          style={
+            canTransformImage
+              ? {
+                  transform: `translate(${offsetX}%, ${offsetY}%) scale(${scale})`,
+                }
+              : undefined
+          }
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center px-4 text-center text-xs font-semibold text-zinc-400">
+          9:16
+        </div>
+      )}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-black/10 to-black/80" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 p-3">
+        <span className="inline-flex rounded-full border border-cyan-200/50 bg-black/35 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-cyan-100">
+          {label}
+        </span>
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 text-white">
+        <h4 className="text-xl font-black uppercase leading-none">{title}</h4>
+        <p className="mt-2 line-clamp-4 text-[11px] font-semibold leading-4 text-zinc-100">
+          {description}
+        </p>
+        {tag ? (
+          <span className="mt-3 inline-flex rounded-lg border border-cyan-200/40 bg-cyan-300/15 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-cyan-100">
+            {tag}
+          </span>
+        ) : null}
+      </div>
+      {onEdit ? (
+        <button
+          type="button"
+          className="absolute right-2 top-2 rounded-lg bg-white px-2.5 py-1.5 text-xs font-bold text-zinc-950 shadow-sm transition hover:bg-cyan-100"
+          onClick={onEdit}
+        >
+          Редактировать
+        </button>
+      ) : null}
     </div>
   );
+}
+
+function clampPromoBannerScale(value: number) {
+  if (!Number.isFinite(value)) {
+    return 1.15;
+  }
+
+  return Math.min(3, Math.max(1, value));
+}
+
+function clampPromoBannerOffset(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.min(45, Math.max(-45, value));
+}
+
+function formatPromoBannerNumber(value: number) {
+  return String(Math.round(value * 100) / 100);
 }
 
 function PromoBannerThumbnail({
@@ -11589,9 +11805,9 @@ function promoTargetLabel(targetAnchor: string | null) {
 
 async function buildPromoBannerMetadata(form: PromoBannerForm) {
   const imageUrl = await renderPromoBannerImage(form);
-  const scale = Number(form.imageScale);
-  const offsetX = Number(form.imageOffsetX);
-  const offsetY = Number(form.imageOffsetY);
+  const scale = clampPromoBannerScale(Number(form.imageScale));
+  const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
+  const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY));
 
   return {
     source: "advanced_editor",
@@ -11600,9 +11816,9 @@ async function buildPromoBannerMetadata(form: PromoBannerForm) {
     actionLabel: nullable(form.actionLabel),
     actionUrl: nullable(form.actionUrl),
     crop: {
-      scale: Number.isFinite(scale) ? scale : 1.15,
-      offsetX: Number.isFinite(offsetX) ? offsetX : 0,
-      offsetY: Number.isFinite(offsetY) ? offsetY : 0,
+      scale,
+      offsetX,
+      offsetY,
     },
   };
 }
@@ -11636,11 +11852,11 @@ async function renderPromoBannerImage(form: PromoBannerForm) {
       const scale = Math.max(
         targetWidth / image.naturalWidth,
         targetHeight / image.naturalHeight,
-      ) * (Number(form.imageScale) || 1);
+      ) * clampPromoBannerScale(Number(form.imageScale));
       const drawWidth = image.naturalWidth * scale;
       const drawHeight = image.naturalHeight * scale;
-      const offsetX = Number(form.imageOffsetX) || 0;
-      const offsetY = Number(form.imageOffsetY) || 0;
+      const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
+      const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY));
       const dx = (targetWidth - drawWidth) / 2 + (offsetX / 100) * targetWidth;
       const dy =
         (targetHeight - drawHeight) / 2 + (offsetY / 100) * targetHeight;

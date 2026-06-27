@@ -77,6 +77,7 @@ const staffTestRewardAccrualEnabledEnv =
 const liveSessionStartCacheDefaultTtlMs = 30_000;
 const liveSessionStartLookupDefaultTimeoutMs = 4_000;
 const liveSessionStartCacheMaxEntries = 1_000;
+const promoBannerDisplayLimit = 4;
 const otpSmsRateLimitDefaults = {
   phoneWindowMinutes: 60,
   phoneMax: 3,
@@ -6161,6 +6162,7 @@ export class GuestGamificationService {
       promoCard.id,
       `промо-баннер "${promoCard.title}"`,
     );
+    await this.detachPromoCardFromVisualEditorPayloads(user, promoCard.id);
 
     await this.prisma.guestGamePromoCard.delete({
       where: { id: promoCard.id },
@@ -6440,6 +6442,44 @@ export class GuestGamificationService {
       }));
   }
 
+  private async detachPromoCardFromVisualEditorPayloads(
+    user: AuthenticatedUser,
+    id: string,
+  ) {
+    const rows = await this.prisma.guestGameVisualDraft.findMany({
+      where: { tenantId: user.tenantId },
+      select: {
+        id: true,
+        payload: true,
+      },
+    });
+    const updates: Array<Promise<unknown>> = [];
+
+    for (const row of rows) {
+      const payload = normalizeVisualEditorPayload(row.payload);
+      const promoCards = payload.promoCards.filter((item) => item.id !== id);
+
+      if (promoCards.length === payload.promoCards.length) {
+        continue;
+      }
+
+      updates.push(
+        this.prisma.guestGameVisualDraft.update({
+          where: { id: row.id },
+          data: {
+            payload: {
+              ...payload,
+              promoCards,
+            },
+            updatedByUserId: actorUserId(user),
+          },
+        }),
+      );
+    }
+
+    await Promise.all(updates);
+  }
+
   private async buildVisualEditorPayloadFromLive(
     user: AuthenticatedUser,
     storeId: string,
@@ -6481,7 +6521,7 @@ export class GuestGamificationService {
             item.status === 'ACTIVE' &&
             ruleMatchesStoreIds(item.storeIds, storeId),
         )
-        .slice(0, 4)
+        .slice(0, promoBannerDisplayLimit)
         .map(visualPromoFromRule),
       checkIn: visualCheckInFromMission(checkInMission ?? null),
     });
@@ -10981,8 +11021,52 @@ function visualEditorPayloadUsesRule(
     case 'season':
       return payload.battlePass.enabled && payload.battlePass.id === id;
     case 'promoCard':
-      return payload.promoCards.some((item) => item.id === id);
+      return visualEditorVisiblePromoCards(payload).some(
+        (item) => item.id === id,
+      );
   }
+}
+
+function visualEditorVisiblePromoCards(
+  payload: GuestGameVisualEditorPayload,
+  now = new Date(),
+) {
+  return payload.promoCards
+    .filter((item) => visualEditorPromoCardCanAppear(item, now))
+    .slice(0, promoBannerDisplayLimit);
+}
+
+function visualEditorPromoCardCanAppear(
+  item: GuestGameVisualEditorPromoCard,
+  now: Date,
+) {
+  if (item.status !== 'ACTIVE') {
+    return false;
+  }
+
+  const nowMs = now.getTime();
+  const fromMs = dateTimestampOrNull(item.periodFrom);
+  const toMs = dateTimestampOrNull(item.periodTo);
+
+  if (fromMs !== null && fromMs > nowMs) {
+    return false;
+  }
+
+  if (toMs !== null && toMs < nowMs) {
+    return false;
+  }
+
+  return true;
+}
+
+function dateTimestampOrNull(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function visualEditorUsageStoreName(
@@ -17336,7 +17420,7 @@ function buildVisualEditorPreviewSummary(
     },
     promoCards: {
       total: payload.promoCards.length,
-      featured: payload.promoCards.slice(0, 4).map((item, index) => {
+      featured: visualEditorVisiblePromoCards(payload).map((item, index) => {
         const metadata = jsonRecord(item.metadata);
 
         return {

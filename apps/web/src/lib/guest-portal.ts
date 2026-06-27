@@ -387,6 +387,9 @@ export type GuestPortalPayload = {
       description: string | null;
       tag: string | null;
       targetAnchor: string | null;
+      imageUrl: string | null;
+      actionLabel: string | null;
+      actionUrl: string | null;
       periodTo: string | null;
     }>;
     rewardSummary: {

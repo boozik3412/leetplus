@@ -47,6 +47,8 @@ import {
   type GuestGameMissionDto,
   type GuestGameMissionUpdateDto,
   type GuestGamePromoCard,
+  type GuestGamePromoCardDto,
+  type GuestGamePromoCardUpdateDto,
   type GuestGameProfile,
   type GuestGameProfileDto,
   type GuestGameProfileUpdateDto,
@@ -298,6 +300,31 @@ export class GuestGamificationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestGamePromoCard[]> {
     return this.gamificationService.getPromoCards(user);
+  }
+
+  @Post('promo-cards')
+  createPromoCard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGamePromoCardDto,
+  ): Promise<GuestGamePromoCard> {
+    return this.gamificationService.createPromoCard(user, dto);
+  }
+
+  @Patch('promo-cards/:id')
+  updatePromoCard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestGamePromoCardUpdateDto,
+  ): Promise<GuestGamePromoCard> {
+    return this.gamificationService.updatePromoCard(user, id, dto);
+  }
+
+  @Delete('promo-cards/:id')
+  deletePromoCard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    return this.gamificationService.deletePromoCard(user, id);
   }
 
   @Get('visual-editor/draft')

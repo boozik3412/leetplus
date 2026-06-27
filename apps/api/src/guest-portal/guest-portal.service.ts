@@ -788,6 +788,9 @@ export type GuestPortalPromoCard = {
   description: string | null;
   tag: string | null;
   targetAnchor: string | null;
+  imageUrl: string | null;
+  actionLabel: string | null;
+  actionUrl: string | null;
   periodTo: string | null;
 };
 
@@ -12528,6 +12531,20 @@ function mapSeason(
   };
 }
 
+function promoMetadataString(
+  metadata: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = metadata[key];
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
 function mapPromoCard(row: {
   id: string;
   label: string | null;
@@ -12535,8 +12552,11 @@ function mapPromoCard(row: {
   description: string | null;
   tag: string | null;
   targetAnchor: string | null;
+  metadata: Prisma.JsonValue | null;
   periodTo: Date | null;
 }): GuestPortalPromoCard {
+  const metadata = jsonRecord(row.metadata);
+
   return {
     id: row.id,
     label: row.label,
@@ -12544,6 +12564,9 @@ function mapPromoCard(row: {
     description: row.description,
     tag: row.tag,
     targetAnchor: row.targetAnchor,
+    imageUrl: promoMetadataString(metadata, 'imageUrl'),
+    actionLabel: promoMetadataString(metadata, 'actionLabel'),
+    actionUrl: promoMetadataString(metadata, 'actionUrl'),
     periodTo: iso(row.periodTo),
   };
 }

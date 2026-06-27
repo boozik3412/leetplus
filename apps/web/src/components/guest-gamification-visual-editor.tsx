@@ -2296,6 +2296,7 @@ function createVisualPromo(): GuestGameVisualEditorPromoCard {
     targetAnchor: "missions",
     periodFrom: null,
     periodTo: null,
+    metadata: null,
   };
 }
 
@@ -2454,6 +2455,7 @@ function visualPromoFromTemplate(
     targetAnchor: promo.targetAnchor,
     periodFrom: promo.periodFrom,
     periodTo: promo.periodTo,
+    metadata: promo.metadata,
   };
 }
 
@@ -2775,6 +2777,7 @@ function fallbackPromos(): GuestGameVisualEditorPromoCard[] {
       targetAnchor: "missions",
       periodFrom: null,
       periodTo: null,
+      metadata: null,
     },
     {
       id: null,
@@ -2786,6 +2789,7 @@ function fallbackPromos(): GuestGameVisualEditorPromoCard[] {
       targetAnchor: "missions",
       periodFrom: null,
       periodTo: null,
+      metadata: null,
     },
     {
       id: null,
@@ -2797,6 +2801,7 @@ function fallbackPromos(): GuestGameVisualEditorPromoCard[] {
       targetAnchor: "rewards",
       periodFrom: null,
       periodTo: null,
+      metadata: null,
     },
   ];
 }

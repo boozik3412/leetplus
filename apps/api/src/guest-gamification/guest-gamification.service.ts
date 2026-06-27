@@ -889,7 +889,7 @@ export type GuestGameRuleDeleteResult = {
   detachedRewards: number;
 };
 
-type VisualEditorUsageKind = 'lootBox' | 'mission' | 'season';
+type VisualEditorUsageKind = 'lootBox' | 'mission' | 'season' | 'promoCard';
 
 type VisualEditorRuleUsage = {
   draftId: string;
@@ -916,6 +916,22 @@ export type GuestGamePromoCard = {
   updatedAt: string;
   createdBy: GuestGameUser | null;
 };
+
+export type GuestGamePromoCardDto = {
+  title?: string;
+  label?: string | null;
+  description?: string | null;
+  tag?: string | null;
+  status?: string;
+  targetAnchor?: string | null;
+  priority?: number | string | null;
+  storeIds?: string[];
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  metadata?: Prisma.InputJsonValue | null;
+};
+
+export type GuestGamePromoCardUpdateDto = Partial<GuestGamePromoCardDto>;
 
 export type GuestGameVisualEditorRewardMode = 'XP' | 'BONUS' | '';
 
@@ -981,6 +997,7 @@ export type GuestGameVisualEditorPromoCard = {
   targetAnchor: string | null;
   periodFrom: string | null;
   periodTo: string | null;
+  metadata: Prisma.JsonValue | null;
 };
 
 export type GuestGameVisualEditorCheckIn = {
@@ -6100,6 +6117,58 @@ export class GuestGamificationService {
     return rows.map(mapPromoCard);
   }
 
+  async createPromoCard(
+    user: AuthenticatedUser,
+    dto: GuestGamePromoCardDto,
+  ): Promise<GuestGamePromoCard> {
+    const data = this.buildPromoCardData(
+      user,
+      dto,
+      true,
+    ) as Prisma.GuestGamePromoCardUncheckedCreateInput;
+    const row = await this.prisma.guestGamePromoCard.create({
+      data,
+      include: promoCardInclude,
+    });
+
+    return mapPromoCard(row);
+  }
+
+  async updatePromoCard(
+    user: AuthenticatedUser,
+    id: string,
+    dto: GuestGamePromoCardUpdateDto,
+  ): Promise<GuestGamePromoCard> {
+    await this.assertPromoCard(user, id);
+    const data = this.buildPromoCardData(user, dto, false);
+    const row = await this.prisma.guestGamePromoCard.update({
+      where: { id },
+      data,
+      include: promoCardInclude,
+    });
+
+    return mapPromoCard(row);
+  }
+
+  async deletePromoCard(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<GuestGameRuleDeleteResult> {
+    const promoCard = await this.assertPromoCard(user, id);
+    await this.assertRuleNotPublishedInVisualEditor(
+      user,
+      'promoCard',
+      promoCard.id,
+      `промо-баннер "${promoCard.title}"`,
+    );
+
+    await this.prisma.guestGamePromoCard.delete({
+      where: { id: promoCard.id },
+    });
+
+    return { deleted: true, detachedEvents: 0, detachedRewards: 0 };
+  }
+
   async getVisualEditorDraft(
     user: AuthenticatedUser,
     dto: Pick<GuestGameVisualDraftDto, 'id' | 'storeId'> = {},
@@ -9864,6 +9933,41 @@ export class GuestGamificationService {
     });
   }
 
+  private buildPromoCardData(
+    user: AuthenticatedUser,
+    dto: GuestGamePromoCardDto,
+    isCreate: boolean,
+  ):
+    | Prisma.GuestGamePromoCardUncheckedCreateInput
+    | Prisma.GuestGamePromoCardUncheckedUpdateInput {
+    return clean({
+      tenantId: isCreate ? user.tenantId : undefined,
+      createdByUserId: isCreate ? actorUserId(user) : undefined,
+      title: requiredString(dto.title, 'Название промо-баннера', isCreate),
+      label: nullableString(dto.label),
+      description: nullableString(dto.description),
+      tag: nullableString(dto.tag),
+      status: enumValue(
+        dto.status,
+        statusValues,
+        isCreate ? 'DRAFT' : undefined,
+      ),
+      targetAnchor: nullableString(dto.targetAnchor),
+      priority: intValue(dto.priority) ?? (isCreate ? 0 : undefined),
+      storeIds: jsonValue(dto.storeIds),
+      periodFrom: dateValue(dto.periodFrom),
+      periodTo: dateValue(dto.periodTo),
+      metadata:
+        jsonValue(dto.metadata) ??
+        (isCreate
+          ? {
+              source: 'advanced_editor',
+              imageAspectRatio: '9:16',
+            }
+          : undefined),
+    });
+  }
+
   private async buildRewardData(
     user: AuthenticatedUser,
     dto: GuestGameRewardDto,
@@ -10876,6 +10980,8 @@ function visualEditorPayloadUsesRule(
       return payload.missions.some((item) => item.id === id);
     case 'season':
       return payload.battlePass.enabled && payload.battlePass.id === id;
+    case 'promoCard':
+      return payload.promoCards.some((item) => item.id === id);
   }
 }
 
@@ -16668,6 +16774,8 @@ function normalizeVisualEditorPayload(
           targetAnchor: visualNullableString(itemRecord.targetAnchor),
           periodFrom: visualDateString(itemRecord.periodFrom),
           periodTo: visualDateString(itemRecord.periodTo),
+          metadata: (jsonValue(itemRecord.metadata) ??
+            null) as Prisma.JsonValue | null,
         };
       })
       .slice(0, 12),
@@ -16818,6 +16926,7 @@ function visualPromoFromRule(
     targetAnchor: rule.targetAnchor,
     periodFrom: rule.periodFrom,
     periodTo: rule.periodTo,
+    metadata: rule.metadata,
   };
 }
 
@@ -16989,6 +17098,8 @@ function buildVisualPromoCardData(
   storeIds: string[],
   item: GuestGameVisualEditorPromoCard,
 ) {
+  const metadata = jsonRecord(item.metadata);
+
   return clean({
     tenantId: user.tenantId,
     createdByUserId: actorUserId(user),
@@ -17001,7 +17112,10 @@ function buildVisualPromoCardData(
     storeIds,
     periodFrom: item.periodFrom ? new Date(item.periodFrom) : null,
     periodTo: item.periodTo ? new Date(item.periodTo) : null,
-    metadata: { source: 'visual_editor' },
+    metadata: {
+      ...metadata,
+      source: metadata.source ?? 'visual_editor',
+    },
   });
 }
 
@@ -17222,15 +17336,22 @@ function buildVisualEditorPreviewSummary(
     },
     promoCards: {
       total: payload.promoCards.length,
-      featured: payload.promoCards.slice(0, 3).map((item, index) => ({
-        id: item.id ?? `preview-promo-${index}`,
-        label: item.label,
-        title: item.title,
-        description: item.description,
-        tag: item.tag,
-        targetAnchor: item.targetAnchor,
-        periodTo: item.periodTo,
-      })),
+      featured: payload.promoCards.slice(0, 3).map((item, index) => {
+        const metadata = jsonRecord(item.metadata);
+
+        return {
+          id: item.id ?? `preview-promo-${index}`,
+          label: item.label,
+          title: item.title,
+          description: item.description,
+          tag: item.tag,
+          targetAnchor: item.targetAnchor,
+          imageUrl: nullableString(metadata.imageUrl),
+          actionLabel: nullableString(metadata.actionLabel),
+          actionUrl: nullableString(metadata.actionUrl),
+          periodTo: item.periodTo,
+        };
+      }),
     },
     lootBoxes: {
       total: payload.lootBoxes.length,

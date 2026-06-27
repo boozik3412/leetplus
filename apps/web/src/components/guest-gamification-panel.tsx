@@ -26,6 +26,7 @@ import type {
   GuestGameLootBox,
   GuestGameMission,
   GuestGamePilotRunbookAction,
+  GuestGamePromoCard,
   GuestGameProfile,
   GuestGameProfileStatus,
   GuestGamePipelineRunResult,
@@ -67,12 +68,13 @@ export type TabId =
   | "lootBoxes"
   | "missions"
   | "seasons"
+  | "promoCards"
   | "rewards"
   | "testRun";
 
 export type EditorMode = "advanced" | "visual";
 
-type RuleTemplateType = "loot-boxes" | "missions" | "seasons";
+type RuleTemplateType = "loot-boxes" | "missions" | "seasons" | "promo-cards";
 
 const editorModeOptions = [
   ["advanced", "Расширенные настройки"],
@@ -250,6 +252,26 @@ type SeasonForm = {
   note: string;
 };
 
+type PromoBannerForm = {
+  title: string;
+  label: string;
+  description: string;
+  tag: string;
+  status: GuestGameStatus;
+  targetAnchor: string;
+  priority: string;
+  storeIds: string[];
+  periodFrom: string;
+  periodTo: string;
+  actionLabel: string;
+  actionUrl: string;
+  imageUrl: string;
+  imageSource: string;
+  imageScale: string;
+  imageOffsetX: string;
+  imageOffsetY: string;
+};
+
 type RewardForm = {
   profileId: string;
   guestId: string;
@@ -317,8 +339,17 @@ const tabs: Array<{ id: TabId; label: string }> = [
   { id: "lootBoxes", label: "Лутбоксы" },
   { id: "missions", label: "Миссии" },
   { id: "seasons", label: "Battle Pass" },
+  { id: "promoCards", label: "Промо баннеры" },
   { id: "testRun", label: "Тест запуска" },
   { id: "rewards", label: "Кошелек" },
+];
+
+const promoTargetOptions = [
+  { value: "", label: "Главный экран" },
+  { value: "lootboxes", label: "Лутбоксы" },
+  { value: "missions", label: "Миссии" },
+  { value: "battlePass", label: "Battle Pass" },
+  { value: "rewards", label: "Кошелек наград" },
 ];
 
 const dryRunEventOptions = [
@@ -966,6 +997,26 @@ const defaultSeasonForm: SeasonForm = {
   note: "Premium включается вручную после оплаты или решения управляющего.",
 };
 
+const defaultPromoBannerForm: PromoBannerForm = {
+  title: "Новая акция клуба",
+  label: "Акция",
+  description: "Короткое описание для гостевой главной.",
+  tag: "активно",
+  status: "DRAFT",
+  targetAnchor: "missions",
+  priority: "0",
+  storeIds: [],
+  periodFrom: "",
+  periodTo: "",
+  actionLabel: "Открыть",
+  actionUrl: "",
+  imageUrl: "",
+  imageSource: "",
+  imageScale: "1.15",
+  imageOffsetX: "0",
+  imageOffsetY: "0",
+};
+
 const defaultRewardForm: RewardForm = {
   profileId: "",
   guestId: "",
@@ -1055,6 +1106,8 @@ export function GuestGamificationPanel({
   const [missionForm, setMissionForm] =
     useState<MissionForm>(defaultMissionForm);
   const [seasonForm, setSeasonForm] = useState<SeasonForm>(defaultSeasonForm);
+  const [promoBannerForm, setPromoBannerForm] =
+    useState<PromoBannerForm>(defaultPromoBannerForm);
   const [rewardForm, setRewardForm] = useState<RewardForm>(defaultRewardForm);
   const [rewardRedeemForm, setRewardRedeemForm] =
     useState<RewardRedeemForm>(defaultRewardRedeemForm);
@@ -1082,6 +1135,8 @@ export function GuestGamificationPanel({
   const [isMissionFormOpen, setIsMissionFormOpen] = useState(false);
   const [editingSeasonId, setEditingSeasonId] = useState<string | null>(null);
   const [isSeasonFormOpen, setIsSeasonFormOpen] = useState(false);
+  const [editingPromoBannerId, setEditingPromoBannerId] = useState<string | null>(null);
+  const [isPromoBannerFormOpen, setIsPromoBannerFormOpen] = useState(false);
   const [editingRewardId, setEditingRewardId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -1184,6 +1239,26 @@ export function GuestGamificationPanel({
     setSeasonForm(defaultSeasonForm);
     setEditingSeasonId(null);
     setIsSeasonFormOpen(false);
+  }
+
+  function editPromoBanner(promoCard: GuestGamePromoCard) {
+    setPromoBannerForm(promoCardToForm(promoCard));
+    setEditingPromoBannerId(promoCard.id);
+    setIsPromoBannerFormOpen(true);
+    setActiveTab("promoCards");
+  }
+
+  function createPromoBanner() {
+    setPromoBannerForm(defaultPromoBannerForm);
+    setEditingPromoBannerId(null);
+    setIsPromoBannerFormOpen(true);
+    setActiveTab("promoCards");
+  }
+
+  function resetPromoBannerForm() {
+    setPromoBannerForm(defaultPromoBannerForm);
+    setEditingPromoBannerId(null);
+    setIsPromoBannerFormOpen(false);
   }
 
   function editReward(reward: GuestGameReward) {
@@ -1377,6 +1452,42 @@ export function GuestGamificationPanel({
       }
 
       resetSeasonForm();
+      await reloadWorkspace();
+    });
+  }
+
+  async function savePromoBanner() {
+    await saveAction("promoBanner", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для изменения промо-баннеров нужно право `Геймификация: правила`.",
+      );
+
+      const metadata = await buildPromoBannerMetadata(promoBannerForm);
+      const payload = {
+        title: promoBannerForm.title,
+        label: nullable(promoBannerForm.label),
+        description: nullable(promoBannerForm.description),
+        tag: nullable(promoBannerForm.tag),
+        status: promoBannerForm.status,
+        targetAnchor: nullable(promoBannerForm.targetAnchor),
+        priority: promoBannerForm.priority,
+        storeIds: promoBannerForm.storeIds,
+        periodFrom: nullable(promoBannerForm.periodFrom),
+        periodTo: nullable(promoBannerForm.periodTo),
+        metadata,
+      };
+
+      if (editingPromoBannerId) {
+        await patchJson(
+          `/api/guests/gamification/promo-cards/${editingPromoBannerId}`,
+          payload,
+        );
+      } else {
+        await postJson("/api/guests/gamification/promo-cards", payload);
+      }
+
+      resetPromoBannerForm();
       await reloadWorkspace();
     });
   }
@@ -1872,6 +1983,10 @@ export function GuestGamificationPanel({
         resetSeasonForm();
       }
 
+      if (type === "promo-cards" && editingPromoBannerId === id) {
+        resetPromoBannerForm();
+      }
+
       await reloadWorkspace();
     });
   }
@@ -2158,6 +2273,25 @@ export function GuestGamificationPanel({
           onEdit={editSeason}
           onCreateNew={createSeason}
           onReset={resetSeasonForm}
+          onStatus={updateRuleStatus}
+          onDelete={deleteRuleTemplate}
+          saving={saving}
+          canManage={access.canManageRules}
+        />
+      ) : null}
+
+      {activeTab === "promoCards" ? (
+        <PromoBannersTab
+          form={promoBannerForm}
+          setForm={setPromoBannerForm}
+          promoCards={workspace.promoCards}
+          stores={stores}
+          editingId={editingPromoBannerId}
+          isFormOpen={isPromoBannerFormOpen}
+          onSave={savePromoBanner}
+          onEdit={editPromoBanner}
+          onCreateNew={createPromoBanner}
+          onReset={resetPromoBannerForm}
           onStatus={updateRuleStatus}
           onDelete={deleteRuleTemplate}
           saving={saving}
@@ -6843,6 +6977,429 @@ function SeasonsTab({
   );
 }
 
+function PromoBannersTab({
+  form,
+  setForm,
+  promoCards,
+  stores,
+  editingId,
+  isFormOpen,
+  onSave,
+  onEdit,
+  onCreateNew,
+  onReset,
+  onStatus,
+  onDelete,
+  saving,
+  canManage,
+}: {
+  form: PromoBannerForm;
+  setForm: (form: PromoBannerForm) => void;
+  promoCards: GuestGamePromoCard[];
+  stores: Store[];
+  editingId: string | null;
+  isFormOpen: boolean;
+  onSave: () => Promise<void>;
+  onEdit: (promoCard: GuestGamePromoCard) => void;
+  onCreateNew: () => void;
+  onReset: () => void;
+  onStatus: (
+    type: RuleTemplateType,
+    id: string,
+    status: GuestGameStatus,
+  ) => Promise<void>;
+  onDelete: (type: RuleTemplateType, id: string, name: string) => Promise<void>;
+  saving: string | null;
+  canManage: boolean;
+}) {
+  const promoTitle = form.title.trim();
+  const formTitle =
+    editingId && promoTitle
+      ? `Редактирование промо баннера "${promoTitle}"`
+      : editingId
+        ? "Редактирование промо баннера"
+        : "Настройка промо баннера";
+
+  return (
+    <RulesLayout
+      canManage={canManage}
+      formTitle={formTitle}
+      formAction={
+        !isFormOpen ? (
+          <button
+            type="button"
+            className={`${primaryButtonClass} sm:min-w-52`}
+            onClick={onCreateNew}
+          >
+            Создать новый промо баннер
+          </button>
+        ) : undefined
+      }
+      form={
+        isFormOpen ? (
+          <div className="space-y-4">
+            <FormSection title="Основное">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(180px,0.6fr)]">
+                <Field label="Название">
+                  <input
+                    className={fieldClass}
+                    value={form.title}
+                    onChange={(event) =>
+                      setForm({ ...form, title: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Статус">
+                  <StatusSelect
+                    value={form.status}
+                    onChange={(status) => setForm({ ...form, status })}
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Field label="Лейбл">
+                  <input
+                    className={fieldClass}
+                    value={form.label}
+                    onChange={(event) =>
+                      setForm({ ...form, label: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Тег">
+                  <input
+                    className={fieldClass}
+                    value={form.tag}
+                    onChange={(event) =>
+                      setForm({ ...form, tag: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Приоритет">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={form.priority}
+                    onChange={(event) =>
+                      setForm({ ...form, priority: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Описание">
+                <textarea
+                  className={`${fieldClass} min-h-20`}
+                  value={form.description}
+                  onChange={(event) =>
+                    setForm({ ...form, description: event.target.value })
+                  }
+                />
+              </Field>
+            </FormSection>
+
+            <FormSection title="Баннер 9:16">
+              <PromoBannerImageEditor form={form} setForm={setForm} />
+            </FormSection>
+
+            <FormSection title="Показ и действие">
+              <StoreSelect
+                stores={stores}
+                value={form.storeIds}
+                onChange={(storeIds) => setForm({ ...form, storeIds })}
+              />
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Начало">
+                  <input
+                    className={fieldClass}
+                    type="datetime-local"
+                    value={form.periodFrom}
+                    onChange={(event) =>
+                      setForm({ ...form, periodFrom: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Окончание">
+                  <input
+                    className={fieldClass}
+                    type="datetime-local"
+                    value={form.periodTo}
+                    onChange={(event) =>
+                      setForm({ ...form, periodTo: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Field label="Куда ведет">
+                  <select
+                    className={fieldClass}
+                    value={form.targetAnchor}
+                    onChange={(event) =>
+                      setForm({ ...form, targetAnchor: event.target.value })
+                    }
+                  >
+                    {promoTargetOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Текст действия">
+                  <input
+                    className={fieldClass}
+                    value={form.actionLabel}
+                    onChange={(event) =>
+                      setForm({ ...form, actionLabel: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Внешняя ссылка">
+                  <input
+                    className={fieldClass}
+                    value={form.actionUrl}
+                    onChange={(event) =>
+                      setForm({ ...form, actionUrl: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+            </FormSection>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                className={`${primaryButtonClass} sm:min-w-44`}
+                disabled={saving === "promoBanner"}
+                onClick={onSave}
+              >
+                {editingId ? "Сохранить" : "Создать промо баннер"}
+              </button>
+              {editingId ? (
+                <button type="button" className={smallButtonClass} onClick={onReset}>
+                  Сбросить выбор
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null
+      }
+      listTitle="Созданные промо баннеры"
+      items={promoCards}
+      layout="stacked"
+      renderItem={(item) => {
+        const metadata = promoCardMetadata(item);
+        const imageUrl = metadataString(metadata, "imageUrl");
+
+        return (
+          <RuleCard
+            key={item.id}
+            eyebrow="Сохраненный баннер"
+            title={item.title}
+            status={item.status}
+            subtitle={`${item.label ?? "Промо"} · ${
+              item.description ?? "без описания"
+            }`}
+            meta={[
+              storeScopeLabel(item.storeIds, stores),
+              item.tag ?? "без тега",
+              `приоритет ${item.priority}`,
+              formatDate(item.periodTo) || "без срока",
+            ]}
+            details={
+              <div className="grid gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
+                <PromoBannerThumbnail imageUrl={imageUrl} title={item.title} />
+                <div className="min-w-0 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                  <p>
+                    Формат: 9:16
+                    {imageUrl ? " · изображение загружено" : " · без изображения"}
+                  </p>
+                  <p>
+                    Действие:{" "}
+                    {metadataString(metadata, "actionLabel") ??
+                      promoTargetLabel(item.targetAnchor)}
+                  </p>
+                </div>
+              </div>
+            }
+            onEdit={() => onEdit(item)}
+            onStatus={(status) => onStatus("promo-cards", item.id, status)}
+            saving={saving === `promo-cards-${item.id}`}
+            onDelete={() => onDelete("promo-cards", item.id, item.title)}
+            deleteSaving={saving === `promo-cards-delete-${item.id}`}
+            canManage={canManage}
+          />
+        );
+      }}
+    />
+  );
+}
+
+function PromoBannerImageEditor({
+  form,
+  setForm,
+}: {
+  form: PromoBannerForm;
+  setForm: (form: PromoBannerForm) => void;
+}) {
+  const source = form.imageSource || form.imageUrl;
+  const scale = Number(form.imageScale) || 1;
+  const offsetX = Number(form.imageOffsetX) || 0;
+  const offsetY = Number(form.imageOffsetY) || 0;
+
+  function handleFile(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const imageSource = typeof reader.result === "string" ? reader.result : "";
+      setForm({
+        ...form,
+        imageSource,
+        imageUrl: "",
+        imageScale: "1.15",
+        imageOffsetX: "0",
+        imageOffsetY: "0",
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function applyCrop() {
+    const imageUrl = await renderPromoBannerImage(form);
+    setForm({
+      ...form,
+      imageUrl,
+      imageSource: "",
+    });
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)]">
+      <div className="mx-auto w-[160px]">
+        <div className="relative aspect-[9/16] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
+          {source ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              src={source}
+              style={
+                form.imageSource
+                  ? {
+                      transform: `translate(${offsetX}%, ${offsetY}%) scale(${scale})`,
+                    }
+                  : undefined
+              }
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center px-4 text-center text-xs font-semibold text-zinc-400">
+              9:16
+            </div>
+          )}
+          <div className="pointer-events-none absolute inset-0 border border-white/50" />
+        </div>
+      </div>
+      <div className="space-y-3">
+        <Field label="Изображение">
+          <input
+            className={fieldClass}
+            type="file"
+            accept="image/*"
+            onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
+          />
+        </Field>
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label="Масштаб">
+            <input
+              type="range"
+              min="1"
+              max="2.5"
+              step="0.01"
+              value={form.imageScale}
+              onChange={(event) =>
+                setForm({ ...form, imageScale: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Сдвиг X">
+            <input
+              type="range"
+              min="-35"
+              max="35"
+              step="1"
+              value={form.imageOffsetX}
+              onChange={(event) =>
+                setForm({ ...form, imageOffsetX: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Сдвиг Y">
+            <input
+              type="range"
+              min="-35"
+              max="35"
+              step="1"
+              value={form.imageOffsetY}
+              onChange={(event) =>
+                setForm({ ...form, imageOffsetY: event.target.value })
+              }
+            />
+          </Field>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className={smallButtonClass}
+            disabled={!source}
+            onClick={applyCrop}
+          >
+            Применить кадр
+          </button>
+          {source ? (
+            <button
+              type="button"
+              className={smallButtonClass}
+              onClick={() =>
+                setForm({
+                  ...form,
+                  imageUrl: "",
+                  imageSource: "",
+                })
+              }
+            >
+              Убрать изображение
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromoBannerThumbnail({
+  imageUrl,
+  title,
+}: {
+  imageUrl: string | null;
+  title: string;
+}) {
+  return (
+    <div className="aspect-[9/16] w-[72px] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
+      {imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img alt={title} className="h-full w-full object-cover" src={imageUrl} />
+      ) : (
+        <div className="flex h-full items-center justify-center text-[11px] font-bold text-zinc-400">
+          9:16
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RewardsTab({
   form,
   setForm,
@@ -10882,6 +11439,31 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
   };
 }
 
+function promoCardToForm(promoCard: GuestGamePromoCard): PromoBannerForm {
+  const metadata = promoCardMetadata(promoCard);
+  const crop = asRecord(metadata.crop);
+
+  return {
+    title: promoCard.title,
+    label: promoCard.label ?? "",
+    description: promoCard.description ?? "",
+    tag: promoCard.tag ?? "",
+    status: promoCard.status,
+    targetAnchor: promoCard.targetAnchor ?? "",
+    priority: String(promoCard.priority),
+    storeIds: promoCard.storeIds,
+    periodFrom: dateInputValue(promoCard.periodFrom),
+    periodTo: dateInputValue(promoCard.periodTo),
+    actionLabel: metadataString(metadata, "actionLabel") ?? "Открыть",
+    actionUrl: metadataString(metadata, "actionUrl") ?? "",
+    imageUrl: metadataString(metadata, "imageUrl") ?? "",
+    imageSource: "",
+    imageScale: String(numberMetadata(crop, "scale", 1.15)),
+    imageOffsetX: String(numberMetadata(crop, "offsetX", 0)),
+    imageOffsetY: String(numberMetadata(crop, "offsetY", 0)),
+  };
+}
+
 function rewardToForm(reward: GuestGameReward): RewardForm {
   return {
     profileId: reward.profile?.id ?? "",
@@ -10945,11 +11527,137 @@ function ruleTemplateLabel(type: RuleTemplateType) {
       return "миссию";
     case "seasons":
       return "сезон";
+    case "promo-cards":
+      return "промо-баннер";
   }
 }
 
 function nullable(value: string) {
   return value.trim() ? value.trim() : null;
+}
+
+function promoCardMetadata(promoCard: GuestGamePromoCard) {
+  return asRecord(promoCard.metadata);
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function numberMetadata(
+  metadata: Record<string, unknown>,
+  key: string,
+  fallback: number,
+) {
+  const value = metadata[key];
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function storeScopeLabel(storeIds: string[], stores: Store[]) {
+  if (!storeIds.length) {
+    return "все клубы";
+  }
+
+  const names = storeIds
+    .map((storeId) => stores.find((store) => store.id === storeId)?.name)
+    .filter((value): value is string => Boolean(value));
+
+  if (!names.length) {
+    return `${storeIds.length} клуб.`;
+  }
+
+  return names.length > 2
+    ? `${names.slice(0, 2).join(", ")} +${names.length - 2}`
+    : names.join(", ");
+}
+
+function promoTargetLabel(targetAnchor: string | null) {
+  return (
+    promoTargetOptions.find((option) => option.value === (targetAnchor ?? ""))
+      ?.label ?? "Главный экран"
+  );
+}
+
+async function buildPromoBannerMetadata(form: PromoBannerForm) {
+  const imageUrl = await renderPromoBannerImage(form);
+  const scale = Number(form.imageScale);
+  const offsetX = Number(form.imageOffsetX);
+  const offsetY = Number(form.imageOffsetY);
+
+  return {
+    source: "advanced_editor",
+    imageAspectRatio: "9:16",
+    imageUrl: imageUrl || null,
+    actionLabel: nullable(form.actionLabel),
+    actionUrl: nullable(form.actionUrl),
+    crop: {
+      scale: Number.isFinite(scale) ? scale : 1.15,
+      offsetX: Number.isFinite(offsetX) ? offsetX : 0,
+      offsetY: Number.isFinite(offsetY) ? offsetY : 0,
+    },
+  };
+}
+
+async function renderPromoBannerImage(form: PromoBannerForm) {
+  const source = form.imageSource || form.imageUrl;
+
+  if (!source) {
+    return "";
+  }
+
+  if (!form.imageSource || typeof window === "undefined") {
+    return form.imageUrl || source;
+  }
+
+  return new Promise<string>((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      const targetWidth = 900;
+      const targetHeight = 1600;
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const context = canvas.getContext("2d");
+
+      if (!context || !image.naturalWidth || !image.naturalHeight) {
+        resolve(source);
+        return;
+      }
+
+      const scale = Math.max(
+        targetWidth / image.naturalWidth,
+        targetHeight / image.naturalHeight,
+      ) * (Number(form.imageScale) || 1);
+      const drawWidth = image.naturalWidth * scale;
+      const drawHeight = image.naturalHeight * scale;
+      const offsetX = Number(form.imageOffsetX) || 0;
+      const offsetY = Number(form.imageOffsetY) || 0;
+      const dx = (targetWidth - drawWidth) / 2 + (offsetX / 100) * targetWidth;
+      const dy =
+        (targetHeight - drawHeight) / 2 + (offsetY / 100) * targetHeight;
+
+      context.fillStyle = "#050b0e";
+      context.fillRect(0, 0, targetWidth, targetHeight);
+      context.drawImage(image, dx, dy, drawWidth, drawHeight);
+
+      try {
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      } catch {
+        resolve(source);
+      }
+    };
+    image.onerror = () => resolve(source);
+    image.src = source;
+  });
 }
 
 function csvList(value: string) {

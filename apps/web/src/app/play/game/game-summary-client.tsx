@@ -39,6 +39,7 @@ type HomeBanner = {
   tag: string;
   featured?: boolean;
   href: string;
+  imageUrl?: string | null;
 };
 type HomeLootCard = {
   id: string;
@@ -1076,18 +1077,25 @@ function HomeBannerGrid({
     <div className="lp-club-banner-grid" aria-label="Баннеры клуба">
       {banners.map((banner) => {
         const titleStyle = bannerTitleStyle(banner.title);
+        const bannerStyle: CSSProperties = banner.imageUrl
+          ? {
+              ...titleStyle,
+              backgroundImage: `linear-gradient(180deg, rgba(3, 7, 9, 0.12), rgba(3, 7, 9, 0.68)), url("${cssUrl(banner.imageUrl)}")`,
+            }
+          : titleStyle;
 
         return (
           <Link
             key={banner.id}
             href={banner.href}
-            target={banner.href === "/play/game/rewards" ? "_blank" : undefined}
-            rel={banner.href === "/play/game/rewards" ? "noreferrer" : undefined}
+            target={banner.href.startsWith("http") || banner.href === "/play/game/rewards" ? "_blank" : undefined}
+            rel={banner.href.startsWith("http") || banner.href === "/play/game/rewards" ? "noreferrer" : undefined}
             className={[
               "lp-club-banner",
               banner.featured ? "is-featured" : "",
+              banner.imageUrl ? "has-image" : "",
             ].join(" ")}
-            style={titleStyle}
+            style={bannerStyle}
             onClick={() => onToast(`Открыт раздел: ${banner.title}.`)}
           >
             <span className="lp-club-banner-content">
@@ -2180,6 +2188,10 @@ function bannerTitleSize(title: string) {
   return 24;
 }
 
+function cssUrl(value: string) {
+  return value.replace(/"/g, '\\"');
+}
+
 function normalizeNickname(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -2249,7 +2261,12 @@ function buildHomeBanners(
         card.tag ??
         (card.periodTo ? `до ${formatDate(card.periodTo)}` : "активно"),
       featured: index === 0,
-      href: card.targetAnchor ? `#${card.targetAnchor}` : (fallbackBanners[index]?.href ?? "#missions"),
+      href:
+        card.actionUrl ??
+        (card.targetAnchor
+          ? `#${card.targetAnchor}`
+          : (fallbackBanners[index]?.href ?? "#missions")),
+      imageUrl: card.imageUrl,
     }),
   );
 
@@ -6039,6 +6056,17 @@ const clubHomeCss = `
   background:
     radial-gradient(circle at 70% 18%, rgba(208, 170, 108, 0.2), transparent 24%),
     linear-gradient(135deg, transparent 0 38%, rgba(208, 170, 108, 0.15) 38% 39%, transparent 39% 100%);
+}
+
+.lp-club-banner.has-image {
+  background-position: center;
+  background-size: cover;
+}
+
+.lp-club-banner.has-image::before {
+  background:
+    linear-gradient(180deg, rgba(3, 7, 9, 0.08), rgba(3, 7, 9, 0.66)),
+    linear-gradient(135deg, transparent 0 34%, rgba(131, 228, 236, 0.12) 34% 35%, transparent 35% 100%);
 }
 
 .lp-club-banner-content {

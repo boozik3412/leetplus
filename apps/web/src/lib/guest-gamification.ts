@@ -163,8 +163,7 @@ export type GuestGamePromoCard = {
   periodFrom: string | null;
   periodTo: string | null;
   targetAnchor: string | null;
-  payload: unknown;
-  note: string | null;
+  metadata: unknown;
   createdAt: string;
   updatedAt: string;
   createdBy: GuestGameUser | null;
@@ -234,6 +233,7 @@ export type GuestGameVisualEditorPromoCard = {
   targetAnchor: string | null;
   periodFrom: string | null;
   periodTo: string | null;
+  metadata: unknown;
 };
 
 export type GuestGameVisualEditorCheckIn = {

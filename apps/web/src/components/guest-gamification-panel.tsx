@@ -497,8 +497,12 @@ const lootBoxTriggerOptions = [
   { value: "VISIT", label: "Визит в клуб" },
   { value: "PLAY_HOUR", label: "Час игры" },
   { value: "BAR_PURCHASE", label: "Покупка в баре" },
+  { value: "PRODUCT_PURCHASE", label: "Товарная покупка" },
   { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
   { value: "GUEST_LOG", label: "Событие Langame" },
+  { value: "REFERRAL_ACCEPTED", label: "Реферал принят" },
+  { value: "REPEAT_VISIT", label: "Повторный визит" },
+  { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
 ];
 
 const lootBoxSegmentOptions = [

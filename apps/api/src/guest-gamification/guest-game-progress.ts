@@ -144,7 +144,8 @@ export function guestGameTriggerMatches(
     SESSION: ['SESSION_START', 'PLAY_HOUR', 'SESSION_STOP'],
     BAR_PURCHASE: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
     PRODUCT_PURCHASE: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
-    BALANCE_TOPUP: ['BALANCE_TOPUP'],
+    BALANCE_TOPUP: ['BALANCE_TOPUP', 'BALANCE_TOP_UP'],
+    BALANCE_TOP_UP: ['BALANCE_TOPUP', 'BALANCE_TOP_UP'],
     REFERRAL: ['REFERRAL_ACCEPTED', 'GAME_REFERRAL_ACCEPTED'],
     REFERRAL_ACCEPTED: ['REFERRAL_ACCEPTED', 'GAME_REFERRAL_ACCEPTED'],
     PACKET_SESSION: ['SESSION_START', 'PLAY_HOUR'],
@@ -165,7 +166,9 @@ function matchesProgressEvent(
     const actual = normalizeProgressToken(event.eventType);
     const accepted = options.eventTypes.map(normalizeProgressToken);
 
-    if (!accepted.includes(actual)) {
+    if (
+      !accepted.some((expected) => guestGameTriggerMatches(expected, actual))
+    ) {
       return false;
     }
   } else if (!guestGameTriggerMatches(rule.triggerKind, event.eventType)) {

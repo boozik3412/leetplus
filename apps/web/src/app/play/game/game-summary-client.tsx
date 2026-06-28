@@ -52,6 +52,8 @@ type HomeLootCard = {
   openable: boolean;
   openBlocker: string | null;
   rewardLabel: string | null;
+  caseRarity: GuestPortalLootBoxRarity;
+  caseRarityLabel: string;
   rewardRarity?: GuestPortalLootBoxRarity | null;
   rewardRarityLabel?: string | null;
   rewardDropChance?: number | null;
@@ -143,6 +145,12 @@ const LOOTBOX_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
   rare: "Редкая",
   epic: "Эпическая",
   legendary: "Легендарная",
+};
+const LOOTBOX_CASE_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
+  common: "Обычный",
+  rare: "Редкий",
+  epic: "Эпический",
+  legendary: "Легендарный",
 };
 const REWARD_HISTORY_SOURCE_ORDER: RewardHistorySource[] = [
   "lootbox",
@@ -1173,7 +1181,7 @@ function HomeLootBoxes({
             </span>
             <span className="lp-lootbox-entry-art" aria-hidden="true">
               <Image
-                src={lootboxSkinForRarity(card.rewardRarity)}
+                src={lootboxSkinForRarity(card.caseRarity)}
                 alt=""
                 width={1024}
                 height={1024}
@@ -1227,10 +1235,9 @@ function LootboxOpeningOverlay({
     normalizeLootboxRarity(roulette?.rarity ?? card.rewardRarity) ?? "common";
   const rewardRarityLabel =
     roulette?.rarityLabel ?? card.rewardRarityLabel ?? LOOTBOX_RARITY_LABELS[rewardRarity];
+  const caseRarity = normalizeLootboxRarity(card.caseRarity) ?? "common";
   const rarityRevealed = isOpening || isOpen || isCollected;
-  const visibleLootboxSkin = lootboxSkinForRarity(
-    rarityRevealed ? rewardRarity : "common",
-  );
+  const visibleLootboxSkin = lootboxSkinForRarity(caseRarity);
   const rouletteVisible =
     Boolean(roulette) && (isRolling || isOpening || isOpen || isCollected);
   const rouletteResultLabel = !roulette
@@ -2316,6 +2323,8 @@ function buildHomeLootCards(
       openable: false,
       openBlocker: "Лутбокс появится после настройки клуба.",
       rewardLabel: null,
+      caseRarity: "common",
+      caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS.common,
       weeklyOpenedCount: 0,
       weeklyLimit: null,
       dailyOpenedCount: 0,
@@ -2332,6 +2341,8 @@ function buildHomeLootCards(
       openable: false,
       openBlocker: "Командный лутбокс появится после настройки клуба.",
       rewardLabel: null,
+      caseRarity: "common",
+      caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS.common,
       weeklyOpenedCount: 0,
       weeklyLimit: null,
       dailyOpenedCount: 0,
@@ -2346,6 +2357,8 @@ function buildHomeLootCards(
       openable: false,
       openBlocker: "Ранговый кейс откроется после настройки сезона.",
       rewardLabel: null,
+      caseRarity: "common",
+      caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS.common,
       weeklyOpenedCount: 0,
       weeklyLimit: null,
       dailyOpenedCount: 0,
@@ -2364,6 +2377,9 @@ function buildHomeLootCards(
     openable: lootBox.openable,
     openBlocker: lootBox.openBlocker,
     rewardLabel: lootBox.rewardLabel,
+    caseRarity: normalizeLootboxRarity(lootBox.caseRarity) ?? "common",
+    caseRarityLabel:
+      lootBox.caseRarityLabel ?? LOOTBOX_CASE_RARITY_LABELS[lootBox.caseRarity],
     rewardRarity: lootBox.latestReward?.rewardRarity ?? null,
     rewardRarityLabel: lootBox.latestReward?.rewardRarityLabel ?? null,
     rewardDropChance: lootBox.latestReward?.rewardDropChance ?? null,
@@ -9848,6 +9864,9 @@ function buildLootboxRouletteState({
         openable: item.openable,
         openBlocker: item.openBlocker,
         rewardLabel: item.rewardLabel,
+        caseRarity: normalizeLootboxRarity(item.caseRarity) ?? "common",
+        caseRarityLabel:
+          item.caseRarityLabel ?? LOOTBOX_CASE_RARITY_LABELS[item.caseRarity],
         rewardRarity: item.latestReward?.rewardRarity ?? null,
         rewardRarityLabel: item.latestReward?.rewardRarityLabel ?? null,
         rewardDropChance: item.latestReward?.rewardDropChance ?? null,

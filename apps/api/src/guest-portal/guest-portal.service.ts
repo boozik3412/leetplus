@@ -68,6 +68,14 @@ const USER_CALL_AUTH_CHANNEL = 'USER_CALL';
 const USER_CALL_AUTH_CONFIRMED_STATUS = 'CALL_CONFIRMED';
 const USER_CALL_AUTH_SESSION_ISSUED_STATUS = 'CALL_SESSION_ISSUED';
 const USER_CALL_PROVIDER_MANUAL = 'MANUAL';
+const LOOTBOX_CASE_RARITY_LABELS = {
+  common: 'Обычный',
+  rare: 'Редкий',
+  epic: 'Эпический',
+  legendary: 'Легендарный',
+} as const;
+
+type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
 const USER_CALL_PROVIDER_SMS_RU_CALLCHECK = 'SMS_RU_CALLCHECK';
 const SMS_RU_CALLCHECK_BASE_URL = 'https://sms.ru';
 const SMS_RU_CALLCHECK_TTL_MINUTES = 5;
@@ -861,6 +869,8 @@ export type GuestPortalGameSummary = {
         | 'triggerKind'
         | 'rewardLabel'
         | 'rewardType'
+        | 'caseRarity'
+        | 'caseRarityLabel'
         | 'openState'
         | 'openable'
         | 'openBlocker'
@@ -1159,6 +1169,8 @@ export type GuestPortalLootBox = {
   triggerKind: string;
   rewardLabel: string | null;
   rewardType: string;
+  caseRarity: GuestPortalLootBoxCaseRarity;
+  caseRarityLabel: string;
   manualApprovalRequired: boolean;
   note: string | null;
   openState: 'OPENABLE' | 'WAITING_EVENT' | 'LIMIT_REACHED';
@@ -9912,6 +9924,8 @@ function buildGameSummaryFromPortal(
       triggerKind: lootBox.triggerKind,
       rewardLabel: lootBox.rewardLabel,
       rewardType: lootBox.rewardType,
+      caseRarity: lootBox.caseRarity,
+      caseRarityLabel: lootBox.caseRarityLabel,
       openState: lootBox.openState,
       openable: lootBox.openable,
       openBlocker: lootBox.openBlocker,
@@ -12027,11 +12041,13 @@ function mapLootBox(
     manualApprovalRequired: boolean;
     note: string | null;
     limits: Prisma.JsonValue | null;
+    probabilityRules: Prisma.JsonValue | null;
   },
   rewards: GuestPortalRewardRow[],
 ): GuestPortalLootBox {
   const rewardState = buildLootBoxRewardState(row.id, rewards);
   const openState = buildLootBoxOpenState(row, rewards);
+  const caseRarity = lootBoxCaseRarity(row.probabilityRules);
 
   return {
     id: row.id,
@@ -12039,11 +12055,26 @@ function mapLootBox(
     triggerKind: row.triggerKind,
     rewardLabel: row.rewardLabel,
     rewardType: row.rewardType,
+    caseRarity,
+    caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS[caseRarity],
     manualApprovalRequired: row.manualApprovalRequired,
     note: row.note,
     ...openState,
     ...rewardState,
   };
+}
+
+function lootBoxCaseRarity(value: unknown): GuestPortalLootBoxCaseRarity {
+  const record = jsonRecord(value);
+  const raw = record.caseRarity ?? record.skinRarity ?? record.lootBoxRarity;
+  const parsed = typeof raw === 'string' ? raw.toLowerCase() : null;
+
+  return parsed === 'rare' ||
+    parsed === 'epic' ||
+    parsed === 'legendary' ||
+    parsed === 'common'
+    ? parsed
+    : 'common';
 }
 
 function buildLootBoxOpenState(

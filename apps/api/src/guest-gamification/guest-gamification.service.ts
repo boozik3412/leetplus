@@ -57,6 +57,12 @@ const lootBoxRewardRarityLabels: Record<GuestGameRewardRarity, string> = {
   epic: 'Эпическая',
   legendary: 'Легендарная',
 };
+const lootBoxCaseRarityLabels: Record<GuestGameRewardRarity, string> = {
+  common: 'Обычный',
+  rare: 'Редкий',
+  epic: 'Эпический',
+  legendary: 'Легендарный',
+};
 const eventSources = [
   'MANUAL',
   'LANGAME',
@@ -963,6 +969,7 @@ export type GuestGameVisualEditorLootBox = {
   rewardType: string;
   rewardAmount: number | null;
   rewardLabel: string;
+  caseRarity: GuestGameRewardRarity;
   prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;
@@ -16792,6 +16799,7 @@ function normalizeVisualEditorPayload(
             visualString(itemRecord.rewardType, 'PROMOCODE'),
           ),
           rewardAmount: visualNumberOrNull(itemRecord.rewardAmount),
+          caseRarity: visualLootBoxCaseRarity(itemRecord),
           rewardLabel: visualString(itemRecord.rewardLabel, 'Награда клуба'),
           prizes: visualLootBoxPrizes(itemRecord),
           condition: visualString(itemRecord.condition, 'Активность в клубе'),
@@ -16939,6 +16947,7 @@ function visualLootBoxFromRule(
     rewardType: canonicalLootBoxRewardType(rule.rewardType),
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel ?? rule.name,
+    caseRarity: visualLootBoxCaseRarity(probabilityRules),
     prizes: visualLootBoxPrizes({
       rewardType: rule.rewardType,
       rewardAmount: rule.rewardAmount,
@@ -17126,6 +17135,7 @@ function buildVisualLootBoxData(
     probabilityRules: {
       type: probabilityType,
       source: 'visual_editor',
+      caseRarity: visualLootBoxCaseRarity({ caseRarity: item.caseRarity }),
       totalChancePercent: Math.round(totalChancePercent * 100) / 100,
       prizes: probabilityPrizes.map((prize) => ({
         rewardType: canonicalLootBoxRewardType(prize.rewardType),
@@ -17445,6 +17455,11 @@ function buildVisualEditorPreviewSummary(
         triggerKind: item.triggerKind,
         rewardLabel: item.rewardLabel,
         rewardType: canonicalLootBoxRewardType(item.rewardType),
+        caseRarity: visualLootBoxCaseRarity({ caseRarity: item.caseRarity }),
+        caseRarityLabel:
+          lootBoxCaseRarityLabels[
+            visualLootBoxCaseRarity({ caseRarity: item.caseRarity })
+          ],
         manualApprovalRequired: false,
         note: null,
         openState: 'WAITING_EVENT',
@@ -17676,6 +17691,20 @@ function visualChancePercent(value: unknown, fallback: number) {
   const safe = parsed == null ? fallback : parsed;
 
   return Math.round(Math.min(100, Math.max(0, safe)) * 100) / 100;
+}
+
+function visualLootBoxCaseRarity(
+  value: Record<string, unknown>,
+): GuestGameRewardRarity {
+  const raw = value.caseRarity ?? value.skinRarity ?? value.lootBoxRarity;
+  const parsed = typeof raw === 'string' ? raw.toLowerCase() : null;
+
+  return parsed === 'rare' ||
+    parsed === 'epic' ||
+    parsed === 'legendary' ||
+    parsed === 'common'
+    ? parsed
+    : 'common';
 }
 
 function visualString(value: unknown, fallback: string) {

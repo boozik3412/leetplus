@@ -298,6 +298,8 @@ export type GuestPortalPayload = {
       triggerKind: string;
       rewardLabel: string | null;
       rewardType: string;
+      caseRarity: GuestPortalLootBoxRarity;
+      caseRarityLabel: string;
       manualApprovalRequired: boolean;
       note: string | null;
       openState: "OPENABLE" | "WAITING_EVENT" | "LIMIT_REACHED";
@@ -631,6 +633,8 @@ export type GuestPortalGameSummary = {
         | "triggerKind"
         | "rewardLabel"
         | "rewardType"
+        | "caseRarity"
+        | "caseRarityLabel"
         | "openState"
         | "openable"
         | "openBlocker"

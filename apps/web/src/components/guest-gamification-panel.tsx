@@ -159,6 +159,7 @@ type LootBoxPrizeForm = {
 
 type LootBoxTimeWindowMode = "ANY" | "QUIET_HOURS" | "CUSTOM";
 type LootBoxWeekdayMode = "ANY" | "WEEKDAYS" | "WEEKENDS" | "CUSTOM";
+type LootBoxCaseRarity = NonNullable<GuestGameReward["rewardRarity"]>;
 
 type LootBoxForm = {
   name: string;
@@ -167,6 +168,7 @@ type LootBoxForm = {
   rewardType: string;
   rewardAmount: string;
   rewardLabel: string;
+  caseRarity: LootBoxCaseRarity;
   audienceId: string;
   segment: string;
   sessionType: string;
@@ -744,6 +746,17 @@ const rewardRarityLabels: Record<
   legendary: "Легендарная",
 };
 
+const lootBoxCaseRarityLabels: Record<LootBoxCaseRarity, string> = {
+  common: "Обычный",
+  rare: "Редкий",
+  epic: "Эпический",
+  legendary: "Легендарный",
+};
+
+const lootBoxCaseRarityOptions = (
+  Object.keys(lootBoxCaseRarityLabels) as LootBoxCaseRarity[]
+).map((value) => ({ value, label: lootBoxCaseRarityLabels[value] }));
+
 const rewardStatusActionLabels: Record<GuestGameRewardStatus, string> = {
   PENDING: "Вернуть к выдаче",
   APPROVED: "Согласовать",
@@ -850,6 +863,7 @@ const defaultLootBoxForm: LootBoxForm = {
   rewardType: defaultLootBoxPrizes[0].rewardType,
   rewardAmount: defaultLootBoxPrizes[0].rewardAmount,
   rewardLabel: defaultLootBoxPrizes[0].rewardLabel,
+  caseRarity: "common",
   audienceId: "",
   segment: "quiet_hours",
   sessionType: "",
@@ -885,6 +899,7 @@ const defaultLootBoxForm: LootBoxForm = {
   }),
   probabilityRulesText: jsonText({
     type: "weighted",
+    caseRarity: "common",
     prizes: defaultLootBoxPrizes.map((prize) => ({
       rewardType: prize.rewardType,
       rewardAmount: Number(prize.rewardAmount),
@@ -6613,6 +6628,32 @@ function LootBoxesTab({
               hideRewardFields
               onChange={(patch) => setForm({ ...form, ...patch })}
             />
+            <FormSection title="Внешний вид кейса">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Качество кейса">
+                  <select
+                    className={fieldClass}
+                    value={form.caseRarity}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        caseRarity: event.target.value as LootBoxCaseRarity,
+                      })
+                    }
+                  >
+                    {lootBoxCaseRarityOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <OptionHelp>
+                    Меняет только скин лутбокса. Редкость выпавшей награды
+                    считается отдельно и не перекрашивает сам кейс.
+                  </OptionHelp>
+                </Field>
+              </div>
+            </FormSection>
             <FormSection
               title="Кому и когда открывать"
             >
@@ -11848,6 +11889,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     rewardType: lootBox.rewardType,
     rewardAmount: moneyFormValue(lootBox.rewardAmount),
     rewardLabel: lootBox.rewardLabel ?? "",
+    caseRarity: lootBoxCaseRarity(lootBox.probabilityRules),
     audienceId: lootBox.audience?.id ?? "",
     segment: lootBox.segment ?? "",
     sessionType: lootBox.sessionType ?? "",
@@ -12606,6 +12648,7 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
   return {
     type: "weighted",
     source: "business_controls",
+    caseRarity: form.caseRarity,
     totalChancePercent: Math.round(totalChancePercent * 100) / 100,
     prizes: safePrizes,
     items: safePrizes.map((prize) => ({
@@ -13112,7 +13155,10 @@ function timeWindowPart(value: unknown, part: 0 | 1, fallback: string) {
 
 function lootBoxPrizesToForm(
   value: unknown,
-  fallback: Pick<LootBoxPrizeForm, "rewardType" | "rewardAmount" | "rewardLabel">,
+  fallback: Pick<
+    LootBoxPrizeForm,
+    "rewardType" | "rewardAmount" | "rewardLabel"
+  >,
 ): LootBoxPrizeForm[] {
   const record = asRecord(value);
   const prizes = Array.isArray(record.prizes) ? record.prizes : [];
@@ -13146,7 +13192,10 @@ function lootBoxPrizesToForm(
 function lootBoxPrizeFromRuleItem(
   value: unknown,
   index: number,
-  fallback: Pick<LootBoxPrizeForm, "rewardType" | "rewardAmount" | "rewardLabel">,
+  fallback: Pick<
+    LootBoxPrizeForm,
+    "rewardType" | "rewardAmount" | "rewardLabel"
+  >,
 ): LootBoxPrizeForm | null {
   const record = asRecord(value);
   const rewardLabel = String(
@@ -13172,6 +13221,18 @@ function lootBoxPrizeFromRuleItem(
       record.chancePercent ?? record.weight ?? record.probability ?? "0",
     ),
   };
+}
+
+function lootBoxCaseRarity(value: unknown): LootBoxCaseRarity {
+  const record = asRecord(value);
+  const raw = record.caseRarity ?? record.skinRarity ?? record.lootBoxRarity;
+
+  return raw === "rare" ||
+    raw === "epic" ||
+    raw === "legendary" ||
+    raw === "common"
+    ? raw
+    : "common";
 }
 
 function numberFormValue(value: unknown) {

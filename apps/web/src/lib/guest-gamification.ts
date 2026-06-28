@@ -198,6 +198,7 @@ export type GuestGameVisualEditorLootBox = {
   rewardType: string;
   rewardAmount: number | null;
   rewardLabel: string;
+  caseRarity: GuestGameRewardRarity;
   prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;

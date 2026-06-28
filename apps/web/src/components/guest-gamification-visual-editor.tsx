@@ -6,6 +6,7 @@ import type {
   GuestGameLootBox,
   GuestGameMission,
   GuestGamePromoCard,
+  GuestGameRewardRarity,
   GuestGameSeason,
   GuestGameStatus,
   GuestGameVisualDraft,
@@ -47,6 +48,17 @@ const statusOptions: GuestGameStatus[] = [
   "FINISHED",
   "ARCHIVED",
 ];
+
+const lootBoxCaseRarityLabels: Record<GuestGameRewardRarity, string> = {
+  common: "Обычный",
+  rare: "Редкий",
+  epic: "Эпический",
+  legendary: "Легендарный",
+};
+
+const lootBoxCaseRarityOptions = (
+  Object.keys(lootBoxCaseRarityLabels) as GuestGameRewardRarity[]
+).map((value) => ({ value, label: lootBoxCaseRarityLabels[value] }));
 const PROMO_BANNER_ACTIVE_LIMIT = 4;
 
 const sectionLabels: Record<EditorSection, string> = {
@@ -587,7 +599,7 @@ function VisualPreview({
                 >
                   <div className="mb-4 grid h-20 place-items-center rounded-lg border border-[#83e4ec42] bg-[#061014]">
                     <Image
-                      src={lootboxSkinForRarity("common")}
+                      src={lootboxSkinForRarity(lootBox.caseRarity)}
                       alt=""
                       width={1024}
                       height={1024}
@@ -1004,6 +1016,30 @@ function LootBoxInspector({
                   disabled={disabled}
                   onChange={(status) => update({ ...item, status })}
                 />
+                <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Качество кейса
+                  <select
+                    className={fieldClass}
+                    value={item.caseRarity}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      update({
+                        ...item,
+                        caseRarity: event.target.value as GuestGameRewardRarity,
+                      })
+                    }
+                  >
+                    {lootBoxCaseRarityOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <EditorHint>
+                    Меняет только изображение кейса. Редкость выпавшей награды
+                    остается отдельной настройкой.
+                  </EditorHint>
+                </label>
               </div>
             </div>
 
@@ -2305,6 +2341,7 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
     triggerKind: "SESSION_START",
     rewardType: "BONUS_BALANCE",
     rewardAmount: 100,
+    caseRarity: "common",
     rewardLabel: "Бонусы Langame",
     prizes: [
       {
@@ -2437,6 +2474,7 @@ function visualLootBoxFromTemplate(
     rewardType: canonicalVisualLootBoxRewardType(lootBox.rewardType),
     rewardAmount: lootBox.rewardAmount,
     rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+    caseRarity: visualLootBoxCaseRarity(probabilityRules),
     prizes: visualLootBoxPrizesFromRules({
       rewardType: lootBox.rewardType,
       rewardAmount: lootBox.rewardAmount,
@@ -2690,6 +2728,17 @@ function templateChancePercent(value: unknown, fallback: number) {
   return Math.round(Math.min(100, Math.max(0, safe)) * 100) / 100;
 }
 
+function visualLootBoxCaseRarity(value: Record<string, unknown>): GuestGameRewardRarity {
+  const raw = value.caseRarity ?? value.skinRarity ?? value.lootBoxRarity;
+
+  return raw === "rare" ||
+    raw === "epic" ||
+    raw === "legendary" ||
+    raw === "common"
+    ? raw
+    : "common";
+}
+
 function templateInt(
   value: unknown,
   fallback: number,
@@ -2872,6 +2921,7 @@ function fallbackLootBoxes(): GuestGameVisualEditorLootBox[] {
       triggerKind: "SESSION_START",
       rewardType: "BONUS_BALANCE",
       rewardAmount: 100,
+      caseRarity: "common",
       rewardLabel: "Бонус за визит",
       prizes: [
         {

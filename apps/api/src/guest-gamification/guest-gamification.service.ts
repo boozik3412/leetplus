@@ -10411,7 +10411,7 @@ export class GuestGamificationService {
       }
     }
 
-    return null;
+    return this.findCachedCheckInSession(tenantId, guest);
   }
 
   private async findCheckInSessionInSource(params: {
@@ -10439,7 +10439,7 @@ export class GuestGamificationService {
 
       for (const row of rows) {
         if (
-          this.checkInScalar(row.guest_id) === params.externalGuestId &&
+          this.checkInSessionGuestIdMatches(row, params.externalGuestId) &&
           this.isOpenCheckInSessionStop(row.date_stop)
         ) {
           const session = this.toCheckInLiveSession(params.source.domain, row);
@@ -10470,7 +10470,7 @@ export class GuestGamificationService {
     return {
       externalDomain,
       externalSessionId: this.checkInScalar(row.id) ?? '',
-      externalGuestId: this.checkInScalar(row.guest_id),
+      externalGuestId: this.checkInSessionExternalGuestId(row),
       externalClubId: this.checkInScalar(row.club_id ?? row.list_clubs_id),
       externalUuid: this.checkInScalar(row.UUID),
       startedAt,
@@ -10480,6 +10480,110 @@ export class GuestGamificationService {
       store: null,
       raw: row,
     };
+  }
+
+  private async findCachedCheckInSession(
+    tenantId: string,
+    guest: {
+      externalDomain: string | null;
+      externalGuestId: string;
+    },
+  ): Promise<CheckInLiveSession | null> {
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - 2);
+
+    const row = await this.prisma.guestSession.findFirst({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalGuestId: guest.externalGuestId,
+        ...(guest.externalDomain
+          ? { externalDomain: guest.externalDomain }
+          : {}),
+        stoppedAt: null,
+        OR: [{ startedAt: null }, { startedAt: { gte: since } }],
+      },
+      orderBy: [{ startedAt: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        externalDomain: true,
+        externalSessionId: true,
+        externalGuestId: true,
+        externalClubId: true,
+        externalUuid: true,
+        startedAt: true,
+        durationMinutes: true,
+        packet: true,
+        store: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!row?.externalSessionId) {
+      return null;
+    }
+
+    return {
+      externalDomain: row.externalDomain ?? guest.externalDomain ?? '',
+      externalSessionId: row.externalSessionId,
+      externalGuestId: row.externalGuestId ?? guest.externalGuestId,
+      externalClubId: row.externalClubId,
+      externalUuid: row.externalUuid,
+      startedAt: row.startedAt,
+      durationMinutes: row.durationMinutes,
+      sessionType: row.packet ? 'packet_hours' : 'regular_session',
+      sessionPacket: row.packet,
+      store: row.store,
+      raw: {
+        id: row.externalSessionId,
+        guest_id: row.externalGuestId ?? guest.externalGuestId,
+        date_start: row.startedAt?.toISOString() ?? null,
+        date_stop: null,
+        UUID: row.externalUuid,
+        packet: row.packet,
+        list_clubs_id: row.externalClubId,
+      },
+    };
+  }
+
+  private checkInSessionGuestIdMatches(
+    row: LangameGuestSession,
+    externalGuestId: string,
+  ) {
+    return this.checkInSessionExternalGuestIds(row).includes(externalGuestId);
+  }
+
+  private checkInSessionExternalGuestId(row: LangameGuestSession) {
+    return this.checkInSessionExternalGuestIds(row)[0] ?? null;
+  }
+
+  private checkInSessionExternalGuestIds(row: LangameGuestSession) {
+    const record = row as LangameGuestSession & Record<string, unknown>;
+    const nestedGuest = this.checkInRecord(record.guest);
+    const values = [
+      record.real_guest_id,
+      record.guest_id,
+      nestedGuest?.real_guest_id,
+      nestedGuest?.guest_id,
+      nestedGuest?.id,
+    ];
+    const ids = new Set<string>();
+
+    for (const value of values) {
+      const id = this.checkInScalar(value);
+
+      if (id) {
+        ids.add(id);
+      }
+    }
+
+    return [...ids];
+  }
+
+  private checkInRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    return value as Record<string, unknown>;
   }
 
   private async resolveCheckInStore(

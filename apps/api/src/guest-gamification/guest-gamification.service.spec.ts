@@ -78,6 +78,7 @@ function createPrismaMock() {
       findFirst: jest.fn(),
     },
     guestSession: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     guestLog: {
@@ -178,6 +179,7 @@ function createService(
   };
   const langameClient = {
     postEndpoint: jest.fn(),
+    listGuestSessions: jest.fn(),
   };
   const bonusLedgerSchedulerService = {
     getRuntimeStatus: jest.fn(() => schedulerStatus),
@@ -4063,6 +4065,47 @@ describe('GuestGamificationService', () => {
       expect(findActiveSessionSpy).toHaveBeenCalledTimes(1);
       expect(existingEventSpy).toHaveBeenCalledTimes(1);
       expect(processEventSpy).not.toHaveBeenCalled();
+    });
+
+    it('matches an open Langame session by real_guest_id', async () => {
+      const { service, langameClient } = createService();
+
+      langameClient.listGuestSessions.mockResolvedValue([
+        {
+          id: 'session-1',
+          guest_id: null,
+          real_guest_id: 'lg-guest-1',
+          list_clubs_id: 'club-external-1',
+          date_start: '2026-06-10 09:45:00',
+          date_stop: null,
+          packet: 1,
+          UUID: 'uuid-1',
+        },
+      ]);
+
+      const result = await (service as any).findCheckInSessionInSource({
+        apiKey: 'api-key',
+        source: {
+          id: 'source-1',
+          domain: 'club-1',
+          baseUrl: 'https://langame.example',
+        },
+        externalGuestId: 'lg-guest-1',
+        period: {
+          dateFrom: '2026-06-10',
+          dateTo: '2026-06-10',
+        },
+      });
+
+      expect(result).toMatchObject({
+        externalDomain: 'club-1',
+        externalSessionId: 'session-1',
+        externalGuestId: 'lg-guest-1',
+        externalClubId: 'club-external-1',
+        externalUuid: 'uuid-1',
+        sessionType: 'packet_hours',
+        sessionPacket: true,
+      });
     });
   });
 

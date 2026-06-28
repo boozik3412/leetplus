@@ -3495,9 +3495,33 @@ export class GuestPortalService {
       payload.tenantId,
       payload.storeId,
     );
-    const guest = await this.findGuest(payload, context.store);
+    let guest = await this.findGuest(payload, context.store);
+    guest = this.guestMatchesStoreDomain(guest, context.store) ? guest : null;
     const profile = await this.findProfile(payload, guest?.id ?? null);
-    const guestId = guest?.id ?? profile?.guestId ?? null;
+
+    if (!guest && profile?.guestId) {
+      const linkedGuest = await this.findGuest(
+        { ...payload, guestId: profile.guestId },
+        context.store,
+        profile,
+      );
+      guest = this.guestMatchesStoreDomain(linkedGuest, context.store)
+        ? linkedGuest
+        : null;
+    }
+
+    if (!guest && profile) {
+      const profileGuest = await this.findGuest(
+        { ...payload, guestId: null },
+        context.store,
+        profile,
+      );
+      guest = this.guestMatchesStoreDomain(profileGuest, context.store)
+        ? profileGuest
+        : null;
+    }
+
+    const guestId = guest?.id ?? null;
 
     if (!profile?.id || !guestId) {
       return null;
@@ -3959,12 +3983,34 @@ export class GuestPortalService {
       payload.storeId,
     );
     let guest = await this.findGuest(payload, context.store);
+    guest = this.guestMatchesStoreDomain(guest, context.store) ? guest : null;
 
     if (!guest) {
       const profile = await this.findProfile(payload, null);
-      guest = profile
-        ? await this.findGuest(payload, context.store, profile)
+
+      if (profile?.guestId) {
+        const linkedGuest = await this.findGuest(
+          { ...payload, guestId: profile.guestId },
+          context.store,
+          profile,
+        );
+        guest = this.guestMatchesStoreDomain(linkedGuest, context.store)
+          ? linkedGuest
+          : null;
+      }
+
+      const profileGuest = profile
+        ? await this.findGuest(
+            { ...payload, guestId: null },
+            context.store,
+            profile,
+          )
         : null;
+      if (!guest) {
+        guest = this.guestMatchesStoreDomain(profileGuest, context.store)
+          ? profileGuest
+          : null;
+      }
     }
 
     if (!guest) {
@@ -7776,6 +7822,20 @@ export class GuestPortalService {
     rows: GuestPortalBonusLedgerRow[],
   ): GuestPortalBonusHistory {
     return buildBonusLedgerHistory(rows);
+  }
+
+  private guestMatchesStoreDomain(
+    guest: { externalDomain: string | null } | null,
+    store?: Pick<TenantStoreContext['store'], 'externalDomain'> | null,
+  ) {
+    if (!guest) {
+      return false;
+    }
+
+    const storeDomain = store?.externalDomain?.trim();
+    const guestDomain = guest.externalDomain?.trim();
+
+    return !storeDomain || !guestDomain || guestDomain === storeDomain;
   }
 
   private async findGuest(

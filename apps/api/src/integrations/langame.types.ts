@@ -74,6 +74,7 @@ export type LangameGuestBonusBalance = {
 export type LangameGuestSession = {
   id: number | string;
   guest_id?: number | string | null;
+  real_guest_id?: number | string | null;
   date_start?: string | null;
   date_stop?: string | null;
   UUID?: string | null;

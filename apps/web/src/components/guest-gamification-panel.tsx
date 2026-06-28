@@ -5572,11 +5572,15 @@ function CommunicationQueueCard({
                     {item.nextAction}
                   </p>
                 </div>
-                <div className="grid min-w-0 gap-2 text-xs sm:grid-cols-3 lg:min-w-[460px]">
+                <div className="grid min-w-0 gap-2 text-xs sm:grid-cols-2 lg:min-w-[520px] lg:grid-cols-4">
                   <MiniMetric label="сумма" value={formatMoney(item.rewardAmount)} />
                   <MiniMetric
                     label="контакт"
                     value={item.contactMasked ?? "нет"}
+                  />
+                  <MiniMetric
+                    label="дата"
+                    value={formatDate(item.qualifiedAt)}
                   />
                   <MiniMetric
                     label="до"

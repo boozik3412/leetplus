@@ -7,7 +7,12 @@ import {
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { parseLangameDate } from '../integrations/langame-date';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  cityFromStoreAddress,
+  normalizeStoreTimeZone,
+} from '../stores/store-timezones';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
   buildStaffExportFile,
@@ -342,7 +347,14 @@ export type StaffChecklistExecutionRun = StaffChecklistExecutionMetrics & {
   activityDate: string;
   scheduledAt: string | null;
   submittedAt: string | null;
-  store: { id: string; name: string; isActive: boolean } | null;
+  store: {
+    id: string;
+    name: string;
+    city: string | null;
+    address: string | null;
+    timeZone: string | null;
+    isActive: boolean;
+  } | null;
   assignedToUser: { id: string; email: string; fullName: string | null } | null;
   checklist: {
     id: string | null;
@@ -452,7 +464,14 @@ export type StaffChecklistRunResponse = {
     status: string;
     version: number;
   } | null;
-  store: { id: string; name: string; isActive: boolean } | null;
+  store: {
+    id: string;
+    name: string;
+    city: string | null;
+    address: string | null;
+    timeZone: string | null;
+    isActive: boolean;
+  } | null;
   shift: {
     id: string;
     externalShiftId: string;
@@ -472,14 +491,31 @@ const checklistRunInclude = {
   template: {
     select: { id: true, title: true, status: true, version: true },
   },
-  store: { select: { id: true, name: true, isActive: true } },
+  store: {
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      address: true,
+      timeZone: true,
+      isActive: true,
+    },
+  },
   shift: {
     select: {
       id: true,
       externalShiftId: true,
       startedAt: true,
       stoppedAt: true,
-      store: { select: { id: true, name: true } },
+      store: {
+        select: {
+          id: true,
+          name: true,
+          city: true,
+          address: true,
+          timeZone: true,
+        },
+      },
     },
   },
   createdByUser: { select: { id: true, email: true, fullName: true } },
@@ -521,7 +557,20 @@ type ChecklistTimingRun = {
   createdAt: Date;
   sectionsSnapshot: Prisma.JsonValue;
   answers: Prisma.JsonValue;
-  shift: { startedAt: Date | null; stoppedAt: Date | null } | null;
+  store: {
+    city: string | null;
+    address: string | null;
+    timeZone: string | null;
+  } | null;
+  shift: {
+    startedAt: Date | null;
+    stoppedAt: Date | null;
+    store: {
+      city: string | null;
+      address: string | null;
+      timeZone: string | null;
+    } | null;
+  } | null;
 };
 
 type ChecklistSource = {
@@ -590,7 +639,18 @@ export class StaffChecklistsService {
             createdAt: true,
             sectionsSnapshot: true,
             answers: true,
-            shift: { select: { startedAt: true, stoppedAt: true } },
+            store: {
+              select: { city: true, address: true, timeZone: true },
+            },
+            shift: {
+              select: {
+                startedAt: true,
+                stoppedAt: true,
+                store: {
+                  select: { city: true, address: true, timeZone: true },
+                },
+              },
+            },
             failedItems: true,
             blockingIssues: true,
           },
@@ -925,12 +985,17 @@ export class StaffChecklistsService {
     }
 
     const sections = this.normalizeSections(current.sectionsSnapshot);
+    const currentStatus = current.status as StaffChecklistStatus;
+    const now = new Date();
+    const currentAnswers = this.normalizeAnswers(current.answers, sections);
     const answers =
       dto.answers === undefined
-        ? this.normalizeAnswers(current.answers, sections)
-        : this.normalizeAnswers(dto.answers, sections);
+        ? currentAnswers
+        : this.normalizeAnswers(dto.answers, sections, {
+            previousAnswers: currentAnswers,
+            serverCompletedAt: now.toISOString(),
+          });
     const metrics = this.calculateMetrics(sections, answers);
-    const currentStatus = current.status as StaffChecklistStatus;
     const nextStatus =
       dto.status === undefined
         ? currentStatus
@@ -954,7 +1019,6 @@ export class StaffChecklistsService {
       nextStatus !== currentStatus;
     const isEscalation =
       nextStatus === 'ESCALATED' && nextStatus !== currentStatus;
-    const now = new Date();
 
     if (nextStatus === 'ON_REVIEW' && metrics.blockingIssues.length > 0) {
       throw new BadRequestException(
@@ -1837,7 +1901,20 @@ export class StaffChecklistsService {
       createdAt: Date;
       sectionsSnapshot: Prisma.JsonValue;
       answers: Prisma.JsonValue;
-      shift: { startedAt: Date | null; stoppedAt: Date | null } | null;
+      store: {
+        city: string | null;
+        address: string | null;
+        timeZone: string | null;
+      } | null;
+      shift: {
+        startedAt: Date | null;
+        stoppedAt: Date | null;
+        store: {
+          city: string | null;
+          address: string | null;
+          timeZone: string | null;
+        } | null;
+      } | null;
       failedItems: number;
       blockingIssues: Prisma.JsonValue | null;
     }>,
@@ -2458,6 +2535,10 @@ export class StaffChecklistsService {
   private normalizeAnswers(
     value: unknown,
     sections: StaffChecklistSection[],
+    options?: {
+      previousAnswers?: StaffChecklistAnswer[];
+      serverCompletedAt?: string;
+    },
   ): StaffChecklistAnswer[] {
     const rawAnswers = Array.isArray(value) ? value : [];
     const answerByKey = new Map(
@@ -2468,6 +2549,12 @@ export class StaffChecklistsService {
           record,
         ];
       }),
+    );
+    const previousAnswerByKey = new Map(
+      (options?.previousAnswers ?? []).map((answer) => [
+        `${answer.sectionId}::${answer.itemId}`,
+        answer,
+      ]),
     );
 
     return sections.flatMap((section) =>
@@ -2482,11 +2569,23 @@ export class StaffChecklistsService {
           record.evidenceAttachments,
           evidenceUrl,
         );
-        const persistedCompletedAt = this.normalizeOptionalString(
+        const previousCompletedAt =
+          previousAnswerByKey.get(`${section.id}::${item.id}`)?.completedAt ??
+          null;
+        const clientCompletedAt = this.normalizeOptionalString(
           record.completedAt,
         );
+        const hasClientCompletedAt = 'completedAt' in record;
+        const shouldStampServerCompletedAt =
+          Boolean(options?.serverCompletedAt) &&
+          (!previousCompletedAt ||
+            (hasClientCompletedAt && !clientCompletedAt));
         const completedAt = normalizedStatus
-          ? (persistedCompletedAt ?? new Date().toISOString())
+          ? options?.serverCompletedAt
+            ? shouldStampServerCompletedAt
+              ? options.serverCompletedAt
+              : previousCompletedAt
+            : (clientCompletedAt ?? new Date().toISOString())
           : null;
 
         return {
@@ -2691,9 +2790,12 @@ export class StaffChecklistsService {
         return null;
       }
 
-      const plannedAt = new Date(base);
-      plannedAt.setHours(hours, minutes, 0, 0);
-      return plannedAt;
+      return this.resolveTimeOfDayPlannedAt(
+        base,
+        hours,
+        minutes,
+        this.resolveChecklistTimeZone(row),
+      );
     }
 
     const base =
@@ -2713,6 +2815,66 @@ export class StaffChecklistsService {
     }
 
     return new Date(base.getTime() + (timing.offsetMinutes ?? 0) * 60000);
+  }
+
+  private resolveTimeOfDayPlannedAt(
+    base: Date,
+    hours: number,
+    minutes: number,
+    timeZone: string,
+  ): Date | null {
+    const localDate = this.localDateParts(base, timeZone);
+
+    if (!localDate) {
+      return null;
+    }
+
+    return parseLangameDate(
+      `${localDate.year}-${localDate.month}-${localDate.day} ${String(
+        hours,
+      ).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
+      timeZone,
+    );
+  }
+
+  private localDateParts(
+    date: Date,
+    timeZone: string,
+  ): { year: string; month: string; day: string } | null {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(date);
+      const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+      const year = valueByType.get('year');
+      const month = valueByType.get('month');
+      const day = valueByType.get('day');
+
+      return year && month && day ? { year, month, day } : null;
+    } catch {
+      if (timeZone !== 'UTC') {
+        return this.localDateParts(date, 'UTC');
+      }
+
+      return null;
+    }
+  }
+
+  private resolveChecklistTimeZone(row: ChecklistTimingRun): string {
+    return (
+      normalizeStoreTimeZone(
+        row.store?.city ?? row.shift?.store?.city ?? null,
+        row.store?.timeZone ?? row.shift?.store?.timeZone ?? null,
+      ) ??
+      normalizeStoreTimeZone(
+        cityFromStoreAddress(row.store?.address ?? row.shift?.store?.address),
+        null,
+      ) ??
+      'UTC'
+    );
   }
 
   private calculateMetrics(

@@ -646,7 +646,8 @@ function draftReadingData(
     tags: tagsFromText(draft.tagsText),
     edit: {
       articleId: draft.id,
-      label: "Вернуться к редактированию",
+      label: "Редактировать",
+      mode: "inline",
     },
     materials: readingMaterialsFrom(draft.materials),
     relatedLinks: readingLinksFrom(draft.relatedLinks),
@@ -764,13 +765,33 @@ export function StaffKnowledgeBaseWorkspace({
       const data = event.data as {
         type?: unknown;
         articleId?: unknown;
+        title?: unknown;
+        summary?: unknown;
+        content?: unknown;
       };
 
-      if (data?.type !== "staff-knowledge-edit-article") {
+      if (!report.canManageKnowledge) {
         return;
       }
 
-      if (!report.canManageKnowledge) {
+      if (data?.type === "staff-knowledge-preview-draft-updated") {
+        setDraft((current) => ({
+          ...current,
+          title: typeof data.title === "string" ? data.title : current.title,
+          summary:
+            typeof data.summary === "string" ? data.summary : current.summary,
+          content:
+            typeof data.content === "string" ? data.content : current.content,
+        }));
+        setMessage(
+          "Правки из предпросмотра применены к черновику. Нажмите «Сохранить», чтобы записать статью.",
+        );
+        setError(null);
+        setIsBuilderOpen(true);
+        return;
+      }
+
+      if (data?.type !== "staff-knowledge-edit-article") {
         return;
       }
 

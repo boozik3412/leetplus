@@ -5,6 +5,7 @@ import { requireCurrentUser } from "@/lib/auth";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getStaffOperationsDashboard,
+  type StaffOperationsDashboard,
   type StaffOperationsDashboardFilters,
   type StaffOperationsDrilldownAction,
   type StaffOperationsEmployeeRating,
@@ -209,7 +210,15 @@ export default async function StaffOperationsDashboardPage({
               проблемы смены.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+            <details className="relative">
+              <summary className="inline-flex h-10 cursor-pointer list-none items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900 [&::-webkit-details-marker]:hidden">
+                Фильтр
+              </summary>
+              <div className="mt-2 w-[min(88vw,56rem)] rounded-lg border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 lg:absolute lg:right-0 lg:z-20">
+                <StaffOperationsFilterForm dashboard={dashboard} />
+              </div>
+            </details>
             <Link
               href="/staff/tasks"
               className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
@@ -239,7 +248,32 @@ export default async function StaffOperationsDashboardPage({
           compact
         />
 
-        <form className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+        <section className="mt-6 grid gap-4 lg:grid-cols-2">
+          <StaffControlPanel staffControl={dashboard.staffControl} />
+        </section>
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-2">
+          <RatingPanel title="Рейтинг клубов" rows={dashboard.clubs} />
+          <EmployeeRatingPanel rows={dashboard.employees} />
+        </section>
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.1fr]">
+          <RecurringIssuesPanel issues={dashboard.recurringIssues} />
+          <LatestRisksPanel risks={dashboard.latestRisks} />
+        </section>
+      </div>
+    </main>
+  );
+}
+
+
+function StaffOperationsFilterForm({
+  dashboard,
+}: {
+  dashboard: StaffOperationsDashboard;
+}) {
+  return (
+    <form>
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
             <label className="block text-sm">
               <span className="text-xs font-semibold uppercase text-zinc-500">
@@ -314,23 +348,7 @@ export default async function StaffOperationsDashboardPage({
               </div>
             </label>
           </div>
-        </form>
-
-        <section className="mt-6 grid gap-4 lg:grid-cols-2">
-          <StaffControlPanel staffControl={dashboard.staffControl} />
-        </section>
-
-        <section className="mt-6 grid gap-4 lg:grid-cols-2">
-          <RatingPanel title="Рейтинг клубов" rows={dashboard.clubs} />
-          <EmployeeRatingPanel rows={dashboard.employees} />
-        </section>
-
-        <section className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.1fr]">
-          <RecurringIssuesPanel issues={dashboard.recurringIssues} />
-          <LatestRisksPanel risks={dashboard.latestRisks} />
-        </section>
-      </div>
-    </main>
+    </form>
   );
 }
 
@@ -380,8 +398,8 @@ function StaffControlPanel({
   ] as const;
 
   return (
-    <section className="lg:col-span-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <details className="lg:col-span-2 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 p-4 [&::-webkit-details-marker]:hidden">
         <div>
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
             Staff-control
@@ -391,15 +409,22 @@ function StaffControlPanel({
             Дашборд связывает дисциплину персонала с фактическими сменами: привязка сотрудников, касса, возвраты, инкассация, средний чек и чеклисты смены.
           </p>
         </div>
-        <Link
-          href="/staff/staff-control"
-          className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-        >
-          Контроль персонала
-        </Link>
-      </div>
+        <span className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">
+          Развернуть
+        </span>
+      </summary>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="border-t border-zinc-200 px-4 pb-4 pt-4 dark:border-zinc-800">
+        <div className="flex justify-end">
+          <Link
+            href="/staff/staff-control"
+            className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            Контроль персонала
+          </Link>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         {metricCards.map((card) => (
           <div
             key={card.label}
@@ -453,7 +478,8 @@ function StaffControlPanel({
           </div>
         )}
       </div>
-    </section>
+      </div>
+    </details>
   );
 }
 

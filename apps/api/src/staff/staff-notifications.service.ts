@@ -403,26 +403,20 @@ export class StaffNotificationsService {
 
     return [
       ...tasks.map((task): SignalDraft => {
-        const assignee = this.userLabel(task.assignedToUser);
-
         return {
           sourceType: 'TASK',
           sourceId: task.id,
           dedupeKey: `task:${task.id}:overdue`,
           severity: task.priority === 'URGENT' ? 'CRITICAL' : 'WARNING',
           title: `Просрочена важная задача: ${task.title}`.slice(0, 240),
-          message: [
-            task.store ? `Клуб: ${task.store.name}` : 'Клуб: вся сеть',
-            assignee ? `Ответственный: ${assignee}` : null,
-            task.dueAt ? `Срок: ${task.dueAt.toLocaleString('ru-RU')}` : null,
-            `Приоритет: ${task.priority}`,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          message: this.notificationMessage([
+            `Источник: Задача — ${task.title}`,
+            'Ситуация: просрочена важная задача',
+          ]),
           storeId: task.storeId,
           targetUserId: task.assignedToUserId,
           actionLabel: 'Открыть задачу',
-          actionHref: `/staff/tasks?search=${encodeURIComponent(task.title)}`,
+          actionHref: `/staff/tasks?taskId=${encodeURIComponent(task.id)}`,
           metadata: {
             priority: task.priority,
             status: task.status,
@@ -438,19 +432,11 @@ export class StaffNotificationsService {
           run.blockingIssues,
         );
         const reviewComment = this.normalizeOptionalString(run.reviewComment);
-        const score = this.formatChecklistScore(
-          run.scoreEarned,
-          run.scoreTotal,
-        );
-        const issueLines = this.checklistIssueLines(
-          run.sectionsSnapshot,
-          run.answers,
-          run.blockingIssues,
-        );
+        const administrator = assignee ?? 'не назначен';
         const actionHref = `/staff/checklists?runId=${encodeURIComponent(
           run.id,
         )}`;
-        const conclusion = this.checklistConclusion({
+        const situation = this.checklistSituation({
           isEscalated,
           failedItems,
           blockingIssuesCount,
@@ -468,30 +454,13 @@ export class StaffNotificationsService {
             reviewComment,
           }),
           title: `${
-            isEscalated
-              ? 'Эскалация чек-листа требует проверки'
-              : 'Чек-лист с проблемами'
+            isEscalated ? 'Эскалация чек-листа' : 'Чек-лист с проблемами'
           }: ${run.title}`.slice(0, 240),
-          message: [
-            run.store ? `Клуб: ${run.store.name}` : 'Клуб: вся сеть',
-            assignee ? `Ответственный: ${assignee}` : null,
-            isEscalated
-              ? 'Событие: чек-лист эскалирован менеджером.'
-              : `Статус: ${this.checklistStatusLabel(run.status)}`,
-            reviewComment
-              ? `Причина/комментарий: ${reviewComment}`
-              : isEscalated
-                ? 'Причина: не указана'
-                : null,
-            `Проблемных пунктов: ${failedItems}`,
-            `Блокеров сдачи: ${blockingIssuesCount}`,
-            issueLines.length > 0 ? 'Детали:' : null,
-            ...issueLines,
-            score ? `Оценка: ${score}` : null,
-            `Вывод: ${conclusion}`,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          message: this.notificationMessage([
+            `Источник: Чек-лист — ${run.title}`,
+            `Администратор: ${administrator}`,
+            `Ситуация: ${situation}`,
+          ]),
           storeId: run.storeId,
           targetUserId: null,
           actionLabel: 'Открыть чек-лист',
@@ -503,6 +472,7 @@ export class StaffNotificationsService {
             scoreEarned: run.scoreEarned,
             scoreTotal: run.scoreTotal,
             reviewComment,
+            administrator,
             actionHref,
           },
         };
@@ -514,8 +484,6 @@ export class StaffNotificationsService {
               Math.floor((now.getTime() - rule.nextRunAt.getTime()) / 3600000),
             )
           : 0;
-        const assignee = this.userLabel(rule.assignedToUser);
-
         return {
           sourceType: 'RECURRING_RULE',
           sourceId: rule.id,
@@ -525,16 +493,10 @@ export class StaffNotificationsService {
             0,
             240,
           ),
-          message: [
-            rule.store ? `Клуб: ${rule.store.name}` : 'Клуб: вся сеть',
-            assignee ? `Ответственный: ${assignee}` : null,
-            rule.nextRunAt
-              ? `Плановый запуск: ${rule.nextRunAt.toLocaleString('ru-RU')}`
-              : null,
-            `Расписание: ${rule.cadence}`,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          message: this.notificationMessage([
+            `Источник: Регулярное правило — ${rule.title}`,
+            `Ситуация: ${this.recurringRuleSituation(overdueHours)}`,
+          ]),
           storeId: rule.storeId,
           targetUserId: rule.assignedToUserId,
           actionLabel: 'Открыть правила',
@@ -547,8 +509,6 @@ export class StaffNotificationsService {
         };
       }),
       ...returnedArticles.map((article): SignalDraft => {
-        const author = this.userLabel(article.createdByUser);
-        const reviewer = this.userLabel(article.approvedByUser);
         const isSlaOverdue =
           Boolean(article.revisionDueAt) && article.revisionDueAt! < now;
 
@@ -561,19 +521,14 @@ export class StaffNotificationsService {
             0,
             240,
           ),
-          message: [
-            article.store ? `Клуб: ${article.store.name}` : 'Клуб: вся сеть',
-            author ? `Автор: ${author}` : null,
-            reviewer ? `Проверил: ${reviewer}` : null,
-            article.revisionDueAt
-              ? `Срок реакции: ${article.revisionDueAt.toLocaleString('ru-RU')}`
-              : null,
-            article.approvalNote
-              ? `Комментарий: ${article.approvalNote}`
-              : 'Нужно доработать материал и снова отправить на согласование.',
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          message: this.notificationMessage([
+            `Источник: База знаний — ${article.title}`,
+            `Ситуация: ${
+              isSlaOverdue
+                ? 'доработка материала просрочена'
+                : 'материал возвращен на доработку'
+            }`,
+          ]),
           storeId: article.storeId,
           targetUserId: article.createdByUserId,
           actionLabel: 'Открыть материал',
@@ -606,15 +561,13 @@ export class StaffNotificationsService {
               0,
               240,
             ),
-            message: [
-              message.store ? `Клуб: ${message.store.name}` : 'Клуб: вся сеть',
-              this.userLabel(message.authorUser)
-                ? `Автор: ${this.userLabel(message.authorUser)}`
-                : null,
-              messageAction.body.slice(0, 700),
-            ]
-              .filter(Boolean)
-              .join('\n'),
+            message: this.notificationMessage([
+              `Источник: Командный чат — ${message.channel.name}`,
+              `Ситуация: ${
+                this.compactNotificationText(messageAction.body) ??
+                'срочный инцидент в командном чате'
+              }`,
+            ]),
             storeId: message.storeId,
             targetUserId: null,
             actionLabel: messageAction.actionLabel ?? 'Открыть чат',
@@ -640,95 +593,32 @@ export class StaffNotificationsService {
     ];
   }
 
-  private checklistBlockingIssueCount(value: unknown) {
-    return Array.isArray(value) ? value.length : 0;
-  }
-
-  private checklistIssueLines(
-    sectionsValue: unknown,
-    answersValue: unknown,
-    blockingIssuesValue: unknown,
-  ) {
-    const titleByKey = new Map<string, string>();
-    const sections = Array.isArray(sectionsValue) ? sectionsValue : [];
-
-    sections.forEach((sectionValue) => {
-      const section = this.asNotificationRecord(sectionValue);
-      const sectionId = this.notificationString(section.id);
-      const sectionTitle = this.notificationString(section.title);
-      const items = Array.isArray(section.items) ? section.items : [];
-
-      items.forEach((itemValue) => {
-        const item = this.asNotificationRecord(itemValue);
-        const itemId = this.notificationString(item.id);
-        const itemTitle = this.notificationString(item.title);
-
-        if (sectionId && itemId && itemTitle) {
-          titleByKey.set(
-            `${sectionId}::${itemId}`,
-            sectionTitle ? `${sectionTitle}: ${itemTitle}` : itemTitle,
-          );
-        }
-      });
-    });
-
-    const answers = Array.isArray(answersValue) ? answersValue : [];
-    const failedLines = answers
-      .map((answerValue) => {
-        const answer = this.asNotificationRecord(answerValue);
-
-        if (answer.status !== 'FAILED') {
-          return null;
-        }
-
-        const sectionId = this.notificationString(answer.sectionId);
-        const itemId = this.notificationString(answer.itemId);
-        const title =
-          sectionId && itemId
-            ? (titleByKey.get(`${sectionId}::${itemId}`) ?? itemId)
-            : (itemId ?? 'Пункт чек-листа');
-        const note = this.notificationString(answer.note);
-
-        return `- Провален: ${title}${note ? ` — ${note}` : ''}`;
-      })
+  private notificationMessage(lines: Array<string | null | undefined>) {
+    return lines
+      .map((line) => this.compactNotificationText(line, 240))
       .filter((line): line is string => Boolean(line))
-      .slice(0, 3);
-
-    const blockingLines = (
-      Array.isArray(blockingIssuesValue) ? blockingIssuesValue : []
-    )
-      .map((issueValue) => {
-        const issue = this.asNotificationRecord(issueValue);
-        const title = this.notificationString(issue.title) ?? 'Пункт чек-листа';
-        const issueType = this.notificationString(issue.issue);
-
-        return `- Блокер: ${title} — ${this.checklistBlockingIssueLabel(
-          issueType,
-        )}`;
-      })
-      .slice(0, Math.max(0, 5 - failedLines.length));
-
-    return [...failedLines, ...blockingLines];
+      .join('\n');
   }
 
-  private asNotificationRecord(value: unknown): Record<string, unknown> {
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  }
+  private compactNotificationText(
+    value: string | null | undefined,
+    maxLength = 180,
+  ) {
+    const text = this.normalizeOptionalString(value)?.replace(/\s+/g, ' ');
 
-  private notificationString(value: unknown) {
-    return typeof value === 'string'
-      ? this.normalizeOptionalString(value)
-      : null;
-  }
-
-  private checklistBlockingIssueLabel(issue: string | null) {
-    if (issue === 'REQUIRED_EVIDENCE_MISSING') {
-      return 'нет обязательного доказательства';
+    if (!text) {
+      return null;
     }
 
-    return 'нет обязательного ответа';
+    if (text.length <= maxLength) {
+      return text;
+    }
+
+    return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+  }
+
+  private checklistBlockingIssueCount(value: unknown) {
+    return Array.isArray(value) ? value.length : 0;
   }
 
   private checklistSeverity({
@@ -753,7 +643,7 @@ export class StaffNotificationsService {
     return 'WARNING';
   }
 
-  private checklistConclusion({
+  private checklistSituation({
     isEscalated,
     failedItems,
     blockingIssuesCount,
@@ -764,53 +654,80 @@ export class StaffNotificationsService {
     blockingIssuesCount: number;
     reviewComment: string | null;
   }) {
-    if (blockingIssuesCount > 0) {
-      return 'есть блокеры сдачи; нужен разбор руководителя до принятия чек-листа.';
-    }
-
-    if (failedItems > 0) {
-      return isEscalated
-        ? 'есть проблемные пункты; руководителю нужно принять решение по смене.'
-        : 'есть проблемные пункты; проверьте доработку и комментарии исполнителя.';
-    }
-
-    if (isEscalated && reviewComment) {
-      return 'проваленных пунктов нет; решение зависит от причины, указанной проверяющим.';
-    }
+    const issueSummary = this.checklistIssueSummary(
+      failedItems,
+      blockingIssuesCount,
+    );
 
     if (isEscalated) {
-      return 'проблемы и причина не указаны; проверьте корректность эскалации.';
+      if (issueSummary) {
+        return `эскалация: ${issueSummary}`;
+      }
+
+      return reviewComment
+        ? 'эскалация без проблемных пунктов; причина указана в чек-листе'
+        : 'эскалация без указанной причины';
     }
 
-    return 'нужна проверка чек-листа.';
+    return issueSummary ?? 'чек-лист требует проверки';
   }
 
-  private checklistStatusLabel(status: string) {
-    switch (status) {
-      case 'ON_REVIEW':
-        return 'на проверке';
-      case 'RETURNED':
-        return 'возвращен на доработку';
-      case 'ESCALATED':
-        return 'эскалирован';
-      default:
-        return status;
-    }
-  }
-
-  private formatChecklistScore(
-    scoreEarned: number | null,
-    scoreTotal: number | null,
+  private checklistIssueSummary(
+    failedItems: number,
+    blockingIssuesCount: number,
   ) {
-    if (
-      typeof scoreEarned === 'number' &&
-      typeof scoreTotal === 'number' &&
-      scoreTotal > 0
-    ) {
-      return `${scoreEarned}/${scoreTotal}`;
+    const parts: string[] = [];
+
+    if (failedItems > 0) {
+      parts.push(
+        this.pluralizeRu(
+          failedItems,
+          'проблемный пункт',
+          'проблемных пункта',
+          'проблемных пунктов',
+        ),
+      );
     }
 
-    return null;
+    if (blockingIssuesCount > 0) {
+      parts.push(
+        this.pluralizeRu(
+          blockingIssuesCount,
+          'блокер сдачи',
+          'блокера сдачи',
+          'блокеров сдачи',
+        ),
+      );
+    }
+
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+
+  private recurringRuleSituation(overdueHours: number) {
+    if (overdueHours > 0) {
+      return `ожидает запуска ${this.pluralizeRu(
+        overdueHours,
+        'час',
+        'часа',
+        'часов',
+      )}`;
+    }
+
+    return 'ожидает запуска';
+  }
+
+  private pluralizeRu(count: number, one: string, few: string, many: string) {
+    const abs = Math.abs(count);
+    const mod10 = abs % 10;
+    const mod100 = abs % 100;
+    const label =
+      mod10 === 1 && mod100 !== 11
+        ? one
+        : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+          ? few
+          : many;
+
+    return `${count} ${label}`;
   }
 
   private isChecklistGeneratedIncident(body: string) {
@@ -921,18 +838,13 @@ export class StaffNotificationsService {
       dedupeKey: `operations-dashboard:${anomaly.kind}:${anomaly.id}`,
       severity: 'CRITICAL',
       title: `Операционный риск: ${anomaly.title}`.slice(0, 240),
-      message: [
-        anomaly.store ? `Клуб: ${anomaly.store.name}` : 'Клуб: вся сеть',
-        `Период: ${this.formatDate(dateFrom)} - ${this.formatDate(dateTo)}`,
-        `Сигналов: ${anomaly.count}`,
-        anomaly.amount !== null
-          ? `Сумма: ${anomaly.amount.toLocaleString('ru-RU')} руб`
-          : null,
-        anomaly.operatorLabel ? `Оператор: ${anomaly.operatorLabel}` : null,
-        anomaly.detail,
-      ]
-        .filter(Boolean)
-        .join('\n'),
+      message: this.notificationMessage([
+        `Источник: Операционный контроль — ${anomaly.title}`,
+        `Ситуация: ${
+          this.compactNotificationText(anomaly.detail) ??
+          'обнаружен операционный риск'
+        }`,
+      ]),
       storeId: anomaly.store?.id ?? null,
       targetUserId: null,
       actionLabel: this.operationsDashboardActionLabel(anomaly.href),
@@ -1122,16 +1034,6 @@ export class StaffNotificationsService {
     }
 
     return 'Открыть дашборд';
-  }
-
-  private formatDate(value: string) {
-    const [year, month, day] = value.split('-');
-
-    if (!year || !month || !day) {
-      return value;
-    }
-
-    return `${day}.${month}.${year}`;
   }
 
   private userLabel(

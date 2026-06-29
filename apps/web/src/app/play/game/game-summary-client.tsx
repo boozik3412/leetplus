@@ -1757,10 +1757,13 @@ function HomeBattlePass({
           <span className="lp-club-battlepass-emblem">
             <picture>
               <source
-                srcSet="/assets/brand/leetplus-logo-white.svg"
+                srcSet="/assets/brand/leetplus-logo-white.svg?v=battlepass-track"
                 media="(prefers-color-scheme: dark)"
               />
-              <img src="/assets/brand/leetplus-logo-white.svg" alt="LeetPlus" />
+              <img
+                src="/assets/brand/leetplus-logo-white.svg?v=battlepass-track"
+                alt="LeetPlus"
+              />
             </picture>
           </span>
           <span className="lp-club-battlepass-season-copy">

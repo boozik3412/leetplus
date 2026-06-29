@@ -2472,6 +2472,20 @@ type CheckInResolvedStore = {
   timeZone: string | null;
 };
 
+type CheckInExpectedStore = {
+  id: string;
+  name: string;
+  externalDomain: string | null;
+  externalClubId: string | null;
+  integrationSourceId: string | null;
+  timeZone: string | null;
+};
+
+type CheckInLookupOptions = {
+  timeoutMs?: number;
+  expectedStore?: CheckInExpectedStore | null;
+};
+
 type LiveSessionStartCacheEntry = {
   expiresAt: number;
   result: GuestGameProcessEventResult | null;
@@ -8447,11 +8461,15 @@ export class GuestGamificationService {
     const expectedStore = expectedStoreId
       ? await this.assertStore(user, expectedStoreId)
       : null;
+    const checkInExpectedStore = expectedStore
+      ? this.toCheckInExpectedStore(expectedStore)
+      : null;
     let liveSession: CheckInLiveSession | null;
 
     try {
       liveSession = await this.findActiveCheckInSession(user.tenantId, guest, {
         timeoutMs: this.liveSessionStartLookupTimeoutMs(),
+        expectedStore: checkInExpectedStore,
       });
     } catch (error) {
       this.logger.warn(
@@ -8466,13 +8484,7 @@ export class GuestGamificationService {
 
     const storeId = this.liveSessionStartStoreId(
       liveSession,
-      expectedStore
-        ? {
-            id: expectedStore.id,
-            externalDomain: expectedStore.externalDomain,
-            externalClubId: expectedStore.externalClubId,
-          }
-        : null,
+      checkInExpectedStore,
     );
 
     if (expectedStoreId && !storeId) {
@@ -8661,10 +8673,18 @@ export class GuestGamificationService {
       );
     }
 
+    const expectedStoreId = nullableId(dto.storeId);
+    const expectedStore = expectedStoreId
+      ? this.toCheckInExpectedStore(
+          await this.assertStore(user, expectedStoreId),
+        )
+      : null;
     let liveSession: CheckInLiveSession | null;
 
     try {
-      liveSession = await this.findActiveCheckInSession(user.tenantId, guest);
+      liveSession = await this.findActiveCheckInSession(user.tenantId, guest, {
+        expectedStore,
+      });
     } catch (error) {
       throw new BadRequestException(
         `Не удалось проверить активную сессию Langame: ${this.checkInErrorMessage(error)}`,
@@ -8677,11 +8697,11 @@ export class GuestGamificationService {
       );
     }
 
-    const expectedStoreId = nullableId(dto.storeId);
+    const checkInStore = liveSession.store ?? expectedStore;
 
     if (
-      expectedStoreId &&
-      (!liveSession.store || liveSession.store.id !== expectedStoreId)
+      expectedStore &&
+      (!checkInStore || checkInStore.id !== expectedStore.id)
     ) {
       throw new BadRequestException(
         'Не удалось подтвердить, что активная сессия гостя открыта в этом клубе.',
@@ -8690,12 +8710,12 @@ export class GuestGamificationService {
 
     const checkedAt = new Date();
 
-    if (liveSession.store?.id) {
+    if (checkInStore?.id) {
       await this.assertCheckInAvailableToday(user, {
         guestId: guest.id,
-        storeId: liveSession.store.id,
+        storeId: checkInStore.id,
         checkedAt,
-        timeZone: liveSession.store.timeZone,
+        timeZone: checkInStore.timeZone,
       });
     }
 
@@ -8707,7 +8727,7 @@ export class GuestGamificationService {
     ].join(':');
     const processResult = await this.processEvent(user, {
       guestId: guest.id,
-      storeId: liveSession.store?.id ?? null,
+      storeId: checkInStore?.id ?? null,
       eventType: 'CHECK_IN',
       occurredAt: checkedAt.toISOString(),
       sessionType: liveSession.sessionType,
@@ -8735,8 +8755,8 @@ export class GuestGamificationService {
         durationMinutes: liveSession.durationMinutes,
         sessionType: liveSession.sessionType,
         sessionPacket: liveSession.sessionPacket,
-        store: liveSession.store
-          ? { id: liveSession.store.id, name: liveSession.store.name }
+        store: checkInStore
+          ? { id: checkInStore.id, name: checkInStore.name }
           : null,
       },
       processResult,
@@ -10700,13 +10720,31 @@ export class GuestGamificationService {
     return row;
   }
 
+  private toCheckInExpectedStore(store: {
+    id: string;
+    name?: string | null;
+    externalDomain?: string | null;
+    externalClubId?: string | null;
+    integrationSourceId?: string | null;
+    timeZone?: string | null;
+  }): CheckInExpectedStore {
+    return {
+      id: store.id,
+      name: store.name ?? 'Клуб',
+      externalDomain: nullableString(store.externalDomain) ?? null,
+      externalClubId: nullableString(store.externalClubId) ?? null,
+      integrationSourceId: nullableString(store.integrationSourceId) ?? null,
+      timeZone: nullableString(store.timeZone) ?? null,
+    };
+  }
+
   private async findActiveCheckInSession(
     tenantId: string,
     guest: {
       externalDomain: string | null;
       externalGuestId: string;
     },
-    options: { timeoutMs?: number } = {},
+    options: CheckInLookupOptions = {},
   ): Promise<CheckInLiveSession | null> {
     const externalGuestId = nullableString(guest.externalGuestId);
 
@@ -10716,13 +10754,12 @@ export class GuestGamificationService {
 
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
-    const preferredDomain = nullableString(guest.externalDomain);
-    const orderedSources = preferredDomain
-      ? [
-          ...sources.filter((source) => source.domain === preferredDomain),
-          ...sources.filter((source) => source.domain !== preferredDomain),
-        ]
-      : sources;
+    const preferredDomain = nullableString(guest.externalDomain) ?? null;
+    const orderedSources = this.checkInLookupSources(
+      sources,
+      preferredDomain,
+      options.expectedStore ?? null,
+    );
     const period = this.checkInLookupPeriod(new Date());
 
     for (const source of orderedSources) {
@@ -10734,6 +10771,7 @@ export class GuestGamificationService {
           externalGuestId,
           period,
           timeoutMs: options.timeoutMs,
+          expectedStore: options.expectedStore ?? null,
         });
 
         if (session) {
@@ -10744,7 +10782,70 @@ export class GuestGamificationService {
       }
     }
 
-    return this.findCachedCheckInSession(tenantId, guest);
+    return this.findCachedCheckInSession(
+      tenantId,
+      guest,
+      options.expectedStore ?? null,
+    );
+  }
+
+  private checkInLookupSources(
+    sources: Array<{ id: string; domain: string; baseUrl: string }>,
+    preferredDomain: string | null,
+    expectedStore: CheckInExpectedStore | null,
+  ) {
+    const expectedSourceId =
+      nullableString(expectedStore?.integrationSourceId) ?? null;
+    const expectedDomain =
+      nullableString(expectedStore?.externalDomain) ?? null;
+    const scopedSources = expectedStore
+      ? sources.filter((source) => {
+          if (expectedSourceId && source.id === expectedSourceId) {
+            return true;
+          }
+
+          return Boolean(expectedDomain && source.domain === expectedDomain);
+        })
+      : [];
+    const candidateSources =
+      scopedSources.length > 0 ? scopedSources : sources;
+
+    return [...candidateSources].sort(
+      (left, right) =>
+        this.checkInLookupSourceScore(
+          left,
+          preferredDomain,
+          expectedSourceId,
+          expectedDomain,
+        ) -
+        this.checkInLookupSourceScore(
+          right,
+          preferredDomain,
+          expectedSourceId,
+          expectedDomain,
+        ),
+    );
+  }
+
+  private checkInLookupSourceScore(
+    source: { id: string; domain: string },
+    preferredDomain: string | null,
+    expectedSourceId: string | null,
+    expectedDomain: string | null,
+  ) {
+    if (expectedSourceId && source.id === expectedSourceId) {
+      return 0;
+    }
+
+    if (expectedDomain && source.domain === expectedDomain) {
+      return 1;
+    }
+
+    if (preferredDomain && source.domain === preferredDomain) {
+      return 2;
+    }
+
+    return 3;
   }
 
   private async findCheckInSessionInSource(params: {
@@ -10754,6 +10855,7 @@ export class GuestGamificationService {
     externalGuestId: string;
     period: { dateFrom: string; dateTo: string };
     timeoutMs?: number;
+    expectedStore?: CheckInExpectedStore | null;
   }): Promise<CheckInLiveSession | null> {
     const pageLimit = 200;
     const maxPages = 5;
@@ -10779,14 +10881,31 @@ export class GuestGamificationService {
           const externalClubId = this.checkInScalar(
             row.club_id ?? row.list_clubs_id,
           );
+
+          if (
+            !this.checkInSessionMatchesExpectedStore(
+              params.source,
+              externalClubId,
+              params.expectedStore ?? null,
+            )
+          ) {
+            continue;
+          }
+
           const store = params.tenantId
             ? await this.resolveCheckInStore(
                 params.tenantId,
                 params.source.id,
                 params.source.domain,
                 externalClubId,
+                params.expectedStore ?? null,
               )
             : null;
+
+          if (params.expectedStore && !store) {
+            continue;
+          }
+
           const session = this.toCheckInLiveSession(
             params.source.domain,
             row,
@@ -10796,7 +10915,9 @@ export class GuestGamificationService {
           if (session.externalSessionId) {
             return {
               ...session,
-              store: store ? { id: store.id, name: store.name } : null,
+              store: store
+                ? { id: store.id, name: store.name, timeZone: store.timeZone }
+                : null,
             };
           }
         }
@@ -10836,26 +10957,76 @@ export class GuestGamificationService {
     };
   }
 
+  private checkInSessionMatchesExpectedStore(
+    source: { id: string; domain: string },
+    externalClubId: string | null,
+    expectedStore: CheckInExpectedStore | null,
+  ) {
+    if (!expectedStore) {
+      return true;
+    }
+
+    const expectedSourceId = nullableString(expectedStore.integrationSourceId);
+    const expectedDomain = nullableString(expectedStore.externalDomain);
+    const expectedClubId = nullableString(expectedStore.externalClubId);
+
+    if (
+      expectedSourceId &&
+      source.id !== expectedSourceId &&
+      !expectedDomain
+    ) {
+      return false;
+    }
+
+    if (expectedDomain && source.domain !== expectedDomain) {
+      return false;
+    }
+
+    if (expectedClubId) {
+      return externalClubId === expectedClubId;
+    }
+
+    return true;
+  }
+
   private async findCachedCheckInSession(
     tenantId: string,
     guest: {
       externalDomain: string | null;
       externalGuestId: string;
     },
+    expectedStore: CheckInExpectedStore | null,
   ): Promise<CheckInLiveSession | null> {
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - 2);
+    const expectedDomain = nullableString(expectedStore?.externalDomain);
+    const expectedStoreId = nullableId(expectedStore?.id);
+    const expectedClubId = nullableString(expectedStore?.externalClubId);
+    const cachedExternalDomain =
+      expectedDomain ?? nullableString(guest.externalDomain);
+    const expectedScope =
+      expectedStoreId || expectedClubId
+        ? {
+            OR: [
+              ...(expectedStoreId ? [{ storeId: expectedStoreId }] : []),
+              ...(expectedClubId ? [{ externalClubId: expectedClubId }] : []),
+            ],
+          }
+        : null;
 
     const row = await this.prisma.guestSession.findFirst({
       where: {
         tenantId,
         externalProvider: IntegrationProvider.LANGAME,
         externalGuestId: guest.externalGuestId,
-        ...(guest.externalDomain
-          ? { externalDomain: guest.externalDomain }
+        ...(cachedExternalDomain
+          ? { externalDomain: cachedExternalDomain }
           : {}),
         stoppedAt: null,
-        OR: [{ startedAt: null }, { startedAt: { gte: since } }],
+        AND: [
+          { OR: [{ startedAt: null }, { startedAt: { gte: since } }] },
+          ...(expectedScope ? [expectedScope] : []),
+        ],
       },
       orderBy: [{ startedAt: 'desc' }, { updatedAt: 'desc' }],
       select: {
@@ -10875,6 +11046,14 @@ export class GuestGamificationService {
       return null;
     }
 
+    const store = expectedStore
+      ? {
+          id: expectedStore.id,
+          name: expectedStore.name,
+          timeZone: expectedStore.timeZone,
+        }
+      : row.store;
+
     return {
       externalDomain: row.externalDomain ?? guest.externalDomain ?? '',
       externalSessionId: row.externalSessionId,
@@ -10885,7 +11064,7 @@ export class GuestGamificationService {
       durationMinutes: row.durationMinutes,
       sessionType: row.packet ? 'packet_hours' : 'regular_session',
       sessionPacket: row.packet,
-      store: row.store,
+      store,
       raw: {
         id: row.externalSessionId,
         guest_id: row.externalGuestId ?? guest.externalGuestId,
@@ -11073,7 +11252,30 @@ export class GuestGamificationService {
     integrationSourceId: string,
     externalDomain: string,
     externalClubId: string | null,
+    expectedStore: CheckInExpectedStore | null,
   ): Promise<CheckInResolvedStore | null> {
+    if (expectedStore) {
+      const expectedClubId = nullableString(expectedStore.externalClubId);
+
+      if (
+        !this.checkInSessionMatchesExpectedStore(
+          { id: integrationSourceId, domain: externalDomain },
+          externalClubId,
+          expectedStore,
+        )
+      ) {
+        return null;
+      }
+
+      if (expectedClubId) {
+        return {
+          id: expectedStore.id,
+          name: expectedStore.name,
+          timeZone: expectedStore.timeZone,
+        };
+      }
+    }
+
     if (externalClubId) {
       const store = await this.prisma.store.findFirst({
         where: {

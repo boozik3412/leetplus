@@ -764,6 +764,16 @@ function ChecklistRunEditor({
       ),
     [answersByKey, run.sections],
   );
+  const localFailedItems = useMemo(
+    () => answers.filter((answer) => answer.status === "FAILED").length,
+    [answers],
+  );
+  const escalationNeedsComment =
+    canReviewRun &&
+    run.status === "ON_REVIEW" &&
+    localFailedItems === 0 &&
+    localBlockingIssues.length === 0 &&
+    reviewComment.trim().length === 0;
   const canCancelRun =
     run.status !== "ACCEPTED" &&
     run.status !== "CANCELED" &&
@@ -983,6 +993,13 @@ function ChecklistRunEditor({
     nextAnswers = answers,
     successMessage?: string,
   ) {
+    if (status === "ESCALATED" && escalationNeedsComment) {
+      setMessage(
+        "Для эскалации без проблемных пунктов укажите причину в комментарии проверки.",
+      );
+      return;
+    }
+
     setIsPending(true);
     setMessage(null);
 
@@ -1012,7 +1029,7 @@ function ChecklistRunEditor({
       ON_REVIEW: "Чеклист отправлен на проверку.",
       ACCEPTED: "Чеклист принят.",
       RETURNED: "Чеклист возвращен на доработку.",
-      ESCALATED: "Чеклист эскалирован и отправлен в командный чат.",
+      ESCALATED: "Чеклист эскалирован и добавлен в уведомления руководителя.",
       CANCELED: "Чеклист отменен.",
     };
     const fallbackMessage = status
@@ -1456,6 +1473,11 @@ function ChecklistRunEditor({
             }
           />
         </label>
+        {escalationNeedsComment ? (
+          <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+            Для эскалации без проблемных пунктов укажите причину в комментарии проверки.
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <ActionButton disabled={isPending} onClick={() => updateRun("IN_PROGRESS")}>
             Сохранить
@@ -1500,7 +1522,16 @@ function ChecklistRunEditor({
               <button
                 type="button"
                 onClick={() => updateRun("ESCALATED")}
-                disabled={isPending || run.status !== "ON_REVIEW"}
+                disabled={
+                  isPending ||
+                  run.status !== "ON_REVIEW" ||
+                  escalationNeedsComment
+                }
+                title={
+                  escalationNeedsComment
+                    ? "Укажите причину эскалации в комментарии проверки"
+                    : undefined
+                }
                 className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100"
               >
                 Эскалировать

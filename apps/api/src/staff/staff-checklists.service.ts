@@ -936,6 +936,14 @@ export class StaffChecklistsService {
         ? currentStatus
         : this.resolveOne(dto.status, checklistStatuses, currentStatus);
     this.ensureCanUpdateChecklist(user, current, currentStatus, nextStatus);
+    const normalizedReviewComment =
+      dto.reviewComment === undefined
+        ? undefined
+        : this.normalizeOptionalString(dto.reviewComment);
+    const effectiveReviewComment =
+      normalizedReviewComment === undefined
+        ? this.normalizeOptionalString(current.reviewComment)
+        : normalizedReviewComment;
 
     const isSubmit =
       nextStatus === 'ON_REVIEW' && currentStatus !== 'ON_REVIEW';
@@ -954,6 +962,17 @@ export class StaffChecklistsService {
       );
     }
 
+    if (
+      isEscalation &&
+      metrics.failedItems === 0 &&
+      metrics.blockingIssues.length === 0 &&
+      !effectiveReviewComment
+    ) {
+      throw new BadRequestException(
+        'Укажите причину эскалации: у чек-листа нет проблемных пунктов и блокеров.',
+      );
+    }
+
     const run = await this.prisma.$transaction(async (tx) => {
       await tx.staffChecklistRun.update({
         where: { id: current.id },
@@ -968,10 +987,7 @@ export class StaffChecklistsService {
           evidenceDone: metrics.evidenceDone,
           failedItems: metrics.failedItems,
           blockingIssues: metrics.blockingIssues,
-          reviewComment:
-            dto.reviewComment === undefined
-              ? undefined
-              : this.normalizeOptionalString(dto.reviewComment),
+          reviewComment: normalizedReviewComment,
           startedAt:
             current.startedAt ??
             (nextStatus === 'IN_PROGRESS' || nextStatus === 'ON_REVIEW'
@@ -1020,7 +1036,7 @@ export class StaffChecklistsService {
           sections,
           answers,
           metrics,
-          this.normalizeOptionalString(dto.reviewComment),
+          effectiveReviewComment,
         );
       }
 
@@ -3183,9 +3199,7 @@ export class StaffChecklistsService {
         : null,
       '',
       'Источник: чеклист смены LeetPlus.',
-      `Открыть чеклисты: /staff/checklists?search=${encodeURIComponent(
-        run.title,
-      )}`,
+      `Открыть чек-лист: ${this.checklistRunHref(run.id)}`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -3217,12 +3231,19 @@ export class StaffChecklistsService {
         const note = answer.note ? ` - ${answer.note}` : '';
         return `- ${title}${note}`;
       });
+    const blockingLines = metrics.blockingIssues.slice(0, 5).map((issue) => {
+      return `- ${issue.title}: ${this.checklistBlockingIssueLabel(issue.issue)}`;
+    });
     const assignedTo =
       run.assignedToUser?.fullName ?? run.assignedToUser?.email ?? null;
     const score =
       metrics.scoreTotal > 0
         ? `${metrics.scoreEarned}/${metrics.scoreTotal}`
         : 'без баллов';
+    const conclusion = this.buildChecklistEscalationConclusion(
+      metrics,
+      reviewComment,
+    );
 
     return [
       'Чеклист эскалирован менеджером.',
@@ -3230,24 +3251,63 @@ export class StaffChecklistsService {
       `Чеклист: ${run.title}`,
       `Клуб: ${run.store?.name ?? 'вся сеть'}`,
       assignedTo ? `Ответственный: ${assignedTo}` : null,
-      reviewComment ? `Комментарий проверки: ${reviewComment}` : null,
+      reviewComment
+        ? `Причина/комментарий: ${reviewComment}`
+        : 'Причина: не указана',
       `Проблемных пунктов: ${metrics.failedItems}`,
       `Блокеров сдачи: ${metrics.blockingIssues.length}`,
       `Оценка: ${score}`,
+      `Вывод: ${conclusion}`,
       '',
       failedLines.length > 0 ? 'Проблемные пункты:' : null,
       ...failedLines,
       metrics.failedItems > failedLines.length
         ? `- Еще ${metrics.failedItems - failedLines.length} пункт(ов)`
         : null,
+      blockingLines.length > 0 ? 'Блокеры сдачи:' : null,
+      ...blockingLines,
+      metrics.blockingIssues.length > blockingLines.length
+        ? `- Еще ${metrics.blockingIssues.length - blockingLines.length} блокер(ов)`
+        : null,
       '',
       'Источник: эскалация чеклиста смены LeetPlus.',
-      `Открыть чеклисты: /staff/checklists?search=${encodeURIComponent(
-        run.title,
-      )}`,
+      `Открыть чек-лист: ${this.checklistRunHref(run.id)}`,
     ]
       .filter(Boolean)
       .join('\n');
+  }
+
+  private checklistRunHref(runId: string) {
+    return `/staff/checklists?runId=${encodeURIComponent(runId)}`;
+  }
+
+  private checklistBlockingIssueLabel(
+    issue: StaffChecklistBlockingIssue['issue'],
+  ) {
+    if (issue === 'REQUIRED_EVIDENCE_MISSING') {
+      return 'нет обязательного доказательства';
+    }
+
+    return 'нет обязательного ответа';
+  }
+
+  private buildChecklistEscalationConclusion(
+    metrics: Metrics,
+    reviewComment: string | null,
+  ) {
+    if (metrics.blockingIssues.length > 0) {
+      return 'есть блокеры сдачи; нужен разбор руководителя до принятия чек-листа.';
+    }
+
+    if (metrics.failedItems > 0) {
+      return 'есть проблемные пункты; руководителю нужно принять решение по смене.';
+    }
+
+    if (reviewComment) {
+      return 'проваленных пунктов нет; решение зависит от причины, указанной проверяющим.';
+    }
+
+    return 'проблемы и причина не указаны; проверьте корректность эскалации.';
   }
 
   private async fetchRunOrThrow(

@@ -433,35 +433,77 @@ export class StaffNotificationsService {
       ...checklists.map((run): SignalDraft => {
         const assignee = this.userLabel(run.assignedToUser);
         const isEscalated = run.status === 'ESCALATED';
+        const failedItems = Math.max(0, run.failedItems ?? 0);
+        const blockingIssuesCount = this.checklistBlockingIssueCount(
+          run.blockingIssues,
+        );
+        const reviewComment = this.normalizeOptionalString(run.reviewComment);
+        const score = this.formatChecklistScore(
+          run.scoreEarned,
+          run.scoreTotal,
+        );
+        const issueLines = this.checklistIssueLines(
+          run.sectionsSnapshot,
+          run.answers,
+          run.blockingIssues,
+        );
+        const actionHref = `/staff/checklists?runId=${encodeURIComponent(
+          run.id,
+        )}`;
+        const conclusion = this.checklistConclusion({
+          isEscalated,
+          failedItems,
+          blockingIssuesCount,
+          reviewComment,
+        });
 
         return {
           sourceType: 'CHECKLIST',
           sourceId: run.id,
           dedupeKey: `checklist:${run.id}:failed`,
-          severity: isEscalated ? 'CRITICAL' : 'WARNING',
-          title:
-            `${isEscalated ? 'Эскалирован чек-лист' : 'Чек-лист с проблемами'}: ${run.title}`.slice(
-              0,
-              240,
-            ),
+          severity: this.checklistSeverity({
+            isEscalated,
+            failedItems,
+            blockingIssuesCount,
+            reviewComment,
+          }),
+          title: `${
+            isEscalated
+              ? 'Эскалация чек-листа требует проверки'
+              : 'Чек-лист с проблемами'
+          }: ${run.title}`.slice(0, 240),
           message: [
             run.store ? `Клуб: ${run.store.name}` : 'Клуб: вся сеть',
             assignee ? `Ответственный: ${assignee}` : null,
-            `Статус: ${run.status}`,
-            `Проблемных пунктов: ${run.failedItems}`,
-            run.reviewComment ? `Комментарий: ${run.reviewComment}` : null,
+            isEscalated
+              ? 'Событие: чек-лист эскалирован менеджером.'
+              : `Статус: ${this.checklistStatusLabel(run.status)}`,
+            reviewComment
+              ? `Причина/комментарий: ${reviewComment}`
+              : isEscalated
+                ? 'Причина: не указана'
+                : null,
+            `Проблемных пунктов: ${failedItems}`,
+            `Блокеров сдачи: ${blockingIssuesCount}`,
+            issueLines.length > 0 ? 'Детали:' : null,
+            ...issueLines,
+            score ? `Оценка: ${score}` : null,
+            `Вывод: ${conclusion}`,
           ]
             .filter(Boolean)
             .join('\n'),
           storeId: run.storeId,
-          targetUserId: run.assignedToUserId,
-          actionLabel: 'Открыть чек-листы',
-          actionHref: `/staff/checklists?search=${encodeURIComponent(run.title)}`,
+          targetUserId: null,
+          actionLabel: 'Открыть чек-лист',
+          actionHref,
           metadata: {
             status: run.status,
-            failedItems: run.failedItems,
+            failedItems,
+            blockingIssues: blockingIssuesCount,
             scoreEarned: run.scoreEarned,
             scoreTotal: run.scoreTotal,
+            reviewComment,
+            actionHref,
           },
         };
       }),
@@ -547,41 +589,45 @@ export class StaffNotificationsService {
           },
         };
       }),
-      ...incidents.map((message): SignalDraft => {
-        const messageAction = this.extractMessageAction(message.body);
-        const chatHref = `/staff/team-chat?channelId=${encodeURIComponent(message.channelId)}`;
+      ...incidents
+        .filter((message) => !this.isChecklistGeneratedIncident(message.body))
+        .map((message): SignalDraft => {
+          const messageAction = this.extractMessageAction(message.body);
+          const chatHref = `/staff/team-chat?channelId=${encodeURIComponent(
+            message.channelId,
+          )}`;
 
-        return {
-          sourceType: 'TEAM_CHAT',
-          sourceId: message.id,
-          dedupeKey: `team-chat:${message.id}:incident`,
-          severity: 'CRITICAL',
-          title: `Срочный инцидент в чате: ${message.channel.name}`.slice(
-            0,
-            240,
-          ),
-          message: [
-            message.store ? `Клуб: ${message.store.name}` : 'Клуб: вся сеть',
-            this.userLabel(message.authorUser)
-              ? `Автор: ${this.userLabel(message.authorUser)}`
-              : null,
-            messageAction.body.slice(0, 700),
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          storeId: message.storeId,
-          targetUserId: null,
-          actionLabel: messageAction.actionLabel ?? 'Открыть чат',
-          actionHref: messageAction.actionHref ?? chatHref,
-          metadata: {
-            priority: message.priority,
-            isPinned: message.isPinned,
-            channelId: message.channelId,
-            chatHref,
-            messageActionHref: messageAction.actionHref,
-          },
-        };
-      }),
+          return {
+            sourceType: 'TEAM_CHAT',
+            sourceId: message.id,
+            dedupeKey: `team-chat:${message.id}:incident`,
+            severity: 'CRITICAL',
+            title: `Срочный инцидент в чате: ${message.channel.name}`.slice(
+              0,
+              240,
+            ),
+            message: [
+              message.store ? `Клуб: ${message.store.name}` : 'Клуб: вся сеть',
+              this.userLabel(message.authorUser)
+                ? `Автор: ${this.userLabel(message.authorUser)}`
+                : null,
+              messageAction.body.slice(0, 700),
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            storeId: message.storeId,
+            targetUserId: null,
+            actionLabel: messageAction.actionLabel ?? 'Открыть чат',
+            actionHref: messageAction.actionHref ?? chatHref,
+            metadata: {
+              priority: message.priority,
+              isPinned: message.isPinned,
+              channelId: message.channelId,
+              chatHref,
+              messageActionHref: messageAction.actionHref,
+            },
+          };
+        }),
       ...operationsDashboardSignals.anomalies
         .filter((anomaly) => anomaly.severity === 'HIGH')
         .map((anomaly) =>
@@ -592,6 +638,186 @@ export class StaffNotificationsService {
           ),
         ),
     ];
+  }
+
+  private checklistBlockingIssueCount(value: unknown) {
+    return Array.isArray(value) ? value.length : 0;
+  }
+
+  private checklistIssueLines(
+    sectionsValue: unknown,
+    answersValue: unknown,
+    blockingIssuesValue: unknown,
+  ) {
+    const titleByKey = new Map<string, string>();
+    const sections = Array.isArray(sectionsValue) ? sectionsValue : [];
+
+    sections.forEach((sectionValue) => {
+      const section = this.asNotificationRecord(sectionValue);
+      const sectionId = this.notificationString(section.id);
+      const sectionTitle = this.notificationString(section.title);
+      const items = Array.isArray(section.items) ? section.items : [];
+
+      items.forEach((itemValue) => {
+        const item = this.asNotificationRecord(itemValue);
+        const itemId = this.notificationString(item.id);
+        const itemTitle = this.notificationString(item.title);
+
+        if (sectionId && itemId && itemTitle) {
+          titleByKey.set(
+            `${sectionId}::${itemId}`,
+            sectionTitle ? `${sectionTitle}: ${itemTitle}` : itemTitle,
+          );
+        }
+      });
+    });
+
+    const answers = Array.isArray(answersValue) ? answersValue : [];
+    const failedLines = answers
+      .map((answerValue) => {
+        const answer = this.asNotificationRecord(answerValue);
+
+        if (answer.status !== 'FAILED') {
+          return null;
+        }
+
+        const sectionId = this.notificationString(answer.sectionId);
+        const itemId = this.notificationString(answer.itemId);
+        const title =
+          sectionId && itemId
+            ? (titleByKey.get(`${sectionId}::${itemId}`) ?? itemId)
+            : (itemId ?? 'Пункт чек-листа');
+        const note = this.notificationString(answer.note);
+
+        return `- Провален: ${title}${note ? ` — ${note}` : ''}`;
+      })
+      .filter((line): line is string => Boolean(line))
+      .slice(0, 3);
+
+    const blockingLines = (
+      Array.isArray(blockingIssuesValue) ? blockingIssuesValue : []
+    )
+      .map((issueValue) => {
+        const issue = this.asNotificationRecord(issueValue);
+        const title = this.notificationString(issue.title) ?? 'Пункт чек-листа';
+        const issueType = this.notificationString(issue.issue);
+
+        return `- Блокер: ${title} — ${this.checklistBlockingIssueLabel(
+          issueType,
+        )}`;
+      })
+      .slice(0, Math.max(0, 5 - failedLines.length));
+
+    return [...failedLines, ...blockingLines];
+  }
+
+  private asNotificationRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private notificationString(value: unknown) {
+    return typeof value === 'string'
+      ? this.normalizeOptionalString(value)
+      : null;
+  }
+
+  private checklistBlockingIssueLabel(issue: string | null) {
+    if (issue === 'REQUIRED_EVIDENCE_MISSING') {
+      return 'нет обязательного доказательства';
+    }
+
+    return 'нет обязательного ответа';
+  }
+
+  private checklistSeverity({
+    isEscalated,
+    failedItems,
+    blockingIssuesCount,
+    reviewComment,
+  }: {
+    isEscalated: boolean;
+    failedItems: number;
+    blockingIssuesCount: number;
+    reviewComment: string | null;
+  }): StaffNotificationSeverity {
+    if (!isEscalated) {
+      return 'WARNING';
+    }
+
+    if (failedItems > 0 || blockingIssuesCount > 0 || reviewComment) {
+      return 'CRITICAL';
+    }
+
+    return 'WARNING';
+  }
+
+  private checklistConclusion({
+    isEscalated,
+    failedItems,
+    blockingIssuesCount,
+    reviewComment,
+  }: {
+    isEscalated: boolean;
+    failedItems: number;
+    blockingIssuesCount: number;
+    reviewComment: string | null;
+  }) {
+    if (blockingIssuesCount > 0) {
+      return 'есть блокеры сдачи; нужен разбор руководителя до принятия чек-листа.';
+    }
+
+    if (failedItems > 0) {
+      return isEscalated
+        ? 'есть проблемные пункты; руководителю нужно принять решение по смене.'
+        : 'есть проблемные пункты; проверьте доработку и комментарии исполнителя.';
+    }
+
+    if (isEscalated && reviewComment) {
+      return 'проваленных пунктов нет; решение зависит от причины, указанной проверяющим.';
+    }
+
+    if (isEscalated) {
+      return 'проблемы и причина не указаны; проверьте корректность эскалации.';
+    }
+
+    return 'нужна проверка чек-листа.';
+  }
+
+  private checklistStatusLabel(status: string) {
+    switch (status) {
+      case 'ON_REVIEW':
+        return 'на проверке';
+      case 'RETURNED':
+        return 'возвращен на доработку';
+      case 'ESCALATED':
+        return 'эскалирован';
+      default:
+        return status;
+    }
+  }
+
+  private formatChecklistScore(
+    scoreEarned: number | null,
+    scoreTotal: number | null,
+  ) {
+    if (
+      typeof scoreEarned === 'number' &&
+      typeof scoreTotal === 'number' &&
+      scoreTotal > 0
+    ) {
+      return `${scoreEarned}/${scoreTotal}`;
+    }
+
+    return null;
+  }
+
+  private isChecklistGeneratedIncident(body: string) {
+    return (
+      body.includes('Источник: чеклист смены LeetPlus.') ||
+      body.includes('Источник: эскалация чеклиста смены LeetPlus.')
+    );
   }
 
   private extractMessageAction(body: string) {

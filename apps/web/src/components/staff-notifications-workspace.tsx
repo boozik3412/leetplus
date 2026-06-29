@@ -293,7 +293,7 @@ type NotificationLinkContext = {
 };
 
 const notificationHrefPattern =
-  /(https?:\/\/[^\s<>"']+|\/(?!\/)[^\s<>"']+)/gi;
+  /(^|[\s(])((?:https?:\/\/[^\s<>"']+)|(?:\/(?!\/)[^\s<>"']+))/gi;
 
 function renderLinkedNotificationText(
   message: string,
@@ -344,8 +344,9 @@ function renderLinkedNotificationLine(
   notificationHrefPattern.lastIndex = 0;
 
   for (const match of line.matchAll(notificationHrefPattern)) {
-    const rawMatch = match[0];
-    const start = match.index ?? 0;
+    const prefix = match[1] ?? "";
+    const rawMatch = match[2] ?? "";
+    const start = (match.index ?? 0) + prefix.length;
     const { href: rawHref, trailingText } = splitTrailingHrefText(rawMatch);
     const href = normalizeNotificationHref(rawHref);
 
@@ -437,7 +438,7 @@ function normalizeNotificationHref(rawHref: string) {
   const href = rawHref.trim();
 
   if (href.startsWith("/") && !href.startsWith("//")) {
-    return href;
+    return isSafeInternalNotificationHref(href) ? href : null;
   }
 
   try {
@@ -453,12 +454,27 @@ function normalizeNotificationHref(rawHref: string) {
       url.hostname === "localhost" ||
       url.hostname === "127.0.0.1"
     ) {
-      return url.pathname + url.search + url.hash;
+      const internalHref = url.pathname + url.search + url.hash;
+
+      return isSafeInternalNotificationHref(internalHref)
+        ? internalHref
+        : null;
     }
 
     return url.toString();
   } catch {
     return null;
+  }
+}
+
+function isSafeInternalNotificationHref(href: string) {
+  try {
+    const url = new URL(href, "https://leetplus.local");
+    const firstSegment = url.pathname.split("/").filter(Boolean)[0] ?? "";
+
+    return /^[a-z][a-z0-9-]*$/i.test(firstSegment);
+  } catch {
+    return false;
   }
 }
 

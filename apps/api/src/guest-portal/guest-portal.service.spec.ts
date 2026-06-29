@@ -1438,7 +1438,7 @@ describe('GuestPortalService', () => {
       }
     });
 
-    it('does not open a session-start lootbox from the guest home click', async () => {
+    it('does not open a session-start lootbox before the unlock event', async () => {
       const { guestGamificationService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
         WEB_URL: 'https://leetplus.ru',
@@ -1478,6 +1478,121 @@ describe('GuestPortalService', () => {
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
+    });
+
+    it('opens a session-start lootbox after the session unlock event', async () => {
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      const { tokenPayload } = mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-session',
+        tenantId: 'tenant-1',
+        name: 'Лутбокс за старт сессии',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'SESSION_START',
+        limits: { perGuestPerWeek: 2 },
+      });
+      prisma.guestGameEvent.findMany.mockResolvedValue([
+        {
+          eventType: 'SESSION_START',
+          occurredAt: new Date('2026-06-29T09:45:00.000Z'),
+          payload: {
+            sourceFactKind: 'GUEST_SESSION',
+            store: { id: portal.store.id, name: portal.store.name },
+            input: {
+              sessionType: 'regular_session',
+              sessionPacket: false,
+              sessionMinutes: 75,
+            },
+          },
+        },
+      ]);
+      prisma.guestGameReward.count.mockResolvedValue(0);
+      prisma.guestGameEvent.count.mockResolvedValue(0);
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-session',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 100,
+        },
+        rewards: [{ rewardLabel: '100 бонусов' }],
+      });
+
+      const result = await service.openLootBox(
+        'Bearer guest-token',
+        'loot-session',
+      );
+
+      expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: tokenPayload.tenantId,
+          tenantSlug: 'leet',
+        }),
+        expect.objectContaining({
+          profileId: portal.profile.id,
+          guestId: 'guest-1',
+          lootBoxId: 'loot-session',
+          storeId: portal.store.id,
+          eventType: 'SESSION_START',
+          sessionType: 'regular_session',
+          sessionPacket: false,
+          sessionMinutes: 75,
+          sourceFactId: expect.stringMatching(
+            /^profile-1:store-1:loot-session:\d{4}-\d{2}-\d{2}:1$/,
+          ),
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        }),
+      );
+      expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-session',
+          eventType: 'SESSION_START',
+          sourceFactId: expect.stringMatching(
+            /^profile-1:store-1:loot-session:\d{4}-\d{2}-\d{2}:1$/,
+          ),
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        }),
+      );
+      expect(result).toMatchObject({
+        processed: true,
+        idempotent: false,
+        createdRewards: 1,
+        queuedRewardAmount: 100,
+        rewards: [{ rewardLabel: '100 бонусов' }],
+      });
     });
 
     it('opens an app-open lootbox through dry-run and process-event', async () => {

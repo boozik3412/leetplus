@@ -35,6 +35,7 @@ import {
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import {
   evaluateGuestGameProgress,
+  guestGameTriggerMatches,
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
@@ -1407,11 +1408,27 @@ export type GuestPortalLootBoxOpenResponse = {
   idempotent: boolean;
   createdRewards: number;
   queuedRewardAmount: number;
-  rewards: GuestGameProcessEventResult['rewards'];
+  rewards: GuestPortalLootBoxOpenReward[];
   portal: GuestPortalPayload;
   summary: GuestPortalGameSummary;
   message: string;
 };
+
+export type GuestPortalLootBoxOpenReward = Pick<
+  GuestPortalReward,
+  | 'id'
+  | 'walletState'
+  | 'rewardType'
+  | 'rewardAmount'
+  | 'rewardLabel'
+  | 'rewardRarity'
+  | 'rewardRarityLabel'
+  | 'rewardDropChance'
+  | 'rewardCode'
+  | 'claimPayload'
+  | 'qualifiedAt'
+  | 'expiresAt'
+>;
 
 export type GuestPortalClubSelectResponse = {
   token: string;
@@ -1469,6 +1486,12 @@ type GuestPortalRewardRow = {
   lootBox?: { name: string } | null;
   mission?: { name: string } | null;
   season?: { name: string } | null;
+};
+
+type GuestPortalLootBoxUnlockEventRow = {
+  eventType: string;
+  occurredAt: Date;
+  payload: Prisma.JsonValue | null;
 };
 
 type GuestPortalVisualLootBoxRef = {
@@ -3408,6 +3431,12 @@ export class GuestPortalService {
       );
     }
 
+    await this.processLiveSessionStartForPayload({
+      ...payload,
+      guestId: guest?.id ?? profile.guestId ?? null,
+      profileId: profile.id,
+    });
+
     const openedAt = new Date();
     const openedDate = openedAt.toISOString().slice(0, 10);
     const surface = guestPortalAppOpenSurface(dto.surface);
@@ -3565,6 +3594,8 @@ export class GuestPortalService {
     payload: GuestPortalTokenPayload,
     id: string,
   ): Promise<GuestPortalLootBoxOpenResponse> {
+    await this.processLiveSessionStartForPayload(payload);
+
     const context = await this.getTenantStoreByIds(
       payload.tenantId,
       payload.storeId,
@@ -3608,20 +3639,35 @@ export class GuestPortalService {
       );
     }
 
-    if (lootBox.triggerKind !== GAME_APP_OPEN_EVENT_TYPE) {
-      throw new BadRequestException(
-        lootBoxWaitingEventMessage(lootBox.triggerKind),
-      );
-    }
-
     const openedAt = new Date();
-    const currentRewards = await this.findPortalRewards(
-      context.tenant.id,
+    const ownerGuestId = guest?.id ?? profile.guestId ?? null;
+    const [currentRewards, unlockEvents] = await Promise.all([
+      this.findPortalRewards(
+        context.tenant.id,
+        context.store.id,
+        ownerGuestId,
+        profile.id,
+      ),
+      this.findPortalLootBoxUnlockEvents(
+        context.tenant.id,
+        ownerGuestId,
+        profile.id,
+      ),
+    ]);
+    const openState = buildLootBoxOpenState(
+      lootBox,
+      currentRewards,
+      unlockEvents,
       context.store.id,
-      guest?.id ?? profile.guestId ?? null,
-      profile.id,
     );
-    const openState = buildLootBoxOpenState(lootBox, currentRewards);
+    const unlockEvent = findLootBoxUnlockEvent(
+      lootBox,
+      unlockEvents,
+      context.store.id,
+    );
+    const unlockInput = unlockEvent
+      ? portalEventToProgressEvent(unlockEvent)
+      : null;
 
     if (!openState.openable) {
       throw new BadRequestException(
@@ -3632,9 +3678,10 @@ export class GuestPortalService {
     const sourceFactId = await this.buildLootBoxOpenSourceFactId(
       context.tenant.id,
       profile.id,
-      guest?.id ?? profile.guestId ?? null,
+      ownerGuestId,
       context.store.id,
       lootBox.id,
+      lootBox.triggerKind,
       lootBox.limits,
       openedAt,
     );
@@ -3650,11 +3697,30 @@ export class GuestPortalService {
     };
     const processDto = {
       profileId: profile.id,
-      guestId: guest?.id ?? profile.guestId ?? null,
+      guestId: ownerGuestId,
       lootBoxId: lootBox.id,
       storeId: context.store.id,
-      eventType: GAME_APP_OPEN_EVENT_TYPE,
+      eventType: lootBox.triggerKind,
       occurredAt: openedAt.toISOString(),
+      ...(unlockInput
+        ? {
+            sessionType: unlockInput.sessionType,
+            sessionPacket: unlockInput.sessionPacket,
+            sessionMinutes: unlockInput.sessionMinutes,
+            spendAmount: unlockInput.spendAmount,
+            tariffGroupId: unlockInput.tariffGroupId,
+            tariffPeriodId: unlockInput.tariffPeriodId,
+            tariffTypeId: unlockInput.tariffTypeId,
+            guestLogType: unlockInput.guestLogType,
+            productId: unlockInput.productId,
+            externalProductId: unlockInput.externalProductId,
+            categoryId: unlockInput.categoryId,
+            productName: unlockInput.productName,
+            categoryName: unlockInput.categoryName,
+            supplierName: unlockInput.supplierName,
+            quantity: unlockInput.quantity,
+          }
+        : {}),
       sourceFactId,
       sourceFactKind: GAME_LOOT_BOX_OPEN_SOURCE_KIND,
       externalDomain: GAME_APP_OPEN_EXTERNAL_DOMAIN,
@@ -3680,7 +3746,7 @@ export class GuestPortalService {
     );
     const nextPayload: GuestPortalTokenPayload = {
       ...payload,
-      guestId: guest?.id ?? profile.guestId ?? null,
+      guestId: ownerGuestId,
       profileId: profile.id,
     };
     const portal = await this.buildPortalPayload(nextPayload);
@@ -6822,6 +6888,7 @@ export class GuestPortalService {
     guestId: string | null,
     storeId: string,
     lootBoxId: string,
+    eventType: string,
     lootBoxLimits: Prisma.JsonValue | null,
     openedAt: Date,
   ) {
@@ -6832,7 +6899,7 @@ export class GuestPortalService {
     const sourceFactPrefix = [
       'guest-game',
       GAME_LOOT_BOX_OPEN_SOURCE_KIND,
-      GAME_APP_OPEN_EVENT_TYPE,
+      eventType,
       profileId,
       storeId,
       lootBoxId,
@@ -6854,7 +6921,7 @@ export class GuestPortalService {
           tenantId,
           profileId,
           lootBoxId,
-          eventType: GAME_APP_OPEN_EVENT_TYPE,
+          eventType,
           occurredAt: { gte: weekStart },
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: GAME_APP_OPEN_EXTERNAL_DOMAIN,
@@ -6906,6 +6973,36 @@ export class GuestPortalService {
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
       take: 1000,
+    });
+  }
+
+  private async findPortalLootBoxUnlockEvents(
+    tenantId: string,
+    guestId: string | null,
+    profileId: string | null,
+  ): Promise<GuestPortalLootBoxUnlockEventRow[]> {
+    const ownerFilters: Prisma.GuestGameEventWhereInput[] = [
+      ...(guestId ? [{ guestId }] : []),
+      ...(profileId ? [{ profileId }] : []),
+    ];
+
+    if (!ownerFilters.length) {
+      return [];
+    }
+
+    return this.prisma.guestGameEvent.findMany({
+      where: {
+        tenantId,
+        eventType: { not: GAME_APP_OPEN_EVENT_TYPE },
+        OR: ownerFilters,
+      },
+      select: {
+        eventType: true,
+        occurredAt: true,
+        payload: true,
+      },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
     });
   }
 
@@ -7190,6 +7287,7 @@ export class GuestPortalService {
       bonusLedgerRows,
       communicationEvents,
       publishedVisualLootBoxRefs,
+      lootBoxUnlockEvents,
       activity,
     ] = await Promise.all([
       this.prisma.guestGroup.findMany({
@@ -7337,6 +7435,11 @@ export class GuestPortalService {
           })
         : [],
       this.getPublishedVisualLootBoxRefs(context.tenant.id, context.store.id),
+      this.findPortalLootBoxUnlockEvents(
+        context.tenant.id,
+        guest?.id ?? null,
+        profile?.id ?? null,
+      ),
       this.buildActivity(context.tenant.id, context.store.id, guest, profile),
     ]);
 
@@ -7381,7 +7484,9 @@ export class GuestPortalService {
       publishedVisualLootBoxRefs,
     )
       .slice(0, 6)
-      .map((item) => mapLootBox(item, rewards));
+      .map((item) =>
+        mapLootBox(item, rewards, lootBoxUnlockEvents, context.store.id),
+      );
     const portalMissions = visibleMissions.map((item) =>
       mapMission(item, missionProgress.get(item.id), rewards, bonusLedgerRows),
     );
@@ -12106,9 +12211,16 @@ function mapLootBox(
     probabilityRules: Prisma.JsonValue | null;
   },
   rewards: GuestPortalRewardRow[],
+  unlockEvents: GuestPortalLootBoxUnlockEventRow[],
+  storeId: string,
 ): GuestPortalLootBox {
   const rewardState = buildLootBoxRewardState(row.id, rewards);
-  const openState = buildLootBoxOpenState(row, rewards);
+  const openState = buildLootBoxOpenState(
+    row,
+    rewards,
+    unlockEvents,
+    storeId,
+  );
   const caseRarity = lootBoxCaseRarity(row.probabilityRules);
 
   return {
@@ -12146,6 +12258,8 @@ function buildLootBoxOpenState(
     limits: Prisma.JsonValue | null;
   },
   rewards: GuestPortalRewardRow[],
+  unlockEvents: GuestPortalLootBoxUnlockEventRow[] = [],
+  storeId: string | null = null,
 ): Pick<
   GuestPortalLootBox,
   | 'openState'
@@ -12175,6 +12289,20 @@ function buildLootBoxOpenState(
     (reward) => reward.qualifiedAt.getTime() >= dayStart.getTime(),
   ).length;
 
+  const unlockEvent = findLootBoxUnlockEvent(row, unlockEvents, storeId);
+
+  if (row.triggerKind !== GAME_APP_OPEN_EVENT_TYPE && !unlockEvent) {
+    return {
+      openState: 'WAITING_EVENT',
+      openable: false,
+      openBlocker: lootBoxWaitingEventMessage(row.triggerKind),
+      weeklyOpenedCount,
+      weeklyLimit,
+      dailyOpenedCount,
+      dailyLimit,
+    };
+  }
+
   if (weeklyLimit !== null && weeklyOpenedCount >= weeklyLimit) {
     return {
       openState: 'LIMIT_REACHED',
@@ -12199,18 +12327,6 @@ function buildLootBoxOpenState(
     };
   }
 
-  if (row.triggerKind !== GAME_APP_OPEN_EVENT_TYPE) {
-    return {
-      openState: 'WAITING_EVENT',
-      openable: false,
-      openBlocker: lootBoxWaitingEventMessage(row.triggerKind),
-      weeklyOpenedCount,
-      weeklyLimit,
-      dailyOpenedCount,
-      dailyLimit,
-    };
-  }
-
   return {
     openState: 'OPENABLE',
     openable: true,
@@ -12220,6 +12336,47 @@ function buildLootBoxOpenState(
     dailyOpenedCount,
     dailyLimit,
   };
+}
+
+function findLootBoxUnlockEvent(
+  row: {
+    triggerKind: string;
+    limits: Prisma.JsonValue | null;
+  },
+  unlockEvents: GuestPortalLootBoxUnlockEventRow[],
+  storeId: string | null,
+) {
+  if (row.triggerKind === GAME_APP_OPEN_EVENT_TYPE) {
+    return null;
+  }
+
+  const restartedAt = lootBoxRestartedAt(jsonRecord(row.limits));
+
+  return (
+    unlockEvents.find((event) => {
+      if (!guestGameTriggerMatches(row.triggerKind, event.eventType)) {
+        return false;
+      }
+
+      const payload = jsonRecord(event.payload);
+      if (
+        stringField(payload.sourceFactKind) === GAME_LOOT_BOX_OPEN_SOURCE_KIND
+      ) {
+        return false;
+      }
+
+      if (
+        restartedAt &&
+        event.occurredAt.getTime() < restartedAt.getTime()
+      ) {
+        return false;
+      }
+
+      const eventStoreId = portalEventToProgressEvent(event).storeId;
+
+      return !storeId || eventStoreId === storeId;
+    }) ?? null
+  );
 }
 
 function lootBoxWaitingEventMessage(triggerKind: string) {

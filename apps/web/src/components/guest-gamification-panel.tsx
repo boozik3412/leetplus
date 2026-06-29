@@ -6596,6 +6596,18 @@ function LootBoxesTab({
   saving: string | null;
   canManage: boolean;
 }) {
+  const [lootBoxStoreFilter, setLootBoxStoreFilter] = useState("");
+  const [lootBoxTriggerFilter, setLootBoxTriggerFilter] = useState("");
+  const filteredLootBoxes = useMemo(
+    () =>
+      lootBoxes.filter(
+        (lootBox) =>
+          lootBoxMatchesStoreFilter(lootBox, lootBoxStoreFilter) &&
+          (!lootBoxTriggerFilter ||
+            lootBox.triggerKind === lootBoxTriggerFilter),
+      ),
+    [lootBoxes, lootBoxStoreFilter, lootBoxTriggerFilter],
+  );
   const lootBoxTitle = form.name.trim();
   const formTitle =
     editingId && lootBoxTitle
@@ -6756,7 +6768,22 @@ function LootBoxesTab({
         ) : null
       }
       listTitle="Созданные правила лутбоксов"
-      items={lootBoxes}
+      listSummary={
+        <LootBoxRuleFilters
+          stores={stores}
+          storeId={lootBoxStoreFilter}
+          triggerKind={lootBoxTriggerFilter}
+          totalCount={lootBoxes.length}
+          visibleCount={filteredLootBoxes.length}
+          onStoreIdChange={setLootBoxStoreFilter}
+          onTriggerKindChange={setLootBoxTriggerFilter}
+          onReset={() => {
+            setLootBoxStoreFilter("");
+            setLootBoxTriggerFilter("");
+          }}
+        />
+      }
+      items={filteredLootBoxes}
       layout="stacked"
       renderItem={(item) => (
         <RuleCard
@@ -8640,12 +8667,14 @@ function LootBoxBusinessRules({
         tariffTypeId={form.tariffTypeId}
         onChange={onChange}
       />
-      <GuestLogConditionFields
-        guestLogTypes={form.guestLogTypes}
-        blockedGuestLogTypes={form.blockedGuestLogTypes}
-        catalog={guestLogCatalog}
-        onChange={onChange}
-      />
+      {form.triggerKind === "GUEST_LOG" ? (
+        <GuestLogConditionFields
+          guestLogTypes={form.guestLogTypes}
+          blockedGuestLogTypes={form.blockedGuestLogTypes}
+          catalog={guestLogCatalog}
+          onChange={onChange}
+        />
+      ) : null}
       <div className="grid gap-3 lg:grid-cols-2">
         <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
           <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
@@ -8713,6 +8742,74 @@ function LootBoxBusinessRules({
       </div>
       <LootBoxPrizesEditor prizes={form.prizes} onChange={updatePrizes} />
     </BusinessRuleSection>
+  );
+}
+
+function LootBoxRuleFilters({
+  stores,
+  storeId,
+  triggerKind,
+  totalCount,
+  visibleCount,
+  onStoreIdChange,
+  onTriggerKindChange,
+  onReset,
+}: {
+  stores: Store[];
+  storeId: string;
+  triggerKind: string;
+  totalCount: number;
+  visibleCount: number;
+  onStoreIdChange: (storeId: string) => void;
+  onTriggerKindChange: (triggerKind: string) => void;
+  onReset: () => void;
+}) {
+  const filtersActive = Boolean(storeId || triggerKind);
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+        <Field label="Фильтр по клубу">
+          <select
+            className={fieldClass}
+            value={storeId}
+            onChange={(event) => onStoreIdChange(event.target.value)}
+          >
+            <option value="">Все клубы</option>
+            {stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Фильтр по событию">
+          <select
+            className={fieldClass}
+            value={triggerKind}
+            onChange={(event) => onTriggerKindChange(event.target.value)}
+          >
+            <option value="">Все события</option>
+            {lootBoxTriggerOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <button
+          type="button"
+          className={smallButtonClass}
+          disabled={!filtersActive}
+          onClick={onReset}
+        >
+          Сбросить
+        </button>
+      </div>
+      <p className="mt-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        Показано {visibleCount} из {totalCount}
+      </p>
+    </div>
   );
 }
 
@@ -12259,6 +12356,15 @@ function storeScopeLabel(storeIds: string[], stores: Store[]) {
     : names.join(", ");
 }
 
+function lootBoxMatchesStoreFilter(
+  lootBox: Pick<GuestGameLootBox, "storeIds">,
+  storeId: string,
+) {
+  return (
+    !storeId || !lootBox.storeIds.length || lootBox.storeIds.includes(storeId)
+  );
+}
+
 function buildPromoBannerUsage(
   promoCards: GuestGamePromoCard[],
   stores: Store[],
@@ -12581,6 +12687,7 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
   const start = form.hourFrom || "00:00";
   const end = form.hourTo || "23:59";
   const usesTimeWindow = form.timeWindowMode !== "ANY";
+  const usesGuestLogTypes = form.triggerKind === "GUEST_LOG";
   const weekdays =
     form.weekdayMode === "ANY" ? [] : lootBoxWeekdaysForMode(form);
 
@@ -12596,8 +12703,10 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
-    guestLogTypes: csvList(form.guestLogTypes),
-    blockedGuestLogTypes: csvList(form.blockedGuestLogTypes),
+    guestLogTypes: usesGuestLogTypes ? csvList(form.guestLogTypes) : [],
+    blockedGuestLogTypes: usesGuestLogTypes
+      ? csvList(form.blockedGuestLogTypes)
+      : [],
   };
 }
 

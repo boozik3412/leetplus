@@ -274,6 +274,13 @@ type PlayerQuest = {
     value: string | number;
   };
 };
+type QuestCompletionDialog = {
+  id: string;
+  title: string;
+  rewardLabel: string;
+  statusLabel: string;
+  receivedAt: string;
+};
 type QuestBoardStyle = CSSProperties &
   Partial<
     Record<
@@ -550,6 +557,8 @@ function ReadyGameView({
   const [questsExpanded, setQuestsExpanded] = useState(false);
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
+  const [questCompletionDialog, setQuestCompletionDialog] =
+    useState<QuestCompletionDialog | null>(null);
   const homeBanners = buildHomeBanners(
     summary,
     primaryAction,
@@ -698,6 +707,16 @@ function ReadyGameView({
     setToastMessage(message);
   }
 
+  function applySummaryWithQuestDialog(nextSummary: GuestPortalGameSummary) {
+    const completion = findNewQuestCompletion(summary, nextSummary);
+
+    onSummaryChange(nextSummary);
+
+    if (completion) {
+      setQuestCompletionDialog(completion);
+    }
+  }
+
   function toggleQuestsExpanded() {
     const nextExpanded = !questsExpanded;
 
@@ -745,7 +764,7 @@ function ReadyGameView({
         createdRewards > 0 ? `${formatNumber(createdRewards)} наград` : null,
       ].filter(Boolean);
 
-      onSummaryChange(nextSummary);
+      applySummaryWithQuestDialog(nextSummary);
       showToast(
         details.length
           ? `Чекин засчитан: ${details.join(", ")}.`
@@ -852,7 +871,7 @@ function ReadyGameView({
         runId,
       });
 
-      onSummaryChange(result.summary);
+      applySummaryWithQuestDialog(result.summary);
       setLootboxOverlayCard(nextCard);
       setLootboxRoulette(roulette);
       setLootboxOverlayPhase("rolling");
@@ -1106,6 +1125,58 @@ function ReadyGameView({
           onRouletteFinish={finishLootboxRoulette}
         />
       ) : null}
+
+      {questCompletionDialog ? (
+        <QuestCompletionModal
+          completion={questCompletionDialog}
+          onClose={() => setQuestCompletionDialog(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function QuestCompletionModal({
+  completion,
+  onClose,
+}: {
+  completion: QuestCompletionDialog;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="lp-quest-complete-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="questCompleteTitle"
+    >
+      <div className="lp-quest-complete-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть поздравление"
+          onClick={onClose}
+        >
+          ×
+        </button>
+        <span className="lp-quest-complete-kicker">Квест выполнен</span>
+        <h3 id="questCompleteTitle">{completion.title}</h3>
+        <div className="lp-quest-complete-reward">
+          <span>Награда</span>
+          <strong>{completion.rewardLabel}</strong>
+        </div>
+        <div className="lp-quest-complete-meta">
+          <span>{completion.statusLabel}</span>
+          <span>{formatDate(completion.receivedAt)}</span>
+        </div>
+        <button
+          type="button"
+          className="lp-quest-complete-action"
+          onClick={onClose}
+        >
+          Отлично
+        </button>
+      </div>
     </div>
   );
 }
@@ -1186,7 +1257,8 @@ function HomeLootBoxes({
       </div>
 
       <div className="lp-club-loot-grid">
-        {cards.map((card, index) => (
+        {cards.length ? (
+          cards.map((card, index) => (
           <button
             key={card.id}
             type="button"
@@ -1227,7 +1299,12 @@ function HomeLootBoxes({
               </span>
             </span>
           </button>
-        ))}
+          ))
+        ) : (
+          <p className="lp-club-loot-empty">
+            Клуб пока не опубликовал активные лутбоксы.
+          </p>
+        )}
       </div>
     </section>
   );
@@ -1632,27 +1709,16 @@ function HomeBattlePass({
     rewards.find((reward) => reward.status === "current")?.id ??
     rewards[0]?.id ??
     null;
-  const [activeRewardId, setActiveRewardId] = useState<string | null>(
-    initialRewardId,
-  );
+  const [activeRewardId, setActiveRewardId] = useState<string | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const lastScrollEventRef = useRef(0);
-
-  useEffect(() => {
-    if (!rewards.length) {
-      setActiveRewardId(null);
-      return;
-    }
-
-    setActiveRewardId((current) =>
-      current && rewards.some((reward) => reward.id === current)
-        ? current
-        : initialRewardId,
-    );
-  }, [initialRewardId, rewards]);
+  const selectedRewardId =
+    activeRewardId && rewards.some((reward) => reward.id === activeRewardId)
+      ? activeRewardId
+      : initialRewardId;
 
   const activeReward =
-    rewards.find((reward) => reward.id === activeRewardId) ??
+    rewards.find((reward) => reward.id === selectedRewardId) ??
     rewards.find((reward) => reward.status === "ready") ??
     rewards.find((reward) => reward.status === "current") ??
     rewards[0] ??
@@ -2722,58 +2788,6 @@ function buildHomeLootCards(
   summary: GuestPortalGameSummary,
   selectedLootId: string | null,
 ): HomeLootCard[] {
-  const fallback: HomeLootCard[] = [
-    {
-      id: "daily-container",
-      title: "Ежедневный контейнер",
-      description: "Открывается за визит, авторизацию и активность в клубе.",
-      status: summary.rewards.summary.ready > 0 ? "доступен" : "сегодня",
-      active: false,
-      openable: false,
-      openBlocker: "Лутбокс появится после настройки клуба.",
-      rewardLabel: null,
-      caseRarity: "common",
-      caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS.common,
-      weeklyOpenedCount: 0,
-      weeklyLimit: null,
-      dailyOpenedCount: 0,
-      dailyLimit: null,
-    },
-    {
-      id: "team-drop",
-      title: "Командный дроп",
-      description: "Награда за игру компанией и выполнение клубных задач.",
-      status: `${formatNumber(summary.journey.summary.completed)}/${formatNumber(
-        summary.journey.summary.total,
-      )}`,
-      active: false,
-      openable: false,
-      openBlocker: "Командный лутбокс появится после настройки клуба.",
-      rewardLabel: null,
-      caseRarity: "common",
-      caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS.common,
-      weeklyOpenedCount: 0,
-      weeklyLimit: null,
-      dailyOpenedCount: 0,
-      dailyLimit: null,
-    },
-    {
-      id: "rank-case",
-      title: "Ранговый кейс",
-      description: "Откроется после следующей ступени уровня или ранга.",
-      status: "ранг",
-      active: false,
-      openable: false,
-      openBlocker: "Ранговый кейс откроется после настройки сезона.",
-      rewardLabel: null,
-      caseRarity: "common",
-      caseRarityLabel: LOOTBOX_CASE_RARITY_LABELS.common,
-      weeklyOpenedCount: 0,
-      weeklyLimit: null,
-      dailyOpenedCount: 0,
-      dailyLimit: null,
-    },
-  ];
   const realCards = summary.lootBoxes.featured.slice(0, 3).map((lootBox) => ({
     id: lootBox.id,
     title: lootBox.name,
@@ -2797,10 +2811,9 @@ function buildHomeLootCards(
     dailyOpenedCount: lootBox.dailyOpenedCount,
     dailyLimit: lootBox.dailyLimit,
   }));
-  const cards = realCards.length > 0 ? realCards : fallback;
-  const activeId = selectedLootId ?? cards[0]?.id ?? null;
+  const activeId = selectedLootId ?? realCards[0]?.id ?? null;
 
-  return cards.map((card) => ({
+  return realCards.map((card) => ({
     ...card,
     active: card.id === activeId,
   }));
@@ -2864,6 +2877,83 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
       reward,
     };
   });
+}
+
+function findNewQuestCompletion(
+  previousSummary: GuestPortalGameSummary,
+  nextSummary: GuestPortalGameSummary,
+): QuestCompletionDialog | null {
+  const previousMissions = new Map(
+    [...previousSummary.missions.featured, ...previousSummary.missions.history].map(
+      (mission) => [mission.id, mission],
+    ),
+  );
+  const seen = new Set<string>();
+  const nextMissions = [
+    ...nextSummary.missions.featured,
+    ...nextSummary.missions.history,
+  ];
+
+  for (const mission of nextMissions) {
+    if (seen.has(mission.id)) {
+      continue;
+    }
+
+    seen.add(mission.id);
+
+    const previousMission = previousMissions.get(mission.id);
+    if (
+      !isMissionCompletedForDialog(mission) ||
+      (previousMission && isMissionCompletedForDialog(previousMission))
+    ) {
+      continue;
+    }
+
+    return {
+      id: mission.id,
+      title: mission.name,
+      rewardLabel: missionCompletionRewardLabel(mission),
+      statusLabel: mission.rewardStatus.label,
+      receivedAt: mission.rewardStatus.occurredAt ?? nextSummary.generatedAt,
+    };
+  }
+
+  return null;
+}
+
+function isMissionCompletedForDialog(mission: GameMission | GameMissionHistoryItem) {
+  return (
+    mission.progressPercent >= 100 ||
+    mission.rewardStatus.state === "COMPLETED" ||
+    mission.rewardStatus.state === "WAITING_APPROVAL" ||
+    mission.rewardStatus.state === "READY" ||
+    mission.rewardStatus.state === "QUEUED" ||
+    mission.rewardStatus.state === "SENDING" ||
+    mission.rewardStatus.state === "CONFIRMED" ||
+    mission.rewardStatus.state === "REDEEMED"
+  );
+}
+
+function missionCompletionRewardLabel(
+  mission: GameMission | GameMissionHistoryItem,
+) {
+  if (mission.rewardStatus.rewardLabel) {
+    return mission.rewardStatus.rewardLabel;
+  }
+
+  if (mission.rewardStatus.rewardAmount !== null) {
+    return `${formatNumber(mission.rewardStatus.rewardAmount)} бонусов`;
+  }
+
+  if (mission.rewardLabel) {
+    return mission.rewardLabel;
+  }
+
+  if (mission.xpReward > 0) {
+    return `${formatNumber(mission.xpReward)} XP`;
+  }
+
+  return "Награда клуба";
 }
 
 function buildQuestGroups(quests: PlayerQuest[]) {
@@ -6613,6 +6703,21 @@ const clubHomeCss = `
   gap: 14px;
 }
 
+.lp-club-loot-empty {
+  grid-column: 1 / -1;
+  min-height: 132px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  border: 1px solid rgba(196, 224, 225, 0.12);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  background: rgba(196, 224, 225, 0.035);
+}
+
 .lootbox-entry {
   position: relative;
   display: grid;
@@ -6764,6 +6869,126 @@ const clubHomeCss = `
 .lp-lootbox-mini-lock svg {
   width: 16px;
   height: 16px;
+}
+
+.lp-quest-complete-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(208, 170, 108, 0.18), transparent 34%),
+    rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.lp-quest-complete-dialog {
+  position: relative;
+  width: min(430px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid rgba(208, 170, 108, 0.4);
+  border-radius: var(--radius);
+  color: var(--text);
+  background:
+    linear-gradient(135deg, rgba(208, 170, 108, 0.12), transparent 42%),
+    rgba(5, 12, 14, 0.98);
+  box-shadow:
+    0 34px 110px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.06);
+}
+
+.lp-quest-complete-close {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 7px;
+  color: var(--muted);
+  background: rgba(196, 224, 225, 0.04);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lp-quest-complete-close:hover,
+.lp-quest-complete-close:focus-visible,
+.lp-quest-complete-action:hover,
+.lp-quest-complete-action:focus-visible {
+  border-color: rgba(131, 228, 236, 0.52);
+  color: var(--text);
+  outline: none;
+}
+
+.lp-quest-complete-kicker {
+  width: fit-content;
+  border: 1px solid rgba(208, 170, 108, 0.36);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  background: rgba(208, 170, 108, 0.08);
+}
+
+.lp-quest-complete-dialog h3 {
+  max-width: calc(100% - 42px);
+  color: var(--text);
+  font-size: 28px;
+  line-height: 1.08;
+  font-weight: 780;
+}
+
+.lp-quest-complete-reward,
+.lp-quest-complete-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(196, 224, 225, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(196, 224, 225, 0.035);
+}
+
+.lp-quest-complete-reward span,
+.lp-quest-complete-meta span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-quest-complete-reward strong {
+  min-width: 0;
+  color: var(--cyan);
+  font-size: 15px;
+  line-height: 1.2;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.lp-quest-complete-action {
+  min-height: 42px;
+  border: 1px solid rgba(208, 170, 108, 0.48);
+  border-radius: 7px;
+  color: #061013;
+  font-size: 12px;
+  font-weight: 860;
+  letter-spacing: 0;
+  background: linear-gradient(135deg, var(--amber), #f4dba0);
+  cursor: pointer;
 }
 
 .lp-lootbox-overlay {

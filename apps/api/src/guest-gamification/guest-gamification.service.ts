@@ -18,6 +18,7 @@ import {
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
+import { parseLangameDate } from '../integrations/langame-date';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { LangameGuestSession } from '../integrations/langame.types';
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
@@ -2219,6 +2220,7 @@ export type GuestGameProcessEventDto = GuestGameDryRunDto & {
   externalId?: string | null;
   note?: string | null;
   activeRulesOnly?: boolean | string | null;
+  suppressLootBoxRewards?: boolean | string | null;
 };
 
 export type GuestGameSelectedReward = {
@@ -2436,6 +2438,12 @@ type CheckInLiveSession = {
   raw: LangameGuestSession;
 };
 
+type CheckInResolvedStore = {
+  id: string;
+  name: string;
+  timeZone: string | null;
+};
+
 type LiveSessionStartCacheEntry = {
   expiresAt: number;
   result: GuestGameProcessEventResult | null;
@@ -2574,6 +2582,10 @@ function jsonRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value
     : {};
+}
+
+function visualEditorSourceRecord(value: Prisma.JsonValue | null) {
+  return jsonRecord(value).source === 'visual_editor';
 }
 
 function finiteJsonNumber(value: unknown): number | null {
@@ -6498,9 +6510,14 @@ export class GuestGamificationService {
       this.getPromoCards(user),
     ]);
     const season =
-      seasons.find((item) => ruleMatchesPilotStore(item, storeId)) ?? null;
+      seasons.find(
+        (item) =>
+          this.visualEditorSeasonSource(item) &&
+          ruleMatchesPilotStore(item, storeId),
+      ) ?? null;
     const checkInMission = missions.find(
       (item) =>
+        this.visualEditorMissionSource(item) &&
         item.status === 'ACTIVE' &&
         (item.missionType === 'CHECK_IN' || item.triggerKind === 'CHECK_IN') &&
         ruleMatchesStoreIds(item.storeIds, storeId),
@@ -6510,12 +6527,17 @@ export class GuestGamificationService {
       version: 1,
       battlePass: visualBattlePassFromSeason(season),
       lootBoxes: lootBoxes
-        .filter((item) => ruleMatchesPilotStore(item, storeId))
+        .filter(
+          (item) =>
+            this.visualEditorLootBoxSource(item) &&
+            ruleMatchesPilotStore(item, storeId),
+        )
         .slice(0, 8)
         .map(visualLootBoxFromRule),
       missions: missions
         .filter(
           (item) =>
+            this.visualEditorMissionSource(item) &&
             item.missionType !== 'CHECK_IN' &&
             item.triggerKind !== 'CHECK_IN' &&
             ruleMatchesPilotStore(item, storeId),
@@ -6525,6 +6547,7 @@ export class GuestGamificationService {
       promoCards: promoCards
         .filter(
           (item) =>
+            this.visualEditorPromoSource(item) &&
             item.status === 'ACTIVE' &&
             ruleMatchesStoreIds(item.storeIds, storeId),
         )
@@ -6532,6 +6555,22 @@ export class GuestGamificationService {
         .map(visualPromoFromRule),
       checkIn: visualCheckInFromMission(checkInMission ?? null),
     });
+  }
+
+  private visualEditorSeasonSource(rule: GuestGameSeason) {
+    return visualEditorSourceRecord(rule.xpRules);
+  }
+
+  private visualEditorLootBoxSource(rule: GuestGameLootBox) {
+    return visualEditorSourceRecord(rule.periodRules);
+  }
+
+  private visualEditorMissionSource(rule: GuestGameMission) {
+    return visualEditorSourceRecord(rule.conditions);
+  }
+
+  private visualEditorPromoSource(rule: GuestGamePromoCard) {
+    return visualEditorSourceRecord(rule.metadata);
   }
 
   private async materializeVisualEditorPayload(
@@ -7889,9 +7928,12 @@ export class GuestGamificationService {
       profileId: profile.id,
       guestId: nullableId(dto.guestId) ?? profile.guest?.id ?? null,
     });
-    const dryRun = booleanValue(dto.activeRulesOnly)
+    const activeDryRun = booleanValue(dto.activeRulesOnly)
       ? activeRulesOnlyDryRun(dryRunResult)
       : dryRunResult;
+    const dryRun = booleanValue(dto.suppressLootBoxRewards)
+      ? suppressLootBoxRewardsDryRun(activeDryRun)
+      : activeDryRun;
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
     const processPayload = buildProcessPayload(dto, dryRun);
     const existingEvent = eventReference
@@ -8188,6 +8230,7 @@ export class GuestGamificationService {
       externalDomain: liveSession.externalDomain,
       externalId: liveSession.externalSessionId,
       activeRulesOnly: true,
+      suppressLootBoxRewards: true,
       note:
         nullableString(dto.note) ??
         'Гость открыл игровой модуль во время активной Langame-сессии; старт сессии обработан live-проверкой.',
@@ -8381,6 +8424,7 @@ export class GuestGamificationService {
       externalProvider: IntegrationProvider.LANGAME,
       externalDomain: liveSession.externalDomain,
       externalId: eventExternalId,
+      suppressLootBoxRewards: true,
       note:
         nullableString(dto.note) ??
         'Гость прошел чекин в активной сессии Langame.',
@@ -10388,6 +10432,7 @@ export class GuestGamificationService {
     for (const source of orderedSources) {
       try {
         const session = await this.findCheckInSessionInSource({
+          tenantId,
           apiKey,
           source,
           externalGuestId,
@@ -10396,15 +10441,7 @@ export class GuestGamificationService {
         });
 
         if (session) {
-          return {
-            ...session,
-            store: await this.resolveCheckInStore(
-              tenantId,
-              source.id,
-              source.domain,
-              session.externalClubId,
-            ),
-          };
+          return session;
         }
       } catch {
         continue;
@@ -10415,6 +10452,7 @@ export class GuestGamificationService {
   }
 
   private async findCheckInSessionInSource(params: {
+    tenantId?: string;
     apiKey: string;
     source: { id: string; domain: string; baseUrl: string };
     externalGuestId: string;
@@ -10442,10 +10480,28 @@ export class GuestGamificationService {
           this.checkInSessionGuestIdMatches(row, params.externalGuestId) &&
           this.isOpenCheckInSessionStop(row.date_stop)
         ) {
-          const session = this.toCheckInLiveSession(params.source.domain, row);
+          const externalClubId = this.checkInScalar(
+            row.club_id ?? row.list_clubs_id,
+          );
+          const store = params.tenantId
+            ? await this.resolveCheckInStore(
+                params.tenantId,
+                params.source.id,
+                params.source.domain,
+                externalClubId,
+              )
+            : null;
+          const session = this.toCheckInLiveSession(
+            params.source.domain,
+            row,
+            store?.timeZone ?? null,
+          );
 
           if (session.externalSessionId) {
-            return session;
+            return {
+              ...session,
+              store: store ? { id: store.id, name: store.name } : null,
+            };
           }
         }
       }
@@ -10461,9 +10517,11 @@ export class GuestGamificationService {
   private toCheckInLiveSession(
     externalDomain: string,
     row: LangameGuestSession,
+    timeZone?: string | null,
   ): CheckInLiveSession {
     const startedAt = this.parseCheckInLangameDate(
       this.checkInScalar(row.date_start),
+      timeZone,
     );
     const packet = this.checkInBoolean(row.packet);
 
@@ -10591,7 +10649,7 @@ export class GuestGamificationService {
     integrationSourceId: string,
     externalDomain: string,
     externalClubId: string | null,
-  ): Promise<CheckInLiveSession['store']> {
+  ): Promise<CheckInResolvedStore | null> {
     if (externalClubId) {
       const store = await this.prisma.store.findFirst({
         where: {
@@ -10601,7 +10659,7 @@ export class GuestGamificationService {
           externalClubId,
           isActive: true,
         },
-        select: { id: true, name: true },
+        select: { id: true, name: true, timeZone: true },
       });
 
       if (store) {
@@ -10612,7 +10670,7 @@ export class GuestGamificationService {
     const sourceStores = await this.prisma.store.findMany({
       where: { tenantId, integrationSourceId, isActive: true },
       take: 2,
-      select: { id: true, name: true },
+      select: { id: true, name: true, timeZone: true },
     });
 
     if (sourceStores.length === 1) {
@@ -10627,7 +10685,7 @@ export class GuestGamificationService {
         isActive: true,
       },
       take: 2,
-      select: { id: true, name: true },
+      select: { id: true, name: true, timeZone: true },
     });
 
     return domainStores.length === 1 ? domainStores[0] : null;
@@ -10688,39 +10746,11 @@ export class GuestGamificationService {
     return null;
   }
 
-  private parseCheckInLangameDate(value: string | null | undefined) {
-    if (!value) {
-      return null;
-    }
-
-    const trimmed = value.trim();
-    const ruDate =
-      /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
-        trimmed,
-      );
-
-    if (ruDate) {
-      return new Date(
-        Date.UTC(
-          Number(ruDate[3]),
-          Number(ruDate[2]) - 1,
-          Number(ruDate[1]),
-          Number(ruDate[4] ?? 0),
-          Number(ruDate[5] ?? 0),
-          Number(ruDate[6] ?? 0),
-        ),
-      );
-    }
-
-    const normalized = trimmed.includes('T')
-      ? trimmed
-      : trimmed.replace(' ', 'T');
-    const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
-      ? normalized
-      : `${normalized}Z`;
-    const date = new Date(withTimezone);
-
-    return Number.isNaN(date.getTime()) ? null : date;
+  private parseCheckInLangameDate(
+    value: string | null | undefined,
+    timeZone?: string | null,
+  ) {
+    return parseLangameDate(value, timeZone);
   }
 
   private checkInDurationMinutes(startedAt: Date | null) {
@@ -14479,6 +14509,35 @@ function activeRulesOnlyDryRun(
       ],
     };
   });
+
+  return dryRunWithRules(dryRun, rules);
+}
+
+function suppressLootBoxRewardsDryRun(
+  dryRun: GuestGameDryRunResult,
+): GuestGameDryRunResult {
+  const rules = dryRun.rules.map((rule) => {
+    if (!rule.eligible || rule.kind !== 'LOOT_BOX') {
+      return rule;
+    }
+
+    return {
+      ...rule,
+      eligible: false,
+      blockers: [
+        ...rule.blockers,
+        'Лутбокс разблокирован: награда создается только при открытии гостем.',
+      ],
+    };
+  });
+
+  return dryRunWithRules(dryRun, rules);
+}
+
+function dryRunWithRules(
+  dryRun: GuestGameDryRunResult,
+  rules: GuestGameDryRunRule[],
+): GuestGameDryRunResult {
   const eligibleRules = rules.filter((rule) => rule.eligible);
 
   return {

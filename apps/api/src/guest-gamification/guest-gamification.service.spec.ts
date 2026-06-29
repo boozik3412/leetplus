@@ -3950,6 +3950,7 @@ describe('GuestGamificationService', () => {
           externalDomain: 'club-1',
           externalId: 'session-1',
           activeRulesOnly: true,
+          suppressLootBoxRewards: true,
         }),
       );
       expect(result).toBe(processResult);
@@ -4157,6 +4158,103 @@ describe('GuestGamificationService', () => {
         queuedRewardAmount: 50,
         idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
         langameWrite: false,
+      });
+    });
+
+    it('records session-start unlocks without queuing lootbox rewards when suppressed', async () => {
+      const { service } = createService();
+      const profile = profileFixture();
+      const lootBoxDryRun = dryRunResult({
+        summary: {
+          checkedRules: 1,
+          eligibleRules: 1,
+          blockedRules: 0,
+          estimatedRewardAmount: 100,
+          projectedXpDelta: 0,
+        },
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'loot-box-1',
+            kind: 'LOOT_BOX',
+            name: 'Session lootbox',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 100,
+            rewardLabel: '100 bonuses',
+            selectedRewardLabel: '100 bonuses',
+            manualApprovalRequired: false,
+            xpDelta: 0,
+          },
+        ],
+      });
+      const createRewardsSpy = jest.spyOn(
+        service as any,
+        'createProcessRewards',
+      );
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(lootBoxDryRun);
+      jest
+        .spyOn(service as any, 'createProcessEvent')
+        .mockResolvedValue(eventResult({ xpDelta: 0 }));
+
+      const result = await service.processEvent(user, {
+        profileId: profile.id,
+        guestId: 'guest-1',
+        eventType: 'SESSION_START',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'session-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-1',
+        suppressLootBoxRewards: true,
+      });
+
+      expect(createRewardsSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          suppressLootBoxRewards: true,
+        }),
+        expect.objectContaining({
+          summary: expect.objectContaining({
+            eligibleRules: 0,
+            blockedRules: 1,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          }),
+          rules: [
+            expect.objectContaining({
+              id: 'loot-box-1',
+              kind: 'LOOT_BOX',
+              eligible: false,
+              blockers: expect.arrayContaining([
+                'Лутбокс разблокирован: награда создается только при открытии гостем.',
+              ]),
+            }),
+          ],
+        }),
+        profile.id,
+        expect.objectContaining({
+          externalId: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+        }),
+      );
+      expect(result).toMatchObject({
+        rewards: [],
+        summary: {
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+          appliedXpDelta: 0,
+        },
+        dryRun: {
+          summary: {
+            eligibleRules: 0,
+            blockedRules: 1,
+            estimatedRewardAmount: 0,
+          },
+        },
       });
     });
 

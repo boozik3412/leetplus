@@ -912,16 +912,16 @@ const startCss = `
 }
 
 .lp-start-legal {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 3;
+  position: relative;
+  z-index: 2;
   margin: 0;
   width: 100%;
   max-width: none;
   border: 0 !important;
-  background: transparent;
+  border-top: 1px solid rgba(196, 224, 225, 0.1) !important;
+  background:
+    linear-gradient(90deg, rgba(148, 214, 184, 0.04), transparent 42%, rgba(140, 230, 237, 0.04)),
+    #000;
   padding: 0;
   color: rgba(168, 185, 186, 0.72) !important;
 }
@@ -929,7 +929,7 @@ const startCss = `
 .lp-start-legal > div {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0 clamp(20px, 4vw, 58px) 14px;
+  padding: 22px clamp(20px, 4vw, 58px) 24px;
 }
 
 .lp-start-legal p,

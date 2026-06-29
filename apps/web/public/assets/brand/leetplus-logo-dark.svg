@@ -1,0 +1,8 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LeetPlus">
+  <rect x="18" y="18" width="124" height="124" rx="32" fill="#F7FFFF" stroke="#02080B" stroke-opacity="0.54" stroke-width="4"/>
+  <path d="M80 36L124 80L80 124L36 80L80 36Z" stroke="#02080B" stroke-width="9" stroke-linejoin="round"/>
+  <path d="M80 59L101 80L80 101L59 80L80 59Z" stroke="#0B8F98" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M80 72L88 80L80 88L72 80L80 72Z" fill="#0B8F98"/>
+  <path d="M42 38L34 38L34 50" stroke="#9C732D" stroke-width="4" stroke-linecap="round"/>
+  <path d="M118 122L126 122L126 110" stroke="#9C732D" stroke-width="4" stroke-linecap="round"/>
+</svg>

@@ -933,6 +933,7 @@ export type GuestPortalGameSummary = {
           GuestPortalSeason,
           | 'id'
           | 'name'
+          | 'periodTo'
           | 'currentLevel'
           | 'nextLevel'
           | 'progressPercent'
@@ -10062,6 +10063,7 @@ function buildGameSummaryFromPortal(
         ? {
             id: activeSeason.id,
             name: activeSeason.name,
+            periodTo: activeSeason.periodTo,
             currentLevel: activeSeason.currentLevel,
             nextLevel: activeSeason.nextLevel,
             progressPercent: activeSeason.progressPercent,

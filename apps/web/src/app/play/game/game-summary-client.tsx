@@ -135,6 +135,36 @@ type HomeBattleQuest = {
   x: string;
   y: string;
 };
+type HomeBattlePassSeason = NonNullable<
+  GuestPortalGameSummary["battlePass"]["active"]
+>;
+type HomeBattlePassLevel = HomeBattlePassSeason["levels"][number];
+type BattlePassRewardType =
+  | "xp"
+  | "coins"
+  | "discount"
+  | "lootbox"
+  | "avatar"
+  | "boost"
+  | "rank";
+type BattlePassRewardStatus = "locked" | "current" | "ready" | "claimed";
+type BattlePassRewardCard = {
+  id: string;
+  level: number;
+  title: string;
+  subtitle: string;
+  type: BattlePassRewardType;
+  rarity: GuestPortalLootBoxRarity;
+  status: BattlePassRewardStatus;
+  image?: string;
+  rewardValue?: string;
+};
+type BattlePassEventName =
+  | "reward_click"
+  | "reward_claim"
+  | "help_click"
+  | "track_scroll"
+  | "level_focus";
 type QuestStatus = "done" | "live" | "next";
 type RewardHistorySource = "lootbox" | "battlepass" | "quest" | "promo";
 type RewardHistorySourceFilter = RewardHistorySource | "all";
@@ -1012,6 +1042,7 @@ function ReadyGameView({
 
           <HomeBattlePass
             sectionRef={battlePassRef}
+            battlePass={summary.battlePass.active}
             quests={battleQuests}
             progress={battlePassProgress}
             rewardLabel={mainRewardLabel}
@@ -1577,6 +1608,7 @@ function LootboxOpeningOverlay({
 
 function HomeBattlePass({
   sectionRef,
+  battlePass,
   quests,
   progress,
   rewardLabel,
@@ -1584,41 +1616,118 @@ function HomeBattlePass({
   onToast,
 }: {
   sectionRef?: RefObject<HTMLElement | null>;
+  battlePass: GuestPortalGameSummary["battlePass"]["active"];
   quests: HomeBattleQuest[];
   progress: number;
   rewardLabel: string;
   seasonName: string;
   onToast: (message: string) => void;
 }) {
-  const [activeQuestId, setActiveQuestId] = useState<string | null>(null);
-  const activeQuest = quests.find((quest) => quest.id === activeQuestId) ?? null;
+  const rewards = useMemo(
+    () => buildBattlePassRewardCards(battlePass, quests),
+    [battlePass, quests],
+  );
+  const initialRewardId =
+    rewards.find((reward) => reward.status === "ready")?.id ??
+    rewards.find((reward) => reward.status === "current")?.id ??
+    rewards[0]?.id ??
+    null;
+  const [activeRewardId, setActiveRewardId] = useState<string | null>(
+    initialRewardId,
+  );
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const lastScrollEventRef = useRef(0);
 
   useEffect(() => {
-    if (!activeQuestId) {
+    if (!rewards.length) {
+      setActiveRewardId(null);
       return;
     }
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setActiveQuestId(null);
-      }
-    };
+    setActiveRewardId((current) =>
+      current && rewards.some((reward) => reward.id === current)
+        ? current
+        : initialRewardId,
+    );
+  }, [initialRewardId, rewards]);
 
-    document.addEventListener("keydown", handleKeyDown);
+  const activeReward =
+    rewards.find((reward) => reward.id === activeRewardId) ??
+    rewards.find((reward) => reward.status === "ready") ??
+    rewards.find((reward) => reward.status === "current") ??
+    rewards[0] ??
+    null;
+  const totalLevels = Math.max(rewards.length, battlePass?.levels.length ?? 0, 1);
+  const currentLevel = Math.min(
+    totalLevels,
+    Math.max(0, battlePass?.currentLevel ?? activeReward?.level ?? 0),
+  );
+  const levelLineScale =
+    totalLevels > 1 ? clampPercent(((currentLevel - 1) / (totalLevels - 1)) * 100) / 100 : 1;
+  const progressLabel = `${formatNumber(currentLevel)} / ${formatNumber(totalLevels)}`;
+  const mainReward = rewards[rewards.length - 1] ?? activeReward;
+  const mainRewardLevel = mainReward?.level ?? totalLevels;
+  const mainRewardLabel =
+    mainReward?.type === "lootbox"
+      ? mainReward.title
+      : rewardLabel || mainReward?.title || "Сезонный контейнер";
+  const trackGridStyle = {
+    gridTemplateColumns: `repeat(${rewards.length}, var(--battlepass-card-width))`,
+  } as CSSProperties;
+  const railStyle = {
+    ...trackGridStyle,
+    "--battlepass-line-scale": String(levelLineScale),
+  } as CSSProperties & Record<"--battlepass-line-scale", string>;
 
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [activeQuestId]);
-
-  const toggleQuestDetail = (quest: HomeBattleQuest) => {
-    setActiveQuestId((current) => {
-      const next = current === quest.id ? null : quest.id;
-
-      if (next) {
-        onToast(`${quest.title}: ${quest.description}`);
-      }
-
-      return next;
+  const handleHelpClick = () => {
+    emitBattlePassEvent("help_click", {
+      seasonId: battlePass?.id ?? null,
+      seasonName,
     });
+    onToast("Баттлпасс открывает награды по мере роста уровня гостя.");
+  };
+
+  const handleTrackScroll = () => {
+    const track = trackRef.current;
+    const now = Date.now();
+
+    if (!track || now - lastScrollEventRef.current < 260) {
+      return;
+    }
+
+    lastScrollEventRef.current = now;
+    emitBattlePassEvent("track_scroll", {
+      seasonId: battlePass?.id ?? null,
+      scrollLeft: Math.round(track.scrollLeft),
+      scrollWidth: track.scrollWidth,
+      clientWidth: track.clientWidth,
+    });
+  };
+
+  const focusReward = (reward: BattlePassRewardCard) => {
+    setActiveRewardId(reward.id);
+    emitBattlePassEvent("level_focus", battlePassRewardEventDetail(reward, battlePass));
+  };
+
+  const clickReward = (
+    reward: BattlePassRewardCard,
+    element: HTMLElement,
+  ) => {
+    focusReward(reward);
+    element.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+    emitBattlePassEvent("reward_click", battlePassRewardEventDetail(reward, battlePass));
+
+    if (reward.status === "ready") {
+      emitBattlePassEvent("reward_claim", battlePassRewardEventDetail(reward, battlePass));
+      onToast(`Награда уровня ${formatNumber(reward.level)} готова: ${reward.title}`);
+      return;
+    }
+
+    onToast(`${reward.title}: ${reward.subtitle}`);
   };
 
   return (
@@ -1628,136 +1737,433 @@ function HomeBattlePass({
       className="lp-club-panel lp-club-battlepass"
       aria-label="Баттлпасс"
     >
-      <div className="lp-club-section-head">
-        <span>
+      <div className="lp-club-battlepass-head">
+        <span className="lp-club-battlepass-title">
           <h2>Баттлпасс клуба</h2>
-          <p>Сезонная карта заданий ведет к главной награде текущего сезона.</p>
+          <p>Премиальная сезонная карта наград для гостей клуба.</p>
         </span>
-        <span className="lp-club-small-label">
-          {seasonName} / {formatNumber(progress)}% завершено
-        </span>
+        <button
+          type="button"
+          className="lp-club-battlepass-help"
+          onClick={handleHelpClick}
+        >
+          <span aria-hidden="true">?</span>
+          Как работает
+        </button>
       </div>
 
-      <div
-        className="lp-club-battle-track"
-        onClick={(event) => {
-          const target = event.target as HTMLElement;
-
-          if (
-            activeQuestId &&
-            !target.closest(".lp-club-pass-detail") &&
-            !target.closest(".lp-club-pass-node")
-          ) {
-            setActiveQuestId(null);
-          }
-        }}
-      >
-        <div className="lp-club-pass-map" aria-label="Карта прогресса Battle Pass">
-          <svg
-            className="lp-club-pass-route"
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
-            <defs>
-              <linearGradient id="lpClubBattleRouteGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="rgba(148, 214, 184, 0.9)" />
-                <stop offset="52%" stopColor="rgba(131, 228, 236, 0.88)" />
-                <stop offset="100%" stopColor="rgba(208, 170, 108, 0.82)" />
-              </linearGradient>
-            </defs>
-            <path
-              className="lp-club-route-base"
-              d="M 7 72 C 18 34, 30 34, 39 58 S 56 82, 65 48 S 80 19, 93 36"
-              pathLength="100"
-            />
-            <path
-              className="lp-club-route-progress"
-              d="M 7 72 C 18 34, 30 34, 39 58 S 56 82, 65 48 S 80 19, 93 36"
-              pathLength="100"
-              style={{ strokeDasharray: `${formatNumber(progress)} 100` }}
-            />
-          </svg>
-
-          {quests.map((quest) => {
-            const isActive = activeQuestId === quest.id;
-
-            return (
-              <button
-                key={quest.id}
-                type="button"
-                className={[
-                  "lp-club-pass-node",
-                  quest.state === "complete" ? "is-complete" : "",
-                  quest.state === "current" ? "is-current" : "",
-                  quest.state === "locked" ? "is-locked" : "",
-                  isActive ? "is-active" : "",
-                ].join(" ")}
-                style={{ "--x": quest.x, "--y": quest.y } as CSSProperties}
-                aria-expanded={isActive}
-                data-step={quest.step}
-                data-status={quest.status}
-                data-condition={quest.condition}
-                data-reward={quest.reward}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  toggleQuestDetail(quest);
-                }}
-              >
-                <span className="lp-club-node-mark">{quest.step}</span>
-                <span className="lp-club-node-copy">
-                  <strong>{quest.title}</strong>
-                  <small>{quest.label}</small>
-                  <span className="lp-club-node-preview">{quest.preview}</span>
-                </span>
-              </button>
-            );
-          })}
-
-          {activeQuest ? (
-            <div
-              className="lp-club-pass-detail is-open"
-              role="dialog"
-              aria-hidden="false"
-              aria-live="polite"
-              aria-labelledby="lpClubPassDetailTitle"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <span className="lp-club-detail-mark">{activeQuest.step}</span>
-              <span className="lp-club-detail-copy">
-                <small>{activeQuest.status}</small>
-                <strong id="lpClubPassDetailTitle">{activeQuest.title}</strong>
-                <span>{activeQuest.condition}</span>
-                <span className="lp-club-detail-reward">
-                  <b>Награда:</b>{" "}
-                  <span>{activeQuest.reward.replace(/^Награда:\s*/i, "")}</span>
-                </span>
-              </span>
-              <button
-                className="lp-club-detail-close"
-                type="button"
-                onClick={() => setActiveQuestId(null)}
-              >
-                Закрыть
-              </button>
-            </div>
-          ) : null}
+      <div className="lp-club-battlepass-top">
+        <div className="lp-club-battlepass-season">
+          <span className="lp-club-battlepass-emblem">
+            <picture>
+              <source
+                srcSet="/assets/brand/leetplus-logo-white.svg"
+                media="(prefers-color-scheme: dark)"
+              />
+              <img src="/assets/brand/leetplus-logo-white.svg" alt="LeetPlus" />
+            </picture>
+          </span>
+          <span className="lp-club-battlepass-season-copy">
+            <small>Сезон {battlePassSeasonNumber(seasonName)}</small>
+            <strong>{seasonName}</strong>
+            <span>
+              <b>{formatNumber(progress)}%</b>
+              {battlePassSeasonTimeLabel(battlePass?.periodTo)}
+            </span>
+          </span>
         </div>
 
-        <div className="lp-club-season-drop" aria-label="Главная награда">
-          <span className="lp-club-season-crest" aria-hidden="true">
-            <i />
+        <div className="lp-club-battlepass-main-reward">
+          <span className="lp-club-battlepass-main-copy">
+            <small>Главная награда</small>
+            <strong>Сезонный контейнер</strong>
+            <span>{mainRewardLabel}</span>
+            <em>Открывается на уровне {formatNumber(mainRewardLevel)}</em>
           </span>
-          <span className="lp-club-season-copy">
-            <small>season drop</small>
-            <strong>Главная награда</strong>
-            <span>{rewardLabel}</span>
+          <span className="lp-club-battlepass-main-case">
+            <Image
+              src={lootboxSkinForRarity(mainReward?.rarity ?? "legendary")}
+              alt=""
+              width={280}
+              height={190}
+              sizes="(max-width: 560px) 48vw, 220px"
+            />
           </span>
+        </div>
+      </div>
+
+      <div className="lp-club-battlepass-track" aria-label="Очередь наград Battle Pass">
+        <div
+          ref={trackRef}
+          className="lp-club-battlepass-track-scroll"
+          onScroll={handleTrackScroll}
+        >
+          <div className="lp-club-battlepass-track-inner">
+            <div className="lp-club-battlepass-level-rail" style={railStyle}>
+              {rewards.map((reward) => (
+                <button
+                  key={`level-${reward.id}`}
+                  type="button"
+                  className={[
+                    "lp-club-battlepass-level",
+                    reward.status === "claimed" ? "is-done" : "",
+                    reward.id === activeReward?.id ? "is-active" : "",
+                  ].join(" ")}
+                  aria-label={`Уровень ${formatNumber(reward.level)}`}
+                  onClick={() => focusReward(reward)}
+                  onFocus={() => focusReward(reward)}
+                >
+                  {formatNumber(reward.level)}
+                </button>
+              ))}
+            </div>
+
+            <div className="lp-club-battlepass-reward-grid" style={trackGridStyle}>
+              {rewards.map((reward) => {
+                const isActive = reward.id === activeReward?.id;
+
+                return (
+                  <button
+                    key={reward.id}
+                    type="button"
+                    className={[
+                      "lp-club-battlepass-reward",
+                      reward.type === "lootbox" ? "is-case" : "",
+                      isActive ? "is-active" : "",
+                      reward.status === "locked" ? "is-locked" : "",
+                      reward.status === "ready" ? "is-ready" : "",
+                      reward.status === "claimed" ? "is-claimed" : "",
+                    ].join(" ")}
+                    data-rank={reward.rarity}
+                    data-status={battlePassRewardStatusLabel(reward.status)}
+                    data-reward-id={reward.id}
+                    onClick={(event) => clickReward(reward, event.currentTarget)}
+                    onFocus={() => focusReward(reward)}
+                  >
+                    <span className="lp-club-battlepass-reward-media">
+                      <BattlePassRewardMedia reward={reward} />
+                    </span>
+                    <span className="lp-club-battlepass-reward-copy">
+                      <strong>{reward.title}</strong>
+                      <small>{reward.subtitle}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="lp-club-battlepass-progress">
+              <span className="lp-club-battlepass-meter">
+                <i style={{ width: `${clampPercent(progress)}%` }} />
+              </span>
+              <span>{progressLabel}</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
   );
+}
+
+function BattlePassRewardMedia({ reward }: { reward: BattlePassRewardCard }) {
+  if (reward.type === "lootbox") {
+    return (
+      <Image
+        src={reward.image ?? lootboxSkinForRarity(reward.rarity)}
+        alt=""
+        width={180}
+        height={130}
+        sizes="132px"
+      />
+    );
+  }
+
+  return (
+    <span className="lp-club-battlepass-token" data-type={reward.type}>
+      {reward.rewardValue ?? battlePassRewardTypeLabel(reward.type)}
+    </span>
+  );
+}
+
+function buildBattlePassRewardCards(
+  battlePass: GuestPortalGameSummary["battlePass"]["active"],
+  quests: HomeBattleQuest[],
+): BattlePassRewardCard[] {
+  if (!battlePass?.levels.length) {
+    return quests.map((quest, index) =>
+      battlePassRewardFromQuest(quest, index, quests.length),
+    );
+  }
+
+  return battlePass.levels.map((level) =>
+    battlePassRewardFromLevel(level, battlePass),
+  );
+}
+
+function battlePassRewardFromLevel(
+  level: HomeBattlePassLevel,
+  battlePass: HomeBattlePassSeason,
+): BattlePassRewardCard {
+  const title =
+    level.freeReward ??
+    level.premiumReward ??
+    `${formatNumber(level.xp)} XP`;
+  const rarity = inferBattlePassRewardRarity(title);
+  const type = inferBattlePassRewardType(title);
+
+  return {
+    id: `${battlePass.id}:${level.level}`,
+    level: level.level,
+    title: battlePassRewardTitle(title, type),
+    subtitle: battlePassRewardSubtitle(level, type),
+    type,
+    rarity,
+    status: battlePassRewardStatus(level, battlePass),
+    image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
+    rewardValue: battlePassRewardValue(title, type, level.xp),
+  };
+}
+
+function battlePassRewardFromQuest(
+  quest: HomeBattleQuest,
+  index: number,
+  total: number,
+): BattlePassRewardCard {
+  const rawTitle = quest.reward.replace(/^Награда:\s*/i, "") || quest.title;
+  const type = inferBattlePassRewardType(rawTitle);
+  const rarity = inferBattlePassRewardRarity(rawTitle);
+  const status =
+    quest.state === "complete"
+      ? "claimed"
+      : quest.state === "current"
+        ? "current"
+        : "locked";
+
+  return {
+    id: `fallback:${quest.id}`,
+    level: index + 1,
+    title: battlePassRewardTitle(rawTitle, type),
+    subtitle: index + 1 === total ? "Финальная награда" : quest.title,
+    type,
+    rarity,
+    status,
+    image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
+    rewardValue: battlePassRewardValue(rawTitle, type, index + 1),
+  };
+}
+
+function battlePassRewardStatus(
+  level: HomeBattlePassLevel,
+  battlePass: HomeBattlePassSeason,
+): BattlePassRewardStatus {
+  if (level.current && battlePass.readyRewards > 0) {
+    return "ready";
+  }
+
+  if (level.current) {
+    return "current";
+  }
+
+  if (level.reached) {
+    return "claimed";
+  }
+
+  return "locked";
+}
+
+function battlePassRewardEventDetail(
+  reward: BattlePassRewardCard,
+  battlePass: GuestPortalGameSummary["battlePass"]["active"],
+) {
+  return {
+    seasonId: battlePass?.id ?? null,
+    seasonName: battlePass?.name ?? null,
+    rewardId: reward.id,
+    level: reward.level,
+    title: reward.title,
+    subtitle: reward.subtitle,
+    type: reward.type,
+    rarity: reward.rarity,
+    status: reward.status,
+    rewardValue: reward.rewardValue ?? null,
+  };
+}
+
+function emitBattlePassEvent(
+  name: BattlePassEventName,
+  detail: Record<string, unknown> = {},
+) {
+  window.dispatchEvent(
+    new CustomEvent(`battlepass_${name}`, {
+      detail,
+    }),
+  );
+}
+
+function battlePassRewardTitle(value: string, type: BattlePassRewardType) {
+  const cleanValue = value.trim();
+
+  if (type === "lootbox" && !/контейнер|кейс|лутбокс/i.test(cleanValue)) {
+    return "Сезонный контейнер";
+  }
+
+  return cleanValue || battlePassRewardTypeLabel(type);
+}
+
+function battlePassRewardSubtitle(
+  level: HomeBattlePassLevel,
+  type: BattlePassRewardType,
+) {
+  const typeLabel = battlePassRewardTypeLabel(type);
+
+  if (level.freeReward && level.premiumReward) {
+    return `${typeLabel} · premium: ${level.premiumReward}`;
+  }
+
+  return `${typeLabel} · ${formatNumber(level.xp)} XP`;
+}
+
+function battlePassRewardValue(
+  value: string,
+  type: BattlePassRewardType,
+  fallback: number,
+) {
+  if (type === "xp") {
+    const match = value.match(/\d[\d\s.,]*/);
+    return match ? `${match[0].trim()} XP` : `${formatNumber(fallback)} XP`;
+  }
+
+  if (type === "coins") {
+    const match = value.match(/\d[\d\s.,]*(?:\s?₽|\s?руб|\s?бонус)/i);
+    return match ? match[0].trim() : value;
+  }
+
+  if (type === "discount") {
+    const match = value.match(/\d[\d\s.,]*%/);
+    return match ? match[0].trim() : "Промо";
+  }
+
+  if (type === "boost") {
+    return "Boost";
+  }
+
+  if (type === "avatar") {
+    return "Avatar";
+  }
+
+  if (type === "rank") {
+    return "Rank";
+  }
+
+  return undefined;
+}
+
+function inferBattlePassRewardType(value: string): BattlePassRewardType {
+  const normalized = value.toLocaleLowerCase("ru-RU");
+
+  if (/лутбокс|кейс|контейнер|lootbox|case/.test(normalized)) {
+    return "lootbox";
+  }
+
+  if (/xp|хр|опыт/.test(normalized)) {
+    return "xp";
+  }
+
+  if (/скид|discount|промокод|promo/.test(normalized)) {
+    return "discount";
+  }
+
+  if (/аватар|avatar/.test(normalized)) {
+    return "avatar";
+  }
+
+  if (/буст|boost|множител|ускор/.test(normalized)) {
+    return "boost";
+  }
+
+  if (/ранг|rank|лига/.test(normalized)) {
+    return "rank";
+  }
+
+  return "coins";
+}
+
+function inferBattlePassRewardRarity(value: string): GuestPortalLootBoxRarity {
+  const normalized = value.toLocaleLowerCase("ru-RU");
+
+  if (/legendary|легендар/.test(normalized)) {
+    return "legendary";
+  }
+
+  if (/epic|эпич/.test(normalized)) {
+    return "epic";
+  }
+
+  if (/rare|редк/.test(normalized)) {
+    return "rare";
+  }
+
+  return "common";
+}
+
+function battlePassRewardStatusLabel(status: BattlePassRewardStatus) {
+  if (status === "ready") {
+    return "Забрать";
+  }
+
+  if (status === "current") {
+    return "Сейчас";
+  }
+
+  if (status === "claimed") {
+    return "Получено";
+  }
+
+  return "Закрыто";
+}
+
+function battlePassRewardTypeLabel(type: BattlePassRewardType) {
+  const labels = {
+    xp: "XP",
+    coins: "Бонусы",
+    discount: "Промо",
+    lootbox: "Кейс",
+    avatar: "Аватар",
+    boost: "Буст",
+    rank: "Ранг",
+  } satisfies Record<BattlePassRewardType, string>;
+
+  return labels[type];
+}
+
+function battlePassSeasonNumber(value: string) {
+  return value.match(/\d+/)?.[0].padStart(2, "0") ?? "01";
+}
+
+function battlePassSeasonTimeLabel(value: string | null | undefined) {
+  if (!value) {
+    return " · сезон активен";
+  }
+
+  const diff = new Date(value).getTime() - Date.now();
+
+  if (!Number.isFinite(diff)) {
+    return " · сезон активен";
+  }
+
+  if (diff <= 0) {
+    return " · сезон завершен";
+  }
+
+  const totalHours = Math.ceil(diff / 3_600_000);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+
+  if (days > 0) {
+    return ` · до конца ${formatNumber(days)} дн. ${formatNumber(hours)} ч`;
+  }
+
+  return ` · до конца ${formatNumber(totalHours)} ч`;
 }
 function PlayerProfilePanel({
   summary,
@@ -7281,450 +7687,640 @@ const clubHomeCss = `
 }
 
 .lp-club-battlepass {
-  display: grid;
-  gap: 18px;
-  min-width: 0;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 18% 0%, rgba(131, 228, 236, 0.1), transparent 30%),
-    radial-gradient(circle at 86% 18%, rgba(208, 170, 108, 0.09), transparent 28%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent 26%),
-    var(--club-panel, rgba(2, 8, 11, 0.82));
-}
-
-.lp-club-battle-track {
+  --battlepass-card-width: 132px;
+  --battlepass-card-gap: 18px;
+  --battlepass-card-half: calc(var(--battlepass-card-width) / 2);
   position: relative;
   display: grid;
-  grid-template-columns: minmax(680px, 1fr) minmax(210px, 280px);
-  gap: 16px;
-  align-items: stretch;
+  gap: 24px;
   min-width: 0;
-  padding: 0;
+  overflow: hidden;
+  padding: clamp(22px, 2.4vw, 34px);
+  border-color: rgba(131, 228, 236, 0.2);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 42% 72%, rgba(131, 228, 236, 0.12), transparent 28%),
+    radial-gradient(circle at 86% 18%, rgba(208, 170, 108, 0.11), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 36%),
+    rgba(3, 10, 12, 0.96);
+  box-shadow:
+    0 24px 90px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 rgba(131, 228, 236, 0.04);
+  isolation: isolate;
+}
+
+.lp-club-battlepass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0 49.85%, rgba(131, 228, 236, 0.07) 49.85% 50.15%, transparent 50.15%),
+    linear-gradient(rgba(131, 228, 236, 0.03) 1px, transparent 1px);
+  background-size: auto, 100% 72px;
+  opacity: 0.7;
+}
+
+.lp-club-battlepass-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.lp-club-battlepass-title {
+  min-width: 0;
+}
+
+.lp-club-battlepass-title h2 {
+  color: var(--text);
+  font-size: clamp(30px, 3vw, 42px);
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.lp-club-battlepass-title p {
+  max-width: 560px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.lp-club-battlepass-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-battlepass-help span {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(196, 224, 225, 0.35);
+  border-radius: 50%;
+}
+
+.lp-club-battlepass-help:hover,
+.lp-club-battlepass-help:focus-visible {
+  border-color: rgba(131, 228, 236, 0.52);
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.lp-club-battlepass-top {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.25fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+.lp-club-battlepass-season,
+.lp-club-battlepass-main-reward {
+  position: relative;
+  overflow: hidden;
+  min-height: 186px;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 44%),
+    rgba(2, 11, 14, 0.72);
+}
+
+.lp-club-battlepass-season {
+  display: grid;
+  grid-template-columns: minmax(108px, 0.72fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 22px;
+}
+
+.lp-club-battlepass-emblem {
+  display: grid;
+  place-items: center;
+  min-height: 116px;
+}
+
+.lp-club-battlepass-emblem img {
+  display: block;
+  width: 104px;
+  height: 104px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 0 18px rgba(131, 228, 236, 0.44))
+    drop-shadow(0 12px 18px rgba(0, 0, 0, 0.45));
+}
+
+.lp-club-battlepass-season-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.lp-club-battlepass-season-copy small,
+.lp-club-battlepass-main-copy small {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.lp-club-battlepass-season-copy strong {
+  margin-top: 10px;
+  color: var(--text);
+  font-size: clamp(23px, 2vw, 30px);
+  line-height: 1;
+}
+
+.lp-club-battlepass-season-copy span {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.lp-club-battlepass-season-copy b {
+  color: var(--amber);
+  font-size: 18px;
+}
+
+.lp-club-battlepass-main-reward {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.9fr) minmax(210px, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 22px 24px;
+  border-color: rgba(208, 170, 108, 0.46);
+  background:
+    radial-gradient(circle at 78% 50%, rgba(208, 170, 108, 0.2), transparent 34%),
+    linear-gradient(90deg, rgba(208, 170, 108, 0.08), transparent 56%),
+    rgba(10, 11, 8, 0.72);
+}
+
+.lp-club-battlepass-main-reward::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0 64%, rgba(208, 170, 108, 0.1) 64% 65%, transparent 65%),
+    linear-gradient(rgba(208, 170, 108, 0.08) 1px, transparent 1px);
+  background-size: auto, 100% 54px;
+  opacity: 0.65;
+}
+
+.lp-club-battlepass-main-copy,
+.lp-club-battlepass-main-case {
+  position: relative;
+  z-index: 1;
+}
+
+.lp-club-battlepass-main-copy strong {
+  display: block;
+  margin-top: 14px;
+  color: var(--text);
+  font-size: clamp(25px, 2vw, 32px);
+  line-height: 1.04;
+}
+
+.lp-club-battlepass-main-copy span {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.lp-club-battlepass-main-copy em {
+  display: block;
+  margin-top: 18px;
+  color: var(--amber);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 860;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lp-club-battlepass-main-case {
+  display: grid;
+  place-items: center;
+  min-height: 144px;
+}
+
+.lp-club-battlepass-main-case::before {
+  content: "";
+  position: absolute;
+  width: 220px;
+  height: 112px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(208, 170, 108, 0.24), transparent 66%);
+  filter: blur(8px);
+  transform: translateY(42px);
+}
+
+.lp-club-battlepass-main-case img {
+  position: relative;
+  z-index: 1;
+  width: min(230px, 95%);
+  max-height: 150px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 24px 34px rgba(0, 0, 0, 0.58))
+    drop-shadow(0 0 24px rgba(208, 170, 108, 0.34));
+  animation: battlePassCaseHover 4.6s ease-in-out infinite;
+}
+
+.lp-club-battlepass-track {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.lp-club-battlepass-track-scroll {
   overflow-x: auto;
-  overflow-y: visible;
-  overscroll-behavior-inline: contain;
-  scrollbar-color: rgba(131, 228, 236, 0.42) rgba(196, 224, 225, 0.08);
+  overflow-y: hidden;
+  padding: 12px 4px 4px;
+  scroll-snap-type: x proximity;
+  scrollbar-color: rgba(131, 228, 236, 0.62) rgba(196, 224, 225, 0.08);
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
 
-.lp-club-battle-track::-webkit-scrollbar {
-  height: 8px;
+.lp-club-battlepass-track-scroll::-webkit-scrollbar {
+  height: 9px;
 }
 
-.lp-club-battle-track::-webkit-scrollbar-track {
+.lp-club-battlepass-track-scroll::-webkit-scrollbar-track {
   border-radius: 999px;
   background: rgba(196, 224, 225, 0.08);
 }
 
-.lp-club-battle-track::-webkit-scrollbar-thumb {
+.lp-club-battlepass-track-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(131, 228, 236, 0.46);
+  background: linear-gradient(90deg, var(--cyan), var(--amber));
 }
 
-.lp-club-pass-map {
+.lp-club-battlepass-track-inner {
+  width: max-content;
+  min-width: 100%;
+  padding: 4px 2px 0;
+}
+
+.lp-club-battlepass-level-rail,
+.lp-club-battlepass-reward-grid {
+  display: grid;
+  gap: var(--battlepass-card-gap);
+  width: max-content;
+}
+
+.lp-club-battlepass-level-rail {
   position: relative;
-  min-height: 286px;
-  min-width: 680px;
-  overflow: visible;
+  margin-bottom: 34px;
   isolation: isolate;
-  border: 1px solid rgba(196, 224, 225, 0.12);
-  border-radius: 8px;
-  background:
-    radial-gradient(circle at 16% 82%, rgba(148, 214, 184, 0.12), transparent 24%),
-    radial-gradient(circle at 46% 40%, rgba(131, 228, 236, 0.14), transparent 28%),
-    radial-gradient(circle at 90% 30%, rgba(208, 170, 108, 0.13), transparent 26%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 36%),
-    rgba(1, 7, 10, 0.58);
 }
 
-.lp-club-pass-map::before {
+.lp-club-battlepass-level-rail::before,
+.lp-club-battlepass-level-rail::after {
   content: "";
   position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, transparent 0 49.8%, rgba(131, 228, 236, 0.06) 49.8% 50%, transparent 50%),
-    linear-gradient(rgba(196, 224, 225, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(196, 224, 225, 0.03) 1px, transparent 1px);
-  background-size: auto, 58px 58px, 58px 58px;
-  mask-image: radial-gradient(circle at 54% 50%, #000, transparent 78%);
-  pointer-events: none;
+  left: var(--battlepass-card-half);
+  right: var(--battlepass-card-half);
+  top: 28px;
+  z-index: -1;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.18);
 }
 
-.lp-club-pass-route {
-  position: absolute;
-  inset: 20px 24px;
-  width: calc(100% - 48px);
-  height: calc(100% - 40px);
-  overflow: visible;
-  pointer-events: none;
+.lp-club-battlepass-level-rail::after {
+  background: linear-gradient(90deg, var(--cyan), var(--teal), var(--amber));
+  box-shadow: 0 0 24px rgba(131, 228, 236, 0.46);
+  transform: scaleX(var(--battlepass-line-scale, 0));
+  transform-origin: left center;
 }
 
-.lp-club-pass-route path {
-  fill: none;
-  vector-effect: non-scaling-stroke;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.lp-club-route-base {
-  stroke: rgba(196, 224, 225, 0.14);
-  stroke-width: 2;
-}
-
-.lp-club-route-progress {
-  stroke: url("#lpClubBattleRouteGradient");
-  stroke-width: 3;
-  filter: drop-shadow(0 0 12px rgba(131, 228, 236, 0.32));
-}
-
-.lp-club-pass-node {
-  position: absolute;
-  left: var(--x);
-  top: var(--y);
-  z-index: 2;
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 9px;
-  align-items: center;
-  width: 150px;
-  min-height: 62px;
-  padding: 9px 10px;
-  border: 1px solid rgba(196, 224, 225, 0.13);
-  border-radius: 8px;
-  color: var(--text);
-  text-align: left;
-  background:
-    linear-gradient(135deg, rgba(196, 224, 225, 0.05), transparent 58%),
-    rgba(2, 8, 11, 0.94);
-  cursor: pointer;
-  transform: translate(-50%, var(--lift, -50%));
-  backdrop-filter: blur(10px);
-  transition:
-    border-color 180ms ease,
-    background 180ms ease,
-    width 180ms ease,
-    min-height 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease,
-    opacity 180ms ease;
-}
-
-.lp-club-pass-node:hover,
-.lp-club-pass-node:focus-visible,
-.lp-club-pass-node.is-active {
-  z-index: 20;
-  width: 218px;
-  min-height: 108px;
-  border-color: rgba(131, 228, 236, 0.54);
-  background:
-    radial-gradient(circle at 14% 28%, rgba(131, 228, 236, 0.2), transparent 44%),
-    linear-gradient(135deg, rgba(131, 228, 236, 0.1), transparent 62%),
-    rgba(2, 9, 12, 0.99);
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.74),
-    0 0 0 999px rgba(0, 0, 0, 0.03),
-    0 0 30px rgba(131, 228, 236, 0.12);
-  outline: none;
-  --lift: -58%;
-}
-
-.lp-club-node-mark {
+.lp-club-battlepass-level {
   position: relative;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid rgba(196, 224, 225, 0.18);
+  justify-self: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgba(196, 224, 225, 0.25);
   border-radius: 50%;
-  color: var(--quiet);
-  background: rgba(0, 0, 0, 0.3);
-  font-size: 10px;
+  color: var(--text);
+  background:
+    radial-gradient(circle, rgba(131, 228, 236, 0.12), transparent 68%),
+    #03090b;
+  box-shadow:
+    0 0 0 5px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 4px rgba(196, 224, 225, 0.05);
+  cursor: pointer;
+  font: inherit;
+  font-size: 21px;
   font-weight: 860;
-  letter-spacing: 0.08em;
+  transition:
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
 }
 
-.lp-club-node-mark::after {
+.lp-club-battlepass-level:hover,
+.lp-club-battlepass-level:focus-visible,
+.lp-club-battlepass-level.is-active {
+  border-color: rgba(131, 228, 236, 0.96);
+  color: var(--cyan);
+  background:
+    radial-gradient(circle, rgba(131, 228, 236, 0.35), transparent 66%),
+    #061113;
+  box-shadow:
+    0 0 0 5px rgba(131, 228, 236, 0.1),
+    0 0 42px rgba(131, 228, 236, 0.46),
+    inset 0 0 0 4px rgba(131, 228, 236, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.lp-club-battlepass-level.is-done {
+  border-color: rgba(148, 214, 184, 0.42);
+  color: var(--good);
+}
+
+.lp-club-battlepass-level.is-active::after {
   content: "";
   position: absolute;
-  inset: -5px;
-  border: 1px solid rgba(196, 224, 225, 0.08);
-  border-radius: inherit;
+  left: 50%;
+  top: calc(100% + 8px);
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 18px solid var(--cyan);
+  filter: drop-shadow(0 0 14px rgba(131, 228, 236, 0.72));
+  transform: translateX(-50%);
 }
 
-.lp-club-node-copy {
-  min-width: 0;
-}
-
-.lp-club-pass-node strong {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.lp-club-battlepass-reward {
+  --rank: #b7c4c6;
+  --rank-line: rgba(196, 224, 225, 0.2);
+  --rank-glow: rgba(196, 224, 225, 0.08);
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(82px, 1fr) auto;
+  align-items: end;
+  width: var(--battlepass-card-width);
+  min-width: var(--battlepass-card-width);
+  min-height: 204px;
+  padding: 18px 13px 15px;
+  border: 1px solid var(--rank-line);
+  border-radius: 10px;
   color: var(--text);
-  font-size: 12px;
-  line-height: 1.2;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 39%, var(--rank-glow), transparent 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 58%),
+    rgba(2, 8, 10, 0.83);
+  cursor: pointer;
+  scroll-snap-align: center;
+  transition:
+    border-color 210ms ease,
+    box-shadow 210ms ease,
+    opacity 210ms ease,
+    transform 210ms ease;
 }
 
-.lp-club-pass-node small {
-  display: block;
-  margin-top: 4px;
-  color: var(--quiet);
-  font-size: 8px;
+.lp-club-battlepass-reward::before {
+  content: attr(data-status);
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  min-width: 48px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--rank);
+  background: rgba(0, 0, 0, 0.36);
+  font-size: 9px;
   font-weight: 860;
-  letter-spacing: 0.11em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.lp-club-node-preview {
-  display: block;
-  max-height: 0;
-  margin-top: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.38;
-  opacity: 0;
-  transition:
-    max-height 180ms ease,
-    margin-top 180ms ease,
-    opacity 180ms ease;
+.lp-club-battlepass-reward[data-rank="rare"] {
+  --rank: var(--cyan);
+  --rank-line: rgba(131, 228, 236, 0.42);
+  --rank-glow: rgba(131, 228, 236, 0.18);
 }
 
-.lp-club-pass-node:hover .lp-club-node-preview,
-.lp-club-pass-node:focus-visible .lp-club-node-preview,
-.lp-club-pass-node.is-active .lp-club-node-preview {
-  max-height: 46px;
-  margin-top: 7px;
-  opacity: 1;
+.lp-club-battlepass-reward[data-rank="epic"] {
+  --rank: #9a80ff;
+  --rank-line: rgba(154, 128, 255, 0.46);
+  --rank-glow: rgba(154, 128, 255, 0.2);
 }
 
-.lp-club-pass-node.is-complete {
-  border-color: rgba(148, 214, 184, 0.42);
-  background:
-    radial-gradient(circle at 18% 50%, rgba(148, 214, 184, 0.16), transparent 42%),
-    rgba(8, 24, 19, 0.94);
+.lp-club-battlepass-reward[data-rank="legendary"] {
+  --rank: var(--amber);
+  --rank-line: rgba(208, 170, 108, 0.52);
+  --rank-glow: rgba(208, 170, 108, 0.22);
 }
 
-.lp-club-pass-node.is-complete .lp-club-node-mark {
-  border-color: rgba(148, 214, 184, 0.54);
-  color: var(--good);
-  background: rgba(22, 58, 46, 0.72);
-}
-
-.lp-club-pass-node.is-current {
-  z-index: 8;
-  width: 184px;
-  min-height: 76px;
-  border-color: rgba(131, 228, 236, 0.72);
-  background:
-    radial-gradient(circle at 20% 50%, rgba(131, 228, 236, 0.24), transparent 48%),
-    linear-gradient(135deg, rgba(131, 228, 236, 0.12), transparent 62%),
-    rgba(5, 19, 23, 0.98);
+.lp-club-battlepass-reward:hover,
+.lp-club-battlepass-reward:focus-visible,
+.lp-club-battlepass-reward.is-active {
+  border-color: var(--rank);
   box-shadow:
-    inset 0 0 0 1px rgba(131, 228, 236, 0.09),
-    0 0 38px rgba(131, 228, 236, 0.12);
-  --lift: -62%;
+    0 20px 58px rgba(0, 0, 0, 0.36),
+    0 0 34px var(--rank-glow),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  outline: none;
+  transform: translateY(-6px);
 }
 
-.lp-club-pass-node.is-current .lp-club-node-mark {
-  border-color: rgba(131, 228, 236, 0.84);
-  color: var(--cyan);
-  box-shadow: 0 0 24px rgba(131, 228, 236, 0.2);
+.lp-club-battlepass-reward.is-active::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--rank);
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 32px var(--rank-glow);
+  pointer-events: none;
+  animation: battlePassActivePulse 2.2s ease-in-out infinite;
 }
 
-.lp-club-pass-node.is-current.is-active,
-.lp-club-pass-node.is-current:hover,
-.lp-club-pass-node.is-current:focus-visible {
-  z-index: 24;
-  width: 218px;
-  min-height: 108px;
-  background:
-    radial-gradient(circle at 18% 34%, rgba(131, 228, 236, 0.25), transparent 46%),
-    linear-gradient(135deg, rgba(131, 228, 236, 0.14), transparent 62%),
-    rgba(2, 10, 13, 1);
-  --lift: -68%;
-}
-
-.lp-club-pass-node.is-locked {
+.lp-club-battlepass-reward.is-locked {
   opacity: 0.62;
 }
 
-.lp-club-pass-node.is-locked:hover,
-.lp-club-pass-node.is-locked:focus-visible,
-.lp-club-pass-node.is-locked.is-active {
-  opacity: 1;
+.lp-club-battlepass-reward.is-ready::before {
+  color: #031114;
+  background: linear-gradient(90deg, var(--cyan), var(--teal));
 }
 
-.lp-club-pass-detail {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 60;
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-  width: min(430px, calc(100% - 32px));
-  padding: 17px;
-  border: 1px solid rgba(131, 228, 236, 0.34);
-  border-radius: 8px;
-  background:
-    radial-gradient(circle at 8% 14%, rgba(131, 228, 236, 0.18), transparent 34%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 42%),
-    rgba(2, 9, 12, 0.985);
-  box-shadow:
-    0 28px 90px rgba(0, 0, 0, 0.82),
-    0 0 42px rgba(131, 228, 236, 0.14),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(20px);
-}
-
-.lp-club-pass-detail::before {
-  content: "";
-  position: absolute;
-  inset: -999px;
-  z-index: -2;
-  background: rgba(0, 0, 0, 0.34);
-  pointer-events: none;
-}
-
-.lp-club-pass-detail::after {
-  content: "";
-  position: absolute;
-  inset: 9px;
-  z-index: -1;
-  border: 1px solid rgba(196, 224, 225, 0.08);
-  border-radius: 7px;
-  background:
-    linear-gradient(90deg, transparent 0 49.6%, rgba(131, 228, 236, 0.13) 49.6% 50.3%, transparent 50.3%),
-    linear-gradient(rgba(196, 224, 225, 0.04) 1px, transparent 1px);
-  background-size: auto, 100% 28px;
-  mask-image: radial-gradient(circle at 50% 50%, #000, transparent 82%);
-  pointer-events: none;
-}
-
-.lp-club-detail-mark {
+.lp-club-battlepass-reward-media {
+  align-self: center;
+  justify-self: center;
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  border: 1px solid rgba(131, 228, 236, 0.5);
-  border-radius: 50%;
-  color: var(--cyan);
-  background: rgba(131, 228, 236, 0.08);
-  font-size: 12px;
-  font-weight: 860;
-  letter-spacing: 0.1em;
+  width: 104px;
+  height: 88px;
+  margin-top: 22px;
+  color: var(--rank);
+  filter: drop-shadow(0 0 18px var(--rank-glow));
 }
 
-.lp-club-detail-copy {
+.lp-club-battlepass-reward-media img {
+  width: 112px;
+  height: 84px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 16px 20px rgba(0, 0, 0, 0.54))
+    drop-shadow(0 0 20px var(--rank-glow));
+}
+
+.lp-club-battlepass-reward.is-active .lp-club-battlepass-reward-media img {
+  animation: battlePassCaseCardFloat 3.2s ease-in-out infinite;
+}
+
+.lp-club-battlepass-token {
   display: grid;
-  gap: 8px;
+  place-items: center;
+  width: 74px;
+  height: 74px;
+  border: 1px solid var(--rank-line);
+  border-radius: 50%;
+  color: var(--rank);
+  background:
+    radial-gradient(circle, var(--rank-glow), transparent 68%),
+    rgba(0, 0, 0, 0.28);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.lp-club-battlepass-token[data-type="discount"] {
+  font-size: 15px;
+}
+
+.lp-club-battlepass-reward-copy {
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
 
-.lp-club-detail-copy small {
-  color: var(--amber);
-  font-size: 9px;
-  font-weight: 860;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.lp-club-detail-copy strong {
+.lp-club-battlepass-reward-copy strong {
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--text);
-  font-size: 18px;
-  line-height: 1.1;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.18;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.lp-club-detail-copy span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.lp-club-detail-reward b {
-  color: var(--text);
-}
-
-.lp-club-detail-close {
-  grid-column: 2;
-  justify-self: start;
-  min-height: 34px;
-  padding: 0 14px;
-  border: 1px solid rgba(131, 228, 236, 0.22);
-  border-radius: 7px;
-  color: var(--cyan);
-  background: rgba(131, 228, 236, 0.06);
+.lp-club-battlepass-reward-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--quiet);
   font-size: 10px;
+  font-weight: 800;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.lp-club-battlepass-progress {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  min-width: min(100%, 420px);
+  margin-top: 22px;
+}
+
+.lp-club-battlepass-meter {
+  position: relative;
+  overflow: hidden;
+  height: 11px;
+  border: 1px solid rgba(196, 224, 225, 0.12);
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.055);
+}
+
+.lp-club-battlepass-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--teal), var(--amber));
+  box-shadow: 0 0 22px rgba(131, 228, 236, 0.4);
+}
+
+.lp-club-battlepass-progress > span:last-child {
+  color: var(--cyan);
+  font-size: 14px;
   font-weight: 860;
   letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
-.lp-club-season-drop {
-  position: relative;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  min-height: 286px;
-  padding: 18px;
-  border: 1px solid rgba(196, 224, 225, 0.12);
-  border-radius: 8px;
-  overflow: hidden;
-  text-align: center;
-  background:
-    radial-gradient(circle at 50% 38%, rgba(208, 170, 108, 0.18), transparent 42%),
-    linear-gradient(135deg, rgba(208, 170, 108, 0.08), transparent 46%),
-    rgba(2, 8, 11, 0.62);
+@keyframes battlePassCaseHover {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+
+  50% {
+    transform: translateY(-7px) rotate(1deg);
+  }
 }
 
-.lp-club-season-crest {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 120px;
-  height: 120px;
-  background:
-    linear-gradient(135deg, rgba(208, 170, 108, 0.26), rgba(131, 228, 236, 0.12)),
-    rgba(7, 13, 16, 0.98);
-  clip-path: polygon(50% 0%, 62% 30%, 96% 21%, 76% 50%, 96% 79%, 62% 70%, 50% 100%, 38% 70%, 4% 79%, 24% 50%, 4% 21%, 38% 30%);
-  filter: drop-shadow(0 0 32px rgba(208, 170, 108, 0.16));
+@keyframes battlePassCaseCardFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-5px) scale(1.03);
+  }
 }
 
-.lp-club-season-crest i {
-  width: 54px;
-  height: 54px;
-  border: 1px solid rgba(208, 170, 108, 0.62);
-  transform: rotate(45deg);
-}
+@keyframes battlePassActivePulse {
+  0%,
+  100% {
+    opacity: 0.68;
+  }
 
-.lp-club-season-copy {
-  display: grid;
-  gap: 7px;
-  max-width: 180px;
-  margin-top: 14px;
-}
-
-.lp-club-season-copy small {
-  color: var(--amber);
-  font-size: 9px;
-  font-weight: 860;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.lp-club-season-copy strong {
-  color: var(--text);
-  font-size: 20px;
-  line-height: 1.05;
-}
-
-.lp-club-season-copy span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
+  50% {
+    opacity: 1;
+  }
 }
 .lp-club-profile-panel {
   align-self: start;
@@ -9493,6 +10089,27 @@ const clubHomeCss = `
     scroll-snap-align: start;
   }
 
+  .lp-club-battlepass-head {
+    display: grid;
+  }
+
+  .lp-club-battlepass-help {
+    justify-self: start;
+  }
+
+  .lp-club-battlepass-top {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-club-battlepass-season,
+  .lp-club-battlepass-main-reward {
+    min-height: 0;
+  }
+
+  .lp-club-battlepass-main-reward {
+    grid-template-columns: minmax(0, 0.88fr) minmax(190px, 1fr);
+  }
+
   .lp-club-battle-track {
     display: grid;
     grid-template-columns: minmax(680px, 1fr) minmax(210px, 260px);
@@ -9589,6 +10206,53 @@ const clubHomeCss = `
   .lp-club-banner {
     flex-basis: min(84vw, 280px);
     min-height: 336px;
+  }
+
+  .lp-club-battlepass {
+    --battlepass-card-width: min(154px, calc(100vw - 76px));
+    --battlepass-card-gap: 14px;
+  }
+
+  .lp-club-battlepass-season {
+    grid-template-columns: minmax(84px, 0.42fr) minmax(0, 1fr);
+    padding: 18px;
+  }
+
+  .lp-club-battlepass-emblem img {
+    width: 82px;
+    height: 82px;
+  }
+
+  .lp-club-battlepass-main-reward {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 20px;
+  }
+
+  .lp-club-battlepass-main-case {
+    min-height: 128px;
+  }
+
+  .lp-club-battlepass-main-case img {
+    max-height: 132px;
+  }
+
+  .lp-club-battlepass-track-scroll {
+    padding-right: 0;
+    padding-left: 0;
+    scrollbar-width: none;
+  }
+
+  .lp-club-battlepass-track-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .lp-club-battlepass-reward {
+    min-height: 222px;
+  }
+
+  .lp-club-battlepass-progress {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
   .lp-club-quick-metrics,

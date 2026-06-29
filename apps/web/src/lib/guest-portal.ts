@@ -696,6 +696,7 @@ export type GuestPortalGameSummary = {
       GuestPortalPayload["gamification"]["seasons"][number],
       | "id"
       | "name"
+      | "periodTo"
       | "currentLevel"
       | "nextLevel"
       | "progressPercent"

@@ -17708,6 +17708,7 @@ function buildVisualPreviewBattlePass(
   return {
     id: battlePass.id ?? 'preview-season',
     name: battlePass.title,
+    periodTo: null,
     currentLevel: 1,
     nextLevel: next?.level ?? null,
     progressPercent: 0,

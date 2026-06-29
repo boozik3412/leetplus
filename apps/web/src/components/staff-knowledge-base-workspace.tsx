@@ -7,6 +7,12 @@ import {
   type StaffAttachmentUploadResult,
 } from "@/components/staff-attachment-upload";
 import { StaffMaterialPreview } from "@/components/staff-material-preview";
+import {
+  KnowledgeArticleRichText,
+  StaffKnowledgeRichTextEditor,
+  openKnowledgeReadingWindow,
+  type KnowledgeReadingWindowData,
+} from "@/components/staff-knowledge-rich-text";
 import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import type {
   StaffKnowledgeArticle,
@@ -495,6 +501,111 @@ function RevisionSlaPill({ article }: { article: StaffKnowledgeArticle }) {
   );
 }
 
+
+function readingMaterialsFrom(
+  materials: StaffKnowledgeMaterial[],
+): KnowledgeReadingWindowData["materials"] {
+  return materials
+    .filter(
+      (material) =>
+        material.title.trim() || material.content?.trim() || material.url?.trim(),
+    )
+    .map((material, index) => ({
+      id: material.id || `knowledge-material-${index}`,
+      title: material.title || `Материал ${index + 1}`,
+      type: material.type,
+      typeLabel: materialTypeLabels[material.type],
+      url: material.url,
+      content: material.content,
+      note: material.note,
+      required: material.required,
+    }));
+}
+
+function readingLinksFrom(
+  links: StaffKnowledgeRelatedLink[],
+): KnowledgeReadingWindowData["relatedLinks"] {
+  return links
+    .filter((link) => link.title.trim() || link.url?.trim())
+    .map((link, index) => ({
+      id: link.id || `knowledge-link-${index}`,
+      title: link.title || `Связь ${index + 1}`,
+      typeLabel: relatedLinkTypeLabels[link.type],
+      url: link.url,
+      note: link.note,
+    }));
+}
+
+function articleReadingData(
+  article: StaffKnowledgeArticle,
+): KnowledgeReadingWindowData {
+  return {
+    id: article.id,
+    eyebrow: "База знаний",
+    title: article.title,
+    summary: article.summary,
+    content: article.content,
+    metrics: [
+      { label: "Папка", value: article.folder },
+      { label: "Категория", value: article.category },
+      { label: "Видимость", value: roleScopeLabels[article.roleScope] },
+      { label: "Клуб", value: article.store?.name ?? "Вся сеть" },
+      { label: "Статус", value: statusLabels[article.status] },
+      {
+        label: "Прочтение",
+        value: article.requiresReading ? "Обязательное" : "Необязательное",
+      },
+    ],
+    tags: article.tags,
+    materials: readingMaterialsFrom(article.materials),
+    relatedLinks: readingLinksFrom(article.relatedLinks),
+    reading: {
+      requiresReading: article.requiresReading,
+      requiredByMe: article.readingSummary.requiredByMe,
+      readByMe: article.readingSummary.readByMe,
+      readAt: article.readingSummary.readAt,
+      readCount: article.readingSummary.readCount,
+      requiredCount: article.readingSummary.requiredCount,
+      pendingCount: article.readingSummary.pendingCount,
+    },
+  };
+}
+
+function draftReadingData(
+  draft: DraftArticle,
+  report: StaffKnowledgeBaseReport,
+  effectiveRevisionSlaDays: number,
+): KnowledgeReadingWindowData {
+  return {
+    id: draft.id,
+    eyebrow: "Предпросмотр базы знаний",
+    title: draft.title || "Новая статья",
+    summary: draft.summary,
+    content: draft.content,
+    metrics: [
+      { label: "Папка", value: draft.folder || "Общие" },
+      { label: "Категория", value: draft.category || "Без категории" },
+      { label: "Видимость", value: roleScopeLabels[draft.roleScope] },
+      {
+        label: "Клуб",
+        value: draft.storeId
+          ? report.stores.find((store) => store.id === draft.storeId)?.name ??
+            "Клуб"
+          : "Вся сеть",
+      },
+      { label: "Статус", value: statusLabels[draft.status] },
+      {
+        label: "Прочтение",
+        value: draft.requiresReading ? "Обязательное" : "Необязательное",
+      },
+      { label: "SLA возврата", value: `${effectiveRevisionSlaDays} дн.` },
+    ],
+    tags: tagsFromText(draft.tagsText),
+    materials: readingMaterialsFrom(draft.materials),
+    relatedLinks: readingLinksFrom(draft.relatedLinks),
+  };
+}
+
 export function StaffKnowledgeBaseWorkspace({
   report,
 }: {
@@ -522,6 +633,7 @@ export function StaffKnowledgeBaseWorkspace({
     report.settings.history,
   );
   const [readPendingId, setReadPendingId] = useState<string | null>(null);
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -599,12 +711,20 @@ export function StaffKnowledgeBaseWorkspace({
     setSavedDraftSnapshot(draftSnapshot(nextDraft));
     setMessage(null);
     setError(null);
+
+    if (report.canManageKnowledge) {
+      setIsBuilderOpen(true);
+    }
   }
 
   function updateDraft(patch: Partial<DraftArticle>) {
     setDraft((current) => ({ ...current, ...patch }));
     setMessage(null);
     setError(null);
+
+    if (report.canManageKnowledge) {
+      setIsBuilderOpen(true);
+    }
   }
 
   function loadSeed(
@@ -613,6 +733,7 @@ export function StaffKnowledgeBaseWorkspace({
     setDraft({ ...seed, id: null, storeId: "", revisionSlaDays: "" });
     setMessage("Черновик загружен. Проверьте текст и сохраните статью.");
     setError(null);
+    setIsBuilderOpen(true);
   }
 
   function loadSuggestion(suggestion: StaffKnowledgeArticleSuggestion) {
@@ -638,6 +759,7 @@ export function StaffKnowledgeBaseWorkspace({
       "Черновик создан из повторяющегося провала чек-листа. Проверьте текст и сохраните статью.",
     );
     setError(null);
+    setIsBuilderOpen(true);
   }
 
   function addMaterial() {
@@ -710,6 +832,51 @@ export function StaffKnowledgeBaseWorkspace({
       ...current,
       relatedLinks: current.relatedLinks.filter((link) => link.id !== linkId),
     }));
+  }
+
+
+  function addUploadedImageMaterial(attachment: StaffAttachmentUploadResult) {
+    setDraft((current) => {
+      if (current.materials.some((material) => material.url === attachment.url)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        materials: [
+          ...current.materials,
+          {
+            id: uid("material-image"),
+            title: attachment.fileName,
+            type: "IMAGE",
+            url: attachment.url,
+            content: null,
+            note: "",
+            required: false,
+          },
+        ],
+      };
+    });
+    setMessage("Картинка добавлена в текст статьи и материалы.");
+    setError(null);
+  }
+
+  function openDraftPreview() {
+    const opened = openKnowledgeReadingWindow(
+      draftReadingData(draft, report, effectiveRevisionSlaDays),
+    );
+
+    if (!opened) {
+      setError("Браузер заблокировал окно предпросмотра.");
+    }
+  }
+
+  function openArticleForReading(article: StaffKnowledgeArticle) {
+    const opened = openKnowledgeReadingWindow(articleReadingData(article));
+
+    if (!opened) {
+      setError("Браузер заблокировал окно чтения.");
+    }
   }
 
   async function saveArticle(statusOverride?: StaffKnowledgeArticleStatus) {
@@ -1237,79 +1404,32 @@ export function StaffKnowledgeBaseWorkspace({
         </section>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                Каталог
-              </p>
-              <h2 className="mt-1 text-lg font-semibold">Статьи и материалы</h2>
-            </div>
-            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-              {report.rows.length}
-            </span>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {report.rows.length === 0 ? (
-              <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
-                Материалов пока нет. Руководитель или менеджер по стандартам
-                может создать первую статью справа.
-              </p>
-            ) : (
-              report.rows.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  onClick={() => guardAction(() => loadArticle(row))}
-                  className={[
-                    "w-full rounded-lg border p-3 text-left transition",
-                    draft.id === row.id
-                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-                      : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900",
-                  ].join(" ")}
-                >
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold">{row.title}</span>
-                    {report.canManageKnowledge ? (
-                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                        {statusLabels[row.status]}
-                      </span>
-                    ) : null}
-                    <RevisionSlaPill article={row} />
-                  </span>
-                  {row.summary ? (
-                    <span className="mt-2 block text-sm text-zinc-600 dark:text-zinc-400">
-                      {row.summary}
-                    </span>
-                  ) : null}
-                  <span className="mt-2 block text-xs text-zinc-500">
-                    {row.folder} · {row.category} ·{" "}
-                    {roleScopeLabels[row.roleScope]} ·{" "}
-                    {row.store?.name ?? "Вся сеть"} · материалов:{" "}
-                    {row.materialsCount}
-                    {row.requiresReading ? " · обязательное прочтение" : ""}
-                  </span>
-                  {row.requiresReading ? (
-                    <span className="mt-2 block text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                      Прочитали {row.readingSummary.readCount}/
-                      {row.readingSummary.requiredCount}
-                      {row.readingSummary.requiredByMe &&
-                      !row.readingSummary.readByMe
-                        ? " · требуется от вас"
-                        : ""}
-                    </span>
-                  ) : null}
-                </button>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          {report.canManageKnowledge ? (
-            <form onSubmit={save}>
+      <div className="space-y-6">
+        {report.canManageKnowledge ? (
+          <details
+            open={isBuilderOpen}
+            onToggle={(event) =>
+              setIsBuilderOpen(event.currentTarget.open)
+            }
+            className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                    Конструктор
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold">
+                    {draft.id ? "Редактирование статьи" : "Новая статья"}
+                  </h2>
+                </div>
+                <span className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+                  {isBuilderOpen ? "Свернуть" : "Развернуть"}
+                </span>
+              </div>
+            </summary>
+            <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+              <form onSubmit={save}>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
@@ -1350,7 +1470,15 @@ export function StaffKnowledgeBaseWorkspace({
                     ) : null}
                   </div>
                 </div>
-                <button
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={openDraftPreview}
+                    className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    Предпросмотр
+                  </button>
+                  <button
                   type="submit"
                   disabled={isPending || !canSaveCurrentStatus}
                   className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1361,6 +1489,8 @@ export function StaffKnowledgeBaseWorkspace({
                       ? "Сохранить"
                       : "Нет прав"}
                 </button>
+
+                </div>
                 {selectedArticle?.status === "RETURNED" ? (
                   <a
                     href="/staff/tasks?view=approval"
@@ -1555,20 +1685,16 @@ export function StaffKnowledgeBaseWorkspace({
                 />
               </label>
 
-              <label className="mt-3 block space-y-1">
-                <span className="text-xs font-bold uppercase text-zinc-500">
+              <div className="mt-3">
+                <span className="mb-1 block text-xs font-bold uppercase text-zinc-500">
                   Основной текст
                 </span>
-                <textarea
+                <StaffKnowledgeRichTextEditor
                   value={draft.content}
-                  onChange={(event) =>
-                    updateDraft({ content: event.target.value })
-                  }
-                  rows={8}
-                  placeholder="Стандарт, инструкция, порядок действий или короткий учебный материал."
-                  className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                  onChange={(content) => updateDraft({ content })}
+                  onImageUploaded={addUploadedImageMaterial}
                 />
-              </label>
+              </div>
 
               <label className="mt-3 block space-y-1">
                 <span className="text-xs font-bold uppercase text-zinc-500">
@@ -1861,8 +1987,22 @@ export function StaffKnowledgeBaseWorkspace({
                 )}
               </div>
 
-              <div className="mt-5">
-                <StaffMaterialPreview
+              <details className="mt-5 rounded-lg border border-zinc-200 dark:border-zinc-800">
+                <summary className="cursor-pointer list-none p-3 [&::-webkit-details-marker]:hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                        Тест
+                      </p>
+                      <h3 className="mt-1 text-base font-semibold">Тест прохождения (опция)</h3>
+                    </div>
+                    <span className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+                      Открыть
+                    </span>
+                  </div>
+                </summary>
+                <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+                  <StaffMaterialPreview
                   title={draft.title}
                   description={draft.summary}
                   body={draft.content}
@@ -1944,35 +2084,126 @@ export function StaffKnowledgeBaseWorkspace({
                     }))}
                   emptyLabel="В статье пока нет тестовых действий для сотрудника."
                 />
-              </div>
+                </div>
+              </details>
 
               {selectedArticle ? (
                 <VersionHistory article={selectedArticle} />
               ) : null}
-            </form>
-          ) : selectedArticle ? (
+              </form>
+            </div>
+          </details>
+        ) : null}
+
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Каталог
+              </p>
+              <h2 className="mt-1 text-lg font-semibold">Статьи и материалы</h2>
+            </div>
+            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              {report.rows.length}
+            </span>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {report.rows.length === 0 ? (
+              <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
+                Материалов пока нет. Руководитель или менеджер по стандартам
+                может создать первую статью в конструкторе выше.
+              </p>
+            ) : (
+              report.rows.map((row) => (
+                <article
+                  key={row.id}
+                  className={[
+                    "rounded-lg border p-3 transition",
+                    draft.id === row.id
+                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                      : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900",
+                  ].join(" ")}
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-base font-semibold">{row.title}</h3>
+                        {report.canManageKnowledge ? (
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            {statusLabels[row.status]}
+                          </span>
+                        ) : null}
+                        <RevisionSlaPill article={row} />
+                      </div>
+                      {row.summary ? (
+                        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+                          {row.summary}
+                        </p>
+                      ) : null}
+                      <p className="mt-2 text-xs text-zinc-500">
+                        {row.folder} · {row.category} ·{" "}
+                        {roleScopeLabels[row.roleScope]} ·{" "}
+                        {row.store?.name ?? "Вся сеть"} · материалов:{" "}
+                        {row.materialsCount}
+                        {row.requiresReading
+                          ? " · обязательное прочтение"
+                          : ""}
+                      </p>
+                      {row.requiresReading ? (
+                        <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                          Прочитали {row.readingSummary.readCount}/
+                          {row.readingSummary.requiredCount}
+                          {row.readingSummary.requiredByMe &&
+                          !row.readingSummary.readByMe
+                            ? " · требуется от вас"
+                            : ""}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => guardAction(() => loadArticle(row))}
+                        className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                      >
+                        {report.canManageKnowledge ? "Редактировать" : "Показать здесь"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openArticleForReading(row)}
+                        className="h-9 rounded-md bg-zinc-950 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+                      >
+                        Открыть для чтения
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+
+        {!report.canManageKnowledge && selectedArticle ? (
+          <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
             <ArticlePreview
               article={selectedArticle}
               onMarkRead={markRead}
               isReadPending={readPendingId === selectedArticle.id}
             />
-          ) : (
-            <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
-              Выберите материал слева.
-            </p>
-          )}
+          </section>
+        ) : null}
 
-          {message ? (
-            <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
-              {message}
-            </p>
-          ) : null}
-          {error ? (
-            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-              {error}
-            </p>
-          ) : null}
-        </section>
+        {message ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
+            {message}
+          </p>
+        ) : null}
+        {error ? (
+          <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+            {error}
+          </p>
+        ) : null}
       </div>
       </div>
     </>
@@ -2043,9 +2274,7 @@ function ArticlePreview({
         </p>
       ) : null}
       {article.content ? (
-        <p className="mt-4 whitespace-pre-line text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-          {article.content}
-        </p>
+        <KnowledgeArticleRichText value={article.content} className="mt-4" />
       ) : null}
       {article.tags.length > 0 ? (
         <div className="mt-4 flex flex-wrap gap-2">
@@ -2081,6 +2310,14 @@ function ArticlePreview({
                 <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                   {material.content}
                 </p>
+              ) : null}
+              {material.type === "IMAGE" && material.url ? (
+                <img
+                  src={material.url}
+                  alt={material.title || "Изображение материала"}
+                  className="mt-3 max-h-[520px] w-full rounded-lg border border-zinc-200 object-contain dark:border-zinc-800"
+                  loading="lazy"
+                />
               ) : null}
               {material.url ? (
                 <a

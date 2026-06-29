@@ -371,6 +371,18 @@ export function StaffTaskCreateForm({
           </label>
         </div>
 
+        <label className="mt-3 block space-y-1">
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            Комментарий
+          </span>
+          <textarea
+            name="description"
+            rows={3}
+            placeholder="Что нужно проверить, какой результат приложить, на что обратить внимание."
+            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+
         <fieldset className="mt-3 rounded-lg border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
           <legend className="px-1 text-xs font-bold uppercase text-zinc-500">
             Ответственные
@@ -558,18 +570,6 @@ export function StaffTaskCreateForm({
             </div>
           </fieldset>
         ) : null}
-
-        <label className="mt-3 block space-y-1">
-          <span className="text-xs font-bold uppercase text-zinc-500">
-            Комментарий
-          </span>
-          <textarea
-            name="description"
-            rows={3}
-            placeholder="Что нужно проверить, какой результат приложить, на что обратить внимание."
-            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-          />
-        </label>
 
         {error ? (
           <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">

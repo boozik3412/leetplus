@@ -1241,7 +1241,7 @@ export function StaffKnowledgeBaseWorkspace({
             <button
               type="button"
               onClick={() => guardAction(() => loadArticle(null))}
-              className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+              className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 shadow-sm transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
             >
               Новая статья
             </button>

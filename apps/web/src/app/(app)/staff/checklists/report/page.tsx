@@ -316,6 +316,13 @@ export default async function StaffChecklistExecutionReportPage({
     { label: "Просрочено", value: report.summary.overdue },
     { label: "Проблемных пунктов", value: report.summary.failedItems },
     { label: "Средняя оценка", value: `${report.summary.scorePercent}%` },
+    {
+      label: "Дисциплина времени",
+      value:
+        report.summary.timedItemsTotal > 0
+          ? `${report.summary.timingCompliancePercent}%`
+          : "нет",
+    },
   ];
 
   return (
@@ -925,14 +932,15 @@ function GroupTable({
               <th className="px-4 py-3 text-right font-medium">Принято</th>
               <th className="px-4 py-3 text-right font-medium">Эскалации</th>
               <th className="px-4 py-3 text-right font-medium">Проблемы</th>
-              <th className="px-4 py-3 text-right font-medium">Оценка</th>
+                            <th className="px-4 py-3 text-right font-medium">Время</th>
+<th className="px-4 py-3 text-right font-medium">Оценка</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-4 py-6 text-center text-sm text-zinc-500"
                 >
                   Нет данных в выбранном периоде.
@@ -973,7 +981,19 @@ function GroupTable({
                     {formatNumber(row.failedItems)}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right">{row.scorePercent}%</td>
+                                <td className="px-4 py-3 text-right">
+                  {row.timedItemsTotal > 0 ? (
+                    <>
+                      {row.timingCompliancePercent}%
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {formatNumber(row.timedItemsOnTime)}/{formatNumber(row.timedItemsTotal)}
+                      </p>
+                    </>
+                  ) : (
+                    <span className="text-zinc-500">нет</span>
+                  )}
+                </td>
+<td className="px-4 py-3 text-right">{row.scorePercent}%</td>
               </tr>
             ))}
           </tbody>
@@ -1023,6 +1043,11 @@ function ExecutionRow({ run }: { run: StaffChecklistExecutionRun }) {
       <td className="px-4 py-3 text-right">
         {formatNumber(run.scoreEarned)}/{formatNumber(run.scoreTotal)}
         <p className="mt-1 text-xs text-zinc-500">{run.scorePercent}%</p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {run.timedItemsTotal > 0
+            ? `вовремя: ${formatNumber(run.timedItemsOnTime)}/${formatNumber(run.timedItemsTotal)}`
+            : "время не задано"}
+        </p>
       </td>
       <td className="px-4 py-3 text-right">
         <span

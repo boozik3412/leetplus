@@ -59,6 +59,14 @@ const emptyChecklistMetrics: StaffChecklistExecutionMetrics = {
   evidenceTotal: 0,
   evidenceDone: 0,
   evidencePercent: 0,
+  timedItemsTotal: 0,
+  timedItemsDone: 0,
+  timedItemsOnTime: 0,
+  timedItemsEarly: 0,
+  timedItemsLate: 0,
+  timingViolations: 0,
+  timingCompliancePercent: 0,
+  maxTimingDeviationMinutes: 0,
 };
 
 const emptyTaskGroup: StaffTaskGroup = {

@@ -28,6 +28,20 @@ export type StaffChecklistItemValueType =
   | "FILE_LINK"
   | "SELECT"
   | "TIMESTAMP";
+export type StaffChecklistItemTimingMode =
+  | "NONE"
+  | "SHIFT_START"
+  | "SHIFT_END"
+  | "CHECKLIST_SCHEDULED"
+  | "TIME_OF_DAY";
+export type StaffChecklistTimingStatus =
+  | "NOT_CONFIGURED"
+  | "WAITING"
+  | "ON_TIME"
+  | "EARLY"
+  | "LATE"
+  | "MISSED"
+  | "NO_ANCHOR";
 export type StaffChecklistExecutionSort =
   | "activityDate"
   | "checklist"
@@ -62,6 +76,14 @@ export type StaffChecklistUser = {
   fullName: string | null;
 };
 
+export type StaffChecklistItemTiming = {
+  mode: StaffChecklistItemTimingMode;
+  offsetMinutes: number | null;
+  timeOfDay: string | null;
+  toleranceMinutes: number;
+  affectsDiscipline: boolean;
+};
+
 export type StaffChecklistItem = {
   id: string;
   title: string;
@@ -70,6 +92,7 @@ export type StaffChecklistItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  timing: StaffChecklistItemTiming;
 };
 
 export type StaffChecklistEvidenceAttachment = {
@@ -103,6 +126,16 @@ export type StaffChecklistReviewThread = {
   messages: StaffChecklistReviewThreadMessage[];
 };
 
+export type StaffChecklistAnswerTiming = {
+  status: StaffChecklistTimingStatus;
+  plannedAt: string | null;
+  windowStartAt: string | null;
+  windowEndAt: string | null;
+  deviationMinutes: number | null;
+  toleranceMinutes: number;
+  affectsDiscipline: boolean;
+};
+
 export type StaffChecklistSection = {
   id: string;
   title: string;
@@ -120,6 +153,7 @@ export type StaffChecklistAnswer = {
   evidenceAttachments: StaffChecklistEvidenceAttachment[];
   reviewThreads: StaffChecklistReviewThread[];
   completedAt: string | null;
+  timing: StaffChecklistAnswerTiming | null;
 };
 
 export type StaffChecklistBlockingIssue = {
@@ -180,6 +214,14 @@ export type StaffChecklistRun = {
   blockingIssues: StaffChecklistBlockingIssue[];
   reviewComment: string | null;
   isOverdue: boolean;
+  timedItemsTotal: number;
+  timedItemsDone: number;
+  timedItemsOnTime: number;
+  timedItemsEarly: number;
+  timedItemsLate: number;
+  timingViolations: number;
+  timingCompliancePercent: number;
+  maxTimingDeviationMinutes: number;
   createdAt: string;
   updatedAt: string;
   regulation: { id: string; title: string; status: string; version: number } | null;
@@ -241,6 +283,11 @@ export type StaffChecklistReport = {
     overdue: number;
     failedItems: number;
     blockingIssues: number;
+    timedItemsTotal: number;
+    timedItemsDone: number;
+    timedItemsOnTime: number;
+    timingViolations: number;
+    timingCompliancePercent: number;
   };
   rows: StaffChecklistRun[];
   publishedRegulations: StaffChecklistRegulationOption[];
@@ -270,6 +317,14 @@ export type StaffChecklistExecutionMetrics = {
   evidenceTotal: number;
   evidenceDone: number;
   evidencePercent: number;
+  timedItemsTotal: number;
+  timedItemsDone: number;
+  timedItemsOnTime: number;
+  timedItemsEarly: number;
+  timedItemsLate: number;
+  timingViolations: number;
+  timingCompliancePercent: number;
+  maxTimingDeviationMinutes: number;
 };
 
 export type StaffChecklistExecutionGroup = StaffChecklistExecutionMetrics & {

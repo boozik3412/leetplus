@@ -88,6 +88,13 @@ const executionSourceFilters = [
   'TEMPLATE',
   'RUN',
 ] as const;
+const checklistTimingModes = [
+  'NONE',
+  'SHIFT_START',
+  'SHIFT_END',
+  'CHECKLIST_SCHEDULED',
+  'TIME_OF_DAY',
+] as const;
 
 export type StaffChecklistStatus = (typeof checklistStatuses)[number];
 export type StaffChecklistFilterStatus =
@@ -95,6 +102,16 @@ export type StaffChecklistFilterStatus =
 export type StaffChecklistShiftKind = (typeof shiftKinds)[number];
 export type StaffChecklistAnswerStatus = (typeof answerStatuses)[number];
 export type StaffChecklistItemValueType = (typeof itemValueTypes)[number];
+export type StaffChecklistItemTimingMode =
+  (typeof checklistTimingModes)[number];
+export type StaffChecklistTimingStatus =
+  | 'NOT_CONFIGURED'
+  | 'WAITING'
+  | 'ON_TIME'
+  | 'EARLY'
+  | 'LATE'
+  | 'MISSED'
+  | 'NO_ANCHOR';
 export type StaffChecklistExecutionSort = (typeof executionSortFields)[number];
 export type StaffChecklistExecutionSortDirection =
   (typeof executionSortDirections)[number];
@@ -165,6 +182,14 @@ export type StaffChecklistSection = {
   items: StaffChecklistItem[];
 };
 
+export type StaffChecklistItemTiming = {
+  mode: StaffChecklistItemTimingMode;
+  offsetMinutes: number | null;
+  timeOfDay: string | null;
+  toleranceMinutes: number;
+  affectsDiscipline: boolean;
+};
+
 export type StaffChecklistItem = {
   id: string;
   title: string;
@@ -173,6 +198,7 @@ export type StaffChecklistItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  timing: StaffChecklistItemTiming;
 };
 
 export type StaffChecklistEvidenceAttachment = {
@@ -206,6 +232,16 @@ export type StaffChecklistReviewThread = {
   messages: StaffChecklistReviewThreadMessage[];
 };
 
+export type StaffChecklistAnswerTiming = {
+  status: StaffChecklistTimingStatus;
+  plannedAt: string | null;
+  windowStartAt: string | null;
+  windowEndAt: string | null;
+  deviationMinutes: number | null;
+  toleranceMinutes: number;
+  affectsDiscipline: boolean;
+};
+
 export type StaffChecklistAnswer = {
   sectionId: string;
   itemId: string;
@@ -216,6 +252,7 @@ export type StaffChecklistAnswer = {
   evidenceAttachments: StaffChecklistEvidenceAttachment[];
   reviewThreads: StaffChecklistReviewThread[];
   completedAt: string | null;
+  timing: StaffChecklistAnswerTiming | null;
 };
 
 export type StaffChecklistBlockingIssue = {
@@ -248,6 +285,11 @@ export type StaffChecklistReport = {
     overdue: number;
     failedItems: number;
     blockingIssues: number;
+    timedItemsTotal: number;
+    timedItemsDone: number;
+    timedItemsOnTime: number;
+    timingViolations: number;
+    timingCompliancePercent: number;
   };
   rows: StaffChecklistRunResponse[];
   publishedRegulations: StaffChecklistRegulationOption[];
@@ -277,6 +319,14 @@ export type StaffChecklistExecutionMetrics = {
   evidenceTotal: number;
   evidenceDone: number;
   evidencePercent: number;
+  timedItemsTotal: number;
+  timedItemsDone: number;
+  timedItemsOnTime: number;
+  timedItemsEarly: number;
+  timedItemsLate: number;
+  timingViolations: number;
+  timingCompliancePercent: number;
+  maxTimingDeviationMinutes: number;
 };
 
 export type StaffChecklistExecutionGroup = StaffChecklistExecutionMetrics & {
@@ -380,6 +430,14 @@ export type StaffChecklistRunResponse = {
   blockingIssues: StaffChecklistBlockingIssue[];
   reviewComment: string | null;
   isOverdue: boolean;
+  timedItemsTotal: number;
+  timedItemsDone: number;
+  timedItemsOnTime: number;
+  timedItemsEarly: number;
+  timedItemsLate: number;
+  timingViolations: number;
+  timingCompliancePercent: number;
+  maxTimingDeviationMinutes: number;
   createdAt: string;
   updatedAt: string;
   regulation: {
@@ -444,6 +502,28 @@ type Metrics = {
   blockingIssues: StaffChecklistBlockingIssue[];
 };
 
+type TimingMetrics = Pick<
+  StaffChecklistExecutionMetrics,
+  | 'timedItemsTotal'
+  | 'timedItemsDone'
+  | 'timedItemsOnTime'
+  | 'timedItemsEarly'
+  | 'timedItemsLate'
+  | 'timingViolations'
+  | 'timingCompliancePercent'
+  | 'maxTimingDeviationMinutes'
+>;
+
+type ChecklistTimingRun = {
+  status: string;
+  scheduledAt: Date | null;
+  startedAt: Date | null;
+  createdAt: Date;
+  sectionsSnapshot: Prisma.JsonValue;
+  answers: Prisma.JsonValue;
+  shift: { startedAt: Date | null; stoppedAt: Date | null } | null;
+};
+
 type ChecklistSource = {
   kind: 'REGULATION' | 'TEMPLATE';
   id: string;
@@ -506,6 +586,11 @@ export class StaffChecklistsService {
           select: {
             status: true,
             scheduledAt: true,
+            startedAt: true,
+            createdAt: true,
+            sectionsSnapshot: true,
+            answers: true,
+            shift: { select: { startedAt: true, stoppedAt: true } },
             failedItems: true,
             blockingIssues: true,
           },
@@ -717,6 +802,10 @@ export class StaffChecklistsService {
           'Отправлено',
           'Смена',
           'Просрочено',
+          'Пунктов с временем',
+          'Вовремя',
+          'Нарушений времени',
+          'Дисциплина времени, %',
           'Проблемных пунктов',
           'Блокирующих проблем',
           'Оценка, %',
@@ -725,7 +814,9 @@ export class StaffChecklistsService {
         ],
         ...reportRows.map((row) => this.toExecutionExportRow(row)),
       ],
-      widths: [36, 34, 18, 18, 24, 28, 20, 20, 20, 22, 14, 18, 18, 14, 16, 18],
+      widths: [
+        36, 34, 18, 18, 24, 28, 20, 20, 20, 22, 14, 18, 14, 18, 18, 14, 16, 18,
+      ],
     });
   }
 
@@ -1726,6 +1817,11 @@ export class StaffChecklistsService {
     rows: Array<{
       status: string;
       scheduledAt: Date | null;
+      startedAt: Date | null;
+      createdAt: Date;
+      sectionsSnapshot: Prisma.JsonValue;
+      answers: Prisma.JsonValue;
+      shift: { startedAt: Date | null; stoppedAt: Date | null } | null;
       failedItems: number;
       blockingIssues: Prisma.JsonValue | null;
     }>,
@@ -1743,6 +1839,11 @@ export class StaffChecklistsService {
       overdue: 0,
       failedItems: 0,
       blockingIssues: 0,
+      timedItemsTotal: 0,
+      timedItemsDone: 0,
+      timedItemsOnTime: 0,
+      timingViolations: 0,
+      timingCompliancePercent: 0,
     };
 
     rows.forEach((row) => {
@@ -1770,7 +1871,18 @@ export class StaffChecklistsService {
       summary.blockingIssues += this.normalizeBlockingIssues(
         row.blockingIssues,
       ).length;
+
+      const timingMetrics = this.calculateTimingMetrics(row);
+      summary.timedItemsTotal += timingMetrics.timedItemsTotal;
+      summary.timedItemsDone += timingMetrics.timedItemsDone;
+      summary.timedItemsOnTime += timingMetrics.timedItemsOnTime;
+      summary.timingViolations += timingMetrics.timingViolations;
     });
+
+    summary.timingCompliancePercent = this.percent(
+      summary.timedItemsOnTime,
+      summary.timedItemsTotal,
+    );
 
     return summary;
   }
@@ -1797,6 +1909,14 @@ export class StaffChecklistsService {
       evidenceTotal: 0,
       evidenceDone: 0,
       evidencePercent: 0,
+      timedItemsTotal: 0,
+      timedItemsDone: 0,
+      timedItemsOnTime: 0,
+      timedItemsEarly: 0,
+      timedItemsLate: 0,
+      timingViolations: 0,
+      timingCompliancePercent: 0,
+      maxTimingDeviationMinutes: 0,
     };
   }
 
@@ -1859,6 +1979,18 @@ export class StaffChecklistsService {
     metrics.requiredItemsDone += row.requiredItemsDone;
     metrics.evidenceTotal += row.evidenceTotal;
     metrics.evidenceDone += row.evidenceDone;
+
+    const timingMetrics = this.calculateTimingMetrics(row);
+    metrics.timedItemsTotal += timingMetrics.timedItemsTotal;
+    metrics.timedItemsDone += timingMetrics.timedItemsDone;
+    metrics.timedItemsOnTime += timingMetrics.timedItemsOnTime;
+    metrics.timedItemsEarly += timingMetrics.timedItemsEarly;
+    metrics.timedItemsLate += timingMetrics.timedItemsLate;
+    metrics.timingViolations += timingMetrics.timingViolations;
+    metrics.maxTimingDeviationMinutes = Math.max(
+      metrics.maxTimingDeviationMinutes,
+      timingMetrics.maxTimingDeviationMinutes,
+    );
   }
 
   private finalizeExecutionGroups(
@@ -1889,6 +2021,10 @@ export class StaffChecklistsService {
     metrics.evidencePercent = this.percent(
       metrics.evidenceDone,
       metrics.evidenceTotal,
+    );
+    metrics.timingCompliancePercent = this.percent(
+      metrics.timedItemsOnTime,
+      metrics.timedItemsTotal,
     );
 
     return metrics;
@@ -1970,7 +2106,17 @@ export class StaffChecklistsService {
 
   private toRunResponse(row: StaffChecklistRunRow): StaffChecklistRunResponse {
     const sections = this.normalizeSections(row.sectionsSnapshot);
-    const answers = this.normalizeAnswers(row.answers, sections);
+    const normalizedAnswers = this.normalizeAnswers(row.answers, sections);
+    const answers = this.attachTimingToAnswers(
+      row,
+      sections,
+      normalizedAnswers,
+    );
+    const timingMetrics = this.calculateTimingMetrics(
+      row,
+      sections,
+      normalizedAnswers,
+    );
     const blockingIssues = this.normalizeBlockingIssues(row.blockingIssues);
     const isOverdue = this.isRunOverdue(row.status, row.scheduledAt);
 
@@ -2000,6 +2146,7 @@ export class StaffChecklistsService {
       blockingIssues,
       reviewComment: row.reviewComment,
       isOverdue,
+      ...timingMetrics,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       regulation: row.regulation,
@@ -2069,6 +2216,10 @@ export class StaffChecklistsService {
       formatStaffDateTime(run.submittedAt),
       run.shift ? `Смена ${run.shift.externalShiftId}` : null,
       staffYesNo(run.overdue > 0),
+      run.timedItemsTotal,
+      run.timedItemsOnTime,
+      run.timingViolations,
+      run.timingCompliancePercent,
       run.failedItems,
       run.blockingIssues,
       run.scorePercent,
@@ -2189,6 +2340,7 @@ export class StaffChecklistsService {
       required: this.normalizeBoolean(item.required, true),
       evidenceRequired: this.normalizeBoolean(item.evidenceRequired, false),
       score: this.normalizeScore(item.score),
+      timing: this.normalizeTiming(item.timing),
     };
   }
 
@@ -2204,6 +2356,7 @@ export class StaffChecklistsService {
         evidenceAttachments: [],
         reviewThreads: [],
         completedAt: null,
+        timing: null,
       })),
     );
   }
@@ -2330,9 +2483,220 @@ export class StaffChecklistsService {
           evidenceAttachments,
           reviewThreads: this.normalizeReviewThreads(record.reviewThreads),
           completedAt,
+          timing: null,
         };
       }),
     );
+  }
+
+  private createTimingMetrics(): TimingMetrics {
+    return {
+      timedItemsTotal: 0,
+      timedItemsDone: 0,
+      timedItemsOnTime: 0,
+      timedItemsEarly: 0,
+      timedItemsLate: 0,
+      timingViolations: 0,
+      timingCompliancePercent: 0,
+      maxTimingDeviationMinutes: 0,
+    };
+  }
+
+  private calculateTimingMetrics(
+    row: ChecklistTimingRun,
+    sections = this.normalizeSections(row.sectionsSnapshot),
+    answers = this.normalizeAnswers(row.answers, sections),
+  ): TimingMetrics {
+    const metrics = this.createTimingMetrics();
+    const answerByKey = new Map(
+      answers.map((answer) => [
+        `${answer.sectionId}::${answer.itemId}`,
+        answer,
+      ]),
+    );
+
+    sections.forEach((section) => {
+      section.items.forEach((item) => {
+        const timing = item.timing;
+
+        if (timing.mode === 'NONE' || !timing.affectsDiscipline) {
+          return;
+        }
+
+        const answer = answerByKey.get(`${section.id}::${item.id}`);
+        const evaluation = this.evaluateAnswerTiming(row, item, answer);
+
+        if (!evaluation) {
+          return;
+        }
+
+        metrics.timedItemsTotal += 1;
+
+        if (answer?.completedAt) {
+          metrics.timedItemsDone += 1;
+        }
+
+        if (evaluation.status === 'ON_TIME') {
+          metrics.timedItemsOnTime += 1;
+        } else if (evaluation.status === 'EARLY') {
+          metrics.timedItemsEarly += 1;
+          metrics.timingViolations += 1;
+        } else if (evaluation.status === 'LATE') {
+          metrics.timedItemsLate += 1;
+          metrics.timingViolations += 1;
+        } else if (evaluation.status === 'MISSED') {
+          metrics.timingViolations += 1;
+        }
+
+        if (evaluation.deviationMinutes !== null) {
+          metrics.maxTimingDeviationMinutes = Math.max(
+            metrics.maxTimingDeviationMinutes,
+            Math.abs(evaluation.deviationMinutes),
+          );
+        }
+      });
+    });
+
+    metrics.timingCompliancePercent = this.percent(
+      metrics.timedItemsOnTime,
+      metrics.timedItemsTotal,
+    );
+
+    return metrics;
+  }
+
+  private attachTimingToAnswers(
+    row: ChecklistTimingRun,
+    sections: StaffChecklistSection[],
+    answers: StaffChecklistAnswer[],
+  ): StaffChecklistAnswer[] {
+    const itemByKey = new Map(
+      sections.flatMap((section) =>
+        section.items.map((item) => [`${section.id}::${item.id}`, item]),
+      ),
+    );
+
+    return answers.map((answer) => {
+      const item = itemByKey.get(`${answer.sectionId}::${answer.itemId}`);
+
+      return {
+        ...answer,
+        timing: item ? this.evaluateAnswerTiming(row, item, answer) : null,
+      };
+    });
+  }
+
+  private evaluateAnswerTiming(
+    row: ChecklistTimingRun,
+    item: StaffChecklistItem,
+    answer: StaffChecklistAnswer | undefined,
+  ): StaffChecklistAnswerTiming | null {
+    const timing = item.timing;
+
+    if (timing.mode === 'NONE') {
+      return null;
+    }
+
+    const plannedAt = this.resolvePlannedAt(row, timing);
+
+    if (!plannedAt) {
+      return {
+        status: 'NO_ANCHOR',
+        plannedAt: null,
+        windowStartAt: null,
+        windowEndAt: null,
+        deviationMinutes: null,
+        toleranceMinutes: timing.toleranceMinutes,
+        affectsDiscipline: timing.affectsDiscipline,
+      };
+    }
+
+    const toleranceMs = timing.toleranceMinutes * 60 * 1000;
+    const windowStartAt = new Date(plannedAt.getTime() - toleranceMs);
+    const windowEndAt = new Date(plannedAt.getTime() + toleranceMs);
+    const completedAt = answer?.completedAt
+      ? new Date(answer.completedAt)
+      : null;
+
+    if (!completedAt || Number.isNaN(completedAt.getTime())) {
+      return {
+        status: new Date() > windowEndAt ? 'MISSED' : 'WAITING',
+        plannedAt: plannedAt.toISOString(),
+        windowStartAt: windowStartAt.toISOString(),
+        windowEndAt: windowEndAt.toISOString(),
+        deviationMinutes: null,
+        toleranceMinutes: timing.toleranceMinutes,
+        affectsDiscipline: timing.affectsDiscipline,
+      };
+    }
+
+    const deviationMinutes = Math.round(
+      (completedAt.getTime() - plannedAt.getTime()) / 60000,
+    );
+    const status =
+      completedAt < windowStartAt
+        ? 'EARLY'
+        : completedAt > windowEndAt
+          ? 'LATE'
+          : 'ON_TIME';
+
+    return {
+      status,
+      plannedAt: plannedAt.toISOString(),
+      windowStartAt: windowStartAt.toISOString(),
+      windowEndAt: windowEndAt.toISOString(),
+      deviationMinutes,
+      toleranceMinutes: timing.toleranceMinutes,
+      affectsDiscipline: timing.affectsDiscipline,
+    };
+  }
+
+  private resolvePlannedAt(
+    row: ChecklistTimingRun,
+    timing: StaffChecklistItemTiming,
+  ): Date | null {
+    if (timing.mode === 'TIME_OF_DAY') {
+      const [hours, minutes] = (timing.timeOfDay ?? '').split(':').map(Number);
+      const base =
+        row.shift?.startedAt ??
+        row.scheduledAt ??
+        row.startedAt ??
+        row.createdAt;
+
+      if (
+        !base ||
+        !Number.isInteger(hours) ||
+        !Number.isInteger(minutes) ||
+        hours < 0 ||
+        hours > 23 ||
+        minutes < 0 ||
+        minutes > 59
+      ) {
+        return null;
+      }
+
+      const plannedAt = new Date(base);
+      plannedAt.setHours(hours, minutes, 0, 0);
+      return plannedAt;
+    }
+
+    const base =
+      timing.mode === 'SHIFT_START'
+        ? (row.shift?.startedAt ??
+          row.startedAt ??
+          row.scheduledAt ??
+          row.createdAt)
+        : timing.mode === 'SHIFT_END'
+          ? (row.shift?.stoppedAt ?? null)
+          : timing.mode === 'CHECKLIST_SCHEDULED'
+            ? (row.scheduledAt ?? row.startedAt ?? row.createdAt)
+            : null;
+
+    if (!base) {
+      return null;
+    }
+
+    return new Date(base.getTime() + (timing.offsetMinutes ?? 0) * 60000);
   }
 
   private calculateMetrics(
@@ -2978,6 +3342,60 @@ export class StaffChecklistsService {
 
     if (Number.isNaN(date.getTime())) {
       throw new BadRequestException('Invalid date filter');
+    }
+
+    return normalized;
+  }
+
+  private normalizeTiming(value: unknown): StaffChecklistItemTiming {
+    const record = this.asRecord(value);
+    const mode = this.resolveOne(
+      this.normalizeOptionalString(record.mode),
+      checklistTimingModes,
+      'NONE',
+    );
+    const offsetMinutes =
+      mode === 'TIME_OF_DAY' || mode === 'NONE'
+        ? null
+        : this.normalizeInteger(record.offsetMinutes, 0, -1440, 1440);
+    const timeOfDay =
+      mode === 'TIME_OF_DAY' ? this.normalizeTimeOfDay(record.timeOfDay) : null;
+    const toleranceMinutes =
+      mode === 'NONE'
+        ? 0
+        : this.normalizeInteger(record.toleranceMinutes, 10, 0, 240);
+
+    return {
+      mode,
+      offsetMinutes,
+      timeOfDay,
+      toleranceMinutes,
+      affectsDiscipline:
+        mode !== 'NONE' &&
+        this.normalizeBoolean(record.affectsDiscipline, true),
+    };
+  }
+
+  private normalizeInteger(
+    value: unknown,
+    fallback: number,
+    min: number,
+    max: number,
+  ) {
+    const numeric = Number(value);
+
+    if (!Number.isFinite(numeric)) {
+      return fallback;
+    }
+
+    return Math.max(min, Math.min(max, Math.round(numeric)));
+  }
+
+  private normalizeTimeOfDay(value: unknown) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized || !/^([01]\d|2[0-3]):[0-5]\d$/.test(normalized)) {
+      return null;
     }
 
     return normalized;

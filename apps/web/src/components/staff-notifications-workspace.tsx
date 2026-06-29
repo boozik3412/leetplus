@@ -270,6 +270,255 @@ function MetricCard({
   );
 }
 
+
+function LinkedNotificationMessage({
+  message,
+  actionHref,
+  actionLabel,
+}: {
+  message: string;
+  actionHref: string | null;
+  actionLabel: string | null;
+}) {
+  return (
+    <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+      {renderLinkedNotificationText(message, { actionHref, actionLabel })}
+    </p>
+  );
+}
+
+type NotificationLinkContext = {
+  actionHref: string | null;
+  actionLabel: string | null;
+};
+
+const notificationHrefPattern =
+  /(https?:\/\/[^\s<>"']+|\/(?!\/)[^\s<>"']+)/gi;
+
+function renderLinkedNotificationText(
+  message: string,
+  context: NotificationLinkContext,
+) {
+  const nodes: ReactNode[] = [];
+  const lines = message.split("\n");
+
+  lines.forEach((line, lineIndex) => {
+    if (lineIndex > 0) {
+      nodes.push("\n");
+    }
+
+    nodes.push(...renderLinkedNotificationLine(line, context, lineIndex));
+  });
+
+  return nodes.length > 0 ? nodes : message;
+}
+
+function renderLinkedNotificationLine(
+  line: string,
+  context: NotificationLinkContext,
+  lineIndex: number,
+) {
+  const actionLine = parseNotificationActionLine(line);
+
+  if (actionLine) {
+    const nodes: ReactNode[] = [
+      actionLine.indent,
+      <NotificationMessageLink
+        key={"notification-action-link-" + lineIndex}
+        href={actionLine.href}
+      >
+        {actionLine.label}
+      </NotificationMessageLink>,
+    ];
+
+    if (actionLine.trailingText) {
+      nodes.push(actionLine.trailingText);
+    }
+
+    return nodes;
+  }
+
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let linkIndex = 0;
+  notificationHrefPattern.lastIndex = 0;
+
+  for (const match of line.matchAll(notificationHrefPattern)) {
+    const rawMatch = match[0];
+    const start = match.index ?? 0;
+    const { href: rawHref, trailingText } = splitTrailingHrefText(rawMatch);
+    const href = normalizeNotificationHref(rawHref);
+
+    if (!href) {
+      continue;
+    }
+
+    if (start > lastIndex) {
+      nodes.push(line.slice(lastIndex, start));
+    }
+
+    nodes.push(
+      <NotificationMessageLink
+        key={
+          "notification-inline-link-" + lineIndex + "-" + linkIndex
+        }
+        href={href}
+      >
+        {notificationLinkLabel(href, context)}
+      </NotificationMessageLink>,
+    );
+
+    if (trailingText) {
+      nodes.push(trailingText);
+    }
+
+    lastIndex = start + rawMatch.length;
+    linkIndex += 1;
+  }
+
+  if (lastIndex < line.length) {
+    nodes.push(line.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : [line];
+}
+
+function parseNotificationActionLine(line: string) {
+  const match = line.match(
+    /^(\s*)([^:\n]{2,100}?):\s*(https?:\/\/[^\s<>"']+|\/(?!\/)[^\s<>"']+)\s*$/i,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const { href: rawHref, trailingText } = splitTrailingHrefText(match[3]);
+  const href = normalizeNotificationHref(rawHref);
+  const label = match[2].trim();
+
+  if (!href || !label) {
+    return null;
+  }
+
+  return {
+    indent: match[1],
+    label,
+    href,
+    trailingText,
+  };
+}
+
+function NotificationMessageLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: ReactNode;
+}) {
+  const className =
+    "font-semibold text-emerald-700 underline decoration-emerald-500/40 underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200";
+
+  if (href.startsWith("/")) {
+    return (
+      <Link href={href} className={className}>
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <a href={href} className={className} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  );
+}
+
+function normalizeNotificationHref(rawHref: string) {
+  const href = rawHref.trim();
+
+  if (href.startsWith("/") && !href.startsWith("//")) {
+    return href;
+  }
+
+  try {
+    const url = new URL(href);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    if (
+      url.hostname === "leetplus.ru" ||
+      url.hostname === "www.leetplus.ru" ||
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1"
+    ) {
+      return url.pathname + url.search + url.hash;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function splitTrailingHrefText(rawHref: string) {
+  let href = rawHref;
+  let trailingText = "";
+
+  while (/[),.;!?]$/.test(href)) {
+    trailingText = href.slice(-1) + trailingText;
+    href = href.slice(0, -1);
+  }
+
+  return { href, trailingText };
+}
+
+function notificationLinkLabel(
+  href: string,
+  { actionHref, actionLabel }: NotificationLinkContext,
+) {
+  if (actionLabel && normalizeNotificationHref(actionHref ?? "") === href) {
+    return actionLabel;
+  }
+
+  try {
+    const url = new URL(href, "https://leetplus.local");
+
+    if (url.pathname === "/staff/checklists") {
+      return "Открыть чек-лист";
+    }
+
+    if (url.pathname === "/staff/team-chat") {
+      return "Открыть чат";
+    }
+
+    if (url.pathname === "/staff/tasks") {
+      return "Открыть задачу";
+    }
+
+    if (url.pathname === "/staff/knowledge-base") {
+      return "Открыть материал";
+    }
+
+    if (url.pathname === "/staff/task-rules") {
+      return "Открыть правила";
+    }
+
+    if (url.pathname === "/staff/operations-dashboard") {
+      return "Открыть дашборд";
+    }
+
+    if (href.startsWith("/")) {
+      return url.pathname;
+    }
+
+    return url.hostname.replace(/^www\./, "");
+  } catch {
+    return href;
+  }
+}
+
 function NotificationRow({
   notification,
   disabled,
@@ -305,9 +554,11 @@ function NotificationRow({
             {notification.title}
           </h2>
           {notification.message ? (
-            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              {notification.message}
-            </p>
+            <LinkedNotificationMessage
+              message={notification.message}
+              actionHref={notification.actionHref}
+              actionLabel={notification.actionLabel}
+            />
           ) : null}
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-zinc-500">
             <span>Создано: {formatDateTime(notification.createdAt)}</span>

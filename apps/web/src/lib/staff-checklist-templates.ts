@@ -1,5 +1,6 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import type {
+  StaffChecklistItemTiming,
   StaffChecklistItemValueType,
   StaffChecklistShiftKind,
   StaffChecklistStore,
@@ -23,6 +24,7 @@ export type StaffChecklistTemplateItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  timing?: StaffChecklistItemTiming;
 };
 
 export type StaffChecklistTemplateSection = {
@@ -43,6 +45,7 @@ export type StaffChecklistTemplateRegulationOption = {
   sectionsCount: number;
   itemsCount: number;
   evidenceItemsCount: number;
+  timedItemsCount: number;
 };
 
 export type StaffChecklistTemplate = {
@@ -58,6 +61,7 @@ export type StaffChecklistTemplate = {
   itemsCount: number;
   requiredItemsCount: number;
   evidenceItemsCount: number;
+  timedItemsCount: number;
   scoreTotal: number;
   createdAt: string;
   updatedAt: string;
@@ -97,6 +101,7 @@ export type StaffChecklistTemplateReport = {
     itemsCount: number;
     requiredItemsCount: number;
     evidenceItemsCount: number;
+    timedItemsCount: number;
     scoreTotal: number;
   };
   rows: StaffChecklistTemplate[];

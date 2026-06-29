@@ -547,8 +547,11 @@ export class StaffNotificationsService {
           },
         };
       }),
-      ...incidents.map(
-        (message): SignalDraft => ({
+      ...incidents.map((message): SignalDraft => {
+        const messageAction = this.extractMessageAction(message.body);
+        const chatHref = `/staff/team-chat?channelId=${encodeURIComponent(message.channelId)}`;
+
+        return {
           sourceType: 'TEAM_CHAT',
           sourceId: message.id,
           dedupeKey: `team-chat:${message.id}:incident`,
@@ -562,21 +565,23 @@ export class StaffNotificationsService {
             this.userLabel(message.authorUser)
               ? `Автор: ${this.userLabel(message.authorUser)}`
               : null,
-            message.body.slice(0, 700),
+            messageAction.body.slice(0, 700),
           ]
             .filter(Boolean)
             .join('\n'),
           storeId: message.storeId,
           targetUserId: null,
-          actionLabel: 'Открыть чат',
-          actionHref: `/staff/team-chat?channelId=${encodeURIComponent(message.channelId)}`,
+          actionLabel: messageAction.actionLabel ?? 'Открыть чат',
+          actionHref: messageAction.actionHref ?? chatHref,
           metadata: {
             priority: message.priority,
             isPinned: message.isPinned,
             channelId: message.channelId,
+            chatHref,
+            messageActionHref: messageAction.actionHref,
           },
-        }),
-      ),
+        };
+      }),
       ...operationsDashboardSignals.anomalies
         .filter((anomaly) => anomaly.severity === 'HIGH')
         .map((anomaly) =>
@@ -587,6 +592,96 @@ export class StaffNotificationsService {
           ),
         ),
     ];
+  }
+
+  private extractMessageAction(body: string) {
+    const lines = body.split('\n');
+    const actionLineIndex = this.findLastTextLineIndex(lines);
+
+    if (actionLineIndex === -1) {
+      return { body, actionLabel: null, actionHref: null };
+    }
+
+    const rawActionLine = lines[actionLineIndex]?.trim() ?? '';
+    const match = rawActionLine.match(
+      /^([^:\n]{2,100}?):\s*((?:\/|https?:\/\/)\S+)$/i,
+    );
+
+    if (!match) {
+      return { body, actionLabel: null, actionHref: null };
+    }
+
+    const actionLabel = this.normalizeOptionalString(match[1]);
+    const actionHref = this.normalizeMessageActionHref(match[2]);
+
+    if (!actionLabel || !actionHref) {
+      return { body, actionLabel: null, actionHref: null };
+    }
+
+    const visibleLines = lines.slice();
+    visibleLines.splice(actionLineIndex, 1);
+
+    while (
+      visibleLines.length > 0 &&
+      !visibleLines[visibleLines.length - 1]?.trim()
+    ) {
+      visibleLines.pop();
+    }
+
+    return {
+      body: visibleLines.join('\n'),
+      actionLabel,
+      actionHref,
+    };
+  }
+
+  private findLastTextLineIndex(lines: string[]) {
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (lines[index]?.trim()) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  private normalizeMessageActionHref(rawHref: string) {
+    const href = this.trimTrailingHrefPunctuation(rawHref.trim());
+
+    if (href.startsWith('/') && !href.startsWith('//')) {
+      return href;
+    }
+
+    try {
+      const url = new URL(href);
+
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return null;
+      }
+
+      if (
+        url.hostname === 'leetplus.ru' ||
+        url.hostname === 'www.leetplus.ru' ||
+        url.hostname === 'localhost' ||
+        url.hostname === '127.0.0.1'
+      ) {
+        return url.pathname + url.search + url.hash;
+      }
+
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private trimTrailingHrefPunctuation(href: string) {
+    let cleanHref = href;
+
+    while (/[),.;!?]$/.test(cleanHref)) {
+      cleanHref = cleanHref.slice(0, -1);
+    }
+
+    return cleanHref;
   }
 
   private toOperationsDashboardSignal(

@@ -36,12 +36,21 @@ const itemValueTypes = [
   'SELECT',
   'TIMESTAMP',
 ] as const;
+const checklistTimingModes = [
+  'NONE',
+  'SHIFT_START',
+  'SHIFT_END',
+  'CHECKLIST_SCHEDULED',
+  'TIME_OF_DAY',
+] as const;
 
 export type StaffChecklistTemplateStatus = (typeof templateStatuses)[number];
 export type StaffChecklistTemplateShiftKind = (typeof shiftKinds)[number];
 export type StaffChecklistTemplateRoleScope = (typeof roleScopes)[number];
 export type StaffChecklistTemplateItemValueType =
   (typeof itemValueTypes)[number];
+export type StaffChecklistTemplateItemTimingMode =
+  (typeof checklistTimingModes)[number];
 
 export type StaffChecklistTemplatesQuery = {
   status?: StaffChecklistTemplateStatus | 'all';
@@ -68,6 +77,14 @@ export type StaffChecklistTemplateSection = {
   items: StaffChecklistTemplateItem[];
 };
 
+export type StaffChecklistTemplateItemTiming = {
+  mode: StaffChecklistTemplateItemTimingMode;
+  offsetMinutes: number | null;
+  timeOfDay: string | null;
+  toleranceMinutes: number;
+  affectsDiscipline: boolean;
+};
+
 export type StaffChecklistTemplateItem = {
   id: string;
   title: string;
@@ -76,6 +93,7 @@ export type StaffChecklistTemplateItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+  timing: StaffChecklistTemplateItemTiming;
 };
 
 export type StaffChecklistTemplateReport = {
@@ -93,6 +111,7 @@ export type StaffChecklistTemplateReport = {
     itemsCount: number;
     requiredItemsCount: number;
     evidenceItemsCount: number;
+    timedItemsCount: number;
     scoreTotal: number;
   };
   rows: StaffChecklistTemplateResponse[];
@@ -111,6 +130,7 @@ export type StaffChecklistTemplateRegulationOption = {
   sectionsCount: number;
   itemsCount: number;
   evidenceItemsCount: number;
+  timedItemsCount: number;
 };
 
 export type StaffChecklistTemplateResponse = {
@@ -126,6 +146,7 @@ export type StaffChecklistTemplateResponse = {
   itemsCount: number;
   requiredItemsCount: number;
   evidenceItemsCount: number;
+  timedItemsCount: number;
   scoreTotal: number;
   createdAt: string;
   updatedAt: string;
@@ -166,6 +187,7 @@ type SectionSummary = {
   itemsCount: number;
   requiredItemsCount: number;
   evidenceItemsCount: number;
+  timedItemsCount: number;
   scoreTotal: number;
 };
 
@@ -568,6 +590,7 @@ export class StaffChecklistTemplatesService {
         summary.itemsCount += row.itemsCount;
         summary.requiredItemsCount += row.requiredItemsCount;
         summary.evidenceItemsCount += row.evidenceItemsCount;
+        summary.timedItemsCount += row.timedItemsCount;
         summary.scoreTotal += row.scoreTotal;
 
         if (row.status === 'DRAFT') {
@@ -588,6 +611,7 @@ export class StaffChecklistTemplatesService {
         itemsCount: 0,
         requiredItemsCount: 0,
         evidenceItemsCount: 0,
+        timedItemsCount: 0,
         scoreTotal: 0,
       },
     );
@@ -616,6 +640,7 @@ export class StaffChecklistTemplatesService {
       sectionsCount: summary.sectionsCount,
       itemsCount: summary.itemsCount,
       evidenceItemsCount: summary.evidenceItemsCount,
+      timedItemsCount: summary.timedItemsCount,
     };
   }
 
@@ -638,6 +663,7 @@ export class StaffChecklistTemplatesService {
       itemsCount: summary.itemsCount,
       requiredItemsCount: summary.requiredItemsCount,
       evidenceItemsCount: summary.evidenceItemsCount,
+      timedItemsCount: summary.timedItemsCount,
       scoreTotal: summary.scoreTotal,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -734,6 +760,7 @@ export class StaffChecklistTemplatesService {
       required: this.normalizeBoolean(item.required, true),
       evidenceRequired: this.normalizeBoolean(item.evidenceRequired, false),
       score: this.normalizeScore(item.score),
+      timing: this.normalizeTiming(item.timing),
     };
   }
 
@@ -747,6 +774,8 @@ export class StaffChecklistTemplatesService {
       itemsCount: items.length,
       requiredItemsCount: items.filter((item) => item.required).length,
       evidenceItemsCount: items.filter((item) => item.evidenceRequired).length,
+      timedItemsCount: items.filter((item) => item.timing.mode !== 'NONE')
+        .length,
       scoreTotal: items.reduce((sum, item) => sum + item.score, 0),
     };
   }
@@ -767,6 +796,7 @@ export class StaffChecklistTemplatesService {
             required: true,
             evidenceRequired: false,
             score: 2,
+            timing: this.normalizeTiming(null),
           },
           {
             id: 'guest-zone-ready',
@@ -777,6 +807,7 @@ export class StaffChecklistTemplatesService {
             required: true,
             evidenceRequired: false,
             score: 2,
+            timing: this.normalizeTiming(null),
           },
         ],
       },
@@ -845,6 +876,60 @@ export class StaffChecklistTemplatesService {
     }
 
     return fallback;
+  }
+
+  private normalizeTiming(value: unknown): StaffChecklistTemplateItemTiming {
+    const record = this.asRecord(value);
+    const mode = this.resolveOne(
+      this.normalizeOptionalString(record.mode),
+      checklistTimingModes,
+      'NONE',
+    );
+    const offsetMinutes =
+      mode === 'TIME_OF_DAY' || mode === 'NONE'
+        ? null
+        : this.normalizeInteger(record.offsetMinutes, 0, -1440, 1440);
+    const timeOfDay =
+      mode === 'TIME_OF_DAY' ? this.normalizeTimeOfDay(record.timeOfDay) : null;
+    const toleranceMinutes =
+      mode === 'NONE'
+        ? 0
+        : this.normalizeInteger(record.toleranceMinutes, 10, 0, 240);
+
+    return {
+      mode,
+      offsetMinutes,
+      timeOfDay,
+      toleranceMinutes,
+      affectsDiscipline:
+        mode !== 'NONE' &&
+        this.normalizeBoolean(record.affectsDiscipline, true),
+    };
+  }
+
+  private normalizeInteger(
+    value: unknown,
+    fallback: number,
+    min: number,
+    max: number,
+  ) {
+    const numeric = Number(value);
+
+    if (!Number.isFinite(numeric)) {
+      return fallback;
+    }
+
+    return Math.max(min, Math.min(max, Math.round(numeric)));
+  }
+
+  private normalizeTimeOfDay(value: unknown) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized || !/^([01]\d|2[0-3]):[0-5]\d$/.test(normalized)) {
+      return null;
+    }
+
+    return normalized;
   }
 
   private normalizeScore(value: unknown) {

@@ -218,6 +218,74 @@ function formatCompletionDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatTimeOnly(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function timingStatusClass(
+  status: NonNullable<StaffChecklistAnswer["timing"]>["status"],
+) {
+  const base = "rounded-full px-2 py-0.5 font-semibold";
+
+  if (status === "ON_TIME") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200`;
+  }
+
+  if (status === "EARLY" || status === "WAITING") {
+    return `${base} bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200`;
+  }
+
+  if (status === "LATE" || status === "MISSED") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300`;
+}
+
+function formatTimingLabel(timing: StaffChecklistAnswer["timing"]) {
+  if (!timing) {
+    return null;
+  }
+
+  if (timing.status === "NO_ANCHOR") {
+    return "время не рассчитано";
+  }
+
+  const planned = formatTimeOnly(timing.plannedAt);
+  const windowStart = formatTimeOnly(timing.windowStartAt);
+  const windowEnd = formatTimeOnly(timing.windowEndAt);
+  const window = windowStart && windowEnd ? `${windowStart}-${windowEnd}` : null;
+
+  if (timing.status === "ON_TIME") {
+    return planned ? `вовремя к ${planned}` : "вовремя";
+  }
+
+  if (timing.status === "EARLY") {
+    return timing.deviationMinutes !== null
+      ? `раньше на ${Math.abs(timing.deviationMinutes)} мин`
+      : "раньше окна";
+  }
+
+  if (timing.status === "LATE") {
+    return timing.deviationMinutes !== null
+      ? `позже на ${Math.abs(timing.deviationMinutes)} мин`
+      : "позже окна";
+  }
+
+  if (timing.status === "MISSED") {
+    return window ? `просрочено, окно ${window}` : "просрочено";
+  }
+
+  return window ? `окно ${window}` : planned ? `к ${planned}` : null;
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
@@ -1048,7 +1116,7 @@ function ChecklistRunEditor({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
         <Metric
           label="Обязательные"
           value={`${formatNumber(run.requiredItemsDone)}/${formatNumber(run.requiredItemsTotal)}`}
@@ -1061,6 +1129,15 @@ function ChecklistRunEditor({
           label="Проблемы"
           value={formatNumber(run.failedItems)}
           tone={run.failedItems > 0 ? "bad" : "good"}
+        />
+        <Metric
+          label="Вовремя"
+          value={
+            run.timedItemsTotal > 0
+              ? `${formatNumber(run.timedItemsOnTime)}/${formatNumber(run.timedItemsTotal)}`
+              : "нет"
+          }
+          tone={run.timingViolations > 0 ? "bad" : "good"}
         />
         <Metric
           label="Блокеры сдачи"
@@ -1158,6 +1235,11 @@ function ChecklistRunEditor({
                             {completedAt ? (
                               <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
                                 отправлено {completedAt}
+                              </span>
+                            ) : null}
+                            {answer?.timing ? (
+                              <span className={timingStatusClass(answer.timing.status)}>
+                                {formatTimingLabel(answer.timing)}
                               </span>
                             ) : null}
                           </div>

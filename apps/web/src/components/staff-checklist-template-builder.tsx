@@ -4,6 +4,8 @@ import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import type {
+  StaffChecklistItemTiming,
+  StaffChecklistItemTimingMode,
   StaffChecklistItemValueType,
   StaffChecklistShiftKind,
 } from "@/lib/staff-checklists";
@@ -56,6 +58,14 @@ const valueTypeLabels: Record<StaffChecklistItemValueType, string> = {
   TIMESTAMP: "Время",
 };
 
+const timingModeLabels: Record<StaffChecklistItemTimingMode, string> = {
+  NONE: "Без контроля",
+  SHIFT_START: "От начала смены",
+  SHIFT_END: "До конца смены",
+  CHECKLIST_SCHEDULED: "От планового срока",
+  TIME_OF_DAY: "Точное время",
+};
+
 type DraftTemplate = {
   id: string | null;
   title: string;
@@ -79,6 +89,45 @@ function createId(prefix: string) {
   }
 
   return `${prefix}-${Date.now()}-${Math.round(Math.random() * 10000)}`;
+}
+
+function defaultTiming(): StaffChecklistItemTiming {
+  return {
+    mode: "NONE",
+    offsetMinutes: null,
+    timeOfDay: null,
+    toleranceMinutes: 0,
+    affectsDiscipline: false,
+  };
+}
+
+function normalizeTiming(
+  timing?: StaffChecklistItemTiming | null,
+): StaffChecklistItemTiming {
+  if (!timing || timing.mode === "NONE") {
+    return defaultTiming();
+  }
+
+  return {
+    mode: timing.mode,
+    offsetMinutes:
+      timing.mode === "TIME_OF_DAY" ? null : (timing.offsetMinutes ?? 0),
+    timeOfDay: timing.mode === "TIME_OF_DAY" ? timing.timeOfDay ?? "09:00" : null,
+    toleranceMinutes: Math.max(0, Math.min(240, timing.toleranceMinutes ?? 10)),
+    affectsDiscipline: timing.affectsDiscipline ?? true,
+  };
+}
+
+function normalizeSectionsTiming(
+  sections: StaffChecklistTemplateSection[],
+): StaffChecklistTemplateSection[] {
+  return sections.map((section) => ({
+    ...section,
+    items: section.items.map((item) => ({
+      ...item,
+      timing: normalizeTiming(item.timing),
+    })),
+  }));
 }
 
 function defaultSections(): StaffChecklistTemplateSection[] {
@@ -120,6 +169,7 @@ function clonePackSections(
     items: section.items.map((item) => ({
       ...item,
       id: createId(item.id || "item"),
+      timing: normalizeTiming(item.timing),
     })),
   }));
 }
@@ -135,6 +185,7 @@ function cloneRegulationSections(
     items: section.items.map((item) => ({
       ...item,
       id: createId(item.id || "item"),
+      timing: normalizeTiming(item.timing),
     })),
   }));
 }
@@ -166,7 +217,7 @@ function toDraft(template: StaffChecklistTemplate | null): DraftTemplate {
       status: "DRAFT",
       storeId: "",
       sourceRegulationId: "",
-      sections: defaultSections(),
+      sections: normalizeSectionsTiming(defaultSections()),
     };
   }
 
@@ -179,7 +230,7 @@ function toDraft(template: StaffChecklistTemplate | null): DraftTemplate {
     status: template.status,
     storeId: template.store?.id ?? "",
     sourceRegulationId: template.sourceRegulation?.id ?? "",
-    sections: template.sections,
+    sections: normalizeSectionsTiming(template.sections),
   };
 }
 
@@ -277,6 +328,8 @@ export function StaffChecklistTemplateBuilder({
       items: items.length,
       required: items.filter((item) => item.required).length,
       evidence: items.filter((item) => item.evidenceRequired).length,
+      timed: items.filter((item) => normalizeTiming(item.timing).mode !== "NONE")
+        .length,
       score: items.reduce((sum, item) => sum + Number(item.score || 0), 0),
     };
   }, [draft.sections]);
@@ -340,6 +393,7 @@ export function StaffChecklistTemplateBuilder({
               required: true,
               evidenceRequired: false,
               score: 1,
+              timing: defaultTiming(),
             },
           ],
         },
@@ -393,12 +447,64 @@ export function StaffChecklistTemplateBuilder({
                   required: true,
                   evidenceRequired: false,
                   score: 1,
+                  timing: defaultTiming(),
                 },
               ],
             }
           : section,
       ),
     });
+  }
+
+  function applySequentialTiming() {
+    let offset = 0;
+
+    setDraft((current) => ({
+      ...current,
+      sections: current.sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => {
+          const timing: StaffChecklistItemTiming = {
+            mode: "SHIFT_START",
+            offsetMinutes: offset,
+            timeOfDay: null,
+            toleranceMinutes: 10,
+            affectsDiscipline: true,
+          };
+          offset += 10;
+
+          return { ...item, timing };
+        }),
+      })),
+    }));
+  }
+
+  function applyToleranceToTimedItems(toleranceMinutes: number) {
+    setDraft((current) => ({
+      ...current,
+      sections: current.sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => {
+          const timing = normalizeTiming(item.timing);
+
+          return timing.mode === "NONE"
+            ? item
+            : { ...item, timing: { ...timing, toleranceMinutes } };
+        }),
+      })),
+    }));
+  }
+
+  function disableOptionalTiming() {
+    setDraft((current) => ({
+      ...current,
+      sections: current.sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) =>
+          item.required ? item : { ...item, timing: defaultTiming() },
+        ),
+      })),
+    }));
   }
 
   function removeItem(sectionId: string, itemId: string) {
@@ -558,7 +664,7 @@ export function StaffChecklistTemplateBuilder({
       status: status ?? draft.status,
       storeId: draft.storeId || null,
       sourceRegulationId: draft.sourceRegulationId || null,
-      sections: draft.sections,
+      sections: normalizeSectionsTiming(draft.sections),
     };
     const response = await fetch(
       draft.id
@@ -794,7 +900,8 @@ export function StaffChecklistTemplateBuilder({
                 </div>
                 <p className="mt-2 text-xs text-zinc-500">
                   {formatNumber(template.itemsCount)} пунктов ·{" "}
-                  {formatNumber(template.evidenceItemsCount)} доказ.
+                  {formatNumber(template.evidenceItemsCount)} доказ. ·{" "}
+                  {formatNumber(template.timedItemsCount)} с временем
                 </p>
               </button>
               <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
@@ -851,6 +958,7 @@ export function StaffChecklistTemplateBuilder({
             <Metric label="Пункты" value={summary.items} />
             <Metric label="Обяз." value={summary.required} />
             <Metric label="Доказ." value={summary.evidence} />
+            <Metric label="Время" value={summary.timed} />
             <Metric label="Баллы" value={summary.score} />
           </div>
         </div>
@@ -862,6 +970,30 @@ export function StaffChecklistTemplateBuilder({
             {message}
           </p>
         ) : null}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={applySequentialTiming}
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            Расставить время
+          </button>
+          <button
+            type="button"
+            onClick={() => applyToleranceToTimedItems(10)}
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            ±10 мин всем
+          </button>
+          <button
+            type="button"
+            onClick={disableOptionalTiming}
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            Необязательные без времени
+          </button>
+        </div>
 
         {isPreviewOpen ? (
           <div className="mt-4">
@@ -1145,6 +1277,118 @@ export function StaffChecklistTemplateBuilder({
                     >
                       Убрать
                     </button>
+                    <div className="grid gap-2 lg:col-start-2 lg:col-span-5 sm:grid-cols-[minmax(10rem,1fr)_8rem_8rem_8rem_auto]">
+                      <label className="text-xs font-semibold uppercase text-zinc-500">
+                        Время исполнения
+                        <select
+                          value={normalizeTiming(item.timing).mode}
+                          onChange={(event) => {
+                            const mode = event.target
+                              .value as StaffChecklistItemTimingMode;
+                            patchItem(section.id, item.id, {
+                              timing:
+                                mode === "NONE"
+                                  ? defaultTiming()
+                                  : {
+                                      ...normalizeTiming(item.timing),
+                                      mode,
+                                      offsetMinutes:
+                                        mode === "TIME_OF_DAY"
+                                          ? null
+                                          : normalizeTiming(item.timing)
+                                              .offsetMinutes ?? 0,
+                                      timeOfDay:
+                                        mode === "TIME_OF_DAY"
+                                          ? normalizeTiming(item.timing)
+                                              .timeOfDay ?? "09:00"
+                                          : null,
+                                      toleranceMinutes:
+                                        normalizeTiming(item.timing)
+                                          .toleranceMinutes || 10,
+                                      affectsDiscipline: true,
+                                    },
+                            });
+                          }}
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm normal-case text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                        >
+                          {Object.entries(timingModeLabels).map(
+                            ([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      </label>
+                      <label className="text-xs font-semibold uppercase text-zinc-500">
+                        Смещение
+                        <input
+                          type="number"
+                          value={normalizeTiming(item.timing).offsetMinutes ?? 0}
+                          disabled={normalizeTiming(item.timing).mode === "NONE" || normalizeTiming(item.timing).mode === "TIME_OF_DAY"}
+                          onChange={(event) =>
+                            patchItem(section.id, item.id, {
+                              timing: {
+                                ...normalizeTiming(item.timing),
+                                offsetMinutes: Number(event.target.value),
+                              },
+                            })
+                          }
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm normal-case text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:disabled:bg-zinc-900"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold uppercase text-zinc-500">
+                        Часы
+                        <input
+                          type="time"
+                          value={normalizeTiming(item.timing).timeOfDay ?? "09:00"}
+                          disabled={normalizeTiming(item.timing).mode !== "TIME_OF_DAY"}
+                          onChange={(event) =>
+                            patchItem(section.id, item.id, {
+                              timing: {
+                                ...normalizeTiming(item.timing),
+                                timeOfDay: event.target.value,
+                              },
+                            })
+                          }
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm normal-case text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:disabled:bg-zinc-900"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold uppercase text-zinc-500">
+                        ± минут
+                        <input
+                          type="number"
+                          min={0}
+                          max={240}
+                          value={normalizeTiming(item.timing).toleranceMinutes}
+                          disabled={normalizeTiming(item.timing).mode === "NONE"}
+                          onChange={(event) =>
+                            patchItem(section.id, item.id, {
+                              timing: {
+                                ...normalizeTiming(item.timing),
+                                toleranceMinutes: Number(event.target.value),
+                              },
+                            })
+                          }
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm normal-case text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:disabled:bg-zinc-900"
+                        />
+                      </label>
+                      <div className="flex items-end">
+                        <Toggle
+                          checked={normalizeTiming(item.timing).affectsDiscipline}
+                          onChange={(checked) =>
+                            patchItem(section.id, item.id, {
+                              timing: {
+                                ...normalizeTiming(item.timing),
+                                affectsDiscipline: checked,
+                              },
+                            })
+                          }
+                        >
+                          Дисц.
+                        </Toggle>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

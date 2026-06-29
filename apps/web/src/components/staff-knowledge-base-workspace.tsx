@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   StaffAttachmentUpload,
   type StaffAttachmentUploadResult,
@@ -502,6 +502,42 @@ function RevisionSlaPill({ article }: { article: StaffKnowledgeArticle }) {
 }
 
 
+function materialHostFromUrl(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value).hostname.replace(/^www\./, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+function knowledgeMaterialTitleFallback(
+  material: Pick<StaffKnowledgeMaterial, "title" | "type" | "url" | "content">,
+  index: number,
+) {
+  const title = material.title.trim();
+
+  if (title) {
+    return title;
+  }
+
+  const typeLabel = materialTypeLabels[material.type] ?? "Материал";
+  const host = materialHostFromUrl(material.url);
+
+  if (host) {
+    return `${typeLabel}: ${host}`.slice(0, 160);
+  }
+
+  if (material.type === "TEXT") {
+    return `Текстовый материал ${index + 1}`;
+  }
+
+  return `${typeLabel} ${index + 1}`;
+}
+
 function readingMaterialsFrom(
   materials: StaffKnowledgeMaterial[],
 ): KnowledgeReadingWindowData["materials"] {
@@ -512,7 +548,7 @@ function readingMaterialsFrom(
     )
     .map((material, index) => ({
       id: material.id || `knowledge-material-${index}`,
-      title: material.title || `Материал ${index + 1}`,
+      title: knowledgeMaterialTitleFallback(material, index),
       type: material.type,
       typeLabel: materialTypeLabels[material.type],
       url: material.url,
@@ -538,6 +574,7 @@ function readingLinksFrom(
 
 function articleReadingData(
   article: StaffKnowledgeArticle,
+  canEdit: boolean,
 ): KnowledgeReadingWindowData {
   return {
     id: article.id,
@@ -559,6 +596,12 @@ function articleReadingData(
     tags: article.tags,
     materials: readingMaterialsFrom(article.materials),
     relatedLinks: readingLinksFrom(article.relatedLinks),
+    edit: canEdit
+      ? {
+          articleId: article.id,
+          label: "Редактировать",
+        }
+      : undefined,
     reading: {
       requiresReading: article.requiresReading,
       requiredByMe: article.readingSummary.requiredByMe,
@@ -601,6 +644,10 @@ function draftReadingData(
       { label: "SLA возврата", value: `${effectiveRevisionSlaDays} дн.` },
     ],
     tags: tagsFromText(draft.tagsText),
+    edit: {
+      articleId: draft.id,
+      label: "Вернуться к редактированию",
+    },
     materials: readingMaterialsFrom(draft.materials),
     relatedLinks: readingLinksFrom(draft.relatedLinks),
   };
@@ -704,6 +751,55 @@ export function StaffKnowledgeBaseWorkspace({
     report.canManageKnowledge &&
     !isPending &&
     currentDraftSnapshot !== savedDraftSnapshot;
+
+  useEffect(() => {
+    function handleReadingWindowMessage(event: MessageEvent) {
+      if (
+        event.origin !== window.location.origin &&
+        event.origin !== "null"
+      ) {
+        return;
+      }
+
+      const data = event.data as {
+        type?: unknown;
+        articleId?: unknown;
+      };
+
+      if (data?.type !== "staff-knowledge-edit-article") {
+        return;
+      }
+
+      if (!report.canManageKnowledge) {
+        return;
+      }
+
+      if (typeof data.articleId === "string" && data.articleId) {
+        const article = report.rows.find((row) => row.id === data.articleId);
+
+        if (!article) {
+          setError("Статья для редактирования не найдена в текущем каталоге.");
+          setIsBuilderOpen(true);
+          window.focus();
+          return;
+        }
+
+        const nextDraft = fromArticle(article);
+        setDraft(nextDraft);
+        setSavedDraftSnapshot(draftSnapshot(nextDraft));
+      }
+
+      setMessage(null);
+      setError(null);
+      setIsBuilderOpen(true);
+      window.focus();
+    }
+
+    window.addEventListener("message", handleReadingWindowMessage);
+
+    return () =>
+      window.removeEventListener("message", handleReadingWindowMessage);
+  }, [report.canManageKnowledge, report.rows]);
 
   function loadArticle(row: StaffKnowledgeArticle | null) {
     const nextDraft = row ? fromArticle(row) : defaultDraft();
@@ -872,7 +968,9 @@ export function StaffKnowledgeBaseWorkspace({
   }
 
   function openArticleForReading(article: StaffKnowledgeArticle) {
-    const opened = openKnowledgeReadingWindow(articleReadingData(article));
+    const opened = openKnowledgeReadingWindow(
+      articleReadingData(article, report.canManageKnowledge),
+    );
 
     if (!opened) {
       setError("Браузер заблокировал окно чтения.");
@@ -912,13 +1010,26 @@ export function StaffKnowledgeBaseWorkspace({
       storeId: draft.storeId || null,
       tags: tagsFromText(draft.tagsText),
       materials: draft.materials
-        .map((material) => ({
-          ...material,
-          title: material.title.trim(),
-          url: material.url?.trim() || null,
-          content: material.content?.trim() || null,
-          note: material.note?.trim() || null,
-        }))
+        .map((material, index) => {
+          const normalizedMaterial = {
+            ...material,
+            title: material.title.trim(),
+            url: material.url?.trim() || null,
+            content: material.content?.trim() || null,
+            note: material.note?.trim() || null,
+          };
+          const hasPayload =
+            normalizedMaterial.title ||
+            normalizedMaterial.url ||
+            normalizedMaterial.content;
+
+          return {
+            ...normalizedMaterial,
+            title: hasPayload
+              ? knowledgeMaterialTitleFallback(normalizedMaterial, index)
+              : "",
+          };
+        })
         .filter(
           (material) => material.title || material.url || material.content,
         ),
@@ -2049,7 +2160,7 @@ export function StaffKnowledgeBaseWorkspace({
                       )
                       .map((material, index) => ({
                         id: material.id || `knowledge-material-${index}`,
-                        title: material.title || `Материал ${index + 1}`,
+                        title: knowledgeMaterialTitleFallback(material, index),
                         typeLabel: materialTypeLabels[material.type],
                         content: material.note || material.content,
                         url: material.url,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useRef, type MouseEvent, type ReactNode } from "react";
 import {
   StaffAttachmentUpload,
   type StaffAttachmentUploadResult,
@@ -55,6 +55,10 @@ export type KnowledgeReadingWindowData = {
     readCount: number;
     requiredCount: number;
     pendingCount: number;
+  };
+  edit?: {
+    articleId?: string | null;
+    label?: string;
   };
 };
 
@@ -379,22 +383,64 @@ export function StaffKnowledgeRichTextEditor({
   onImageUploaded?: (attachment: StaffAttachmentUploadResult) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const selectionRef = useRef({ start: value.length, end: value.length, scrollTop: 0 });
+
+  function rememberSelection() {
+    const textarea = textareaRef.current;
+
+    if (!textarea) {
+      return;
+    }
+
+    selectionRef.current = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+      scrollTop: textarea.scrollTop,
+    };
+  }
+
+  function keepTextareaSelection(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    rememberSelection();
+  }
 
   function replaceSelection(
     formatter: (selected: string) => string,
     fallback: string,
   ) {
     const textarea = textareaRef.current;
-    const start = textarea?.selectionStart ?? value.length;
-    const end = textarea?.selectionEnd ?? value.length;
+    const selection = textarea
+      ? {
+          start: textarea.selectionStart,
+          end: textarea.selectionEnd,
+          scrollTop: textarea.scrollTop,
+        }
+      : selectionRef.current;
+    const start = Math.min(selection.start, value.length);
+    const end = Math.min(selection.end, value.length);
     const selected = value.slice(start, end);
     const replacement = formatter(selected || fallback);
     const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+    const hasSelectedText = end > start;
+    const nextSelectionStart = hasSelectedText ? start : start + replacement.length;
+    const nextSelectionEnd = hasSelectedText
+      ? start + replacement.length
+      : nextSelectionStart;
 
     onChange(nextValue);
     window.requestAnimationFrame(() => {
-      textarea?.focus();
-      textarea?.setSelectionRange(start, start + replacement.length);
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+      textarea.scrollTop = selection.scrollTop;
+      selectionRef.current = {
+        start: nextSelectionStart,
+        end: nextSelectionEnd,
+        scrollTop: selection.scrollTop,
+      };
     });
   }
 
@@ -433,6 +479,7 @@ export function StaffKnowledgeRichTextEditor({
       <div className="flex flex-wrap items-center gap-1 border-b border-zinc-200 p-2 dark:border-zinc-800">
         <button
           type="button"
+          onMouseDown={keepTextareaSelection}
           onClick={() => prefixLines("## ", "Заголовок")}
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Заголовок"
@@ -441,6 +488,7 @@ export function StaffKnowledgeRichTextEditor({
         </button>
         <button
           type="button"
+          onMouseDown={keepTextareaSelection}
           onClick={() => replaceSelection((selected) => `**${selected}**`, "важный текст")}
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Жирный"
@@ -449,6 +497,7 @@ export function StaffKnowledgeRichTextEditor({
         </button>
         <button
           type="button"
+          onMouseDown={keepTextareaSelection}
           onClick={() => replaceSelection((selected) => `*${selected}*`, "акцент")}
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-semibold italic transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Курсив"
@@ -457,6 +506,7 @@ export function StaffKnowledgeRichTextEditor({
         </button>
         <button
           type="button"
+          onMouseDown={keepTextareaSelection}
           onClick={() => prefixLines("- ", "Пункт списка")}
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Список"
@@ -465,6 +515,7 @@ export function StaffKnowledgeRichTextEditor({
         </button>
         <button
           type="button"
+          onMouseDown={keepTextareaSelection}
           onClick={() => prefixLines("> ", "Важная заметка")}
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Цитата"
@@ -473,6 +524,7 @@ export function StaffKnowledgeRichTextEditor({
         </button>
         <button
           type="button"
+          onMouseDown={keepTextareaSelection}
           onClick={insertLink}
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Ссылка"
@@ -492,6 +544,10 @@ export function StaffKnowledgeRichTextEditor({
         ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={rememberSelection}
+        onKeyUp={rememberSelection}
+        onMouseUp={rememberSelection}
+        onSelect={rememberSelection}
         rows={10}
         placeholder="Стандарт, инструкция, порядок действий или короткий учебный материал."
         className="min-h-72 w-full resize-y rounded-b-lg bg-white px-3 py-2 text-sm leading-6 outline-none dark:bg-zinc-950"
@@ -537,6 +593,10 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
   const materials = data.materials ?? [];
   const links = data.relatedLinks ?? [];
   const articleId = JSON.stringify(data.id ?? null);
+  const editArticleId = JSON.stringify(data.edit?.articleId ?? null);
+  const editButton = data.edit
+    ? `<button id="edit-article" type="button">${escapeHtml(data.edit.label ?? "Редактировать")}</button>`
+    : "";
   const readButton =
     data.id && data.reading?.requiresReading && data.reading.requiredByMe && !data.reading.readByMe
       ? `<button id="mark-read" type="button">Отметить прочтение</button>`
@@ -577,6 +637,8 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
     .card small { display: block; margin-top: 8px; color: #71717a; }
     .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .reading { display: grid; gap: 8px; margin-top: 18px; border: 1px solid #a7f3d0; border-radius: 10px; background: #ecfdf5; padding: 14px; color: #065f46; }
+    .top-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    #edit-article { width: fit-content; border: 1px solid #10b981; border-radius: 8px; background: #10b981; padding: 10px 14px; color: #052e16; font-weight: 800; cursor: pointer; }
     #mark-read { width: fit-content; border: 0; border-radius: 8px; background: #10b981; padding: 10px 14px; color: #052e16; font-weight: 800; cursor: pointer; }
     #read-status { margin: 0; font-size: 13px; }
     @media print { body { background: #fff; padding: 0; } main { box-shadow: none; border: 0; } }
@@ -586,6 +648,7 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
   <main>
     <p class="eyebrow">${escapeHtml(data.eyebrow ?? "База знаний")}</p>
     <h1>${escapeHtml(data.title || "Новая статья")}</h1>
+    ${editButton ? `<div class="top-actions">${editButton}</div>` : ""}
     ${data.summary ? `<div class="summary">${escapeHtml(data.summary)}</div>` : ""}
     ${metrics.length > 0 ? `<div class="metrics">${metrics
       .map((metric) => `<span>${escapeHtml(metric.label)}: ${escapeHtml(metric.value)}</span>`)
@@ -598,8 +661,20 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
   </main>
   <script>
     const articleId = ${articleId};
+    const editArticleId = ${editArticleId};
+    const editButton = document.getElementById("edit-article");
     const button = document.getElementById("mark-read");
     const status = document.getElementById("read-status");
+    if (editButton) {
+      editButton.addEventListener("click", () => {
+        if (!window.opener || window.opener.closed) return;
+        window.opener.postMessage(
+          { type: "staff-knowledge-edit-article", articleId: editArticleId },
+          "*",
+        );
+        window.opener.focus();
+      });
+    }
     if (button && articleId) {
       button.addEventListener("click", async () => {
         button.disabled = true;

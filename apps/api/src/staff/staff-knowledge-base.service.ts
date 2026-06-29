@@ -1601,17 +1601,16 @@ export class StaffKnowledgeBaseService {
         materialTypes,
         'TEXT',
       );
-      const title = this.normalizeOptionalString(record.title);
+      const providedTitle = this.normalizeOptionalString(record.title);
       const url = this.normalizeOptionalString(record.url);
       const content = this.normalizeOptionalString(record.content);
 
-      if (!title && !url && !content) {
+      if (!providedTitle && !url && !content) {
         return;
       }
 
-      if (!title) {
-        throw new BadRequestException('Material title is required');
-      }
+      const title =
+        providedTitle ?? this.buildMaterialTitle(type, url, content, index);
 
       if (type === 'TEXT' && !content) {
         throw new BadRequestException('Text material content is required');
@@ -1639,6 +1638,42 @@ export class StaffKnowledgeBaseService {
     });
 
     return materials;
+  }
+
+  private buildMaterialTitle(
+    type: StaffKnowledgeMaterialType,
+    url: string | null,
+    _content: string | null,
+    index: number,
+  ) {
+    const fallback = `Материал ${index + 1}`;
+    const labels: Record<StaffKnowledgeMaterialType, string> = {
+      TEXT: 'Текстовый материал',
+      FILE_LINK: 'Файл',
+      IMAGE: 'Изображение',
+      VIDEO: 'Видео',
+      EXTERNAL_LINK: 'Ссылка',
+      OTHER: 'Материал',
+    };
+    const label = labels[type] ?? 'Материал';
+
+    if (url) {
+      try {
+        const host = new URL(url).hostname.replace(/^www\./, '');
+
+        if (host) {
+          return `${label}: ${host}`.slice(0, 160);
+        }
+      } catch {
+        return fallback;
+      }
+    }
+
+    if (type === 'TEXT') {
+      return `${label} ${index + 1}`;
+    }
+
+    return `${label} ${index + 1}`;
   }
 
   private normalizeRelatedLinks(value: unknown): StaffKnowledgeRelatedLink[] {

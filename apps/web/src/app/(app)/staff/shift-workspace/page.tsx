@@ -237,7 +237,7 @@ function checklistStatusLabel(status: StaffChecklistRun["status"]) {
     ON_REVIEW: "На проверке",
     ACCEPTED: "Принят",
     RETURNED: "Возвращен",
-    ESCALATED: "Эскалация",
+    ESCALATED: "Эскалирован",
     CANCELED: "Отменен",
   };
 
@@ -366,6 +366,34 @@ function activeChecklistRows(rows: StaffChecklistRun[], userId: string) {
     (run) =>
       ["OPEN", "IN_PROGRESS", "RETURNED", "ESCALATED"].includes(run.status) &&
       (run.assignedToUser?.id === userId || !run.assignedToUser),
+  );
+}
+
+function escalatedChecklistRows(rows: StaffChecklistRun[], userId: string) {
+  return rows.filter(
+    (run) =>
+      run.status === "ESCALATED" &&
+      (run.assignedToUser?.id === userId || !run.assignedToUser),
+  );
+}
+
+function mergeChecklistRows(...groups: StaffChecklistRun[][]) {
+  const byId = new Map<string, StaffChecklistRun>();
+
+  groups.flat().forEach((run) => {
+    if (!byId.has(run.id)) {
+      byId.set(run.id, run);
+    }
+  });
+
+  return Array.from(byId.values());
+}
+
+function sortEscalatedChecklists(rows: StaffChecklistRun[]) {
+  return [...rows].sort(
+    (left, right) =>
+      timeValue(right.reviewedAt ?? right.updatedAt ?? right.submittedAt) -
+      timeValue(left.reviewedAt ?? left.updatedAt ?? left.submittedAt),
   );
 }
 
@@ -608,17 +636,25 @@ export default async function StaffShiftWorkspacePage({
     }),
     emptyChecklistReport,
   );
+  const escalatedChecklistsPromise = safeValue(
+    getStaffChecklistReport({
+      status: "ESCALATED",
+    }),
+    emptyChecklistReport,
+  );
   const profilePromise = safeValue(
     getStaffShiftWorkspaceProfile(),
     { staffMember: null },
   );
 
-  const [myTasks, reviewTasks, checklists, profile] = await Promise.all([
-    myTasksPromise,
-    reviewTasksPromise,
-    checklistsPromise,
-    profilePromise,
-  ]);
+  const [myTasks, reviewTasks, checklists, escalatedReport, profile] =
+    await Promise.all([
+      myTasksPromise,
+      reviewTasksPromise,
+      checklistsPromise,
+      escalatedChecklistsPromise,
+      profilePromise,
+    ]);
   const staffMember = profile.staffMember;
   const shiftReport = staffMember?.externalUserId
     ? await safeValue(
@@ -646,15 +682,22 @@ export default async function StaffShiftWorkspacePage({
   const activeTasks = myTasks.rows.filter(isActiveTask);
   const nextTasks = activeTasks.slice(0, 5);
   const staffStoreId = staffMember?.store?.id ?? null;
-  const activeChecklists = filterClubChecklistRows(
-    activeChecklistRows(checklists.rows, user.id),
-    staffStoreId,
+  const escalatedChecklists = sortEscalatedChecklists(
+    filterClubChecklistRows(
+      escalatedChecklistRows(escalatedReport.rows, user.id),
+      staffStoreId,
+    ),
+  );
+  const activeChecklists = mergeChecklistRows(
+    escalatedChecklists,
+    filterClubChecklistRows(activeChecklistRows(checklists.rows, user.id), staffStoreId),
   );
   const availableChecklistTemplates = filterClubChecklistTemplates(
     checklists.checklistTemplates,
     staffStoreId,
   );
-  const recommendedChecklist = findCurrentChecklistRun(activeChecklists, currentShift);
+  const recommendedChecklist =
+    escalatedChecklists[0] ?? findCurrentChecklistRun(activeChecklists, currentShift);
   const selectedChecklist = isChecklistPickerOpen
     ? null
     : selectedChecklistId
@@ -697,6 +740,7 @@ export default async function StaffShiftWorkspacePage({
       : "Открытая смена не найдена";
   const taskControlCount =
     activeTasks.length +
+    escalatedChecklists.length +
     checklists.summary.returned +
     checklists.summary.overdue +
     (canReviewStaffTasks
@@ -776,6 +820,7 @@ export default async function StaffShiftWorkspacePage({
             selectedChecklist={selectedChecklist}
             recommendedChecklist={recommendedChecklist}
             checklists={activeChecklists}
+            escalatedChecklists={escalatedChecklists}
             checklistTemplates={availableChecklistTemplates}
             checklistStartError={checklistStartError ?? null}
             staffStoreId={staffStoreId}
@@ -791,6 +836,7 @@ export default async function StaffShiftWorkspacePage({
             myOnReview={myTasks.summary.onReview}
             reviewQueue={reviewTasks.summary.onReview}
             returnedChecklists={checklists.summary.returned}
+            escalatedChecklists={escalatedChecklists.length}
             overdueReviews={reviewTasks.summary.overdue}
             myOverdueTasks={myTasks.summary.overdue}
             overdueChecklists={checklists.summary.overdue}
@@ -981,6 +1027,7 @@ function WorkPanel({
   selectedChecklist,
   recommendedChecklist,
   checklists,
+  escalatedChecklists,
   checklistTemplates,
   checklistStartError,
   staffStoreId,
@@ -993,6 +1040,7 @@ function WorkPanel({
   selectedChecklist: StaffChecklistRun | null;
   recommendedChecklist: StaffChecklistRun | null;
   checklists: StaffChecklistRun[];
+  escalatedChecklists: StaffChecklistRun[];
   checklistTemplates: StaffChecklistTemplateOption[];
   checklistStartError: string | null;
   staffStoreId: string | null;
@@ -1029,13 +1077,19 @@ function WorkPanel({
         </div>
       </div>
 
+      {escalatedChecklists.length > 0 ? (
+        <EscalatedChecklistBlock checklists={escalatedChecklists} />
+      ) : null}
+
       {selectedChecklist ? (
         <div className="mt-5 space-y-4">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs font-bold uppercase text-zinc-500 dark:text-zinc-500">
-                  Основной чек-лист
+                  {selectedChecklist.status === "ESCALATED"
+                    ? "Эскалированный чек-лист"
+                    : "Основной чек-лист"}
                 </p>
                 <h3 className="mt-1 truncate text-lg font-semibold text-zinc-950 dark:text-zinc-100">
                   {selectedChecklist.title}
@@ -1184,6 +1238,63 @@ function WorkPanel({
   );
 }
 
+function EscalatedChecklistBlock({
+  checklists,
+}: {
+  checklists: StaffChecklistRun[];
+}) {
+  return (
+    <section className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-500/30 dark:bg-red-500/10">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase text-red-600 dark:text-red-300">
+            Требует доработки
+          </p>
+          <h3 className="mt-1 text-lg font-semibold text-red-950 dark:text-red-100">
+            {checklists.length === 1
+              ? "Эскалированный чек-лист"
+              : "Эскалированные чек-листы"}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-red-800 dark:text-red-100/80">
+            Доделайте чек-лист до конца смены, иначе он не будет засчитан.
+          </p>
+        </div>
+        <StatusPill label={formatNumber(checklists.length)} tone="red" />
+      </div>
+      <div className="mt-4 space-y-2">
+        {checklists.map((run) => {
+          const progress = checklistProgress(run);
+
+          return (
+            <Link
+              key={run.id}
+              href={`/staff/checklists?runId=${encodeURIComponent(run.id)}#run-${encodeURIComponent(run.id)}`}
+              className="grid min-w-0 gap-3 rounded-md border border-red-200 bg-white px-3 py-2.5 transition hover:border-red-300 hover:bg-red-50 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center dark:border-red-500/30 dark:bg-zinc-950/70 dark:hover:border-red-400/50 dark:hover:bg-red-500/10"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+                  {run.title}
+                </p>
+                <p className="mt-1 truncate text-xs text-zinc-600 dark:text-zinc-400">
+                  {run.store?.name ?? "вся сеть"} · {formatDateTime(run.reviewedAt ?? run.updatedAt)} · {formatNumber(progress.done)} из {formatNumber(progress.total)}
+                </p>
+                {run.reviewComment ? (
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-red-800 dark:text-red-100/75">
+                    {run.reviewComment}
+                  </p>
+                ) : null}
+              </div>
+              <span className="inline-flex h-9 items-center justify-center rounded-md bg-red-600 px-3 text-sm font-semibold text-white transition group-hover:bg-red-500">
+                Открыть
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ChecklistCounter({
   label,
   value,
@@ -1296,6 +1407,7 @@ function TaskControlPanel({
   myOnReview,
   reviewQueue,
   returnedChecklists,
+  escalatedChecklists,
   overdueReviews,
   myOverdueTasks,
   overdueChecklists,
@@ -1306,6 +1418,7 @@ function TaskControlPanel({
   myOnReview: number;
   reviewQueue: number;
   returnedChecklists: number;
+  escalatedChecklists: number;
   overdueReviews: number;
   myOverdueTasks: number;
   overdueChecklists: number;
@@ -1335,6 +1448,13 @@ function TaskControlPanel({
           tone: "amber" as const,
         },
         {
+          title: "Эскалированные чек-листы",
+          description: "Доделайте до конца смены, иначе не будет зачтено",
+          count: escalatedChecklists,
+          href: "/staff/checklists?status=ESCALATED",
+          tone: "red" as const,
+        },
+        {
           title: "Просроченные проверки",
           description: "Работы команды с истекшим сроком",
           count: overdueReviews,
@@ -1356,6 +1476,13 @@ function TaskControlPanel({
           count: returnedChecklists,
           href: "/staff/checklists?status=RETURNED",
           tone: "amber" as const,
+        },
+        {
+          title: "Эскалированные чек-листы",
+          description: "Доделайте до конца смены, иначе не будет зачтено",
+          count: escalatedChecklists,
+          href: "/staff/checklists?status=ESCALATED",
+          tone: "red" as const,
         },
         {
           title: "Просроченные задачи",

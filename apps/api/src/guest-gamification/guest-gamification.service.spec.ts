@@ -375,6 +375,45 @@ function visualEditorPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function visualLootBoxItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'loot-box-1',
+    title: 'Prize lootbox',
+    status: 'ACTIVE',
+    triggerKind: 'SESSION_START',
+    rewardType: 'BONUS_BALANCE',
+    rewardAmount: 50,
+    rewardLabel: '50 бонусов',
+    prizes: [],
+    condition: 'Старт сессии',
+    limitPerGuest: 1,
+    timeWindowMode: 'ANY',
+    weekdayMode: 'ANY',
+    weekdays: [1, 2, 3, 4, 5, 6, 0],
+    hourFrom: '10:00',
+    hourTo: '16:00',
+    ...overrides,
+  };
+}
+
+function visualMissionItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'mission-1',
+    title: 'Visit mission',
+    status: 'ACTIVE',
+    missionType: 'VISIT',
+    triggerKind: 'SESSION_START',
+    xpReward: 40,
+    rewardType: 'BONUS',
+    rewardAmount: 75,
+    rewardLabel: '75 bonus points',
+    progressTarget: null,
+    progressUnit: null,
+    questSteps: [],
+    ...overrides,
+  };
+}
+
 function visualDraftRow(overrides: Record<string, unknown> = {}) {
   const store = visualEditorStore();
 
@@ -3053,6 +3092,152 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGamePromoCard.create).not.toHaveBeenCalled();
     });
 
+    it('reports event sync differences against the published visual editor', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore({
+        id: 'store-rhodonite',
+        name: '1337 Родонитовая',
+      });
+      const publishedPayload = visualEditorPayload({
+        battlePass: {
+          id: null,
+          enabled: false,
+          title: 'Клубный сезон',
+          status: 'DRAFT',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: null,
+          levelRewards: [],
+        },
+        lootBoxes: [
+          visualLootBoxItem({
+            id: 'loot-old',
+            title: 'Старый кейс',
+          }),
+        ],
+        missions: [
+          visualMissionItem({
+            id: 'mission-old',
+            title: 'Старая миссия',
+          }),
+        ],
+      });
+
+      prisma.store.findMany.mockResolvedValue([store]);
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          id: 'loot-new',
+          name: 'Новый кейс',
+          storeIds: [store.id],
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          id: 'mission-new',
+          name: 'Новая миссия',
+          storeIds: [store.id],
+        }),
+      ]);
+      prisma.guestGameVisualDraft.findMany.mockResolvedValue([
+        visualDraftRow({
+          id: 'published-1',
+          store,
+          storeId: store.id,
+          status: 'PUBLISHED',
+          payload: publishedPayload,
+          publishedAt: now,
+        }),
+      ]);
+
+      const result = await service.getVisualEditorEventSyncStatus(user);
+
+      expect(result).toMatchObject({
+        dirty: true,
+        stores: [
+          {
+            storeId: store.id,
+            storeName: '1337 Родонитовая',
+            addedLootBoxes: ['Новый кейс'],
+            removedLootBoxes: ['Старый кейс'],
+            addedMissions: ['Новая миссия'],
+            removedMissions: ['Старая миссия'],
+          },
+        ],
+      });
+    });
+
+    it('saves event sync into a visual draft without mutating rule rows', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const draft = visualDraftRow({
+        store,
+        storeId: store.id,
+        payload: visualEditorPayload({
+          battlePass: {
+            id: null,
+            enabled: false,
+            title: 'Клубный сезон',
+            status: 'DRAFT',
+            levelCount: 4,
+            xpPerLevel: 250,
+            mainPrize: null,
+            levelRewards: [],
+          },
+          lootBoxes: [visualLootBoxItem({ id: 'loot-old', title: 'Старый кейс' })],
+          missions: [],
+        }),
+      });
+
+      prisma.store.findMany.mockResolvedValue([store]);
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          id: 'loot-new',
+          name: 'Новый кейс',
+          storeIds: [store.id],
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      prisma.guestGameVisualDraft.findMany
+        .mockResolvedValueOnce([draft])
+        .mockResolvedValueOnce([]);
+      prisma.guestGameVisualDraft.update.mockImplementation(({ data }) =>
+        Promise.resolve(
+          visualDraftRow({
+            store,
+            storeId: store.id,
+            status: data.status,
+            payload: data.payload,
+          }),
+        ),
+      );
+
+      const result = await service.syncVisualEditorEvents(user, {
+        storeIds: [store.id],
+      });
+
+      expect(prisma.guestGameVisualDraft.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: draft.id },
+          data: expect.objectContaining({
+            status: 'DRAFT',
+            payload: expect.objectContaining({
+              lootBoxes: [
+                expect.objectContaining({
+                  id: 'loot-new',
+                  title: 'Новый кейс',
+                }),
+              ],
+            }),
+          }),
+        }),
+      );
+      expect(result.published).toBe(false);
+      expect(prisma.guestGameLootBox.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.update).not.toHaveBeenCalled();
+      expect(prisma.guestGameMission.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameMission.update).not.toHaveBeenCalled();
+    });
+
     it('saves new visual loot boxes into the shared rule list and keeps their ids in the draft', async () => {
       const { service, prisma } = createService();
       const store = visualEditorStore();
@@ -3887,6 +4072,134 @@ describe('GuestGamificationService', () => {
         estimatedRewardAmount: 75,
         projectedXpDelta: 40,
       });
+    });
+  });
+
+  describe('checkIn', () => {
+    function mockCheckInGuestAndSession(
+      service: GuestGamificationService,
+      store: { id: string; name: string; timeZone?: string | null } = {
+        id: 'store-1',
+        name: '1337 Родонитовая',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+    ) {
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+      });
+      jest.spyOn(service as any, 'findActiveCheckInSession').mockResolvedValue({
+        externalDomain: 'club-1',
+        externalSessionId: 'session-1',
+        externalGuestId: 'lg-guest-1',
+        externalClubId: 'club-external-1',
+        externalUuid: 'uuid-1',
+        startedAt: new Date('2026-06-10T09:45:00.000Z'),
+        durationMinutes: 15,
+        sessionType: 'regular_session',
+        sessionPacket: false,
+        store,
+        raw: {},
+      });
+    }
+
+    it('blocks a second check-in in the same club during the local calendar day', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-10T10:00:00.000Z'));
+
+      try {
+        const { service, prisma } = createService();
+        const processEventSpy = jest.spyOn(service, 'processEvent');
+
+        mockCheckInGuestAndSession(service);
+        prisma.guestGameEvent.findMany.mockResolvedValue([
+          {
+            occurredAt: new Date('2026-06-10T08:00:00.000Z'),
+            payload: { store: { id: 'store-1' } },
+          },
+        ]);
+
+        await expect(
+          service.checkIn(user, {
+            guestId: 'guest-1',
+            storeId: 'store-1',
+          }),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(prisma.guestGameEvent.findMany).toHaveBeenCalledWith({
+          where: {
+            tenantId: user.tenantId,
+            guestId: 'guest-1',
+            eventType: 'CHECK_IN',
+            occurredAt: {
+              gte: new Date('2026-06-09T19:00:00.000Z'),
+              lt: new Date('2026-06-10T19:00:00.000Z'),
+            },
+          },
+          select: {
+            occurredAt: true,
+            payload: true,
+          },
+          orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+          take: 100,
+        });
+        expect(processEventSpy).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('allows a check-in in another club on the same local calendar day', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-10T10:00:00.000Z'));
+
+      try {
+        const { service, prisma } = createService();
+        const processResult = {
+          processed: true,
+          dryRun: noRewardDryRunResult(),
+          event: eventResult({ eventType: 'CHECK_IN' }),
+          rewards: [],
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: 0,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+            idempotencyKey: 'check-in:club-1:session-1:lg-guest-1',
+            idempotent: false,
+            langameWrite: false,
+          },
+          note: 'created',
+        } as GuestGameProcessEventResult;
+        const processEventSpy = jest
+          .spyOn(service, 'processEvent')
+          .mockResolvedValue(processResult);
+
+        mockCheckInGuestAndSession(service);
+        prisma.guestGameEvent.findMany.mockResolvedValue([
+          {
+            occurredAt: new Date('2026-06-10T08:00:00.000Z'),
+            payload: { store: { id: 'store-2' } },
+          },
+        ]);
+
+        const result = await service.checkIn(user, {
+          guestId: 'guest-1',
+          storeId: 'store-1',
+        });
+
+        expect(result.checkedIn).toBe(true);
+        expect(processEventSpy).toHaveBeenCalledWith(
+          user,
+          expect.objectContaining({
+            guestId: 'guest-1',
+            storeId: 'store-1',
+            eventType: 'CHECK_IN',
+            suppressLootBoxRewards: true,
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 

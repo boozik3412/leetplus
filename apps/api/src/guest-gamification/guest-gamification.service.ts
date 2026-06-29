@@ -1060,6 +1060,34 @@ export type GuestGameVisualEditorPreview = {
   draft: GuestGameVisualDraft;
   summary: GuestPortalGameSummary;
 };
+
+export type GuestGameVisualEventSyncStore = {
+  storeId: string;
+  storeName: string;
+  draftId: string | null;
+  publishedAt: string | null;
+  addedLootBoxes: string[];
+  removedLootBoxes: string[];
+  addedMissions: string[];
+  removedMissions: string[];
+};
+
+export type GuestGameVisualEventSyncStatus = {
+  dirty: boolean;
+  checkedAt: string;
+  stores: GuestGameVisualEventSyncStore[];
+};
+
+export type GuestGameVisualEventSyncDto = {
+  storeIds?: string[];
+  publish?: boolean;
+};
+
+export type GuestGameVisualEventSyncResult = {
+  published: boolean;
+  drafts: GuestGameVisualDraft[];
+  status: GuestGameVisualEventSyncStatus;
+};
 export type GuestGameReward = {
   id: string;
   status: RewardStatus;
@@ -2434,7 +2462,7 @@ type CheckInLiveSession = {
   durationMinutes: number | null;
   sessionType: string;
   sessionPacket: boolean | null;
-  store: { id: string; name: string } | null;
+  store: { id: string; name: string; timeZone?: string | null } | null;
   raw: LangameGuestSession;
 };
 
@@ -5856,7 +5884,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameLootBox.findMany({
       where: { tenantId: user.tenantId },
       include: lootBoxInclude,
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     return rows.map(mapLootBox);
@@ -5977,7 +6005,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameMission.findMany({
       where: { tenantId: user.tenantId },
       include: missionInclude,
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     return rows.map(mapMission);
@@ -6057,7 +6085,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGameSeason.findMany({
       where: { tenantId: user.tenantId },
       include: seasonInclude,
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     return rows.map(mapSeason);
@@ -6127,11 +6155,7 @@ export class GuestGamificationService {
     const rows = await this.prisma.guestGamePromoCard.findMany({
       where: { tenantId: user.tenantId },
       include: promoCardInclude,
-      orderBy: [
-        { priority: 'desc' },
-        { updatedAt: 'desc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     return rows.map(mapPromoCard);
@@ -6308,6 +6332,266 @@ export class GuestGamificationService {
       draft,
       summary: this.buildVisualEditorPreviewSummary(user, store, draft.payload),
     };
+  }
+
+  async getVisualEditorEventSyncStatus(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameVisualEventSyncStatus> {
+    const [stores, lootBoxes, missions, publishedRows] = await Promise.all([
+      this.getPilotStores(user),
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.findVisualEditorDraftRows(user, ['PUBLISHED']),
+    ]);
+
+    return this.buildVisualEditorEventSyncStatus(
+      stores,
+      lootBoxes,
+      missions,
+      publishedRows,
+    );
+  }
+
+  async syncVisualEditorEvents(
+    user: AuthenticatedUser,
+    dto: GuestGameVisualEventSyncDto = {},
+  ): Promise<GuestGameVisualEventSyncResult> {
+    const [stores, lootBoxes, missions, rows] = await Promise.all([
+      this.getPilotStores(user),
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.findVisualEditorDraftRows(user, ['DRAFT', 'PUBLISHED']),
+    ]);
+    const published = dto.publish === true;
+    const statusBefore = this.buildVisualEditorEventSyncStatus(
+      stores,
+      lootBoxes,
+      missions,
+      rows.filter((row) => row.status === 'PUBLISHED'),
+    );
+    const requestedStoreIds = uniqueStrings(
+      Array.isArray(dto.storeIds)
+        ? dto.storeIds.filter((item): item is string => typeof item === 'string')
+        : [],
+    );
+    const targetStoreIds = requestedStoreIds.length
+      ? requestedStoreIds
+      : statusBefore.stores.map((item) => item.storeId);
+    const targetStoreIdSet = new Set(targetStoreIds);
+    const targetStores = stores.filter((store) => targetStoreIdSet.has(store.id));
+    const drafts: GuestGameVisualDraft[] = [];
+
+    for (const store of targetStores) {
+      const row = await this.upsertVisualEditorEventSyncDraft(
+        user,
+        store,
+        rows,
+        this.buildVisualEditorEventPayloadFromRules(
+          await this.visualEditorEventSyncBasePayload(user, store, rows),
+          lootBoxes,
+          missions,
+          store.id,
+        ),
+        published,
+      );
+      drafts.push(mapVisualDraft(row));
+    }
+
+    const refreshedRows = await this.findVisualEditorDraftRows(user, [
+      'PUBLISHED',
+    ]);
+
+    return {
+      published,
+      drafts,
+      status: this.buildVisualEditorEventSyncStatus(
+        stores,
+        lootBoxes,
+        missions,
+        refreshedRows,
+      ),
+    };
+  }
+
+  private async findVisualEditorDraftRows(
+    user: AuthenticatedUser,
+    statuses: string[],
+  ): Promise<VisualDraftRow[]> {
+    return this.prisma.guestGameVisualDraft.findMany({
+      where: { tenantId: user.tenantId, status: { in: statuses } },
+      include: visualDraftInclude,
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  private buildVisualEditorEventSyncStatus(
+    stores: PilotStoreRow[],
+    lootBoxes: GuestGameLootBox[],
+    missions: GuestGameMission[],
+    publishedRows: VisualDraftRow[],
+  ): GuestGameVisualEventSyncStatus {
+    const publishedByStoreId = latestVisualDraftByStoreId(publishedRows);
+    const storeDiffs = stores
+      .map((store) => {
+        const publishedDraft = publishedByStoreId.get(store.id) ?? null;
+        const publishedPayload = normalizeVisualEditorPayload(
+          publishedDraft?.payload ?? null,
+        );
+        const currentPayload = this.buildVisualEditorEventPayloadFromRules(
+          publishedPayload,
+          lootBoxes,
+          missions,
+          store.id,
+        );
+        const lootBoxDiff = visualEventSyncDiff(
+          visualRuleRefs(
+            currentPayload.lootBoxes.map((item) => ({
+              id: item.id,
+              label: item.title,
+            })),
+          ),
+          visualRuleRefs(
+            publishedPayload.lootBoxes.map((item) => ({
+              id: item.id,
+              label: item.title,
+            })),
+          ),
+        );
+        const missionDiff = visualEventSyncDiff(
+          visualRuleRefs(
+            currentPayload.missions.map((item) => ({
+              id: item.id,
+              label: item.title,
+            })),
+          ),
+          visualRuleRefs(
+            publishedPayload.missions.map((item) => ({
+              id: item.id,
+              label: item.title,
+            })),
+          ),
+        );
+
+        return {
+          storeId: store.id,
+          storeName: store.name,
+          draftId: publishedDraft?.id ?? null,
+          publishedAt: iso(publishedDraft?.publishedAt ?? null),
+          addedLootBoxes: lootBoxDiff.added,
+          removedLootBoxes: lootBoxDiff.removed,
+          addedMissions: missionDiff.added,
+          removedMissions: missionDiff.removed,
+        };
+      })
+      .filter((item) => visualEventSyncStoreIsDirty(item));
+
+    return {
+      dirty: storeDiffs.length > 0,
+      checkedAt: new Date().toISOString(),
+      stores: storeDiffs,
+    };
+  }
+
+  private buildVisualEditorEventPayloadFromRules(
+    basePayload: GuestGameVisualEditorPayload,
+    lootBoxes: GuestGameLootBox[],
+    missions: GuestGameMission[],
+    storeId: string,
+  ): GuestGameVisualEditorPayload {
+    return normalizeVisualEditorPayload({
+      ...basePayload,
+      lootBoxes: lootBoxes
+        .filter((item) => ruleMatchesPilotStore(item, storeId))
+        .slice(0, 8)
+        .map(visualLootBoxFromRule),
+      missions: missions
+        .filter(
+          (item) =>
+            item.missionType !== 'CHECK_IN' &&
+            item.triggerKind !== 'CHECK_IN' &&
+            ruleMatchesPilotStore(item, storeId),
+        )
+        .slice(0, 8)
+        .map(visualMissionFromRule),
+    });
+  }
+
+  private async visualEditorEventSyncBasePayload(
+    user: AuthenticatedUser,
+    store: PilotStoreRow,
+    rows: VisualDraftRow[],
+  ): Promise<GuestGameVisualEditorPayload> {
+    const storeRows = rows.filter((row) => row.storeId === store.id);
+    const draftRow =
+      storeRows.find((row) => row.status === 'DRAFT') ??
+      storeRows.find((row) => row.status === 'PUBLISHED') ??
+      null;
+
+    if (draftRow) {
+      return normalizeVisualEditorPayload(draftRow.payload);
+    }
+
+    return this.buildVisualEditorPayloadFromLive(user, store.id);
+  }
+
+  private async upsertVisualEditorEventSyncDraft(
+    user: AuthenticatedUser,
+    store: PilotStoreRow,
+    rows: VisualDraftRow[],
+    payload: GuestGameVisualEditorPayload,
+    publish: boolean,
+  ): Promise<VisualDraftRow> {
+    const storeRows = rows.filter((row) => row.storeId === store.id);
+    const existing =
+      storeRows.find((row) => row.status === 'DRAFT') ??
+      storeRows.find((row) => row.status === 'PUBLISHED') ??
+      null;
+    const actorId = actorUserId(user);
+    const note = publish
+      ? 'Опубликовано после синхронизации игровых событий.'
+      : 'Черновик синхронизирован с расширенными игровыми правилами.';
+
+    if (publish) {
+      validateVisualEditorPublish(payload);
+    }
+
+    if (existing) {
+      return this.prisma.guestGameVisualDraft.update({
+        where: { id: existing.id },
+        data: {
+          status: publish ? 'PUBLISHED' : 'DRAFT',
+          payload,
+          note,
+          updatedByUserId: actorId,
+          ...(publish
+            ? {
+                publishedByUserId: actorId,
+                publishedAt: new Date(),
+              }
+            : {}),
+        },
+        include: visualDraftInclude,
+      });
+    }
+
+    return this.prisma.guestGameVisualDraft.create({
+      data: {
+        tenantId: user.tenantId,
+        storeId: store.id,
+        status: publish ? 'PUBLISHED' : 'DRAFT',
+        payload,
+        note,
+        createdByUserId: actorId,
+        updatedByUserId: actorId,
+        ...(publish
+          ? {
+              publishedByUserId: actorId,
+              publishedAt: new Date(),
+            }
+          : {}),
+      },
+      include: visualDraftInclude,
+    });
   }
 
   private async upsertVisualEditorDraft(
@@ -8405,6 +8689,16 @@ export class GuestGamificationService {
     }
 
     const checkedAt = new Date();
+
+    if (liveSession.store?.id) {
+      await this.assertCheckInAvailableToday(user, {
+        guestId: guest.id,
+        storeId: liveSession.store.id,
+        checkedAt,
+        timeZone: liveSession.store.timeZone,
+      });
+    }
+
     const eventExternalId = [
       'check-in',
       liveSession.externalDomain,
@@ -8441,7 +8735,9 @@ export class GuestGamificationService {
         durationMinutes: liveSession.durationMinutes,
         sessionType: liveSession.sessionType,
         sessionPacket: liveSession.sessionPacket,
-        store: liveSession.store,
+        store: liveSession.store
+          ? { id: liveSession.store.id, name: liveSession.store.name }
+          : null,
       },
       processResult,
       note: 'Чекин подтвержден активной сессией Langame и обработан правилами геймификации.',
@@ -10571,7 +10867,7 @@ export class GuestGamificationService {
         startedAt: true,
         durationMinutes: true,
         packet: true,
-        store: { select: { id: true, name: true } },
+        store: { select: { id: true, name: true, timeZone: true } },
       },
     });
 
@@ -10607,6 +10903,134 @@ export class GuestGamificationService {
     externalGuestId: string,
   ) {
     return this.checkInSessionExternalGuestIds(row).includes(externalGuestId);
+  }
+
+  private async assertCheckInAvailableToday(
+    user: AuthenticatedUser,
+    params: {
+      guestId: string;
+      storeId: string;
+      checkedAt: Date;
+      timeZone?: string | null;
+    },
+  ) {
+    const existing = await this.findCheckInEventInLocalDay(user, params);
+
+    if (existing) {
+      throw new BadRequestException(
+        'Чекин в этом клубе уже был сделан сегодня. Повторить можно завтра после 00:01 по времени клуба.',
+      );
+    }
+  }
+
+  private async findCheckInEventInLocalDay(
+    user: AuthenticatedUser,
+    params: {
+      guestId: string;
+      storeId: string;
+      checkedAt: Date;
+      timeZone?: string | null;
+    },
+  ): Promise<{ occurredAt: Date } | null> {
+    const day = this.checkInLocalDayWindow(
+      params.checkedAt,
+      params.timeZone,
+    );
+    const rows = await this.prisma.guestGameEvent.findMany({
+      where: {
+        tenantId: user.tenantId,
+        guestId: params.guestId,
+        eventType: 'CHECK_IN',
+        occurredAt: {
+          gte: day.from,
+          lt: day.to,
+        },
+      },
+      select: {
+        occurredAt: true,
+        payload: true,
+      },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+    });
+
+    return (
+      rows.find(
+        (row) => this.checkInEventStoreId(row.payload) === params.storeId,
+      ) ?? null
+    );
+  }
+
+  private checkInEventStoreId(payloadValue: Prisma.JsonValue | null) {
+    const payload = jsonRecord(payloadValue);
+    const store = jsonRecord(payload.store as Prisma.JsonValue | null);
+    const input = jsonRecord(payload.input as Prisma.JsonValue | null);
+
+    return (
+      nullableString(store.id) ??
+      nullableString(input.storeId) ??
+      nullableString(payload.storeId)
+    );
+  }
+
+  private checkInLocalDayWindow(
+    value: Date,
+    timeZone?: string | null,
+  ): { from: Date; to: Date } {
+    const normalizedTimeZone = this.checkInTimeZone(timeZone);
+    const localDate = this.checkInLocalDateParts(value, normalizedTimeZone);
+    const fromLabel = checkInDateLabel(localDate);
+    const toLabel = checkInDateLabel(
+      checkInAddLocalDays(localDate, 1),
+    );
+
+    return {
+      from:
+        parseLangameDate(`${fromLabel} 00:00:00`, normalizedTimeZone) ??
+        new Date(`${fromLabel}T00:00:00.000Z`),
+      to:
+        parseLangameDate(`${toLabel} 00:00:00`, normalizedTimeZone) ??
+        new Date(`${toLabel}T00:00:00.000Z`),
+    };
+  }
+
+  private checkInLocalDateParts(value: Date, timeZone: string) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(value);
+      const valueByType = new Map(
+        parts.map((part) => [part.type, part.value]),
+      );
+
+      return {
+        year: Number(valueByType.get('year')),
+        month: Number(valueByType.get('month')),
+        day: Number(valueByType.get('day')),
+      };
+    } catch {
+      return {
+        year: value.getUTCFullYear(),
+        month: value.getUTCMonth() + 1,
+        day: value.getUTCDate(),
+      };
+    }
+  }
+
+  private checkInTimeZone(timeZone?: string | null) {
+    const normalized = nullableString(timeZone) ?? 'UTC';
+
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: normalized }).format(
+        new Date(),
+      );
+      return normalized;
+    } catch {
+      return 'UTC';
+    }
   }
 
   private checkInSessionExternalGuestId(row: LangameGuestSession) {
@@ -11145,6 +11569,61 @@ function mapVisualEditorStore(row: PilotStoreRow): GuestGameVisualEditorStore {
     address: row.address,
     gamificationEnabled: row.gamificationEnabled,
   };
+}
+
+function latestVisualDraftByStoreId(rows: VisualDraftRow[]) {
+  const map = new Map<string, VisualDraftRow>();
+
+  for (const row of rows) {
+    if (!row.storeId || map.has(row.storeId)) {
+      continue;
+    }
+
+    map.set(row.storeId, row);
+  }
+
+  return map;
+}
+
+function visualRuleRefs(
+  items: Array<{ id: string | null; label: string }>,
+): Map<string, string> {
+  const refs = new Map<string, string>();
+
+  for (const item of items) {
+    const key = item.id ? `id:${item.id}` : `title:${item.label.trim()}`;
+
+    if (!key || refs.has(key)) {
+      continue;
+    }
+
+    refs.set(key, item.label);
+  }
+
+  return refs;
+}
+
+function visualEventSyncDiff(
+  currentRefs: Map<string, string>,
+  publishedRefs: Map<string, string>,
+) {
+  const added = [...currentRefs.entries()]
+    .filter(([key]) => !publishedRefs.has(key))
+    .map(([, label]) => label);
+  const removed = [...publishedRefs.entries()]
+    .filter(([key]) => !currentRefs.has(key))
+    .map(([, label]) => label);
+
+  return { added, removed };
+}
+
+function visualEventSyncStoreIsDirty(store: GuestGameVisualEventSyncStore) {
+  return Boolean(
+    store.addedLootBoxes.length ||
+      store.removedLootBoxes.length ||
+      store.addedMissions.length ||
+      store.removedMissions.length,
+  );
 }
 
 function visualEditorPayloadUsesRule(
@@ -13150,6 +13629,27 @@ function deliveryProviderBlockerNote(
   }
 
   return provider.note;
+}
+
+function checkInDateLabel(parts: { year: number; month: number; day: number }) {
+  return [
+    String(parts.year).padStart(4, '0'),
+    String(parts.month).padStart(2, '0'),
+    String(parts.day).padStart(2, '0'),
+  ].join('-');
+}
+
+function checkInAddLocalDays(
+  parts: { year: number; month: number; day: number },
+  days: number,
+) {
+  const next = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+
+  return {
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+  };
 }
 
 function telegramChatIdFromIdentity(value: string | null) {

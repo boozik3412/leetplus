@@ -71,6 +71,9 @@ import {
   type GuestGameVisualDraft,
   type GuestGameVisualDraftDto,
   type GuestGameVisualEditorPreview,
+  type GuestGameVisualEventSyncDto,
+  type GuestGameVisualEventSyncResult,
+  type GuestGameVisualEventSyncStatus,
   type GuestGamificationWorkspace,
 } from './guest-gamification.service';
 
@@ -325,6 +328,21 @@ export class GuestGamificationController {
     @Param('id') id: string,
   ): Promise<GuestGameRuleDeleteResult> {
     return this.gamificationService.deletePromoCard(user, id);
+  }
+
+  @Get('visual-editor/events/sync-status')
+  getVisualEditorEventSyncStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestGameVisualEventSyncStatus> {
+    return this.gamificationService.getVisualEditorEventSyncStatus(user);
+  }
+
+  @Post('visual-editor/events/sync')
+  syncVisualEditorEvents(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameVisualEventSyncDto,
+  ): Promise<GuestGameVisualEventSyncResult> {
+    return this.gamificationService.syncVisualEditorEvents(user, dto);
   }
 
   @Get('visual-editor/draft')

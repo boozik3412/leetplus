@@ -27,6 +27,7 @@ type Props = {
   workspace: GuestGamificationWorkspace;
   stores: Store[];
   canManage: boolean;
+  initialStoreId?: string | null;
   onPublished: () => Promise<void>;
   onRestartLootBox?: (lootBoxId: string) => Promise<void>;
   restartingLootBoxId?: string | null;
@@ -209,6 +210,7 @@ export function GuestGamificationVisualEditor({
   workspace,
   stores,
   canManage,
+  initialStoreId = null,
   onPublished,
   onRestartLootBox,
   restartingLootBoxId = null,
@@ -226,7 +228,11 @@ export function GuestGamificationVisualEditor({
         }),
     [stores],
   );
-  const [storeId, setStoreId] = useState(selectableStores[0]?.id ?? "");
+  const [storeId, setStoreId] = useState(
+    selectableStores.some((store) => store.id === initialStoreId)
+      ? (initialStoreId ?? "")
+      : (selectableStores[0]?.id ?? ""),
+  );
   const [draft, setDraft] = useState<GuestGameVisualDraft | null>(null);
   const [activeSection, setActiveSection] =
     useState<EditorSection>("battlePass");
@@ -242,6 +248,16 @@ export function GuestGamificationVisualEditor({
   const payload = draft?.payload ?? null;
   const publishBlocked =
     Boolean(payload?.checkIn.enabled) && !payload?.checkIn.rewardMode;
+
+  useEffect(() => {
+    if (
+      initialStoreId &&
+      initialStoreId !== storeId &&
+      selectableStores.some((store) => store.id === initialStoreId)
+    ) {
+      setStoreId(initialStoreId);
+    }
+  }, [initialStoreId, selectableStores, storeId]);
 
   useEffect(() => {
     if (!storeId) {

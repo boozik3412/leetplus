@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -41,6 +42,8 @@ import type {
   GuestGameStatus,
   GuestGameTariffSnapshotEndpoint,
   GuestGameTariffSnapshotStatus,
+  GuestGameVisualEventSyncResult,
+  GuestGameVisualEventSyncStatus,
   GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
 import type { Product } from "@/lib/products";
@@ -1212,6 +1215,13 @@ export function GuestGamificationPanel({
     useState<RuleDeleteRequestModal | null>(null);
   const [deleteBlockedModal, setDeleteBlockedModal] =
     useState<RuleDeleteBlockedModal | null>(null);
+  const [visualSyncStatus, setVisualSyncStatus] =
+    useState<GuestGameVisualEventSyncStatus | null>(null);
+  const [visualSyncSaving, setVisualSyncSaving] =
+    useState<"draft" | "publish" | null>(null);
+  const [visualEditorStoreId, setVisualEditorStoreId] = useState<string | null>(
+    null,
+  );
 
   const filteredProfiles = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -1240,6 +1250,37 @@ export function GuestGamificationPanel({
       ),
     [workspace.rewards],
   );
+
+  useEffect(() => {
+    if (!access.canManageRules) {
+      setVisualSyncStatus(null);
+      return;
+    }
+
+    let isActive = true;
+
+    async function loadStatus() {
+      try {
+        const status = await fetchJson<GuestGameVisualEventSyncStatus>(
+          "/api/guests/gamification/visual-editor/events/sync-status",
+        );
+
+        if (isActive) {
+          setVisualSyncStatus(status);
+        }
+      } catch {
+        if (isActive) {
+          setVisualSyncStatus(null);
+        }
+      }
+    }
+
+    void loadStatus();
+
+    return () => {
+      isActive = false;
+    };
+  }, [access.canManageRules, workspace.lootBoxes, workspace.missions]);
 
   function editProfile(profile: GuestGameProfile) {
     setProfileForm(profileToForm(profile));
@@ -1369,6 +1410,44 @@ export function GuestGamificationPanel({
       );
     } finally {
       setEditorModeRefreshing(null);
+    }
+  }
+
+  async function syncVisualEvents(mode: "draft" | "publish") {
+    setVisualSyncSaving(mode);
+    setError(null);
+
+    try {
+      assertCan(
+        access.canManageRules,
+        "Для публикации игровых событий нужно право `Геймификация: правила`.",
+      );
+
+      const result = await postJson<GuestGameVisualEventSyncResult>(
+        "/api/guests/gamification/visual-editor/events/sync",
+        { publish: mode === "publish" },
+      );
+      const targetStoreId =
+        result.drafts[0]?.store?.id ??
+        visualSyncStatus?.stores[0]?.storeId ??
+        result.status.stores[0]?.storeId ??
+        null;
+
+      setVisualSyncStatus(result.status);
+      await reloadWorkspace();
+
+      if (mode === "draft") {
+        setVisualEditorStoreId(targetStoreId);
+        setEditorMode("visual");
+      }
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось синхронизировать визуальный редактор",
+      );
+    } finally {
+      setVisualSyncSaving(null);
     }
   }
 
@@ -2241,6 +2320,7 @@ export function GuestGamificationPanel({
           workspace={workspace}
           stores={stores}
           canManage={access.canManageRules}
+          initialStoreId={visualEditorStoreId}
           onPublished={reloadWorkspace}
           onRestartLootBox={restartLootBox}
           restartingLootBoxId={
@@ -2253,7 +2333,16 @@ export function GuestGamificationPanel({
 
       {editorMode === "advanced" ? (
         <>
-      <div className="flex gap-2 overflow-x-auto border-b border-zinc-200 pb-2 dark:border-zinc-800">
+          {visualSyncStatus?.dirty ? (
+            <VisualEventSyncBanner
+              status={visualSyncStatus}
+              saving={visualSyncSaving}
+              onOpenDraft={() => void syncVisualEvents("draft")}
+              onPublish={() => void syncVisualEvents("publish")}
+            />
+          ) : null}
+
+          <div className="flex gap-2 overflow-x-auto border-b border-zinc-200 pb-2 dark:border-zinc-800">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -7996,6 +8085,102 @@ function PromoBannerCardPreview({
   );
 }
 
+function VisualEventSyncBanner({
+  status,
+  saving,
+  onOpenDraft,
+  onPublish,
+}: {
+  status: GuestGameVisualEventSyncStatus;
+  saving: "draft" | "publish" | null;
+  onOpenDraft: () => void;
+  onPublish: () => void;
+}) {
+  const visibleStores = status.stores.slice(0, 3);
+  const hiddenCount = Math.max(0, status.stores.length - visibleStores.length);
+  const storeNames = compactStoreNames(
+    status.stores.map((store) => store.storeName),
+  );
+
+  return (
+    <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-wide">
+            Нужна публикация игровых событий
+          </p>
+          <h2 className="mt-1 text-base font-bold">
+            Изменена конфигурация в клубах: {storeNames || "клуб не выбран"}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-amber-900/85 dark:text-amber-100/85">
+            В расширенных правилах лутбоксы или миссии отличаются от
+            опубликованного визуального редактора. Сохраните черновик для
+            проверки или сразу опубликуйте актуальный список событий.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/40"
+            disabled={saving !== null}
+            onClick={onOpenDraft}
+          >
+            {saving === "draft" ? "Сохраняем..." : "Открыть черновик"}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-zinc-950 px-3 py-2 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-500 dark:bg-cyan-300 dark:text-zinc-950 dark:hover:bg-cyan-200"
+            disabled={saving !== null}
+            onClick={onPublish}
+          >
+            {saving === "publish" ? "Публикуем..." : "Опубликовать изменения"}
+          </button>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        {visibleStores.map((store) => (
+          <div
+            key={store.storeId}
+            className="rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100"
+          >
+            <p className="font-bold">{store.storeName}</p>
+            <p className="mt-1">{visualEventSyncStoreSummary(store)}</p>
+          </div>
+        ))}
+        {hiddenCount ? (
+          <div className="rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-xs font-bold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
+            Еще {hiddenCount} клуб.
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function visualEventSyncStoreSummary(
+  store: GuestGameVisualEventSyncStatus["stores"][number],
+) {
+  const parts = [
+    visualEventSyncPart("новые лутбоксы", store.addedLootBoxes),
+    visualEventSyncPart("убрать лутбоксы", store.removedLootBoxes),
+    visualEventSyncPart("новые миссии", store.addedMissions),
+    visualEventSyncPart("убрать миссии", store.removedMissions),
+  ].filter(Boolean);
+
+  return parts.length ? parts.join("; ") : "есть изменения в событиях";
+}
+
+function visualEventSyncPart(label: string, items: string[]) {
+  if (!items.length) {
+    return "";
+  }
+
+  const shown = items.slice(0, 2).join(", ");
+  const rest = items.length > 2 ? ` +${items.length - 2}` : "";
+
+  return `${label}: ${shown}${rest}`;
+}
+
 function promoBannerPreviewTitleStyle(title: string): CSSProperties {
   const size = promoBannerPreviewTitleSize(title);
 
@@ -10125,7 +10310,10 @@ function ProfileCard({
               Тест сотрудника
             </span>
           ) : null}
-          <StatusPill label={profileStatusLabels[profile.status]} />
+          <StatusPill
+            label={profileStatusLabels[profile.status]}
+            tone={profileStatusPillTone(profile.status)}
+          />
         </div>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
@@ -10210,7 +10398,7 @@ function RuleCard({
             {subtitle}
           </p>
         </div>
-        <StatusPill label={statusLabels[status]} />
+        <StatusPill label={statusLabels[status]} tone={ruleStatusPillTone(status)} />
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {meta.map((item) => (
@@ -10494,9 +10682,20 @@ function RewardRow({
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
-            {rarityLabel ? <StatusPill label={rarityLabel} /> : null}
-            <StatusPill label={rewardStatusLabels[reward.status]} />
-            <StatusPill label={rewardWalletLabel(reward)} />
+            {rarityLabel ? (
+              <StatusPill
+                label={rarityLabel}
+                tone={rewardRarityPillTone(reward.rewardRarity)}
+              />
+            ) : null}
+            <StatusPill
+              label={rewardStatusLabels[reward.status]}
+              tone={rewardStatusPillTone(reward.status)}
+            />
+            <StatusPill
+              label={rewardWalletLabel(reward)}
+              tone={rewardWalletPillTone(reward.walletState)}
+            />
           </div>
         </div>
       </summary>
@@ -10507,9 +10706,20 @@ function RewardRow({
               <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
                 {reward.rewardLabel}
               </h3>
-              <StatusPill label={rewardStatusLabels[reward.status]} />
-              <StatusPill label={rewardWalletLabel(reward)} />
-              {rarityLabel ? <StatusPill label={rarityLabel} /> : null}
+              <StatusPill
+                label={rewardStatusLabels[reward.status]}
+                tone={rewardStatusPillTone(reward.status)}
+              />
+              <StatusPill
+                label={rewardWalletLabel(reward)}
+                tone={rewardWalletPillTone(reward.walletState)}
+              />
+              {rarityLabel ? (
+                <StatusPill
+                  label={rarityLabel}
+                  tone={rewardRarityPillTone(reward.rewardRarity)}
+                />
+              ) : null}
             </div>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               {guestName} · телефон: {guestContact}
@@ -11956,12 +12166,123 @@ function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function StatusPill({ label }: { label: string }) {
+type StatusPillTone =
+  | "neutral"
+  | "success"
+  | "info"
+  | "warning"
+  | "danger"
+  | "purple"
+  | "cyan";
+
+const statusPillToneClasses: Record<StatusPillTone, string> = {
+  neutral:
+    "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700",
+  success:
+    "bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:ring-emerald-800",
+  info:
+    "bg-sky-100 text-sky-800 ring-sky-200 dark:bg-sky-950 dark:text-sky-200 dark:ring-sky-800",
+  warning:
+    "bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-800",
+  danger:
+    "bg-red-100 text-red-800 ring-red-200 dark:bg-red-950 dark:text-red-200 dark:ring-red-800",
+  purple:
+    "bg-violet-100 text-violet-800 ring-violet-200 dark:bg-violet-950 dark:text-violet-200 dark:ring-violet-800",
+  cyan:
+    "bg-cyan-100 text-cyan-800 ring-cyan-200 dark:bg-cyan-950 dark:text-cyan-200 dark:ring-cyan-800",
+};
+
+function StatusPill({
+  label,
+  tone = "neutral",
+}: {
+  label: string;
+  tone?: StatusPillTone;
+}) {
   return (
-    <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+    <span
+      className={[
+        "rounded-full px-2 py-1 text-xs font-bold ring-1",
+        statusPillToneClasses[tone],
+      ].join(" ")}
+    >
       {label}
     </span>
   );
+}
+
+function ruleStatusPillTone(status: GuestGameStatus): StatusPillTone {
+  switch (status) {
+    case "ACTIVE":
+      return "success";
+    case "DRAFT":
+      return "info";
+    case "PAUSED":
+      return "warning";
+    case "FINISHED":
+      return "cyan";
+    case "ARCHIVED":
+      return "neutral";
+  }
+}
+
+function profileStatusPillTone(status: GuestGameProfileStatus): StatusPillTone {
+  switch (status) {
+    case "ACTIVE":
+      return "success";
+    case "PAUSED":
+      return "warning";
+    case "ARCHIVED":
+      return "neutral";
+  }
+}
+
+function rewardStatusPillTone(status: GuestGameRewardStatus): StatusPillTone {
+  switch (status) {
+    case "PENDING":
+      return "warning";
+    case "APPROVED":
+      return "info";
+    case "PAID":
+      return "success";
+    case "CANCELED":
+      return "neutral";
+    case "EXPIRED":
+      return "danger";
+  }
+}
+
+function rewardWalletPillTone(
+  status: GuestGameReward["walletState"],
+): StatusPillTone {
+  switch (status) {
+    case "WAITING_APPROVAL":
+      return "warning";
+    case "READY":
+      return "success";
+    case "REDEEMED":
+      return "cyan";
+    case "CANCELED":
+      return "neutral";
+    case "EXPIRED":
+      return "danger";
+  }
+}
+
+function rewardRarityPillTone(
+  rarity: GuestGameReward["rewardRarity"],
+): StatusPillTone {
+  switch (rarity) {
+    case "rare":
+      return "info";
+    case "epic":
+      return "purple";
+    case "legendary":
+      return "warning";
+    case "common":
+    default:
+      return "neutral";
+  }
 }
 
 function EmptyState({ text }: { text: string }) {

@@ -281,6 +281,29 @@ export type GuestGameVisualEditorPreview = {
   summary: unknown;
 };
 
+export type GuestGameVisualEventSyncStore = {
+  storeId: string;
+  storeName: string;
+  draftId: string | null;
+  publishedAt: string | null;
+  addedLootBoxes: string[];
+  removedLootBoxes: string[];
+  addedMissions: string[];
+  removedMissions: string[];
+};
+
+export type GuestGameVisualEventSyncStatus = {
+  dirty: boolean;
+  checkedAt: string;
+  stores: GuestGameVisualEventSyncStore[];
+};
+
+export type GuestGameVisualEventSyncResult = {
+  published: boolean;
+  drafts: GuestGameVisualDraft[];
+  status: GuestGameVisualEventSyncStatus;
+};
+
 export type GuestGameReward = {
   id: string;
   status: GuestGameRewardStatus;

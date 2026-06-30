@@ -100,15 +100,6 @@ function escapeAttribute(value: string | null | undefined) {
   return escapeHtml(value).replace(/\n/g, " ");
 }
 
-function serializeScriptJson(value: unknown) {
-  return JSON.stringify(value)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
-}
-
 function parseRichText(value: string | null | undefined): RichTextBlock[] {
   const lines = (value ?? "").replace(/\r\n/g, "\n").split("\n");
   const blocks: RichTextBlock[] = [];
@@ -602,16 +593,7 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
   const tags = data.tags ?? [];
   const materials = data.materials ?? [];
   const links = data.relatedLinks ?? [];
-  const articleId = serializeScriptJson(data.id ?? null);
-  const editArticleId = serializeScriptJson(data.edit?.articleId ?? null);
   const editMode = data.edit?.mode ?? "opener";
-  const editModeScript = serializeScriptJson(editMode);
-  const editableDraftScript = serializeScriptJson({
-    articleId: data.edit?.articleId ?? data.id ?? null,
-    title: data.title ?? "",
-    summary: data.summary ?? "",
-    content: data.content ?? "",
-  });
   const editButton = data.edit
     ? `<button id="edit-article" type="button">${escapeHtml(data.edit.label ?? "Редактировать")}</button>`
     : "";
@@ -708,135 +690,51 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
     ${materials.length > 0 ? `<h2 class="section-title">Материалы</h2>${materials.map(renderMaterialHtml).join("")}` : ""}
     ${links.length > 0 ? `<h2 class="section-title">Связанные разделы</h2>${links.map(renderLinkHtml).join("")}` : ""}
   </main>
-  <script>
-    const articleId = ${articleId};
-    const editArticleId = ${editArticleId};
-    const editMode = ${editModeScript};
-    let editableDraft = ${editableDraftScript};
-    const editButton = document.getElementById("edit-article");
-    const button = document.getElementById("mark-read");
-    const status = document.getElementById("read-status");
-    const inlineEditor = document.getElementById("inline-editor");
-    const editTitle = document.getElementById("edit-title");
-    const editSummary = document.getElementById("edit-summary");
-    const editContent = document.getElementById("edit-content");
-    const applyPreviewEdit = document.getElementById("apply-preview-edit");
-    const cancelPreviewEdit = document.getElementById("cancel-preview-edit");
-    const editStatus = document.getElementById("edit-status");
-    const articleTitle = document.getElementById("article-title");
-    const articleSummary = document.getElementById("article-summary");
-    const articleBody = document.getElementById("article-body");
+</body>
+</html>`;
+}
 
-    function escapeText(value) {
-      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;",
-      })[char]);
-    }
+function wireKnowledgeReadingWindow(
+  popup: Window,
+  data: KnowledgeReadingWindowData,
+) {
+  const doc = popup.document;
+  const editMode = data.edit?.mode ?? "opener";
+  const editableDraft = {
+    articleId: data.edit?.articleId ?? data.id ?? null,
+    title: data.title ?? "",
+    summary: data.summary ?? "",
+    content: data.content ?? "",
+  };
+  let currentDraft = editableDraft;
+  const editButton = doc.getElementById("edit-article") as HTMLButtonElement | null;
+  const readButton = doc.getElementById("mark-read") as HTMLButtonElement | null;
+  const readStatus = doc.getElementById("read-status");
+  const inlineEditor = doc.getElementById("inline-editor");
+  const editTitle = doc.getElementById("edit-title") as HTMLInputElement | null;
+  const editSummary = doc.getElementById("edit-summary") as HTMLTextAreaElement | null;
+  const editContent = doc.getElementById("edit-content") as HTMLTextAreaElement | null;
+  const applyPreviewEdit = doc.getElementById(
+    "apply-preview-edit",
+  ) as HTMLButtonElement | null;
+  const cancelPreviewEdit = doc.getElementById(
+    "cancel-preview-edit",
+  ) as HTMLButtonElement | null;
+  const editStatus = doc.getElementById("edit-status");
+  const articleTitle = doc.getElementById("article-title");
+  const articleSummary = doc.getElementById("article-summary");
+  const articleBody = doc.getElementById("article-body");
 
-    function escapeAttr(value) {
-      return escapeText(value).replace(/\n/g, " ");
-    }
+  function setPreviewValue(nextDraft: typeof editableDraft) {
+    currentDraft = nextDraft;
 
-    function safeUrl(value) {
-      const url = String(value ?? "").trim();
-      return Boolean(url) && (url.startsWith("/") || /^https?:\/\//i.test(url) || /^mailto:/i.test(url));
-    }
-
-    function safeImageUrl(value) {
-      const url = String(value ?? "").trim();
-      return Boolean(url) && (url.startsWith("/") || /^https?:\/\//i.test(url));
-    }
-
-    function renderInlineValue(text) {
-      let html = escapeText(text);
-      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
-        return safeUrl(url)
-          ? '<a href="' + escapeAttr(url) + '" target="_blank" rel="noreferrer">' + label + '</a>'
-          : match;
-      });
-      html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-      html = html.replace(/(^|\s)\*([^*]+)\*/g, "$1<em>$2</em>");
-      return html;
-    }
-
-    function renderRichTextValue(value) {
-      const lines = String(value ?? "").replace(/\r\n/g, "\n").split("\n");
-      const html = [];
-      let paragraph = [];
-      let list = [];
-
-      function flushParagraph() {
-        if (!paragraph.length) return;
-        html.push("<p>" + renderInlineValue(paragraph.join(" ")) + "</p>");
-        paragraph = [];
-      }
-
-      function flushList() {
-        if (!list.length) return;
-        html.push("<ul>" + list.map((item) => "<li>" + renderInlineValue(item) + "</li>").join("") + "</ul>");
-        list = [];
-      }
-
-      lines.forEach((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          flushParagraph();
-          flushList();
-          return;
-        }
-
-        const imageMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
-        if (imageMatch) {
-          flushParagraph();
-          flushList();
-          if (safeImageUrl(imageMatch[2])) {
-            html.push('<figure><img src="' + escapeAttr(imageMatch[2]) + '" alt="' + escapeAttr(imageMatch[1] || "Изображение статьи") + '" loading="lazy"/>' + (imageMatch[1] ? "<figcaption>" + escapeText(imageMatch[1]) + "</figcaption>" : "") + "</figure>");
-          }
-          return;
-        }
-
-        const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
-        if (headingMatch) {
-          flushParagraph();
-          flushList();
-          const tag = headingMatch[1].length >= 3 ? "h3" : "h2";
-          html.push("<" + tag + ">" + renderInlineValue(headingMatch[2]) + "</" + tag + ">");
-          return;
-        }
-
-        const listMatch = trimmed.match(/^[-*]\s+(.+)$/);
-        if (listMatch) {
-          flushParagraph();
-          list.push(listMatch[1]);
-          return;
-        }
-
-        const quoteMatch = trimmed.match(/^>\s?(.+)$/);
-        if (quoteMatch) {
-          flushParagraph();
-          flushList();
-          html.push("<blockquote>" + renderInlineValue(quoteMatch[1]) + "</blockquote>");
-          return;
-        }
-
-        flushList();
-        paragraph.push(trimmed);
-      });
-
-      flushParagraph();
-      flushList();
-      return html.join("");
-    }
-
-    function setPreviewValue(nextDraft) {
-      editableDraft = nextDraft;
+    if (articleTitle) {
       articleTitle.textContent = nextDraft.title || "Новая статья";
-      document.title = nextDraft.title || "Статья базы знаний";
+    }
 
+    popup.document.title = nextDraft.title || "Статья базы знаний";
+
+    if (articleSummary) {
       if (nextDraft.summary) {
         articleSummary.textContent = nextDraft.summary;
         articleSummary.classList.remove("hidden");
@@ -844,127 +742,197 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
         articleSummary.textContent = "";
         articleSummary.classList.add("hidden");
       }
+    }
 
+    if (articleBody) {
       if (nextDraft.content) {
-        articleBody.innerHTML = renderRichTextValue(nextDraft.content);
+        articleBody.innerHTML = richTextToHtml(nextDraft.content);
         articleBody.classList.remove("hidden");
       } else {
         articleBody.innerHTML = "";
         articleBody.classList.add("hidden");
       }
     }
+  }
 
-    function showInlineEditor() {
-      if (!inlineEditor || !editTitle || !editSummary || !editContent) return;
-      editTitle.value = editableDraft.title || "";
-      editSummary.value = editableDraft.summary || "";
-      editContent.value = editableDraft.content || "";
-      inlineEditor.classList.remove("hidden");
+  function showInlineEditor() {
+    if (!inlineEditor || !editTitle || !editSummary || !editContent) {
+      return;
+    }
+
+    editTitle.value = currentDraft.title || "";
+    editSummary.value = currentDraft.summary || "";
+    editContent.value = currentDraft.content || "";
+    inlineEditor.classList.remove("hidden");
+
+    if (editStatus) {
       editStatus.textContent = "";
-      editTitle.focus();
-      inlineEditor.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
-    function hideInlineEditor() {
-      if (inlineEditor) inlineEditor.classList.add("hidden");
+    editTitle.focus({ preventScroll: true });
+    inlineEditor.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function hideInlineEditor() {
+    inlineEditor?.classList.add("hidden");
+  }
+
+  function replaceEditorSelection(
+    formatter: (value: string) => string,
+    fallback: string,
+  ) {
+    if (!editContent) {
+      return;
     }
 
-    function replaceEditorSelection(formatter, fallback) {
-      if (!editContent) return;
-      const start = editContent.selectionStart ?? editContent.value.length;
-      const end = editContent.selectionEnd ?? editContent.value.length;
-      const selected = editContent.value.slice(start, end) || fallback;
-      const scrollTop = editContent.scrollTop;
-      const replacement = formatter(selected);
-      editContent.value = editContent.value.slice(0, start) + replacement + editContent.value.slice(end);
-      editContent.focus({ preventScroll: true });
-      editContent.setSelectionRange(start, start + replacement.length);
-      editContent.scrollTop = scrollTop;
-    }
+    const start = editContent.selectionStart ?? editContent.value.length;
+    const end = editContent.selectionEnd ?? editContent.value.length;
+    const selected = editContent.value.slice(start, end) || fallback;
+    const scrollTop = editContent.scrollTop;
+    const replacement = formatter(selected);
+    editContent.value =
+      editContent.value.slice(0, start) +
+      replacement +
+      editContent.value.slice(end);
+    editContent.focus({ preventScroll: true });
+    editContent.setSelectionRange(start, start + replacement.length);
+    editContent.scrollTop = scrollTop;
+  }
 
-    document.querySelectorAll("[data-format]").forEach((tool) => {
-      tool.addEventListener("mousedown", (event) => event.preventDefault());
-      tool.addEventListener("click", () => {
-        const format = tool.getAttribute("data-format");
-        if (format === "heading") replaceEditorSelection((value) => "## " + value, "Заголовок");
-        if (format === "bold") replaceEditorSelection((value) => "**" + value + "**", "важный текст");
-        if (format === "italic") replaceEditorSelection((value) => "*" + value + "*", "акцент");
-        if (format === "list") replaceEditorSelection((value) => value.split("\n").map((line) => line.trim() ? "- " + line : line).join("\n"), "Пункт списка");
-        if (format === "quote") replaceEditorSelection((value) => value.split("\n").map((line) => line.trim() ? "> " + line : line).join("\n"), "Важная заметка");
-        if (format === "link") {
-          const href = window.prompt("Ссылка");
-          if (href) replaceEditorSelection((value) => "[" + value + "](" + href.trim() + ")", "текст ссылки");
-        }
-      });
-    });
+  doc.querySelectorAll<HTMLButtonElement>("[data-format]").forEach((tool) => {
+    tool.addEventListener("mousedown", (event) => event.preventDefault());
+    tool.addEventListener("click", () => {
+      const format = tool.getAttribute("data-format");
 
-    if (applyPreviewEdit) {
-      applyPreviewEdit.addEventListener("click", () => {
-        const nextDraft = {
-          articleId: editableDraft.articleId,
-          title: editTitle.value.trim(),
-          summary: editSummary.value.trim(),
-          content: editContent.value.trim(),
-        };
+      if (format === "heading") {
+        replaceEditorSelection((value) => `## ${value}`, "Заголовок");
+      }
 
-        if (!nextDraft.title) {
-          editStatus.textContent = "Укажите название статьи.";
-          return;
-        }
+      if (format === "bold") {
+        replaceEditorSelection((value) => `**${value}**`, "важный текст");
+      }
 
-        setPreviewValue(nextDraft);
+      if (format === "italic") {
+        replaceEditorSelection((value) => `*${value}*`, "акцент");
+      }
 
-        if (window.opener && !window.opener.closed) {
-          window.opener.postMessage(
-            { type: "staff-knowledge-preview-draft-updated", ...nextDraft },
-            "*",
+      if (format === "list") {
+        replaceEditorSelection(
+          (value) =>
+            value
+              .split("\n")
+              .map((line) => (line.trim() ? `- ${line}` : line))
+              .join("\n"),
+          "Пункт списка",
+        );
+      }
+
+      if (format === "quote") {
+        replaceEditorSelection(
+          (value) =>
+            value
+              .split("\n")
+              .map((line) => (line.trim() ? `> ${line}` : line))
+              .join("\n"),
+          "Важная заметка",
+        );
+      }
+
+      if (format === "link") {
+        const href = popup.prompt("Ссылка");
+
+        if (href) {
+          replaceEditorSelection(
+            (value) => `[${value}](${href.trim()})`,
+            "текст ссылки",
           );
         }
+      }
+    });
+  });
 
-        editStatus.textContent = "Правки применены к предпросмотру и черновику.";
-      });
+  editButton?.addEventListener("click", () => {
+    if (editMode === "inline") {
+      showInlineEditor();
+      return;
     }
 
-    if (cancelPreviewEdit) {
-      cancelPreviewEdit.addEventListener("click", hideInlineEditor);
+    window.postMessage(
+      {
+        type: "staff-knowledge-edit-article",
+        articleId: data.edit?.articleId ?? data.id ?? null,
+      },
+      window.location.origin,
+    );
+    window.focus();
+  });
+
+  applyPreviewEdit?.addEventListener("click", () => {
+    if (!editTitle || !editSummary || !editContent) {
+      return;
     }
 
-    if (editButton) {
-      editButton.addEventListener("click", () => {
-        if (editMode === "inline") {
-          showInlineEditor();
-          return;
-        }
-        if (!window.opener || window.opener.closed) return;
-        window.opener.postMessage(
-          { type: "staff-knowledge-edit-article", articleId: editArticleId },
-          "*",
-        );
-        window.opener.focus();
-      });
+    const nextDraft = {
+      articleId: currentDraft.articleId,
+      title: editTitle.value.trim(),
+      summary: editSummary.value.trim(),
+      content: editContent.value.trim(),
+    };
+
+    if (!nextDraft.title) {
+      if (editStatus) {
+        editStatus.textContent = "Укажите название статьи.";
+      }
+
+      return;
     }
-    if (button && articleId) {
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        status.textContent = "Отмечаем прочтение...";
-        try {
-          const response = await fetch("/api/staff/knowledge-base/" + encodeURIComponent(articleId) + "/read-receipts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ note: "Прочитано из режима чтения" }),
-          });
-          if (!response.ok) throw new Error("Не удалось отметить прочтение");
-          status.textContent = "Прочтение отмечено.";
-          button.remove();
-        } catch (error) {
-          status.textContent = error instanceof Error ? error.message : "Ошибка запроса";
-          button.disabled = false;
-        }
-      });
+
+    setPreviewValue(nextDraft);
+    window.postMessage(
+      { type: "staff-knowledge-preview-draft-updated", ...nextDraft },
+      window.location.origin,
+    );
+
+    if (editStatus) {
+      editStatus.textContent =
+        "Правки применены к предпросмотру и черновику.";
     }
-  </script>
-</body>
-</html>`;
+  });
+
+  cancelPreviewEdit?.addEventListener("click", hideInlineEditor);
+
+  readButton?.addEventListener("click", async () => {
+    if (!data.id || !readStatus) {
+      return;
+    }
+
+    readButton.disabled = true;
+    readStatus.textContent = "Отмечаем прочтение...";
+
+    try {
+      const response = await fetch(
+        `/api/staff/knowledge-base/${encodeURIComponent(
+          data.id,
+        )}/read-receipts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note: "Прочитано из режима чтения" }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error("Не удалось отметить прочтение");
+      }
+
+      readStatus.textContent = "Прочтение отмечено.";
+      readButton.remove();
+    } catch (error) {
+      readStatus.textContent =
+        error instanceof Error ? error.message : "Ошибка запроса";
+      readButton.disabled = false;
+    }
+  });
 }
 
 export function openKnowledgeReadingWindow(data: KnowledgeReadingWindowData) {
@@ -977,6 +945,7 @@ export function openKnowledgeReadingWindow(data: KnowledgeReadingWindowData) {
   popup.document.open();
   popup.document.write(buildReadingWindowHtml(data));
   popup.document.close();
+  wireKnowledgeReadingWindow(popup, data);
   popup.focus();
 
   return true;

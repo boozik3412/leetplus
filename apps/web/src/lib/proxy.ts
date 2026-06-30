@@ -16,7 +16,8 @@ export async function proxyJsonRequest(
   }
 
   const body = method === "DELETE" ? undefined : await request.text();
-  const response = await fetch(`${getApiUrl()}${path}`, {
+  const url = new URL(request.url);
+  const response = await fetch(`${getApiUrl()}${path}${url.search}`, {
     method,
     headers: {
       ...headers,
@@ -56,10 +57,16 @@ export async function proxyFileRequest(
   });
 
   if (!response.ok) {
-    return NextResponse.json(
-      { message: await readApiError(response) },
-      { status: response.status },
-    );
+    const rawError = await response.text();
+    let errorBody: unknown;
+
+    try {
+      errorBody = JSON.parse(rawError);
+    } catch {
+      errorBody = { message: rawError || "Ошибка запроса" };
+    }
+
+    return NextResponse.json(errorBody, { status: response.status });
   }
 
   return new Response(await response.arrayBuffer(), {

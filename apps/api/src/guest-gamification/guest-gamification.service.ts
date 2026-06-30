@@ -895,14 +895,31 @@ export type GuestGameRuleDeleteResult = {
   deleted: true;
   detachedEvents: number;
   detachedRewards: number;
+  detachedVisualEditorItems?: number;
+};
+
+export type GuestGameRuleDeleteOptions = {
+  detachVisualEditor?: boolean | string | null;
+  deleteActiveRule?: boolean | string | null;
 };
 
 type VisualEditorUsageKind = 'lootBox' | 'mission' | 'season' | 'promoCard';
+
+type RuleDeleteActivityUsage = {
+  source: 'visualEditor' | 'advanced';
+  draftId?: string;
+  storeId: string | null;
+  storeName: string;
+  status: string;
+  publishedAt?: string | null;
+  updatedAt?: string;
+};
 
 type VisualEditorRuleUsage = {
   draftId: string;
   storeId: string | null;
   storeName: string;
+  status: string;
   publishedAt: string | null;
   updatedAt: string;
 };
@@ -5992,14 +6009,18 @@ export class GuestGamificationService {
   async deleteLootBox(
     user: AuthenticatedUser,
     id: string,
+    options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const lootBox = await this.assertLootBox(user, id);
-    await this.assertRuleNotPublishedInVisualEditor(
-      user,
-      'lootBox',
-      lootBox.id,
-      `лутбокс "${lootBox.name}"`,
-    );
+    const detachedVisualEditorItems =
+      await this.prepareRuleDelete(
+        user,
+        'lootBox',
+        lootBox.id,
+        `лутбокс "${lootBox.name}"`,
+        lootBox,
+        options,
+      );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, lootBoxId: lootBox.id },
@@ -6013,7 +6034,12 @@ export class GuestGamificationService {
       where: { id: lootBox.id },
     });
 
-    return { deleted: true, detachedEvents, detachedRewards };
+    return {
+      deleted: true,
+      detachedEvents,
+      detachedRewards,
+      detachedVisualEditorItems,
+    };
   }
 
   async getMissions(user: AuthenticatedUser): Promise<GuestGameMission[]> {
@@ -6072,14 +6098,18 @@ export class GuestGamificationService {
   async deleteMission(
     user: AuthenticatedUser,
     id: string,
+    options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const mission = await this.assertMission(user, id);
-    await this.assertRuleNotPublishedInVisualEditor(
-      user,
-      'mission',
-      mission.id,
-      `миссию "${mission.name}"`,
-    );
+    const detachedVisualEditorItems =
+      await this.prepareRuleDelete(
+        user,
+        'mission',
+        mission.id,
+        `миссию "${mission.name}"`,
+        mission,
+        options,
+      );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, missionId: mission.id },
@@ -6093,7 +6123,12 @@ export class GuestGamificationService {
       where: { id: mission.id },
     });
 
-    return { deleted: true, detachedEvents, detachedRewards };
+    return {
+      deleted: true,
+      detachedEvents,
+      detachedRewards,
+      detachedVisualEditorItems,
+    };
   }
 
   async getSeasons(user: AuthenticatedUser): Promise<GuestGameSeason[]> {
@@ -6142,14 +6177,18 @@ export class GuestGamificationService {
   async deleteSeason(
     user: AuthenticatedUser,
     id: string,
+    options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const season = await this.assertSeason(user, id);
-    await this.assertRuleNotPublishedInVisualEditor(
-      user,
-      'season',
-      season.id,
-      `Battle Pass "${season.name}"`,
-    );
+    const detachedVisualEditorItems =
+      await this.prepareRuleDelete(
+        user,
+        'season',
+        season.id,
+        `Battle Pass "${season.name}"`,
+        season,
+        options,
+      );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, seasonId: season.id },
@@ -6163,7 +6202,12 @@ export class GuestGamificationService {
       where: { id: season.id },
     });
 
-    return { deleted: true, detachedEvents, detachedRewards };
+    return {
+      deleted: true,
+      detachedEvents,
+      detachedRewards,
+      detachedVisualEditorItems,
+    };
   }
 
   async getPromoCards(user: AuthenticatedUser): Promise<GuestGamePromoCard[]> {
@@ -6212,21 +6256,29 @@ export class GuestGamificationService {
   async deletePromoCard(
     user: AuthenticatedUser,
     id: string,
+    options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const promoCard = await this.assertPromoCard(user, id);
-    await this.assertRuleNotPublishedInVisualEditor(
-      user,
-      'promoCard',
-      promoCard.id,
-      `промо-баннер "${promoCard.title}"`,
-    );
-    await this.detachPromoCardFromVisualEditorPayloads(user, promoCard.id);
+    const detachedVisualEditorItems =
+      await this.prepareRuleDelete(
+        user,
+        'promoCard',
+        promoCard.id,
+        `промо-баннер "${promoCard.title}"`,
+        promoCard,
+        options,
+      );
 
     await this.prisma.guestGamePromoCard.delete({
       where: { id: promoCard.id },
     });
 
-    return { deleted: true, detachedEvents: 0, detachedRewards: 0 };
+    return {
+      deleted: true,
+      detachedEvents: 0,
+      detachedRewards: 0,
+      detachedVisualEditorItems,
+    };
   }
 
   async getVisualEditorDraft(
@@ -6706,23 +6758,96 @@ export class GuestGamificationService {
     return row;
   }
 
-  private async assertRuleNotPublishedInVisualEditor(
+  private async prepareRuleDelete(
     user: AuthenticatedUser,
     kind: VisualEditorUsageKind,
     id: string,
     label: string,
-  ) {
-    const usages = await this.findPublishedVisualEditorRuleUsages(
+    rule: {
+      status?: string | null;
+      storeIds?: Prisma.JsonValue | null;
+    },
+    options: GuestGameRuleDeleteOptions,
+  ): Promise<number> {
+    const visualUsages = await this.findPublishedVisualEditorRuleUsages(
       user,
       kind,
       id,
     );
+    const advancedUsages = await this.findAdvancedRuleActivityUsages(
+      user,
+      rule.status,
+      stringArray(rule.storeIds ?? null),
+    );
+    const detachVisualEditor = booleanValue(options.detachVisualEditor);
+    const deleteActiveRule = booleanValue(options.deleteActiveRule);
+    const blockedUsages: RuleDeleteActivityUsage[] = [];
 
-    if (usages.length) {
-      throw new ConflictException(
-        visualEditorRuleDeleteBlockedMessage(label, usages),
+    if (visualUsages.length && !detachVisualEditor) {
+      blockedUsages.push(
+        ...visualUsages.map((usage) => ({
+          ...usage,
+          source: 'visualEditor' as const,
+        })),
       );
     }
+
+    if (advancedUsages.length && !deleteActiveRule) {
+      blockedUsages.push(...advancedUsages);
+    }
+
+    if (blockedUsages.length) {
+      throw new ConflictException(
+        ruleDeleteActivityConfirmation(label, blockedUsages),
+      );
+    }
+
+    return this.detachRuleFromVisualEditorPayloads(user, kind, id);
+  }
+
+  private async findAdvancedRuleActivityUsages(
+    user: AuthenticatedUser,
+    status: string | null | undefined,
+    storeIds: string[],
+  ): Promise<RuleDeleteActivityUsage[]> {
+    if (status !== 'ACTIVE') {
+      return [];
+    }
+
+    if (!storeIds.length) {
+      return [
+        {
+          source: 'advanced',
+          storeId: null,
+          storeName: 'все клубы сети',
+          status,
+        },
+      ];
+    }
+
+    const stores = await this.prisma.store.findMany({
+      where: { tenantId: user.tenantId, id: { in: storeIds } },
+      select: {
+        id: true,
+        name: true,
+        city: true,
+        address: true,
+      },
+    });
+    const storesById = new Map(stores.map((store) => [store.id, store]));
+
+    return storeIds.map((storeId) => {
+      const store = storesById.get(storeId);
+
+      return {
+        source: 'advanced',
+        storeId,
+        storeName: store
+          ? visualEditorUsageStoreName(store)
+          : `клуб ${storeId}`,
+        status,
+      };
+    });
   }
 
   private async findPublishedVisualEditorRuleUsages(
@@ -6735,6 +6860,7 @@ export class GuestGamificationService {
       select: {
         id: true,
         storeId: true,
+        status: true,
         payload: true,
         publishedAt: true,
         updatedAt: true,
@@ -6755,13 +6881,15 @@ export class GuestGamificationService {
         draftId: row.id,
         storeId: row.storeId,
         storeName: visualEditorUsageStoreName(row.store),
+        status: row.status,
         publishedAt: iso(row.publishedAt),
         updatedAt: row.updatedAt.toISOString(),
       }));
   }
 
-  private async detachPromoCardFromVisualEditorPayloads(
+  private async detachRuleFromVisualEditorPayloads(
     user: AuthenticatedUser,
+    kind: VisualEditorUsageKind,
     id: string,
   ) {
     const rows = await this.prisma.guestGameVisualDraft.findMany({
@@ -6775,9 +6903,9 @@ export class GuestGamificationService {
 
     for (const row of rows) {
       const payload = normalizeVisualEditorPayload(row.payload);
-      const promoCards = payload.promoCards.filter((item) => item.id !== id);
+      const nextPayload = detachVisualEditorRule(payload, kind, id);
 
-      if (promoCards.length === payload.promoCards.length) {
+      if (!nextPayload) {
         continue;
       }
 
@@ -6785,10 +6913,7 @@ export class GuestGamificationService {
         this.prisma.guestGameVisualDraft.update({
           where: { id: row.id },
           data: {
-            payload: {
-              ...payload,
-              promoCards,
-            },
+            payload: nextPayload,
             updatedByUserId: actorUserId(user),
           },
         }),
@@ -6796,6 +6921,7 @@ export class GuestGamificationService {
     }
 
     await Promise.all(updates);
+    return updates.length;
   }
 
   private async buildVisualEditorPayloadFromLive(
@@ -11868,6 +11994,51 @@ function visualEditorPayloadUsesRule(
   }
 }
 
+function detachVisualEditorRule(
+  payload: GuestGameVisualEditorPayload,
+  kind: VisualEditorUsageKind,
+  id: string,
+): GuestGameVisualEditorPayload | null {
+  switch (kind) {
+    case 'lootBox': {
+      const lootBoxes = payload.lootBoxes.filter((item) => item.id !== id);
+
+      return lootBoxes.length === payload.lootBoxes.length
+        ? null
+        : normalizeVisualEditorPayload({ ...payload, lootBoxes });
+    }
+    case 'mission': {
+      const missions = payload.missions.filter((item) => item.id !== id);
+
+      return missions.length === payload.missions.length
+        ? null
+        : normalizeVisualEditorPayload({ ...payload, missions });
+    }
+    case 'season': {
+      if (payload.battlePass.id !== id) {
+        return null;
+      }
+
+      return normalizeVisualEditorPayload({
+        ...payload,
+        battlePass: {
+          ...payload.battlePass,
+          id: null,
+          enabled: false,
+          status: 'DRAFT',
+        },
+      });
+    }
+    case 'promoCard': {
+      const promoCards = payload.promoCards.filter((item) => item.id !== id);
+
+      return promoCards.length === payload.promoCards.length
+        ? null
+        : normalizeVisualEditorPayload({ ...payload, promoCards });
+    }
+  }
+}
+
 function visualEditorVisiblePromoCards(
   payload: GuestGameVisualEditorPayload,
   now = new Date(),
@@ -11924,13 +12095,31 @@ function visualEditorUsageStoreName(
   return details.length ? `${store.name} (${details.join(', ')})` : store.name;
 }
 
-function visualEditorRuleDeleteBlockedMessage(
+function ruleDeleteActivityConfirmation(
   label: string,
-  usages: VisualEditorRuleUsage[],
+  usages: RuleDeleteActivityUsage[],
 ) {
-  const storeList = usages.map((usage) => usage.storeName).join(', ');
+  const storeNames = Array.from(
+    new Set(usages.map((usage) => usage.storeName)),
+  );
+  const storeList = storeNames.join(', ');
+  const hasVisualEditorUsage = usages.some(
+    (usage) => usage.source === 'visualEditor',
+  );
+  const hasAdvancedUsage = usages.some((usage) => usage.source === 'advanced');
 
-  return `Нельзя удалить ${label}: этот элемент используется в визуальном редакторе клуба. Сначала удалите его из отображения и опубликуйте изменения для клубов: ${storeList}.`;
+  return {
+    statusCode: 409,
+    code: 'GAME_RULE_ACTIVE',
+    message: `Нельзя удалить ${label}: этот элемент сейчас активен в клубе. Удалить его из активности клуба и затем удалить шаблон?`,
+    stores: usages,
+    storeNames,
+    storeList,
+    sources: {
+      visualEditor: hasVisualEditorUsage,
+      advanced: hasAdvancedUsage,
+    },
+  };
 }
 
 function mapReward(row: RewardRow): GuestGameReward {

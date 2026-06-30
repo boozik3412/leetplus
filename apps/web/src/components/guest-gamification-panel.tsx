@@ -119,6 +119,11 @@ type RuleDeleteRequestModal = {
   label: string;
 };
 
+type RuleDeleteActivityModal = RuleDeleteRequestModal & {
+  message: string;
+  stores: string[];
+};
+
 type PromoBannerUsageInfo = {
   visibleStoreNames: string[];
   overflowStoreNames: string[];
@@ -1213,6 +1218,8 @@ export function GuestGamificationPanel({
     useState<EditorMode | null>(null);
   const [deleteRequestModal, setDeleteRequestModal] =
     useState<RuleDeleteRequestModal | null>(null);
+  const [deleteActivityModal, setDeleteActivityModal] =
+    useState<RuleDeleteActivityModal | null>(null);
   const [deleteBlockedModal, setDeleteBlockedModal] =
     useState<RuleDeleteBlockedModal | null>(null);
   const [visualSyncStatus, setVisualSyncStatus] =
@@ -2130,11 +2137,15 @@ export function GuestGamificationPanel({
     setDeleteRequestModal({ type, id, name, label });
   }
 
-  async function confirmDeleteRuleTemplate(request: RuleDeleteRequestModal) {
+  async function confirmDeleteRuleTemplate(
+    request: RuleDeleteRequestModal,
+    options: { deleteActiveRule?: boolean; detachVisualEditor?: boolean } = {},
+  ) {
     const { type, id, name } = request;
     setSaving(`${type}-delete-${id}`);
     setError(null);
     setDeleteRequestModal(null);
+    setDeleteActivityModal(null);
     setDeleteBlockedModal(null);
 
     try {
@@ -2143,7 +2154,15 @@ export function GuestGamificationPanel({
         "Для удаления шаблона нужно право `Геймификация: правила`.",
       );
 
-      await deleteJson(`/api/guests/gamification/${type}/${id}`);
+      const deleteParams = new URLSearchParams();
+      if (options.detachVisualEditor) {
+        deleteParams.set("detachVisualEditor", "true");
+      }
+      if (options.deleteActiveRule) {
+        deleteParams.set("deleteActiveRule", "true");
+      }
+      const deleteQuery = deleteParams.size ? `?${deleteParams}` : "";
+      await deleteJson(`/api/guests/gamification/${type}/${id}${deleteQuery}`);
 
       if (type === "loot-boxes" && editingLootBoxId === id) {
         resetLootBoxForm();
@@ -2163,6 +2182,13 @@ export function GuestGamificationPanel({
 
       await reloadWorkspace();
     } catch (caught) {
+      const activeModal = buildDeleteActivityModal(request, caught);
+
+      if (activeModal && !options.detachVisualEditor) {
+        setDeleteActivityModal(activeModal);
+        return;
+      }
+
       const message =
         caught instanceof Error ? caught.message : "Не удалось удалить шаблон";
       const blockedModal = buildDeleteBlockedModal(name, message);
@@ -2556,6 +2582,23 @@ export function GuestGamificationPanel({
         />
       ) : null}
 
+      {deleteActivityModal ? (
+        <DeleteActivityModal
+          modal={deleteActivityModal}
+          onClose={() => setDeleteActivityModal(null)}
+          onConfirm={() =>
+            confirmDeleteRuleTemplate(deleteActivityModal, {
+              deleteActiveRule: true,
+              detachVisualEditor: true,
+            })
+          }
+          saving={
+            saving ===
+            `${deleteActivityModal.type}-delete-${deleteActivityModal.id}`
+          }
+        />
+      ) : null}
+
       {deleteBlockedModal ? (
         <DeleteBlockedModal
           modal={deleteBlockedModal}
@@ -2619,6 +2662,74 @@ function DeleteConfirmModal({
             onClick={() => void onConfirm()}
           >
             {saving ? "Удаление..." : "Удалить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteActivityModal({
+  modal,
+  saving,
+  onClose,
+  onConfirm,
+}: {
+  modal: RuleDeleteActivityModal;
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  return (
+    <div
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 p-4 backdrop-blur-sm"
+      role="dialog"
+    >
+      <div className="w-full max-w-lg rounded-lg border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-300">
+            Элемент активен в клубе
+          </p>
+          <h3 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Удалить {modal.label} «{modal.name}» из активности?
+          </h3>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          {modal.message}
+        </p>
+        {modal.stores.length ? (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+              Клубы
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-amber-900 dark:text-amber-100">
+              {modal.stores.map((store) => (
+                <li key={store}>{store}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          Если подтвердить, LeetPlus уберет элемент из опубликованной и
+          сохраненной конфигурации клуба, а затем удалит сам шаблон.
+        </p>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            className={smallButtonClass}
+            disabled={saving}
+            onClick={onClose}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            className={dangerButtonClass}
+            disabled={saving}
+            onClick={() => void onConfirm()}
+          >
+            {saving ? "Удаление..." : "Удалить из активности и удалить"}
           </button>
         </div>
       </div>
@@ -12550,14 +12661,33 @@ function rewardToForm(reward: GuestGameReward): RewardForm {
   };
 }
 
+type ApiRequestErrorBody = {
+  code?: string;
+  message?: string;
+  stores?: Array<{ storeName?: string }>;
+  storeNames?: string[];
+};
+
+class ApiRequestError extends Error {
+  status: number;
+  body: ApiRequestErrorBody | null;
+
+  constructor(status: number, body: ApiRequestErrorBody | null) {
+    super(body?.message ?? "Ошибка запроса");
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      message?: string;
-    } | null;
-    throw new Error(body?.message ?? "Ошибка запроса");
+    const body = (await response.json().catch(() => null)) as
+      | ApiRequestErrorBody
+      | null;
+    throw new ApiRequestError(response.status, body);
   }
 
   return response.json() as Promise<T>;
@@ -12596,6 +12726,42 @@ function ruleTemplateLabel(type: RuleTemplateType) {
     case "promo-cards":
       return "промо-баннер";
   }
+}
+
+function buildDeleteActivityModal(
+  request: RuleDeleteRequestModal,
+  error: unknown,
+): RuleDeleteActivityModal | null {
+  if (!(error instanceof ApiRequestError)) {
+    return null;
+  }
+
+  const body = error.body;
+
+  if (
+    error.status !== 409 ||
+    !["GAME_RULE_ACTIVE", "VISUAL_EDITOR_RULE_ACTIVE"].includes(
+      body?.code ?? "",
+    )
+  ) {
+    return null;
+  }
+
+  const storesFromObjects =
+    body?.stores
+      ?.map((store) => store.storeName)
+      .filter((store): store is string => Boolean(store)) ?? [];
+  const stores = storesFromObjects.length
+    ? storesFromObjects
+    : (body?.storeNames ?? []);
+
+  return {
+    ...request,
+    message:
+      body?.message ??
+      "Элемент сейчас активен в клубе.",
+    stores,
+  };
 }
 
 function buildDeleteBlockedModal(

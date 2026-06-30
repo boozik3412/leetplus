@@ -57,6 +57,7 @@ import {
   type GuestGameRewardRedeemDto,
   type GuestGameRewardUpdateDto,
   type GuestGameRuleDeleteResult,
+  type GuestGameRuleDeleteOptions,
   type GuestGameDelivery,
   type GuestGameDeliveryDispatchDto,
   type GuestGameDeliveryDispatchResult,
@@ -218,8 +219,9 @@ export class GuestGamificationController {
   deleteLootBox(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
+    @Query() query: GuestGameRuleDeleteOptions,
   ): Promise<GuestGameRuleDeleteResult> {
-    return this.gamificationService.deleteLootBox(user, id);
+    return this.gamificationService.deleteLootBox(user, id, query);
   }
 
   @Post('loot-boxes/:id/restart')
@@ -262,8 +264,9 @@ export class GuestGamificationController {
   deleteMission(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
+    @Query() query: GuestGameRuleDeleteOptions,
   ): Promise<GuestGameRuleDeleteResult> {
-    return this.gamificationService.deleteMission(user, id);
+    return this.gamificationService.deleteMission(user, id, query);
   }
 
   @Get('seasons')
@@ -294,8 +297,9 @@ export class GuestGamificationController {
   deleteSeason(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
+    @Query() query: GuestGameRuleDeleteOptions,
   ): Promise<GuestGameRuleDeleteResult> {
-    return this.gamificationService.deleteSeason(user, id);
+    return this.gamificationService.deleteSeason(user, id, query);
   }
 
   @Get('promo-cards')
@@ -326,8 +330,9 @@ export class GuestGamificationController {
   deletePromoCard(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
+    @Query() query: GuestGameRuleDeleteOptions,
   ): Promise<GuestGameRuleDeleteResult> {
-    return this.gamificationService.deletePromoCard(user, id);
+    return this.gamificationService.deletePromoCard(user, id, query);
   }
 
   @Get('visual-editor/events/sync-status')

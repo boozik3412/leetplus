@@ -3568,6 +3568,64 @@ describe('GuestGamificationService', () => {
         deleted: true,
         detachedEvents: 2,
         detachedRewards: 3,
+        detachedVisualEditorItems: 0,
+      });
+    });
+
+    it('asks confirmation before deleting an active advanced lootbox from clubs', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore({ name: '1337-Пушкинская' });
+
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-delete',
+        tenantId: user.tenantId,
+        name: 'Лутбокс тест автомат',
+        status: 'ACTIVE',
+        storeIds: [store.id],
+      });
+      prisma.store.findMany.mockResolvedValue([store]);
+
+      await expect(service.deleteLootBox(user, 'loot-delete')).rejects.toMatchObject(
+        {
+          response: expect.objectContaining({
+            code: 'GAME_RULE_ACTIVE',
+            storeNames: [expect.stringContaining('1337-Пушкинская')],
+          }),
+        },
+      );
+      expect(prisma.guestGameEvent.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameReward.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.delete).not.toHaveBeenCalled();
+    });
+
+    it('deletes an active advanced lootbox after confirmation', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore({ name: '1337-Пушкинская' });
+
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-delete',
+        tenantId: user.tenantId,
+        name: 'Лутбокс тест автомат',
+        status: 'ACTIVE',
+        storeIds: [store.id],
+      });
+      prisma.store.findMany.mockResolvedValue([store]);
+      prisma.guestGameEvent.count.mockResolvedValue(2);
+      prisma.guestGameReward.count.mockResolvedValue(3);
+      prisma.guestGameLootBox.delete.mockResolvedValue({});
+
+      const result = await service.deleteLootBox(user, 'loot-delete', {
+        deleteActiveRule: true,
+      });
+
+      expect(prisma.guestGameLootBox.delete).toHaveBeenCalledWith({
+        where: { id: 'loot-delete' },
+      });
+      expect(result).toEqual({
+        deleted: true,
+        detachedEvents: 2,
+        detachedRewards: 3,
+        detachedVisualEditorItems: 0,
       });
     });
 
@@ -3630,6 +3688,86 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameLootBox.delete).not.toHaveBeenCalled();
     });
 
+    it('detaches a published lootbox from visual editor before confirmed deletion', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore({ name: '1337-Пушкинская' });
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: null,
+          enabled: false,
+          title: 'Клубный сезон',
+          status: 'DRAFT',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: null,
+          levelRewards: [],
+        },
+        lootBoxes: [
+          {
+            id: 'loot-delete',
+            title: 'Лутбокс тест автомат',
+            status: 'ACTIVE',
+            triggerKind: 'SESSION_START',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 50,
+            rewardLabel: '50 бонусов',
+            prizes: [],
+            condition: 'Старт сессии',
+            limitPerGuest: 1,
+            timeWindowMode: 'ANY',
+            weekdayMode: 'ANY',
+            weekdays: [1, 2, 3, 4, 5, 6, 0],
+            hourFrom: '10:00',
+            hourTo: '16:00',
+          },
+        ],
+      });
+
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-delete',
+        tenantId: user.tenantId,
+        name: 'Лутбокс тест автомат',
+      });
+      prisma.guestGameVisualDraft.findMany.mockResolvedValue([
+        {
+          id: 'visual-draft-published',
+          storeId: store.id,
+          status: 'PUBLISHED',
+          payload,
+          publishedAt: now,
+          updatedAt: now,
+          store,
+        },
+      ]);
+      prisma.guestGameEvent.count.mockResolvedValue(2);
+      prisma.guestGameReward.count.mockResolvedValue(3);
+      prisma.guestGameVisualDraft.update.mockResolvedValue({});
+      prisma.guestGameLootBox.delete.mockResolvedValue({});
+
+      const result = await service.deleteLootBox(user, 'loot-delete', {
+        detachVisualEditor: true,
+      });
+
+      expect(prisma.guestGameVisualDraft.update).toHaveBeenCalledWith({
+        where: { id: 'visual-draft-published' },
+        data: expect.objectContaining({
+          payload: expect.objectContaining({
+            lootBoxes: [],
+          }),
+          updatedByUserId: user.id,
+        }),
+      });
+      expect(prisma.guestGameLootBox.delete).toHaveBeenCalledWith({
+        where: { id: 'loot-delete' },
+      });
+      expect(result).toEqual({
+        deleted: true,
+        detachedEvents: 2,
+        detachedRewards: 3,
+        detachedVisualEditorItems: 1,
+      });
+    });
+
     it('deletes a mission template and reports detached records', async () => {
       const { service, prisma } = createService();
 
@@ -3659,6 +3797,7 @@ describe('GuestGamificationService', () => {
         deleted: true,
         detachedEvents: 1,
         detachedRewards: 4,
+        detachedVisualEditorItems: 0,
       });
     });
 
@@ -3746,6 +3885,7 @@ describe('GuestGamificationService', () => {
         deleted: true,
         detachedEvents: 5,
         detachedRewards: 6,
+        detachedVisualEditorItems: 0,
       });
     });
 

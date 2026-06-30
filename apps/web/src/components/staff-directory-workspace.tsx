@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   type StaffDirectoryMember,
   type StaffDirectoryReport,
@@ -161,40 +160,6 @@ function formatCompensation(member: StaffDirectoryMember) {
   return `${compensationTypeLabels[member.compensationType]} · ${formatMoney(member.compensationAmount)}`;
 }
 
-function prepareCardWindow(popup: Window) {
-  const targetDocument = popup.document;
-  const existingRoot = targetDocument.getElementById(
-    "staff-directory-card-root",
-  );
-
-  if (existingRoot) {
-    return existingRoot;
-  }
-
-  targetDocument.open();
-  targetDocument.write(
-    '<!doctype html><html lang="ru"><head><title>Карточка сотрудника</title><style>body{margin:0;background:#f4f4f1;color:#18181b;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}</style></head><body><div id="staff-directory-card-root"></div></body></html>',
-  );
-  targetDocument.close();
-  targetDocument.documentElement.className = document.documentElement.className;
-
-  document
-    .querySelectorAll<
-      HTMLLinkElement | HTMLStyleElement
-    >('link[rel="stylesheet"], style')
-    .forEach((sourceNode) => {
-      targetDocument.head.appendChild(sourceNode.cloneNode(true));
-    });
-
-  const root = targetDocument.getElementById("staff-directory-card-root");
-
-  if (!root) {
-    throw new Error("Не удалось открыть окно карточки сотрудника");
-  }
-
-  return root;
-}
-
 export function StaffDirectoryWorkspace({
   report,
 }: {
@@ -213,8 +178,7 @@ export function StaffDirectoryWorkspace({
     null,
   );
   const [langameSearch, setLangameSearch] = useState("");
-  const [cardWindow, setCardWindow] = useState<Window | null>(null);
-  const [cardContainer, setCardContainer] = useState<HTMLElement | null>(null);
+  const [isCardOpen, setIsCardOpen] = useState(false);
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === draft.id) ?? null,
@@ -276,27 +240,20 @@ export function StaffDirectoryWorkspace({
   }, [langameSearch, report.langameUsers, selectedStore]);
 
   useEffect(() => {
-    if (!cardWindow) {
+    if (!isCardOpen) {
       return undefined;
     }
 
-    const handleCardWindowClose = () => {
-      setCardWindow(null);
-      setCardContainer(null);
-    };
-    const closeWatcher = window.setInterval(() => {
-      if (cardWindow.closed) {
-        handleCardWindowClose();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsCardOpen(false);
       }
-    }, 500);
-
-    cardWindow.addEventListener("beforeunload", handleCardWindowClose);
-
-    return () => {
-      window.clearInterval(closeWatcher);
-      cardWindow.removeEventListener("beforeunload", handleCardWindowClose);
     };
-  }, [cardWindow]);
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCardOpen]);
 
   useEffect(() => {
     const storeId = draft.storeId;
@@ -370,32 +327,7 @@ export function StaffDirectoryWorkspace({
   }
 
   function openCardWindow() {
-    try {
-      const popup =
-        cardWindow && !cardWindow.closed
-          ? cardWindow
-          : window.open(
-              "",
-              "staff-directory-card",
-              "popup,width=980,height=900,resizable=yes,scrollbars=yes",
-            );
-
-      if (!popup) {
-        setMessage("Браузер заблокировал окно карточки сотрудника.");
-        return;
-      }
-
-      const container = prepareCardWindow(popup);
-      setCardWindow(popup);
-      setCardContainer(container);
-      popup.focus();
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Не удалось открыть окно карточки сотрудника",
-      );
-    }
+    setIsCardOpen(true);
   }
 
   function openMemberCard(member: StaffDirectoryMember | null) {
@@ -537,15 +469,30 @@ export function StaffDirectoryWorkspace({
     }
   }
 
-  const cardPanel = (
-    <section className="min-h-screen bg-zinc-50 p-4 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
-      <div className="mx-auto max-w-5xl rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-          Карточка
-        </p>
-        <h2 className="mt-1 text-xl font-semibold">
-          {selectedMember ? "Редактирование" : "Новый сотрудник"}
-        </h2>
+  const cardPanel = isCardOpen ? (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-zinc-950/60 px-3 py-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+    >
+      <section className="mx-auto max-w-5xl rounded-lg border border-zinc-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+              Карточка
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">
+              {selectedMember ? "Редактирование" : "Новый сотрудник"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsCardOpen(false)}
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            Закрыть
+          </button>
+        </div>
         <div className="mt-4 space-y-3">
           <Field label="ФИО или рабочее имя">
             <input
@@ -941,9 +888,9 @@ export function StaffDirectoryWorkspace({
             </button>
           ) : null}
         </div>
-      </div>
-    </section>
-  );
+      </section>
+    </div>
+  ) : null;
 
   return (
     <>
@@ -969,7 +916,7 @@ export function StaffDirectoryWorkspace({
             ) : null}
           </div>
 
-          {message && !cardContainer ? (
+          {message && !isCardOpen ? (
             <p className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
               {message}
             </p>
@@ -1095,7 +1042,7 @@ export function StaffDirectoryWorkspace({
           ) : null}
         </section>
       </div>
-      {cardContainer ? createPortal(cardPanel, cardContainer) : null}
+      {cardPanel}
     </>
   );
 }

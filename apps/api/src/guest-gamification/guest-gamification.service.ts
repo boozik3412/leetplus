@@ -2246,6 +2246,7 @@ export type GuestGameProcessEventDto = GuestGameDryRunDto & {
   externalProvider?: string | null;
   externalDomain?: string | null;
   externalId?: string | null;
+  payload?: Prisma.InputJsonObject | null;
   note?: string | null;
   activeRulesOnly?: boolean | string | null;
   suppressLootBoxRewards?: boolean | string | null;
@@ -8725,6 +8726,12 @@ export class GuestGamificationService {
       liveSession.externalSessionId,
       guest.externalGuestId,
     ].join(':');
+    const storeResolvedBy =
+      checkInStore && expectedStore && !liveSession.externalClubId
+        ? 'selected_store_fallback'
+        : checkInStore
+          ? 'langame_session'
+          : 'none';
     const processResult = await this.processEvent(user, {
       guestId: guest.id,
       storeId: checkInStore?.id ?? null,
@@ -8738,6 +8745,14 @@ export class GuestGamificationService {
       externalProvider: IntegrationProvider.LANGAME,
       externalDomain: liveSession.externalDomain,
       externalId: eventExternalId,
+      payload: {
+        langameSessionResolution: {
+          externalClubId: liveSession.externalClubId,
+          selectedStoreId: expectedStore?.id ?? null,
+          resolvedStoreId: checkInStore?.id ?? null,
+          storeResolvedBy,
+        },
+      },
       suppressLootBoxRewards: true,
       note:
         nullableString(dto.note) ??
@@ -10982,8 +10997,12 @@ export class GuestGamificationService {
       return false;
     }
 
-    if (expectedClubId) {
+    if (expectedClubId && externalClubId) {
       return externalClubId === expectedClubId;
+    }
+
+    if (expectedClubId && !externalClubId) {
+      return Boolean(expectedSourceId || expectedDomain);
     }
 
     return true;
@@ -15166,6 +15185,8 @@ function buildProcessPayload(
   dto: GuestGameProcessEventDto,
   dryRun: GuestGameDryRunResult,
 ): Prisma.InputJsonObject {
+  const extraPayload = dto.payload ?? null;
+
   return {
     source: 'guest_gamification_process_event',
     langameWrite: false,
@@ -15174,6 +15195,7 @@ function buildProcessPayload(
     externalProvider: nullableString(dto.externalProvider),
     externalDomain: nullableString(dto.externalDomain),
     externalId: nullableString(dto.externalId),
+    ...(extraPayload ? { extra: extraPayload } : {}),
     store: dryRun.store,
     input: dryRun.input,
     summary: dryRun.summary,

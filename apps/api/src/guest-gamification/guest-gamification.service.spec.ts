@@ -4308,6 +4308,105 @@ describe('GuestGamificationService', () => {
         jest.useRealTimers();
       }
     });
+
+    it('accepts a selected-club session when Langame omits the session club id', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-10T10:00:00.000Z'));
+
+      try {
+        const { service, prisma, langameSettingsService, langameClient } =
+          createService();
+        const processResult = {
+          processed: true,
+          dryRun: noRewardDryRunResult(),
+          event: eventResult({ eventType: 'CHECK_IN' }),
+          rewards: [],
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: 0,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+            idempotencyKey:
+              'check-in:shared-domain:session-without-club:lg-guest-1',
+            idempotent: false,
+            langameWrite: false,
+          },
+          note: 'created',
+        } as GuestGameProcessEventResult;
+        const processEventSpy = jest
+          .spyOn(service, 'processEvent')
+          .mockResolvedValue(processResult);
+
+        jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+          id: 'guest-1',
+          externalDomain: 'shared-domain',
+          externalGuestId: 'lg-guest-1',
+        });
+        prisma.store.findFirst.mockResolvedValue({
+          id: 'store-push',
+          tenantId: user.tenantId,
+          name: '1337-Пушкинская',
+          externalDomain: 'shared-domain',
+          externalClubId: 'push-club',
+          integrationSourceId: 'source-shared',
+          timeZone: 'Asia/Yekaterinburg',
+        });
+        prisma.guestGameEvent.findMany.mockResolvedValue([]);
+        langameSettingsService.resolveTenantAccess.mockResolvedValue({
+          apiKey: 'api-key',
+          sources: [
+            {
+              id: 'source-shared',
+              domain: 'shared-domain',
+              baseUrl: 'https://langame.example',
+            },
+          ],
+        });
+        langameClient.listGuestSessions.mockResolvedValue([
+          {
+            id: 'session-without-club',
+            guest_id: null,
+            real_guest_id: 'lg-guest-1',
+            list_clubs_id: null,
+            date_start: '2026-06-10 09:45:00',
+            date_stop: null,
+            packet: 0,
+            UUID: 'uuid-push',
+          },
+        ]);
+
+        const result = await service.checkIn(user, {
+          guestId: 'guest-1',
+          storeId: 'store-push',
+        });
+
+        expect(result.liveSession.externalSessionId).toBe(
+          'session-without-club',
+        );
+        expect(result.liveSession.store).toEqual({
+          id: 'store-push',
+          name: '1337-Пушкинская',
+        });
+        expect(processEventSpy).toHaveBeenCalledWith(
+          user,
+          expect.objectContaining({
+            guestId: 'guest-1',
+            storeId: 'store-push',
+            eventType: 'CHECK_IN',
+            sourceFactId: 'session-without-club',
+            payload: {
+              langameSessionResolution: {
+                externalClubId: null,
+                selectedStoreId: 'store-push',
+                resolvedStoreId: 'store-push',
+                storeResolvedBy: 'selected_store_fallback',
+              },
+            },
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   describe('processLiveSessionStart', () => {

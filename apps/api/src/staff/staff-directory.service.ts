@@ -28,6 +28,8 @@ const employmentTypes = [
   'CONTRACTOR',
 ] as const;
 
+const compensationTypes = ['SHIFT', 'MONTH'] as const;
+
 const manageableRoles = new Set<UserRole>([
   UserRole.OWNER,
   UserRole.ADMIN,
@@ -47,6 +49,7 @@ const accountBackedStaffRoles = [
 
 export type StaffMemberStatus = (typeof memberStatuses)[number];
 export type StaffMemberEmploymentType = (typeof employmentTypes)[number];
+export type StaffMemberCompensationType = (typeof compensationTypes)[number];
 
 export type StaffDirectoryQuery = {
   status?: StaffMemberStatus | 'all';
@@ -65,6 +68,8 @@ export type StaffMemberDto = {
   status?: StaffMemberStatus;
   position?: string | null;
   employmentType?: StaffMemberEmploymentType | null;
+  compensationType?: StaffMemberCompensationType | null;
+  compensationAmount?: number | string | null;
   email?: string | null;
   phone?: string | null;
   hiredAt?: string | null;
@@ -113,6 +118,8 @@ export type StaffMemberResponse = {
   status: StaffMemberStatus;
   position: string | null;
   employmentType: StaffMemberEmploymentType | null;
+  compensationType: StaffMemberCompensationType | null;
+  compensationAmount: number | null;
   email: string | null;
   phone: string | null;
   hiredAt: string | null;
@@ -558,6 +565,19 @@ export class StaffDirectoryService {
 
     const externalDomain = this.cleanString(dto.externalDomain);
     const externalUserId = this.cleanString(dto.externalUserId);
+    const compensationType = this.resolveCompensationType(dto.compensationType);
+    const compensationAmount = this.resolveCompensationAmount(
+      dto.compensationAmount,
+    );
+
+    if (
+      (compensationType && compensationAmount === null) ||
+      (!compensationType && compensationAmount !== null)
+    ) {
+      throw new BadRequestException(
+        'Compensation type and amount should be filled together',
+      );
+    }
 
     if (
       (externalDomain && !externalUserId) ||
@@ -574,6 +594,8 @@ export class StaffDirectoryService {
       ...(dto.status ? { status: this.resolveStatus(dto.status) } : {}),
       position: this.cleanString(dto.position),
       employmentType: this.resolveEmploymentType(dto.employmentType),
+      compensationType,
+      compensationAmount,
       email: this.cleanString(dto.email) ?? user?.email ?? null,
       phone: this.cleanString(dto.phone),
       hiredAt: this.parseDate(dto.hiredAt),
@@ -654,6 +676,43 @@ export class StaffDirectoryService {
     }
 
     return cleanType as StaffMemberEmploymentType;
+  }
+
+  private resolveCompensationType(type?: StaffMemberCompensationType | null) {
+    const cleanType = this.cleanString(type);
+
+    if (!cleanType) {
+      return null;
+    }
+
+    if (!compensationTypes.includes(cleanType as StaffMemberCompensationType)) {
+      throw new BadRequestException('Unsupported compensation type');
+    }
+
+    return cleanType as StaffMemberCompensationType;
+  }
+
+  private resolveCompensationAmount(value?: number | string | null) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const numericValue =
+      typeof value === 'number'
+        ? value
+        : Number(String(value).replace(',', '.'));
+
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      throw new BadRequestException(
+        'Compensation amount should be greater than zero',
+      );
+    }
+
+    if (numericValue > 10_000_000) {
+      throw new BadRequestException('Compensation amount is too large');
+    }
+
+    return Math.round(numericValue);
   }
 
   private parseDate(value?: string | null) {
@@ -1274,6 +1333,9 @@ export class StaffDirectoryService {
       status: row.status as StaffMemberStatus,
       position: row.position,
       employmentType: row.employmentType as StaffMemberEmploymentType | null,
+      compensationType:
+        row.compensationType as StaffMemberCompensationType | null,
+      compensationAmount: row.compensationAmount,
       email: row.email,
       phone: row.phone,
       hiredAt: row.hiredAt?.toISOString() ?? null,

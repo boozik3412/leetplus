@@ -14,6 +14,8 @@ export type StaffMemberEmploymentType =
   | "TRAINEE"
   | "CONTRACTOR";
 
+export type StaffMemberCompensationType = "SHIFT" | "MONTH";
+
 export type StaffDirectoryFilters = {
   status?: StaffMemberStatus | "all";
   role?: AuthUser["role"] | "all";
@@ -42,6 +44,8 @@ export type StaffDirectoryMember = {
   status: StaffMemberStatus;
   position: string | null;
   employmentType: StaffMemberEmploymentType | null;
+  compensationType: StaffMemberCompensationType | null;
+  compensationAmount: number | null;
   email: string | null;
   phone: string | null;
   hiredAt: string | null;

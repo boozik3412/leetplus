@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   type StaffDirectoryMember,
   type StaffDirectoryReport,
   type StaffLangameUserOption,
+  type StaffMemberCompensationType,
   type StaffMemberEmploymentType,
   type StaffMemberStatus,
 } from "@/lib/staff-directory";
@@ -25,6 +27,11 @@ const employmentTypeLabels: Record<StaffMemberEmploymentType, string> = {
   CONTRACTOR: "Подрядчик",
 };
 
+const compensationTypeLabels: Record<StaffMemberCompensationType, string> = {
+  SHIFT: "За смену",
+  MONTH: "За месяц",
+};
+
 type DraftMember = {
   id: string | null;
   displayName: string;
@@ -32,6 +39,8 @@ type DraftMember = {
   status: StaffMemberStatus;
   position: string;
   employmentType: StaffMemberEmploymentType | "";
+  compensationType: StaffMemberCompensationType | "";
+  compensationAmount: string;
   email: string;
   phone: string;
   hiredAt: string;
@@ -78,6 +87,8 @@ function emptyDraft(): DraftMember {
     status: "ACTIVE",
     position: "",
     employmentType: "",
+    compensationType: "",
+    compensationAmount: "",
     email: "",
     phone: "",
     hiredAt: "",
@@ -98,6 +109,8 @@ function draftFromMember(member: StaffDirectoryMember): DraftMember {
     status: member.status,
     position: member.position ?? "",
     employmentType: member.employmentType ?? "",
+    compensationType: member.compensationType ?? "",
+    compensationAmount: member.compensationAmount?.toString() ?? "",
     email: member.email ?? "",
     phone: member.phone ?? "",
     hiredAt: member.hiredAt ? member.hiredAt.slice(0, 10) : "",
@@ -132,6 +145,56 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatMoney(value: number | null) {
+  if (value === null) {
+    return "не указана";
+  }
+
+  return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)} ₽`;
+}
+
+function formatCompensation(member: StaffDirectoryMember) {
+  if (!member.compensationType || member.compensationAmount === null) {
+    return "мотивация не указана";
+  }
+
+  return `${compensationTypeLabels[member.compensationType]} · ${formatMoney(member.compensationAmount)}`;
+}
+
+function prepareCardWindow(popup: Window) {
+  const targetDocument = popup.document;
+  const existingRoot = targetDocument.getElementById(
+    "staff-directory-card-root",
+  );
+
+  if (existingRoot) {
+    return existingRoot;
+  }
+
+  targetDocument.open();
+  targetDocument.write(
+    '<!doctype html><html lang="ru"><head><title>Карточка сотрудника</title><style>body{margin:0;background:#f4f4f1;color:#18181b;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}</style></head><body><div id="staff-directory-card-root"></div></body></html>',
+  );
+  targetDocument.close();
+  targetDocument.documentElement.className = document.documentElement.className;
+
+  document
+    .querySelectorAll<
+      HTMLLinkElement | HTMLStyleElement
+    >('link[rel="stylesheet"], style')
+    .forEach((sourceNode) => {
+      targetDocument.head.appendChild(sourceNode.cloneNode(true));
+    });
+
+  const root = targetDocument.getElementById("staff-directory-card-root");
+
+  if (!root) {
+    throw new Error("Не удалось открыть окно карточки сотрудника");
+  }
+
+  return root;
+}
+
 export function StaffDirectoryWorkspace({
   report,
 }: {
@@ -150,6 +213,8 @@ export function StaffDirectoryWorkspace({
     null,
   );
   const [langameSearch, setLangameSearch] = useState("");
+  const [cardWindow, setCardWindow] = useState<Window | null>(null);
+  const [cardContainer, setCardContainer] = useState<HTMLElement | null>(null);
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === draft.id) ?? null,
@@ -209,6 +274,29 @@ export function StaffDirectoryWorkspace({
       })
       .slice(0, 8);
   }, [langameSearch, report.langameUsers, selectedStore]);
+
+  useEffect(() => {
+    if (!cardWindow) {
+      return undefined;
+    }
+
+    const handleCardWindowClose = () => {
+      setCardWindow(null);
+      setCardContainer(null);
+    };
+    const closeWatcher = window.setInterval(() => {
+      if (cardWindow.closed) {
+        handleCardWindowClose();
+      }
+    }, 500);
+
+    cardWindow.addEventListener("beforeunload", handleCardWindowClose);
+
+    return () => {
+      window.clearInterval(closeWatcher);
+      cardWindow.removeEventListener("beforeunload", handleCardWindowClose);
+    };
+  }, [cardWindow]);
 
   useEffect(() => {
     const storeId = draft.storeId;
@@ -281,6 +369,41 @@ export function StaffDirectoryWorkspace({
     setDraft((current) => ({ ...current, ...patch }));
   }
 
+  function openCardWindow() {
+    try {
+      const popup =
+        cardWindow && !cardWindow.closed
+          ? cardWindow
+          : window.open(
+              "",
+              "staff-directory-card",
+              "popup,width=980,height=900,resizable=yes,scrollbars=yes",
+            );
+
+      if (!popup) {
+        setMessage("Браузер заблокировал окно карточки сотрудника.");
+        return;
+      }
+
+      const container = prepareCardWindow(popup);
+      setCardWindow(popup);
+      setCardContainer(container);
+      popup.focus();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось открыть окно карточки сотрудника",
+      );
+    }
+  }
+
+  function openMemberCard(member: StaffDirectoryMember | null) {
+    setDraft(member ? draftFromMember(member) : emptyDraft());
+    setMessage(null);
+    openCardWindow();
+  }
+
   function applyUserAccount(userId: string) {
     const account = report.users.find((user) => user.id === userId);
 
@@ -304,6 +427,7 @@ export function StaffDirectoryWorkspace({
     setMessage(
       `Подставлен Langame user_id ${user.externalUserId} (${user.displayName}). Сохраните карточку сотрудника, чтобы закрепить привязку.`,
     );
+    openCardWindow();
   }
 
   function applyActiveShiftCandidate(candidate: ActiveShiftCandidate) {
@@ -316,6 +440,19 @@ export function StaffDirectoryWorkspace({
     setMessage(
       `Выбран Langame user_id ${candidate.externalUserId}. Проверьте карточку и сохраните изменения.`,
     );
+    openCardWindow();
+  }
+
+  function applyLegacyMapping(mapping: (typeof unmappedLegacy)[number]) {
+    updateDraft({
+      externalDomain: mapping.externalDomain,
+      externalUserId: mapping.externalUserId,
+      displayName:
+        draft.displayName ||
+        mapping.guestName ||
+        `user_id ${mapping.externalUserId}`,
+    });
+    openCardWindow();
   }
 
   async function saveMember() {
@@ -323,12 +460,34 @@ export function StaffDirectoryWorkspace({
     setMessage(null);
 
     try {
+      const cleanCompensationAmount = draft.compensationAmount.trim();
+      const compensationAmount = cleanCompensationAmount
+        ? Number(cleanCompensationAmount)
+        : null;
+
+      if (
+        compensationAmount !== null &&
+        (!Number.isFinite(compensationAmount) || compensationAmount <= 0)
+      ) {
+        throw new Error("Сумма мотивации должна быть больше нуля.");
+      }
+
+      if (
+        (draft.compensationType && compensationAmount === null) ||
+        (!draft.compensationType && compensationAmount !== null)
+      ) {
+        throw new Error("Заполните тип и сумму мотивации вместе.");
+      }
+
       const payload = {
         displayName: draft.displayName,
         role: draft.role,
         status: draft.status,
         position: draft.position || null,
         employmentType: draft.employmentType || null,
+        compensationType: draft.compensationType || null,
+        compensationAmount:
+          compensationAmount === null ? null : Math.round(compensationAmount),
         email: draft.email || null,
         phone: draft.phone || null,
         hiredAt: draft.hiredAt || null,
@@ -378,154 +537,9 @@ export function StaffDirectoryWorkspace({
     }
   }
 
-  return (
-    <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Команда
-            </p>
-            <h2 className="mt-1 text-xl font-semibold">Карточки сотрудников</h2>
-          </div>
-          {report.canManageDirectory ? (
-            <button
-              type="button"
-              onClick={() => setDraft(emptyDraft())}
-              className="rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-            >
-              Новый сотрудник
-            </button>
-          ) : null}
-        </div>
-
-        {members.length === 0 ? (
-          <div className="mt-4 rounded-lg border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            В справочнике пока нет сотрудников. Создайте первую карточку или
-            привяжите существующую учетную запись.
-          </div>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {members.map((member) => (
-              <button
-                key={member.id}
-                type="button"
-                onClick={() => setDraft(draftFromMember(member))}
-                className={[
-                  "w-full rounded-lg border p-4 text-left transition hover:border-emerald-400 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20",
-                  draft.id === member.id
-                    ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
-                    : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40",
-                ].join(" ")}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">{member.displayName}</p>
-                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                      {getRoleLabel(member.role)} ·{" "}
-                      {member.store?.name ?? "вся сеть"}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-zinc-200 px-2.5 py-1 text-xs font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-                    {statusLabels[member.status]}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-2 text-xs text-zinc-500 sm:grid-cols-3 dark:text-zinc-400">
-                  <span>
-                    Аккаунт:{" "}
-                    {member.user
-                      ? member.user.fullName ?? member.user.email
-                      : "не привязан"}
-                  </span>
-                  <span>
-                    Langame:{" "}
-                    {member.externalUserId
-                      ? member.langameUser
-                        ? `${member.langameUser.displayName} / ${member.externalUserId}`
-                        : `${member.externalDomain ?? "домен"} / ${member.externalUserId}`
-                      : "не привязан"}
-                  </span>
-                  <span>Обновлено: {formatDate(member.updatedAt)}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {unmappedLangameUsers.length > 0 ? (
-          <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
-            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Операторы Langame из API
-            </p>
-            <p className="mt-2 text-sm text-emerald-900 dark:text-emerald-100">
-              Эти сотрудники пришли из /users/list и пока не привязаны к карточкам персонала.
-            </p>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {unmappedLangameUsers.slice(0, 8).map((user) => (
-                <button
-                  key={user.id}
-                  type="button"
-                  onClick={() => applyLangameUser(user)}
-                  className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-400 dark:border-emerald-900/60 dark:bg-zinc-950"
-                >
-                  <span className="font-semibold">{user.displayName}</span>
-                  <span className="block text-xs text-zinc-500">
-                    {user.externalDomain} · user_id {user.externalUserId}
-                  </span>
-                  {user.adminStatus || user.workPointLabel ? (
-                    <span className="block text-xs text-zinc-500">
-                      {[user.adminStatus, user.workPointLabel]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {unmappedLegacy.length > 0 ? (
-          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
-            <p className="text-xs font-bold uppercase text-amber-700 dark:text-amber-300">
-              Старые связки staff-control
-            </p>
-            <p className="mt-2 text-sm text-amber-800 dark:text-amber-200">
-              Есть Langame user_id, которые пока живут только в старой
-              staff-control привязке. Их можно перенести в новую карточку
-              сотрудника.
-            </p>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {unmappedLegacy.slice(0, 6).map((mapping) => (
-                <button
-                  key={mapping.id}
-                  type="button"
-                  onClick={() =>
-                    updateDraft({
-                      externalDomain: mapping.externalDomain,
-                      externalUserId: mapping.externalUserId,
-                      displayName:
-                        draft.displayName ||
-                        mapping.guestName ||
-                        `user_id ${mapping.externalUserId}`,
-                    })
-                  }
-                  className="rounded-md border border-amber-200 bg-white px-3 py-2 text-left text-sm transition hover:border-amber-400 dark:border-amber-900/60 dark:bg-zinc-950"
-                >
-                  <span className="font-semibold">
-                    user_id {mapping.externalUserId}
-                  </span>
-                  <span className="block text-xs text-zinc-500">
-                    {mapping.externalDomain} · {mapping.guestName ?? "без имени"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      <aside className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+  const cardPanel = (
+    <section className="min-h-screen bg-zinc-50 p-4 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
+      <div className="mx-auto max-w-5xl rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
           Карточка
         </p>
@@ -559,7 +573,7 @@ export function StaffDirectoryWorkspace({
               ))}
             </select>
           </Field>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Роль">
               <select
                 value={draft.role}
@@ -610,7 +624,7 @@ export function StaffDirectoryWorkspace({
               ))}
             </select>
           </Field>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Должность">
               <input
                 value={draft.position}
@@ -643,7 +657,52 @@ export function StaffDirectoryWorkspace({
               </select>
             </Field>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+              Система мотивации
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Ставка">
+                <select
+                  value={draft.compensationType}
+                  onChange={(event) =>
+                    updateDraft({
+                      compensationType: event.target.value as
+                        | StaffMemberCompensationType
+                        | "",
+                    })
+                  }
+                  disabled={!report.canManageDirectory}
+                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                >
+                  <option value="">Не указано</option>
+                  {Object.entries(compensationTypeLabels).map(
+                    ([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </Field>
+              <Field label="Сумма, ₽">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={draft.compensationAmount}
+                  onChange={(event) =>
+                    updateDraft({ compensationAmount: event.target.value })
+                  }
+                  placeholder="Например: 3500"
+                  disabled={!report.canManageDirectory}
+                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </Field>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Email">
               <input
                 value={draft.email}
@@ -686,9 +745,7 @@ export function StaffDirectoryWorkspace({
             </Field>
           </div>
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-            <p className="text-xs font-bold uppercase text-zinc-500">
-              Langame
-            </p>
+            <p className="text-xs font-bold uppercase text-zinc-500">Langame</p>
             {report.canManageDirectory ? (
               <div className="mt-3 rounded-md border border-emerald-200 bg-white p-3 dark:border-emerald-900/60 dark:bg-zinc-950">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -816,7 +873,9 @@ export function StaffDirectoryWorkspace({
                         </span>
                         <span className="mt-1 block text-xs text-zinc-500">
                           {user.externalDomain} · user_id {user.externalUserId}
-                          {user.workPointLabel ? ` · ${user.workPointLabel}` : ""}
+                          {user.workPointLabel
+                            ? ` · ${user.workPointLabel}`
+                            : ""}
                         </span>
                         {user.mappedStaffMemberId ? (
                           <span className="mt-1 block text-[11px] font-semibold text-amber-700 dark:text-amber-300">
@@ -833,7 +892,7 @@ export function StaffDirectoryWorkspace({
                 )}
               </div>
             ) : null}
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Домен">
                 <input
                   value={draft.externalDomain}
@@ -882,18 +941,166 @@ export function StaffDirectoryWorkspace({
             </button>
           ) : null}
         </div>
-      </aside>
-    </div>
+      </div>
+    </section>
+  );
+
+  return (
+    <>
+      <div className="mt-6 space-y-6">
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Команда
+              </p>
+              <h2 className="mt-1 text-xl font-semibold">
+                Карточки сотрудников
+              </h2>
+            </div>
+            {report.canManageDirectory ? (
+              <button
+                type="button"
+                onClick={() => openMemberCard(null)}
+                className="rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+              >
+                Новый сотрудник
+              </button>
+            ) : null}
+          </div>
+
+          {message && !cardContainer ? (
+            <p className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
+              {message}
+            </p>
+          ) : null}
+
+          {members.length === 0 ? (
+            <div className="mt-4 rounded-lg border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+              В справочнике пока нет сотрудников. Создайте первую карточку или
+              привяжите существующую учетную запись.
+            </div>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {members.map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => openMemberCard(member)}
+                  className={[
+                    "w-full rounded-lg border p-4 text-left transition hover:border-emerald-400 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20",
+                    draft.id === member.id
+                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
+                      : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40",
+                  ].join(" ")}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">{member.displayName}</p>
+                      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                        {getRoleLabel(member.role)} ·{" "}
+                        {member.store?.name ?? "вся сеть"}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-zinc-200 px-2.5 py-1 text-xs font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                      {statusLabels[member.status]}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-zinc-500 sm:grid-cols-2 lg:grid-cols-4 dark:text-zinc-400">
+                    <span>
+                      Аккаунт:{" "}
+                      {member.user
+                        ? (member.user.fullName ?? member.user.email)
+                        : "не привязан"}
+                    </span>
+                    <span>
+                      Langame:{" "}
+                      {member.externalUserId
+                        ? member.langameUser
+                          ? `${member.langameUser.displayName} / ${member.externalUserId}`
+                          : `${member.externalDomain ?? "домен"} / ${member.externalUserId}`
+                        : "не привязан"}
+                    </span>
+                    <span>Мотивация: {formatCompensation(member)}</span>
+                    <span>Обновлено: {formatDate(member.updatedAt)}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {unmappedLangameUsers.length > 0 ? (
+            <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Операторы Langame из API
+              </p>
+              <p className="mt-2 text-sm text-emerald-900 dark:text-emerald-100">
+                Эти сотрудники пришли из /users/list и пока не привязаны к
+                карточкам персонала.
+              </p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {unmappedLangameUsers.slice(0, 8).map((user) => (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => applyLangameUser(user)}
+                    className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-400 dark:border-emerald-900/60 dark:bg-zinc-950"
+                  >
+                    <span className="font-semibold">{user.displayName}</span>
+                    <span className="block text-xs text-zinc-500">
+                      {user.externalDomain} · user_id {user.externalUserId}
+                    </span>
+                    {user.adminStatus || user.workPointLabel ? (
+                      <span className="block text-xs text-zinc-500">
+                        {[user.adminStatus, user.workPointLabel]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {unmappedLegacy.length > 0 ? (
+            <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+              <p className="text-xs font-bold uppercase text-amber-700 dark:text-amber-300">
+                Старые связки staff-control
+              </p>
+              <p className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+                Есть Langame user_id, которые пока живут только в старой
+                staff-control привязке. Их можно перенести в новую карточку
+                сотрудника.
+              </p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {unmappedLegacy.slice(0, 6).map((mapping) => (
+                  <button
+                    key={mapping.id}
+                    type="button"
+                    onClick={() => applyLegacyMapping(mapping)}
+                    className="rounded-md border border-amber-200 bg-white px-3 py-2 text-left text-sm transition hover:border-amber-400 dark:border-amber-900/60 dark:bg-zinc-950"
+                  >
+                    <span className="font-semibold">
+                      user_id {mapping.externalUserId}
+                    </span>
+                    <span className="block text-xs text-zinc-500">
+                      {mapping.externalDomain} ·{" "}
+                      {mapping.guestName ?? "без имени"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      </div>
+      {cardContainer ? createPortal(cardPanel, cardContainer) : null}
+    </>
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block space-y-1">
       <span className="text-xs font-bold uppercase text-zinc-500">{label}</span>

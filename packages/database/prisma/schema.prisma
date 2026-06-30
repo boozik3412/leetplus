@@ -2307,6 +2307,8 @@ model StaffMember {
   status           String               @default("ACTIVE")
   position         String?
   employmentType   String?
+  compensationType String?
+  compensationAmount Int?
   email            String?
   phone            String?
   hiredAt          DateTime?

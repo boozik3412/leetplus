@@ -36,7 +36,7 @@ export default async function StaffSalaryPage({
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Зарплата"
+          current="Расчет зарплаты"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Персонал" },
@@ -49,7 +49,7 @@ export default async function StaffSalaryPage({
               Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Зарплата администраторов
+              Расчет зарплаты
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Создавайте схемы оклада, ставок, премий и удержаний, а затем

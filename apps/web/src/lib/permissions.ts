@@ -113,7 +113,9 @@ const parentCapabilityChildren: Partial<Record<Capability, Capability[]>> = {
   view_assortment_stores: [],
 };
 
-const requestedCapabilityAlternatives: Partial<Record<Capability, Capability[]>> = {
+const requestedCapabilityAlternatives: Partial<
+  Record<Capability, Capability[]>
+> = {
   view_reports: [...assortmentSectionCapabilities, ...reportActionCapabilities],
   view_assortment_reports: reportActionCapabilities,
   view_assortment_products: ["edit_products"],
@@ -320,12 +322,12 @@ export const capabilityOptions: CapabilityOption[] = [
   },
   {
     key: "view_staff_salary",
-    label: "Персонал: зарплата",
+    label: "Персонал: расчет зарплаты",
     description: "Оклады, премии, штрафы и расчет выплат администраторам.",
   },
   {
     key: "manage_staff_salary",
-    label: "Персонал: изменение зарплаты",
+    label: "Персонал: изменение расчета зарплаты",
     description:
       "Создание схем оплаты, премий, штрафов и расчетов выплат администраторам.",
   },
@@ -395,6 +397,13 @@ const validCapabilities = new Set<Capability>(
   capabilityOptions.map((capability) => capability.key),
 );
 
+const staffSalaryRoles = new Set<AuthUser["role"]>([
+  "OWNER",
+  "ADMIN",
+  "MANAGER",
+  "STANDARDS_MANAGER",
+]);
+
 const ownerStaffCapabilities: Capability[] = [
   "view_staff",
   ...staffSectionCapabilities,
@@ -430,6 +439,8 @@ const standardsManagerStaffCapabilities: Capability[] = [
   "view_staff_knowledge",
   "view_staff_control",
   "view_staff_directory",
+  "view_staff_salary",
+  "manage_staff_salary",
   "manage_staff_tasks",
   "manage_staff_standards",
   "manage_staff_training",
@@ -569,9 +580,10 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   ],
 };
 
-const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> = {
-  STANDARDS_MANAGER: roleCapabilities.STANDARDS_MANAGER,
-};
+const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> =
+  {
+    STANDARDS_MANAGER: roleCapabilities.STANDARDS_MANAGER,
+  };
 
 function mergeCapabilities(
   ...capabilitySets: Array<readonly Capability[] | null | undefined>
@@ -664,6 +676,12 @@ function isCommunicationChatOnlyUser(user: AuthUser | null) {
   return Boolean(user && isCommunicationChatOnlyRole(user.role));
 }
 
+function canAccessStaffSalary(user: AuthUser | null) {
+  return Boolean(
+    user && staffSalaryRoles.has(user.role) && can(user, "view_staff_salary"),
+  );
+}
+
 function canAccessShiftStaffPath(href: string) {
   const path = href.split("?")[0]?.split("#")[0] ?? href;
 
@@ -681,11 +699,17 @@ function canAccessShiftStaffPath(href: string) {
 function resolveStaffPathCapability(href: string): Capability {
   const path = href.split("?")[0]?.split("#")[0] ?? href;
 
-  if (path.startsWith("/staff/staff-control") || path.startsWith("/guests/staff-control")) {
+  if (
+    path.startsWith("/staff/staff-control") ||
+    path.startsWith("/guests/staff-control")
+  ) {
     return "view_staff_control";
   }
 
-  if (path.startsWith("/staff/team-chat") || path.startsWith("/staff/notifications")) {
+  if (
+    path.startsWith("/staff/team-chat") ||
+    path.startsWith("/staff/notifications")
+  ) {
     return "view_communications";
   }
 
@@ -783,9 +807,16 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "view_communications");
   }
 
+  if (href.startsWith("/staff/salary")) {
+    return canAccessStaffSalary(user);
+  }
+
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {
     if (isShiftWorkspaceRole(user) && href.startsWith("/staff")) {
-      return can(user, resolveStaffPathCapability(href)) && canAccessShiftStaffPath(href);
+      return (
+        can(user, resolveStaffPathCapability(href)) &&
+        canAccessShiftStaffPath(href)
+      );
     }
 
     return can(user, resolveStaffPathCapability(href));

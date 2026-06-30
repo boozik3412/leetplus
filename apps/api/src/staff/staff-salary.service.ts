@@ -26,7 +26,7 @@ const salaryManagerRoles = [
   UserRole.OWNER,
   UserRole.ADMIN,
   UserRole.MANAGER,
-  UserRole.CLUB_MANAGER,
+  UserRole.STANDARDS_MANAGER,
 ] as const;
 
 const defaultBonusRules = {
@@ -943,7 +943,7 @@ export class StaffSalaryService {
   private ensureSalaryAccess(user: AuthenticatedUser) {
     if (!salaryManagerRoles.some((role) => role === user.role)) {
       throw new ForbiddenException(
-        'Salary module is available only to managers',
+        'Salary module is available only to standards managers and higher',
       );
     }
   }

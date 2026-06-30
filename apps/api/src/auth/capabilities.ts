@@ -188,12 +188,12 @@ export const accessCapabilityCatalog = [
   },
   {
     key: 'view_staff_salary',
-    label: 'Персонал: зарплата',
+    label: 'Персонал: расчет зарплаты',
     description: 'Оклады, премии, штрафы и расчет выплат администраторам.',
   },
   {
     key: 'manage_staff_salary',
-    label: 'Персонал: изменение зарплаты',
+    label: 'Персонал: изменение расчета зарплаты',
     description:
       'Создание схем оплаты, премий, штрафов и расчетов выплат администраторам.',
   },
@@ -381,6 +381,8 @@ const standardsManagerStaffCapabilities: AccessCapability[] = [
   'view_staff_knowledge',
   'view_staff_control',
   'view_staff_directory',
+  'view_staff_salary',
+  'manage_staff_salary',
   'manage_staff_tasks',
   'manage_staff_standards',
   'manage_staff_training',

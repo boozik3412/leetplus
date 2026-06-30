@@ -21,7 +21,12 @@ import {
 } from './staff-salary.service';
 
 @Controller('staff/salary')
-@Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.CLUB_MANAGER)
+@Roles(
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.STANDARDS_MANAGER,
+)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffSalaryController {
   constructor(private readonly staffSalaryService: StaffSalaryService) {}

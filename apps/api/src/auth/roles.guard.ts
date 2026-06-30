@@ -33,6 +33,13 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Insufficient role permissions');
     }
 
+    if (
+      this.isStaffSalaryPath(request) &&
+      !this.isStaffSalaryRole(user?.role)
+    ) {
+      throw new ForbiddenException('Insufficient role permissions');
+    }
+
     if (this.isUserAccessPath(request)) {
       if (
         role &&
@@ -340,6 +347,19 @@ export class RolesGuard implements CanActivate {
       role === UserRole.SENIOR_ADMINISTRATOR ||
       role === UserRole.CLUB_ADMINISTRATOR ||
       role === UserRole.TRAINEE
+    );
+  }
+
+  private isStaffSalaryPath(request: AuthenticatedRequest) {
+    return this.normalizePath(request).startsWith('/staff/salary');
+  }
+
+  private isStaffSalaryRole(role: UserRole | null | undefined) {
+    return (
+      role === UserRole.OWNER ||
+      role === UserRole.ADMIN ||
+      role === UserRole.MANAGER ||
+      role === UserRole.STANDARDS_MANAGER
     );
   }
 

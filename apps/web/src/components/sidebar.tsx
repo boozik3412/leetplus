@@ -76,6 +76,7 @@ const navGroups: NavGroup[] = [
       { href: "/staff/training-courses", label: "Обучение и аттестации" },
       { href: "/staff/knowledge-base", label: "База знаний" },
       { href: "/staff/administrator-ratings", label: "Контроль и мотивация" },
+      { href: "/staff/salary", label: "Расчет зарплаты" },
       { href: "/staff/directory", label: "Сотрудники" },
       { href: "/staff/staff-control", label: "Контроль персонала" },
     ],
@@ -154,7 +155,10 @@ function canShowNavItem(user: AuthUser | null, item: NavItem) {
 
   const hrefPath = normalizeNavigationPath(item.href);
 
-  if (hrefPath.startsWith("/staff") || hrefPath.startsWith("/guests/staff-control")) {
+  if (
+    hrefPath.startsWith("/staff") ||
+    hrefPath.startsWith("/guests/staff-control")
+  ) {
     return shiftWorkspaceNavHrefs.has(hrefPath);
   }
 
@@ -309,7 +313,10 @@ function CompactNavSection({
   function handleBlur(event: FocusEvent<HTMLDivElement>) {
     const nextTarget = event.relatedTarget;
 
-    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+    if (
+      nextTarget instanceof Node &&
+      event.currentTarget.contains(nextTarget)
+    ) {
       return;
     }
 
@@ -387,7 +394,7 @@ function compactGroupButtonClass({
       ? "border-emerald-500/50 bg-emerald-500 text-zinc-950 shadow-sm"
       : isOpen
         ? "border-zinc-300 bg-zinc-100 text-zinc-950 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-      : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
+        : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
   ].join(" ");
 }
 
@@ -767,8 +774,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
 
   function toggleNavGroup(title: string) {
     setOpenNavState((current) => {
-      const currentGroups =
-        current.pathname === pathname ? current.groups : {};
+      const currentGroups = current.pathname === pathname ? current.groups : {};
 
       return {
         pathname,
@@ -842,10 +848,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             <div className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <LogoLink
-                    href={homeHref}
-                    onNavigate={closeMobileMenu}
-                  />
+                  <LogoLink href={homeHref} onNavigate={closeMobileMenu} />
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
                       LeetPlus

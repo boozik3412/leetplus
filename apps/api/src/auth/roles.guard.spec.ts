@@ -331,6 +331,45 @@ describe('RolesGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
+  it('limits staff salary to standards manager and higher', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.STANDARDS_MANAGER,
+    ]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/salary',
+          user: {
+            role: UserRole.STANDARDS_MANAGER,
+            permissions: resolveUserCapabilities({
+              role: UserRole.STANDARDS_MANAGER,
+            }),
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/salary',
+          user: {
+            role: UserRole.CLUB_MANAGER,
+            permissions: resolveUserCapabilities({
+              role: UserRole.CLUB_MANAGER,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('separates staff task viewing from staff task mutation', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 

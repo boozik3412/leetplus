@@ -56,14 +56,25 @@ const staffAreas: StaffArea[] = [
   {
     href: "/staff/administrator-ratings",
     eyebrow: "Контроль и мотивация",
-    title: "Рейтинг, штрафы и зарплата",
+    title: "Рейтинг и штрафы",
     description:
-      "Сводная оценка администраторов, предупреждения, штрафы, схемы оплаты и расчет выплат.",
+      "Сводная оценка администраторов, предупреждения, штрафы и контрольные сигналы по сменам.",
     links: [
       { href: "/staff/discipline", label: "Предупреждения и штрафы" },
-      { href: "/staff/salary", label: "Зарплата" },
+      { href: "/staff/salary", label: "Расчет зарплаты" },
       { href: "/staff/staff-control", label: "Контроль смен" },
       { href: "/staff/staff-control/operators", label: "Администраторы" },
+    ],
+  },
+  {
+    href: "/staff/salary",
+    eyebrow: "Мотивация",
+    title: "Расчет зарплаты",
+    description:
+      "Схемы окладов, ставок, премий и удержаний, расчет выплат по администраторам за выбранный период.",
+    links: [
+      { href: "/staff/directory", label: "Сотрудники" },
+      { href: "/staff/discipline", label: "Штрафы" },
     ],
   },
   {
@@ -92,10 +103,7 @@ export default async function StaffHubPage() {
     .map((area) => {
       const links =
         area.href === "/staff/directory" && canManageUserAccess(user.role)
-          ? [
-              { href: "/users", label: "Пользователи и роли" },
-              ...area.links,
-            ]
+          ? [{ href: "/users", label: "Пользователи и роли" }, ...area.links]
           : area.links;
 
       return {
@@ -199,9 +207,9 @@ export default async function StaffHubPage() {
                 Чат и уведомления теперь не перегружают персональный блок
               </h2>
               <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Оперативный обмен информацией доступен в разделе
-                «Коммуникации», а здесь остается управление людьми,
-                стандартами, обучением и качеством работы.
+                Оперативный обмен информацией доступен в разделе «Коммуникации»,
+                а здесь остается управление людьми, стандартами, обучением и
+                качеством работы.
               </p>
             </div>
             <Link

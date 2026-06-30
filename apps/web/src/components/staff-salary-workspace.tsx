@@ -54,9 +54,8 @@ function numberValue(value: number) {
 
 export function StaffSalaryWorkspaceView({ workspace }: Props) {
   const router = useRouter();
-  const [selectedScheme, setSelectedScheme] = useState<StaffSalaryScheme | null>(
-    workspace.schemes[0] ?? null,
-  );
+  const [selectedScheme, setSelectedScheme] =
+    useState<StaffSalaryScheme | null>(workspace.schemes[0] ?? null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -108,9 +107,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
       hourlyRate: String(form.get("hourlyRate") ?? "0"),
       shiftRate: String(form.get("shiftRate") ?? "0"),
       bonusRules: {
-        taskDoneOnTimeAmount: String(
-          form.get("taskDoneOnTimeAmount") ?? "0",
-        ),
+        taskDoneOnTimeAmount: String(form.get("taskDoneOnTimeAmount") ?? "0"),
         acceptedChecklistAmount: String(
           form.get("acceptedChecklistAmount") ?? "0",
         ),
@@ -143,9 +140,9 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
     setSaving(false);
 
     if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as
-        | { message?: string }
-        | null;
+      const data = (await response.json().catch(() => null)) as {
+        message?: string;
+      } | null;
       setMessage(data?.message ?? "Не удалось сохранить схему");
       return;
     }
@@ -461,13 +458,11 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
             <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
               Расчет
             </p>
-            <h2 className="mt-1 text-xl font-semibold">
-              Зарплата администраторов
-            </h2>
+            <h2 className="mt-1 text-xl font-semibold">Расчет зарплаты</h2>
           </div>
           <p className="max-w-2xl text-sm text-zinc-500">
-            Расчет собирает оклад, смены, часы, премии, просрочки,
-            чек-листы, предупреждения и штрафы за выбранный период.
+            Расчет собирает оклад, смены, часы, премии, просрочки, чек-листы,
+            предупреждения и штрафы за выбранный период.
           </p>
         </div>
 
@@ -549,7 +544,8 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
                       {formatMoney(row.penaltyAmount)}
                     </p>
                     <p className="text-xs text-zinc-500">
-                      просрочек {row.tasks.overdue}, штрафов {row.discipline.fines}
+                      просрочек {row.tasks.overdue}, штрафов{" "}
+                      {row.discipline.fines}
                     </p>
                   </td>
                   <td className="py-3 pr-4">
@@ -604,13 +600,7 @@ function Input({
   );
 }
 
-function RuleBox({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+function RuleBox({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
       <p className="text-sm font-semibold">{title}</p>

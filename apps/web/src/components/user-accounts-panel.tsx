@@ -239,7 +239,7 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
   },
   { group: "Персонал", href: "/staff/discipline", label: "Штрафы" },
   { group: "Персонал", href: "/staff/directory", label: "Сотрудники" },
-  { group: "Персонал", href: "/staff/salary", label: "Зарплата" },
+  { group: "Персонал", href: "/staff/salary", label: "Расчет зарплаты" },
   {
     group: "Персонал",
     href: "/staff/staff-control",
@@ -349,25 +349,25 @@ export function UserAccountsPanel({
   const assignableRoles = getAssignableRoles(currentUser.role);
   const defaultRole = assignableRoles.includes("CLUB_ADMINISTRATOR")
     ? "CLUB_ADMINISTRATOR"
-    : assignableRoles[0] ?? currentUser.role;
+    : (assignableRoles[0] ?? currentUser.role);
   const [users, setUsers] = useState(initialData.users);
   const [systemRoles, setSystemRoles] = useState(initialData.roleOptions);
   const [customRoles, setCustomRoles] = useState(initialData.customRoles);
   const [invites, setInvites] = useState(initialData.invites ?? []);
-  const [form, setForm] = useState<FormState>(() => createEmptyForm(defaultRole));
+  const [form, setForm] = useState<FormState>(() =>
+    createEmptyForm(defaultRole),
+  );
   const [accountFormMode, setAccountFormMode] =
     useState<AccountFormMode>("account");
   const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
-  const [roleForm, setRoleForm] = useState<AccessRoleFormState>(
-    createEmptyRoleForm,
-  );
+  const [roleForm, setRoleForm] =
+    useState<AccessRoleFormState>(createEmptyRoleForm);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [selectedSystemRole, setSelectedSystemRole] = useState<UserRole | null>(
     null,
   );
-  const [roleEditorMode, setRoleEditorMode] =
-    useState<RoleEditorMode>("idle");
+  const [roleEditorMode, setRoleEditorMode] = useState<RoleEditorMode>("idle");
   const [openPermissionSections, setOpenPermissionSections] = useState<
     Record<string, boolean>
   >(defaultOpenPermissionSections);
@@ -386,10 +386,10 @@ export function UserAccountsPanel({
   const [isRoleSaving, setIsRoleSaving] = useState(false);
 
   const selectedUser = selectedId
-    ? users.find((account) => account.id === selectedId) ?? null
+    ? (users.find((account) => account.id === selectedId) ?? null)
     : null;
   const selectedInvite = selectedInviteId
-    ? invites.find((invite) => invite.id === selectedInviteId) ?? null
+    ? (invites.find((invite) => invite.id === selectedInviteId) ?? null)
     : null;
   const roleOptions = systemRoles.filter((option) =>
     assignableRoles.includes(option.role),
@@ -398,13 +398,13 @@ export function UserAccountsPanel({
     (option) => option.role === form.role,
   );
   const selectedCustomRole = form.customRoleId
-    ? customRoles.find((role) => role.id === form.customRoleId) ?? null
+    ? (customRoles.find((role) => role.id === form.customRoleId) ?? null)
     : null;
   const roleAssignmentValue = form.customRoleId
     ? `custom:${form.customRoleId}`
     : `system:${form.role}`;
   const selectedSystemRoleOption = selectedSystemRole
-    ? roleOptions.find((option) => option.role === selectedSystemRole) ?? null
+    ? (roleOptions.find((option) => option.role === selectedSystemRole) ?? null)
     : null;
   const isSystemRoleDirty =
     roleEditorMode === "system" && selectedSystemRoleOption
@@ -424,7 +424,7 @@ export function UserAccountsPanel({
     roleEditorMode === "custom"
       ? "Сохранение изменений роли"
       : roleEditorMode === "system"
-        ? selectedSystemRoleOption?.label ?? "Настройка системной роли"
+        ? (selectedSystemRoleOption?.label ?? "Настройка системной роли")
         : "Создание роли с нуля";
   const roleEditorDescription =
     roleEditorMode === "custom"
@@ -459,8 +459,11 @@ export function UserAccountsPanel({
       .map((section) => {
         const options = section.permissions
           .map((key) => optionsByKey.get(key))
-          .filter((option): option is (typeof initialData.capabilityOptions)[number] =>
-            Boolean(option),
+          .filter(
+            (
+              option,
+            ): option is (typeof initialData.capabilityOptions)[number] =>
+              Boolean(option),
           );
 
         options.forEach((option) => usedKeys.add(option.key));
@@ -853,7 +856,10 @@ export function UserAccountsPanel({
       });
 
       if (!response.ok) {
-        setStatus({ type: "error", message: await readResponseError(response) });
+        setStatus({
+          type: "error",
+          message: await readResponseError(response),
+        });
         setIsSaving(false);
         return;
       }
@@ -888,13 +894,19 @@ export function UserAccountsPanel({
       });
 
       if (!response.ok) {
-        setStatus({ type: "error", message: await readResponseError(response) });
+        setStatus({
+          type: "error",
+          message: await readResponseError(response),
+        });
         setIsSaving(false);
         return;
       }
 
       const invite = (await response.json()) as UserInvite;
-      setInvites((current) => [invite, ...current.filter((item) => item.id !== invite.id)]);
+      setInvites((current) => [
+        invite,
+        ...current.filter((item) => item.id !== invite.id),
+      ]);
       setCreatedInviteUrl(invite.registrationUrl ?? null);
       setStatus({
         type: "success",
@@ -904,7 +916,9 @@ export function UserAccountsPanel({
       return;
     }
 
-    const endpoint = selectedUser ? `/api/users/${selectedUser.id}` : "/api/users";
+    const endpoint = selectedUser
+      ? `/api/users/${selectedUser.id}`
+      : "/api/users";
     const response = await fetch(endpoint, {
       method: selectedUser ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
@@ -1072,9 +1086,9 @@ export function UserAccountsPanel({
                 ? selectedInvite.fullName ||
                   selectedInvite.email ||
                   "Ссылка-приглашение"
-              : accountFormMode === "invite"
-                ? "Ссылка для регистрации"
-                : "Новая учетная запись"}
+                : accountFormMode === "invite"
+                  ? "Ссылка для регистрации"
+                  : "Новая учетная запись"}
           </h2>
           <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             {accountFormMode === "invite" && !selectedUser
@@ -1123,7 +1137,9 @@ export function UserAccountsPanel({
                 Email
               </span>
               <input
-                required={selectedUser !== null || accountFormMode === "account"}
+                required={
+                  selectedUser !== null || accountFormMode === "account"
+                }
                 type="email"
                 value={form.email}
                 onChange={(event) =>
@@ -1361,9 +1377,9 @@ export function UserAccountsPanel({
                   ? "Сохранить изменения"
                   : selectedInvite
                     ? "Сохранить приглашение"
-                  : accountFormMode === "invite"
-                    ? "Создать ссылку"
-                    : "Создать учетную запись"}
+                    : accountFormMode === "invite"
+                      ? "Создать ссылку"
+                      : "Создать учетную запись"}
             </button>
             {selectedInvite ? (
               <button
@@ -1429,7 +1445,9 @@ export function UserAccountsPanel({
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-semibold">
-                        {invite.fullName || invite.email || "Без привязки к email"}
+                        {invite.fullName ||
+                          invite.email ||
+                          "Без привязки к email"}
                       </p>
                       <p className="mt-1 text-xs text-zinc-500">
                         {inviteRoleLabel(invite)} - {scopeLabel(invite)}
@@ -1475,9 +1493,7 @@ export function UserAccountsPanel({
             <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
               Роли клуба
             </p>
-            <h2 className="mt-1 text-xl font-semibold">
-              Настройка доступов
-            </h2>
+            <h2 className="mt-1 text-xl font-semibold">Настройка доступов</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Создайте роль под структуру клуба и отметьте только те разделы,
               которые сотрудник должен видеть или редактировать.

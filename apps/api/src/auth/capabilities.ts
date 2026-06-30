@@ -522,7 +522,15 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
   ],
 };
 
+const elevatedKnowledgeCapabilities: AccessCapability[] = [
+  'view_staff_knowledge',
+  ...staffKnowledgeWriteCapabilities,
+];
+
 const minimumRoleCapabilities: Partial<Record<UserRole, AccessCapability[]>> = {
+  [UserRole.OWNER]: elevatedKnowledgeCapabilities,
+  [UserRole.ADMIN]: elevatedKnowledgeCapabilities,
+  [UserRole.MANAGER]: elevatedKnowledgeCapabilities,
   [UserRole.STANDARDS_MANAGER]: roleCapabilities[UserRole.STANDARDS_MANAGER],
 };
 

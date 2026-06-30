@@ -580,8 +580,16 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   ],
 };
 
+const elevatedKnowledgeCapabilities: Capability[] = [
+  "view_staff_knowledge",
+  ...staffKnowledgeWriteCapabilities,
+];
+
 const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> =
   {
+    OWNER: elevatedKnowledgeCapabilities,
+    ADMIN: elevatedKnowledgeCapabilities,
+    MANAGER: elevatedKnowledgeCapabilities,
     STANDARDS_MANAGER: roleCapabilities.STANDARDS_MANAGER,
   };
 

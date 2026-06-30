@@ -676,6 +676,43 @@ describe('RolesGuard', () => {
     });
   });
 
+  it('keeps knowledge editing for platform admins and network managers with custom roles', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+    ]);
+
+    [UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER].forEach((role) => {
+      const permissions = resolveUserCapabilities({
+        role,
+        customRole: { permissions: ['view_dashboard'] },
+      });
+
+      expect(permissions).toEqual(
+        expect.arrayContaining([
+          'view_staff_knowledge',
+          'edit_staff_knowledge',
+          'review_staff_knowledge',
+          'publish_staff_knowledge',
+        ]),
+      );
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'PATCH',
+            path: '/staff/knowledge-base/article-1',
+            user: {
+              role,
+              customRoleId: 'custom-role-1',
+              permissions,
+            },
+          }),
+        ),
+      ).toBe(true);
+    });
+  });
+
   it('keeps standards manager baseline staff and communications access after custom role assignment', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
     const permissions = resolveUserCapabilities({

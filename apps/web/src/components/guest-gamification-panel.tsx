@@ -2703,8 +2703,8 @@ function DeleteConfirmModal({
         </div>
         <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
           История событий и наград сохранится, но шаблон исчезнет из редактора.
-          Если он используется в опубликованной визуализации клуба, удаление
-          будет заблокировано и мы покажем, где его нужно убрать.
+          Если он сейчас активен или используется в опубликованной визуализации
+          клуба, LeetPlus покажет список клубов и попросит отдельное подтверждение.
         </p>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
@@ -2752,7 +2752,7 @@ function DeleteActivityModal({
             Элемент активен в клубе
           </p>
           <h3 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
-            Удалить {modal.label} «{modal.name}» из активности?
+            Вы действительно хотите удалить {modal.label} «{modal.name}»?
           </h3>
         </div>
         <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
@@ -2771,8 +2771,9 @@ function DeleteActivityModal({
           </div>
         ) : null}
         <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-          Если подтвердить, LeetPlus уберет элемент из опубликованной и
-          сохраненной конфигурации клуба, а затем удалит сам шаблон.
+          Если подтвердить, LeetPlus уберет элемент из активности этих клубов,
+          опубликованных и сохраненных конфигураций визуального редактора, а затем
+          удалит сам шаблон из системы.
         </p>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
@@ -2789,7 +2790,7 @@ function DeleteActivityModal({
             disabled={saving}
             onClick={() => void onConfirm()}
           >
-            {saving ? "Удаление..." : "Удалить из активности и удалить"}
+            {saving ? "Удаление..." : "Удалить из активности и везде"}
           </button>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getApiUrl, getAuthHeaders, readApiError } from "./api";
+import { getApiUrl, getAuthHeaders } from "./api";
 
 export async function proxyJsonRequest(
   request: Request,
@@ -27,13 +27,22 @@ export async function proxyJsonRequest(
   });
 
   if (!response.ok) {
-    return NextResponse.json(
-      { message: await readApiError(response) },
-      { status: response.status },
-    );
+    return NextResponse.json(await readProxyErrorBody(response), {
+      status: response.status,
+    });
   }
 
   return NextResponse.json(await response.json());
+}
+
+async function readProxyErrorBody(response: Response) {
+  const rawError = await response.text();
+
+  try {
+    return JSON.parse(rawError) as unknown;
+  } catch {
+    return { message: rawError || "Ошибка запроса" };
+  }
 }
 
 export async function proxyFileRequest(

@@ -600,6 +600,7 @@ function articleReadingData(
       ? {
           articleId: article.id,
           label: "Редактировать",
+          mode: "inline",
         }
       : undefined,
     reading: {
@@ -770,19 +771,50 @@ export function StaffKnowledgeBaseWorkspace({
         content?: unknown;
       };
 
-      if (!report.canManageKnowledge) {
+      if (!canSaveArticle) {
         return;
       }
 
       if (data?.type === "staff-knowledge-preview-draft-updated") {
-        setDraft((current) => ({
-          ...current,
-          title: typeof data.title === "string" ? data.title : current.title,
+        const articleId =
+          typeof data.articleId === "string" && data.articleId
+            ? data.articleId
+            : null;
+        const patch = {
+          title: typeof data.title === "string" ? data.title : undefined,
           summary:
-            typeof data.summary === "string" ? data.summary : current.summary,
+            typeof data.summary === "string" ? data.summary : undefined,
           content:
-            typeof data.content === "string" ? data.content : current.content,
-        }));
+            typeof data.content === "string" ? data.content : undefined,
+        };
+
+        if (articleId && articleId !== draft.id) {
+          const article = report.rows.find((row) => row.id === articleId);
+
+          if (!article) {
+            setError("Статья для редактирования не найдена в текущем каталоге.");
+            setIsBuilderOpen(true);
+            window.focus();
+            return;
+          }
+
+          const baseDraft = fromArticle(article);
+          setSavedDraftSnapshot(draftSnapshot(baseDraft));
+          setDraft({
+            ...baseDraft,
+            ...(patch.title !== undefined ? { title: patch.title } : {}),
+            ...(patch.summary !== undefined ? { summary: patch.summary } : {}),
+            ...(patch.content !== undefined ? { content: patch.content } : {}),
+          });
+        } else {
+          setDraft((current) => ({
+            ...current,
+            ...(patch.title !== undefined ? { title: patch.title } : {}),
+            ...(patch.summary !== undefined ? { summary: patch.summary } : {}),
+            ...(patch.content !== undefined ? { content: patch.content } : {}),
+          }));
+        }
+
         setMessage(
           "Правки из предпросмотра применены к черновику. Нажмите «Сохранить», чтобы записать статью.",
         );
@@ -820,7 +852,7 @@ export function StaffKnowledgeBaseWorkspace({
 
     return () =>
       window.removeEventListener("message", handleReadingWindowMessage);
-  }, [report.canManageKnowledge, report.rows]);
+  }, [canSaveArticle, draft.id, report.rows]);
 
   function loadArticle(row: StaffKnowledgeArticle | null) {
     const nextDraft = row ? fromArticle(row) : defaultDraft();
@@ -990,7 +1022,7 @@ export function StaffKnowledgeBaseWorkspace({
 
   function openArticleForReading(article: StaffKnowledgeArticle) {
     const opened = openKnowledgeReadingWindow(
-      articleReadingData(article, report.canManageKnowledge),
+      articleReadingData(article, canSaveArticle),
     );
 
     if (!opened) {

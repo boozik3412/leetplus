@@ -1,6 +1,11 @@
 "use client";
 
-import { useRef, type MouseEvent, type ReactNode } from "react";
+import {
+  useRef,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import {
   StaffAttachmentUpload,
   type StaffAttachmentUploadResult,
@@ -71,9 +76,7 @@ function isSafeUrl(value: string | null | undefined) {
   }
 
   return (
-    url.startsWith("/") ||
-    /^https?:\/\//i.test(url) ||
-    /^mailto:/i.test(url)
+    url.startsWith("/") || /^https?:\/\//i.test(url) || /^mailto:/i.test(url)
   );
 }
 
@@ -180,7 +183,8 @@ function parseRichText(value: string | null | undefined): RichTextBlock[] {
 
 function renderInline(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  const pattern =
+    /(\+\+[^+]+\+\+|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -206,7 +210,11 @@ function renderInline(text: string): ReactNode[] {
         </a>,
       );
     } else if (token.startsWith("**") && token.endsWith("**")) {
-      nodes.push(<strong key={`bold-${match.index}`}>{token.slice(2, -2)}</strong>);
+      nodes.push(
+        <strong key={`bold-${match.index}`}>{token.slice(2, -2)}</strong>,
+      );
+    } else if (token.startsWith("++") && token.endsWith("++")) {
+      nodes.push(<u key={`underline-${match.index}`}>{token.slice(2, -2)}</u>);
     } else if (token.startsWith("*") && token.endsWith("*")) {
       nodes.push(<em key={`italic-${match.index}`}>{token.slice(1, -1)}</em>);
     } else {
@@ -225,19 +233,25 @@ function renderInline(text: string): ReactNode[] {
 
 function renderInlineHtml(text: string) {
   return escapeHtml(text).replace(
-    /(\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g,
+    /(\+\+[^+]+\+\+|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g,
     (token) => {
       const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
 
       if (linkMatch && isSafeUrl(linkMatch[2])) {
         const href = linkMatch[2].trim();
-        const target = href.startsWith("/") ? "" : ' target="_blank" rel="noreferrer"';
+        const target = href.startsWith("/")
+          ? ""
+          : ' target="_blank" rel="noreferrer"';
 
         return `<a href="${escapeAttribute(href)}"${target}>${escapeHtml(linkMatch[1])}</a>`;
       }
 
       if (token.startsWith("**") && token.endsWith("**")) {
         return `<strong>${escapeHtml(token.slice(2, -2))}</strong>`;
+      }
+
+      if (token.startsWith("++") && token.endsWith("++")) {
+        return `<u>${escapeHtml(token.slice(2, -2))}</u>`;
       }
 
       if (token.startsWith("*") && token.endsWith("*")) {
@@ -264,7 +278,10 @@ export function KnowledgeArticleRichText({
 
   return (
     <div
-      className={["space-y-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300", className]
+      className={[
+        "space-y-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300",
+        className,
+      ]
         .filter(Boolean)
         .join(" ")}
     >
@@ -313,7 +330,10 @@ export function KnowledgeArticleRichText({
           }
 
           return (
-            <figure key={`image-${index}`} className="overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <figure
+              key={`image-${index}`}
+              className="overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40"
+            >
               <img
                 src={block.url}
                 alt={block.alt || "Изображение статьи"}
@@ -384,7 +404,11 @@ export function StaffKnowledgeRichTextEditor({
   onImageUploaded?: (attachment: StaffAttachmentUploadResult) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const selectionRef = useRef({ start: value.length, end: value.length, scrollTop: 0 });
+  const selectionRef = useRef({
+    start: value.length,
+    end: value.length,
+    scrollTop: 0,
+  });
 
   function rememberSelection() {
     const textarea = textareaRef.current;
@@ -423,7 +447,9 @@ export function StaffKnowledgeRichTextEditor({
     const replacement = formatter(selected || fallback);
     const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
     const hasSelectedText = end > start;
-    const nextSelectionStart = hasSelectedText ? start : start + replacement.length;
+    const nextSelectionStart = hasSelectedText
+      ? start
+      : start + replacement.length;
     const nextSelectionEnd = hasSelectedText
       ? start + replacement.length
       : nextSelectionStart;
@@ -470,6 +496,35 @@ export function StaffKnowledgeRichTextEditor({
     replaceSelection((selected) => `[${selected}](${href})`, "текст ссылки");
   }
 
+  function handleEditorKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+      return;
+    }
+
+    if (event.code === "KeyB") {
+      event.preventDefault();
+      replaceSelection((selected) => `**${selected}**`, "важный текст");
+      return;
+    }
+
+    if (event.code === "KeyI") {
+      event.preventDefault();
+      replaceSelection((selected) => `*${selected}*`, "акцент");
+      return;
+    }
+
+    if (event.code === "KeyU") {
+      event.preventDefault();
+      replaceSelection((selected) => `++${selected}++`, "подчеркнутый текст");
+      return;
+    }
+
+    if (event.code === "KeyK") {
+      event.preventDefault();
+      insertLink();
+    }
+  }
+
   function handleImageUploaded(attachment: StaffAttachmentUploadResult) {
     insertSnippet(`![${attachment.fileName}](${attachment.url})`);
     onImageUploaded?.(attachment);
@@ -490,7 +545,9 @@ export function StaffKnowledgeRichTextEditor({
         <button
           type="button"
           onMouseDown={keepTextareaSelection}
-          onClick={() => replaceSelection((selected) => `**${selected}**`, "важный текст")}
+          onClick={() =>
+            replaceSelection((selected) => `**${selected}**`, "важный текст")
+          }
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Жирный"
         >
@@ -499,11 +556,27 @@ export function StaffKnowledgeRichTextEditor({
         <button
           type="button"
           onMouseDown={keepTextareaSelection}
-          onClick={() => replaceSelection((selected) => `*${selected}*`, "акцент")}
+          onClick={() =>
+            replaceSelection((selected) => `*${selected}*`, "акцент")
+          }
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-semibold italic transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
           title="Курсив"
         >
           I
+        </button>
+        <button
+          type="button"
+          onMouseDown={keepTextareaSelection}
+          onClick={() =>
+            replaceSelection(
+              (selected) => `++${selected}++`,
+              "подчеркнутый текст",
+            )
+          }
+          className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-semibold underline transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          title="Подчеркивание"
+        >
+          U
         </button>
         <button
           type="button"
@@ -545,6 +618,7 @@ export function StaffKnowledgeRichTextEditor({
         ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={handleEditorKeyDown}
         onBlur={rememberSelection}
         onKeyUp={rememberSelection}
         onMouseUp={rememberSelection}
@@ -579,7 +653,9 @@ function renderMaterialHtml(material: KnowledgeReadingWindowMaterial) {
 
 function renderLinkHtml(link: KnowledgeReadingWindowLink) {
   const href = link.url && isSafeUrl(link.url) ? link.url : null;
-  const target = href?.startsWith("/") ? "" : ' target="_blank" rel="noreferrer"';
+  const target = href?.startsWith("/")
+    ? ""
+    : ' target="_blank" rel="noreferrer"';
 
   return `<article class="card"><div class="card-head"><strong>${escapeHtml(
     link.title || "Связанный материал",
@@ -599,27 +675,26 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
     : "";
   const inlineEditor =
     editMode === "inline"
-      ? `<section id="inline-editor" class="editor hidden" aria-label="Редактирование предпросмотра">
-      <label>Название<input id="edit-title" type="text" value="${escapeAttribute(data.title || "")}" /></label>
-      <label>Кратко<textarea id="edit-summary" rows="3">${escapeHtml(data.summary ?? "")}</textarea></label>
-      <div class="editor-toolbar" aria-label="Форматирование текста">
-        <button type="button" data-format="heading">H2</button>
-        <button type="button" data-format="bold">B</button>
-        <button type="button" data-format="italic">I</button>
-        <button type="button" data-format="list">Список</button>
-        <button type="button" data-format="quote">Цитата</button>
-        <button type="button" data-format="link">Ссылка</button>
-      </div>
-      <label>Основной текст<textarea id="edit-content" rows="18">${escapeHtml(data.content ?? "")}</textarea></label>
-      <div class="editor-actions">
-        <button id="apply-preview-edit" type="button">Применить</button>
-        <button id="cancel-preview-edit" type="button">Отмена</button>
-      </div>
-      <p id="edit-status"></p>
-    </section>`
+      ? `<section id="inline-editor" class="editor-toolbar hidden" aria-label="Форматирование текста">
+        <button type="button" data-format="heading" title="Заголовок">H2</button>
+        <button type="button" data-format="paragraph" title="Обычный текст">P</button>
+        <button type="button" data-format="bold" title="Ctrl+B">B</button>
+        <button type="button" data-format="italic" title="Ctrl+I"><em>I</em></button>
+        <button type="button" data-format="underline" title="Ctrl+U"><u>U</u></button>
+        <button type="button" data-format="list" title="Список">Список</button>
+        <button type="button" data-format="quote" title="Цитата">Цитата</button>
+        <button type="button" data-format="link" title="Ctrl+K">Ссылка</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button id="apply-preview-edit" class="primary" type="button">Применить</button>
+        <button id="cancel-preview-edit" type="button">Отменить</button>
+        <span id="edit-status" aria-live="polite"></span>
+      </section>`
       : "";
   const readButton =
-    data.id && data.reading?.requiresReading && data.reading.requiredByMe && !data.reading.readByMe
+    data.id &&
+    data.reading?.requiresReading &&
+    data.reading.requiredByMe &&
+    !data.reading.readByMe
       ? `<button id="mark-read" type="button">Отметить прочтение</button>`
       : "";
   const readingSummary = data.reading?.requiresReading
@@ -662,31 +737,40 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
     .hidden { display: none !important; }
     #edit-article { width: fit-content; border: 1px solid #10b981; border-radius: 8px; background: #10b981; padding: 10px 14px; color: #052e16; font-weight: 800; cursor: pointer; }
     #mark-read { width: fit-content; border: 0; border-radius: 8px; background: #10b981; padding: 10px 14px; color: #052e16; font-weight: 800; cursor: pointer; }
-    .editor { display: grid; gap: 12px; margin-top: 20px; border: 1px solid #a7f3d0; border-radius: 12px; background: #f0fdf4; padding: 16px; }
-    .editor label { display: grid; gap: 6px; color: #3f3f46; font-size: 12px; font-weight: 800; text-transform: uppercase; }
-    .editor input, .editor textarea { width: 100%; box-sizing: border-box; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; padding: 10px 12px; color: #18181b; font: 14px/1.55 Inter, Arial, sans-serif; outline: none; text-transform: none; }
-    .editor textarea { resize: vertical; }
-    .editor-toolbar, .editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .editor-toolbar button, .editor-actions button { border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; padding: 9px 12px; color: #18181b; font-weight: 800; cursor: pointer; }
-    #apply-preview-edit { border-color: #10b981; background: #10b981; color: #052e16; }
-    #edit-status { margin: 0; color: #047857; font-size: 13px; font-weight: 700; }
+    .editor-toolbar { position: sticky; top: 12px; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 20px; border: 1px solid #a7f3d0; border-radius: 12px; background: rgba(240, 253, 244, .96); padding: 10px; box-shadow: 0 10px 24px rgba(16,185,129,.12); backdrop-filter: blur(8px); }
+    .editor-toolbar button { min-width: 38px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; padding: 9px 12px; color: #18181b; font-weight: 800; cursor: pointer; }
+    .editor-toolbar button:hover { border-color: #10b981; }
+    .editor-toolbar .primary { border-color: #10b981; background: #10b981; color: #052e16; }
+    .toolbar-separator { width: 1px; align-self: stretch; background: #bbf7d0; }
+    #edit-status { color: #047857; font-size: 13px; font-weight: 700; }
     #read-status { margin: 0; font-size: 13px; }
-    @media print { body { background: #fff; padding: 0; } main { box-shadow: none; border: 0; } }
+    .editable[contenteditable="true"] { border-radius: 10px; outline: 2px solid #34d399; outline-offset: 5px; caret-color: #047857; }
+    #article-summary[contenteditable="true"] { min-height: 54px; }
+    #article-body[contenteditable="true"] { min-height: 240px; padding: 4px; }
+    .editable[contenteditable="true"]:empty::before { content: attr(data-placeholder); color: #a1a1aa; }
+    @media print { body { background: #fff; padding: 0; } main { box-shadow: none; border: 0; } .top-actions, .editor-toolbar { display: none !important; } }
   </style>
 </head>
 <body>
   <main>
     <p class="eyebrow">${escapeHtml(data.eyebrow ?? "База знаний")}</p>
-    <h1 id="article-title">${escapeHtml(data.title || "Новая статья")}</h1>
+    <h1 id="article-title" class="editable" data-placeholder="Название статьи">${escapeHtml(data.title || "Новая статья")}</h1>
     ${editButton ? `<div class="top-actions">${editButton}</div>` : ""}
-    <div id="article-summary" class="summary${data.summary ? "" : " hidden"}">${escapeHtml(data.summary)}</div>
-    ${metrics.length > 0 ? `<div class="metrics">${metrics
-      .map((metric) => `<span>${escapeHtml(metric.label)}: ${escapeHtml(metric.value)}</span>`)
-      .join("")}</div>` : ""}
+    <div id="article-summary" class="summary editable${data.summary ? "" : " hidden"}" data-placeholder="Краткое описание">${escapeHtml(data.summary)}</div>
+    ${
+      metrics.length > 0
+        ? `<div class="metrics">${metrics
+            .map(
+              (metric) =>
+                `<span>${escapeHtml(metric.label)}: ${escapeHtml(metric.value)}</span>`,
+            )
+            .join("")}</div>`
+        : ""
+    }
     ${readingSummary}
     ${tags.length > 0 ? `<div class="tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
-    <section id="article-body" class="body${data.content ? "" : " hidden"}">${data.content ? richTextToHtml(data.content) : ""}</section>
     ${inlineEditor}
+    <section id="article-body" class="body editable${data.content ? "" : " hidden"}" data-placeholder="Текст статьи">${data.content ? richTextToHtml(data.content) : ""}</section>
     ${materials.length > 0 ? `<h2 class="section-title">Материалы</h2>${materials.map(renderMaterialHtml).join("")}` : ""}
     ${links.length > 0 ? `<h2 class="section-title">Связанные разделы</h2>${links.map(renderLinkHtml).join("")}` : ""}
   </main>
@@ -707,13 +791,14 @@ function wireKnowledgeReadingWindow(
     content: data.content ?? "",
   };
   let currentDraft = editableDraft;
-  const editButton = doc.getElementById("edit-article") as HTMLButtonElement | null;
-  const readButton = doc.getElementById("mark-read") as HTMLButtonElement | null;
+  const editButton = doc.getElementById(
+    "edit-article",
+  ) as HTMLButtonElement | null;
+  const readButton = doc.getElementById(
+    "mark-read",
+  ) as HTMLButtonElement | null;
   const readStatus = doc.getElementById("read-status");
   const inlineEditor = doc.getElementById("inline-editor");
-  const editTitle = doc.getElementById("edit-title") as HTMLInputElement | null;
-  const editSummary = doc.getElementById("edit-summary") as HTMLTextAreaElement | null;
-  const editContent = doc.getElementById("edit-content") as HTMLTextAreaElement | null;
   const applyPreviewEdit = doc.getElementById(
     "apply-preview-edit",
   ) as HTMLButtonElement | null;
@@ -724,6 +809,13 @@ function wireKnowledgeReadingWindow(
   const articleTitle = doc.getElementById("article-title");
   const articleSummary = doc.getElementById("article-summary");
   const articleBody = doc.getElementById("article-body");
+  const editableElements = [articleTitle, articleSummary, articleBody].filter(
+    (element): element is HTMLElement => Boolean(element),
+  );
+
+  function isInlineEditing() {
+    return doc.body.classList.contains("is-editing");
+  }
 
   function setPreviewValue(nextDraft: typeof editableDraft) {
     currentDraft = nextDraft;
@@ -735,11 +827,11 @@ function wireKnowledgeReadingWindow(
     popup.document.title = nextDraft.title || "Статья базы знаний";
 
     if (articleSummary) {
-      if (nextDraft.summary) {
-        articleSummary.textContent = nextDraft.summary;
+      articleSummary.textContent = nextDraft.summary || "";
+
+      if (nextDraft.summary || isInlineEditing()) {
         articleSummary.classList.remove("hidden");
       } else {
-        articleSummary.textContent = "";
         articleSummary.classList.add("hidden");
       }
     }
@@ -747,6 +839,9 @@ function wireKnowledgeReadingWindow(
     if (articleBody) {
       if (nextDraft.content) {
         articleBody.innerHTML = richTextToHtml(nextDraft.content);
+        articleBody.classList.remove("hidden");
+      } else if (isInlineEditing()) {
+        articleBody.innerHTML = "";
         articleBody.classList.remove("hidden");
       } else {
         articleBody.innerHTML = "";
@@ -756,47 +851,250 @@ function wireKnowledgeReadingWindow(
   }
 
   function showInlineEditor() {
-    if (!inlineEditor || !editTitle || !editSummary || !editContent) {
+    if (editMode !== "inline" || !inlineEditor) {
       return;
     }
 
-    editTitle.value = currentDraft.title || "";
-    editSummary.value = currentDraft.summary || "";
-    editContent.value = currentDraft.content || "";
     inlineEditor.classList.remove("hidden");
+    doc.body.classList.add("is-editing");
+    editableElements.forEach((element) => {
+      element.setAttribute("contenteditable", "true");
+      element.setAttribute("spellcheck", "true");
+    });
+
+    if (articleSummary) {
+      articleSummary.classList.remove("hidden");
+    }
+
+    if (articleBody) {
+      articleBody.classList.remove("hidden");
+    }
 
     if (editStatus) {
       editStatus.textContent = "";
     }
 
-    editTitle.focus({ preventScroll: true });
-    inlineEditor.scrollIntoView({ behavior: "smooth", block: "start" });
+    popup.document.execCommand("defaultParagraphSeparator", false, "p");
+    (articleBody ?? articleTitle)?.focus({ preventScroll: true });
+    inlineEditor.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function hideInlineEditor() {
+    editableElements.forEach((element) => {
+      element.removeAttribute("contenteditable");
+      element.removeAttribute("spellcheck");
+    });
     inlineEditor?.classList.add("hidden");
+    doc.body.classList.remove("is-editing");
+    setPreviewValue(currentDraft);
   }
 
-  function replaceEditorSelection(
-    formatter: (value: string) => string,
-    fallback: string,
-  ) {
-    if (!editContent) {
+  function inlineChildrenToRichText(element: Element) {
+    return Array.from(element.childNodes)
+      .map(inlineNodeToRichText)
+      .join("")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n");
+  }
+
+  function inlineNodeToRichText(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent ?? "";
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const element = node as HTMLElement;
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === "br") {
+      return "\n";
+    }
+
+    if (tag === "img") {
+      const src = element.getAttribute("src");
+
+      if (!isSafeImageUrl(src)) {
+        return "";
+      }
+
+      return `![${element.getAttribute("alt") ?? ""}](${src})`;
+    }
+
+    const content = inlineChildrenToRichText(element);
+    const trimmed = content.trim();
+
+    if (!trimmed) {
+      return "";
+    }
+
+    if (tag === "strong" || tag === "b") {
+      return `**${trimmed}**`;
+    }
+
+    if (tag === "em" || tag === "i") {
+      return `*${trimmed}*`;
+    }
+
+    if (tag === "u") {
+      return `++${trimmed}++`;
+    }
+
+    if (tag === "a") {
+      const href = element.getAttribute("href")?.trim();
+
+      if (href && isSafeUrl(href)) {
+        return `[${trimmed || href}](${href})`;
+      }
+    }
+
+    return content;
+  }
+
+  function imageElementToRichText(element: Element) {
+    const image =
+      element.tagName.toLowerCase() === "img"
+        ? element
+        : element.querySelector("img");
+
+    if (!image) {
+      return "";
+    }
+
+    const src = image.getAttribute("src");
+
+    if (!isSafeImageUrl(src)) {
+      return "";
+    }
+
+    const caption =
+      element.querySelector("figcaption")?.textContent?.trim() ??
+      image.getAttribute("alt") ??
+      "";
+
+    return `![${caption}](${src})`;
+  }
+
+  function blockNodeToRichText(node: Node): string[] {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent?.trim();
+      return text ? [text] : [];
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return [];
+    }
+
+    const element = node as HTMLElement;
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === "h1" || tag === "h2") {
+      const text = inlineChildrenToRichText(element).trim();
+      return text ? [`## ${text}`] : [];
+    }
+
+    if (tag === "h3") {
+      const text = inlineChildrenToRichText(element).trim();
+      return text ? [`### ${text}`] : [];
+    }
+
+    if (tag === "blockquote") {
+      const text = inlineChildrenToRichText(element).trim();
+      return text ? text.split("\n").map((line) => `> ${line.trim()}`) : [];
+    }
+
+    if (tag === "ul" || tag === "ol") {
+      return Array.from(element.children)
+        .filter((child) => child.tagName.toLowerCase() === "li")
+        .map((item) => inlineChildrenToRichText(item).trim())
+        .filter(Boolean)
+        .map((item) => `- ${item}`);
+    }
+
+    if (tag === "figure" || tag === "img") {
+      const image = imageElementToRichText(element);
+      return image ? [image] : [];
+    }
+
+    if (tag === "div" && element.children.length > 0) {
+      const blocks = Array.from(element.childNodes).flatMap(
+        blockNodeToRichText,
+      );
+
+      if (blocks.length > 0) {
+        return blocks;
+      }
+    }
+
+    const text = inlineChildrenToRichText(element)
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    return text ? [text] : [];
+  }
+
+  function editableBodyToRichText() {
+    if (!articleBody) {
+      return "";
+    }
+
+    return Array.from(articleBody.childNodes)
+      .flatMap(blockNodeToRichText)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function readEditableDraft() {
+    return {
+      articleId: currentDraft.articleId,
+      title: articleTitle?.textContent?.trim() ?? "",
+      summary: articleSummary?.textContent?.trim() ?? "",
+      content: editableBodyToRichText(),
+    };
+  }
+
+  function formatSelection(format: string) {
+    if (!isInlineEditing()) {
+      showInlineEditor();
+    }
+
+    if (format === "link") {
+      const href = popup.prompt("Ссылка", "https://");
+
+      if (href?.trim()) {
+        popup.document.execCommand("createLink", false, href.trim());
+      }
+
       return;
     }
 
-    const start = editContent.selectionStart ?? editContent.value.length;
-    const end = editContent.selectionEnd ?? editContent.value.length;
-    const selected = editContent.value.slice(start, end) || fallback;
-    const scrollTop = editContent.scrollTop;
-    const replacement = formatter(selected);
-    editContent.value =
-      editContent.value.slice(0, start) +
-      replacement +
-      editContent.value.slice(end);
-    editContent.focus({ preventScroll: true });
-    editContent.setSelectionRange(start, start + replacement.length);
-    editContent.scrollTop = scrollTop;
+    if (format === "heading") {
+      popup.document.execCommand("formatBlock", false, "h2");
+      return;
+    }
+
+    if (format === "paragraph") {
+      popup.document.execCommand("formatBlock", false, "p");
+      return;
+    }
+
+    if (format === "quote") {
+      popup.document.execCommand("formatBlock", false, "blockquote");
+      return;
+    }
+
+    if (format === "list") {
+      popup.document.execCommand("insertUnorderedList", false);
+      return;
+    }
+
+    popup.document.execCommand(format, false);
   }
 
   doc.querySelectorAll<HTMLButtonElement>("[data-format]").forEach((tool) => {
@@ -804,49 +1102,50 @@ function wireKnowledgeReadingWindow(
     tool.addEventListener("click", () => {
       const format = tool.getAttribute("data-format");
 
-      if (format === "heading") {
-        replaceEditorSelection((value) => `## ${value}`, "Заголовок");
+      if (format) {
+        formatSelection(format);
       }
+    });
+  });
 
-      if (format === "bold") {
-        replaceEditorSelection((value) => `**${value}**`, "важный текст");
-      }
+  doc.addEventListener("keydown", (event) => {
+    if (
+      !isInlineEditing() ||
+      !(event.ctrlKey || event.metaKey) ||
+      event.altKey
+    ) {
+      return;
+    }
 
-      if (format === "italic") {
-        replaceEditorSelection((value) => `*${value}*`, "акцент");
-      }
+    const target = event.target as Node | null;
 
-      if (format === "list") {
-        replaceEditorSelection(
-          (value) =>
-            value
-              .split("\n")
-              .map((line) => (line.trim() ? `- ${line}` : line))
-              .join("\n"),
-          "Пункт списка",
-        );
-      }
+    if (
+      !target ||
+      !editableElements.some((element) => element.contains(target))
+    ) {
+      return;
+    }
 
-      if (format === "quote") {
-        replaceEditorSelection(
-          (value) =>
-            value
-              .split("\n")
-              .map((line) => (line.trim() ? `> ${line}` : line))
-              .join("\n"),
-          "Важная заметка",
-        );
-      }
+    const shortcuts: Record<string, string> = {
+      KeyB: "bold",
+      KeyI: "italic",
+      KeyU: "underline",
+      KeyK: "link",
+    };
+    const format = shortcuts[event.code];
 
-      if (format === "link") {
-        const href = popup.prompt("Ссылка");
+    if (!format) {
+      return;
+    }
 
-        if (href) {
-          replaceEditorSelection(
-            (value) => `[${value}](${href.trim()})`,
-            "текст ссылки",
-          );
-        }
+    event.preventDefault();
+    formatSelection(format);
+  });
+
+  editableElements.forEach((element) => {
+    element.addEventListener("dblclick", () => {
+      if (editMode === "inline") {
+        showInlineEditor();
       }
     });
   });
@@ -868,16 +1167,7 @@ function wireKnowledgeReadingWindow(
   });
 
   applyPreviewEdit?.addEventListener("click", () => {
-    if (!editTitle || !editSummary || !editContent) {
-      return;
-    }
-
-    const nextDraft = {
-      articleId: currentDraft.articleId,
-      title: editTitle.value.trim(),
-      summary: editSummary.value.trim(),
-      content: editContent.value.trim(),
-    };
+    const nextDraft = readEditableDraft();
 
     if (!nextDraft.title) {
       if (editStatus) {
@@ -894,12 +1184,14 @@ function wireKnowledgeReadingWindow(
     );
 
     if (editStatus) {
-      editStatus.textContent =
-        "Правки применены к предпросмотру и черновику.";
+      editStatus.textContent = "Правки применены к предпросмотру и черновику.";
     }
   });
 
-  cancelPreviewEdit?.addEventListener("click", hideInlineEditor);
+  cancelPreviewEdit?.addEventListener("click", () => {
+    setPreviewValue(currentDraft);
+    hideInlineEditor();
+  });
 
   readButton?.addEventListener("click", async () => {
     if (!data.id || !readStatus) {

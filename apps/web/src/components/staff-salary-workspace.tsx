@@ -143,11 +143,11 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
       const data = (await response.json().catch(() => null)) as {
         message?: string;
       } | null;
-      setMessage(data?.message ?? "Не удалось сохранить схему");
+      setMessage(data?.message ?? "Не удалось сохранить правила расчета");
       return;
     }
 
-    setMessage("Схема сохранена");
+    setMessage("Правила расчета сохранены");
     router.refresh();
   }
 
@@ -174,7 +174,9 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
               <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
                 Конструктор
               </p>
-              <h2 className="mt-1 text-xl font-semibold">Схемы зарплаты</h2>
+              <h2 className="mt-1 text-xl font-semibold">
+                Правила расчета зарплаты
+              </h2>
             </div>
             <button
               type="button"
@@ -184,7 +186,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
               }}
               className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
             >
-              Новая схема
+              Новые правила
             </button>
           </div>
 
@@ -227,7 +229,8 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
               ))
             ) : (
               <div className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
-                Схем пока нет. Создайте первую схему для всей сети или клуба.
+                Правил пока нет. Создайте первые правила для всей сети или
+                клуба.
               </div>
             )}
           </div>
@@ -239,10 +242,10 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
           className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"
         >
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-            {selectedScheme ? "Редактирование" : "Новая схема"}
+            {selectedScheme ? "Редактирование" : "Новые правила"}
           </p>
           <h2 className="mt-1 text-xl font-semibold">
-            {selectedScheme?.title ?? "Схема начислений администратора"}
+            {selectedScheme?.title ?? "Правила расчета зарплаты"}
           </h2>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -443,7 +446,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
                 ? "Сохранение..."
                 : selectedScheme
                   ? "Сохранить изменения"
-                  : "Создать схему"}
+                  : "Создать правила"}
             </button>
             {message ? (
               <span className="text-sm text-zinc-500">{message}</span>
@@ -471,7 +474,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
             <thead className="text-xs uppercase text-zinc-500">
               <tr className="border-b border-zinc-200 dark:border-zinc-800">
                 <th className="py-2 pr-4">Сотрудник</th>
-                <th className="py-2 pr-4">Схема</th>
+                <th className="py-2 pr-4">Правила</th>
                 <th className="py-2 pr-4">Смены</th>
                 <th className="py-2 pr-4">Основа</th>
                 <th className="py-2 pr-4">Премии</th>

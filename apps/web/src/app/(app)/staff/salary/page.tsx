@@ -52,7 +52,7 @@ export default async function StaffSalaryPage({
               Расчет зарплаты
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Создавайте схемы оклада, ставок, премий и удержаний, а затем
+              Настраивайте правила оклада, ставок, премий и удержаний, а затем
               смотрите расчет по администраторам за выбранный период.
             </p>
           </div>
@@ -101,7 +101,7 @@ export default async function StaffSalaryPage({
             </label>
             <label className="block text-sm">
               <span className="text-xs font-semibold uppercase text-zinc-500">
-                Схема
+                Правила
               </span>
               <select
                 name="schemeId"

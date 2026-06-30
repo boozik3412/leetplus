@@ -202,6 +202,8 @@ export type GuestGameVisualEditorLootBox = {
   prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;
+  periodicLimitEnabled: boolean;
+  periodicLimitPeriod: "DAILY" | "WEEKLY" | "MONTHLY";
   timeWindowMode: string;
   weekdayMode: string;
   weekdays: number[];

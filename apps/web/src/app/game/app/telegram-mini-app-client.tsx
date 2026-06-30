@@ -25,6 +25,7 @@ type TelegramWebApp = {
   initData?: string;
   ready?: () => void;
   expand?: () => void;
+  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
   HapticFeedback?: {
     impactOccurred?: (style: "light" | "medium" | "heavy") => void;
   };
@@ -577,7 +578,7 @@ function HeroPanel({ summary }: { summary: GuestPortalGameSummary }) {
         Клубная карта игрока
       </h1>
       <p className="mt-2.5 text-sm leading-6 text-[#c2d0d1]">
-        Сессия активна: квесты, награды, лутбоксы и прогресс сезона в
+        Сессия активна: задания, награды, лутбоксы и прогресс сезона в
         мобильном формате.
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2">
@@ -629,7 +630,14 @@ function EventsRail({
             ].join(" ")}
             key={event.title}
             type="button"
-            onClick={() => showToast(event.toast)}
+            onClick={() => {
+              if (event.actionUrl) {
+                openExternalUrl(event.actionUrl);
+                return;
+              }
+
+              showToast(event.toast);
+            }}
           >
             <span className="relative z-10 flex min-h-[88px] flex-col justify-between">
               <span>
@@ -667,7 +675,7 @@ function QuestPanel({
           summary.missions.total,
           quests.length,
         )}`}
-        title="Квесты"
+        title="Задания"
       />
       <div className="mt-2 grid gap-[7px]">
         {quests.length ? (
@@ -680,13 +688,13 @@ function QuestPanel({
                 quest.progressTarget,
               )} ${quest.progressUnit ?? ""}`.trim()}
               title={quest.name}
-              onClick={() => showToast(`Квест: ${quest.name}.`)}
+              onClick={() => showToast(`Задание: ${quest.name}.`)}
             />
           ))
         ) : (
           <EmptyRow
             icon={<CheckIcon />}
-            title="Квесты готовятся"
+            title="Задания готовятся"
             subtitle="Клуб еще не опубликовал активные задания"
           />
         )}
@@ -864,7 +872,7 @@ function RewardsPanel({
           <EmptyRow
             icon={<RewardIcon />}
             title="Награды впереди"
-            subtitle="Выполните квест, чтобы открыть первый дроп"
+            subtitle="Выполните задание, чтобы открыть первый дроп"
           />
         )}
       </div>
@@ -1001,7 +1009,7 @@ function MiniBonusHistory({
           <EmptyRow
             icon={<RewardIcon />}
             title="Начислений еще нет"
-            subtitle="Первый бонус появится после квеста"
+            subtitle="Первый бонус появится после задания"
           />
         )}
       </div>
@@ -1088,7 +1096,7 @@ function getMiniAppNavigationItems(): Array<{
 }> {
   return [
     { id: "home", label: "Главная", icon: <HomeIcon /> },
-    { id: "quests", label: "Квесты", icon: <CheckIcon /> },
+    { id: "quests", label: "Задания", icon: <CheckIcon /> },
     { id: "rewards", label: "Награды", icon: <RewardIcon /> },
     { id: "profile", label: "Профиль", icon: <ProfileIcon /> },
   ];
@@ -1176,8 +1184,10 @@ function buildEvents(summary: GuestPortalGameSummary) {
     label: card.label ?? "Событие",
     title: card.title,
     action:
+      card.actionLabel ??
       card.tag ??
       (card.periodTo ? `до ${formatDate(card.periodTo)}` : "активно"),
+    actionUrl: normalizeExternalUrl(card.actionUrl),
     toast: card.description ?? card.title,
   }));
 
@@ -1189,6 +1199,7 @@ function buildEvents(summary: GuestPortalGameSummary) {
     label: "План игры",
     title: action.title,
     action: action.statusLabel ?? "открыть",
+    actionUrl: null,
     toast: action.description ?? action.title,
   }));
 
@@ -1201,21 +1212,57 @@ function buildEvents(summary: GuestPortalGameSummary) {
       label: "Акция / реклама",
       title: "Ночной рейд",
       action: "до 30 июня",
+      actionUrl: null,
       toast: "Открыт баннер акции: ночной рейд.",
     },
     {
       label: "Событие",
       title: "Клубный турнир",
       action: "регистрация",
+      actionUrl: null,
       toast: "Открыт клубный турнир.",
     },
     {
       label: "Событие",
       title: "Партнерский дроп",
       action: "получить",
+      actionUrl: null,
       toast: "Открыт партнерский дроп.",
     },
   ];
+}
+
+function openExternalUrl(url: string) {
+  const telegramWebApp = getTelegramWebApp();
+
+  if (telegramWebApp?.openLink) {
+    telegramWebApp.openLink(url, { try_instant_view: false });
+    return;
+  }
+
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function normalizeExternalUrl(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+
+  try {
+    const url = new URL(candidate);
+
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function requestMiniAppSession({

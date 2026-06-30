@@ -120,7 +120,7 @@ const tariffSnapshotDefinitions = [
     endpointKey: 'tariffsByDays',
     endpointPath: '/tariffs/by_days/list',
     title: 'Тарифы по дням',
-    description: 'Дни недели и ограничения периода для миссий и loot box.',
+    description: 'Дни недели и ограничения периода для заданий и loot box.',
   },
   {
     endpointKey: 'tariffsGroups',
@@ -156,7 +156,7 @@ const rewardApprovalEventLabels: Record<string, string> = {
   REFERRAL_ACCEPTED: 'Регистрация приглашенного гостя',
   GAME_REFERRAL_ACCEPTED: 'Регистрация приглашенного гостя',
   REPEAT_VISIT: 'Повторный визит',
-  MISSION_COMPLETED: 'Квест выполнен',
+  MISSION_COMPLETED: 'Задание выполнено',
   visit: 'Визит',
   login: 'Вход в клуб',
   tournament: 'Турнир',
@@ -185,7 +185,7 @@ const rewardApprovalMissionTypeLabels: Record<string, string> = {
   REFERRAL_ACCEPTED: 'Приглашение друга',
   APP_OPEN: 'Возврат в приложение',
   GUEST_LOG: 'Событие Langame',
-  CUSTOM: 'Своя миссия',
+  CUSTOM: 'Свое задание',
 };
 
 const rewardApprovalProgressUnitLabels: Record<string, string> = {
@@ -212,6 +212,7 @@ type RewardSource = (typeof rewardSources)[number];
 type EventSource = (typeof eventSources)[number];
 type GuestLogMappingPreset = (typeof guestLogMappingPresets)[number];
 type GuestLogMappingIntent = (typeof guestLogMappingIntents)[number];
+type LootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 type GuestGameTariffSnapshotStatus =
   | 'READY'
   | 'PARTIAL'
@@ -991,6 +992,8 @@ export type GuestGameVisualEditorLootBox = {
   prizes: GuestGameVisualEditorLootBoxPrize[];
   condition: string;
   limitPerGuest: number | null;
+  periodicLimitEnabled: boolean;
+  periodicLimitPeriod: LootBoxPeriodicLimitPeriod;
   timeWindowMode: string;
   weekdayMode: string;
   weekdays: number[];
@@ -4060,7 +4063,7 @@ export class GuestGamificationService {
         statusLabel: activeProfiles.length ? 'есть профиль' : 'ожидает гостя',
         ready: activeProfiles.length > 0,
         metric: `${activeProfiles.length} активных`,
-        note: 'Регистрация не создает общий Guest, а создает отдельный GuestGameProfile для XP, миссий и наград.',
+        note: 'Регистрация не создает общий Guest, а создает отдельный GuestGameProfile для XP, заданий и наград.',
         nextAction: activeProfiles.length
           ? 'Использовать тестовый профиль для dry-run и первого события.'
           : 'Зарегистрировать тестового участника через /game/auth.',
@@ -4092,10 +4095,10 @@ export class GuestGamificationService {
         statusLabel: activeRuleCount ? 'есть сценарии' : 'нет правил',
         ready: activeRuleCount > 0,
         metric: `${activeRuleCount} правил`,
-        note: 'Пилоту нужен хотя бы один активный лутбокс, миссия или Battle Pass, применимый к клубу.',
+        note: 'Пилоту нужен хотя бы один активный лутбокс, задание или Battle Pass, применимый к клубу.',
         nextAction: activeRuleCount
           ? 'Запустить dry-run по тестовому профилю и пилотному клубу.'
-          : 'Создать простую миссию или лутбокс для клуба 1337.',
+          : 'Создать простое задание или лутбокс для клуба 1337.',
         actionHref: '/guests/gamification?mode=advanced&tab=lootBoxes',
         actionLabel: 'Открыть конструктор',
       },
@@ -4135,7 +4138,7 @@ export class GuestGamificationService {
         note: guestLogsReady
           ? guestLogsRequiredByRules
             ? `Каталог событий готов для ${guestLogRuleDependencies} правил guests/logs: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}.`
-            : `Каталог событий сохранен для будущих квестов и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}. Текущие правила могут идти без guests/logs.`
+            : `Каталог событий сохранен для будущих заданий и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}. Текущие правила могут идти без guests/logs.`
           : guestLogsRequiredByRules
             ? guestLogsCheckedEmpty
               ? `Диагностика guests/logs закрыта: последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} проверил endpoint и вернул 0 логов. Пилот можно продолжать на правилах без guests/logs, а guests/logs-зависимости считать ожидающими подтверждения payload Langame.`
@@ -4144,7 +4147,7 @@ export class GuestGamificationService {
               ? 'Словарь типов уже настроен, но текущие активные правила не требуют guests/logs.'
               : guestLogsCheckedEmpty
                 ? `Текущие активные правила не требуют guests/logs; последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} уже проверил endpoint и вернул 0 логов.`
-                : 'Текущие активные правила не требуют guests/logs; каталог нужен для будущих квестов и anti-fraud.',
+                : 'Текущие активные правила не требуют guests/logs; каталог нужен для будущих заданий и anti-fraud.',
         nextAction: guestLogsReady
           ? 'Скачать CSV каталога и выбрать реальные типы для правил 1337.'
           : guestLogsRequiredByRules
@@ -4152,8 +4155,8 @@ export class GuestGamificationService {
               ? 'Хвост закрыт: endpoint уже проверен и вернул 0 строк. Для первого бонуса используйте правила без guests/logs; к guests/logs вернуться после подтверждения payload Langame.'
               : 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов перед dry-run.'
             : guestLogsCheckedEmpty
-              ? 'Можно запускать dry-run текущих правил; для guests/logs-квестов сначала подтвердить у Langame, почему endpoint возвращает 0 строк.'
-              : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
+              ? 'Можно запускать dry-run текущих правил; для guests/logs-заданий сначала подтвердить у Langame, почему endpoint возвращает 0 строк.'
+              : 'Можно запускать dry-run текущих правил; для расширенных заданий позже заполнить guests/logs на /sync.',
         actionHref: guestLogsReady
           ? '/api/guests/gamification/guest-log-catalog/export'
           : guestLogsRequiredByRules && guestLogsCheckedEmpty
@@ -6106,7 +6109,7 @@ export class GuestGamificationService {
         user,
         'mission',
         mission.id,
-        `миссию "${mission.name}"`,
+        `задание "${mission.name}"`,
         mission,
         options,
       );
@@ -10410,7 +10413,7 @@ export class GuestGamificationService {
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
       createdByUserId: isCreate ? actorUserId(user) : undefined,
-      name: requiredString(dto.name, 'Название миссии', isCreate),
+      name: requiredString(dto.name, 'Название задания', isCreate),
       status,
       missionType:
         stringValue(dto.missionType) ?? (isCreate ? 'REPEAT_VISIT' : undefined),
@@ -10714,7 +10717,7 @@ export class GuestGamificationService {
     }
 
     if (row.missionId) {
-      return 'Квест';
+      return 'Задание';
     }
 
     if (row.seasonId) {
@@ -10807,7 +10810,7 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Игровая миссия не найдена');
+      throw new NotFoundException('Игровое задание не найдено');
     }
 
     return row;
@@ -12980,7 +12983,7 @@ function communicationQueueSourceLabel(reward: GuestGameReward) {
   }
 
   if (reward.mission) {
-    return `Миссия: ${reward.mission.name}`;
+    return `Задание: ${reward.mission.name}`;
   }
 
   if (reward.season) {
@@ -14618,7 +14621,7 @@ function gameScenarioKindLabel(kind: GuestGameEconomyScenario['kind']) {
     case 'LOOT_BOX':
       return 'Лутбокс';
     case 'MISSION':
-      return 'Миссия';
+      return 'Задание';
     case 'SEASON':
       return 'Battle Pass';
     case 'MANUAL':
@@ -15598,7 +15601,7 @@ function rewardApprovalMissionConditions(
       ? `Событие для появления: ${rewardApprovalEventLabel(trigger)}`
       : null,
     mission.missionType
-      ? `Тип квеста: ${rewardApprovalMissionTypeLabel(mission.missionType)}`
+      ? `Тип задания: ${rewardApprovalMissionTypeLabel(mission.missionType)}`
       : null,
     mission.progressTarget
       ? `Цель: ${mission.progressTarget} ${rewardApprovalProgressUnitLabel(
@@ -15789,10 +15792,16 @@ function rewardApprovalGuestLogRuleLines(rules: Record<string, unknown>) {
 }
 
 function rewardApprovalLimitRuleLines(rules: Record<string, unknown>) {
+  const periodicLimit = lootBoxPeriodicLimitPeriod(rules.periodicLimit);
   const perGuestPerWeek = dryRunOptionalNumber(rules.perGuestPerWeek);
   const totalPerDay = dryRunOptionalNumber(rules.totalPerDay);
   const values: Array<string | null> = [];
 
+  if (periodicLimit) {
+    values.push(
+      `Периодический: ${lootBoxPeriodicLimitLabel(periodicLimit).toLowerCase()}`,
+    );
+  }
   if (perGuestPerWeek != null) {
     values.push(
       `Лимит на гостя: ${perGuestPerWeek} ${pluralRu(
@@ -15997,7 +16006,7 @@ function processRuleKindLabel(kind: GuestGameDryRunRule['kind']) {
   }
 
   if (kind === 'MISSION') {
-    return 'Миссия';
+    return 'Задание';
   }
 
   return 'Battle Pass';
@@ -16802,7 +16811,7 @@ function appendDryRunMissionConditions(
     conditions.weekdaysOnly === true &&
     [0, 6].includes(context.occurredAt.getDay())
   ) {
-    blockers.push('Миссия доступна только по будням');
+    blockers.push('Задание доступно только по будням');
   }
   if (conditions.requiresLangameFact === true) {
     reasons.push('Факт Langame обязателен для боевого подтверждения');
@@ -16841,12 +16850,12 @@ function appendDryRunMissionProgress(
     ? ` за ${progress.windowDays} дн.`
     : '';
   reasons.push(
-    `Прогресс миссии: ${progress.current}/${progress.target}${unit}${windowLabel}`,
+    `Прогресс задания: ${progress.current}/${progress.target}${unit}${windowLabel}`,
   );
 
   if (!progress.completed) {
     blockers.push(
-      `Цель миссии еще не выполнена: ${progress.current}/${progress.target}${unit}`,
+      `Цель задания еще не выполнена: ${progress.current}/${progress.target}${unit}`,
     );
   }
 
@@ -16907,6 +16916,7 @@ function appendDryRunLootBoxLimits(
   reasons: string[],
 ) {
   const limits = dryRunRecord(rule.limits);
+  const periodicLimit = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
   const perGuestPerWeek = dryRunOptionalNumber(limits.perGuestPerWeek);
   const totalPerDay = dryRunOptionalNumber(limits.totalPerDay);
   const restartedAt = dryRunDateOrNull(limits.restartedAt);
@@ -16916,18 +16926,43 @@ function appendDryRunLootBoxLimits(
           new Date(reward.qualifiedAt).getTime() >= restartedAt.getTime(),
       )
     : rewards;
+  const needsGuest = periodicLimit != null || perGuestPerWeek != null;
+  const guestRewards = needsGuest
+    ? limitRewards.filter((reward) => dryRunRewardMatchesGuest(reward, context))
+    : [];
 
-  if (perGuestPerWeek != null) {
-    const guestRewards = limitRewards.filter((reward) =>
-      dryRunRewardMatchesGuest(reward, context),
-    );
+  if (needsGuest && !context.profile && !context.guest) {
+    blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
+  } else if (periodicLimit != null) {
+    const periodicCount = guestRewards.filter((reward) =>
+      dryRunIsWithinLootBoxPeriod(
+        reward.qualifiedAt,
+        context.occurredAt,
+        periodicLimit,
+      ),
+    ).length;
+
+    if (periodicCount >= 1) {
+      blockers.push(
+        `Периодический лутбокс уже открыт ${lootBoxPeriodicLimitPastLabel(
+          periodicLimit,
+        )}: ${periodicCount}/1`,
+      );
+    } else {
+      reasons.push(
+        `Периодический лутбокс: 0/1 ${lootBoxPeriodicLimitReasonLabel(
+          periodicLimit,
+        )}`,
+      );
+    }
+  }
+
+  if (perGuestPerWeek != null && (!needsGuest || context.profile || context.guest)) {
     const weeklyCount = guestRewards.filter((reward) =>
       dryRunIsWithinLastDays(reward.qualifiedAt, context.occurredAt, 7),
     ).length;
 
-    if (!context.profile && !context.guest) {
-      blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
-    } else if (weeklyCount >= perGuestPerWeek) {
+    if (weeklyCount >= perGuestPerWeek) {
       blockers.push(
         `Лимит на гостя за неделю исчерпан: ${weeklyCount}/${perGuestPerWeek}`,
       );
@@ -16969,11 +17004,11 @@ function appendDryRunMissionLimits(
       blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
     } else if (guestCount >= rule.perGuestLimit) {
       blockers.push(
-        `Лимит миссии на гостя исчерпан: ${guestCount}/${rule.perGuestLimit}`,
+        `Лимит задания на гостя исчерпан: ${guestCount}/${rule.perGuestLimit}`,
       );
     } else {
       reasons.push(
-        `Лимит миссии на гостя: ${guestCount}/${rule.perGuestLimit}`,
+        `Лимит задания на гостя: ${guestCount}/${rule.perGuestLimit}`,
       );
     }
   }
@@ -16981,11 +17016,11 @@ function appendDryRunMissionLimits(
   if (rule.totalRewardLimit != null) {
     if (rewards.length >= rule.totalRewardLimit) {
       blockers.push(
-        `Общий лимит наград миссии исчерпан: ${rewards.length}/${rule.totalRewardLimit}`,
+        `Общий лимит наград задания исчерпан: ${rewards.length}/${rule.totalRewardLimit}`,
       );
     } else {
       reasons.push(
-        `Общий лимит наград миссии: ${rewards.length}/${rule.totalRewardLimit}`,
+        `Общий лимит наград задания: ${rewards.length}/${rule.totalRewardLimit}`,
       );
     }
   }
@@ -17396,6 +17431,79 @@ function dryRunIsWithinLastDays(value: string, reference: Date, days: number) {
   const diff = reference.getTime() - date.getTime();
 
   return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
+}
+
+function dryRunIsSameMonth(value: string, reference: Date) {
+  const date = new Date(value);
+
+  return (
+    date.getFullYear() === reference.getFullYear() &&
+    date.getMonth() === reference.getMonth()
+  );
+}
+
+function dryRunIsWithinLootBoxPeriod(
+  value: string,
+  reference: Date,
+  period: LootBoxPeriodicLimitPeriod,
+) {
+  if (period === 'DAILY') {
+    return dryRunIsSameDay(value, reference);
+  }
+
+  if (period === 'MONTHLY') {
+    return dryRunIsSameMonth(value, reference);
+  }
+
+  return dryRunIsWithinLastDays(value, reference, 7);
+}
+
+function lootBoxPeriodicLimitPeriod(
+  value: unknown,
+): LootBoxPeriodicLimitPeriod | null {
+  const normalized = typeof value === 'string' ? value.toUpperCase() : '';
+
+  return normalized === 'DAILY' ||
+    normalized === 'WEEKLY' ||
+    normalized === 'MONTHLY'
+    ? normalized
+    : null;
+}
+
+function lootBoxPeriodicLimitLabel(period: LootBoxPeriodicLimitPeriod) {
+  if (period === 'DAILY') {
+    return 'Ежедневный';
+  }
+
+  if (period === 'MONTHLY') {
+    return 'Ежемесячный';
+  }
+
+  return 'Еженедельный';
+}
+
+function lootBoxPeriodicLimitPastLabel(period: LootBoxPeriodicLimitPeriod) {
+  if (period === 'DAILY') {
+    return 'сегодня';
+  }
+
+  if (period === 'MONTHLY') {
+    return 'в этом месяце';
+  }
+
+  return 'на этой неделе';
+}
+
+function lootBoxPeriodicLimitReasonLabel(period: LootBoxPeriodicLimitPeriod) {
+  if (period === 'DAILY') {
+    return 'на сегодня';
+  }
+
+  if (period === 'MONTHLY') {
+    return 'на месяц';
+  }
+
+  return 'на неделю';
 }
 
 function clean<T extends Record<string, unknown>>(value: T): T {
@@ -17880,6 +17988,13 @@ function normalizeVisualEditorPayload(
           prizes: visualLootBoxPrizes(itemRecord),
           condition: visualString(itemRecord.condition, 'Активность в клубе'),
           limitPerGuest: visualIntOrNull(itemRecord.limitPerGuest, 1, 1000),
+          periodicLimitEnabled: visualBool(
+            itemRecord.periodicLimitEnabled,
+            false,
+          ),
+          periodicLimitPeriod:
+            lootBoxPeriodicLimitPeriod(itemRecord.periodicLimitPeriod) ??
+            'DAILY',
           timeWindowMode: visualTimeWindowMode(itemRecord.timeWindowMode),
           weekdayMode: visualWeekdayMode(itemRecord.weekdayMode),
           weekdays: visualWeekdays(itemRecord.weekdays),
@@ -17895,7 +18010,7 @@ function normalizeVisualEditorPayload(
           id: visualId(itemRecord.id),
           title: visualString(
             itemRecord.title,
-            visualString(itemRecord.name, 'Квест'),
+            visualString(itemRecord.name, 'Задание'),
           ),
           status: visualStatus(itemRecord.status, 'DRAFT'),
           missionType: visualString(
@@ -17912,7 +18027,7 @@ function normalizeVisualEditorPayload(
             'PROMOCODE',
           ).toUpperCase(),
           rewardAmount: visualNumberOrNull(itemRecord.rewardAmount),
-          rewardLabel: visualString(itemRecord.rewardLabel, 'Награда за квест'),
+          rewardLabel: visualString(itemRecord.rewardLabel, 'Награда за задание'),
           progressTarget: visualIntOrNull(itemRecord.progressTarget, 1, 100000),
           progressUnit: visualNullableString(itemRecord.progressUnit),
           questSteps: visualArray(itemRecord.questSteps)
@@ -18014,6 +18129,7 @@ function visualLootBoxFromRule(
   const limits = visualRecord(rule.limits);
   const periodRules = visualRecord(rule.periodRules);
   const probabilityRules = visualRecord(rule.probabilityRules);
+  const periodicLimit = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
 
   return {
     id: rule.id,
@@ -18040,6 +18156,8 @@ function visualLootBoxFromRule(
       1,
       1000,
     ),
+    periodicLimitEnabled: periodicLimit != null,
+    periodicLimitPeriod: periodicLimit ?? 'DAILY',
     timeWindowMode: visualTimeWindowMode(
       periodRules.timeWindowMode ?? inferVisualTimeWindowMode(periodRules),
     ),
@@ -18201,12 +18319,15 @@ function buildVisualLootBoxData(
     },
     limits: {
       source: 'visual_editor',
-      ...(item.limitPerGuest == null
-        ? {}
-        : {
+      ...(item.periodicLimitEnabled
+        ? { periodicLimit: item.periodicLimitPeriod }
+        : {}),
+      ...(!item.periodicLimitEnabled && item.limitPerGuest != null
+        ? {
             perGuest: item.limitPerGuest,
             perGuestPerWeek: item.limitPerGuest,
-          }),
+          }
+        : {}),
     },
     probabilityRules: {
       type: probabilityType,
@@ -18389,7 +18510,7 @@ function buildVisualEditorPreviewSummary(
     rewardStatus: {
       state: 'IN_PROGRESS',
       label: 'Награда впереди',
-      hint: 'Квест доступен в выбранном клубе.',
+      hint: 'Задание доступно в выбранном клубе.',
       rewardLabel: mission.rewardLabel,
       rewardAmount: mission.rewardAmount,
       rewardWalletState: null,
@@ -18545,6 +18666,10 @@ function buildVisualEditorPreviewSummary(
         weeklyLimit: null,
         dailyOpenedCount: 0,
         dailyLimit: null,
+        periodicLimitPeriod: item.periodicLimitEnabled
+          ? item.periodicLimitPeriod
+          : null,
+        periodicOpenedCount: 0,
         openedCount: 0,
         readyRewards: 0,
         waitingApprovalRewards: 0,
@@ -18581,7 +18706,7 @@ function buildVisualEditorPreviewSummary(
         total: payload.checkIn.enabled ? 6 : 5,
         readyPercent: payload.checkIn.enabled ? 16 : 20,
         nextStepId: payload.checkIn.enabled ? 'CHECK_IN' : 'MISSION',
-        nextStepLabel: payload.checkIn.enabled ? 'Чекин' : 'Квест',
+        nextStepLabel: payload.checkIn.enabled ? 'Чекин' : 'Задание',
       },
       steps: [
         {
@@ -18611,9 +18736,9 @@ function buildVisualEditorPreviewSummary(
           : []),
         {
           id: 'MISSION',
-          label: 'Квест',
+          label: 'Задание',
           status: payload.missions.length ? 'CURRENT' : 'WAITING',
-          hint: 'Квесты показываются после публикации.',
+          hint: 'Задания показываются после публикации.',
           anchor: 'missions',
         },
         {

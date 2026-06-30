@@ -555,6 +555,8 @@ function portalPayloadFixture() {
           weeklyLimit: 2,
           dailyOpenedCount: 1,
           dailyLimit: null,
+          periodicLimitPeriod: null,
+          periodicOpenedCount: 0,
           openedCount: 1,
           readyRewards: 0,
           waitingApprovalRewards: 1,
@@ -1759,6 +1761,69 @@ describe('GuestPortalService', () => {
       await expect(
         service.openLootBox('Bearer guest-token', 'loot-app'),
       ).rejects.toThrow('Лимит на гостя за неделю исчерпан');
+
+      expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
+      expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
+    });
+
+    it('does not process a periodic daily lootbox more than once per guest per day', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-21T10:00:00.000Z'));
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-app',
+        tenantId: 'tenant-1',
+        name: 'Daily app lootbox',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'APP_OPEN',
+        limits: { periodicLimit: 'DAILY' },
+      });
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-today',
+          status: 'APPROVED',
+          lootBoxId: 'loot-app',
+          missionId: null,
+          seasonId: null,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: new Prisma.Decimal(50),
+          rewardLabel: '50 бонусов',
+          rewardCode: null,
+          qualifiedAt: new Date('2026-06-21T08:00:00.000Z'),
+          expiresAt: null,
+        },
+      ]);
+
+      try {
+        await expect(
+          service.openLootBox('Bearer guest-token', 'loot-app'),
+        ).rejects.toThrow('Периодический лутбокс уже открыт сегодня');
+      } finally {
+        jest.useRealTimers();
+      }
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();

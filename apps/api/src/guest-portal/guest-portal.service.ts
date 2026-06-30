@@ -77,6 +77,7 @@ const LOOTBOX_CASE_RARITY_LABELS = {
 } as const;
 
 type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
+type GuestPortalLootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 const USER_CALL_PROVIDER_SMS_RU_CALLCHECK = 'SMS_RU_CALLCHECK';
 const SMS_RU_CALLCHECK_BASE_URL = 'https://sms.ru';
 const SMS_RU_CALLCHECK_TTL_MINUTES = 5;
@@ -879,6 +880,8 @@ export type GuestPortalGameSummary = {
         | 'weeklyLimit'
         | 'dailyOpenedCount'
         | 'dailyLimit'
+        | 'periodicLimitPeriod'
+        | 'periodicOpenedCount'
         | 'openedCount'
         | 'readyRewards'
         | 'waitingApprovalRewards'
@@ -1182,6 +1185,8 @@ export type GuestPortalLootBox = {
   weeklyLimit: number | null;
   dailyOpenedCount: number;
   dailyLimit: number | null;
+  periodicLimitPeriod: GuestPortalLootBoxPeriodicLimitPeriod | null;
+  periodicOpenedCount: number;
   openedCount: number;
   readyRewards: number;
   waitingApprovalRewards: number;
@@ -10099,6 +10104,8 @@ function buildGameSummaryFromPortal(
       weeklyLimit: lootBox.weeklyLimit,
       dailyOpenedCount: lootBox.dailyOpenedCount,
       dailyLimit: lootBox.dailyLimit,
+      periodicLimitPeriod: lootBox.periodicLimitPeriod,
+      periodicOpenedCount: lootBox.periodicOpenedCount,
       openedCount: lootBox.openedCount,
       readyRewards: lootBox.readyRewards,
       waitingApprovalRewards: lootBox.waitingApprovalRewards,
@@ -12269,14 +12276,20 @@ function buildLootBoxOpenState(
   | 'weeklyLimit'
   | 'dailyOpenedCount'
   | 'dailyLimit'
+  | 'periodicLimitPeriod'
+  | 'periodicOpenedCount'
 > {
   const limits = jsonRecord(row.limits);
   const weeklyLimit = positiveIntOrNull(limits.perGuestPerWeek);
   const dailyLimit = positiveIntOrNull(limits.totalPerDay);
+  const periodicLimitPeriod = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
   const now = new Date();
   const restartedAt = lootBoxRestartedAt(limits);
   const weekStart = maxDate(startOfRollingWeek(now), restartedAt);
   const dayStart = maxDate(startOfDay(now), restartedAt);
+  const periodicStart = periodicLimitPeriod
+    ? maxDate(lootBoxPeriodStart(now, periodicLimitPeriod), restartedAt)
+    : null;
   const lootBoxRewards = rewards.filter(
     (reward) =>
       reward.lootBoxId === row.id &&
@@ -12288,6 +12301,11 @@ function buildLootBoxOpenState(
   const dailyOpenedCount = lootBoxRewards.filter(
     (reward) => reward.qualifiedAt.getTime() >= dayStart.getTime(),
   ).length;
+  const periodicOpenedCount = periodicStart
+    ? lootBoxRewards.filter(
+        (reward) => reward.qualifiedAt.getTime() >= periodicStart.getTime(),
+      ).length
+    : 0;
 
   const unlockEvent = findLootBoxUnlockEvent(row, unlockEvents, storeId);
 
@@ -12300,6 +12318,25 @@ function buildLootBoxOpenState(
       weeklyLimit,
       dailyOpenedCount,
       dailyLimit,
+      periodicLimitPeriod,
+      periodicOpenedCount,
+    };
+  }
+
+  if (periodicLimitPeriod && periodicOpenedCount >= 1) {
+    return {
+      openState: 'LIMIT_REACHED',
+      openable: false,
+      openBlocker: lootBoxPeriodicLimitBlocker(
+        periodicLimitPeriod,
+        periodicOpenedCount,
+      ),
+      weeklyOpenedCount,
+      weeklyLimit,
+      dailyOpenedCount,
+      dailyLimit,
+      periodicLimitPeriod,
+      periodicOpenedCount,
     };
   }
 
@@ -12312,6 +12349,8 @@ function buildLootBoxOpenState(
       weeklyLimit,
       dailyOpenedCount,
       dailyLimit,
+      periodicLimitPeriod,
+      periodicOpenedCount,
     };
   }
 
@@ -12324,6 +12363,8 @@ function buildLootBoxOpenState(
       weeklyLimit,
       dailyOpenedCount,
       dailyLimit,
+      periodicLimitPeriod,
+      periodicOpenedCount,
     };
   }
 
@@ -12335,6 +12376,8 @@ function buildLootBoxOpenState(
     weeklyLimit,
     dailyOpenedCount,
     dailyLimit,
+    periodicLimitPeriod,
+    periodicOpenedCount,
   };
 }
 
@@ -14343,8 +14386,53 @@ function startOfDay(value: Date) {
   );
 }
 
+function startOfMonth(value: Date) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
+}
+
 function maxDate(left: Date, right: Date | null) {
   return right && right.getTime() > left.getTime() ? right : left;
+}
+
+function lootBoxPeriodicLimitPeriod(
+  value: unknown,
+): GuestPortalLootBoxPeriodicLimitPeriod | null {
+  const normalized = typeof value === 'string' ? value.toUpperCase() : '';
+
+  return normalized === 'DAILY' ||
+    normalized === 'WEEKLY' ||
+    normalized === 'MONTHLY'
+    ? normalized
+    : null;
+}
+
+function lootBoxPeriodStart(
+  value: Date,
+  period: GuestPortalLootBoxPeriodicLimitPeriod,
+) {
+  if (period === 'DAILY') {
+    return startOfDay(value);
+  }
+
+  if (period === 'MONTHLY') {
+    return startOfMonth(value);
+  }
+
+  return startOfRollingWeek(value);
+}
+
+function lootBoxPeriodicLimitBlocker(
+  period: GuestPortalLootBoxPeriodicLimitPeriod,
+  count: number,
+) {
+  const label =
+    period === 'DAILY'
+      ? 'сегодня'
+      : period === 'WEEKLY'
+        ? 'на этой неделе'
+        : 'в этом месяце';
+
+  return `Периодический лутбокс уже открыт ${label}: ${count}/1.`;
 }
 
 function lootBoxRestartedAt(limits: Record<string, unknown>) {

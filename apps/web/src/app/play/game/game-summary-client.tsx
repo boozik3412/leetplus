@@ -61,6 +61,8 @@ type HomeLootCard = {
   weeklyLimit: number | null;
   dailyOpenedCount: number;
   dailyLimit: number | null;
+  periodicLimitPeriod: "DAILY" | "WEEKLY" | "MONTHLY" | null;
+  periodicOpenedCount: number;
 };
 type LootboxOverlayPhase =
   | "ready"
@@ -2810,6 +2812,8 @@ function buildHomeLootCards(
     weeklyLimit: lootBox.weeklyLimit,
     dailyOpenedCount: lootBox.dailyOpenedCount,
     dailyLimit: lootBox.dailyLimit,
+    periodicLimitPeriod: lootBox.periodicLimitPeriod,
+    periodicOpenedCount: lootBox.periodicOpenedCount,
   }));
   const activeId = selectedLootId ?? realCards[0]?.id ?? null;
 
@@ -2848,6 +2852,17 @@ function lootboxCardHint(card: HomeLootCard) {
 
   if (card.openable && card.weeklyLimit) {
     return `Осталось ${formatNumber(Math.max(0, card.weeklyLimit - card.weeklyOpenedCount))} из ${formatNumber(card.weeklyLimit)} на неделю`;
+  }
+
+  if (card.openable && card.periodicLimitPeriod) {
+    const period =
+      card.periodicLimitPeriod === "DAILY"
+        ? "день"
+        : card.periodicLimitPeriod === "WEEKLY"
+          ? "неделю"
+          : "месяц";
+
+    return `Доступен один раз в ${period}`;
   }
 
   if (card.status === "доступен" || card.status === "сегодня") {
@@ -10766,6 +10781,8 @@ function buildLootboxRouletteState({
         weeklyLimit: item.weeklyLimit,
         dailyOpenedCount: item.dailyOpenedCount,
         dailyLimit: item.dailyLimit,
+        periodicLimitPeriod: item.periodicLimitPeriod,
+        periodicOpenedCount: item.periodicOpenedCount,
       },
       `lootbox-${index}`,
     ),

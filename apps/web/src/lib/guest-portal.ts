@@ -309,6 +309,8 @@ export type GuestPortalPayload = {
       weeklyLimit: number | null;
       dailyOpenedCount: number;
       dailyLimit: number | null;
+      periodicLimitPeriod: "DAILY" | "WEEKLY" | "MONTHLY" | null;
+      periodicOpenedCount: number;
       openedCount: number;
       readyRewards: number;
       waitingApprovalRewards: number;
@@ -642,6 +644,8 @@ export type GuestPortalGameSummary = {
         | "weeklyLimit"
         | "dailyOpenedCount"
         | "dailyLimit"
+        | "periodicLimitPeriod"
+        | "periodicOpenedCount"
         | "openedCount"
         | "readyRewards"
         | "waitingApprovalRewards"

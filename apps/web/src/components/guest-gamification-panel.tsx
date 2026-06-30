@@ -82,6 +82,10 @@ export type EditorMode = "advanced" | "visual";
 type RuleTemplateType = "loot-boxes" | "missions" | "seasons" | "promo-cards";
 
 const PROMO_BANNER_DISPLAY_LIMIT = 4;
+const PROMO_BANNER_IMAGE_WIDTH = 720;
+const PROMO_BANNER_IMAGE_HEIGHT = 1280;
+const PROMO_BANNER_MAX_DATA_URL_LENGTH = 2_400_000;
+const promoBannerJpegQualities = [0.78, 0.68, 0.58] as const;
 
 const editorModeOptions = [
   ["advanced", "Расширенные настройки"],
@@ -168,6 +172,7 @@ type LootBoxPrizeForm = {
 type LootBoxTimeWindowMode = "ANY" | "QUIET_HOURS" | "CUSTOM";
 type LootBoxWeekdayMode = "ANY" | "WEEKDAYS" | "WEEKENDS" | "CUSTOM";
 type LootBoxCaseRarity = NonNullable<GuestGameReward["rewardRarity"]>;
+type LootBoxPeriodicLimitPeriod = "DAILY" | "WEEKLY" | "MONTHLY";
 
 type LootBoxForm = {
   name: string;
@@ -195,6 +200,8 @@ type LootBoxForm = {
   hourFrom: string;
   hourTo: string;
   perGuestPerWeek: string;
+  periodicLimitEnabled: boolean;
+  periodicLimitPeriod: LootBoxPeriodicLimitPeriod;
   totalPerDay: string;
   prizes: LootBoxPrizeForm[];
   requireCashierConfirmation: boolean;
@@ -320,6 +327,11 @@ type PromoBannerForm = {
   imageOffsetY: string;
 };
 
+type PromoBannerNotice = {
+  tone: "warning" | "error";
+  message: string;
+};
+
 type PromoBannerDragState = {
   pointerId: number;
   startX: number;
@@ -393,7 +405,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
   { id: "overview", label: "Обзор" },
   { id: "profiles", label: "Профили" },
   { id: "lootBoxes", label: "Лутбоксы" },
-  { id: "missions", label: "Миссии" },
+  { id: "missions", label: "Задания" },
   { id: "seasons", label: "Battle Pass" },
   { id: "promoCards", label: "Промо баннеры" },
   { id: "testRun", label: "Тест запуска" },
@@ -403,7 +415,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
 const promoTargetOptions = [
   { value: "", label: "Главный экран" },
   { value: "lootboxes", label: "Лутбоксы" },
-  { value: "missions", label: "Миссии" },
+  { value: "missions", label: "Задания" },
   { value: "battlePass", label: "Battle Pass" },
   { value: "rewards", label: "Кошелек наград" },
 ];
@@ -420,7 +432,7 @@ const dryRunEventOptions = [
   { value: "GUEST_LOG", label: "Лог гостя" },
   { value: "REFERRAL_ACCEPTED", label: "Реферал принят" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
-  { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
+  { value: "MISSION_COMPLETED", label: "Задание выполнено" },
 ];
 
 const manualXpEventOptions = [
@@ -458,7 +470,7 @@ const manualXpEventOptions = [
   },
   {
     value: "MISSION_COMPLETED",
-    label: "Квест выполнен",
+    label: "Задание выполнено",
     description:
       "Используйте, когда сотрудник вручную подтверждает выполнение задания.",
     defaultXpDelta: "50",
@@ -510,7 +522,7 @@ const lootBoxTriggerOptions = [
   { value: "GUEST_LOG", label: "Событие Langame" },
   { value: "REFERRAL_ACCEPTED", label: "Реферал принят" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
-  { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
+  { value: "MISSION_COMPLETED", label: "Задание выполнено" },
 ];
 
 const lootBoxSegmentOptions = [
@@ -541,6 +553,15 @@ const lootBoxWeekdayOptions: Array<{
   { value: "WEEKDAYS", label: "Будни" },
   { value: "WEEKENDS", label: "Выходные" },
   { value: "CUSTOM", label: "Выбрать дни" },
+];
+
+const lootBoxPeriodicLimitOptions: Array<{
+  value: LootBoxPeriodicLimitPeriod;
+  label: string;
+}> = [
+  { value: "DAILY", label: "Ежедневный" },
+  { value: "WEEKLY", label: "Еженедельный" },
+  { value: "MONTHLY", label: "Ежемесячный" },
 ];
 
 const weekdayOptions = [
@@ -584,7 +605,7 @@ const triggerHelpText: Record<string, string> = {
   REPEAT_VISIT:
     "Правило проверит повторное посещение гостя в заданном окне времени.",
   MISSION_COMPLETED:
-    "Правило проверится после выполнения другой миссии или квеста.",
+    "Правило проверится после выполнения другого задания.",
 };
 
 const missionTypeOptions = [
@@ -598,30 +619,30 @@ const missionTypeOptions = [
   { value: "REFERRAL_ACCEPTED", label: "Приглашение друга" },
   { value: "APP_OPEN", label: "Возврат в приложение" },
   { value: "GUEST_LOG", label: "Событие Langame" },
-  { value: "CUSTOM", label: "Своя миссия" },
+  { value: "CUSTOM", label: "Свое задание" },
 ];
 
 const missionTypeHelpText: Record<string, string> = {
   REPEAT_VISIT:
-    "Квест засчитывает повторное посещение в заданном окне времени.",
+    "Задание засчитывает повторное посещение в заданном окне времени.",
   CHECK_IN:
-    "Квест засчитывает чекин гостя в игровом модуле выбранного клуба.",
+    "Задание засчитывает чекин гостя в игровом модуле выбранного клуба.",
   VISIT:
-    "Квест засчитывает факт визита: сессию, чекин или подходящий лог Langame.",
+    "Задание засчитывает факт визита: сессию, чекин или подходящий лог Langame.",
   PLAY_HOUR:
-    "Квест считает накопленное игровое время или длительность сессии.",
+    "Задание считает накопленное игровое время или длительность сессии.",
   BAR_PURCHASE:
-    "Квест считает покупки бара по сохраненным продажам или списаниям.",
+    "Задание считает покупки бара по сохраненным продажам или списаниям.",
   PRODUCT_PURCHASE:
-    "Квест считает покупку выбранных товаров или категорий.",
+    "Задание считает покупку выбранных товаров или категорий.",
   BALANCE_TOPUP:
-    "Квест считает пополнение баланса гостя по сохраненным фактам Langame.",
+    "Задание считает пополнение баланса гостя по сохраненным фактам Langame.",
   REFERRAL_ACCEPTED:
-    "Квест засчитывает регистрацию приглашенного друга в игровом модуле.",
+    "Задание засчитывает регистрацию приглашенного друга в игровом модуле.",
   APP_OPEN:
-    "Квест срабатывает при открытии сайта, игрового модуля или Mini App.",
+    "Задание срабатывает при открытии сайта, игрового модуля или Mini App.",
   GUEST_LOG:
-    "Квест работает от выбранных событий Langame из подготовленного каталога.",
+    "Задание работает от выбранных событий Langame из подготовленного каталога.",
   CUSTOM:
     "Свободный сценарий: событие и условия задаются ниже вручную.",
 };
@@ -894,6 +915,8 @@ const defaultLootBoxForm: LootBoxForm = {
   hourFrom: "10:00",
   hourTo: "16:00",
   perGuestPerWeek: "1",
+  periodicLimitEnabled: false,
+  periodicLimitPeriod: "DAILY",
   totalPerDay: "30",
   prizes: defaultLootBoxPrizes,
   requireCashierConfirmation: true,
@@ -1210,6 +1233,8 @@ export function GuestGamificationPanel({
   const [isSeasonFormOpen, setIsSeasonFormOpen] = useState(false);
   const [editingPromoBannerId, setEditingPromoBannerId] = useState<string | null>(null);
   const [isPromoBannerFormOpen, setIsPromoBannerFormOpen] = useState(false);
+  const [promoBannerNotice, setPromoBannerNotice] =
+    useState<PromoBannerNotice | null>(null);
   const [editingRewardId, setEditingRewardId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -1364,6 +1389,7 @@ export function GuestGamificationPanel({
     setPromoBannerForm(promoCardToForm(promoCard));
     setEditingPromoBannerId(promoCard.id);
     setIsPromoBannerFormOpen(true);
+    setPromoBannerNotice(null);
     setActiveTab("promoCards");
   }
 
@@ -1371,6 +1397,7 @@ export function GuestGamificationPanel({
     setPromoBannerForm(defaultPromoBannerForm);
     setEditingPromoBannerId(null);
     setIsPromoBannerFormOpen(true);
+    setPromoBannerNotice(null);
     setActiveTab("promoCards");
   }
 
@@ -1378,6 +1405,7 @@ export function GuestGamificationPanel({
     setPromoBannerForm(defaultPromoBannerForm);
     setEditingPromoBannerId(null);
     setIsPromoBannerFormOpen(false);
+    setPromoBannerNotice(null);
   }
 
   function editReward(reward: GuestGameReward) {
@@ -1554,7 +1582,7 @@ export function GuestGamificationPanel({
     await saveAction("mission", async () => {
       assertCan(
         access.canManageRules,
-        "Для изменения миссий нужно право `Геймификация: правила`.",
+        "Для изменения заданий нужно право `Геймификация: правила`.",
       );
 
       const payload = {
@@ -1641,14 +1669,35 @@ export function GuestGamificationPanel({
         access.canManageRules,
         "Для изменения промо-баннеров нужно право `Геймификация: правила`.",
       );
+      setPromoBannerNotice(null);
 
-      const metadata = await buildPromoBannerMetadata(promoBannerForm);
+      let metadata: Awaited<ReturnType<typeof buildPromoBannerMetadata>>;
+
+      try {
+        metadata = await buildPromoBannerMetadata(promoBannerForm);
+      } catch (caught) {
+        const message =
+          caught instanceof Error
+            ? caught.message
+            : "Не удалось подготовить изображение баннера.";
+
+        setPromoBannerNotice({ tone: "error", message });
+        throw new Error(message);
+      }
+
+      const limitWarning = promoBannerDraftLimitWarning(
+        promoBannerForm,
+        workspace.promoCards,
+        stores,
+        editingPromoBannerId,
+      );
+      const status = limitWarning ? "DRAFT" : promoBannerForm.status;
       const payload = {
         title: promoBannerForm.title,
         label: nullable(promoBannerForm.label),
         description: nullable(promoBannerForm.description),
         tag: nullable(promoBannerForm.tag),
-        status: promoBannerForm.status,
+        status,
         targetAnchor: nullable(promoBannerForm.targetAnchor),
         priority: promoBannerForm.priority,
         storeIds: promoBannerForm.storeIds,
@@ -1667,6 +1716,9 @@ export function GuestGamificationPanel({
       }
 
       resetPromoBannerForm();
+      if (limitWarning) {
+        setPromoBannerNotice({ tone: "warning", message: limitWarning });
+      }
       await reloadWorkspace();
     });
   }
@@ -2222,7 +2274,14 @@ export function GuestGamificationPanel({
     try {
       await action();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось сохранить");
+      const message =
+        caught instanceof Error ? caught.message : "Не удалось сохранить";
+
+      setError(message);
+
+      if (key === "promoBanner") {
+        setPromoBannerNotice({ tone: "error", message });
+      }
     } finally {
       setSaving(null);
     }
@@ -2237,7 +2296,7 @@ export function GuestGamificationPanel({
               Геймификация гостей
             </p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-950 dark:text-white">
-              Guest Game Hub: XP, миссии, лутбоксы и кошелек
+              Guest Game Hub: XP, задания, лутбоксы и кошелек
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
               Здесь живет постоянная игровая экономика гостя: профиль, уровень,
@@ -2283,7 +2342,7 @@ export function GuestGamificationPanel({
               Долгий прогресс гостя
             </h2>
             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              XP, уровни, лутбоксы, игровые миссии, Battle Pass, кошелек
+              XP, уровни, лутбоксы, игровые задания, Battle Pass, кошелек
               наград, safe dry-run и batch по подготовленным snapshot-фактам.
             </p>
           </div>
@@ -2511,6 +2570,7 @@ export function GuestGamificationPanel({
           promoCards={workspace.promoCards}
           stores={stores}
           editingId={editingPromoBannerId}
+          notice={promoBannerNotice}
           isFormOpen={isPromoBannerFormOpen}
           onSave={savePromoBanner}
           onEdit={editPromoBanner}
@@ -2860,7 +2920,7 @@ function DryRunTab({
             <SectionTitle title="Тест запуска" />
             <p className="mt-2 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
               Проверьте, что произойдет при событии гостя: какие лутбоксы,
-              миссии и Battle Pass сработают, где есть блокировки, сколько XP и
+              задания и Battle Pass сработают, где есть блокировки, сколько XP и
               рублей попадет в очередь выдачи.
             </p>
           </div>
@@ -3603,7 +3663,7 @@ function DryRunRuleCard({ rule }: { rule: GuestGameDryRunResult["rules"][number]
     rule.kind === "LOOT_BOX"
       ? "Лутбокс"
       : rule.kind === "MISSION"
-        ? "Миссия"
+        ? "Задание"
         : "Battle Pass";
 
   return (
@@ -3813,8 +3873,8 @@ function OverviewTab({
           />
           <ScenarioStepCard
             step="3"
-            title="Миссии"
-            text="Задать квесты по визитам, часам, бару или реактивации."
+            title="Задания"
+            text="Задать задания по визитам, часам, бару или реактивации."
             metric={`${workspace.summary.activeMissions} активных`}
             action="Собрать"
             onClick={() => onOpenTab("missions")}
@@ -3933,7 +3993,7 @@ function OverviewTab({
               hint={`${workspace.lootBoxes.length} всего`}
             />
             <StatusMetric
-              label="Миссии"
+              label="Задания"
               value={workspace.summary.activeMissions}
               hint={`${workspace.missions.length} всего`}
             />
@@ -5274,7 +5334,7 @@ function EconomyControlCard({
             </div>
           ))
         ) : (
-          <EmptyState text="Экономика появится после создания лутбокса, миссии, Battle Pass или награды." />
+          <EmptyState text="Экономика появится после создания лутбокса, задания, Battle Pass или награды." />
         )}
       </div>
     </section>
@@ -5300,7 +5360,7 @@ function EffectControlCard({
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             LeetPlus смотрит {effect.windowDays} дней после XP, лутбокса,
-            миссии или Battle Pass: вернулся ли гость, были ли сессии,
+            задания или Battle Pass: вернулся ли гость, были ли сессии,
             продажи бара/товаров и пополнения баланса. Расчет идет только по
             сохраненным snapshot-фактам.
           </p>
@@ -5906,7 +5966,7 @@ function TariffSnapshotReadinessCard({
           <SectionTitle title="Тарифные snapshot-источники" />
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
             Тарифы редактируются в Langame, а LeetPlus использует сохраненный
-            snapshot этих справочников в правилах лутбоксов, миссий и battle
+            snapshot этих справочников в правилах лутбоксов, заданий и battle
             pass. Отсюда можно перейти к нужному endpoint, проверить поля и
             создать свежий snapshot.
           </p>
@@ -6116,7 +6176,7 @@ function GuestLogCatalogCard({
           <SectionTitle title="Каталог событий guests/logs" />
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
             Эти типы собраны из сохраненных фактов Langame и используются как
-            подсказки в правилах лутбоксов, миссий и Battle Pass. Открытие
+            подсказки в правилах лутбоксов, заданий и Battle Pass. Открытие
             страницы не делает live-запросов в Langame.
           </p>
         </div>
@@ -6383,7 +6443,7 @@ function PortalLinksCard({
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             По этим ссылкам гости проходят OTP-вход и видят свой уровень
-            лояльности Langame, XP, миссии, лутбоксы, battle pass и кошелек
+            лояльности Langame, XP, задания, лутбоксы, battle pass и кошелек
             наград без доступа к внутренним разделам LeetPlus. Ссылки
             используют публичный slug клуба, старые URL с внутренним ID
             продолжают работать.
@@ -7067,10 +7127,10 @@ function MissionsTab({
   const missionTitle = form.name.trim();
   const formTitle =
     editingId && missionTitle
-      ? `Редактирование миссии "${missionTitle}"`
+      ? `Редактирование задания "${missionTitle}"`
       : editingId
-        ? "Редактирование миссии"
-        : "Настройка миссии";
+        ? "Редактирование задания"
+        : "Настройка задания";
 
   return (
     <RulesLayout
@@ -7083,7 +7143,7 @@ function MissionsTab({
             className={`${primaryButtonClass} sm:min-w-52`}
             onClick={onCreateNew}
           >
-            Создать новую миссию
+            Создать новое задание
           </button>
         ) : undefined
       }
@@ -7104,7 +7164,7 @@ function MissionsTab({
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Тип миссии">
+            <Field label="Тип задания">
               <OptionSelect
                 options={missionTypeOptions}
                 value={form.missionType}
@@ -7113,7 +7173,7 @@ function MissionsTab({
               />
               <OptionHelp>
                 {missionTypeHelpText[form.missionType] ??
-                  "Тип помогает сотруднику понять сценарий квеста. Условия выполнения задаются ниже."}
+                  "Тип помогает сотруднику понять сценарий задания. Условия выполнения задаются ниже."}
               </OptionHelp>
             </Field>
             <Field label="Событие для появления">
@@ -7230,7 +7290,7 @@ function MissionsTab({
             disabled={saving === "mission"}
             onClick={onSave}
           >
-            {editingId ? "Сохранить" : "Создать миссию"}
+            {editingId ? "Сохранить" : "Создать задание"}
           </button>
           {editingId ? (
             <button type="button" className={smallButtonClass} onClick={onReset}>
@@ -7240,7 +7300,7 @@ function MissionsTab({
         </div>
         ) : null
       }
-      listTitle="Созданные правила миссий"
+      listTitle="Созданные правила заданий"
       items={missions}
       layout="stacked"
       renderItem={(item) => (
@@ -7504,6 +7564,7 @@ function PromoBannersTab({
   promoCards,
   stores,
   editingId,
+  notice,
   isFormOpen,
   onSave,
   onEdit,
@@ -7519,6 +7580,7 @@ function PromoBannersTab({
   promoCards: GuestGamePromoCard[];
   stores: Store[];
   editingId: string | null;
+  notice: PromoBannerNotice | null;
   isFormOpen: boolean;
   onSave: () => Promise<void>;
   onEdit: (promoCard: GuestGamePromoCard) => void;
@@ -7566,6 +7628,7 @@ function PromoBannersTab({
       form={
         isFormOpen ? (
           <div className="space-y-4">
+            {notice ? <PromoBannerNoticeBox notice={notice} /> : null}
             <FormSection title="Основное">
               <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(180px,0.6fr)]">
                 <Field label="Название">
@@ -7685,6 +7748,8 @@ function PromoBannersTab({
                 <Field label="Внешняя ссылка">
                   <input
                     className={fieldClass}
+                    placeholder="https://example.com/promo"
+                    type="url"
                     value={form.actionUrl}
                     onChange={(event) =>
                       setForm({ ...form, actionUrl: event.target.value })
@@ -7714,17 +7779,21 @@ function PromoBannersTab({
       }
       listTitle="Созданные промо баннеры"
       listSummary={
-        <PromoBannerLimitSummary
-          activeCount={activePromoCards}
-          totalCount={promoCards.length}
-          usage={promoBannerUsage}
-        />
+        <div className="space-y-3">
+          {!isFormOpen && notice ? <PromoBannerNoticeBox notice={notice} /> : null}
+          <PromoBannerLimitSummary
+            activeCount={activePromoCards}
+            totalCount={promoCards.length}
+            usage={promoBannerUsage}
+          />
+        </div>
       }
       items={promoCards}
       layout="stacked"
       renderItem={(item) => {
         const metadata = promoCardMetadata(item);
         const imageUrl = metadataString(metadata, "imageUrl");
+        const actionUrl = metadataString(metadata, "actionUrl");
         const usageInfo = promoBannerUsage.byCardId.get(item.id);
 
         return (
@@ -7756,6 +7825,7 @@ function PromoBannersTab({
                       {metadataString(metadata, "actionLabel") ??
                         promoTargetLabel(item.targetAnchor)}
                     </p>
+                    <p>Ссылка: {actionUrl ?? "не указана"}</p>
                   </div>
                 </div>
                 <PromoBannerVisibilityDetails usageInfo={usageInfo} />
@@ -7772,6 +7842,15 @@ function PromoBannersTab({
       }}
     />
   );
+}
+
+function PromoBannerNoticeBox({ notice }: { notice: PromoBannerNotice }) {
+  const className =
+    notice.tone === "error"
+      ? "rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium leading-6 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+      : "rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100";
+
+  return <div className={className}>{notice.message}</div>;
 }
 
 function PromoBannerLimitSummary({
@@ -8224,7 +8303,7 @@ function VisualEventSyncBanner({
             Изменена конфигурация в клубах: {storeNames || "клуб не выбран"}
           </h2>
           <p className="mt-1 text-sm leading-6 text-amber-900/85 dark:text-amber-100/85">
-            В расширенных правилах лутбоксы или миссии отличаются от
+            В расширенных правилах лутбоксы или задания отличаются от
             опубликованного визуального редактора. Сохраните черновик для
             проверки или сразу опубликуйте актуальный список событий.
           </p>
@@ -8274,8 +8353,8 @@ function visualEventSyncStoreSummary(
   const parts = [
     visualEventSyncPart("новые лутбоксы", store.addedLootBoxes),
     visualEventSyncPart("убрать лутбоксы", store.removedLootBoxes),
-    visualEventSyncPart("новые миссии", store.addedMissions),
-    visualEventSyncPart("убрать миссии", store.removedMissions),
+    visualEventSyncPart("новые задания", store.addedMissions),
+    visualEventSyncPart("убрать задания", store.removedMissions),
   ].filter(Boolean);
 
   return parts.length ? parts.join("; ") : "есть изменения в событиях";
@@ -8616,7 +8695,7 @@ function RewardsTab({
             onChange={(lootBoxId) => setForm({ ...form, lootBoxId })}
           />
           <LinkSelect
-            label="Миссия"
+            label="Задание"
             value={form.missionId}
             items={missions}
             onChange={(missionId) => setForm({ ...form, missionId })}
@@ -8949,6 +9028,7 @@ function LootBoxBusinessRules({
   const updatePrizes = (prizes: LootBoxPrizeForm[]) =>
     onChange(lootBoxPrizePatch(form, prizes));
   const hasWeeklyLootBoxLimit = form.perGuestPerWeek.trim().length > 0;
+  const isPeriodicLootBox = form.periodicLimitEnabled;
 
   return (
     <BusinessRuleSection
@@ -8977,45 +9057,88 @@ function LootBoxBusinessRules({
             Лимит на одного гостя
           </p>
           <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            Сколько раз один участник может открыть этот лутбокс за неделю.
+            Включите периодичность, если лутбокс можно открывать регулярно,
+            но не чаще одного раза за выбранный период.
           </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
-              <input
-                type="radio"
-                checked={!hasWeeklyLootBoxLimit}
-                onChange={() => onChange({ perGuestPerWeek: "" })}
-              />
-              <span>Сколько угодно</span>
-            </label>
-            <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
-              <input
-                type="radio"
-                checked={hasWeeklyLootBoxLimit}
-                onChange={() =>
-                  onChange({ perGuestPerWeek: form.perGuestPerWeek || "1" })
-                }
-              />
-              <span>Задать количество</span>
-            </label>
-          </div>
-          {hasWeeklyLootBoxLimit ? (
+          <label className="mt-3 flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+            <input
+              type="checkbox"
+              checked={isPeriodicLootBox}
+              onChange={(event) =>
+                onChange({
+                  periodicLimitEnabled: event.target.checked,
+                  periodicLimitPeriod: form.periodicLimitPeriod || "DAILY",
+                })
+              }
+            />
+            <span>Периодический?</span>
+          </label>
+          {isPeriodicLootBox ? (
             <label className="mt-3 block text-sm font-medium text-zinc-700 dark:text-zinc-200">
-              Открытий на гостя в неделю
-              <input
+              Период
+              <select
                 className={fieldClass}
-                type="number"
-                min="1"
-                value={form.perGuestPerWeek}
+                value={form.periodicLimitPeriod}
                 onChange={(event) =>
-                  onChange({ perGuestPerWeek: event.target.value })
+                  onChange({
+                    periodicLimitPeriod:
+                      lootBoxPeriodicLimitPeriod(event.target.value) ?? "DAILY",
+                  })
                 }
-              />
+              >
+                {lootBoxPeriodicLimitOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs font-normal leading-5 text-zinc-500 dark:text-zinc-400">
+                Один гость сможет открыть этот лутбокс один раз за выбранный
+                календарный период. После начала нового периода он снова станет
+                доступен.
+              </span>
             </label>
           ) : (
-            <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-              LeetPlus не будет ограничивать количество открытий этим недельным лимитом.
-            </p>
+            <>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+                  <input
+                    type="radio"
+                    checked={!hasWeeklyLootBoxLimit}
+                    onChange={() => onChange({ perGuestPerWeek: "" })}
+                  />
+                  <span>Сколько угодно</span>
+                </label>
+                <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+                  <input
+                    type="radio"
+                    checked={hasWeeklyLootBoxLimit}
+                    onChange={() =>
+                      onChange({ perGuestPerWeek: form.perGuestPerWeek || "1" })
+                    }
+                  />
+                  <span>Задать количество</span>
+                </label>
+              </div>
+              {hasWeeklyLootBoxLimit ? (
+                <label className="mt-3 block text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                  Открытий на гостя в неделю
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    min="1"
+                    value={form.perGuestPerWeek}
+                    onChange={(event) =>
+                      onChange({ perGuestPerWeek: event.target.value })
+                    }
+                  />
+                </label>
+              ) : (
+                <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  LeetPlus не будет ограничивать количество открытий этим недельным лимитом.
+                </p>
+              )}
+            </>
           )}
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -9671,10 +9794,10 @@ function MissionBusinessRules({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-zinc-950 dark:text-white">
-              Квестовая цепочка
+              Цепочка заданий
             </p>
             <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-              Разбейте миссию на понятные гостю шаги. В публичном кабинете они
+              Разбейте задание на понятные гостю шаги. В публичном кабинете они
               будут показаны от первого шага к награде.
             </p>
           </div>
@@ -9700,7 +9823,7 @@ function MissionBusinessRules({
             onChange={(requireLangameFact) => onChange({ requireLangameFact })}
           />
           <OptionHelp>
-            Миссия засчитывается только по подтвержденному сохраненному факту:
+            Задание засчитывается только по подтвержденному сохраненному факту:
             визиту, сессии, чеку, пополнению или другому событию из Langame.
           </OptionHelp>
         </div>
@@ -9781,8 +9904,8 @@ function MissionQuestChainFields({
     <div className="mt-3 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <OptionHelp>
-          Шаг можно связать с сохраненной миссией-шаблоном или оставить ручной
-          подписью. В цепочке сохраняется ссылка на выбранную миссию и текст,
+          Шаг можно связать с сохраненным заданием-шаблоном или оставить ручной
+          подписью. В цепочке сохраняется ссылка на выбранное задание и текст,
           который увидит гость.
         </OptionHelp>
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
@@ -9809,7 +9932,7 @@ function MissionQuestChainFields({
                 <option value="">
                   {missionTemplates.length
                     ? "Без шаблона"
-                    : "Сначала сохраните миссию"}
+                    : "Сначала сохраните задание"}
                 </option>
                 {missionTemplates.map((mission) => (
                   <option key={mission.id} value={mission.id}>
@@ -9858,7 +9981,7 @@ function MissionQuestChainFields({
         </button>
         <OptionHelp>
           Можно собрать до {maxMissionQuestSteps} шагов из сохраненных шаблонов
-          миссий.
+          заданий.
         </OptionHelp>
       </div>
     </div>
@@ -9918,7 +10041,7 @@ function SeasonBusinessRules({
             }
           />
         </Field>
-        <Field label="XP за миссию">
+        <Field label="XP за задание">
           <input
             className={fieldClass}
             type="number"
@@ -10636,7 +10759,7 @@ function rewardActivityLabel(reward: GuestGameReward) {
   }
 
   if (reward.mission) {
-    return "Квест";
+    return "Задание";
   }
 
   if (reward.season) {
@@ -11135,7 +11258,7 @@ const guestLogBusinessPresetDefinitions: Array<
   {
     id: "visit_or_session_start",
     label: "Старт визита или сессии",
-    description: "Подходит для лутбокса при начале игры или миссии на визит.",
+    description: "Подходит для лутбокса при начале игры или задания на визит.",
     intent: "allow",
     tokens: [
       "start",
@@ -11156,7 +11279,7 @@ const guestLogBusinessPresetDefinitions: Array<
   {
     id: "session_finish",
     label: "Завершение сессии",
-    description: "Полезно для миссий на отыгранную сессию или итоговый XP.",
+    description: "Полезно для заданий на отыгранную сессию или итоговый XP.",
     intent: "allow",
     tokens: [
       "finish",
@@ -11174,7 +11297,7 @@ const guestLogBusinessPresetDefinitions: Array<
   {
     id: "events_and_tournaments",
     label: "Турниры и события",
-    description: "Подходит для квестов за участие в турнирах и клубных событиях.",
+    description: "Подходит для заданий за участие в турнирах и клубных событиях.",
     intent: "allow",
     tokens: [
       "tournament",
@@ -11193,7 +11316,7 @@ const guestLogBusinessPresetDefinitions: Array<
   {
     id: "balance_and_payment",
     label: "Баланс и оплата",
-    description: "Подходит для миссий или XP за пополнение, оплату или бонусы.",
+    description: "Подходит для заданий или XP за пополнение, оплату или бонусы.",
     intent: "allow",
     tokens: [
       "balance",
@@ -11768,7 +11891,7 @@ function MissionMetricEventField({
       </select>
       <OptionHelp>
         Можно выбрать несколько событий. Они будут считаться как прогресс
-        миссии.
+        задания.
       </OptionHelp>
       <SelectedGuestLogEvents
         values={selectedValues}
@@ -11946,7 +12069,7 @@ function MissionProductMetricSelector({
           Категории товаров
         </p>
         <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-          Выберите категорию, если миссия должна считать любую покупку из этой
+          Выберите категорию, если задание должно считать любую покупку из этой
           группы.
         </p>
         <input
@@ -12448,6 +12571,11 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     hourFrom: timeWindowPart(lootBox.periodRules, 0, "10:00"),
     hourTo: timeWindowPart(lootBox.periodRules, 1, "16:00"),
     perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", ""),
+    periodicLimitEnabled:
+      lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) != null,
+    periodicLimitPeriod:
+      lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) ??
+      "DAILY",
     totalPerDay: numberRule(lootBox.limits, "totalPerDay", "30"),
     prizes: lootBoxPrizesToForm(
       lootBox.probabilityRules,
@@ -12720,7 +12848,7 @@ function ruleTemplateLabel(type: RuleTemplateType) {
     case "loot-boxes":
       return "лутбокс";
     case "missions":
-      return "миссию";
+      return "задание";
     case "seasons":
       return "сезон";
     case "promo-cards":
@@ -12907,6 +13035,73 @@ function buildPromoBannerUsage(
   };
 }
 
+function promoBannerDraftLimitWarning(
+  form: PromoBannerForm,
+  promoCards: GuestGamePromoCard[],
+  stores: Store[],
+  editingId: string | null,
+) {
+  if (form.status !== "ACTIVE" || !promoBannerFormIsInActivePeriod(form)) {
+    return null;
+  }
+
+  const nowMs = Date.now();
+  const fullStores = promoBannerFormTargetStores(form, stores).filter((store) => {
+    const activeCount = promoCards.filter(
+      (promoCard) =>
+        promoCard.id !== editingId &&
+        promoBannerCanAppear(promoCard, nowMs) &&
+        promoBannerMatchesStore(promoCard, store.id),
+    ).length;
+
+    return activeCount >= PROMO_BANNER_DISPLAY_LIMIT;
+  });
+
+  if (!fullStores.length) {
+    return null;
+  }
+
+  const storeLabel = compactStoreNames(fullStores.map((store) => store.name));
+
+  return `Лимит на показ баннеров - ${PROMO_BANNER_DISPLAY_LIMIT}/${PROMO_BANNER_DISPLAY_LIMIT}${
+    storeLabel ? ` (${storeLabel})` : ""
+  }. Баннер сохранен в статусе "Черновик".`;
+}
+
+function promoBannerFormTargetStores(form: PromoBannerForm, stores: Store[]) {
+  const allStores = stores.length
+    ? stores.map((store) => ({ id: store.id, name: store.name }))
+    : [{ id: "__all__", name: "все клубы" }];
+
+  if (!form.storeIds.length) {
+    return allStores;
+  }
+
+  const selectedIds = new Set(form.storeIds);
+  const selectedStores = allStores.filter((store) => selectedIds.has(store.id));
+  const missingStores = form.storeIds
+    .filter((storeId) => !selectedStores.some((store) => store.id === storeId))
+    .map((storeId) => ({ id: storeId, name: storeId }));
+
+  return [...selectedStores, ...missingStores];
+}
+
+function promoBannerFormIsInActivePeriod(form: PromoBannerForm) {
+  const fromMs = dateMs(form.periodFrom || null);
+  const toMs = dateMs(form.periodTo || null);
+  const nowMs = Date.now();
+
+  if (fromMs !== null && fromMs > nowMs) {
+    return false;
+  }
+
+  if (toMs !== null && toMs < nowMs) {
+    return false;
+  }
+
+  return true;
+}
+
 function promoBannerUsageInfo(
   map: Map<string, PromoBannerUsageInfo>,
   promoCardId: string,
@@ -13041,19 +13236,43 @@ async function buildPromoBannerMetadata(form: PromoBannerForm) {
   const scale = clampPromoBannerScale(Number(form.imageScale));
   const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
   const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY));
+  const actionUrl = normalizePromoBannerActionUrl(form.actionUrl);
 
   return {
     source: "advanced_editor",
     imageAspectRatio: "9:16",
     imageUrl: imageUrl || null,
+    imageStorage: imageUrl ? "inline_jpeg" : null,
     actionLabel: nullable(form.actionLabel),
-    actionUrl: nullable(form.actionUrl),
+    actionUrl,
     crop: {
       scale,
       offsetX,
       offsetY,
     },
   };
+}
+
+function normalizePromoBannerActionUrl(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+
+  try {
+    const url = new URL(candidate);
+
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function renderPromoBannerImage(form: PromoBannerForm) {
@@ -13063,50 +13282,92 @@ async function renderPromoBannerImage(form: PromoBannerForm) {
     return "";
   }
 
-  if (!form.imageSource || typeof window === "undefined") {
+  if (typeof window === "undefined") {
     return form.imageUrl || source;
   }
 
-  return new Promise<string>((resolve) => {
+  if (!form.imageSource && !isInlineImageSource(source)) {
+    throw new Error(
+      "Картинка баннера должна храниться в LeetPlus. Загрузите изображение файлом и сохраните баннер еще раз.",
+    );
+  }
+
+  return new Promise<string>((resolve, reject) => {
     const image = new window.Image();
+    image.crossOrigin = "anonymous";
     image.onload = () => {
-      const targetWidth = 900;
-      const targetHeight = 1600;
       const canvas = document.createElement("canvas");
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
+      canvas.width = PROMO_BANNER_IMAGE_WIDTH;
+      canvas.height = PROMO_BANNER_IMAGE_HEIGHT;
       const context = canvas.getContext("2d");
 
       if (!context || !image.naturalWidth || !image.naturalHeight) {
-        resolve(source);
+        reject(new Error("Не удалось подготовить изображение баннера."));
         return;
       }
 
       const scale = Math.max(
-        targetWidth / image.naturalWidth,
-        targetHeight / image.naturalHeight,
+        PROMO_BANNER_IMAGE_WIDTH / image.naturalWidth,
+        PROMO_BANNER_IMAGE_HEIGHT / image.naturalHeight,
       ) * clampPromoBannerScale(Number(form.imageScale));
       const drawWidth = image.naturalWidth * scale;
       const drawHeight = image.naturalHeight * scale;
       const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
       const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY));
-      const dx = (targetWidth - drawWidth) / 2 + (offsetX / 100) * targetWidth;
+      const dx =
+        (PROMO_BANNER_IMAGE_WIDTH - drawWidth) / 2 +
+        (offsetX / 100) * PROMO_BANNER_IMAGE_WIDTH;
       const dy =
-        (targetHeight - drawHeight) / 2 + (offsetY / 100) * targetHeight;
+        (PROMO_BANNER_IMAGE_HEIGHT - drawHeight) / 2 +
+        (offsetY / 100) * PROMO_BANNER_IMAGE_HEIGHT;
 
       context.fillStyle = "#050b0e";
-      context.fillRect(0, 0, targetWidth, targetHeight);
+      context.fillRect(0, 0, PROMO_BANNER_IMAGE_WIDTH, PROMO_BANNER_IMAGE_HEIGHT);
       context.drawImage(image, dx, dy, drawWidth, drawHeight);
 
       try {
-        resolve(canvas.toDataURL("image/jpeg", 0.86));
+        const imageDataUrl = promoBannerJpegQualities.reduce<string | null>(
+          (best, quality) => {
+            if (best && best.length <= PROMO_BANNER_MAX_DATA_URL_LENGTH) {
+              return best;
+            }
+
+            return canvas.toDataURL("image/jpeg", quality);
+          },
+          null,
+        );
+
+        if (!imageDataUrl) {
+          reject(new Error("Не удалось подготовить изображение баннера."));
+          return;
+        }
+
+        if (imageDataUrl.length > PROMO_BANNER_MAX_DATA_URL_LENGTH) {
+          reject(
+            new Error(
+              "Картинка баннера слишком тяжелая. Загрузите изображение меньшего размера или с меньшим количеством деталей.",
+            ),
+          );
+          return;
+        }
+
+        resolve(imageDataUrl);
       } catch {
-        resolve(source);
+        reject(
+          new Error(
+            "Не удалось сохранить картинку баннера у нас. Загрузите изображение файлом, а не внешней ссылкой.",
+          ),
+        );
       }
     };
-    image.onerror = () => resolve(source);
+    image.onerror = () =>
+      reject(new Error("Не удалось загрузить изображение баннера."));
     image.src = source;
   });
+}
+
+function isInlineImageSource(value: string) {
+  return value.trim().toLowerCase().startsWith("data:image/");
 }
 
 function csvList(value: string) {
@@ -13198,11 +13459,16 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
 }
 
 function buildLootBoxLimits(form: LootBoxForm) {
-  const perGuestPerWeek = optionalNumber(form.perGuestPerWeek);
+  const perGuestPerWeek = form.periodicLimitEnabled
+    ? null
+    : optionalNumber(form.perGuestPerWeek);
   const totalPerDay = optionalNumber(form.totalPerDay);
 
   return {
     source: "business_controls",
+    ...(form.periodicLimitEnabled
+      ? { periodicLimit: form.periodicLimitPeriod }
+      : {}),
     ...(perGuestPerWeek == null ? {} : { perGuestPerWeek }),
     ...(totalPerDay == null ? {} : { totalPerDay }),
   };
@@ -13532,6 +13798,17 @@ function lootBoxWeekdaysForMode(form: LootBoxForm) {
   return weekdayPresets[form.weekdayMode];
 }
 
+function lootBoxPeriodicLimitPeriod(
+  value: unknown,
+): LootBoxPeriodicLimitPeriod | null {
+  const raw =
+    typeof value === "string" ? value.trim().toUpperCase() : "";
+
+  return raw === "DAILY" || raw === "WEEKLY" || raw === "MONTHLY"
+    ? raw
+    : null;
+}
+
 function metricRule(value: unknown) {
   const record = asRecord(value);
   return asRecord(record.metric ?? record.progressMetric);
@@ -13720,10 +13997,10 @@ function questRuleSummary(value: unknown) {
   }
 
   return templateCount
-    ? `квест: ${steps.length} ${missionStepCountLabel(
+    ? `задание: ${steps.length} ${missionStepCountLabel(
         steps.length,
       )}, ${templateCount} шабл.`
-    : `квест: ${steps.length} ${missionStepCountLabel(steps.length)}`;
+    : `задание: ${steps.length} ${missionStepCountLabel(steps.length)}`;
 }
 
 function missionMetricSummary(value: unknown) {
@@ -14030,7 +14307,7 @@ function economyKindLabel(
     case "LOOT_BOX":
       return "Лутбокс";
     case "MISSION":
-      return "Миссия";
+      return "Задание";
     case "SEASON":
       return "Battle Pass";
     case "MANUAL":

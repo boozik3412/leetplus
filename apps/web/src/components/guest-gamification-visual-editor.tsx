@@ -65,7 +65,7 @@ const PROMO_BANNER_ACTIVE_LIMIT = 4;
 const sectionLabels: Record<EditorSection, string> = {
   battlePass: "Battle Pass",
   lootBoxes: "Лутбоксы",
-  missions: "Квесты",
+  missions: "Задания",
   promoCards: "События и акции",
   checkIn: "Чекин",
 };
@@ -82,7 +82,7 @@ const visualTriggerOptions = [
   { value: "GUEST_LOG", label: "Событие Langame" },
   { value: "REFERRAL_ACCEPTED", label: "Реферал принят" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
-  { value: "MISSION_COMPLETED", label: "Квест выполнен" },
+  { value: "MISSION_COMPLETED", label: "Задание выполнено" },
 ];
 
 const visualTriggerHelpText: Record<string, string> = {
@@ -101,7 +101,7 @@ const visualTriggerHelpText: Record<string, string> = {
     "Правило проверится по событию из guests/logs. Детальные типы событий можно ограничить в расширенных настройках.",
   REFERRAL_ACCEPTED: "Правило проверится, когда приглашенный гость успешно зарегистрируется по реферальной ссылке.",
   REPEAT_VISIT: "Правило проверит повторное посещение гостя в заданном окне времени.",
-  MISSION_COMPLETED: "Правило проверится после выполнения другой миссии или квеста.",
+  MISSION_COMPLETED: "Правило проверится после выполнения другого задания.",
 };
 
 const visualMissionTypeOptions = [
@@ -115,20 +115,20 @@ const visualMissionTypeOptions = [
   { value: "REFERRAL_ACCEPTED", label: "Приглашение друга" },
   { value: "APP_OPEN", label: "Возврат в приложение" },
   { value: "GUEST_LOG", label: "Событие Langame" },
-  { value: "CUSTOM", label: "Своя миссия" },
+  { value: "CUSTOM", label: "Свое задание" },
 ];
 
 const visualMissionTypeHelpText: Record<string, string> = {
-  REPEAT_VISIT: "Квест засчитывает повторное посещение в заданном окне.",
-  CHECK_IN: "Квест засчитывает чекин гостя в выбранном клубе.",
-  VISIT: "Квест засчитывает посещение клуба.",
-  PLAY_HOUR: "Квест считает накопленное игровое время.",
-  BAR_PURCHASE: "Квест считает покупки бара.",
-  PRODUCT_PURCHASE: "Квест считает покупку выбранных товаров.",
-  BALANCE_TOPUP: "Квест считает пополнение баланса.",
-  REFERRAL_ACCEPTED: "Квест засчитывает приглашенного друга.",
-  APP_OPEN: "Квест срабатывает при открытии сайта или Mini App.",
-  GUEST_LOG: "Квест работает от событий Langame.",
+  REPEAT_VISIT: "Задание засчитывает повторное посещение в заданном окне.",
+  CHECK_IN: "Задание засчитывает чекин гостя в выбранном клубе.",
+  VISIT: "Задание засчитывает посещение клуба.",
+  PLAY_HOUR: "Задание считает накопленное игровое время.",
+  BAR_PURCHASE: "Задание считает покупки бара.",
+  PRODUCT_PURCHASE: "Задание считает покупку выбранных товаров.",
+  BALANCE_TOPUP: "Задание считает пополнение баланса.",
+  REFERRAL_ACCEPTED: "Задание засчитывает приглашенного друга.",
+  APP_OPEN: "Задание срабатывает при открытии сайта или Mini App.",
+  GUEST_LOG: "Задание работает от событий Langame.",
   CUSTOM: "Свободный сценарий с условиями из расширенных настроек.",
 };
 
@@ -153,12 +153,12 @@ const visualProgressUnitHelpText: Record<string, string> = {
   day: "Гость видит прогресс как количество уникальных дней активности.",
   friend: "Гость видит прогресс как количество приглашенных друзей.",
   event: "Гость видит прогресс как количество подходящих событий.",
-  step: "Гость видит прогресс как шаги квестовой цепочки.",
+  step: "Гость видит прогресс как шаги цепочки заданий.",
 };
 
 const visualPromoTargetOptions = [
   { value: "home", label: "Главная игрового модуля" },
-  { value: "missions", label: "Квесты" },
+  { value: "missions", label: "Задания" },
   { value: "lootBoxes", label: "Лутбоксы" },
   { value: "battlePass", label: "Battle Pass" },
   { value: "rewards", label: "Награды" },
@@ -168,7 +168,7 @@ const visualPromoTargetOptions = [
 
 const visualPromoTargetHelpText: Record<string, string> = {
   home: "Баннер ведет на главную страницу игрового модуля.",
-  missions: "Баннер ведет к списку квестов.",
+  missions: "Баннер ведет к списку заданий.",
   lootBoxes: "Баннер ведет к лутбоксам и доступным открытиям.",
   battlePass: "Баннер ведет к сезонному Battle Pass.",
   rewards: "Баннер ведет к наградам и промокодам.",
@@ -187,6 +187,15 @@ const visualWeekdayOptions = [
   { value: "WEEKDAYS", label: "Будни" },
   { value: "WEEKENDS", label: "Выходные" },
   { value: "CUSTOM", label: "Выбрать дни" },
+];
+
+const visualLootBoxPeriodicOptions: Array<{
+  value: GuestGameVisualEditorLootBox["periodicLimitPeriod"];
+  label: string;
+}> = [
+  { value: "DAILY", label: "Ежедневный" },
+  { value: "WEEKLY", label: "Еженедельный" },
+  { value: "MONTHLY", label: "Ежемесячный" },
 ];
 
 const visualWeekdayItems = [
@@ -397,7 +406,7 @@ export function GuestGamificationVisualEditor({
             Гостевая главная как рабочий макет
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-            Настраивайте Battle Pass, лутбоксы, квесты, события и чек-ин через
+            Настраивайте Battle Pass, лутбоксы, задания, события и чек-ин через
             черновик. Публикация применит правила к выбранному клубу.
           </p>
         </div>
@@ -675,7 +684,7 @@ function VisualPreview({
             onClick={() => onSelect("missions")}
           >
             <div className="flex items-center justify-between">
-              <h4 className="text-2xl font-black">Квесты</h4>
+              <h4 className="text-2xl font-black">Задания</h4>
               <span className="text-xs font-black uppercase tracking-[0.16em] text-[#83e4ec]">
                 {payload.missions.length} шт.
               </span>
@@ -1119,13 +1128,23 @@ function LootBoxInspector({
                     })
                   }
                 />
-                <LootBoxLimitField
-                  value={item.limitPerGuest}
+                <LootBoxPeriodicLimitField
+                  enabled={item.periodicLimitEnabled}
+                  period={item.periodicLimitPeriod}
                   disabled={disabled}
-                  onChange={(limitPerGuest) =>
-                    update({ ...item, limitPerGuest })
+                  onChange={(patch) =>
+                    update({ ...item, ...patch })
                   }
                 />
+                {!item.periodicLimitEnabled ? (
+                  <LootBoxLimitField
+                    value={item.limitPerGuest}
+                    disabled={disabled}
+                    onChange={(limitPerGuest) =>
+                      update({ ...item, limitPerGuest })
+                    }
+                  />
+                ) : null}
               </div>
               <div className="mt-3">
                 <LootBoxPrizeDistribution prizes={item.prizes} />
@@ -1178,15 +1197,15 @@ function MissionInspector({
 
   return (
     <CollectionInspector
-      title="Квесты"
+      title="Задания"
       items={payload.missions}
-      emptyLabel="Добавить квест"
+      emptyLabel="Добавить задание"
       templateSlot={
         <TemplatePicker
-          title="Шаблон квеста"
-          description="Добавьте квест из расширенных настроек вместе с XP, наградой и шагами."
+          title="Шаблон задания"
+          description="Добавьте задание из расширенных настроек вместе с XP, наградой и шагами."
           items={missionTemplates}
-          emptyLabel="Готовых квестов для выбранного клуба пока нет."
+          emptyLabel="Готовых заданий для выбранного клуба пока нет."
           getLabel={(mission) => `${mission.name} · ${statusLabel(mission.status)}`}
           disabled={disabled}
           actionLabel="Добавить шаблон"
@@ -1249,7 +1268,7 @@ function MissionInspector({
             onChange={(rewardLabel) => update({ ...item, rewardLabel })}
           />
           <TextAreaField
-            label="Шаги квеста"
+            label="Шаги задания"
             value={item.questSteps.map((step) => step.title).join("\n")}
             disabled={disabled}
             onChange={(value) =>
@@ -1274,7 +1293,7 @@ function MissionInspector({
           />
           <RemoveButton
             disabled={disabled}
-            label="Удалить квест"
+            label="Удалить задание"
             onClick={remove}
           />
         </div>
@@ -1374,6 +1393,21 @@ function PromoInspector({
               onChange={(targetAnchor) => update({ ...item, targetAnchor })}
             />
           </div>
+          <TextField
+            label="Внешняя ссылка"
+            value={visualMetadataString(item.metadata, "actionUrl")}
+            disabled={disabled}
+            onChange={(actionUrl) =>
+              update({
+                ...item,
+                metadata: visualMetadataWithString(
+                  item.metadata,
+                  "actionUrl",
+                  actionUrl,
+                ),
+              })
+            }
+          />
           <StatusField
             value={item.status}
             disabled={disabled}
@@ -2112,6 +2146,70 @@ function LootBoxLimitField({
   );
 }
 
+function LootBoxPeriodicLimitField({
+  enabled,
+  period,
+  disabled,
+  onChange,
+}: {
+  enabled: boolean;
+  period: GuestGameVisualEditorLootBox["periodicLimitPeriod"];
+  disabled: boolean;
+  onChange: (
+    patch: Pick<
+      GuestGameVisualEditorLootBox,
+      "periodicLimitEnabled" | "periodicLimitPeriod"
+    >,
+  ) => void;
+}) {
+  return (
+    <div className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      Периодичность
+      <label className="mt-2 flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium normal-case tracking-normal text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange({
+              periodicLimitEnabled: event.target.checked,
+              periodicLimitPeriod: period || "DAILY",
+            })
+          }
+        />
+        <span>Периодический?</span>
+      </label>
+      {enabled ? (
+        <label className="mt-2 block text-sm font-medium normal-case tracking-normal text-zinc-700 dark:text-zinc-200">
+          Период
+          <select
+            className={fieldClass}
+            value={period}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange({
+                periodicLimitEnabled: true,
+                periodicLimitPeriod:
+                  visualLootBoxPeriodicPeriod(event.target.value) ?? "DAILY",
+              })
+            }
+          >
+            {visualLootBoxPeriodicOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <EditorHint>
+          Если включить, гость сможет открыть лутбокс один раз за выбранный период.
+        </EditorHint>
+      )}
+    </div>
+  );
+}
+
 function StatusField({
   value,
   disabled,
@@ -2198,7 +2296,7 @@ function MissionTypeField({
 
   return (
     <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-      Тип квеста
+      Тип задания
       <select
         className={fieldClass}
         value={value}
@@ -2206,7 +2304,7 @@ function MissionTypeField({
         onChange={(event) => onChange(event.target.value)}
       >
         {!hasCurrentOption && value ? (
-          <option value={value}>Сохраненный тип квеста</option>
+          <option value={value}>Сохраненный тип задания</option>
         ) : null}
         {visualMissionTypeOptions.map((option) => (
           <option key={option.value} value={option.value}>
@@ -2216,7 +2314,7 @@ function MissionTypeField({
       </select>
       <EditorHint>
         {visualMissionTypeHelpText[value] ??
-          "Тип помогает понять сценарий квеста; подробные условия можно уточнить в расширенных настройках."}
+          "Тип помогает понять сценарий задания; подробные условия можно уточнить в расширенных настройках."}
       </EditorHint>
     </label>
   );
@@ -2255,7 +2353,7 @@ function MissionProgressUnitField({
       </select>
       <EditorHint>
         {visualProgressUnitHelpText[value] ??
-          "Выберите, в каких понятных единицах гость будет видеть прогресс квеста."}
+          "Выберите, в каких понятных единицах гость будет видеть прогресс задания."}
       </EditorHint>
     </label>
   );
@@ -2370,6 +2468,8 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
     ],
     condition: visualTriggerLabel("SESSION_START"),
     limitPerGuest: 1,
+    periodicLimitEnabled: false,
+    periodicLimitPeriod: "DAILY",
     timeWindowMode: "ANY",
     weekdayMode: "ANY",
     weekdays: visualWeekdayPresets.ANY,
@@ -2381,7 +2481,7 @@ function createVisualLootBox(): GuestGameVisualEditorLootBox {
 function createVisualMission(): GuestGameVisualEditorMission {
   return {
     id: null,
-    title: "Новый квест",
+    title: "Новое задание",
     status: "DRAFT",
     missionType: "CUSTOM",
     triggerKind: "SESSION_START",
@@ -2480,6 +2580,7 @@ function visualLootBoxFromTemplate(
   const periodRules = templateRecord(lootBox.periodRules);
   const limits = templateRecord(lootBox.limits);
   const probabilityRules = templateRecord(lootBox.probabilityRules);
+  const periodicLimit = visualLootBoxPeriodicPeriod(limits.periodicLimit);
 
   return {
     ...createVisualLootBox(),
@@ -2505,6 +2606,8 @@ function visualLootBoxFromTemplate(
     limitPerGuest: templateNumberOrNull(
       limits.perGuest ?? limits.perGuestPerWeek,
     ),
+    periodicLimitEnabled: periodicLimit != null,
+    periodicLimitPeriod: periodicLimit ?? "DAILY",
     timeWindowMode: templateTimeWindowMode(
       periodRules.timeWindowMode ?? inferTemplateTimeWindowMode(periodRules),
     ),
@@ -2568,6 +2671,32 @@ function visualPromoFromTemplate(
     periodTo: promo.periodTo,
     metadata: promo.metadata,
   };
+}
+
+function visualMetadataRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
+function visualMetadataString(value: unknown, key: string) {
+  const record = visualMetadataRecord(value);
+  const item = record[key];
+
+  return typeof item === "string" ? item : "";
+}
+
+function visualMetadataWithString(value: unknown, key: string, nextValue: string) {
+  const record = visualMetadataRecord(value);
+  const trimmedValue = nextValue.trim();
+
+  if (trimmedValue) {
+    record[key] = trimmedValue;
+  } else {
+    delete record[key];
+  }
+
+  return Object.keys(record).length ? record : null;
 }
 
 function visualCheckInFromMissionTemplate(
@@ -2725,6 +2854,18 @@ function visualLootBoxPrizesFromRules(
 
 function templateString(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function visualLootBoxPeriodicPeriod(
+  value: unknown,
+): GuestGameVisualEditorLootBox["periodicLimitPeriod"] | null {
+  const normalized = typeof value === "string" ? value.toUpperCase() : "";
+
+  return normalized === "DAILY" ||
+    normalized === "WEEKLY" ||
+    normalized === "MONTHLY"
+    ? normalized
+    : null;
 }
 
 function templateNumber(value: unknown, fallback: number) {
@@ -2950,6 +3091,8 @@ function fallbackLootBoxes(): GuestGameVisualEditorLootBox[] {
       ],
       condition: "Визит в клуб",
       limitPerGuest: 1,
+      periodicLimitEnabled: false,
+      periodicLimitPeriod: "DAILY",
       timeWindowMode: "ANY",
       weekdayMode: "ANY",
       weekdays: visualWeekdayPresets.ANY,

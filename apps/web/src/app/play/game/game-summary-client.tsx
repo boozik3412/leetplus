@@ -17,6 +17,11 @@ import type {
   GuestPortalGameSummary,
   GuestPortalLootBoxRarity,
 } from "@/lib/guest-portal";
+import {
+  isHttpExternalActionUrl,
+  isInternalHref,
+  normalizeExternalActionUrl,
+} from "@/lib/external-links";
 import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
@@ -1194,27 +1199,22 @@ function HomeBannerGrid({
     <div className="lp-club-banner-grid" aria-label="Баннеры клуба">
       {banners.map((banner) => {
         const titleStyle = bannerTitleStyle(banner.title);
-        const bannerStyle: CSSProperties = banner.imageUrl
-          ? {
-              ...titleStyle,
-              backgroundImage: `linear-gradient(180deg, rgba(3, 7, 9, 0.12), rgba(3, 7, 9, 0.68)), url("${cssUrl(banner.imageUrl)}")`,
-            }
-          : titleStyle;
-
-        return (
-          <Link
-            key={banner.id}
-            href={banner.href}
-            target={banner.href.startsWith("http") || banner.href === "/play/game/rewards" ? "_blank" : undefined}
-            rel={banner.href.startsWith("http") || banner.href === "/play/game/rewards" ? "noreferrer" : undefined}
-            className={[
-              "lp-club-banner",
-              banner.featured ? "is-featured" : "",
-              banner.imageUrl ? "has-image" : "",
-            ].join(" ")}
-            style={bannerStyle}
-            onClick={() => onToast(`Открыт раздел: ${banner.title}.`)}
-          >
+        const className = [
+          "lp-club-banner",
+          banner.featured ? "is-featured" : "",
+          banner.imageUrl ? "has-image" : "",
+        ].join(" ");
+        const isHttpExternal = isHttpExternalActionUrl(banner.href);
+        const opensInNewTab =
+          isHttpExternal || banner.href === "/play/game/rewards";
+        const content = (
+          <>
+            {banner.imageUrl ? (
+              <span className="lp-club-banner-media" aria-hidden="true">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img alt="" src={banner.imageUrl} />
+              </span>
+            ) : null}
             <span className="lp-club-banner-content">
               <span>
                 <span className="lp-club-banner-kicker">{banner.label}</span>
@@ -1223,7 +1223,37 @@ function HomeBannerGrid({
               </span>
               <span className="lp-club-banner-tag">{banner.tag}</span>
             </span>
-          </Link>
+          </>
+        );
+
+        if (isInternalHref(banner.href)) {
+          return (
+            <Link
+              key={banner.id}
+              href={banner.href}
+              target={opensInNewTab ? "_blank" : undefined}
+              rel={opensInNewTab ? "noreferrer" : undefined}
+              className={className}
+              style={titleStyle}
+              onClick={() => onToast(`Открыт раздел: ${banner.title}.`)}
+            >
+              {content}
+            </Link>
+          );
+        }
+
+        return (
+          <a
+            key={banner.id}
+            href={banner.href}
+            target={isHttpExternal ? "_blank" : undefined}
+            rel={isHttpExternal ? "noreferrer" : undefined}
+            className={className}
+            style={titleStyle}
+            onClick={() => onToast(`Открыт раздел: ${banner.title}.`)}
+          >
+            {content}
+          </a>
         );
       })}
     </div>
@@ -2701,10 +2731,6 @@ function bannerTitleSize(title: string) {
   return 24;
 }
 
-function cssUrl(value: string) {
-  return value.replace(/"/g, '\\"');
-}
-
 function normalizeNickname(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -2761,27 +2787,31 @@ function buildHomeBanners(
       href: "#battlePass",
     },
   ];
-  const promoBanners = summary.promoCards.featured.slice(0, 4).map(
-    (card, index): HomeBanner => ({
-      id: `promo-${card.id}`,
-      label: card.label ?? (index === 0 ? "Акция" : "Событие"),
-      title: card.title,
-      description:
-        card.description ??
-        fallbackBanners[index]?.description ??
-        "Клубное событие для участников игрового модуля.",
-      tag:
-        card.tag ??
-        (card.periodTo ? `до ${formatDate(card.periodTo)}` : "активно"),
-      featured: index === 0,
-      href:
-        card.actionUrl ??
-        (card.targetAnchor
-          ? `#${card.targetAnchor}`
-          : (fallbackBanners[index]?.href ?? "#missions")),
-      imageUrl: card.imageUrl,
-    }),
-  );
+  const promoBanners = summary.promoCards.featured
+    .slice(0, 4)
+    .map((card, index): HomeBanner => {
+      const actionUrl = normalizeExternalActionUrl(card.actionUrl);
+
+      return {
+        id: `promo-${card.id}`,
+        label: card.label ?? (index === 0 ? "Акция" : "Событие"),
+        title: card.title,
+        description:
+          card.description ??
+          fallbackBanners[index]?.description ??
+          "Клубное событие для участников игрового модуля.",
+        tag:
+          card.tag ??
+          (card.periodTo ? `до ${formatDate(card.periodTo)}` : "активно"),
+        featured: index === 0,
+        href:
+          actionUrl ??
+          (card.targetAnchor
+            ? `#${card.targetAnchor}`
+            : (fallbackBanners[index]?.href ?? "#missions")),
+        imageUrl: card.imageUrl,
+      };
+    });
 
   return [...promoBanners, ...fallbackBanners].slice(0, 4);
 }
@@ -6599,6 +6629,8 @@ const clubHomeCss = `
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
+  pointer-events: none;
   opacity: 0.7;
   background:
     linear-gradient(135deg, transparent 0 34%, rgba(131, 228, 236, 0.12) 34% 35%, transparent 35% 100%),
@@ -6618,8 +6650,9 @@ const clubHomeCss = `
 }
 
 .lp-club-banner.has-image {
-  background-position: center;
-  background-size: cover;
+  background:
+    linear-gradient(180deg, rgba(3, 7, 9, 0.2), transparent 36%),
+    rgba(5, 11, 14, 0.82);
 }
 
 .lp-club-banner.has-image::before {
@@ -6628,9 +6661,26 @@ const clubHomeCss = `
     linear-gradient(135deg, transparent 0 34%, rgba(131, 228, 236, 0.12) 34% 35%, transparent 35% 100%);
 }
 
+.lp-club-banner-media {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: rgba(3, 7, 9, 0.34);
+}
+
+.lp-club-banner-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
 .lp-club-banner-content {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   min-height: 100%;
   flex-direction: column;

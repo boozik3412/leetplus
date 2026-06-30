@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { normalizeExternalActionUrl } from "@/lib/external-links";
 import type {
   GuestGameLootBox,
   GuestGameMission,
@@ -341,7 +342,7 @@ export function GuestGamificationVisualEditor({
           body: JSON.stringify({
             id: draft.id,
             storeId,
-            payload,
+            payload: normalizeVisualEditorPayload(payload),
           }),
         },
       );
@@ -372,7 +373,7 @@ export function GuestGamificationVisualEditor({
           body: JSON.stringify({
             id: draft.id,
             storeId,
-            payload,
+            payload: normalizeVisualEditorPayload(payload),
           }),
         },
       );
@@ -1397,6 +1398,7 @@ function PromoInspector({
             label="Внешняя ссылка"
             value={visualMetadataString(item.metadata, "actionUrl")}
             disabled={disabled}
+            placeholder="https://example.com/promo или ts3server://1337community"
             onChange={(actionUrl) =>
               update({
                 ...item,
@@ -1878,11 +1880,13 @@ function TextField({
   label,
   value,
   disabled,
+  placeholder,
   onChange,
 }: {
   label: string;
   value: string;
   disabled: boolean;
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -1892,6 +1896,7 @@ function TextField({
         className={fieldClass}
         value={value}
         disabled={disabled}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
     </label>
@@ -2670,6 +2675,35 @@ function visualPromoFromTemplate(
     periodFrom: promo.periodFrom,
     periodTo: promo.periodTo,
     metadata: promo.metadata,
+  };
+}
+
+function normalizeVisualEditorPayload(
+  payload: GuestGameVisualEditorPayload,
+): GuestGameVisualEditorPayload {
+  return {
+    ...payload,
+    promoCards: payload.promoCards.map(normalizeVisualPromoCard),
+  };
+}
+
+function normalizeVisualPromoCard(
+  item: GuestGameVisualEditorPromoCard,
+): GuestGameVisualEditorPromoCard {
+  const metadata = visualMetadataRecord(item.metadata);
+  const actionUrl = normalizeExternalActionUrl(
+    visualMetadataString(metadata, "actionUrl"),
+  );
+
+  if (actionUrl) {
+    metadata.actionUrl = actionUrl;
+  } else {
+    delete metadata.actionUrl;
+  }
+
+  return {
+    ...item,
+    metadata: Object.keys(metadata).length ? metadata : null,
   };
 }
 

@@ -24,6 +24,7 @@ import type { LangameGuestSession } from '../integrations/langame.types';
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffTeamChatService } from '../staff/staff-team-chat.service';
+import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   GuestBonusLedgerSchedulerService,
   type GuestBonusLedgerSchedulerRuntimeStatus,
@@ -18389,7 +18390,7 @@ function buildVisualPromoCardData(
   storeIds: string[],
   item: GuestGameVisualEditorPromoCard,
 ) {
-  const metadata = jsonRecord(item.metadata);
+  const metadata = normalizePromoCardMetadata(jsonRecord(item.metadata));
 
   return clean({
     tenantId: user.tenantId,
@@ -18408,6 +18409,19 @@ function buildVisualPromoCardData(
       source: metadata.source ?? 'visual_editor',
     },
   });
+}
+
+function normalizePromoCardMetadata(metadata: Record<string, unknown>) {
+  const nextMetadata = { ...metadata };
+  const actionUrl = normalizeExternalActionUrl(nextMetadata.actionUrl);
+
+  if (actionUrl) {
+    nextMetadata.actionUrl = actionUrl;
+  } else {
+    delete nextMetadata.actionUrl;
+  }
+
+  return nextMetadata;
 }
 
 function buildVisualCheckInMissionData(
@@ -18639,7 +18653,7 @@ function buildVisualEditorPreviewSummary(
           targetAnchor: item.targetAnchor,
           imageUrl: nullableString(metadata.imageUrl),
           actionLabel: nullableString(metadata.actionLabel),
-          actionUrl: nullableString(metadata.actionUrl),
+          actionUrl: normalizeExternalActionUrl(metadata.actionUrl),
           periodTo: item.periodTo,
         };
       }),

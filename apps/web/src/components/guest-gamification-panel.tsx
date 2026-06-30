@@ -12,6 +12,7 @@ import {
   type SetStateAction,
 } from "react";
 import { GuestGamificationVisualEditor } from "@/components/guest-gamification-visual-editor";
+import { normalizeExternalActionUrl } from "@/lib/external-links";
 import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guests";
 import type {
   GuestGameBonusLedgerDispatchItem,
@@ -7749,8 +7750,8 @@ function PromoBannersTab({
                 <Field label="Внешняя ссылка">
                   <input
                     className={fieldClass}
-                    placeholder="https://example.com/promo"
-                    type="url"
+                    placeholder="https://example.com/promo или ts3server://1337community"
+                    type="text"
                     value={form.actionUrl}
                     onChange={(event) =>
                       setForm({ ...form, actionUrl: event.target.value })
@@ -13237,7 +13238,7 @@ async function buildPromoBannerMetadata(form: PromoBannerForm) {
   const scale = clampPromoBannerScale(Number(form.imageScale));
   const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
   const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY));
-  const actionUrl = normalizePromoBannerActionUrl(form.actionUrl);
+  const actionUrl = normalizeExternalActionUrl(form.actionUrl);
 
   return {
     source: "advanced_editor",
@@ -13252,28 +13253,6 @@ async function buildPromoBannerMetadata(form: PromoBannerForm) {
       offsetY,
     },
   };
-}
-
-function normalizePromoBannerActionUrl(value: string) {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`;
-
-  try {
-    const url = new URL(candidate);
-
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 async function renderPromoBannerImage(form: PromoBannerForm) {

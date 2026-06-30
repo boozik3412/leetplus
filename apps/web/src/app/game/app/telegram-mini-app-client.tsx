@@ -8,6 +8,10 @@ import type {
   GuestPortalTelegramMiniAppClub,
   GuestPortalTelegramMiniAppSessionResponse,
 } from "@/lib/guest-portal";
+import {
+  isHttpExternalActionUrl,
+  normalizeExternalActionUrl,
+} from "@/lib/external-links";
 
 type LoadState =
   | "loading"
@@ -1187,7 +1191,7 @@ function buildEvents(summary: GuestPortalGameSummary) {
       card.actionLabel ??
       card.tag ??
       (card.periodTo ? `до ${formatDate(card.periodTo)}` : "активно"),
-    actionUrl: normalizeExternalUrl(card.actionUrl),
+    actionUrl: normalizeExternalActionUrl(card.actionUrl),
     toast: card.description ?? card.title,
   }));
 
@@ -1233,36 +1237,25 @@ function buildEvents(summary: GuestPortalGameSummary) {
 }
 
 function openExternalUrl(url: string) {
-  const telegramWebApp = getTelegramWebApp();
+  const actionUrl = normalizeExternalActionUrl(url);
 
-  if (telegramWebApp?.openLink) {
-    telegramWebApp.openLink(url, { try_instant_view: false });
+  if (!actionUrl) {
     return;
   }
 
-  window.open(url, "_blank", "noopener,noreferrer");
-}
+  const telegramWebApp = getTelegramWebApp();
 
-function normalizeExternalUrl(value: string | null | undefined) {
-  const trimmed = value?.trim();
-
-  if (!trimmed) {
-    return null;
+  if (telegramWebApp?.openLink && isHttpExternalActionUrl(actionUrl)) {
+    telegramWebApp.openLink(actionUrl, { try_instant_view: false });
+    return;
   }
 
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`;
-
-  try {
-    const url = new URL(candidate);
-
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
+  if (isHttpExternalActionUrl(actionUrl)) {
+    window.open(actionUrl, "_blank", "noopener,noreferrer");
+    return;
   }
+
+  window.location.href = actionUrl;
 }
 
 async function requestMiniAppSession({

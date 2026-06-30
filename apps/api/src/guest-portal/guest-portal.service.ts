@@ -33,6 +33,7 @@ import {
   type GuestGameProcessEventResult,
 } from '../guest-gamification/guest-gamification.service';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
+import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   evaluateGuestGameProgress,
   guestGameTriggerMatches,
@@ -12859,7 +12860,7 @@ function mapPromoCard(row: {
     targetAnchor: row.targetAnchor,
     imageUrl: promoMetadataString(metadata, 'imageUrl'),
     actionLabel: promoMetadataString(metadata, 'actionLabel'),
-    actionUrl: promoMetadataString(metadata, 'actionUrl'),
+    actionUrl: normalizeExternalActionUrl(metadata.actionUrl),
     periodTo: iso(row.periodTo),
   };
 }

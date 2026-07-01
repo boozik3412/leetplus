@@ -345,6 +345,7 @@ type TenantStoreContext = {
 
 type GuestPortalBuildOptions = {
   refreshLiveBalances?: boolean;
+  liveSessionStartResult?: GuestGameProcessEventResult | null;
 };
 
 type GuestPortalBalanceScope = {
@@ -3344,8 +3345,11 @@ export class GuestPortalService {
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
     const payload = await this.verifyGuestToken(authorization);
-    await this.processLiveSessionStartForPayload(payload);
-    const portal = await this.buildPortalPayload(payload);
+    const liveSessionStartResult =
+      await this.processLiveSessionStartForPayload(payload);
+    const portal = await this.buildPortalPayload(payload, {
+      liveSessionStartResult,
+    });
     const referralStats = await this.getGameReferralStats(
       payload.tenantId,
       portal.profile.id,
@@ -3439,7 +3443,7 @@ export class GuestPortalService {
       );
     }
 
-    await this.processLiveSessionStartForPayload({
+    const liveSessionStartResult = await this.processLiveSessionStartForPayload({
       ...payload,
       guestId: guest?.id ?? profile.guestId ?? null,
       profileId: profile.id,
@@ -3501,7 +3505,9 @@ export class GuestPortalService {
       guestId: guest?.id ?? profile.guestId ?? null,
       profileId: profile.id,
     };
-    const portal = await this.buildPortalPayload(nextPayload);
+    const portal = await this.buildPortalPayload(nextPayload, {
+      liveSessionStartResult,
+    });
     const referralStats = await this.getGameReferralStats(
       nextPayload.tenantId,
       portal.profile.id,
@@ -3602,7 +3608,8 @@ export class GuestPortalService {
     payload: GuestPortalTokenPayload,
     id: string,
   ): Promise<GuestPortalLootBoxOpenResponse> {
-    await this.processLiveSessionStartForPayload(payload);
+    const liveSessionStartResult =
+      await this.processLiveSessionStartForPayload(payload);
 
     const context = await this.getTenantStoreByIds(
       payload.tenantId,
@@ -3649,7 +3656,7 @@ export class GuestPortalService {
 
     const openedAt = new Date();
     const ownerGuestId = guest?.id ?? profile.guestId ?? null;
-    const [currentRewards, unlockEvents] = await Promise.all([
+    const [currentRewards, unlockEvents, audienceMemberIds] = await Promise.all([
       this.findPortalRewards(
         context.tenant.id,
         context.store.id,
@@ -3661,18 +3668,25 @@ export class GuestPortalService {
         ownerGuestId,
         profile.id,
       ),
+      this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
     ]);
+    const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
+      liveSessionStartResult,
+    );
     const openState = buildLootBoxOpenState(
       lootBox,
       currentRewards,
       unlockEvents,
       context.store.id,
       context.store.timeZone,
+      liveSessionStartUnlockEvent,
+      audienceMemberIds,
     );
     const unlockEvent = findLootBoxUnlockEvent(
       lootBox,
       unlockEvents,
       context.store.id,
+      liveSessionStartUnlockEvent,
     );
     const unlockInput = unlockEvent
       ? portalEventToProgressEvent(unlockEvent)
@@ -3758,7 +3772,9 @@ export class GuestPortalService {
       guestId: ownerGuestId,
       profileId: profile.id,
     };
-    const portal = await this.buildPortalPayload(nextPayload);
+    const portal = await this.buildPortalPayload(nextPayload, {
+      liveSessionStartResult,
+    });
     const referralStats = await this.getGameReferralStats(
       nextPayload.tenantId,
       portal.profile.id,
@@ -7015,6 +7031,43 @@ export class GuestPortalService {
     });
   }
 
+  private async findPortalAudienceMemberIds(
+    tenantId: string,
+    guest: {
+      id?: string | null;
+      externalDomain?: string | null;
+      externalGuestId?: string | null;
+    } | null,
+    profile: { guestId?: string | null } | null,
+  ): Promise<Set<string>> {
+    const guestId = guest?.id ?? profile?.guestId ?? null;
+    const ownerFilters: Prisma.GuestAudienceMemberWhereInput[] = [
+      ...(guestId ? [{ guestId }] : []),
+      ...(guest?.externalGuestId
+        ? [
+            {
+              externalDomain: guest.externalDomain ?? '',
+              externalGuestId: guest.externalGuestId,
+            },
+          ]
+        : []),
+    ];
+
+    if (!ownerFilters.length) {
+      return new Set();
+    }
+
+    const rows = await this.prisma.guestAudienceMember.findMany({
+      where: {
+        tenantId,
+        OR: ownerFilters,
+      },
+      select: { audienceId: true },
+    });
+
+    return new Set(rows.map((row) => row.audienceId));
+  }
+
   private portalBalanceScope(
     store: Pick<
       TenantStoreContext['store'],
@@ -7297,6 +7350,7 @@ export class GuestPortalService {
       communicationEvents,
       publishedVisualLootBoxRefs,
       lootBoxUnlockEvents,
+      audienceMemberIds,
       activity,
     ] = await Promise.all([
       this.prisma.guestGroup.findMany({
@@ -7449,6 +7503,7 @@ export class GuestPortalService {
         guest?.id ?? null,
         profile?.id ?? null,
       ),
+      this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
       this.buildActivity(context.tenant.id, context.store.id, guest, profile),
     ]);
 
@@ -7488,6 +7543,9 @@ export class GuestPortalService {
     );
     const portalRewards = rewards.map(mapReward).sort(comparePortalRewards);
     const bonusHistory = this.buildBonusHistory(bonusLedgerRows);
+    const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
+      options.liveSessionStartResult,
+    );
     const portalLootBoxes = filterLootBoxesByVisualRefs(
       lootBoxes.filter((item) => matchesStore(item.storeIds, context.store.id)),
       publishedVisualLootBoxRefs,
@@ -7500,6 +7558,8 @@ export class GuestPortalService {
           lootBoxUnlockEvents,
           context.store.id,
           context.store.timeZone,
+          liveSessionStartUnlockEvent,
+          audienceMemberIds,
         ),
       );
     const portalMissions = visibleMissions.map((item) =>
@@ -12236,6 +12296,29 @@ function visualLootBoxRefsContain(
   );
 }
 
+function liveSessionStartResultToUnlockEvent(
+  result: GuestGameProcessEventResult | null | undefined,
+): GuestPortalLootBoxUnlockEventRow | null {
+  if (
+    !result ||
+    !guestGameTriggerMatches(result.event.eventType, 'SESSION_START')
+  ) {
+    return null;
+  }
+
+  const occurredAt = new Date(result.event.occurredAt);
+
+  if (Number.isNaN(occurredAt.getTime())) {
+    return null;
+  }
+
+  return {
+    eventType: result.event.eventType,
+    occurredAt,
+    payload: result.event.payload,
+  };
+}
+
 function mapLootBox(
   row: {
     id: string;
@@ -12245,6 +12328,8 @@ function mapLootBox(
     rewardType: string;
     manualApprovalRequired: boolean;
     note: string | null;
+    sessionType?: string | null;
+    audienceId?: string | null;
     limits: Prisma.JsonValue | null;
     periodRules: Prisma.JsonValue | null;
     probabilityRules: Prisma.JsonValue | null;
@@ -12253,6 +12338,8 @@ function mapLootBox(
   unlockEvents: GuestPortalLootBoxUnlockEventRow[],
   storeId: string,
   storeTimeZone: string | null,
+  liveSessionStartUnlockEvent: GuestPortalLootBoxUnlockEventRow | null = null,
+  audienceMemberIds: Set<string> = new Set(),
 ): GuestPortalLootBox {
   const rewardState = buildLootBoxRewardState(row.id, rewards);
   const openState = buildLootBoxOpenState(
@@ -12261,6 +12348,8 @@ function mapLootBox(
     unlockEvents,
     storeId,
     storeTimeZone,
+    liveSessionStartUnlockEvent,
+    audienceMemberIds,
   );
   const caseRarity = lootBoxCaseRarity(row.probabilityRules);
 
@@ -12296,6 +12385,8 @@ function buildLootBoxOpenState(
   row: {
     id: string;
     triggerKind: string;
+    sessionType?: string | null;
+    audienceId?: string | null;
     limits: Prisma.JsonValue | null;
     periodRules: Prisma.JsonValue | null;
   },
@@ -12303,6 +12394,8 @@ function buildLootBoxOpenState(
   unlockEvents: GuestPortalLootBoxUnlockEventRow[] = [],
   storeId: string | null = null,
   storeTimeZone: string | null = null,
+  liveSessionStartUnlockEvent: GuestPortalLootBoxUnlockEventRow | null = null,
+  audienceMemberIds: Set<string> = new Set(),
 ): Pick<
   GuestPortalLootBox,
   | 'openState'
@@ -12349,7 +12442,26 @@ function buildLootBoxOpenState(
       ).length
     : 0;
 
-  const unlockEvent = findLootBoxUnlockEvent(row, unlockEvents, storeId);
+  if (row.audienceId && !audienceMemberIds.has(row.audienceId)) {
+    return {
+      openState: 'WAITING_EVENT',
+      openable: false,
+      openBlocker: 'Лутбокс доступен другой аудитории гостей.',
+      weeklyOpenedCount,
+      weeklyLimit,
+      dailyOpenedCount,
+      dailyLimit,
+      periodicLimitPeriod,
+      periodicOpenedCount,
+    };
+  }
+
+  const unlockEvent = findLootBoxUnlockEvent(
+    row,
+    unlockEvents,
+    storeId,
+    liveSessionStartUnlockEvent,
+  );
 
   if (row.triggerKind !== GAME_APP_OPEN_EVENT_TYPE && !unlockEvent) {
     return {
@@ -12446,10 +12558,13 @@ function buildLootBoxOpenState(
 function findLootBoxUnlockEvent(
   row: {
     triggerKind: string;
+    sessionType?: string | null;
     limits: Prisma.JsonValue | null;
+    periodRules?: Prisma.JsonValue | null;
   },
   unlockEvents: GuestPortalLootBoxUnlockEventRow[],
   storeId: string | null,
+  liveSessionStartUnlockEvent: GuestPortalLootBoxUnlockEventRow | null = null,
 ) {
   if (row.triggerKind === GAME_APP_OPEN_EVENT_TYPE) {
     return null;
@@ -12457,30 +12572,219 @@ function findLootBoxUnlockEvent(
 
   const restartedAt = lootBoxRestartedAt(jsonRecord(row.limits));
 
+  if (guestGameTriggerMatches(row.triggerKind, 'SESSION_START')) {
+    return liveSessionStartUnlockEvent &&
+      lootBoxUnlockEventMatches(
+        row,
+        liveSessionStartUnlockEvent,
+        storeId,
+        restartedAt,
+      )
+      ? liveSessionStartUnlockEvent
+      : null;
+  }
+
   return (
-    unlockEvents.find((event) => {
-      if (!guestGameTriggerMatches(row.triggerKind, event.eventType)) {
-        return false;
-      }
+    unlockEvents.find((event) =>
+      lootBoxUnlockEventMatches(row, event, storeId, restartedAt),
+    ) ?? null
+  );
+}
 
-      const payload = jsonRecord(event.payload);
-      if (
-        stringField(payload.sourceFactKind) === GAME_LOOT_BOX_OPEN_SOURCE_KIND
-      ) {
-        return false;
-      }
+function lootBoxUnlockEventMatches(
+  row: {
+    triggerKind: string;
+    sessionType?: string | null;
+    periodRules?: Prisma.JsonValue | null;
+  },
+  event: GuestPortalLootBoxUnlockEventRow,
+  storeId: string | null,
+  restartedAt: Date | null,
+) {
+  if (!guestGameTriggerMatches(row.triggerKind, event.eventType)) {
+    return false;
+  }
 
-      if (
-        restartedAt &&
-        event.occurredAt.getTime() < restartedAt.getTime()
-      ) {
-        return false;
-      }
+  const payload = jsonRecord(event.payload);
+  if (stringField(payload.sourceFactKind) === GAME_LOOT_BOX_OPEN_SOURCE_KIND) {
+    return false;
+  }
 
-      const eventStoreId = portalEventToProgressEvent(event).storeId;
+  if (restartedAt && event.occurredAt.getTime() < restartedAt.getTime()) {
+    return false;
+  }
 
-      return !storeId || eventStoreId === storeId;
-    }) ?? null
+  const progressEvent = portalEventToProgressEvent(event);
+  const eventStoreId = progressEvent.storeId;
+
+  if (storeId && eventStoreId !== storeId) {
+    return false;
+  }
+
+  return (
+    lootBoxUnlockSessionMatches(row, progressEvent) &&
+    lootBoxUnlockTariffMatches(row.periodRules, progressEvent) &&
+    lootBoxUnlockGuestLogTypeMatches(row.periodRules, progressEvent)
+  );
+}
+
+function lootBoxUnlockSessionMatches(
+  row: {
+    triggerKind: string;
+    sessionType?: string | null;
+    periodRules?: Prisma.JsonValue | null;
+  },
+  event: GuestGameProgressEvent,
+) {
+  if (!guestGameTriggerMatches(row.triggerKind, 'SESSION_START')) {
+    return true;
+  }
+
+  const expectedType = stringField(row.sessionType);
+  if (expectedType && isGuestPortalActionableSessionType(expectedType)) {
+    if (!event.sessionType) {
+      return false;
+    }
+
+    if (
+      normalizeGuestPortalSessionType(expectedType) !==
+      normalizeGuestPortalSessionType(event.sessionType)
+    ) {
+      return false;
+    }
+  }
+
+  const packetMode =
+    stringField(jsonRecord(row.periodRules).packetMode)?.toUpperCase() ?? 'ANY';
+  if (packetMode === 'ANY' || packetMode === 'ALL') {
+    return true;
+  }
+
+  if (event.sessionPacket == null) {
+    return false;
+  }
+
+  if (packetMode === 'PACKET_ONLY') {
+    return event.sessionPacket === true;
+  }
+
+  if (packetMode === 'NON_PACKET_ONLY') {
+    return event.sessionPacket === false;
+  }
+
+  return true;
+}
+
+function lootBoxUnlockTariffMatches(
+  value: Prisma.JsonValue | null | undefined,
+  event: GuestGameProgressEvent,
+) {
+  const rules = jsonRecord(value);
+
+  return (
+    lootBoxUnlockStringConditionMatches(
+      stringValues(rules.tariffGroupIds, rules.tariffGroupId),
+      event.tariffGroupId,
+    ) &&
+    lootBoxUnlockStringConditionMatches(
+      stringValues(rules.tariffPeriodIds, rules.tariffPeriodId),
+      event.tariffPeriodId,
+    ) &&
+    lootBoxUnlockStringConditionMatches(
+      stringValues(rules.tariffTypeIds, rules.tariffTypeId),
+      event.tariffTypeId,
+    )
+  );
+}
+
+function lootBoxUnlockGuestLogTypeMatches(
+  value: Prisma.JsonValue | null | undefined,
+  event: GuestGameProgressEvent,
+) {
+  const rules = jsonRecord(value);
+  const allowedTypes = normalizedPortalGuestLogTypes(
+    stringValues(
+      rules.guestLogTypes,
+      rules.guestLogType,
+      rules.logTypes,
+      rules.logType,
+    ),
+  );
+  const blockedTypes = normalizedPortalGuestLogTypes(
+    stringValues(
+      rules.blockedGuestLogTypes,
+      rules.deniedGuestLogTypes,
+      rules.blockedLogTypes,
+      rules.deniedLogTypes,
+    ),
+  );
+
+  if (!allowedTypes.length && !blockedTypes.length) {
+    return true;
+  }
+
+  const actualType = event.guestLogType
+    ? normalizePortalGuestLogType(event.guestLogType)
+    : null;
+
+  if (!actualType || blockedTypes.includes(actualType)) {
+    return false;
+  }
+
+  return !allowedTypes.length || allowedTypes.includes(actualType);
+}
+
+function lootBoxUnlockStringConditionMatches(
+  expectedValues: string[],
+  actualValue: string | null | undefined,
+) {
+  const uniqueExpected = Array.from(new Set(expectedValues));
+
+  if (!uniqueExpected.length) {
+    return true;
+  }
+
+  return actualValue ? uniqueExpected.includes(actualValue) : false;
+}
+
+function stringValues(...values: unknown[]) {
+  return values.flatMap((value) => {
+    if (Array.isArray(value)) {
+      return unknownStringArray(value);
+    }
+
+    const single = stringField(value);
+    return single ? [single] : [];
+  });
+}
+
+function normalizedPortalGuestLogTypes(values: string[]) {
+  return Array.from(
+    new Set(values.map(normalizePortalGuestLogType).filter(Boolean)),
+  );
+}
+
+function normalizePortalGuestLogType(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeGuestPortalSessionType(value: string | null | undefined) {
+  const normalized = (value ?? '').trim().toLowerCase();
+
+  if (['packet_hours', 'packet', 'package', 'package_hours'].includes(normalized)) {
+    return 'packet_hours';
+  }
+
+  if (['regular_session', 'regular', 'common', 'default'].includes(normalized)) {
+    return 'regular_session';
+  }
+
+  return normalized;
+}
+
+function isGuestPortalActionableSessionType(value: string | null | undefined) {
+  return ['regular_session', 'packet_hours'].includes(
+    normalizeGuestPortalSessionType(value),
   );
 }
 

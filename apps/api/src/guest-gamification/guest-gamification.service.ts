@@ -8287,6 +8287,7 @@ export class GuestGamificationService {
       profileId: profile?.id ?? null,
       guestId: guest?.id ?? null,
     });
+    const audienceMemberIds = await this.getDryRunAudienceMemberIds(user, guest);
     const context: DryRunContext = {
       eventType,
       occurredAt,
@@ -8311,6 +8312,7 @@ export class GuestGamificationService {
       quantity,
       rewards,
       progressEvents,
+      audienceMemberIds,
     };
     const targetLootBoxes = lootBoxId
       ? lootBoxes.filter((item) => item.id === lootBoxId)
@@ -8657,25 +8659,6 @@ export class GuestGamificationService {
     }
 
     const occurredAt = liveSession.startedAt ?? new Date();
-    const eventReference = buildProcessExternalReference(
-      {
-        eventType: 'SESSION_START',
-        sourceFactId: liveSession.externalSessionId,
-        sourceFactKind: 'GUEST_SESSION',
-        externalProvider: IntegrationProvider.LANGAME,
-        externalDomain: liveSession.externalDomain,
-        externalId: liveSession.externalSessionId,
-      },
-      'SESSION_START',
-    );
-
-    if (
-      eventReference &&
-      (await this.findProcessEventByReference(user, eventReference))
-    ) {
-      return { result: null, cache: true };
-    }
-
     const result = await this.processEvent(user, {
       profileId: nullableId(dto.profileId),
       guestId,
@@ -9289,6 +9272,37 @@ export class GuestGamificationService {
     }
 
     return rows.map(storedEventToProgressEvent);
+  }
+
+  private async getDryRunAudienceMemberIds(
+    user: AuthenticatedUser,
+    guest: GuestGameProfile['guest'],
+  ): Promise<Set<string>> {
+    const ownerFilters: Prisma.GuestAudienceMemberWhereInput[] = [
+      ...(guest?.id ? [{ guestId: guest.id }] : []),
+      ...(guest?.externalGuestId
+        ? [
+            {
+              externalDomain: guest.externalDomain ?? '',
+              externalGuestId: guest.externalGuestId,
+            },
+          ]
+        : []),
+    ];
+
+    if (!ownerFilters.length) {
+      return new Set();
+    }
+
+    const rows = await this.prisma.guestAudienceMember.findMany({
+      where: {
+        tenantId: user.tenantId,
+        OR: ownerFilters,
+      },
+      select: { audienceId: true },
+    });
+
+    return new Set(rows.map((row) => row.audienceId));
   }
 
   private async resolveScheduledTenantActor(dto: {
@@ -16232,6 +16246,7 @@ type DryRunContext = {
   quantity: number | null;
   rewards: GuestGameReward[];
   progressEvents: GuestGameProgressEvent[];
+  audienceMemberIds: Set<string>;
 };
 
 function evaluateLootBoxDryRun(
@@ -16252,6 +16267,7 @@ function evaluateLootBoxDryRun(
   appendDryRunStatusCheck(rule.status, blockers, reasons);
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
   appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
+  appendDryRunAudienceCheck(rule, context, blockers, reasons);
   appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
   appendDryRunPeriodRules(
     rule.periodRules,
@@ -16283,9 +16299,6 @@ function evaluateLootBoxDryRun(
   );
   appendDryRunLootBoxLimits(rule, context, ruleRewards, blockers, reasons);
 
-  if (rule.audience) {
-    reasons.push(`Аудитория: ${rule.audience.name}`);
-  }
   if (rule.segment) {
     reasons.push(`Сегмент: ${rule.segment}`);
   }
@@ -16324,6 +16337,7 @@ function evaluateMissionDryRun(
   appendDryRunStatusCheck(rule.status, blockers, reasons);
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
   appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
+  appendDryRunAudienceCheck(rule, context, blockers, reasons);
   appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
   appendDryRunDateBounds(
     rule.periodFrom,
@@ -16348,9 +16362,6 @@ function evaluateMissionDryRun(
   );
   appendDryRunMissionLimits(rule, context, ruleRewards, blockers, reasons);
 
-  if (rule.audience) {
-    reasons.push(`Аудитория: ${rule.audience.name}`);
-  }
   if (rule.manualApprovalRequired) {
     reasons.push('Выдача требует подтверждения сотрудником');
   }
@@ -16386,6 +16397,7 @@ function evaluateSeasonDryRun(
 
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
+  appendDryRunAudienceCheck(rule, context, blockers, reasons);
   appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
   appendDryRunDateBounds(
     rule.periodFrom,
@@ -16397,9 +16409,6 @@ function evaluateSeasonDryRun(
   appendDryRunSeasonXpRules(rule.xpRules, context, blockers, reasons);
   appendDryRunBudgetCheck(rule.budgetAmount, 0, ruleRewards, blockers, reasons);
 
-  if (rule.audience) {
-    reasons.push(`Аудитория: ${rule.audience.name}`);
-  }
   if (rule.premiumEnabled) {
     reasons.push('Есть premium-дорожка');
   }
@@ -16465,6 +16474,31 @@ function appendDryRunProfileCheck(
   }
 
   reasons.push('Гость выбран для проверки');
+}
+
+function appendDryRunAudienceCheck(
+  rule: Pick<GuestGameRuleBase, 'audience'>,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  if (!rule.audience) {
+    return;
+  }
+
+  if (!context.guest) {
+    blockers.push(
+      `Гость не связан с Langame, нельзя проверить аудиторию: ${rule.audience.name}`,
+    );
+    return;
+  }
+
+  if (!context.audienceMemberIds.has(rule.audience.id)) {
+    blockers.push(`Гость не входит в аудиторию: ${rule.audience.name}`);
+    return;
+  }
+
+  reasons.push(`Аудитория подходит: ${rule.audience.name}`);
 }
 
 function appendDryRunTriggerCheck(

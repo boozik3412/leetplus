@@ -102,6 +102,9 @@ function createPrismaMock() {
     guest: {
       findMany: jest.fn(),
     },
+    guestAudienceMember: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     guestGroup: {
       findMany: jest.fn(),
     },
@@ -4113,6 +4116,107 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('blocks a loot box when the selected audience does not include the guest', async () => {
+      const { service, prisma } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          audience: {
+            id: 'audience-vip',
+            name: 'VIP guests',
+            description: null,
+            guestsCount: 1,
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      prisma.guestAudienceMember.findMany.mockResolvedValue([
+        { audienceId: 'audience-regular' },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 0,
+        blockedRules: 1,
+      });
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        kind: 'LOOT_BOX',
+        eligible: false,
+        blockers: expect.arrayContaining([
+          expect.stringContaining('VIP guests'),
+        ]),
+      });
+    });
+
+    it('allows a loot box when the selected audience includes the guest', async () => {
+      const { service, prisma } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          audience: {
+            id: 'audience-vip',
+            name: 'VIP guests',
+            description: null,
+            guestsCount: 1,
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      prisma.guestAudienceMember.findMany.mockResolvedValue([
+        { audienceId: 'audience-vip' },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(prisma.guestAudienceMember.findMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: user.tenantId,
+          OR: [
+            { guestId: 'guest-1' },
+            {
+              externalDomain: 'club-1',
+              externalGuestId: 'lg-guest-1',
+            },
+          ],
+        },
+        select: { audienceId: true },
+      });
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 1,
+        blockedRules: 0,
+      });
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        kind: 'LOOT_BOX',
+        eligible: true,
+        reasons: expect.arrayContaining([
+          expect.stringContaining('VIP guests'),
+        ]),
+      });
+    });
+
     it('blocks a mission until the configured progress metric reaches its target', async () => {
       const { service } = createService();
 
@@ -4685,7 +4789,7 @@ describe('GuestGamificationService', () => {
       expect(findActiveSessionSpy).toHaveBeenCalledTimes(2);
     });
 
-    it('caches an already processed live session and skips processEvent', async () => {
+    it('caches an already processed live session and returns the idempotent event', async () => {
       const { service } = createService();
 
       jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
@@ -4716,25 +4820,45 @@ describe('GuestGamificationService', () => {
           store: null,
           raw: {},
         });
-      const existingEventSpy = jest
-        .spyOn(service as any, 'findProcessEventByReference')
-        .mockResolvedValue({ id: 'event-1' });
-      const processEventSpy = jest.spyOn(service, 'processEvent');
+      const processEventSpy = jest.spyOn(service, 'processEvent').mockResolvedValue({
+        processed: true,
+        dryRun: {},
+        event: {
+          eventType: 'SESSION_START',
+          occurredAt: '2026-06-10T09:45:00.000Z',
+          payload: {
+            sourceFactKind: 'GUEST_SESSION',
+            store: { id: 'store-1' },
+            input: {
+              sessionType: 'regular_session',
+              sessionPacket: false,
+              sessionMinutes: 15,
+            },
+          },
+        },
+        rewards: [],
+        summary: {
+          idempotent: true,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+        },
+      } as any);
 
-      await service.processLiveSessionStart(user, {
+      const first = await service.processLiveSessionStart(user, {
         profileId: 'profile-1',
         guestId: 'guest-1',
         storeId: 'store-1',
       });
-      await service.processLiveSessionStart(user, {
+      const second = await service.processLiveSessionStart(user, {
         profileId: 'profile-1',
         guestId: 'guest-1',
         storeId: 'store-1',
       });
 
       expect(findActiveSessionSpy).toHaveBeenCalledTimes(1);
-      expect(existingEventSpy).toHaveBeenCalledTimes(1);
-      expect(processEventSpy).not.toHaveBeenCalled();
+      expect(processEventSpy).toHaveBeenCalledTimes(1);
+      expect(first?.summary.idempotent).toBe(true);
+      expect(second).toBe(first);
     });
 
     it('matches an open Langame session by real_guest_id', async () => {

@@ -8537,7 +8537,7 @@ const clubHomeCss = `
 
 .lp-club-battlepass-reward-copy {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -8545,20 +8545,22 @@ const clubHomeCss = `
   display: -webkit-box;
   overflow: hidden;
   color: var(--text);
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.18;
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.14;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
 }
 
 .lp-club-battlepass-reward-copy small {
   display: -webkit-box;
   overflow: hidden;
   color: var(--quiet);
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.25;
+  font-size: 8.5px;
+  font-weight: 740;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }

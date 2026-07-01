@@ -1109,7 +1109,7 @@ const defaultPromoBannerForm: PromoBannerForm = {
   actionUrl: "",
   imageUrl: "",
   imageSource: "",
-  imageScale: "1.15",
+  imageScale: "1",
   imageOffsetX: "0",
   imageOffsetY: "0",
 };
@@ -7934,6 +7934,9 @@ function PromoBannerImageEditor({
   setForm: (form: PromoBannerForm) => void;
 }) {
   const [editorOpen, setEditorOpen] = useState(false);
+  const [editorSnapshot, setEditorSnapshot] = useState<PromoBannerForm | null>(
+    null,
+  );
   const [dragState, setDragState] = useState<PromoBannerDragState | null>(null);
   const source = form.imageSource || form.imageUrl;
   const scale = Number(form.imageScale) || 1;
@@ -7952,7 +7955,7 @@ function PromoBannerImageEditor({
         ...form,
         imageSource,
         imageUrl: "",
-        imageScale: "1.15",
+        imageScale: "1",
         imageOffsetX: "0",
         imageOffsetY: "0",
       });
@@ -7964,6 +7967,8 @@ function PromoBannerImageEditor({
     if (!source) {
       return;
     }
+
+    setEditorSnapshot(form);
 
     if (!form.imageSource) {
       setForm({
@@ -7978,6 +7983,15 @@ function PromoBannerImageEditor({
     setEditorOpen(true);
   }
 
+  function closeEditor() {
+    if (editorSnapshot) {
+      setForm(editorSnapshot);
+      setEditorSnapshot(null);
+    }
+
+    setEditorOpen(false);
+  }
+
   async function applyCrop(closeEditor = false) {
     const imageUrl = await renderPromoBannerImage(form);
     setForm({
@@ -7985,6 +7999,7 @@ function PromoBannerImageEditor({
       imageUrl,
       imageSource: "",
     });
+    setEditorSnapshot(null);
 
     if (closeEditor) {
       setEditorOpen(false);
@@ -8001,7 +8016,7 @@ function PromoBannerImageEditor({
   function resetCrop() {
     setForm({
       ...form,
-      imageScale: "1.15",
+      imageScale: "1",
       imageOffsetX: "0",
       imageOffsetY: "0",
     });
@@ -8109,7 +8124,7 @@ function PromoBannerImageEditor({
               <button
                 type="button"
                 className={smallButtonClass}
-                onClick={() => setEditorOpen(false)}
+                onClick={closeEditor}
               >
                 Закрыть
               </button>
@@ -8409,7 +8424,7 @@ function promoBannerPreviewTitleSize(title: string) {
 
 function clampPromoBannerScale(value: number) {
   if (!Number.isFinite(value)) {
-    return 1.15;
+    return 1;
   }
 
   return Math.min(3, Math.max(1, value));
@@ -12765,7 +12780,7 @@ function promoCardToForm(promoCard: GuestGamePromoCard): PromoBannerForm {
     actionUrl: metadataString(metadata, "actionUrl") ?? "",
     imageUrl: metadataString(metadata, "imageUrl") ?? "",
     imageSource: "",
-    imageScale: String(numberMetadata(crop, "scale", 1.15)),
+    imageScale: String(numberMetadata(crop, "scale", 1)),
     imageOffsetX: String(numberMetadata(crop, "offsetX", 0)),
     imageOffsetY: String(numberMetadata(crop, "offsetY", 0)),
   };
@@ -13262,11 +13277,15 @@ async function renderPromoBannerImage(form: PromoBannerForm) {
     return "";
   }
 
+  if (!form.imageSource) {
+    return form.imageUrl;
+  }
+
   if (typeof window === "undefined") {
     return form.imageUrl || source;
   }
 
-  if (!form.imageSource && !isInlineImageSource(source)) {
+  if (!isInlineImageSource(source)) {
     throw new Error(
       "Картинка баннера должна храниться в LeetPlus. Загрузите изображение файлом и сохраните баннер еще раз.",
     );

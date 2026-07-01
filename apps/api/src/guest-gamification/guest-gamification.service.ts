@@ -116,6 +116,7 @@ const snapshotFactSources = [
 ] as const;
 const tariffSnapshotFreshMs = 24 * 60 * 60 * 1000;
 const gameEffectWindowDays = 14;
+const defaultGuestGameTimeZone = 'Asia/Yekaterinburg';
 const tariffSnapshotDefinitions = [
   {
     endpointKey: 'tariffsByDays',
@@ -6294,18 +6295,69 @@ export class GuestGamificationService {
     }
 
     const store = await this.resolveVisualEditorStore(user, dto.storeId);
-    const row = await this.prisma.guestGameVisualDraft.findFirst({
-      where: {
-        tenantId: user.tenantId,
-        storeId: store.id,
-        status: 'DRAFT',
-      },
-      include: visualDraftInclude,
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-    });
+    const [draftRow, publishedRow] = await Promise.all([
+      this.prisma.guestGameVisualDraft.findFirst({
+        where: {
+          tenantId: user.tenantId,
+          storeId: store.id,
+          status: 'DRAFT',
+        },
+        include: visualDraftInclude,
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      }),
+      this.prisma.guestGameVisualDraft.findFirst({
+        where: {
+          tenantId: user.tenantId,
+          storeId: store.id,
+          status: 'PUBLISHED',
+        },
+        include: visualDraftInclude,
+        orderBy: [{ publishedAt: 'desc' }, { updatedAt: 'desc' }],
+      }),
+    ]);
 
-    if (row) {
-      return mapVisualDraft(row);
+    if (draftRow) {
+      const publishedTime =
+        publishedRow?.publishedAt?.getTime() ??
+        publishedRow?.updatedAt.getTime() ??
+        null;
+      const draftIsBehindPublished =
+        publishedTime !== null && draftRow.updatedAt.getTime() < publishedTime;
+      const draftWasNotEdited =
+        draftRow.createdAt.getTime() === draftRow.updatedAt.getTime();
+
+      if (draftIsBehindPublished || draftWasNotEdited) {
+        const livePayload = await this.buildVisualEditorPayloadFromLive(
+          user,
+          store.id,
+        );
+
+        if (!visualEditorPayloadEquals(draftRow.payload, livePayload)) {
+          return mapVisualDraft(
+            await this.prisma.guestGameVisualDraft.update({
+              where: { id: draftRow.id },
+              data: {
+                payload: livePayload,
+                updatedByUserId: actorUserId(user),
+              },
+              include: visualDraftInclude,
+            }),
+          );
+        }
+      }
+
+      return mapVisualDraft(draftRow);
+    }
+
+    if (publishedRow) {
+      return mapVisualDraft(
+        await this.upsertVisualEditorDraft(
+          user,
+          store,
+          await this.buildVisualEditorPayloadFromLive(user, store.id),
+          null,
+        ),
+      );
     }
 
     return mapVisualDraft(await this.createVisualEditorDraft(user, store));
@@ -6941,13 +6993,13 @@ export class GuestGamificationService {
     const season =
       seasons.find(
         (item) =>
-          this.visualEditorSeasonSource(item) &&
-          ruleMatchesPilotStore(item, storeId),
+          ruleMatchesPilotStore(item, storeId) &&
+          visualRulePeriodIsActive(item.periodFrom, item.periodTo),
       ) ?? null;
     const checkInMission = missions.find(
       (item) =>
-        this.visualEditorMissionSource(item) &&
         item.status === 'ACTIVE' &&
+        visualRulePeriodIsActive(item.periodFrom, item.periodTo) &&
         (item.missionType === 'CHECK_IN' || item.triggerKind === 'CHECK_IN') &&
         ruleMatchesStoreIds(item.storeIds, storeId),
     );
@@ -6956,50 +7008,30 @@ export class GuestGamificationService {
       version: 1,
       battlePass: visualBattlePassFromSeason(season),
       lootBoxes: lootBoxes
-        .filter(
-          (item) =>
-            this.visualEditorLootBoxSource(item) &&
-            ruleMatchesPilotStore(item, storeId),
-        )
+        .filter((item) => ruleMatchesPilotStore(item, storeId))
         .slice(0, 8)
         .map(visualLootBoxFromRule),
       missions: missions
         .filter(
           (item) =>
-            this.visualEditorMissionSource(item) &&
             item.missionType !== 'CHECK_IN' &&
             item.triggerKind !== 'CHECK_IN' &&
-            ruleMatchesPilotStore(item, storeId),
+            ruleMatchesPilotStore(item, storeId) &&
+            visualRulePeriodIsActive(item.periodFrom, item.periodTo),
         )
         .slice(0, 8)
         .map(visualMissionFromRule),
       promoCards: promoCards
         .filter(
           (item) =>
-            this.visualEditorPromoSource(item) &&
             item.status === 'ACTIVE' &&
+            visualRulePeriodIsActive(item.periodFrom, item.periodTo) &&
             ruleMatchesStoreIds(item.storeIds, storeId),
         )
         .slice(0, promoBannerDisplayLimit)
         .map(visualPromoFromRule),
       checkIn: visualCheckInFromMission(checkInMission ?? null),
     });
-  }
-
-  private visualEditorSeasonSource(rule: GuestGameSeason) {
-    return visualEditorSourceRecord(rule.xpRules);
-  }
-
-  private visualEditorLootBoxSource(rule: GuestGameLootBox) {
-    return visualEditorSourceRecord(rule.periodRules);
-  }
-
-  private visualEditorMissionSource(rule: GuestGameMission) {
-    return visualEditorSourceRecord(rule.conditions);
-  }
-
-  private visualEditorPromoSource(rule: GuestGamePromoCard) {
-    return visualEditorSourceRecord(rule.metadata);
   }
 
   private async materializeVisualEditorPayload(
@@ -8250,6 +8282,7 @@ export class GuestGamificationService {
     const store = dto.storeId
       ? await this.assertStore(user, dto.storeId)
       : null;
+    const timeZone = guestGameTimeZone(store?.timeZone ?? null);
     const progressEvents = await this.getDryRunProgressEvents(user, {
       profileId: profile?.id ?? null,
       guestId: guest?.id ?? null,
@@ -8260,6 +8293,7 @@ export class GuestGamificationService {
       profile,
       guest,
       storeId: store?.id ?? null,
+      timeZone,
       sessionType,
       sessionPacket,
       sessionMinutes,
@@ -12050,6 +12084,36 @@ function visualEditorVisiblePromoCards(
   return payload.promoCards
     .filter((item) => visualEditorPromoCardCanAppear(item, now))
     .slice(0, promoBannerDisplayLimit);
+}
+
+function visualEditorPayloadEquals(
+  left: Prisma.JsonValue | GuestGameVisualEditorPayload | null,
+  right: GuestGameVisualEditorPayload,
+) {
+  return (
+    JSON.stringify(normalizeVisualEditorPayload(left)) ===
+    JSON.stringify(normalizeVisualEditorPayload(right))
+  );
+}
+
+function visualRulePeriodIsActive(
+  periodFrom: string | null,
+  periodTo: string | null,
+  now = new Date(),
+) {
+  const nowMs = now.getTime();
+  const fromMs = dateTimestampOrNull(periodFrom);
+  const toMs = dateTimestampOrNull(periodTo);
+
+  if (fromMs !== null && fromMs > nowMs) {
+    return false;
+  }
+
+  if (toMs !== null && toMs < nowMs) {
+    return false;
+  }
+
+  return true;
 }
 
 function visualEditorPromoCardCanAppear(
@@ -16150,6 +16214,7 @@ type DryRunContext = {
   profile: GuestGameProfile | null;
   guest: GuestGameProfile['guest'];
   storeId: string | null;
+  timeZone: string;
   sessionType: string | null;
   sessionPacket: boolean | null;
   sessionMinutes: number;
@@ -16191,6 +16256,7 @@ function evaluateLootBoxDryRun(
   appendDryRunPeriodRules(
     rule.periodRules,
     context.occurredAt,
+    context.timeZone,
     blockers,
     reasons,
   );
@@ -16500,12 +16566,14 @@ function appendDryRunStoreCheck(
 function appendDryRunPeriodRules(
   value: unknown,
   occurredAt: Date,
+  timeZone: string,
   blockers: string[],
   reasons: string[],
 ) {
   const rules = dryRunRecord(value);
   const weekdays = dryRunNumberArray(rules.weekdays);
-  const weekday = occurredAt.getDay();
+  const localTime = dryRunLocalTimeParts(occurredAt, timeZone);
+  const weekday = localTime.weekday;
   const weekdaysOnly = rules.weekdaysOnly === true;
 
   if (weekdays.length && !weekdays.includes(weekday)) {
@@ -16521,7 +16589,11 @@ function appendDryRunPeriodRules(
     return;
   }
 
-  if (hours.some((window) => dryRunIsWithinTimeWindow(occurredAt, window))) {
+  if (
+    hours.some((window) =>
+      dryRunIsWithinTimeWindow(localTime.minutesOfDay, window),
+    )
+  ) {
     reasons.push(`Время входит в окно ${hours.join(', ')}`);
   } else {
     blockers.push(`Время не входит в окно ${hours.join(', ')}`);
@@ -16940,6 +17012,7 @@ function appendDryRunLootBoxLimits(
         reward.qualifiedAt,
         context.occurredAt,
         periodicLimit,
+        context.timeZone,
       ),
     ).length;
 
@@ -16976,7 +17049,7 @@ function appendDryRunLootBoxLimits(
 
   if (totalPerDay != null) {
     const dayCount = limitRewards.filter((reward) =>
-      dryRunIsSameDay(reward.qualifiedAt, context.occurredAt),
+      dryRunIsSameDay(reward.qualifiedAt, context.occurredAt, context.timeZone),
     ).length;
 
     if (dayCount >= totalPerDay) {
@@ -17385,7 +17458,108 @@ function dryRunDateOrNull(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function dryRunIsWithinTimeWindow(date: Date, window: string) {
+function guestGameTimeZone(value: string | null | undefined) {
+  const normalized = nullableString(value) ?? defaultGuestGameTimeZone;
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: normalized }).format(
+      new Date(),
+    );
+
+    return normalized;
+  } catch {
+    return defaultGuestGameTimeZone;
+  }
+}
+
+function dryRunLocalTimeParts(value: Date, timeZone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(value);
+    const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+    const weekday = dryRunWeekdayNumber(valueByType.get('weekday'));
+    const hour = Number(valueByType.get('hour'));
+    const minute = Number(valueByType.get('minute'));
+
+    return {
+      weekday: weekday ?? value.getUTCDay(),
+      minutesOfDay:
+        (Number.isFinite(hour) ? hour % 24 : value.getUTCHours()) * 60 +
+        (Number.isFinite(minute) ? minute : value.getUTCMinutes()),
+    };
+  } catch {
+    return {
+      weekday: value.getUTCDay(),
+      minutesOfDay: value.getUTCHours() * 60 + value.getUTCMinutes(),
+    };
+  }
+}
+
+function dryRunLocalDateKey(value: Date, timeZone: string) {
+  const parts = dryRunLocalDateParts(value, timeZone);
+
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(
+    parts.day,
+  ).padStart(2, '0')}`;
+}
+
+function dryRunLocalMonthKey(value: Date, timeZone: string) {
+  const parts = dryRunLocalDateParts(value, timeZone);
+
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}`;
+}
+
+function dryRunLocalDateParts(value: Date, timeZone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+
+    return {
+      year: Number(valueByType.get('year')),
+      month: Number(valueByType.get('month')),
+      day: Number(valueByType.get('day')),
+    };
+  } catch {
+    return {
+      year: value.getUTCFullYear(),
+      month: value.getUTCMonth() + 1,
+      day: value.getUTCDate(),
+    };
+  }
+}
+
+function dryRunWeekdayNumber(value: string | undefined) {
+  switch (value) {
+    case 'Sun':
+      return 0;
+    case 'Mon':
+      return 1;
+    case 'Tue':
+      return 2;
+    case 'Wed':
+      return 3;
+    case 'Thu':
+      return 4;
+    case 'Fri':
+      return 5;
+    case 'Sat':
+      return 6;
+    default:
+      return null;
+  }
+}
+
+function dryRunIsWithinTimeWindow(minutesOfDay: number, window: string) {
   const [from, to] = window.split('-').map((part) => part.trim());
   const fromMinutes = dryRunTimeToMinutes(from);
   const toMinutes = dryRunTimeToMinutes(to);
@@ -17394,13 +17568,11 @@ function dryRunIsWithinTimeWindow(date: Date, window: string) {
     return true;
   }
 
-  const currentMinutes = date.getHours() * 60 + date.getMinutes();
-
   if (fromMinutes <= toMinutes) {
-    return currentMinutes >= fromMinutes && currentMinutes <= toMinutes;
+    return minutesOfDay >= fromMinutes && minutesOfDay <= toMinutes;
   }
 
-  return currentMinutes >= fromMinutes || currentMinutes <= toMinutes;
+  return minutesOfDay >= fromMinutes || minutesOfDay <= toMinutes;
 }
 
 function dryRunTimeToMinutes(value: string | undefined) {
@@ -17417,13 +17589,16 @@ function dryRunTimeToMinutes(value: string | undefined) {
   return hours * 60 + minutes;
 }
 
-function dryRunIsSameDay(value: string, reference: Date) {
+function dryRunIsSameDay(
+  value: string,
+  reference: Date,
+  timeZone: string,
+) {
   const date = new Date(value);
 
   return (
-    date.getFullYear() === reference.getFullYear() &&
-    date.getMonth() === reference.getMonth() &&
-    date.getDate() === reference.getDate()
+    dryRunLocalDateKey(date, timeZone) ===
+    dryRunLocalDateKey(reference, timeZone)
   );
 }
 
@@ -17434,12 +17609,16 @@ function dryRunIsWithinLastDays(value: string, reference: Date, days: number) {
   return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
 }
 
-function dryRunIsSameMonth(value: string, reference: Date) {
+function dryRunIsSameMonth(
+  value: string,
+  reference: Date,
+  timeZone: string,
+) {
   const date = new Date(value);
 
   return (
-    date.getFullYear() === reference.getFullYear() &&
-    date.getMonth() === reference.getMonth()
+    dryRunLocalMonthKey(date, timeZone) ===
+    dryRunLocalMonthKey(reference, timeZone)
   );
 }
 
@@ -17447,13 +17626,14 @@ function dryRunIsWithinLootBoxPeriod(
   value: string,
   reference: Date,
   period: LootBoxPeriodicLimitPeriod,
+  timeZone: string,
 ) {
   if (period === 'DAILY') {
-    return dryRunIsSameDay(value, reference);
+    return dryRunIsSameDay(value, reference, timeZone);
   }
 
   if (period === 'MONTHLY') {
-    return dryRunIsSameMonth(value, reference);
+    return dryRunIsSameMonth(value, reference, timeZone);
   }
 
   return dryRunIsWithinLastDays(value, reference, 7);

@@ -523,6 +523,12 @@ function VisualPreview({
   const activePromos = payload.promoCards
     .filter((item) => item.status === "ACTIVE")
     .slice(0, PROMO_BANNER_ACTIVE_LIMIT);
+  const activeLootBoxes = payload.lootBoxes.filter(
+    (item) => item.status === "ACTIVE",
+  );
+  const activeMissions = payload.missions.filter(
+    (item) => item.status === "ACTIVE",
+  );
   const levels = Array.from(
     { length: payload.battlePass.levelCount },
     (_, index) => {
@@ -570,7 +576,7 @@ function VisualPreview({
             onClick={() => onSelect("promoCards")}
           >
             <div className="grid gap-3 md:grid-cols-4">
-              {(activePromos.length ? activePromos : fallbackPromos()).map(
+              {activePromos.map(
                 (promo, index) => (
                   <article
                     key={`${promo.title}-${index}`}
@@ -597,6 +603,12 @@ function VisualPreview({
                 ),
               )}
             </div>
+            {!activePromos.length ? (
+              <PreviewEmptyState
+                className="mt-3"
+                label="Активные баннеры не опубликованы"
+              />
+            ) : null}
           </button>
 
           <button
@@ -610,7 +622,7 @@ function VisualPreview({
                   Лутбоксы
                 </p>
                 <h4 className="mt-1 text-2xl font-black">
-                  {payload.lootBoxes.filter((item) => item.status === "ACTIVE").length || 0} активных
+                  {activeLootBoxes.length} активных
                 </h4>
               </div>
               <span className="rounded-full border border-[#c4e0e524] px-3 py-1 text-xs text-[#a8b9ba]">
@@ -618,7 +630,7 @@ function VisualPreview({
               </span>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {(payload.lootBoxes.length ? payload.lootBoxes : fallbackLootBoxes()).slice(0, 3).map((lootBox) => (
+              {activeLootBoxes.slice(0, 3).map((lootBox) => (
                 <div
                   key={lootBox.id ?? lootBox.title}
                   className="rounded-lg border border-[#c4e0e524] bg-[#02080b] p-4"
@@ -642,6 +654,12 @@ function VisualPreview({
                 </div>
               ))}
             </div>
+            {!activeLootBoxes.length ? (
+              <PreviewEmptyState
+                className="mt-4"
+                label="Нет активных лутбоксов"
+              />
+            ) : null}
           </button>
 
           <button
@@ -655,28 +673,39 @@ function VisualPreview({
                   Battle Pass
                 </p>
                 <h4 className="mt-1 text-2xl font-black">
-                  {payload.battlePass.title || "Сезон клуба"}
+                  {payload.battlePass.enabled
+                    ? payload.battlePass.title || "Сезон клуба"
+                    : "Battle Pass выключен"}
                 </h4>
               </div>
-              <span className="rounded-full border border-[#d0aa6c66] px-3 py-1 text-xs font-black text-[#d0aa6c]">
-                Главный приз: {payload.battlePass.mainPrize || "не задан"}
-              </span>
+              {payload.battlePass.enabled ? (
+                <span className="rounded-full border border-[#d0aa6c66] px-3 py-1 text-xs font-black text-[#d0aa6c]">
+                  Главный приз: {payload.battlePass.mainPrize || "не задан"}
+                </span>
+              ) : null}
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-              {levels.slice(0, 12).map((level) => (
-                <div
-                  key={level.level}
-                  className="rounded-lg border border-[#c4e0e524] bg-[#061014] p-3"
-                >
-                  <span className="grid size-8 place-items-center rounded-full bg-[#83e4ec] text-sm font-black text-black">
-                    {level.level}
-                  </span>
-                  <p className="mt-3 text-xs text-[#a8b9ba]">
-                    {level.reward || `${payload.battlePass.xpPerLevel * level.level} XP`}
-                  </p>
-                </div>
-              ))}
-            </div>
+            {payload.battlePass.enabled ? (
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                {levels.slice(0, 12).map((level) => (
+                  <div
+                    key={level.level}
+                    className="rounded-lg border border-[#c4e0e524] bg-[#061014] p-3"
+                  >
+                    <span className="grid size-8 place-items-center rounded-full bg-[#83e4ec] text-sm font-black text-black">
+                      {level.level}
+                    </span>
+                    <p className="mt-3 text-xs text-[#a8b9ba]">
+                      {level.reward || `${payload.battlePass.xpPerLevel * level.level} XP`}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <PreviewEmptyState
+                className="mt-5"
+                label="Сезон для клуба не опубликован"
+              />
+            )}
           </button>
 
           <button
@@ -687,11 +716,11 @@ function VisualPreview({
             <div className="flex items-center justify-between">
               <h4 className="text-2xl font-black">Задания</h4>
               <span className="text-xs font-black uppercase tracking-[0.16em] text-[#83e4ec]">
-                {payload.missions.length} шт.
+                {activeMissions.length} шт.
               </span>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {(payload.missions.length ? payload.missions : fallbackMissions()).slice(0, 4).map((mission) => (
+              {activeMissions.slice(0, 4).map((mission) => (
                 <div
                   key={mission.id ?? mission.title}
                   className="rounded-lg border border-[#c4e0e524] bg-[#02080b] p-4"
@@ -703,6 +732,12 @@ function VisualPreview({
                 </div>
               ))}
             </div>
+            {!activeMissions.length ? (
+              <PreviewEmptyState
+                className="mt-4"
+                label="Нет активных заданий"
+              />
+            ) : null}
           </button>
         </div>
 
@@ -3049,6 +3084,25 @@ function PreviewMetric({ label, value }: { label: string; value: string }) {
         {label}
       </p>
       <p className="mt-1 text-lg font-black">{value}</p>
+    </div>
+  );
+}
+
+function PreviewEmptyState({
+  label,
+  className = "",
+}: {
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={[
+        "rounded-lg border border-dashed border-[#c4e0e524] bg-[#02080b] px-4 py-6 text-sm font-bold text-[#a8b9ba]",
+        className,
+      ].join(" ")}
+    >
+      {label}
     </div>
   );
 }

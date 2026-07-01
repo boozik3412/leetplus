@@ -7520,6 +7520,28 @@ const clubHomeCss = `
   max-height: min(760px, calc(100vh - 44px));
   overflow-y: auto;
   gap: 12px;
+  border-color: rgba(131, 228, 236, 0.34);
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.1), transparent 44%),
+    rgba(5, 12, 14, 0.98);
+}
+
+.lp-battlepass-detail-overlay {
+  background:
+    radial-gradient(circle at 50% 40%, rgba(131, 228, 236, 0.16), transparent 34%),
+    rgba(0, 0, 0, 0.72);
+}
+
+.lp-battlepass-detail-dialog .lp-quest-complete-kicker {
+  border-color: rgba(131, 228, 236, 0.34);
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+}
+
+.lp-battlepass-detail-dialog .lp-quest-complete-close {
+  border-color: rgba(131, 228, 236, 0.18);
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.045);
 }
 
 .lp-battlepass-detail-season {
@@ -7573,7 +7595,7 @@ const clubHomeCss = `
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--cyan), var(--amber));
+  background: linear-gradient(90deg, var(--cyan), var(--teal));
 }
 
 .lp-battlepass-detail-block,
@@ -7607,7 +7629,26 @@ const clubHomeCss = `
 }
 
 .lp-battlepass-planned-reward strong {
-  color: var(--amber);
+  color: var(--cyan);
+}
+
+.lp-battlepass-detail-dialog .lp-battlepass-planned-reward {
+  border-color: rgba(131, 228, 236, 0.18);
+  background: rgba(131, 228, 236, 0.045);
+}
+
+.lp-battlepass-detail-dialog .lp-quest-complete-action {
+  border-color: rgba(131, 228, 236, 0.44);
+  color: #001012;
+  background: linear-gradient(135deg, var(--cyan), var(--teal));
+  box-shadow: 0 12px 34px rgba(84, 191, 198, 0.16);
+}
+
+.lp-battlepass-detail-dialog .lp-quest-complete-action:hover,
+.lp-battlepass-detail-dialog .lp-quest-complete-action:focus-visible {
+  border-color: rgba(131, 228, 236, 0.76);
+  color: #001012;
+  transform: translateY(-1px);
 }
 
 .lp-battlepass-received-card {

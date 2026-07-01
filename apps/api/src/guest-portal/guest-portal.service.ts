@@ -79,6 +79,7 @@ const LOOTBOX_CASE_RARITY_LABELS = {
 
 type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
 type GuestPortalLootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
+const DEFAULT_GUEST_GAME_TIME_ZONE = 'Asia/Yekaterinburg';
 const USER_CALL_PROVIDER_SMS_RU_CALLCHECK = 'SMS_RU_CALLCHECK';
 const SMS_RU_CALLCHECK_BASE_URL = 'https://sms.ru';
 const SMS_RU_CALLCHECK_TTL_MINUTES = 5;
@@ -335,6 +336,7 @@ type TenantStoreContext = {
     publicSlug: string | null;
     name: string;
     address: string | null;
+    timeZone: string | null;
     externalDomain: string | null;
     externalClubId: string | null;
     integrationSourceId: string | null;
@@ -3665,6 +3667,7 @@ export class GuestPortalService {
       currentRewards,
       unlockEvents,
       context.store.id,
+      context.store.timeZone,
     );
     const unlockEvent = findLootBoxUnlockEvent(
       lootBox,
@@ -7491,7 +7494,13 @@ export class GuestPortalService {
     )
       .slice(0, 6)
       .map((item) =>
-        mapLootBox(item, rewards, lootBoxUnlockEvents, context.store.id),
+        mapLootBox(
+          item,
+          rewards,
+          lootBoxUnlockEvents,
+          context.store.id,
+          context.store.timeZone,
+        ),
       );
     const portalMissions = visibleMissions.map((item) =>
       mapMission(item, missionProgress.get(item.id), rewards, bonusLedgerRows),
@@ -8124,6 +8133,7 @@ export class GuestPortalService {
             publicSlug: true,
             name: true,
             address: true,
+            timeZone: true,
             externalDomain: true,
             externalClubId: true,
             integrationSourceId: true,
@@ -8172,6 +8182,7 @@ export class GuestPortalService {
             publicSlug: true,
             name: true,
             address: true,
+            timeZone: true,
             externalDomain: true,
             externalClubId: true,
             integrationSourceId: true,
@@ -12235,11 +12246,13 @@ function mapLootBox(
     manualApprovalRequired: boolean;
     note: string | null;
     limits: Prisma.JsonValue | null;
+    periodRules: Prisma.JsonValue | null;
     probabilityRules: Prisma.JsonValue | null;
   },
   rewards: GuestPortalRewardRow[],
   unlockEvents: GuestPortalLootBoxUnlockEventRow[],
   storeId: string,
+  storeTimeZone: string | null,
 ): GuestPortalLootBox {
   const rewardState = buildLootBoxRewardState(row.id, rewards);
   const openState = buildLootBoxOpenState(
@@ -12247,6 +12260,7 @@ function mapLootBox(
     rewards,
     unlockEvents,
     storeId,
+    storeTimeZone,
   );
   const caseRarity = lootBoxCaseRarity(row.probabilityRules);
 
@@ -12283,10 +12297,12 @@ function buildLootBoxOpenState(
     id: string;
     triggerKind: string;
     limits: Prisma.JsonValue | null;
+    periodRules: Prisma.JsonValue | null;
   },
   rewards: GuestPortalRewardRow[],
   unlockEvents: GuestPortalLootBoxUnlockEventRow[] = [],
   storeId: string | null = null,
+  storeTimeZone: string | null = null,
 ): Pick<
   GuestPortalLootBox,
   | 'openState'
@@ -12304,12 +12320,9 @@ function buildLootBoxOpenState(
   const dailyLimit = positiveIntOrNull(limits.totalPerDay);
   const periodicLimitPeriod = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
   const now = new Date();
+  const timeZone = guestGameTimeZone(storeTimeZone);
   const restartedAt = lootBoxRestartedAt(limits);
   const weekStart = maxDate(startOfRollingWeek(now), restartedAt);
-  const dayStart = maxDate(startOfDay(now), restartedAt);
-  const periodicStart = periodicLimitPeriod
-    ? maxDate(lootBoxPeriodStart(now, periodicLimitPeriod), restartedAt)
-    : null;
   const lootBoxRewards = rewards.filter(
     (reward) =>
       reward.lootBoxId === row.id &&
@@ -12319,11 +12332,20 @@ function buildLootBoxOpenState(
     (reward) => reward.qualifiedAt.getTime() >= weekStart.getTime(),
   ).length;
   const dailyOpenedCount = lootBoxRewards.filter(
-    (reward) => reward.qualifiedAt.getTime() >= dayStart.getTime(),
+    (reward) =>
+      lootBoxRewardAfterRestart(reward.qualifiedAt, restartedAt) &&
+      guestGameSameLocalDay(reward.qualifiedAt, now, timeZone),
   ).length;
-  const periodicOpenedCount = periodicStart
+  const periodicOpenedCount = periodicLimitPeriod
     ? lootBoxRewards.filter(
-        (reward) => reward.qualifiedAt.getTime() >= periodicStart.getTime(),
+        (reward) =>
+          lootBoxRewardWithinPeriod(
+            reward.qualifiedAt,
+            now,
+            periodicLimitPeriod,
+            timeZone,
+            restartedAt,
+          ),
       ).length
     : 0;
 
@@ -12334,6 +12356,26 @@ function buildLootBoxOpenState(
       openState: 'WAITING_EVENT',
       openable: false,
       openBlocker: lootBoxWaitingEventMessage(row.triggerKind),
+      weeklyOpenedCount,
+      weeklyLimit,
+      dailyOpenedCount,
+      dailyLimit,
+      periodicLimitPeriod,
+      periodicOpenedCount,
+    };
+  }
+
+  const scheduleBlocker = lootBoxScheduleBlocker(
+    row.periodRules,
+    now,
+    timeZone,
+  );
+
+  if (scheduleBlocker) {
+    return {
+      openState: 'WAITING_EVENT',
+      openable: false,
+      openBlocker: scheduleBlocker,
       weeklyOpenedCount,
       weeklyLimit,
       dailyOpenedCount,
@@ -14400,16 +14442,6 @@ function startOfRollingWeek(value: Date) {
   return new Date(value.getTime() - 7 * 24 * 60 * 60 * 1000);
 }
 
-function startOfDay(value: Date) {
-  return new Date(
-    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
-  );
-}
-
-function startOfMonth(value: Date) {
-  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
-}
-
 function maxDate(left: Date, right: Date | null) {
   return right && right.getTime() > left.getTime() ? right : left;
 }
@@ -14426,21 +14458,6 @@ function lootBoxPeriodicLimitPeriod(
     : null;
 }
 
-function lootBoxPeriodStart(
-  value: Date,
-  period: GuestPortalLootBoxPeriodicLimitPeriod,
-) {
-  if (period === 'DAILY') {
-    return startOfDay(value);
-  }
-
-  if (period === 'MONTHLY') {
-    return startOfMonth(value);
-  }
-
-  return startOfRollingWeek(value);
-}
-
 function lootBoxPeriodicLimitBlocker(
   period: GuestPortalLootBoxPeriodicLimitPeriod,
   count: number,
@@ -14453,6 +14470,214 @@ function lootBoxPeriodicLimitBlocker(
         : 'в этом месяце';
 
   return `Периодический лутбокс уже открыт ${label}: ${count}/1.`;
+}
+
+function lootBoxScheduleBlocker(
+  value: Prisma.JsonValue | null,
+  now: Date,
+  timeZone: string,
+) {
+  const rules = jsonRecord(value);
+  const localTime = guestGameLocalTimeParts(now, timeZone);
+  const weekdays = numberArrayField(rules.weekdays).filter(
+    (item) => item >= 0 && item <= 6,
+  );
+  const weekdaysOnly = rules.weekdaysOnly === true;
+
+  if (weekdays.length && !weekdays.includes(localTime.weekday)) {
+    return `Лутбокс доступен в выбранные дни по времени клуба (${timeZone}).`;
+  }
+
+  if (weekdaysOnly && (localTime.weekday === 0 || localTime.weekday === 6)) {
+    return `Лутбокс доступен только по будням по времени клуба (${timeZone}).`;
+  }
+
+  const hours = unknownStringArray(rules.hours);
+
+  if (!hours.length) {
+    return null;
+  }
+
+  if (
+    hours.some((window) =>
+      lootBoxMinutesWithinTimeWindow(localTime.minutesOfDay, window),
+    )
+  ) {
+    return null;
+  }
+
+  return `Лутбокс доступен в окно ${hours.join(', ')} по времени клуба (${timeZone}).`;
+}
+
+function guestGameTimeZone(value: string | null | undefined) {
+  const normalized = stringField(value) ?? DEFAULT_GUEST_GAME_TIME_ZONE;
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: normalized }).format(
+      new Date(),
+    );
+
+    return normalized;
+  } catch {
+    return DEFAULT_GUEST_GAME_TIME_ZONE;
+  }
+}
+
+function guestGameLocalTimeParts(value: Date, timeZone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(value);
+    const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+    const weekday = weekdayNumber(valueByType.get('weekday'));
+    const hour = Number(valueByType.get('hour'));
+    const minute = Number(valueByType.get('minute'));
+
+    return {
+      weekday: weekday ?? value.getUTCDay(),
+      minutesOfDay:
+        (Number.isFinite(hour) ? hour % 24 : value.getUTCHours()) * 60 +
+        (Number.isFinite(minute) ? minute : value.getUTCMinutes()),
+    };
+  } catch {
+    return {
+      weekday: value.getUTCDay(),
+      minutesOfDay: value.getUTCHours() * 60 + value.getUTCMinutes(),
+    };
+  }
+}
+
+function guestGameSameLocalDay(left: Date, right: Date, timeZone: string) {
+  return (
+    guestGameLocalDateKey(left, timeZone) ===
+    guestGameLocalDateKey(right, timeZone)
+  );
+}
+
+function guestGameSameLocalMonth(left: Date, right: Date, timeZone: string) {
+  return (
+    guestGameLocalMonthKey(left, timeZone) ===
+    guestGameLocalMonthKey(right, timeZone)
+  );
+}
+
+function guestGameLocalDateKey(value: Date, timeZone: string) {
+  const parts = guestGameLocalDateParts(value, timeZone);
+
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(
+    parts.day,
+  ).padStart(2, '0')}`;
+}
+
+function guestGameLocalMonthKey(value: Date, timeZone: string) {
+  const parts = guestGameLocalDateParts(value, timeZone);
+
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}`;
+}
+
+function guestGameLocalDateParts(value: Date, timeZone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+
+    return {
+      year: Number(valueByType.get('year')),
+      month: Number(valueByType.get('month')),
+      day: Number(valueByType.get('day')),
+    };
+  } catch {
+    return {
+      year: value.getUTCFullYear(),
+      month: value.getUTCMonth() + 1,
+      day: value.getUTCDate(),
+    };
+  }
+}
+
+function weekdayNumber(value: string | undefined) {
+  switch (value) {
+    case 'Sun':
+      return 0;
+    case 'Mon':
+      return 1;
+    case 'Tue':
+      return 2;
+    case 'Wed':
+      return 3;
+    case 'Thu':
+      return 4;
+    case 'Fri':
+      return 5;
+    case 'Sat':
+      return 6;
+    default:
+      return null;
+  }
+}
+
+function lootBoxMinutesWithinTimeWindow(minutesOfDay: number, window: string) {
+  const [from, to] = window.split('-').map((part) => part.trim());
+  const fromMinutes = timeToMinutes(from);
+  const toMinutes = timeToMinutes(to);
+
+  if (fromMinutes == null || toMinutes == null) {
+    return true;
+  }
+
+  if (fromMinutes <= toMinutes) {
+    return minutesOfDay >= fromMinutes && minutesOfDay <= toMinutes;
+  }
+
+  return minutesOfDay >= fromMinutes || minutesOfDay <= toMinutes;
+}
+
+function timeToMinutes(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const [hours, minutes] = value.split(':').map((item) => Number(item));
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function lootBoxRewardWithinPeriod(
+  value: Date,
+  reference: Date,
+  period: GuestPortalLootBoxPeriodicLimitPeriod,
+  timeZone: string,
+  restartedAt: Date | null,
+) {
+  if (!lootBoxRewardAfterRestart(value, restartedAt)) {
+    return false;
+  }
+
+  if (period === 'DAILY') {
+    return guestGameSameLocalDay(value, reference, timeZone);
+  }
+
+  if (period === 'MONTHLY') {
+    return guestGameSameLocalMonth(value, reference, timeZone);
+  }
+
+  return value.getTime() >= startOfRollingWeek(reference).getTime();
+}
+
+function lootBoxRewardAfterRestart(value: Date, restartedAt: Date | null) {
+  return !restartedAt || value.getTime() >= restartedAt.getTime();
 }
 
 function lootBoxRestartedAt(limits: Record<string, unknown>) {
@@ -14562,6 +14787,21 @@ function jsonRecord(value: unknown): Record<string, unknown> {
 
 function stringField(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function unknownStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function numberArrayField(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map(numberField)
+        .filter((item): item is number => item !== null)
+        .map((item) => Math.trunc(item))
+    : [];
 }
 
 function numberField(value: unknown) {

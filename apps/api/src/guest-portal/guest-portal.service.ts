@@ -5169,7 +5169,7 @@ export class GuestPortalService {
     const club =
       scopedClub ?? (await this.findTelegramBotLatestClub(profile.id));
     const xp = Math.max(0, profile.xp ?? 0);
-    const level = Math.max(1, profile.level ?? levelFromXp(xp));
+    const level = levelFromXp(xp);
     let portal: GuestPortalPayload | null = null;
 
     if (club && profile.phoneHash) {
@@ -7449,8 +7449,8 @@ export class GuestPortalService {
       this.buildActivity(context.tenant.id, context.store.id, guest, profile),
     ]);
 
-    const xp = profile?.xp ?? 0;
-    const level = Math.max(1, profile?.level ?? levelFromXp(xp));
+    const xp = Math.max(0, profile?.xp ?? 0);
+    const level = levelFromXp(xp);
     const currentLevelXp = (level - 1) * 500;
     const nextLevelXp = level * 500;
     const levelProgressPercent = percent(xp - currentLevelXp, 500);
@@ -7532,6 +7532,11 @@ export class GuestPortalService {
           crmLead?.phoneMasked ??
           'Гость клуба',
         contactMasked:
+          this.gameProfilePhoneMasked(
+            profile?.phoneEncrypted ?? null,
+            guest?.phoneEncrypted ?? null,
+            crmLead?.phoneEncrypted ?? null,
+          ) ??
           profile?.contactMasked ??
           guest?.phoneMasked ??
           guest?.emailMasked ??
@@ -8225,6 +8230,20 @@ export class GuestPortalService {
     } catch {
       return null;
     }
+  }
+
+  private gameProfilePhoneMasked(
+    ...encryptedPhones: Array<string | null | undefined>
+  ) {
+    for (const encryptedPhone of encryptedPhones) {
+      const phone = this.phoneIdentityFromEncrypted(encryptedPhone ?? null);
+
+      if (phone) {
+        return `***${phone.normalized.slice(-6)}`;
+      }
+    }
+
+    return null;
   }
 
   private guestPhoneHashCandidates(

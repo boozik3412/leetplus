@@ -189,6 +189,7 @@ const LOOTBOX_CASE_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
   epic: "Эпический",
   legendary: "Легендарный",
 };
+const LEVEL_XP_STEP = 500;
 const REWARD_HISTORY_SOURCE_ORDER: RewardHistorySource[] = [
   "lootbox",
   "battlepass",
@@ -587,9 +588,6 @@ function ReadyGameView({
     summary.rewards.ready[0]?.rewardLabel ??
     summary.rewards.latestBonus?.title ??
     "Главная награда";
-  const rankLabel = buildRankLabel(summary.profile.level);
-  const rankPercent = buildRankPercent(summary);
-
   const syncQuestBoardBounds = useCallback(() => {
     const shell = shellRef.current;
     const lootBoxes = lootBoxesRef.current;
@@ -1079,8 +1077,6 @@ function ReadyGameView({
 
         <PlayerProfilePanel
           summary={summary}
-          rankLabel={rankLabel}
-          rankPercent={rankPercent}
           completedQuestCount={completedQuestCount}
           questTotalCount={questTotalCount}
           quests={playerQuests}
@@ -2268,8 +2264,6 @@ function battlePassSeasonTimeLabel(value: string | null | undefined) {
 }
 function PlayerProfilePanel({
   summary,
-  rankLabel,
-  rankPercent,
   completedQuestCount,
   questTotalCount,
   quests,
@@ -2288,8 +2282,6 @@ function PlayerProfilePanel({
   onQuestsToggle,
 }: {
   summary: GuestPortalGameSummary;
-  rankLabel: string;
-  rankPercent: number;
   completedQuestCount: number;
   questTotalCount: number;
   quests: PlayerQuest[];
@@ -2313,6 +2305,8 @@ function PlayerProfilePanel({
   const [nicknameEditing, setNicknameEditing] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState(summary.profile.displayName);
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
+  const levelProgress = buildPlayerLevelProgress(summary.profile);
+  const phoneMasked = formatPlayerPhoneMasked(summary.profile.contactMasked);
 
   useEffect(() => {
     if (!nicknameEditing) {
@@ -2394,6 +2388,9 @@ function PlayerProfilePanel({
                 onChange={(event) => setNicknameDraft(event.target.value)}
                 onKeyDown={handleNicknameKeyDown}
               />
+              {phoneMasked ? (
+                <span className="lp-club-profile-contact">{phoneMasked}</span>
+              ) : null}
             </label>
           ) : (
             <button
@@ -2405,6 +2402,9 @@ function PlayerProfilePanel({
             >
               <strong>Игровой профиль</strong>
               <span>{summary.profile.displayName}</span>
+              {phoneMasked ? (
+                <span className="lp-club-profile-contact">{phoneMasked}</span>
+              ) : null}
             </button>
           )}
         </div>
@@ -2419,22 +2419,19 @@ function PlayerProfilePanel({
           <span
             style={
               {
-                "--value": `${clampPercent(summary.profile.levelProgressPercent)}%`,
+                "--value": `${levelProgress.percent}%`,
               } as CSSProperties
             }
           />
         </div>
-      </div>
-
-      <div className="lp-club-profile-section rank">
-        <div className="lp-club-profile-row">
-          <span className="lp-club-small-label">Ранг</span>
-          <strong>{rankLabel}</strong>
-        </div>
-        <div className="lp-club-progress" aria-label="Прогресс ранга">
-          <span
-            style={{ "--value": `${rankPercent}%` } as CSSProperties}
-          />
+        <div className="lp-club-level-meta">
+          <span>
+            {formatNumber(levelProgress.current)} /{" "}
+            {formatNumber(levelProgress.required)} XP
+          </span>
+          <span>
+            до следующего {formatNumber(levelProgress.remaining)} XP
+          </span>
         </div>
       </div>
 
@@ -3284,21 +3281,38 @@ function homeQuestStateLabel(status: GameJourneyStep["status"]) {
   return status === "ATTENTION" ? "проверить" : "locked";
 }
 
-function buildRankLabel(level: number) {
-  const tiers = ["Bronze", "Silver", "Gold", "Platinum", "Diamond"];
-  const safeLevel = Math.max(1, level);
-  const tier = tiers[Math.min(tiers.length - 1, Math.floor((safeLevel - 1) / 3))];
-  const romans = ["IV", "III", "II", "I"];
-  const roman = romans[(safeLevel - 1) % romans.length] ?? "I";
+function buildPlayerLevelProgress(profile: GuestPortalGameSummary["profile"]) {
+  const level = Math.max(1, Math.trunc(profile.level || 1));
+  const xp = Math.max(0, Math.trunc(profile.xp || 0));
+  const currentLevelXp = Math.max(0, (level - 1) * LEVEL_XP_STEP);
+  const nextLevelXp = Math.max(
+    profile.nextLevelXp || level * LEVEL_XP_STEP,
+    currentLevelXp + 1,
+  );
+  const required = Math.max(1, nextLevelXp - currentLevelXp);
+  const current = Math.min(Math.max(0, xp - currentLevelXp), required);
+  const remaining = Math.max(0, nextLevelXp - xp);
 
-  return `${tier} ${roman}`;
+  return {
+    current,
+    required,
+    remaining,
+    percent: clampPercent((current / required) * 100),
+  };
 }
 
-function buildRankPercent(summary: GuestPortalGameSummary) {
-  const explicitProgress = summary.profile.levelProgressPercent;
-  const readiness = summary.account.readinessPercent;
+function formatPlayerPhoneMasked(value: string | null) {
+  const digits = value?.replace(/\D/g, "") ?? "";
 
-  return clampPercent(Math.max(explicitProgress, Math.min(100, readiness)));
+  if (!digits) {
+    return null;
+  }
+
+  if (digits.length >= 6) {
+    return `***${digits.slice(-6)}`;
+  }
+
+  return value?.trim() || null;
 }
 
 function BrandMark() {
@@ -8683,6 +8697,16 @@ const clubHomeCss = `
   overflow-wrap: anywhere;
 }
 
+.lp-club-nickname-button .lp-club-profile-contact,
+.lp-club-nickname-editor .lp-club-profile-contact {
+  margin-top: 6px;
+  color: rgba(168, 185, 186, 0.88);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
 .lp-club-nickname-editor {
   display: block;
   min-width: 0;
@@ -8749,8 +8773,17 @@ const clubHomeCss = `
   box-shadow: 0 0 20px rgba(131, 228, 236, 0.34);
 }
 
-.lp-club-profile-section.rank .lp-club-progress span {
-  background: linear-gradient(90deg, var(--amber), rgba(208, 170, 108, 0.48));
+.lp-club-level-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 7px 12px;
+  margin-top: 9px;
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .lp-club-checkin-card {

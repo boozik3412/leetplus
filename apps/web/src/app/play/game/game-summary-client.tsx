@@ -130,6 +130,8 @@ type BannerTitleStyle = CSSProperties &
   >;
 type HomeBattleQuest = {
   id: string;
+  sourceKind: "journey" | "mission" | "fallback";
+  sourceId: string;
   title: string;
   description: string;
   state: "complete" | "current" | "locked";
@@ -139,6 +141,13 @@ type HomeBattleQuest = {
   condition: string;
   reward: string;
   preview: string;
+  progress?: {
+    current: number;
+    total: number;
+    label: string;
+    percent: number;
+  };
+  periodTo?: string | null;
   x: string;
   y: string;
 };
@@ -165,6 +174,7 @@ type BattlePassRewardCard = {
   status: BattlePassRewardStatus;
   image?: string;
   rewardValue?: string;
+  quest?: HomeBattleQuest;
 };
 type BattlePassEventName =
   | "reward_click"
@@ -1066,6 +1076,7 @@ function ReadyGameView({
 
           <HomeBattlePass
             sectionRef={battlePassRef}
+            summary={summary}
             battlePass={summary.battlePass.active}
             quests={battleQuests}
             progress={battlePassProgress}
@@ -1713,6 +1724,7 @@ function LootboxOpeningOverlay({
 
 function HomeBattlePass({
   sectionRef,
+  summary,
   battlePass,
   quests,
   progress,
@@ -1721,6 +1733,7 @@ function HomeBattlePass({
   onToast,
 }: {
   sectionRef?: RefObject<HTMLElement | null>;
+  summary: GuestPortalGameSummary;
   battlePass: GuestPortalGameSummary["battlePass"]["active"];
   quests: HomeBattleQuest[];
   progress: number;
@@ -1738,6 +1751,7 @@ function HomeBattlePass({
     rewards[0]?.id ??
     null;
   const [activeRewardId, setActiveRewardId] = useState<string | null>(null);
+  const [detailRewardId, setDetailRewardId] = useState<string | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const lastScrollEventRef = useRef(0);
   const selectedRewardId =
@@ -1751,14 +1765,27 @@ function HomeBattlePass({
     rewards.find((reward) => reward.status === "current") ??
     rewards[0] ??
     null;
+  const currentReward =
+    rewards.find((reward) => reward.status === "current") ??
+    rewards.find((reward) => reward.status === "ready") ??
+    activeReward;
+  const detailReward =
+    detailRewardId
+      ? rewards.find((reward) => reward.id === detailRewardId) ?? null
+      : null;
   const totalLevels = Math.max(rewards.length, battlePass?.levels.length ?? 0, 1);
   const currentLevel = Math.min(
     totalLevels,
-    Math.max(0, battlePass?.currentLevel ?? activeReward?.level ?? 0),
+    Math.max(0, battlePass?.currentLevel ?? currentReward?.level ?? activeReward?.level ?? 0),
   );
   const levelLineScale =
     totalLevels > 1 ? clampPercent(((currentLevel - 1) / (totalLevels - 1)) * 100) / 100 : 1;
-  const progressLabel = `${formatNumber(currentLevel)} / ${formatNumber(totalLevels)}`;
+  const progressCountLabel = `${formatNumber(currentLevel)} / ${formatNumber(totalLevels)}`;
+  const progressQuestLabel = currentReward?.quest
+    ? `Сейчас: ${currentReward.quest.title}`
+    : currentReward
+      ? `Сейчас: ${currentReward.title}`
+      : null;
   const mainReward = rewards[rewards.length - 1] ?? activeReward;
   const mainRewardLevel = mainReward?.level ?? totalLevels;
   const mainRewardLabel =
@@ -1772,6 +1799,22 @@ function HomeBattlePass({
     ...trackGridStyle,
     "--battlepass-line-scale": String(levelLineScale),
   } as CSSProperties & Record<"--battlepass-line-scale", string>;
+
+  useEffect(() => {
+    if (!detailReward) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setDetailRewardId(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [detailReward]);
 
   const handleHelpClick = () => {
     emitBattlePassEvent("help_click", {
@@ -1817,11 +1860,9 @@ function HomeBattlePass({
 
     if (reward.status === "ready") {
       emitBattlePassEvent("reward_claim", battlePassRewardEventDetail(reward, battlePass));
-      onToast(`Награда уровня ${formatNumber(reward.level)} готова: ${reward.title}`);
-      return;
     }
 
-    onToast(`${reward.title}: ${reward.subtitle}`);
+    setDetailRewardId(reward.id);
   };
 
   return (
@@ -1953,13 +1994,364 @@ function HomeBattlePass({
               <span className="lp-club-battlepass-meter">
                 <i style={{ width: `${clampPercent(progress)}%` }} />
               </span>
-              <span>{progressLabel}</span>
+              <span className="lp-club-battlepass-progress-copy">
+                <strong>{progressCountLabel}</strong>
+                {progressQuestLabel ? <small>{progressQuestLabel}</small> : null}
+              </span>
             </div>
           </div>
         </div>
       </div>
+
+      {detailReward ? (
+        <BattlePassQuestModal
+          reward={detailReward}
+          summary={summary}
+          seasonName={seasonName}
+          onClose={() => setDetailRewardId(null)}
+        />
+      ) : null}
     </section>
   );
+}
+
+function BattlePassQuestModal({
+  reward,
+  summary,
+  seasonName,
+  onClose,
+}: {
+  reward: BattlePassRewardCard;
+  summary: GuestPortalGameSummary;
+  seasonName: string;
+  onClose: () => void;
+}) {
+  const quest = reward.quest ?? null;
+  const mission = findBattlePassQuestMission(summary, reward);
+  const actualReward = findBattlePassQuestReward(summary, reward);
+  const lootBoxDrop = findBattlePassQuestLootBoxDrop(
+    summary,
+    reward,
+    actualReward,
+    mission,
+  );
+  const activeStep =
+    mission?.questSteps.find((step) => step.current) ??
+    mission?.questSteps.find((step) => !step.completed) ??
+    null;
+  const statusLabel = quest?.status ?? battlePassRewardStatusLabel(reward.status);
+  const condition = stripBattlePassDetailPrefix(
+    quest?.condition ?? reward.subtitle,
+    "Условие",
+  );
+  const plannedReward = stripBattlePassDetailPrefix(
+    quest?.reward ?? reward.title,
+    "Награда",
+  );
+  const fallbackRewardStatus = mission?.rewardStatus ?? null;
+  const fallbackRewardLabel =
+    fallbackRewardStatus?.rewardLabel ??
+    (fallbackRewardStatus?.rewardAmount !== null &&
+    fallbackRewardStatus?.rewardAmount !== undefined
+      ? `${formatNumber(fallbackRewardStatus.rewardAmount)} бонусов`
+      : null);
+  const receivedAt =
+    actualReward?.qualifiedAt ??
+    lootBoxDrop?.qualifiedAt ??
+    fallbackRewardStatus?.occurredAt ??
+    null;
+  const progressPercent =
+    quest?.progress?.percent ??
+    (mission ? clampPercent(mission.progressPercent) : reward.status === "claimed" ? 100 : 0);
+
+  return (
+    <div
+      className="lp-quest-complete-overlay lp-battlepass-detail-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="battlePassQuestTitle"
+    >
+      <div className="lp-quest-complete-dialog lp-battlepass-detail-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть подробности задания"
+          onClick={onClose}
+        >
+          ×
+        </button>
+        <span className="lp-quest-complete-kicker">{statusLabel}</span>
+        <h3 id="battlePassQuestTitle">
+          {quest?.title ?? `Этап ${formatNumber(reward.level)}`}
+        </h3>
+        <p className="lp-battlepass-detail-season">
+          {seasonName} · этап {formatNumber(reward.level)}
+        </p>
+
+        <div className="lp-battlepass-detail-progress">
+          <div>
+            <span>Прогресс</span>
+            <strong>
+              {quest?.progress?.label ??
+                (mission
+                  ? `${Math.round(mission.progressPercent)}%`
+                  : `${formatNumber(reward.level)} / ${formatNumber(reward.level)}`)}
+            </strong>
+          </div>
+          <span className="lp-battlepass-detail-meter">
+            <i style={{ width: `${clampPercent(progressPercent)}%` }} />
+          </span>
+        </div>
+
+        <div className="lp-battlepass-detail-block">
+          <span>Задача</span>
+          <p>{condition}</p>
+        </div>
+
+        {activeStep ? (
+          <div className="lp-battlepass-detail-block is-current">
+            <span>Текущий шаг</span>
+            <strong>{activeStep.title}</strong>
+            <p>{formatMissionStepProgress(activeStep)}</p>
+          </div>
+        ) : null}
+
+        <div className="lp-quest-complete-reward lp-battlepass-planned-reward">
+          <span>Награда</span>
+          <strong>{plannedReward}</strong>
+        </div>
+
+        {actualReward ? (
+          <BattlePassReceivedRewardCard
+            reward={actualReward}
+            title={
+              actualReward.sourceKind === "LOOT_BOX"
+                ? "Содержимое кейса"
+                : "Полученная награда"
+            }
+          />
+        ) : fallbackRewardLabel ? (
+          <div className="lp-battlepass-received-card">
+            <span>Полученная награда</span>
+            <strong>{fallbackRewardLabel}</strong>
+            <p>{fallbackRewardStatus?.label}</p>
+            {receivedAt ? <small>{formatDate(receivedAt)}</small> : null}
+          </div>
+        ) : reward.status === "claimed" ? (
+          <div className="lp-battlepass-received-card">
+            <span>Полученная награда</span>
+            <p>Награда уже засчитана, но детальный результат не найден в текущем кошельке.</p>
+          </div>
+        ) : null}
+
+        {lootBoxDrop && lootBoxDrop.id !== actualReward?.id ? (
+          <BattlePassReceivedRewardCard
+            reward={lootBoxDrop}
+            title="Содержимое кейса"
+          />
+        ) : null}
+
+        {receivedAt ? (
+          <div className="lp-quest-complete-meta">
+            <span>Получено</span>
+            <span>{formatDate(receivedAt)}</span>
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          className="lp-quest-complete-action"
+          onClick={onClose}
+        >
+          Понятно
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BattlePassReceivedRewardCard({
+  reward,
+  title,
+}: {
+  reward: GameRewardHistoryItem;
+  title: string;
+}) {
+  const rarityLabel = lootboxRewardRarityLabel(reward);
+  const readyCode =
+    reward.walletState === "READY" ? reward.rewardCode ?? reward.claimPayload : null;
+
+  return (
+    <div className="lp-battlepass-received-card">
+      <span>{title}</span>
+      <strong>{reward.rewardLabel}</strong>
+      <p>
+        {rewardHistoryValue(reward)} · {walletStateLabel(reward.walletState)}
+      </p>
+      {rarityLabel ? <small>{rarityLabel}</small> : null}
+      {reward.rewardDropChance !== null ? (
+        <small>Шанс выпадения: {formatRewardChance(reward.rewardDropChance)}</small>
+      ) : null}
+      {readyCode ? <em>Код кассиру: {readyCode}</em> : null}
+      <small>{walletStateHint(reward.walletState)}</small>
+    </div>
+  );
+}
+
+function findBattlePassQuestMission(
+  summary: GuestPortalGameSummary,
+  reward: BattlePassRewardCard,
+): GameMission | GameMissionHistoryItem | null {
+  const quest = reward.quest;
+
+  if (quest?.sourceKind !== "mission") {
+    return null;
+  }
+
+  return (
+    [...summary.missions.featured, ...summary.missions.history].find(
+      (mission) => mission.id === quest.sourceId,
+    ) ?? null
+  );
+}
+
+function findBattlePassQuestReward(
+  summary: GuestPortalGameSummary,
+  reward: BattlePassRewardCard,
+): GameRewardHistoryItem | null {
+  const quest = reward.quest;
+
+  if (!quest) {
+    return findLatestRewardBySource(summary.rewards.recent, "BATTLE_PASS", reward.id);
+  }
+
+  if (quest.sourceKind !== "mission") {
+    return null;
+  }
+
+  const candidates = summary.rewards.recent
+    .filter((item) => item.sourceKind === "MISSION")
+    .sort(compareRewardsByQualifiedAtDesc);
+  const titleKey = normalizeRewardLookupText(quest.title);
+
+  return (
+    candidates.find((item) => item.sourceId === quest.sourceId) ??
+    candidates.find((item) => {
+      const sourceKey = normalizeRewardLookupText(item.sourceLabel);
+
+      return Boolean(sourceKey && titleKey && sourceKey.includes(titleKey));
+    }) ??
+    candidates.find((item) => {
+      const sourceKey = normalizeRewardLookupText(item.sourceLabel);
+
+      return Boolean(sourceKey && titleKey && titleKey.includes(sourceKey));
+    }) ??
+    null
+  );
+}
+
+function findLatestRewardBySource(
+  rewards: GameRewardHistoryItem[],
+  sourceKind: GameRewardHistoryItem["sourceKind"],
+  sourceId: string,
+) {
+  return (
+    rewards
+      .filter((item) => item.sourceKind === sourceKind && item.sourceId === sourceId)
+      .sort(compareRewardsByQualifiedAtDesc)[0] ?? null
+  );
+}
+
+function findBattlePassQuestLootBoxDrop(
+  summary: GuestPortalGameSummary,
+  reward: BattlePassRewardCard,
+  actualReward: GameRewardHistoryItem | null,
+  mission: GameMission | GameMissionHistoryItem | null,
+): GameRewardHistoryItem | null {
+  if (actualReward?.sourceKind === "LOOT_BOX") {
+    return actualReward;
+  }
+
+  if (!battlePassRewardLooksLikeLootBox(reward, actualReward)) {
+    return null;
+  }
+
+  const candidates = summary.rewards.recent
+    .filter((item) => item.sourceKind === "LOOT_BOX")
+    .sort(compareRewardsByQualifiedAtDesc);
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  const lookupKeys = [
+    reward.title,
+    reward.rewardValue,
+    reward.quest?.reward,
+    actualReward?.rewardLabel,
+    actualReward?.sourceLabel,
+  ]
+    .map(normalizeRewardLookupText)
+    .filter(Boolean);
+  const directMatch = candidates.find((item) => {
+    const sourceKey = normalizeRewardLookupText(item.sourceLabel);
+
+    if (!sourceKey) {
+      return false;
+    }
+
+    return lookupKeys.some(
+      (key) => key.includes(sourceKey) || sourceKey.includes(key),
+    );
+  });
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const completedAt = Date.parse(
+    actualReward?.qualifiedAt ?? mission?.rewardStatus.occurredAt ?? "",
+  );
+
+  if (!Number.isFinite(completedAt)) {
+    return null;
+  }
+
+  return (
+    candidates.find(
+      (item) => Date.parse(item.qualifiedAt) >= completedAt - 60_000,
+    ) ?? null
+  );
+}
+
+function compareRewardsByQualifiedAtDesc(
+  left: GameRewardHistoryItem,
+  right: GameRewardHistoryItem,
+) {
+  return Date.parse(right.qualifiedAt) - Date.parse(left.qualifiedAt);
+}
+
+function battlePassRewardLooksLikeLootBox(
+  reward: BattlePassRewardCard,
+  actualReward: GameRewardHistoryItem | null,
+) {
+  return [reward.type, reward.title, reward.rewardValue, reward.quest?.reward, actualReward?.rewardLabel]
+    .filter(Boolean)
+    .some((value) => /lootbox|case|кейс|лутбокс|контейнер/i.test(String(value)));
+}
+
+function normalizeRewardLookupText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLocaleLowerCase("ru-RU")
+    .replace(/[^a-zа-яё0-9]+/gi, " ")
+    .trim();
+}
+
+function stripBattlePassDetailPrefix(value: string, prefix: string) {
+  return value
+    .replace(new RegExp(`^${prefix}:\\s*`, "i"), "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function BattlePassRewardMedia({ reward }: { reward: BattlePassRewardCard }) {
@@ -2053,6 +2445,7 @@ function battlePassRewardFromQuest(
     status,
     image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
     rewardValue: battlePassRewardValue(rawTitle, type, index + 1),
+    quest,
   };
 }
 
@@ -3136,32 +3529,75 @@ function playerQuestDescription(
   return "Клубный квест с прогрессом по активности гостя.";
 }
 
+function missionBattlePassDescription(mission: GameMission) {
+  const activeStep =
+    mission.questSteps.find((step) => step.current) ??
+    mission.questSteps.find((step) => !step.completed) ??
+    null;
+  const progress = playerQuestProgress(mission);
+  const parts = [
+    activeStep ? `Текущий шаг: ${activeStep.title}` : null,
+    progress ? `Прогресс: ${progress.label}` : null,
+    mission.rewardStatus.hint,
+  ].filter(Boolean);
+
+  return parts.join(". ");
+}
+
+function missionBattlePassReward(mission: GameMission) {
+  if (mission.rewardStatus.rewardLabel) {
+    return `Награда: ${mission.rewardStatus.rewardLabel}.`;
+  }
+
+  if (mission.rewardStatus.rewardAmount !== null) {
+    return `Награда: ${formatNumber(mission.rewardStatus.rewardAmount)} бонусов.`;
+  }
+
+  if (mission.rewardLabel) {
+    return `Награда: ${mission.rewardLabel}.`;
+  }
+
+  if (mission.xpReward > 0) {
+    return `Награда: ${formatNumber(mission.xpReward)} XP.`;
+  }
+
+  return "Награда: прогресс сезона.";
+}
+
 function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest[] {
   const journeyQuests = summary.journey.steps
     .filter((step) => !isGuestInternalJourneyStep(step))
     .map((step) => ({
       id: step.id,
+      sourceKind: "journey" as const,
+      sourceId: step.id,
       title: step.label,
       description: guestJourneyHint(step),
       state: homeQuestState(step.status),
       label: homeQuestStateLabel(step.status),
       reward: "Награда: прогресс сезона и доступ к следующему этапу.",
     }));
-  const missionQuests = summary.missions.featured.map((mission) => ({
-    id: mission.id,
-    title: mission.name,
-    description: mission.rewardLabel ?? "Клубный квест с XP и наградой.",
-    state: mission.progressPercent >= 100 ? "complete" : "locked",
-    label: mission.progressPercent >= 100 ? "готово" : "квест",
-    reward: mission.rewardLabel
-      ? `Награда: ${mission.rewardLabel}.`
-      : mission.xpReward > 0
-        ? `Награда: ${formatNumber(mission.xpReward)} XP.`
-        : "Награда: прогресс сезона.",
-  }));
+  const missionQuests = summary.missions.featured.map((mission) => {
+    const progress = playerQuestProgress(mission);
+
+    return {
+      id: mission.id,
+      sourceKind: "mission" as const,
+      sourceId: mission.id,
+      title: mission.name,
+      description: missionBattlePassDescription(mission),
+      state: mission.progressPercent >= 100 ? "complete" : "locked",
+      label: mission.progressPercent >= 100 ? "готово" : "квест",
+      reward: missionBattlePassReward(mission),
+      progress,
+      periodTo: mission.periodTo,
+    };
+  });
   const fallback = [
     {
       id: "promo",
+      sourceKind: "fallback" as const,
+      sourceId: "promo",
       title: "Промокод",
       description: "Активировать клубный код.",
       state: "locked" as const,
@@ -3170,6 +3606,8 @@ function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest
     },
     {
       id: "season-final",
+      sourceKind: "fallback" as const,
+      sourceId: "season-final",
       title: "Финальный чек",
       description: "Забрать сезонный дроп.",
       state: "locked" as const,
@@ -7077,6 +7515,125 @@ const clubHomeCss = `
   cursor: pointer;
 }
 
+.lp-battlepass-detail-dialog {
+  width: min(560px, 100%);
+  max-height: min(760px, calc(100vh - 44px));
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.lp-battlepass-detail-season {
+  margin-top: -6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.lp-battlepass-detail-progress {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(131, 228, 236, 0.16);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(131, 228, 236, 0.055);
+}
+
+.lp-battlepass-detail-progress > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lp-battlepass-detail-progress span,
+.lp-battlepass-detail-block span,
+.lp-battlepass-received-card > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-battlepass-detail-progress strong {
+  color: var(--cyan);
+  font-size: 15px;
+  font-weight: 860;
+}
+
+.lp-battlepass-detail-meter {
+  position: relative;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.1);
+}
+
+.lp-battlepass-detail-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--amber));
+}
+
+.lp-battlepass-detail-block,
+.lp-battlepass-received-card {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(196, 224, 225, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(196, 224, 225, 0.035);
+}
+
+.lp-battlepass-detail-block.is-current {
+  border-color: rgba(131, 228, 236, 0.28);
+  background: rgba(131, 228, 236, 0.07);
+}
+
+.lp-battlepass-detail-block strong,
+.lp-battlepass-received-card strong {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.lp-battlepass-detail-block p,
+.lp-battlepass-received-card p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lp-battlepass-planned-reward strong {
+  color: var(--amber);
+}
+
+.lp-battlepass-received-card {
+  border-color: rgba(148, 214, 184, 0.26);
+  background: rgba(148, 214, 184, 0.07);
+}
+
+.lp-battlepass-received-card small {
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.lp-battlepass-received-card em {
+  width: fit-content;
+  border: 1px dashed rgba(131, 228, 236, 0.44);
+  border-radius: 7px;
+  padding: 7px 9px;
+  color: var(--text);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 860;
+  overflow-wrap: anywhere;
+}
+
 .lp-lootbox-overlay {
   --rarity-accent: #83e4ec;
   --rarity-accent-rgb: 131 228 236;
@@ -8622,11 +9179,32 @@ const clubHomeCss = `
   box-shadow: 0 0 22px rgba(131, 228, 236, 0.4);
 }
 
-.lp-club-battlepass-progress > span:last-child {
+.lp-club-battlepass-progress-copy {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  min-width: 150px;
+  max-width: min(360px, 42vw);
   color: var(--cyan);
+  text-align: right;
+}
+
+.lp-club-battlepass-progress-copy strong {
   font-size: 14px;
   font-weight: 860;
   letter-spacing: 0.1em;
+}
+
+.lp-club-battlepass-progress-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1.18;
+  letter-spacing: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 @keyframes battlePassCaseHover {

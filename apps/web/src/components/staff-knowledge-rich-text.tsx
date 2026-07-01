@@ -875,6 +875,7 @@ function wireKnowledgeReadingWindow(
     }
 
     popup.document.execCommand("defaultParagraphSeparator", false, "p");
+    popup.document.execCommand("styleWithCSS", false, "false");
     (articleBody ?? articleTitle)?.focus({ preventScroll: true });
     inlineEditor.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -896,6 +897,70 @@ function wireKnowledgeReadingWindow(
       .replace(/\u00a0/g, " ")
       .replace(/[ \t]+\n/g, "\n")
       .replace(/\n[ \t]+/g, "\n");
+  }
+
+  function wrapInlineMarkup(content: string, marker: "**" | "*" | "++") {
+    const leading = content.match(/^\s*/)?.[0] ?? "";
+    const trailing = content.match(/\s*$/)?.[0] ?? "";
+    const inner = content.slice(
+      leading.length,
+      content.length - trailing.length,
+    );
+
+    return inner ? `${leading}${marker}${inner}${marker}${trailing}` : "";
+  }
+
+  function hasBoldStyle(element: HTMLElement) {
+    const weight = element.style.fontWeight.trim().toLowerCase();
+
+    if (!weight) {
+      return false;
+    }
+
+    if (weight === "bold" || weight === "bolder") {
+      return true;
+    }
+
+    const numericWeight = Number.parseInt(weight, 10);
+    return Number.isFinite(numericWeight) && numericWeight >= 600;
+  }
+
+  function hasItalicStyle(element: HTMLElement) {
+    const style = element.style.fontStyle.trim().toLowerCase();
+    return style === "italic" || style === "oblique";
+  }
+
+  function hasUnderlineStyle(element: HTMLElement) {
+    const decoration = [
+      element.style.textDecoration,
+      element.style.textDecorationLine,
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return decoration.includes("underline");
+  }
+
+  function applyInlineFormatting(
+    content: string,
+    element: HTMLElement,
+    tag: string,
+  ) {
+    let formatted = content;
+
+    if (tag === "strong" || tag === "b" || hasBoldStyle(element)) {
+      formatted = wrapInlineMarkup(formatted, "**");
+    }
+
+    if (tag === "em" || tag === "i" || hasItalicStyle(element)) {
+      formatted = wrapInlineMarkup(formatted, "*");
+    }
+
+    if (tag === "u" || hasUnderlineStyle(element)) {
+      formatted = wrapInlineMarkup(formatted, "++");
+    }
+
+    return formatted;
   }
 
   function inlineNodeToRichText(node: Node): string {
@@ -931,18 +996,6 @@ function wireKnowledgeReadingWindow(
       return "";
     }
 
-    if (tag === "strong" || tag === "b") {
-      return `**${trimmed}**`;
-    }
-
-    if (tag === "em" || tag === "i") {
-      return `*${trimmed}*`;
-    }
-
-    if (tag === "u") {
-      return `++${trimmed}++`;
-    }
-
     if (tag === "a") {
       const href = element.getAttribute("href")?.trim();
 
@@ -951,7 +1004,7 @@ function wireKnowledgeReadingWindow(
       }
     }
 
-    return content;
+    return applyInlineFormatting(content, element, tag);
   }
 
   function imageElementToRichText(element: Element) {

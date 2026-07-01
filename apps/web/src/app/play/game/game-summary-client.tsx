@@ -1975,9 +1975,16 @@ function BattlePassRewardMedia({ reward }: { reward: BattlePassRewardCard }) {
     );
   }
 
+  const tokenLabel = reward.rewardValue ?? battlePassRewardTypeLabel(reward.type);
+  const tokenDensity = tokenLabel.length > 14 ? "long" : "short";
+
   return (
-    <span className="lp-club-battlepass-token" data-type={reward.type}>
-      {reward.rewardValue ?? battlePassRewardTypeLabel(reward.type)}
+    <span
+      className="lp-club-battlepass-token"
+      data-density={tokenDensity}
+      data-type={reward.type}
+    >
+      <span>{tokenLabel}</span>
     </span>
   );
 }
@@ -8520,15 +8527,38 @@ const clubHomeCss = `
   place-items: center;
   width: 74px;
   height: 74px;
+  overflow: hidden;
+  padding: 8px;
   border: 1px solid var(--rank-line);
   border-radius: 50%;
   color: var(--rank);
+  text-align: center;
   background:
     radial-gradient(circle, var(--rank-glow), transparent 68%),
     rgba(0, 0, 0, 0.28);
   font-size: 18px;
   font-weight: 900;
   line-height: 1;
+}
+
+.lp-club-battlepass-token > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.lp-club-battlepass-token[data-density="long"] {
+  padding: 10px;
+  font-size: 7.5px;
+  font-weight: 720;
+  line-height: 1.06;
+  letter-spacing: 0;
+}
+
+.lp-club-battlepass-token[data-density="long"] > span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
 }
 
 .lp-club-battlepass-token[data-type="discount"] {
@@ -8545,9 +8575,9 @@ const clubHomeCss = `
   display: -webkit-box;
   overflow: hidden;
   color: var(--text);
-  font-size: 11px;
-  font-weight: 760;
-  line-height: 1.14;
+  font-size: 9.5px;
+  font-weight: 720;
+  line-height: 1.12;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -8557,8 +8587,8 @@ const clubHomeCss = `
   display: -webkit-box;
   overflow: hidden;
   color: var(--quiet);
-  font-size: 8.5px;
-  font-weight: 740;
+  font-size: 7.5px;
+  font-weight: 680;
   line-height: 1.22;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;

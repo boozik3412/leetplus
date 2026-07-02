@@ -140,6 +140,7 @@ const shiftWorkspaceNavHrefs = new Set([
   "/staff/shift-regulations",
   "/staff/training-courses",
   "/staff/knowledge-base",
+  "/staff/discipline",
   "/staff/team-chat",
 ]);
 

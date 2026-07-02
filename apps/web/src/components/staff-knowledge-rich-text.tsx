@@ -111,7 +111,7 @@ function parseRichText(value: string | null | undefined): RichTextBlock[] {
 
   function flushParagraph() {
     if (paragraph.length > 0) {
-      blocks.push({ type: "paragraph", text: paragraph.join(" ") });
+      blocks.push({ type: "paragraph", text: paragraph.join("\n") });
       paragraph = [];
     }
   }
@@ -231,6 +231,21 @@ function renderInline(text: string): ReactNode[] {
   return nodes;
 }
 
+function renderInlineWithBreaks(text: string) {
+  const lines = text.split("\n");
+  const nodes: ReactNode[] = [];
+
+  lines.forEach((line, index) => {
+    if (index > 0) {
+      nodes.push(<br key={`br-${index}`} />);
+    }
+
+    nodes.push(...renderInline(line));
+  });
+
+  return nodes;
+}
+
 function renderInlineHtml(text: string) {
   return escapeHtml(text).replace(
     /(\+\+[^+]+\+\+|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g,
@@ -314,7 +329,7 @@ export function KnowledgeArticleRichText({
           return (
             <ul key={`list-${index}`} className="list-disc space-y-1 pl-5">
               {block.items.map((item, itemIndex) => (
-                <li key={`item-${itemIndex}`}>{renderInline(item)}</li>
+                <li key={`item-${itemIndex}`}>{renderInlineWithBreaks(item)}</li>
               ))}
             </ul>
           );
@@ -349,10 +364,18 @@ export function KnowledgeArticleRichText({
           );
         }
 
-        return <p key={`paragraph-${index}`}>{renderInline(block.text)}</p>;
+        return (
+          <p key={`paragraph-${index}`}>
+            {renderInlineWithBreaks(block.text)}
+          </p>
+        );
       })}
     </div>
   );
+}
+
+function renderInlineHtmlWithBreaks(text: string) {
+  return renderInlineHtml(text).replace(/\n/g, "<br/>");
 }
 
 function richTextToHtml(value: string | null | undefined) {
@@ -370,12 +393,12 @@ function richTextToHtml(value: string | null | undefined) {
       }
 
       if (block.type === "quote") {
-        return `<blockquote>${renderInlineHtml(block.text)}</blockquote>`;
+        return `<blockquote>${renderInlineHtmlWithBreaks(block.text)}</blockquote>`;
       }
 
       if (block.type === "list") {
         return `<ul>${block.items
-          .map((item) => `<li>${renderInlineHtml(item)}</li>`)
+          .map((item) => `<li>${renderInlineHtmlWithBreaks(item)}</li>`)
           .join("")}</ul>`;
       }
 
@@ -389,7 +412,7 @@ function richTextToHtml(value: string | null | undefined) {
         )}" loading="lazy"/>${block.alt ? `<figcaption>${escapeHtml(block.alt)}</figcaption>` : ""}</figure>`;
       }
 
-      return `<p>${renderInlineHtml(block.text)}</p>`;
+      return `<p>${renderInlineHtmlWithBreaks(block.text)}</p>`;
     })
     .join("");
 }
@@ -890,6 +913,15 @@ function wireKnowledgeReadingWindow(
     setPreviewValue(currentDraft);
   }
 
+  function normalizeRichTextBlock(value: string) {
+    return value
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
   function inlineChildrenToRichText(element: Element) {
     return Array.from(element.childNodes)
       .map(inlineNodeToRichText)
@@ -963,50 +995,6 @@ function wireKnowledgeReadingWindow(
     return formatted;
   }
 
-  function inlineNodeToRichText(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return node.textContent ?? "";
-    }
-
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return "";
-    }
-
-    const element = node as HTMLElement;
-    const tag = element.tagName.toLowerCase();
-
-    if (tag === "br") {
-      return "\n";
-    }
-
-    if (tag === "img") {
-      const src = element.getAttribute("src");
-
-      if (!isSafeImageUrl(src)) {
-        return "";
-      }
-
-      return `![${element.getAttribute("alt") ?? ""}](${src})`;
-    }
-
-    const content = inlineChildrenToRichText(element);
-    const trimmed = content.trim();
-
-    if (!trimmed) {
-      return "";
-    }
-
-    if (tag === "a") {
-      const href = element.getAttribute("href")?.trim();
-
-      if (href && isSafeUrl(href)) {
-        return `[${trimmed || href}](${href})`;
-      }
-    }
-
-    return applyInlineFormatting(content, element, tag);
-  }
-
   function imageElementToRichText(element: Element) {
     const image =
       element.tagName.toLowerCase() === "img"
@@ -1031,9 +1019,125 @@ function wireKnowledgeReadingWindow(
     return `![${caption}](${src})`;
   }
 
+  function inlineNodeToRichText(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent ?? "";
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const element = node as HTMLElement;
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === "br") {
+      return "\n";
+    }
+
+    if (tag === "figure" || tag === "img") {
+      return imageElementToRichText(element);
+    }
+
+    const content = inlineChildrenToRichText(element);
+    const trimmed = content.trim();
+
+    if (!trimmed) {
+      return "";
+    }
+
+    if (tag === "a") {
+      const href = element.getAttribute("href")?.trim();
+
+      if (href && isSafeUrl(href)) {
+        return `[${trimmed || href}](${href})`;
+      }
+    }
+
+    return applyInlineFormatting(content, element, tag);
+  }
+
+  const blockTags = new Set([
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "div",
+    "figure",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "ul",
+  ]);
+
+  function isBlockLikeElement(element: HTMLElement) {
+    const tag = element.tagName.toLowerCase();
+
+    if (blockTags.has(tag)) {
+      return true;
+    }
+
+    const display = popup.getComputedStyle(element).display;
+    return display === "block" || display === "list-item";
+  }
+
+  function flushInlineBlock(blocks: string[], inlineParts: string[]) {
+    const value = normalizeRichTextBlock(inlineParts.join(""));
+
+    if (value) {
+      blocks.push(value);
+    }
+
+    inlineParts.length = 0;
+  }
+
+  function childNodesToRichTextBlocks(nodes: Iterable<Node>) {
+    const blocks: string[] = [];
+    const inlineParts: string[] = [];
+
+    Array.from(nodes).forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as HTMLElement;
+        const tag = element.tagName.toLowerCase();
+
+        if (tag === "figure" || tag === "img") {
+          flushInlineBlock(blocks, inlineParts);
+          const image = imageElementToRichText(element);
+
+          if (image) {
+            blocks.push(image);
+          }
+
+          return;
+        }
+
+        if (isBlockLikeElement(element)) {
+          flushInlineBlock(blocks, inlineParts);
+          blocks.push(...blockNodeToRichText(element));
+          return;
+        }
+      }
+
+      inlineParts.push(inlineNodeToRichText(node));
+    });
+
+    flushInlineBlock(blocks, inlineParts);
+
+    return blocks;
+  }
+
   function blockNodeToRichText(node: Node): string[] {
     if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent?.trim();
+      const text = normalizeRichTextBlock(node.textContent ?? "");
       return text ? [text] : [];
     }
 
@@ -1045,24 +1149,26 @@ function wireKnowledgeReadingWindow(
     const tag = element.tagName.toLowerCase();
 
     if (tag === "h1" || tag === "h2") {
-      const text = inlineChildrenToRichText(element).trim();
+      const text = normalizeRichTextBlock(inlineChildrenToRichText(element));
       return text ? [`## ${text}`] : [];
     }
 
-    if (tag === "h3") {
-      const text = inlineChildrenToRichText(element).trim();
+    if (tag === "h3" || tag === "h4" || tag === "h5" || tag === "h6") {
+      const text = normalizeRichTextBlock(inlineChildrenToRichText(element));
       return text ? [`### ${text}`] : [];
     }
 
     if (tag === "blockquote") {
-      const text = inlineChildrenToRichText(element).trim();
-      return text ? text.split("\n").map((line) => `> ${line.trim()}`) : [];
+      const text = normalizeRichTextBlock(inlineChildrenToRichText(element));
+      return text
+        ? text.split("\n").map((line) => `> ${line.trim()}`)
+        : [];
     }
 
     if (tag === "ul" || tag === "ol") {
       return Array.from(element.children)
         .filter((child) => child.tagName.toLowerCase() === "li")
-        .map((item) => inlineChildrenToRichText(item).trim())
+        .map((item) => normalizeRichTextBlock(inlineChildrenToRichText(item)))
         .filter(Boolean)
         .map((item) => `- ${item}`);
     }
@@ -1072,21 +1178,7 @@ function wireKnowledgeReadingWindow(
       return image ? [image] : [];
     }
 
-    if (tag === "div" && element.children.length > 0) {
-      const blocks = Array.from(element.childNodes).flatMap(
-        blockNodeToRichText,
-      );
-
-      if (blocks.length > 0) {
-        return blocks;
-      }
-    }
-
-    const text = inlineChildrenToRichText(element)
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-
-    return text ? [text] : [];
+    return childNodesToRichTextBlocks(element.childNodes);
   }
 
   function editableBodyToRichText() {
@@ -1094,9 +1186,8 @@ function wireKnowledgeReadingWindow(
       return "";
     }
 
-    return Array.from(articleBody.childNodes)
-      .flatMap(blockNodeToRichText)
-      .map((block) => block.trim())
+    return childNodesToRichTextBlocks(articleBody.childNodes)
+      .map(normalizeRichTextBlock)
       .filter(Boolean)
       .join("\n\n")
       .replace(/\n{3,}/g, "\n\n")

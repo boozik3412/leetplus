@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { KnowledgeArticleRichText } from "@/components/staff-knowledge-rich-text";
 
 export type StaffMaterialPreviewMetric = {
   label: string;
@@ -168,9 +169,7 @@ export function StaffMaterialPreview({
           <p className="text-xs font-bold uppercase text-zinc-500">
             Основной материал
           </p>
-          <p className="mt-2 whitespace-pre-line text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            {body}
-          </p>
+          <KnowledgeArticleRichText value={body} className="mt-2" />
         </div>
       ) : null}
 

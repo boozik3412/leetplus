@@ -75,6 +75,8 @@ const DEFAULT_REVISION_SLA_POLICY: StaffKnowledgeRevisionSlaPolicy = {
   materialTypeExtraDays: { ...DEFAULT_REVISION_SLA_MATERIAL_EXTRA_DAYS },
 };
 
+const KNOWLEDGE_ARTICLE_CONTENT_LIMIT = 2_000_000;
+
 export type StaffKnowledgeBaseQuery = {
   status?: StaffKnowledgeArticleStatus | 'all';
   roleScope?: StaffKnowledgeRoleScope | 'all';
@@ -1396,7 +1398,10 @@ export class StaffKnowledgeBaseService {
     }
 
     if (dto.content !== undefined) {
-      data.content = this.normalizeOptionalString(dto.content)?.slice(0, 12000);
+      data.content = this.normalizeOptionalString(dto.content)?.slice(
+        0,
+        KNOWLEDGE_ARTICLE_CONTENT_LIMIT,
+      );
     }
 
     if (dto.folder !== undefined || options.requireTitle) {

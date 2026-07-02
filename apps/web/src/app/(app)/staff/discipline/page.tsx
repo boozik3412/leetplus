@@ -53,18 +53,30 @@ export default async function StaffDisciplinePage({
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffDisciplineReport(filters);
-  const cards = [
-    { label: "Предупреждения", value: report.summary.warnings },
-    { label: "Штрафы", value: report.summary.fines },
-    { label: "Сумма штрафов", value: formatMoney(report.summary.fineAmount) },
-    { label: "Активные правила", value: report.summary.activeRules },
-  ] as const;
+  const isSelfView = report.access.mode === "SELF";
+  const pageTitle = isSelfView ? "Мотивация" : "Мотивация персонала";
+  const pageDescription = isSelfView
+    ? "Здесь отображаются только ваши предупреждения и штрафы за выбранный период. Другие сотрудники в этом режиме недоступны."
+    : "Шаблон из файла перенесен в систему: три категории, два предупреждения в категории и штрафная шкала по конкретному нарушению. Включение управляется для всей сети или отдельно по клубам.";
+  const cards: Array<{ label: string; value: number | string }> = isSelfView
+    ? [
+        { label: "Записи", value: report.summary.recordsTotal },
+        { label: "Предупреждения", value: report.summary.warnings },
+        { label: "Штрафы", value: report.summary.fines },
+        { label: "Сумма штрафов", value: formatMoney(report.summary.fineAmount) },
+      ]
+    : [
+        { label: "Предупреждения", value: report.summary.warnings },
+        { label: "Штрафы", value: report.summary.fines },
+        { label: "Сумма штрафов", value: formatMoney(report.summary.fineAmount) },
+        { label: "Активные правила", value: report.summary.activeRules },
+      ];
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Предупреждения и штрафы"
+          current={pageTitle}
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Персонал" },
@@ -77,41 +89,48 @@ export default async function StaffDisciplinePage({
               Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Предупреждения и штрафы
+              {pageTitle}
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Шаблон из файла перенесен в систему: три категории, два
-              предупреждения в категории и штрафная шкала по конкретному
-              нарушению. Включение управляется для всей сети или отдельно по
-              клубам.
+              {pageDescription}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <a
-              href={exportHref("csv", filters)}
-              className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-            >
-              CSV
-            </a>
-            <a
-              href={exportHref("xlsx", filters)}
-              className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-            >
-              XLSX
-            </a>
-            <Link
-              href="/staff/administrator-ratings"
-              className="inline-flex h-10 items-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-            >
-              Рейтинг администраторов
-            </Link>
-            <Link
-              href="/staff/operations-dashboard"
-              className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-            >
-              Операционная дисциплина
-            </Link>
-          </div>
+          {report.access.canExport || report.access.canManage ? (
+            <div className="flex flex-wrap gap-2">
+              {report.access.canExport ? (
+                <>
+                  <a
+                    href={exportHref("csv", filters)}
+                    className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    CSV
+                  </a>
+                  <a
+                    href={exportHref("xlsx", filters)}
+                    className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    XLSX
+                  </a>
+                </>
+              ) : null}
+              {report.access.canManage ? (
+                <>
+                  <Link
+                    href="/staff/administrator-ratings"
+                    className="inline-flex h-10 items-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+                  >
+                    Рейтинг администраторов
+                  </Link>
+                  <Link
+                    href="/staff/operations-dashboard"
+                    className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    Операционная дисциплина
+                  </Link>
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </header>
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -196,7 +215,11 @@ export default async function StaffDisciplinePage({
                 <input
                   name="search"
                   defaultValue={report.filters.search ?? ""}
-                  placeholder="Администратор, нарушение, комментарий"
+                  placeholder={
+                    isSelfView
+                      ? "Нарушение или комментарий"
+                      : "Администратор, нарушение, комментарий"
+                  }
                   className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 />
                 <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">

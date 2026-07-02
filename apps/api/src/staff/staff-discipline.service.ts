@@ -22,6 +22,11 @@ const adminRoles = [
   UserRole.CLUB_ADMINISTRATOR,
 ] as const;
 
+const selfDisciplineRoles = [
+  UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_ADMINISTRATOR,
+] as const;
+
 const policyManagerRoles = [
   UserRole.OWNER,
   UserRole.ADMIN,
@@ -136,7 +141,15 @@ type StaffDisciplineLevel =
   | 'FINE_3';
 type StaffDisciplineRecordStatus = (typeof recordStatuses)[number];
 type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+type StaffDisciplineAccessMode = 'MANAGE' | 'SELF';
 type StoreOption = { id: string; name: string; isActive: boolean };
+
+type StaffDisciplineAccess = {
+  mode: StaffDisciplineAccessMode;
+  userId: string | null;
+  canManage: boolean;
+  canExport: boolean;
+};
 
 export type StaffDisciplineQuery = {
   dateFrom?: string;
@@ -208,7 +221,8 @@ export class StaffDisciplineService {
   async getReport(user: AuthenticatedUser, query: StaffDisciplineQuery = {}) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.ensureDefaultRules(tenantId);
-    const filters = this.resolveFilters(query);
+    const access = this.resolveDisciplineAccess(user);
+    const filters = this.resolveFilters(query, access.userId);
 
     const [rules, records, stores, users, policies] = await Promise.all([
       this.prisma.staffDisciplineRule.findMany({
@@ -227,17 +241,7 @@ export class StaffDisciplineService {
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.user.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-          role: {
-            in: [
-              UserRole.CLUB_ADMINISTRATOR,
-              UserRole.SENIOR_ADMINISTRATOR,
-              UserRole.CLUB_MANAGER,
-            ],
-          },
-        },
+        where: this.buildDisciplineUserWhere(tenantId, access),
         select: { id: true, email: true, fullName: true, role: true },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),
@@ -248,6 +252,11 @@ export class StaffDisciplineService {
     ]);
 
     return {
+      access: {
+        mode: access.mode,
+        canManage: access.canManage,
+        canExport: access.canExport,
+      },
       filters: {
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
@@ -280,6 +289,14 @@ export class StaffDisciplineService {
   ): Promise<StaffExportFile> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.ensureDefaultRules(tenantId);
+    const access = this.resolveDisciplineAccess(user);
+
+    if (!access.canExport) {
+      throw new ForbiddenException(
+        'Only managers can export discipline records',
+      );
+    }
+
     const filters = this.resolveFilters(query);
     const format = resolveStaffExportFormat(query.format);
     const records = await this.prisma.staffDisciplineRecord.findMany({
@@ -347,6 +364,7 @@ export class StaffDisciplineService {
 
   async createRecord(user: AuthenticatedUser, dto: StaffDisciplineRecordDto) {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    this.assertCanManageRecords(user);
     const ruleId = this.normalizeRequiredString(dto.ruleId, 'ruleId');
     const targetUserId = this.normalizeRequiredString(dto.userId, 'userId');
     const storeId = await this.resolveStoreId(tenantId, dto.storeId ?? null);
@@ -410,6 +428,7 @@ export class StaffDisciplineService {
     dto: StaffDisciplineRecordUpdateDto,
   ) {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    this.assertCanManageRecords(user);
     const current = await this.prisma.staffDisciplineRecord.findFirst({
       where: { id, tenantId },
       select: { id: true },
@@ -724,6 +743,31 @@ export class StaffDisciplineService {
     }
 
     return where;
+  }
+
+  private buildDisciplineUserWhere(
+    tenantId: string,
+    access: StaffDisciplineAccess,
+  ): Prisma.UserWhereInput {
+    if (access.mode === 'SELF' && access.userId) {
+      return {
+        tenantId,
+        id: access.userId,
+        isActive: true,
+      };
+    }
+
+    return {
+      tenantId,
+      isActive: true,
+      role: {
+        in: [
+          UserRole.CLUB_ADMINISTRATOR,
+          UserRole.SENIOR_ADMINISTRATOR,
+          UserRole.CLUB_MANAGER,
+        ],
+      },
+    };
   }
 
   private buildAdministratorWhere(
@@ -1098,6 +1142,31 @@ export class StaffDisciplineService {
     return 'LOW';
   }
 
+  private resolveDisciplineAccess(
+    user: AuthenticatedUser,
+  ): StaffDisciplineAccess {
+    const isSelfMode = selfDisciplineRoles.includes(
+      user.role as (typeof selfDisciplineRoles)[number],
+    );
+
+    return {
+      mode: isSelfMode ? 'SELF' : 'MANAGE',
+      userId: isSelfMode ? user.id : null,
+      canManage: !isSelfMode,
+      canExport: !isSelfMode,
+    };
+  }
+
+  private assertCanManageRecords(user: AuthenticatedUser) {
+    if (this.resolveDisciplineAccess(user).canManage) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      'Only managers can create or update discipline records',
+    );
+  }
+
   private async isDisciplineEnabled(tenantId: string, storeId: string | null) {
     const policies = await this.prisma.staffDisciplinePolicy.findMany({
       where: { tenantId, OR: [{ storeId }, { storeId: null }] },
@@ -1144,6 +1213,7 @@ export class StaffDisciplineService {
 
   private resolveFilters(
     query: StaffDisciplineQuery,
+    forcedUserId?: string | null,
   ): ResolvedDisciplineFilters {
     const dateTo =
       this.normalizeDate(query.dateTo) ?? this.toDateOnly(new Date());
@@ -1163,7 +1233,7 @@ export class StaffDisciplineService {
       start,
       end,
       storeId: this.normalizeOptionalString(query.storeId),
-      userId: this.normalizeOptionalString(query.userId),
+      userId: forcedUserId ?? this.normalizeOptionalString(query.userId),
       status: query.status ? this.resolveStatusFilter(query.status) : 'ACTIVE',
       search: this.normalizeOptionalString(query.search),
     };

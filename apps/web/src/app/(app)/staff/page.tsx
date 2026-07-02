@@ -60,7 +60,7 @@ const staffAreas: StaffArea[] = [
     description:
       "Сводная оценка администраторов, предупреждения, штрафы и контрольные сигналы по сменам.",
     links: [
-      { href: "/staff/discipline", label: "Предупреждения и штрафы" },
+      { href: "/staff/discipline", label: "Мотивация" },
       { href: "/staff/salary", label: "Расчет зарплаты" },
       { href: "/staff/staff-control", label: "Контроль смен" },
       { href: "/staff/staff-control/operators", label: "Администраторы" },
@@ -74,7 +74,7 @@ const staffAreas: StaffArea[] = [
       "Схемы окладов, ставок, премий и удержаний, расчет выплат по администраторам за выбранный период.",
     links: [
       { href: "/staff/directory", label: "Сотрудники" },
-      { href: "/staff/discipline", label: "Штрафы" },
+      { href: "/staff/discipline", label: "Мотивация" },
     ],
   },
   {

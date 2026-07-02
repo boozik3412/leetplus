@@ -237,7 +237,7 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
     href: "/staff/administrator-ratings",
     label: "Рейтинг администраторов",
   },
-  { group: "Персонал", href: "/staff/discipline", label: "Штрафы" },
+  { group: "Персонал", href: "/staff/discipline", label: "Мотивация" },
   { group: "Персонал", href: "/staff/directory", label: "Сотрудники" },
   { group: "Персонал", href: "/staff/salary", label: "Расчет зарплаты" },
   {

@@ -690,6 +690,17 @@ function canAccessStaffSalary(user: AuthUser | null) {
   );
 }
 
+function canAccessOwnDisciplinePath(user: AuthUser | null, href: string) {
+  const path = href.split("?")[0]?.split("#")[0] ?? href;
+
+  return Boolean(
+    user &&
+      path === "/staff/discipline" &&
+      (user.role === "SENIOR_ADMINISTRATOR" ||
+        user.role === "CLUB_ADMINISTRATOR"),
+  );
+}
+
 function canAccessShiftStaffPath(href: string) {
   const path = href.split("?")[0]?.split("#")[0] ?? href;
 
@@ -820,6 +831,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {
+    if (canAccessOwnDisciplinePath(user, href)) {
+      return true;
+    }
+
     if (isShiftWorkspaceRole(user) && href.startsWith("/staff")) {
       return (
         can(user, resolveStaffPathCapability(href)) &&

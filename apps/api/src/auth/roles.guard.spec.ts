@@ -441,6 +441,7 @@ describe('RolesGuard', () => {
 
     [
       { method: 'GET', path: '/staff' },
+      { method: 'GET', path: '/staff/discipline' },
       { method: 'GET', path: '/staff/task-templates' },
       { method: 'POST', path: '/staff/tasks' },
       { method: 'POST', path: '/staff/shift-regulations' },
@@ -459,6 +460,51 @@ describe('RolesGuard', () => {
         ),
       ).toThrow(ForbiddenException);
     });
+  });
+
+  it('lets administrators read only their motivation page', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.CLUB_MANAGER,
+      UserRole.STANDARDS_MANAGER,
+      UserRole.SENIOR_ADMINISTRATOR,
+      UserRole.CLUB_ADMINISTRATOR,
+    ]);
+
+    [UserRole.CLUB_ADMINISTRATOR, UserRole.SENIOR_ADMINISTRATOR].forEach(
+      (role) => {
+        const permissions = resolveUserCapabilities({ role });
+
+        expect(
+          guard.canActivate(
+            createContext({
+              method: 'GET',
+              path: '/staff/discipline',
+              user: { role, permissions },
+            }),
+          ),
+        ).toBe(true);
+
+        [
+          { method: 'GET', path: '/staff/discipline/export' },
+          { method: 'POST', path: '/staff/discipline/records' },
+          { method: 'PATCH', path: '/staff/discipline/records/record-1' },
+          { method: 'PATCH', path: '/staff/discipline/policy' },
+        ].forEach(({ method, path }) => {
+          expect(() =>
+            guard.canActivate(
+              createContext({
+                method,
+                path,
+                user: { role, permissions },
+              }),
+            ),
+          ).toThrow(ForbiddenException);
+        });
+      },
+    );
   });
 
   it('maps assortment routes to granular report capabilities', () => {

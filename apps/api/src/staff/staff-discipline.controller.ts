@@ -33,6 +33,7 @@ import {
   UserRole.CLUB_MANAGER,
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_ADMINISTRATOR,
 )
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffDisciplineController {

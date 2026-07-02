@@ -59,6 +59,11 @@ export type StaffDisciplineRecord = {
 };
 
 export type StaffDisciplineReport = {
+  access: {
+    mode: "MANAGE" | "SELF";
+    canManage: boolean;
+    canExport: boolean;
+  };
   filters: Required<Pick<StaffDisciplineFilters, "dateFrom" | "dateTo">> & {
     storeId: string | null;
     userId: string | null;

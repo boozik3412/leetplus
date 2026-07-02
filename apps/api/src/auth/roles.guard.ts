@@ -286,10 +286,19 @@ export class RolesGuard implements CanActivate {
         : 'edit_staff_knowledge';
     }
 
+    if (path.startsWith('/staff/discipline')) {
+      if (this.isSelfDisciplineReadPath(path, method, role)) {
+        return 'view_staff_shift_workspace';
+      }
+
+      return this.isReadMethod(method)
+        ? 'view_staff_control'
+        : 'manage_staff_control';
+    }
+
     if (
       path.startsWith('/staff/operations-dashboard') ||
       path.startsWith('/staff/administrator-ratings') ||
-      path.startsWith('/staff/discipline') ||
       path.startsWith('/staff/ai-assistant')
     ) {
       return this.isReadMethod(method)
@@ -350,6 +359,19 @@ export class RolesGuard implements CanActivate {
     );
   }
 
+  private isSelfDisciplineReadPath(
+    path: string,
+    method: string,
+    role: UserRole | null | undefined,
+  ) {
+    return (
+      path === '/staff/discipline' &&
+      this.isReadMethod(method) &&
+      (role === UserRole.SENIOR_ADMINISTRATOR ||
+        role === UserRole.CLUB_ADMINISTRATOR)
+    );
+  }
+
   private isStaffSalaryPath(request: AuthenticatedRequest) {
     return this.normalizePath(request).startsWith('/staff/salary');
   }
@@ -381,8 +403,14 @@ export class RolesGuard implements CanActivate {
       return false;
     }
 
+    const method = request.method?.toUpperCase() ?? 'GET';
+
     if (path.startsWith('/staff/checklist-templates')) {
-      return !this.isReadMethod(request.method?.toUpperCase() ?? 'GET');
+      return !this.isReadMethod(method);
+    }
+
+    if (path.startsWith('/staff/discipline')) {
+      return !this.isSelfDisciplineReadPath(path, method, role);
     }
 
     const deniedPrefixes = [

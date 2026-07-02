@@ -13,7 +13,7 @@ import {
 
 type RichTextBlock =
   | { type: "paragraph"; text: string }
-  | { type: "heading"; level: 2 | 3; text: string }
+  | { type: "heading"; level: 1 | 2 | 3; text: string }
   | { type: "quote"; text: string }
   | { type: "list"; items: string[] }
   | { type: "image"; alt: string; url: string };
@@ -108,7 +108,7 @@ function escapeAttribute(value: string | null | undefined) {
 }
 
 const KNOWLEDGE_HTML_TAG_PATTERN =
-  /<\/?(?:p|div|br|h[1-6]|ul|ol|li|blockquote|figure|figcaption|img|table|thead|tbody|tfoot|tr|th|td|strong|b|em|i|u|s|span|a|pre|code)\b/i;
+  /<\/?(?:p|div|br|h[1-6]|ul|ol|li|blockquote|figure|figcaption|font|img|mark|table|thead|tbody|tfoot|tr|th|td|strong|b|em|i|u|s|span|a|pre|code)\b/i;
 const MAX_INLINE_IMAGE_CHARS = 2_000_000;
 const SAFE_DATA_IMAGE_PATTERN =
   /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i;
@@ -131,6 +131,7 @@ const ALLOWED_KNOWLEDGE_HTML_TAGS = new Set([
   "i",
   "img",
   "li",
+  "mark",
   "ol",
   "p",
   "pre",
@@ -163,6 +164,8 @@ const DROPPED_KNOWLEDGE_HTML_TAGS = new Set([
   "textarea",
 ]);
 const ALLOWED_KNOWLEDGE_STYLE_PROPERTIES = new Set([
+  "background-color",
+  "color",
   "font-style",
   "font-weight",
   "line-height",
@@ -205,6 +208,21 @@ function isHtmlContent(value: string | null | undefined) {
   return KNOWLEDGE_HTML_TAG_PATTERN.test(value?.trim() ?? "");
 }
 
+function isSafeKnowledgeColor(value: string) {
+  return (
+    /^#[0-9a-f]{3,8}$/i.test(value) ||
+    /^rgba?\(\s*\d{1,3}%?\s*,\s*\d{1,3}%?\s*,\s*\d{1,3}%?(?:\s*,\s*(?:0|1|0?\.\d+|\d{1,3}%))?\s*\)$/i.test(
+      value,
+    ) ||
+    /^hsla?\(\s*-?\d+(?:\.\d+)?(?:deg)?\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%(?:\s*,\s*(?:0|1|0?\.\d+|\d{1,3}%))?\s*\)$/i.test(
+      value,
+    ) ||
+    /^(?:black|white|gray|grey|red|green|blue|yellow|orange|purple|pink|brown|transparent|currentcolor)$/i.test(
+      value,
+    )
+  );
+}
+
 function sanitizeKnowledgeStyle(value: string) {
   return value
     .split(";")
@@ -233,6 +251,8 @@ function sanitizeKnowledgeStyle(value: string) {
       }
 
       if (
+        ((property === "color" || property === "background-color") &&
+          !isSafeKnowledgeColor(styleValue)) ||
         (property === "text-align" &&
           !/^(left|right|center|justify|start|end)$/i.test(styleValue)) ||
         (property === "font-style" &&
@@ -285,6 +305,15 @@ function copySafeKnowledgeAttributes(source: Element, target: HTMLElement) {
         target.setAttribute("style", style);
       }
 
+      return;
+    }
+
+    if (
+      tag === "span" &&
+      (name === "color" || name === "bgcolor") &&
+      isSafeKnowledgeColor(value)
+    ) {
+      target.style[name === "color" ? "color" : "backgroundColor"] = value;
       return;
     }
 
@@ -359,9 +388,10 @@ function sanitizeKnowledgeNode(
   }
 
   const source = node as Element;
-  const tag = source.tagName.toLowerCase();
+  const sourceTag = source.tagName.toLowerCase();
+  const tag = sourceTag === "font" ? "span" : sourceTag;
 
-  if (DROPPED_KNOWLEDGE_HTML_TAGS.has(tag)) {
+  if (DROPPED_KNOWLEDGE_HTML_TAGS.has(sourceTag)) {
     return null;
   }
 
@@ -486,13 +516,13 @@ function parseRichText(value: string | null | undefined): RichTextBlock[] {
       flushList();
       blocks.push({
         type: "heading",
-        level: headingMatch[1].length >= 3 ? 3 : 2,
+        level: Math.min(headingMatch[1].length, 3) as 1 | 2 | 3,
         text: headingMatch[2],
       });
       return;
     }
 
-    const listMatch = trimmed.match(/^[-*]\s+(.+)$/);
+    const listMatch = trimmed.match(/^(?:[-*]|\d+[.)])\s+(.+)$/);
     if (listMatch) {
       flushParagraph();
       list.push(listMatch[1]);
@@ -659,7 +689,8 @@ export function KnowledgeArticleRichText({
     >
       {blocks.map((block, index) => {
         if (block.type === "heading") {
-          const Tag = block.level === 2 ? "h3" : "h4";
+          const Tag =
+            block.level === 1 ? "h2" : block.level === 2 ? "h3" : "h4";
 
           return (
             <Tag
@@ -745,7 +776,8 @@ function richTextToHtml(value: string | null | undefined) {
   return blocks
     .map((block) => {
       if (block.type === "heading") {
-        const tag = block.level === 2 ? "h2" : "h3";
+        const tag =
+          block.level === 1 ? "h1" : block.level === 2 ? "h2" : "h3";
         return `<${tag}>${renderInlineHtml(block.text)}</${tag}>`;
       }
 
@@ -916,11 +948,29 @@ export function StaffKnowledgeRichTextEditor({
         <button
           type="button"
           onMouseDown={keepTextareaSelection}
-          onClick={() => prefixLines("## ", "Заголовок")}
+          onClick={() => prefixLines("# ", "Заголовок 1")}
           className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-          title="Заголовок"
+          title="Заголовок 1"
+        >
+          H1
+        </button>
+        <button
+          type="button"
+          onMouseDown={keepTextareaSelection}
+          onClick={() => prefixLines("## ", "Заголовок 2")}
+          className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          title="Заголовок 2"
         >
           H2
+        </button>
+        <button
+          type="button"
+          onMouseDown={keepTextareaSelection}
+          onClick={() => prefixLines("### ", "Заголовок 3")}
+          className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          title="Заголовок 3"
+        >
+          H3
         </button>
         <button
           type="button"
@@ -966,6 +1016,15 @@ export function StaffKnowledgeRichTextEditor({
           title="Список"
         >
           Список
+        </button>
+        <button
+          type="button"
+          onMouseDown={keepTextareaSelection}
+          onClick={() => prefixLines("1. ", "Пункт списка")}
+          className="h-8 rounded-md border border-zinc-300 px-2 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          title="Нумерованный список"
+        >
+          1.
         </button>
         <button
           type="button"
@@ -1056,12 +1115,30 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
   const inlineEditor =
     editMode === "inline"
       ? `<section id="inline-editor" class="editor-toolbar hidden" aria-label="Форматирование текста">
-        <button type="button" data-format="heading" title="Заголовок">H2</button>
+        <button type="button" data-format="heading1" title="Заголовок 1">H1</button>
+        <button type="button" data-format="heading2" title="Заголовок 2">H2</button>
+        <button type="button" data-format="heading3" title="Заголовок 3">H3</button>
         <button type="button" data-format="paragraph" title="Обычный текст">P</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
         <button type="button" data-format="bold" title="Ctrl+B">B</button>
         <button type="button" data-format="italic" title="Ctrl+I"><em>I</em></button>
         <button type="button" data-format="underline" title="Ctrl+U"><u>U</u></button>
-        <button type="button" data-format="list" title="Список">Список</button>
+        <label class="color-tool" title="Цвет текста">
+          <span>A</span>
+          <input type="color" data-color-command="foreColor" value="#18181b" aria-label="Цвет текста" />
+        </label>
+        <label class="color-tool" title="Маркер">
+          <span>Маркер</span>
+          <input type="color" data-color-command="hiliteColor" value="#fde68a" aria-label="Цвет выделения" />
+        </label>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-format="alignLeft" title="По левому краю">L</button>
+        <button type="button" data-format="alignCenter" title="По центру">C</button>
+        <button type="button" data-format="alignRight" title="По правому краю">R</button>
+        <span class="toolbar-separator" aria-hidden="true"></span>
+        <button type="button" data-format="unorderedList" title="Маркированный список">•</button>
+        <button type="button" data-format="orderedList" title="Нумерованный список">1.</button>
+        <button type="button" data-format="table" title="Создать таблицу">Таблица</button>
         <button type="button" data-format="quote" title="Цитата">Цитата</button>
         <button type="button" data-format="link" title="Ctrl+K">Ссылка</button>
         <span class="toolbar-separator" aria-hidden="true"></span>
@@ -1126,9 +1203,11 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
     #edit-article { width: fit-content; border: 1px solid #10b981; border-radius: 8px; background: #10b981; padding: 10px 14px; color: #052e16; font-weight: 800; cursor: pointer; }
     #mark-read { width: fit-content; border: 0; border-radius: 8px; background: #10b981; padding: 10px 14px; color: #052e16; font-weight: 800; cursor: pointer; }
     .editor-toolbar { position: sticky; top: 12px; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 20px; border: 1px solid #a7f3d0; border-radius: 12px; background: rgba(240, 253, 244, .96); padding: 10px; box-shadow: 0 10px 24px rgba(16,185,129,.12); backdrop-filter: blur(8px); }
-    .editor-toolbar button { min-width: 38px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; padding: 9px 12px; color: #18181b; font-weight: 800; cursor: pointer; }
-    .editor-toolbar button:hover { border-color: #10b981; }
+    .editor-toolbar button, .editor-toolbar .color-tool { min-height: 38px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; padding: 8px 10px; color: #18181b; font-weight: 800; cursor: pointer; }
+    .editor-toolbar button:hover, .editor-toolbar .color-tool:hover { border-color: #10b981; }
     .editor-toolbar .primary { border-color: #10b981; background: #10b981; color: #052e16; }
+    .editor-toolbar .color-tool { display: inline-flex; align-items: center; gap: 7px; }
+    .editor-toolbar .color-tool input { width: 24px; height: 24px; border: 0; background: transparent; padding: 0; cursor: pointer; }
     .toolbar-separator { width: 1px; align-self: stretch; background: #bbf7d0; }
     #edit-status { color: #047857; font-size: 13px; font-weight: 700; }
     #read-status { margin: 0; font-size: 13px; }
@@ -1263,7 +1342,7 @@ function wireKnowledgeReadingWindow(
     }
 
     popup.document.execCommand("defaultParagraphSeparator", false, "p");
-    popup.document.execCommand("styleWithCSS", false, "false");
+    popup.document.execCommand("styleWithCSS", false, "true");
     (articleBody ?? articleTitle)?.focus({ preventScroll: true });
     inlineEditor.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -1513,12 +1592,25 @@ function wireKnowledgeReadingWindow(
     const element = node as HTMLElement;
     const tag = element.tagName.toLowerCase();
 
-    if (tag === "h1" || tag === "h2") {
+    if (tag === "h1" || tag === "h2" || tag === "h3") {
       const text = normalizeRichTextBlock(inlineChildrenToRichText(element));
-      return text ? [`## ${text}`] : [];
+
+      if (!text) {
+        return [];
+      }
+
+      if (tag === "h1") {
+        return [`# ${text}`];
+      }
+
+      if (tag === "h2") {
+        return [`## ${text}`];
+      }
+
+      return [`### ${text}`];
     }
 
-    if (tag === "h3" || tag === "h4" || tag === "h5" || tag === "h6") {
+    if (tag === "h4" || tag === "h5" || tag === "h6") {
       const text = normalizeRichTextBlock(inlineChildrenToRichText(element));
       return text ? [`### ${text}`] : [];
     }
@@ -1571,51 +1663,231 @@ function wireKnowledgeReadingWindow(
     };
   }
 
-  function formatSelection(format: string) {
+  let savedSelection: Range | null = null;
+
+  function selectionBelongsToEditable(selection: Selection | null) {
+    const node = selection?.anchorNode;
+    return Boolean(
+      node && editableElements.some((element) => element.contains(node)),
+    );
+  }
+
+  function saveCurrentSelection() {
+    const selection = doc.getSelection();
+
+    if (
+      !selection ||
+      selection.rangeCount === 0 ||
+      !selectionBelongsToEditable(selection)
+    ) {
+      return;
+    }
+
+    savedSelection = selection.getRangeAt(0).cloneRange();
+  }
+
+  function placeCaretAtArticleEnd() {
+    if (!articleBody) {
+      return;
+    }
+
+    const range = doc.createRange();
+    range.selectNodeContents(articleBody);
+    range.collapse(false);
+    const selection = doc.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    savedSelection = range.cloneRange();
+  }
+
+  function restoreSavedSelection(options: { forceArticleBody?: boolean } = {}) {
+    if (
+      options.forceArticleBody &&
+      (!savedSelection ||
+        !articleBody?.contains(savedSelection.commonAncestorContainer))
+    ) {
+      placeCaretAtArticleEnd();
+    }
+
+    if (!savedSelection) {
+      return;
+    }
+
+    const selection = doc.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(savedSelection);
+  }
+
+  function runEditorCommand(
+    command: string,
+    value?: string,
+    options: { forceArticleBody?: boolean } = {},
+  ) {
     if (!isInlineEditing()) {
       showInlineEditor();
     }
 
-    if (format === "link") {
-      const href = popup.prompt("Ссылка", "https://");
+    restoreSavedSelection(options);
+    const result = popup.document.execCommand(command, false, value);
+    saveCurrentSelection();
 
-      if (href?.trim()) {
-        popup.document.execCommand("createLink", false, href.trim());
+    return result;
+  }
+
+  function promptedTableSize(label: string, fallback: number) {
+    const rawValue = popup.prompt(label, String(fallback));
+
+    if (rawValue === null) {
+      return null;
+    }
+
+    const value = Number.parseInt(rawValue, 10);
+
+    if (!Number.isFinite(value) || value < 1) {
+      if (editStatus) {
+        editStatus.textContent = "Укажите число от 1 до 12.";
+      }
+
+      return null;
+    }
+
+    return Math.min(value, 12);
+  }
+
+  function buildTableHtml(rows: number, columns: number) {
+    return (
+      '<table><tbody>' +
+      Array.from({ length: rows })
+        .map(
+          () =>
+            '<tr>' +
+            Array.from({ length: columns })
+              .map(() => '<td><br></td>')
+              .join("") +
+            '</tr>',
+        )
+        .join("") +
+      '</tbody></table><p><br></p>'
+    );
+  }
+
+  function insertTable() {
+    const rows = promptedTableSize("Сколько строк?", 3);
+
+    if (rows === null) {
+      return;
+    }
+
+    const columns = promptedTableSize("Сколько столбцов?", 3);
+
+    if (columns === null) {
+      return;
+    }
+
+    runEditorCommand("insertHTML", buildTableHtml(rows, columns), {
+      forceArticleBody: true,
+    });
+  }
+
+  function applyColorCommand(command: string, value: string) {
+    if (command === "hiliteColor") {
+      const highlighted = runEditorCommand(command, value);
+
+      if (!highlighted) {
+        runEditorCommand("backColor", value);
       }
 
       return;
     }
 
-    if (format === "heading") {
-      popup.document.execCommand("formatBlock", false, "h2");
-      return;
-    }
-
-    if (format === "paragraph") {
-      popup.document.execCommand("formatBlock", false, "p");
-      return;
-    }
-
-    if (format === "quote") {
-      popup.document.execCommand("formatBlock", false, "blockquote");
-      return;
-    }
-
-    if (format === "list") {
-      popup.document.execCommand("insertUnorderedList", false);
-      return;
-    }
-
-    popup.document.execCommand(format, false);
+    runEditorCommand(command, value);
   }
 
+  function formatSelection(format: string) {
+    if (!isInlineEditing()) {
+      showInlineEditor();
+    }
+
+    saveCurrentSelection();
+
+    if (format === "link") {
+      const href = popup.prompt("Ссылка", "https://");
+
+      if (href?.trim()) {
+        runEditorCommand("createLink", href.trim());
+      }
+
+      return;
+    }
+
+    const blockFormats: Record<string, string> = {
+      heading1: "h1",
+      heading2: "h2",
+      heading3: "h3",
+      paragraph: "p",
+      quote: "blockquote",
+    };
+    const commandFormats: Record<string, string> = {
+      alignCenter: "justifyCenter",
+      alignLeft: "justifyLeft",
+      alignRight: "justifyRight",
+      orderedList: "insertOrderedList",
+      unorderedList: "insertUnorderedList",
+    };
+
+    if (format === "table") {
+      insertTable();
+      return;
+    }
+
+    if (blockFormats[format]) {
+      runEditorCommand("formatBlock", blockFormats[format]);
+      return;
+    }
+
+    if (commandFormats[format]) {
+      runEditorCommand(commandFormats[format], undefined, {
+        forceArticleBody:
+          format === "orderedList" || format === "unorderedList",
+      });
+      return;
+    }
+
+    runEditorCommand(format);
+  }
+
+  doc.addEventListener("selectionchange", () => {
+    if (isInlineEditing()) {
+      saveCurrentSelection();
+    }
+  });
+
+  editableElements.forEach((element) => {
+    element.addEventListener("keyup", saveCurrentSelection);
+    element.addEventListener("mouseup", saveCurrentSelection);
+  });
+
   doc.querySelectorAll<HTMLButtonElement>("[data-format]").forEach((tool) => {
-    tool.addEventListener("mousedown", (event) => event.preventDefault());
+    tool.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      saveCurrentSelection();
+    });
     tool.addEventListener("click", () => {
       const format = tool.getAttribute("data-format");
 
       if (format) {
         formatSelection(format);
+      }
+    });
+  });
+
+  doc.querySelectorAll<HTMLInputElement>("[data-color-command]").forEach((tool) => {
+    tool.addEventListener("mousedown", saveCurrentSelection);
+    tool.addEventListener("input", () => {
+      const command = tool.getAttribute("data-color-command");
+
+      if (command && /^#[0-9a-f]{6}$/i.test(tool.value)) {
+        applyColorCommand(command, tool.value);
       }
     });
   });
@@ -1651,6 +1923,7 @@ function wireKnowledgeReadingWindow(
     }
 
     event.preventDefault();
+    saveCurrentSelection();
     formatSelection(format);
   });
 

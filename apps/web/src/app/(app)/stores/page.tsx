@@ -92,7 +92,7 @@ export default async function StoresPage() {
               </a>
               <a
                 className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-semibold text-cyan-800 hover:bg-cyan-50"
-                href="/play/game"
+                href="/game"
               >
                 Проверить игру
               </a>

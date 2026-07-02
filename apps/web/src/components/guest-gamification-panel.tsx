@@ -4242,7 +4242,7 @@ function PilotReadinessCard({
             Готовность клуба к первому бонусу
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            Чек-лист собирает путь от входа в игровой модуль до /play/game,
+            Чек-лист собирает путь от входа в игровой модуль до /game,
             события, кошелька наград, bonus ledger и последующей сверки баланса
             Langame. Проверка строится по сохраненным данным LeetPlus и не
             делает live-запросов.

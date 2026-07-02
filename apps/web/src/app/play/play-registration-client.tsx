@@ -265,7 +265,7 @@ export function PlayRegistrationClient({
     router.replace("/game/clubs");
   }, [router]);
   const openActiveGameAfterAuth = useCallback(() => {
-    router.replace("/play/game");
+    router.replace("/game");
   }, [router]);
 
   useEffect(() => {
@@ -1383,7 +1383,7 @@ export function PlayRegistrationClient({
                 ) : portal ? (
                     <VerifiedSummary
                       canCheckLangameMatch={canUsePhoneAuth}
-                      continueHref={isGameAuth ? "/game/clubs" : "/play/game"}
+                      continueHref={isGameAuth ? "/game/clubs" : "/game"}
                       isCheckingLangame={isCheckingLangame}
                       langameMatch={langameMatch}
                       localGameMatch={localGameMatch}
@@ -1713,7 +1713,7 @@ function ActiveGameSessionPanel({
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
           <Link
             className="flex min-h-11 items-center justify-center rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200"
-            href="/play/game"
+            href="/game"
           >
             Продолжить игру
           </Link>

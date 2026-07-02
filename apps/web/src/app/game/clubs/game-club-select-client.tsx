@@ -409,7 +409,7 @@ export function GameClubSelectClient({
               </strong>
             </SideBlock>
             <div className="lp-club-actions" ref={gameActionsRef}>
-              <Link className="lp-club-primary" href="/play/game">
+              <Link className="lp-club-primary" href="/game">
                 Открыть игру
                 <ArrowRightIcon />
               </Link>

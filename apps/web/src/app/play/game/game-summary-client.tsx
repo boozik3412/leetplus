@@ -1213,7 +1213,9 @@ function HomeBannerGrid({
         ].join(" ");
         const isHttpExternal = isHttpExternalActionUrl(banner.href);
         const opensInNewTab =
-          isHttpExternal || banner.href === "/play/game/rewards";
+          isHttpExternal ||
+          banner.href === "/game/rewards" ||
+          banner.href === "/play/game/rewards";
         const content = (
           <>
             {banner.imageUrl ? (
@@ -2861,7 +2863,7 @@ function PlayerProfilePanel({
         <button type="submit">Активировать</button>
         <Link
           className="lp-club-side-link"
-          href="/play/game/rewards"
+          href="/game/rewards"
           target="_blank"
           rel="noreferrer"
         >
@@ -3170,7 +3172,7 @@ function buildHomeBanners(
         summary.referral.channelHint ??
         "Лимитированные предметы и бонусы для гостей клуба.",
       tag: secondMission ? "квест" : "получить",
-      href: "/play/game/rewards",
+      href: "/game/rewards",
     },
     {
       id: "battlepass",
@@ -4501,7 +4503,7 @@ function RewardJournalPanel({
         <div className="lp-reward-journal-side">
           <span className="lp-reward-sync-pill">История синхронизирована</span>
           <Link
-            href={standalone ? "/play/game" : "#profile"}
+            href={standalone ? "/game" : "#profile"}
             className="lp-club-ghost-link"
           >
             Назад в модуль

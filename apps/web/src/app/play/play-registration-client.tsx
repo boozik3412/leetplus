@@ -229,6 +229,8 @@ export function PlayRegistrationClient({
     useState<GuestPortalUserCallAuthStartResponse | null>(null);
   const [userCallAuthStatus, setUserCallAuthStatus] =
     useState<GuestPortalUserCallAuthStatusResponse | null>(null);
+  const [isUserCallInstructionOpen, setUserCallInstructionOpen] =
+    useState(false);
   const [incomingCallLast4, setIncomingCallLast4] =
     useState<GuestPortalIncomingCallLast4StartResponse | null>(null);
   const [incomingCallLast4Code, setIncomingCallLast4Code] = useState("");
@@ -934,6 +936,7 @@ export function PlayRegistrationClient({
         message: data.message,
       });
       setMessage(data.message);
+      setUserCallInstructionOpen(true);
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1626,6 +1629,15 @@ export function PlayRegistrationClient({
           <LegalEntityInfo compact className="lp-game-auth-legal" />
         ) : null}
       </div>
+      {userCallAuth && isUserCallInstructionOpen ? (
+        <UserCallInstructionModal
+          callHref={userCallAuth.callHref}
+          callNumber={userCallAuth.callNumber}
+          freeCall={userCallAuth.freeCall}
+          onClose={() => setUserCallInstructionOpen(false)}
+          phoneMasked={userCallAuth.phoneMasked}
+        />
+      ) : null}
       {isGameAuth ? <style>{gameAuthCss}</style> : null}
     </main>
   );
@@ -2276,6 +2288,96 @@ function UserCallAuthPanel({
           попробуйте другой доступный способ или повторите позже.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function UserCallInstructionModal({
+  callHref,
+  callNumber,
+  freeCall,
+  phoneMasked,
+  onClose,
+}: {
+  callHref: string;
+  callNumber: string;
+  freeCall: boolean;
+  phoneMasked: string;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      aria-labelledby="user-call-auth-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm"
+      role="dialog"
+    >
+      <div className="w-full max-w-md rounded-lg border border-cyan-300/25 bg-[#090f18] p-5 shadow-2xl shadow-cyan-950/40">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200">
+              Вход по звонку
+            </p>
+            <h2
+              className="mt-2 text-2xl font-black leading-tight text-white"
+              id="user-call-auth-title"
+            >
+              Позвоните на бесплатный номер
+            </h2>
+          </div>
+          <button
+            aria-label="Закрыть окно"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-xl font-bold text-slate-200 transition hover:border-cyan-300/40 hover:text-white"
+            onClick={onClose}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+
+        <p className="mt-4 text-sm leading-6 text-slate-300">
+          Для авторизации нужно именно совершить звонок с указанного телефона.
+          Нажмите кнопку ниже или наберите номер вручную. После проверки звонок
+          будет сброшен, код вводить не нужно.
+        </p>
+
+        <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-bold uppercase text-slate-500">
+              Номер для звонка
+            </span>
+            <span className="font-black text-cyan-100">{callNumber}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="font-bold uppercase text-slate-500">
+              Ваш телефон
+            </span>
+            <span className="font-black text-white">{phoneMasked}</span>
+          </div>
+          {freeCall ? (
+            <p className="mt-3 text-xs font-semibold leading-5 text-cyan-100/80">
+              Звонок бесплатный и нужен только для подтверждения номера.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mt-5 grid gap-2">
+          <a
+            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+            href={callHref}
+            onClick={onClose}
+          >
+            Позвонить бесплатно: {callNumber}
+          </a>
+          <button
+            className="min-h-11 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-black text-slate-200 transition hover:border-white/20 hover:bg-white/[0.07]"
+            onClick={onClose}
+            type="button"
+          >
+            Я понял
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

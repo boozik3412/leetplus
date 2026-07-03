@@ -103,4 +103,56 @@ describe('guest game progress trigger matching', () => {
       matchedEvents: 1,
     });
   });
+
+  it('normalizes session aliases and still enforces packet-only conditions', () => {
+    const packetResult = evaluateGuestGameProgress(
+      {
+        triggerKind: 'SESSION_START',
+        progressTarget: 1,
+        conditions: {
+          sessionType: 'packet_hours',
+          packetMode: 'PACKET_ONLY',
+          metric: { eventTypes: ['SESSION_START'], target: 1 },
+        },
+      },
+      {
+        eventType: 'SESSION_START',
+        occurredAt: new Date('2026-06-28T12:00:00.000Z'),
+        sessionType: 'package',
+        sessionPacket: true,
+      },
+      [],
+    );
+    const regularResult = evaluateGuestGameProgress(
+      {
+        triggerKind: 'SESSION_START',
+        progressTarget: 1,
+        conditions: {
+          sessionType: 'packet_hours',
+          packetMode: 'PACKET_ONLY',
+          metric: { eventTypes: ['SESSION_START'], target: 1 },
+        },
+      },
+      {
+        eventType: 'SESSION_START',
+        occurredAt: new Date('2026-06-28T12:00:00.000Z'),
+        sessionType: 'common',
+        sessionPacket: false,
+      },
+      [],
+    );
+
+    expect(packetResult).toMatchObject({
+      applicable: true,
+      current: 1,
+      completed: true,
+      matchedEvents: 1,
+    });
+    expect(regularResult).toMatchObject({
+      applicable: true,
+      current: 0,
+      completed: false,
+      matchedEvents: 0,
+    });
+  });
 });

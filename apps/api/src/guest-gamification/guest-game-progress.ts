@@ -318,8 +318,13 @@ function matchesSessionType(
 ) {
   const expectedType = progressString(conditions.sessionType);
 
-  if (expectedType && expectedType !== event.sessionType) {
-    return false;
+  if (expectedType && isActionableProgressSessionType(expectedType)) {
+    const expectedSessionType = normalizeProgressSessionType(expectedType);
+    const actualSessionType = normalizeProgressSessionType(event.sessionType);
+
+    if (!actualSessionType || actualSessionType !== expectedSessionType) {
+      return false;
+    }
   }
 
   const packetMode =
@@ -334,6 +339,28 @@ function matchesSessionType(
   }
 
   return true;
+}
+
+function normalizeProgressSessionType(value: string | null | undefined) {
+  const normalized = (value ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+
+  if (
+    ['packet_hours', 'packet', 'package', 'package_hours'].includes(normalized)
+  ) {
+    return 'packet_hours';
+  }
+
+  if (['regular_session', 'regular', 'common', 'default'].includes(normalized)) {
+    return 'regular_session';
+  }
+
+  return normalized || null;
+}
+
+function isActionableProgressSessionType(value: string | null | undefined) {
+  return ['regular_session', 'packet_hours'].includes(
+    normalizeProgressSessionType(value) ?? '',
+  );
 }
 
 function matchesTariff(

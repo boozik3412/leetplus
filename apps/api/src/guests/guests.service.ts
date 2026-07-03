@@ -3025,11 +3025,24 @@ export class GuestsService {
   }
 
   private liveSessionBoolean(value: unknown) {
-    if (value === true || value === 'true' || value === '1' || value === 1) {
+    const normalized =
+      typeof value === 'string' ? value.trim().toLowerCase() : value;
+
+    if (
+      normalized === true ||
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 1
+    ) {
       return true;
     }
 
-    if (value === false || value === 'false' || value === '0' || value === 0) {
+    if (
+      normalized === false ||
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 0
+    ) {
       return false;
     }
 

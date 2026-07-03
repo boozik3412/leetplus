@@ -11558,11 +11558,24 @@ export class GuestGamificationService {
   }
 
   private checkInBoolean(value: unknown) {
-    if (value === true || value === 'true' || value === '1' || value === 1) {
+    const normalized =
+      typeof value === 'string' ? value.trim().toLowerCase() : value;
+
+    if (
+      normalized === true ||
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 1
+    ) {
       return true;
     }
 
-    if (value === false || value === 'false' || value === '0' || value === 0) {
+    if (
+      normalized === false ||
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 0
+    ) {
       return false;
     }
 
@@ -15373,7 +15386,15 @@ function booleanValue(value: unknown, fallback = false) {
     return fallback;
   }
 
-  if (value === true || value === 'true' || value === '1') {
+  const normalized =
+    typeof value === 'string' ? value.trim().toLowerCase() : value;
+
+  if (
+    normalized === true ||
+    normalized === 'true' ||
+    normalized === '1' ||
+    normalized === 1
+  ) {
     return true;
   }
 
@@ -15381,10 +15402,23 @@ function booleanValue(value: unknown, fallback = false) {
 }
 
 function nullableBooleanValue(value: unknown): boolean | null {
-  if (value === true || value === 'true' || value === '1') {
+  const normalized =
+    typeof value === 'string' ? value.trim().toLowerCase() : value;
+
+  if (
+    normalized === true ||
+    normalized === 'true' ||
+    normalized === '1' ||
+    normalized === 1
+  ) {
     return true;
   }
-  if (value === false || value === 'false' || value === '0') {
+  if (
+    normalized === false ||
+    normalized === 'false' ||
+    normalized === '0' ||
+    normalized === 0
+  ) {
     return false;
   }
 
@@ -17459,7 +17493,19 @@ function isActionableSessionType(value: string) {
 }
 
 function normalizeSessionType(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, '_');
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, '_');
+
+  if (
+    ['packet_hours', 'packet', 'package', 'package_hours'].includes(normalized)
+  ) {
+    return 'packet_hours';
+  }
+
+  if (['regular_session', 'regular', 'common', 'default'].includes(normalized)) {
+    return 'regular_session';
+  }
+
+  return normalized;
 }
 
 function dryRunOptionalNumber(

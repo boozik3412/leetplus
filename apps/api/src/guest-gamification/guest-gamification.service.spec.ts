@@ -4028,6 +4028,41 @@ describe('GuestGamificationService', () => {
       }
     });
 
+    it('blocks packet-only session lootboxes for regular sessions in dry-run', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          sessionType: 'packet_hours',
+          periodRules: { packetMode: 'PACKET_ONLY' },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'common',
+        sessionPacket: 0 as any,
+      });
+
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 0,
+        blockedRules: 1,
+      });
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        kind: 'LOOT_BOX',
+        eligible: false,
+      });
+    });
+
     it('does not grant a session-start lootbox for a session that started before rule activation', async () => {
       const { service } = createService();
 

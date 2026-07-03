@@ -7051,6 +7051,7 @@ function LootBoxesTab({
         <RuleCard
           key={item.id}
           eyebrow="Сохраненное правило"
+          trackingId={trackingId("CASE", item.id)}
           title={item.name}
           status={item.status}
           subtitle={`Появляется: ${optionLabel(
@@ -7062,6 +7063,7 @@ function LootBoxesTab({
           meta={[
             item.audience?.name ?? "все гости",
             optionLabel(lootBoxSegmentOptions, item.segment ?? ""),
+            `тип: ${sessionTypeLabel(item.sessionType)}`,
             packetModeLabel(stringRule(item.periodRules, "packetMode", "ANY")),
             tariffRuleSummary(item.periodRules),
             guestLogRuleSummary(item.periodRules),
@@ -7309,11 +7311,13 @@ function MissionsTab({
         <RuleCard
           key={item.id}
           eyebrow="Сохраненное правило"
+          trackingId={trackingId("TASK", item.id)}
           title={item.name}
           status={item.status}
           subtitle={`${missionTypeLabel(item.missionType)} · ${item.xpReward} XP`}
           meta={[
             item.audience?.name ?? "все гости",
+            `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
             packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
             tariffRuleSummary(item.conditions),
             guestLogRuleSummary(item.conditions, item.antiFraudRules),
@@ -7322,6 +7326,7 @@ function MissionsTab({
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
             formatMoney(item.budgetAmount ?? 0),
           ]}
+          details={<MissionQuestStepIdSummary mission={item} />}
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("missions", item.id, status)}
           saving={saving === `missions-${item.id}`}
@@ -7537,17 +7542,20 @@ function SeasonsTab({
         <RuleCard
           key={item.id}
           eyebrow="Сохраненное правило"
+          trackingId={trackingId("BP", item.id)}
           title={item.name}
           status={item.status}
           subtitle={`${item.seasonType} · ${item.premiumEnabled ? "premium" : "free"}`}
           meta={[
             item.audience?.name ?? "все гости",
+            `тип: ${sessionTypeLabel(stringRule(item.xpRules, "sessionType", ""))}`,
             packetModeLabel(stringRule(item.xpRules, "packetMode", "ANY")),
             tariffRuleSummary(item.xpRules),
             guestLogRuleSummary(item.xpRules),
             formatDate(item.periodFrom),
             formatMoney(item.budgetAmount ?? 0),
           ]}
+          details={<BattlePassLevelIdSummary season={item} />}
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("seasons", item.id, status)}
           saving={saving === `seasons-${item.id}`}
@@ -7802,6 +7810,7 @@ function PromoBannersTab({
           <RuleCard
             key={item.id}
             eyebrow="Сохраненный баннер"
+            trackingId={trackingId("BAN", item.id)}
             title={item.title}
             status={item.status}
             subtitle={`${item.label ?? "Промо"} · ${
@@ -9665,6 +9674,85 @@ function LootBoxRulePrizeSummary({ lootBox }: { lootBox: GuestGameLootBox }) {
   );
 }
 
+function MissionQuestStepIdSummary({
+  mission,
+}: {
+  mission: GuestGameMission;
+}) {
+  const steps = missionQuestSteps(mission.conditions);
+
+  if (!steps.length) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        ID шагов задания
+      </p>
+      <div className="grid gap-2 md:grid-cols-2">
+        {steps.map((step, index) => (
+          <div
+            key={step.id || index}
+            className="rounded-md border border-zinc-200 bg-white p-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <p className="font-bold text-cyan-700 dark:text-cyan-300">
+              {trackingId("TASKSTEP", `${mission.id}-${step.id || index + 1}`)}
+            </p>
+            <p className="mt-1 truncate text-zinc-600 dark:text-zinc-300">
+              {index + 1}. {step.title}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BattlePassLevelIdSummary({
+  season,
+}: {
+  season: GuestGameSeason;
+}) {
+  const levels = battlePassLevelRows(season);
+
+  if (!levels.length) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        ID заданий Battle Pass
+      </p>
+      <div className="grid gap-2 md:grid-cols-3">
+        {levels.slice(0, 9).map((level) => (
+          <div
+            key={level.id}
+            className="rounded-md border border-zinc-200 bg-white p-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <p className="font-bold text-cyan-700 dark:text-cyan-300">
+              {level.id}
+            </p>
+            <p className="mt-1 truncate font-medium text-zinc-700 dark:text-zinc-200">
+              Уровень {level.level}
+            </p>
+            <p className="truncate text-zinc-500 dark:text-zinc-400">
+              {level.label}
+              {level.xp !== null ? ` · ${level.xp} XP` : ""}
+            </p>
+          </div>
+        ))}
+      </div>
+      {levels.length > 9 ? (
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          Еще уровней: {levels.length - 9}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function MissionBusinessRules({
   form,
   missionTemplates,
@@ -10604,6 +10692,7 @@ function ProfileCard({
 
 function RuleCard({
   eyebrow,
+  trackingId,
   title,
   status,
   subtitle,
@@ -10619,6 +10708,7 @@ function RuleCard({
   canManage,
 }: {
   eyebrow?: string;
+  trackingId?: string;
   title: string;
   status: GuestGameStatus;
   subtitle: string;
@@ -10637,10 +10727,19 @@ function RuleCard({
     <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex items-start justify-between gap-3">
         <div>
-          {eyebrow ? (
-            <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-              {eyebrow}
-            </p>
+          {eyebrow || trackingId ? (
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              {eyebrow ? (
+                <p className="text-[11px] font-bold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+                  {eyebrow}
+                </p>
+              ) : null}
+              {trackingId ? (
+                <span className="rounded-md border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cyan-800 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-200">
+                  ID {trackingId}
+                </span>
+              ) : null}
+            </div>
           ) : null}
           <h3 className="text-base font-bold text-zinc-950 dark:text-white">
             {title}
@@ -14488,8 +14587,10 @@ function communicationQueueStatusClass(
 }
 
 function sessionTypeLabel(value: string | null) {
+  const normalized = normalizeUiSessionType(value);
+
   return (
-    sessionTypeOptions.find((option) => option.value === (value ?? ""))?.label ??
+    sessionTypeOptions.find((option) => option.value === normalized)?.label ??
     value ??
     "любой тип"
   );
@@ -14502,6 +14603,55 @@ function packetModeLabel(value: string | null) {
     value ??
     "любой формат"
   );
+}
+
+function trackingId(prefix: string, value: string | null | undefined) {
+  const compact = (value ?? "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 8)
+    .toUpperCase();
+
+  return `${prefix}-${compact || "NEW"}`;
+}
+
+function normalizeUiSessionType(value: string | null | undefined) {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+
+  if (
+    ["packet_hours", "packet", "package", "package_hours"].includes(
+      normalized,
+    )
+  ) {
+    return "packet_hours";
+  }
+
+  if (["regular_session", "regular", "common", "default"].includes(normalized)) {
+    return "regular_session";
+  }
+
+  return normalized;
+}
+
+function battlePassLevelRows(season: GuestGameSeason) {
+  return arrayRule(season.levels).map((item, index) => {
+    const record = asRecord(item);
+    const levelValue = Number(record.level);
+    const xpValue = Number(record.xp);
+    const level = Number.isFinite(levelValue) ? Math.trunc(levelValue) : index + 1;
+    const rewardLabel = String(
+      record.freeReward ??
+        record.premiumReward ??
+        record.reward ??
+        `Уровень ${level}`,
+    ).trim();
+
+    return {
+      id: trackingId(`BP${String(level).padStart(2, "0")}`, season.id),
+      level,
+      xp: Number.isFinite(xpValue) ? Math.trunc(xpValue) : null,
+      label: rewardLabel || `Уровень ${level}`,
+    };
+  });
 }
 
 function packetStateLabel(value: boolean | null) {

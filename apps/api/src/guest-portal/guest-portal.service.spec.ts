@@ -1596,7 +1596,7 @@ describe('GuestPortalService', () => {
             store: { id: portal.store.id, name: portal.store.name },
             input: {
               sessionType: 'regular_session',
-              sessionPacket: false,
+              sessionPacket: 0,
               sessionMinutes: 75,
             },
           },

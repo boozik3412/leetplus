@@ -6317,33 +6317,23 @@ export class GuestGamificationService {
     ]);
 
     if (draftRow) {
-      const publishedTime =
-        publishedRow?.publishedAt?.getTime() ??
-        publishedRow?.updatedAt.getTime() ??
-        null;
-      const draftIsBehindPublished =
-        publishedTime !== null && draftRow.updatedAt.getTime() < publishedTime;
-      const draftWasNotEdited =
-        draftRow.createdAt.getTime() === draftRow.updatedAt.getTime();
+      const livePayload = await this.mergeVisualEditorPayloadWithLiveRules(
+        user,
+        store.id,
+        normalizeVisualEditorPayload(draftRow.payload),
+      );
 
-      if (draftIsBehindPublished || draftWasNotEdited) {
-        const livePayload = await this.buildVisualEditorPayloadFromLive(
-          user,
-          store.id,
+      if (!visualEditorPayloadEquals(draftRow.payload, livePayload)) {
+        return mapVisualDraft(
+          await this.prisma.guestGameVisualDraft.update({
+            where: { id: draftRow.id },
+            data: {
+              payload: livePayload,
+              updatedByUserId: actorUserId(user),
+            },
+            include: visualDraftInclude,
+          }),
         );
-
-        if (!visualEditorPayloadEquals(draftRow.payload, livePayload)) {
-          return mapVisualDraft(
-            await this.prisma.guestGameVisualDraft.update({
-              where: { id: draftRow.id },
-              data: {
-                payload: livePayload,
-                updatedByUserId: actorUserId(user),
-              },
-              include: visualDraftInclude,
-            }),
-          );
-        }
       }
 
       return mapVisualDraft(draftRow);
@@ -6354,7 +6344,11 @@ export class GuestGamificationService {
         await this.upsertVisualEditorDraft(
           user,
           store,
-          await this.buildVisualEditorPayloadFromLive(user, store.id),
+          await this.mergeVisualEditorPayloadWithLiveRules(
+            user,
+            store.id,
+            normalizeVisualEditorPayload(publishedRow.payload),
+          ),
           null,
         ),
       );
@@ -6621,21 +6615,118 @@ export class GuestGamificationService {
     missions: GuestGameMission[],
     storeId: string,
   ): GuestGameVisualEditorPayload {
+    return this.mergeVisualEditorPayloadFromRules(
+      basePayload,
+      { lootBoxes, missions },
+      storeId,
+    );
+  }
+
+  private async mergeVisualEditorPayloadWithLiveRules(
+    user: AuthenticatedUser,
+    storeId: string,
+    basePayload: GuestGameVisualEditorPayload,
+  ): Promise<GuestGameVisualEditorPayload> {
+    const [seasons, lootBoxes, missions, promoCards] = await Promise.all([
+      this.getSeasons(user),
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.getPromoCards(user),
+    ]);
+
+    return this.mergeVisualEditorPayloadFromRules(
+      basePayload,
+      { seasons, lootBoxes, missions, promoCards },
+      storeId,
+    );
+  }
+
+  private mergeVisualEditorPayloadFromRules(
+    basePayload: GuestGameVisualEditorPayload,
+    rules: {
+      seasons?: GuestGameSeason[];
+      lootBoxes?: GuestGameLootBox[];
+      missions?: GuestGameMission[];
+      promoCards?: GuestGamePromoCard[];
+    },
+    storeId: string,
+  ): GuestGameVisualEditorPayload {
+    const liveSeason =
+      rules.seasons?.find(
+        (item) =>
+          ruleMatchesPilotStore(item, storeId) &&
+          visualRulePeriodIsActive(item.periodFrom, item.periodTo),
+      ) ?? null;
+    const liveCheckInMission =
+      rules.missions?.find(
+        (item) =>
+          item.status === 'ACTIVE' &&
+          visualRulePeriodIsActive(item.periodFrom, item.periodTo) &&
+          (item.missionType === 'CHECK_IN' || item.triggerKind === 'CHECK_IN') &&
+          ruleMatchesStoreIds(item.storeIds, storeId),
+      ) ?? null;
+    const liveLootBoxes = rules.lootBoxes
+      ?.filter((item) => ruleMatchesPilotStore(item, storeId))
+      .slice(0, 8)
+      .map(visualLootBoxFromRule);
+    const liveMissions = rules.missions
+      ?.filter(
+        (item) =>
+          item.missionType !== 'CHECK_IN' &&
+          item.triggerKind !== 'CHECK_IN' &&
+          ruleMatchesPilotStore(item, storeId) &&
+          visualRulePeriodIsActive(item.periodFrom, item.periodTo),
+      )
+      .slice(0, 8)
+      .map(visualMissionFromRule);
+    const livePromoCards = rules.promoCards
+      ?.filter(
+        (item) =>
+          item.status === 'ACTIVE' &&
+          visualRulePeriodIsActive(item.periodFrom, item.periodTo) &&
+          ruleMatchesStoreIds(item.storeIds, storeId),
+      )
+      .slice(0, promoBannerDisplayLimit)
+      .map(visualPromoFromRule);
+
     return normalizeVisualEditorPayload({
       ...basePayload,
-      lootBoxes: lootBoxes
-        .filter((item) => ruleMatchesPilotStore(item, storeId))
-        .slice(0, 8)
-        .map(visualLootBoxFromRule),
-      missions: missions
-        .filter(
-          (item) =>
-            item.missionType !== 'CHECK_IN' &&
-            item.triggerKind !== 'CHECK_IN' &&
-            ruleMatchesPilotStore(item, storeId),
-        )
-        .slice(0, 8)
-        .map(visualMissionFromRule),
+      battlePass: rules.seasons
+        ? mergeVisualBattlePassFromLive(
+            basePayload.battlePass,
+            liveSeason ? visualBattlePassFromSeason(liveSeason) : null,
+            rules.seasons,
+          )
+        : basePayload.battlePass,
+      lootBoxes: rules.lootBoxes
+        ? mergeVisualEditorRuleItems(
+            basePayload.lootBoxes,
+            liveLootBoxes ?? [],
+            rules.lootBoxes,
+            12,
+          )
+        : basePayload.lootBoxes,
+      missions: rules.missions
+        ? mergeVisualEditorRuleItems(
+            basePayload.missions,
+            liveMissions ?? [],
+            rules.missions,
+            24,
+          )
+        : basePayload.missions,
+      promoCards: rules.promoCards
+        ? mergeVisualEditorRuleItems(
+            basePayload.promoCards,
+            livePromoCards ?? [],
+            rules.promoCards,
+            12,
+          )
+        : basePayload.promoCards,
+      checkIn: rules.missions
+        ? liveCheckInMission
+          ? visualCheckInFromMission(liveCheckInMission)
+          : basePayload.checkIn
+        : basePayload.checkIn,
     });
   }
 
@@ -7054,10 +7145,20 @@ export class GuestGamificationService {
               status: 'DRAFT' as StatusValue,
             },
           };
-      const seasonData = buildVisualSeasonData(user, storeIds, seasonPayload);
       if (payload.battlePass.id) {
         if (publish) {
-          await this.assertSeason(user, payload.battlePass.id);
+          const existingSeason = await this.assertSeason(
+            user,
+            payload.battlePass.id,
+          );
+          const seasonData = buildVisualSeasonData(
+            user,
+            visualStoreIdsForExistingRule(
+              stringArray(existingSeason.storeIds),
+              store.id,
+            ),
+            seasonPayload,
+          );
           const row = await this.prisma.guestGameSeason.update({
             where: { id: payload.battlePass.id },
             data: seasonData,
@@ -7066,6 +7167,7 @@ export class GuestGamificationService {
           battlePass = visualBattlePassFromSeason(mapSeason(row));
         }
       } else {
+        const seasonData = buildVisualSeasonData(user, storeIds, seasonPayload);
         const row = await this.prisma.guestGameSeason.create({
           data: seasonData,
           include: seasonInclude,
@@ -7079,10 +7181,17 @@ export class GuestGamificationService {
       const item = publish
         ? lootBox
         : { ...lootBox, status: 'DRAFT' as StatusValue };
-      const data = buildVisualLootBoxData(user, storeIds, item);
       if (lootBox.id) {
         if (publish) {
-          await this.assertLootBox(user, lootBox.id);
+          const existingLootBox = await this.assertLootBox(user, lootBox.id);
+          const data = buildVisualLootBoxData(
+            user,
+            visualStoreIdsForExistingRule(
+              stringArray(existingLootBox.storeIds),
+              store.id,
+            ),
+            item,
+          );
           const row = await this.prisma.guestGameLootBox.update({
             where: { id: lootBox.id },
             data,
@@ -7093,6 +7202,7 @@ export class GuestGamificationService {
           lootBoxes.push(lootBox);
         }
       } else {
+        const data = buildVisualLootBoxData(user, storeIds, item);
         const row = await this.prisma.guestGameLootBox.create({
           data: data,
           include: lootBoxInclude,
@@ -7106,10 +7216,17 @@ export class GuestGamificationService {
       const item = publish
         ? mission
         : { ...mission, status: 'DRAFT' as StatusValue };
-      const data = buildVisualMissionData(user, storeIds, item);
       if (mission.id) {
         if (publish) {
-          await this.assertMission(user, mission.id);
+          const existingMission = await this.assertMission(user, mission.id);
+          const data = buildVisualMissionData(
+            user,
+            visualStoreIdsForExistingRule(
+              stringArray(existingMission.storeIds),
+              store.id,
+            ),
+            item,
+          );
           const row = await this.prisma.guestGameMission.update({
             where: { id: mission.id },
             data,
@@ -7120,6 +7237,7 @@ export class GuestGamificationService {
           missions.push(mission);
         }
       } else {
+        const data = buildVisualMissionData(user, storeIds, item);
         const row = await this.prisma.guestGameMission.create({
           data: data,
           include: missionInclude,
@@ -7133,10 +7251,20 @@ export class GuestGamificationService {
       const item = publish
         ? promoCard
         : { ...promoCard, status: 'DRAFT' as StatusValue };
-      const data = buildVisualPromoCardData(user, storeIds, item);
       if (promoCard.id) {
         if (publish) {
-          await this.assertPromoCard(user, promoCard.id);
+          const existingPromoCard = await this.assertPromoCard(
+            user,
+            promoCard.id,
+          );
+          const data = buildVisualPromoCardData(
+            user,
+            visualStoreIdsForExistingRule(
+              stringArray(existingPromoCard.storeIds),
+              store.id,
+            ),
+            item,
+          );
           const row = await this.prisma.guestGamePromoCard.update({
             where: { id: promoCard.id },
             data,
@@ -7147,6 +7275,7 @@ export class GuestGamificationService {
           promoCards.push(promoCard);
         }
       } else {
+        const data = buildVisualPromoCardData(user, storeIds, item);
         const row = await this.prisma.guestGamePromoCard.create({
           data: data,
           include: promoCardInclude,
@@ -7155,17 +7284,24 @@ export class GuestGamificationService {
       }
     }
 
-    if (publish) {
-      await this.applyVisualCheckInRule(user, store.id, payload.checkIn);
-    }
-
-    return normalizeVisualEditorPayload({
+    const materializedPayload = normalizeVisualEditorPayload({
       ...payload,
       battlePass,
       lootBoxes,
       missions,
       promoCards,
     });
+
+    if (publish) {
+      await this.applyVisualCheckInRule(user, store.id, materializedPayload.checkIn);
+      await this.reconcilePublishedVisualEditorPayload(
+        user,
+        store.id,
+        materializedPayload,
+      );
+    }
+
+    return materializedPayload;
   }
 
   private async assertPromoCard(user: AuthenticatedUser, id: string) {
@@ -7178,6 +7314,113 @@ export class GuestGamificationService {
     }
 
     return row;
+  }
+
+  private async reconcilePublishedVisualEditorPayload(
+    user: AuthenticatedUser,
+    storeId: string,
+    payload: GuestGameVisualEditorPayload,
+  ) {
+    const stores = (await this.getPilotStores(user)) ?? [];
+    if (!stores.length) {
+      return;
+    }
+
+    const allStoreIds = stores.map((store) => store.id);
+    const [seasons, lootBoxes, missions, promoCards] = await Promise.all([
+      this.getSeasons(user),
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.getPromoCards(user),
+    ]);
+    const activeBattlePassId =
+      payload.battlePass.enabled && payload.battlePass.id
+        ? payload.battlePass.id
+        : null;
+    const activeLootBoxIds = new Set(
+      payload.lootBoxes
+        .map((item) => item.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const activeMissionIds = new Set(
+      payload.missions
+        .map((item) => item.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const activePromoCardIds = new Set(
+      payload.promoCards
+        .map((item) => item.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const updates: Array<Promise<unknown>> = [];
+
+    for (const season of seasons) {
+      if (
+        season.status === 'ACTIVE' &&
+        season.id !== activeBattlePassId &&
+        ruleMatchesStoreIds(season.storeIds, storeId)
+      ) {
+        updates.push(
+          this.prisma.guestGameSeason.update({
+            where: { id: season.id },
+            data: visualStoreDetachData(season.storeIds, storeId, allStoreIds),
+          }),
+        );
+      }
+    }
+
+    for (const lootBox of lootBoxes) {
+      if (
+        lootBox.status === 'ACTIVE' &&
+        !activeLootBoxIds.has(lootBox.id) &&
+        ruleMatchesStoreIds(lootBox.storeIds, storeId)
+      ) {
+        updates.push(
+          this.prisma.guestGameLootBox.update({
+            where: { id: lootBox.id },
+            data: visualStoreDetachData(lootBox.storeIds, storeId, allStoreIds),
+          }),
+        );
+      }
+    }
+
+    for (const mission of missions) {
+      if (
+        mission.status === 'ACTIVE' &&
+        mission.missionType !== 'CHECK_IN' &&
+        mission.triggerKind !== 'CHECK_IN' &&
+        !activeMissionIds.has(mission.id) &&
+        ruleMatchesStoreIds(mission.storeIds, storeId)
+      ) {
+        updates.push(
+          this.prisma.guestGameMission.update({
+            where: { id: mission.id },
+            data: visualStoreDetachData(mission.storeIds, storeId, allStoreIds),
+          }),
+        );
+      }
+    }
+
+    for (const promoCard of promoCards) {
+      if (
+        promoCard.status === 'ACTIVE' &&
+        !activePromoCardIds.has(promoCard.id) &&
+        ruleMatchesStoreIds(promoCard.storeIds, storeId)
+      ) {
+        updates.push(
+          this.prisma.guestGamePromoCard.update({
+            where: { id: promoCard.id },
+            data: visualStoreDetachData(
+              promoCard.storeIds,
+              storeId,
+              allStoreIds,
+            ),
+          }),
+        );
+      }
+    }
+
+    await Promise.all(updates);
   }
 
   private async applyVisualCheckInRule(
@@ -7197,15 +7440,26 @@ export class GuestGamificationService {
 
     if (!checkIn.enabled) {
       if (existing) {
+        const stores = await this.getPilotStores(user);
         await this.prisma.guestGameMission.update({
           where: { id: existing.id },
-          data: { status: 'PAUSED' },
+          data: visualStoreDetachData(
+            stringArray(existing.storeIds),
+            storeId,
+            stores.map((store) => store.id),
+          ),
         });
       }
       return;
     }
 
-    const data = buildVisualCheckInMissionData(user, storeId, checkIn);
+    const data = buildVisualCheckInMissionData(
+      user,
+      existing
+        ? visualStoreIdsForExistingRule(stringArray(existing.storeIds), storeId)
+        : [storeId],
+      checkIn,
+    );
     if (existing) {
       await this.prisma.guestGameMission.update({
         where: { id: existing.id },
@@ -18643,7 +18897,7 @@ function normalizePromoCardMetadata(metadata: Record<string, unknown>) {
 
 function buildVisualCheckInMissionData(
   user: AuthenticatedUser,
-  storeId: string,
+  storeIds: string[],
   checkIn: GuestGameVisualEditorCheckIn,
 ) {
   const bonusMode = checkIn.rewardMode === 'BONUS';
@@ -18664,7 +18918,7 @@ function buildVisualCheckInMissionData(
     xpReward: xp,
     progressTarget: 1,
     progressUnit: 'check-in',
-    storeIds: [storeId],
+    storeIds,
     conditions: {
       source: 'visual_editor',
       checkIn: true,
@@ -18724,6 +18978,8 @@ function buildVisualEditorPreviewSummary(
   const missions = payload.missions.slice(0, 6).map((mission) => ({
     id: mission.id ?? `preview-mission-${mission.title}`,
     name: mission.title,
+    triggerKind: mission.triggerKind,
+    sessionType: null,
     rewardLabel: mission.rewardLabel,
     xpReward: mission.xpReward,
     progressCurrent: 0,
@@ -18881,6 +19137,7 @@ function buildVisualEditorPreviewSummary(
         id: item.id ?? `preview-loot-${index}`,
         name: item.title,
         triggerKind: item.triggerKind,
+        sessionType: null,
         rewardLabel: item.rewardLabel,
         rewardType: canonicalLootBoxRewardType(item.rewardType),
         caseRarity: visualLootBoxCaseRarity({ caseRarity: item.caseRarity }),
@@ -19050,6 +19307,104 @@ function buildVisualPreviewBattlePass(
 
 function ruleMatchesStoreIds(storeIds: string[], storeId: string | null) {
   return !storeIds.length || Boolean(storeId && storeIds.includes(storeId));
+}
+
+function mergeVisualEditorRuleItems<
+  TItem extends { id: string | null; status: StatusValue },
+  TRule extends { id: string; status: StatusValue },
+>(
+  baseItems: TItem[],
+  liveItems: TItem[],
+  allRules: TRule[],
+  limit: number,
+): TItem[] {
+  const liveById = new Map(
+    liveItems
+      .filter((item): item is TItem & { id: string } => Boolean(item.id))
+      .map((item) => [item.id, item]),
+  );
+  const allRuleIds = new Set(allRules.map((rule) => rule.id));
+  const seenIds = new Set<string>();
+  const result: TItem[] = [];
+
+  for (const baseItem of baseItems) {
+    if (!baseItem.id) {
+      result.push(baseItem);
+      continue;
+    }
+
+    const liveItem = liveById.get(baseItem.id);
+    if (liveItem) {
+      result.push(liveItem);
+      seenIds.add(baseItem.id);
+      continue;
+    }
+
+    if (!allRuleIds.has(baseItem.id)) {
+      continue;
+    }
+
+    if (baseItem.status !== 'ACTIVE') {
+      result.push(baseItem);
+    }
+  }
+
+  for (const liveItem of liveItems) {
+    if (liveItem.id && !seenIds.has(liveItem.id)) {
+      result.push(liveItem);
+      seenIds.add(liveItem.id);
+    }
+  }
+
+  return result.slice(0, limit);
+}
+
+function mergeVisualBattlePassFromLive(
+  baseBattlePass: GuestGameVisualEditorBattlePass,
+  liveBattlePass: GuestGameVisualEditorBattlePass | null,
+  seasons: GuestGameSeason[],
+): GuestGameVisualEditorBattlePass {
+  if (liveBattlePass?.enabled && liveBattlePass.id) {
+    return liveBattlePass;
+  }
+
+  if (!baseBattlePass.id) {
+    return liveBattlePass ?? visualBattlePassFromSeason(null);
+  }
+
+  const seasonExists = seasons.some((season) => season.id === baseBattlePass.id);
+  if (!seasonExists || baseBattlePass.status === 'ACTIVE') {
+    return liveBattlePass ?? visualBattlePassFromSeason(null);
+  }
+
+  return baseBattlePass;
+}
+
+function visualStoreIdsForExistingRule(
+  currentStoreIds: string[],
+  storeId: string,
+) {
+  if (!currentStoreIds.length) {
+    return [];
+  }
+
+  return uniqueStrings([...currentStoreIds, storeId]);
+}
+
+function visualStoreDetachData(
+  currentStoreIds: string[],
+  storeId: string,
+  allStoreIds: string[],
+): { storeIds: string[]; status?: StatusValue } {
+  const nextStoreIds = currentStoreIds.length
+    ? currentStoreIds.filter((id) => id !== storeId)
+    : allStoreIds.filter((id) => id !== storeId);
+
+  if (nextStoreIds.length) {
+    return { storeIds: uniqueStrings(nextStoreIds) };
+  }
+
+  return { storeIds: [], status: 'PAUSED' };
 }
 
 function visualRecord(value: unknown): Record<string, unknown> {

@@ -873,6 +873,7 @@ export type GuestPortalGameSummary = {
         | 'id'
         | 'name'
         | 'triggerKind'
+        | 'sessionType'
         | 'rewardLabel'
         | 'rewardType'
         | 'caseRarity'
@@ -905,6 +906,8 @@ export type GuestPortalGameSummary = {
         GuestPortalMission,
         | 'id'
         | 'name'
+        | 'triggerKind'
+        | 'sessionType'
         | 'rewardLabel'
         | 'xpReward'
         | 'progressCurrent'
@@ -922,6 +925,8 @@ export type GuestPortalGameSummary = {
         GuestPortalMission,
         | 'id'
         | 'name'
+        | 'triggerKind'
+        | 'sessionType'
         | 'rewardLabel'
         | 'xpReward'
         | 'progressCurrent'
@@ -1176,6 +1181,7 @@ export type GuestPortalLootBox = {
   id: string;
   name: string;
   triggerKind: string;
+  sessionType: string | null;
   rewardLabel: string | null;
   rewardType: string;
   caseRarity: GuestPortalLootBoxCaseRarity;
@@ -1219,6 +1225,8 @@ export type GuestPortalLootBoxReward = {
 export type GuestPortalMission = {
   id: string;
   name: string;
+  triggerKind: string;
+  sessionType: string | null;
   missionType: string;
   rewardLabel: string | null;
   xpReward: number;
@@ -10184,6 +10192,7 @@ function buildGameSummaryFromPortal(
       id: lootBox.id,
       name: lootBox.name,
       triggerKind: lootBox.triggerKind,
+      sessionType: lootBox.sessionType,
       rewardLabel: lootBox.rewardLabel,
       rewardType: lootBox.rewardType,
       caseRarity: lootBox.caseRarity,
@@ -10608,6 +10617,8 @@ function mapGameSummaryMission(
   return {
     id: mission.id,
     name: mission.name,
+    triggerKind: mission.triggerKind,
+    sessionType: mission.sessionType,
     rewardLabel: mission.rewardLabel,
     xpReward: mission.xpReward,
     progressCurrent: mission.progressCurrent,
@@ -12279,10 +12290,29 @@ function filterLootBoxesByVisualRefs<T extends { id: string; name: string }>(
   }
 
   if (!refs.length) {
-    return [];
+    return rows;
   }
 
-  return rows.filter((row) => visualLootBoxRefsContain(refs, row));
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const orderedRows: T[] = [];
+  const orderedIds = new Set<string>();
+
+  for (const ref of refs) {
+    const row =
+      (ref.id ? rowById.get(ref.id) : null) ??
+      rows.find((item) => !ref.id && ref.title && ref.title === item.name) ??
+      null;
+
+    if (row && !orderedIds.has(row.id)) {
+      orderedRows.push(row);
+      orderedIds.add(row.id);
+    }
+  }
+
+  return [
+    ...orderedRows,
+    ...rows.filter((row) => !orderedIds.has(row.id)),
+  ];
 }
 
 function visualLootBoxRefsContain(
@@ -12357,6 +12387,7 @@ function mapLootBox(
     id: row.id,
     name: row.name,
     triggerKind: row.triggerKind,
+    sessionType: row.sessionType ?? null,
     rewardLabel: row.rewardLabel,
     rewardType: row.rewardType,
     caseRarity,
@@ -12467,7 +12498,7 @@ function buildLootBoxOpenState(
     return {
       openState: 'WAITING_EVENT',
       openable: false,
-      openBlocker: lootBoxWaitingEventMessage(row.triggerKind),
+      openBlocker: lootBoxWaitingEventMessage(row.triggerKind, row.sessionType),
       weeklyOpenedCount,
       weeklyLimit,
       dailyOpenedCount,
@@ -12770,10 +12801,30 @@ function isGuestPortalActionableSessionType(value: string | null | undefined) {
   );
 }
 
-function lootBoxWaitingEventMessage(triggerKind: string) {
-  return `Чтобы открыть этот лутбокс, выполните задание: ${guestGameTriggerLabel(
-    triggerKind,
-  )}.`;
+function guestPortalSessionRequirementLabel(value: string | null | undefined) {
+  const normalized = normalizeGuestPortalSessionType(value);
+
+  if (normalized === 'packet_hours') {
+    return 'с пакетом часов';
+  }
+
+  if (normalized === 'regular_session') {
+    return 'с почасовым тарифом';
+  }
+
+  return null;
+}
+
+function lootBoxWaitingEventMessage(
+  triggerKind: string,
+  sessionType?: string | null,
+) {
+  const sessionRequirement = guestPortalSessionRequirementLabel(sessionType);
+  const triggerLabel = guestGameTriggerLabel(triggerKind);
+
+  return `Чтобы открыть этот лутбокс, выполните задание: ${triggerLabel}${
+    sessionRequirement ? ` ${sessionRequirement}` : ''
+  }.`;
 }
 
 function buildLootBoxRewardState(
@@ -12833,6 +12884,7 @@ function mapMission(
   row: {
     id: string;
     name: string;
+    triggerKind: string;
     missionType: string;
     rewardLabel: string | null;
     xpReward: number;
@@ -12854,10 +12906,13 @@ function mapMission(
   const progressPercent = questSteps.length
     ? percent(progressCurrent, progressTarget ?? questSteps.length)
     : (progress?.percent ?? 0);
+  const conditions = jsonRecord(row.conditions);
 
   return {
     id: row.id,
     name: row.name,
+    triggerKind: row.triggerKind,
+    sessionType: stringField(conditions.sessionType),
     missionType: row.missionType,
     rewardLabel: row.rewardLabel,
     xpReward: row.xpReward,

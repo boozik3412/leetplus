@@ -52,6 +52,8 @@ type HomeLootCard = {
   id: string;
   title: string;
   description: string;
+  triggerKind: string;
+  sessionType: string | null;
   status: string;
   active: boolean;
   openable: boolean;
@@ -3226,6 +3228,8 @@ function buildHomeLootCards(
       lootBox.latestReward?.rewardLabel ??
       lootBox.rewardLabel ??
       "Лутбокс с наградой за активность в клубе.",
+    triggerKind: lootBox.triggerKind,
+    sessionType: lootBox.sessionType,
     status: lootboxCardStatus(lootBox),
     active: false,
     openable: lootBox.openable,
@@ -3299,10 +3303,149 @@ function lootboxCardHint(card: HomeLootCard) {
   }
 
   if (card.status === "ожидает" || card.status === "ждет событие") {
-    return "Откроется после события в клубе";
+    return lootBoxUnlockHint(card.triggerKind, card.sessionType);
   }
 
   return "Нажмите, чтобы посмотреть контейнер";
+}
+
+function lootBoxUnlockHint(triggerKind: string, sessionType: string | null) {
+  return `Откроется ${gameRuleUnlockCondition(triggerKind, sessionType)}`;
+}
+
+function gameRuleUnlockCondition(
+  triggerKind: string,
+  sessionType: string | null,
+) {
+  const normalized = normalizeGameRuleTrigger(triggerKind);
+  const sessionRequirement =
+    normalized === "SESSION_START"
+      ? gameRuleSessionRequirement(sessionType)
+      : null;
+
+  if (normalized === "SESSION_START") {
+    return `при старте сессии${sessionRequirement ? ` ${sessionRequirement}` : ""}`;
+  }
+
+  if (normalized === "APP_OPEN") {
+    return "при открытии игрового модуля";
+  }
+
+  if (normalized === "CHECK_IN") {
+    return "после чекина в клубе";
+  }
+
+  return `после события: ${gameRuleEventLabel(triggerKind)}`;
+}
+
+function gameRuleConditionLabel(
+  triggerKind: string,
+  sessionType: string | null,
+) {
+  const normalized = normalizeGameRuleTrigger(triggerKind);
+  const sessionRequirement =
+    normalized === "SESSION_START"
+      ? gameRuleSessionRequirement(sessionType)
+      : null;
+
+  if (normalized === "SESSION_START") {
+    return `старт сессии${sessionRequirement ? ` ${sessionRequirement}` : ""}`;
+  }
+
+  return gameRuleEventLabel(triggerKind);
+}
+
+function gameRuleBadgeLabel(triggerKind: string, sessionType: string | null) {
+  const normalized = normalizeGameRuleTrigger(triggerKind);
+
+  if (normalized !== "SESSION_START") {
+    return gameRuleEventLabel(triggerKind);
+  }
+
+  const sessionLabel = gameRuleSessionShortLabel(sessionType);
+
+  return sessionLabel ? `старт сессии · ${sessionLabel}` : "старт сессии";
+}
+
+function gameRuleEventLabel(triggerKind: string) {
+  switch (normalizeGameRuleTrigger(triggerKind)) {
+    case "APP_OPEN":
+      return "открытие игрового модуля";
+    case "SESSION_START":
+      return "старт сессии";
+    case "CHECK_IN":
+      return "чекин в клубе";
+    case "VISIT":
+      return "визит в клуб";
+    case "PLAY_HOUR":
+      return "час игры";
+    case "BAR_PURCHASE":
+      return "покупка в баре";
+    case "PRODUCT_PURCHASE":
+      return "покупка товара";
+    case "BALANCE_TOPUP":
+      return "пополнение баланса";
+    case "GUEST_LOG":
+      return "событие Langame";
+    case "REFERRAL_ACCEPTED":
+      return "приглашенный друг";
+    case "REPEAT_VISIT":
+      return "повторный визит";
+    case "MISSION_COMPLETED":
+      return "выполненное задание";
+    default:
+      return triggerKind;
+  }
+}
+
+function gameRuleSessionRequirement(value: string | null) {
+  const normalized = normalizeGameRuleSessionType(value);
+
+  if (normalized === "packet_hours") {
+    return "с пакетом часов";
+  }
+
+  if (normalized === "regular_session") {
+    return "с почасовым тарифом";
+  }
+
+  return null;
+}
+
+function gameRuleSessionShortLabel(value: string | null) {
+  const normalized = normalizeGameRuleSessionType(value);
+
+  if (normalized === "packet_hours") {
+    return "пакет часов";
+  }
+
+  if (normalized === "regular_session") {
+    return "почасовой тариф";
+  }
+
+  return null;
+}
+
+function normalizeGameRuleTrigger(value: string) {
+  return value.trim().toUpperCase();
+}
+
+function normalizeGameRuleSessionType(value: string | null) {
+  const normalized = (value ?? "").trim().toLowerCase();
+
+  if (
+    ["packet_hours", "packet", "package", "package_hours"].includes(normalized)
+  ) {
+    return "packet_hours";
+  }
+
+  if (
+    ["regular_session", "regular", "common", "default"].includes(normalized)
+  ) {
+    return "regular_session";
+  }
+
+  return normalized;
 }
 
 function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
@@ -3520,15 +3663,22 @@ function playerQuestDescription(
     return mission.rewardStatus.hint;
   }
 
+  const parts = [missionConditionHint(mission)];
+
   if (mission.rewardLabel) {
-    return `Награда: ${mission.rewardLabel}.`;
+    parts.push(`Награда: ${mission.rewardLabel}.`);
+  } else if (reward) {
+    parts.push(`Награда: ${reward.value}.`);
   }
 
-  if (reward) {
-    return `Награда: ${reward.value}.`;
-  }
+  return parts.join(" ");
+}
 
-  return "Клубный квест с прогрессом по активности гостя.";
+function missionConditionHint(mission: GameMission) {
+  return `Условие: ${gameRuleConditionLabel(
+    mission.triggerKind,
+    mission.sessionType,
+  )}.`;
 }
 
 function missionBattlePassDescription(mission: GameMission) {
@@ -3538,6 +3688,7 @@ function missionBattlePassDescription(mission: GameMission) {
     null;
   const progress = playerQuestProgress(mission);
   const parts = [
+    missionConditionHint(mission),
     activeStep ? `Текущий шаг: ${activeStep.title}` : null,
     progress ? `Прогресс: ${progress.label}` : null,
     mission.rewardStatus.hint,
@@ -5221,7 +5372,7 @@ function LootBoxesPanel({
                     </p>
                   </div>
                   <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black text-zinc-200">
-                    {lootBox.triggerKind}
+                    {gameRuleBadgeLabel(lootBox.triggerKind, lootBox.sessionType)}
                   </span>
                 </div>
 
@@ -5295,8 +5446,12 @@ function LootBoxesPanel({
                   </div>
                 ) : (
                   <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-zinc-400">
-                    Лутбокс откроется после подходящего события в клубе:
-                    сессии, квеста или правила Guest Game Hub.
+                    Лутбокс откроется{" "}
+                    {gameRuleUnlockCondition(
+                      lootBox.triggerKind,
+                      lootBox.sessionType,
+                    )}
+                    .
                   </p>
                 )}
               </article>
@@ -5411,6 +5566,9 @@ function MissionsPanel({
                       </span>
                     </div>
                   </div>
+                  <p className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-xs font-semibold leading-5 text-cyan-100">
+                    {missionConditionHint(mission)}
+                  </p>
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
                     <div
                       className="h-full rounded-full bg-emerald-300"
@@ -11502,6 +11660,8 @@ function buildLootboxRouletteState({
           item.latestReward?.rewardLabel ??
           item.rewardLabel ??
           currentCard.description,
+        triggerKind: item.triggerKind ?? currentCard.triggerKind,
+        sessionType: item.sessionType ?? currentCard.sessionType,
         status: "",
         active: false,
         openable: item.openable,

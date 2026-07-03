@@ -296,6 +296,7 @@ export type GuestPortalPayload = {
       id: string;
       name: string;
       triggerKind: string;
+      sessionType: string | null;
       rewardLabel: string | null;
       rewardType: string;
       caseRarity: GuestPortalLootBoxRarity;
@@ -337,6 +338,8 @@ export type GuestPortalPayload = {
       id: string;
       name: string;
       missionType: string;
+      triggerKind: string;
+      sessionType: string | null;
       rewardLabel: string | null;
       xpReward: number;
       progressCurrent: number;
@@ -633,6 +636,7 @@ export type GuestPortalGameSummary = {
         | "id"
         | "name"
         | "triggerKind"
+        | "sessionType"
         | "rewardLabel"
         | "rewardType"
         | "caseRarity"
@@ -665,6 +669,8 @@ export type GuestPortalGameSummary = {
         GuestPortalPayload["gamification"]["missions"][number],
         | "id"
         | "name"
+        | "triggerKind"
+        | "sessionType"
         | "rewardLabel"
         | "xpReward"
         | "progressCurrent"
@@ -682,6 +688,8 @@ export type GuestPortalGameSummary = {
         GuestPortalPayload["gamification"]["missions"][number],
         | "id"
         | "name"
+        | "triggerKind"
+        | "sessionType"
         | "rewardLabel"
         | "xpReward"
         | "progressCurrent"

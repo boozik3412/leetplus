@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import {
-  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -43,8 +42,6 @@ import type {
   GuestGameStatus,
   GuestGameTariffSnapshotEndpoint,
   GuestGameTariffSnapshotStatus,
-  GuestGameVisualEventSyncResult,
-  GuestGameVisualEventSyncStatus,
   GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
 import type { Product } from "@/lib/products";
@@ -127,6 +124,11 @@ type RuleDeleteRequestModal = {
 type RuleDeleteActivityModal = RuleDeleteRequestModal & {
   message: string;
   stores: string[];
+};
+
+type RuleActivationRequestModal = RuleDeleteRequestModal & {
+  stores: string[];
+  confirmAction?: () => Promise<void>;
 };
 
 type PromoBannerUsageInfo = {
@@ -1232,10 +1234,8 @@ export function GuestGamificationPanel({
     useState<RuleDeleteActivityModal | null>(null);
   const [deleteBlockedModal, setDeleteBlockedModal] =
     useState<RuleDeleteBlockedModal | null>(null);
-  const [visualSyncStatus, setVisualSyncStatus] =
-    useState<GuestGameVisualEventSyncStatus | null>(null);
-  const [visualSyncSaving, setVisualSyncSaving] =
-    useState<"draft" | "publish" | null>(null);
+  const [activationRequestModal, setActivationRequestModal] =
+    useState<RuleActivationRequestModal | null>(null);
   const [visualEditorStoreId, setVisualEditorStoreId] = useState<string | null>(
     null,
   );
@@ -1267,37 +1267,6 @@ export function GuestGamificationPanel({
       ),
     [workspace.rewards],
   );
-
-  useEffect(() => {
-    if (!access.canManageRules) {
-      setVisualSyncStatus(null);
-      return;
-    }
-
-    let isActive = true;
-
-    async function loadStatus() {
-      try {
-        const status = await fetchJson<GuestGameVisualEventSyncStatus>(
-          "/api/guests/gamification/visual-editor/events/sync-status",
-        );
-
-        if (isActive) {
-          setVisualSyncStatus(status);
-        }
-      } catch {
-        if (isActive) {
-          setVisualSyncStatus(null);
-        }
-      }
-    }
-
-    void loadStatus();
-
-    return () => {
-      isActive = false;
-    };
-  }, [access.canManageRules, workspace.lootBoxes, workspace.missions]);
 
   function editProfile(profile: GuestGameProfile) {
     setProfileForm(profileToForm(profile));
@@ -1433,44 +1402,6 @@ export function GuestGamificationPanel({
     }
   }
 
-  async function syncVisualEvents(mode: "draft" | "publish") {
-    setVisualSyncSaving(mode);
-    setError(null);
-
-    try {
-      assertCan(
-        access.canManageRules,
-        "Для публикации игровых событий нужно право `Геймификация: правила`.",
-      );
-
-      const result = await postJson<GuestGameVisualEventSyncResult>(
-        "/api/guests/gamification/visual-editor/events/sync",
-        { publish: mode === "publish" },
-      );
-      const targetStoreId =
-        result.drafts[0]?.store?.id ??
-        visualSyncStatus?.stores[0]?.storeId ??
-        result.status.stores[0]?.storeId ??
-        null;
-
-      setVisualSyncStatus(result.status);
-      await reloadWorkspace();
-
-      if (mode === "draft") {
-        setVisualEditorStoreId(targetStoreId);
-        setEditorMode("visual");
-      }
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Не удалось синхронизировать визуальный редактор",
-      );
-    } finally {
-      setVisualSyncSaving(null);
-    }
-  }
-
   async function saveProfile() {
     await saveAction("profile", async () => {
       assertCan(
@@ -1521,7 +1452,39 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function saveLootBox() {
+  function needsActivationConfirmation(
+    nextStatus: GuestGameStatus,
+    currentStatus: GuestGameStatus | null,
+    confirmed: boolean,
+  ) {
+    return nextStatus === "ACTIVE" && currentStatus !== "ACTIVE" && !confirmed;
+  }
+
+  async function saveLootBox(
+    options: { confirmedActivation?: boolean } = {},
+  ) {
+    const currentStatus =
+      workspace.lootBoxes.find((item) => item.id === editingLootBoxId)?.status ??
+      null;
+
+    if (
+      needsActivationConfirmation(
+        lootBoxForm.status,
+        currentStatus,
+        options.confirmedActivation === true,
+      )
+    ) {
+      setActivationRequestModal({
+        type: "loot-boxes",
+        id: editingLootBoxId ?? "new-loot-box",
+        name: lootBoxForm.name || "Новый лутбокс",
+        label: ruleTemplateLabel("loot-boxes"),
+        stores: activationTargetStoreNames(lootBoxForm.storeIds, stores),
+        confirmAction: () => saveLootBox({ confirmedActivation: true }),
+      });
+      return;
+    }
+
     await saveAction("lootBox", async () => {
       assertCan(
         access.canManageRules,
@@ -1563,7 +1526,31 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function saveMission() {
+  async function saveMission(
+    options: { confirmedActivation?: boolean } = {},
+  ) {
+    const currentStatus =
+      workspace.missions.find((item) => item.id === editingMissionId)?.status ??
+      null;
+
+    if (
+      needsActivationConfirmation(
+        missionForm.status,
+        currentStatus,
+        options.confirmedActivation === true,
+      )
+    ) {
+      setActivationRequestModal({
+        type: "missions",
+        id: editingMissionId ?? "new-mission",
+        name: missionForm.name || "Новое задание",
+        label: ruleTemplateLabel("missions"),
+        stores: activationTargetStoreNames(missionForm.storeIds, stores),
+        confirmAction: () => saveMission({ confirmedActivation: true }),
+      });
+      return;
+    }
+
     await saveAction("mission", async () => {
       assertCan(
         access.canManageRules,
@@ -1608,7 +1595,31 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function saveSeason() {
+  async function saveSeason(
+    options: { confirmedActivation?: boolean } = {},
+  ) {
+    const currentStatus =
+      workspace.seasons.find((item) => item.id === editingSeasonId)?.status ??
+      null;
+
+    if (
+      needsActivationConfirmation(
+        seasonForm.status,
+        currentStatus,
+        options.confirmedActivation === true,
+      )
+    ) {
+      setActivationRequestModal({
+        type: "seasons",
+        id: editingSeasonId ?? "new-season",
+        name: seasonForm.name || "Новый сезон",
+        label: ruleTemplateLabel("seasons"),
+        stores: activationTargetStoreNames(seasonForm.storeIds, stores),
+        confirmAction: () => saveSeason({ confirmedActivation: true }),
+      });
+      return;
+    }
+
     await saveAction("season", async () => {
       assertCan(
         access.canManageRules,
@@ -1648,7 +1659,38 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function savePromoBanner() {
+  async function savePromoBanner(
+    options: { confirmedActivation?: boolean } = {},
+  ) {
+    const limitWarning = promoBannerDraftLimitWarning(
+      promoBannerForm,
+      workspace.promoCards,
+      stores,
+      editingPromoBannerId,
+    );
+    const nextStatus = limitWarning ? "DRAFT" : promoBannerForm.status;
+    const currentStatus =
+      workspace.promoCards.find((item) => item.id === editingPromoBannerId)
+        ?.status ?? null;
+
+    if (
+      needsActivationConfirmation(
+        nextStatus,
+        currentStatus,
+        options.confirmedActivation === true,
+      )
+    ) {
+      setActivationRequestModal({
+        type: "promo-cards",
+        id: editingPromoBannerId ?? "new-promo-card",
+        name: promoBannerForm.title || "Новый промо-баннер",
+        label: ruleTemplateLabel("promo-cards"),
+        stores: activationTargetStoreNames(promoBannerForm.storeIds, stores),
+        confirmAction: () => savePromoBanner({ confirmedActivation: true }),
+      });
+      return;
+    }
+
     await saveAction("promoBanner", async () => {
       assertCan(
         access.canManageRules,
@@ -1670,19 +1712,12 @@ export function GuestGamificationPanel({
         throw new Error(message);
       }
 
-      const limitWarning = promoBannerDraftLimitWarning(
-        promoBannerForm,
-        workspace.promoCards,
-        stores,
-        editingPromoBannerId,
-      );
-      const status = limitWarning ? "DRAFT" : promoBannerForm.status;
       const payload = {
         title: promoBannerForm.title,
         label: nullable(promoBannerForm.label),
         description: nullable(promoBannerForm.description),
         tag: nullable(promoBannerForm.tag),
-        status,
+        status: nextStatus,
         targetAnchor: nullable(promoBannerForm.targetAnchor),
         priority: promoBannerForm.priority,
         storeIds: promoBannerForm.storeIds,
@@ -2149,11 +2184,78 @@ export function GuestGamificationPanel({
     });
   }
 
+  function buildRuleActivationRequest(
+    type: RuleTemplateType,
+    id: string,
+  ): RuleActivationRequestModal | null {
+    const label = ruleTemplateLabel(type);
+
+    if (type === "loot-boxes") {
+      const item = workspace.lootBoxes.find((rule) => rule.id === id);
+      return item && item.status !== "ACTIVE"
+        ? {
+            type,
+            id,
+            name: item.name,
+            label,
+            stores: activationTargetStoreNames(item.storeIds, stores),
+          }
+        : null;
+    }
+
+    if (type === "missions") {
+      const item = workspace.missions.find((rule) => rule.id === id);
+      return item && item.status !== "ACTIVE"
+        ? {
+            type,
+            id,
+            name: item.name,
+            label,
+            stores: activationTargetStoreNames(item.storeIds, stores),
+          }
+        : null;
+    }
+
+    if (type === "seasons") {
+      const item = workspace.seasons.find((rule) => rule.id === id);
+      return item && item.status !== "ACTIVE"
+        ? {
+            type,
+            id,
+            name: item.name,
+            label,
+            stores: activationTargetStoreNames(item.storeIds, stores),
+          }
+        : null;
+    }
+
+    const item = workspace.promoCards.find((rule) => rule.id === id);
+    return item && item.status !== "ACTIVE"
+      ? {
+          type,
+          id,
+          name: item.title,
+          label,
+          stores: activationTargetStoreNames(item.storeIds, stores),
+        }
+      : null;
+  }
+
   async function updateRuleStatus(
     type: RuleTemplateType,
     id: string,
     status: GuestGameStatus,
+    options: { confirmedActivation?: boolean } = {},
   ) {
+    if (status === "ACTIVE" && !options.confirmedActivation) {
+      const activationRequest = buildRuleActivationRequest(type, id);
+
+      if (activationRequest) {
+        setActivationRequestModal(activationRequest);
+        return;
+      }
+    }
+
     await saveAction(`${type}-${id}`, async () => {
       assertCan(
         access.canManageRules,
@@ -2162,6 +2264,20 @@ export function GuestGamificationPanel({
 
       await patchJson(`/api/guests/gamification/${type}/${id}`, { status });
       await reloadWorkspace();
+    });
+  }
+
+  async function confirmActivateRuleTemplate(
+    request: RuleActivationRequestModal,
+  ) {
+    setActivationRequestModal(null);
+    if (request.confirmAction) {
+      await request.confirmAction();
+      return;
+    }
+
+    await updateRuleStatus(request.type, request.id, "ACTIVE", {
+      confirmedActivation: true,
     });
   }
 
@@ -2403,15 +2519,6 @@ export function GuestGamificationPanel({
 
       {editorMode === "advanced" ? (
         <>
-          {visualSyncStatus?.dirty ? (
-            <VisualEventSyncBanner
-              status={visualSyncStatus}
-              saving={visualSyncSaving}
-              onOpenDraft={() => void syncVisualEvents("draft")}
-              onPublish={() => void syncVisualEvents("publish")}
-            />
-          ) : null}
-
           <div className="flex gap-2 overflow-x-auto border-b border-zinc-200 pb-2 dark:border-zinc-800">
         {tabs.map((tab) => (
           <button
@@ -2650,6 +2757,18 @@ export function GuestGamificationPanel({
           onClose={() => setDeleteBlockedModal(null)}
         />
       ) : null}
+
+      {activationRequestModal ? (
+        <ActivationConfirmModal
+          modal={activationRequestModal}
+          onClose={() => setActivationRequestModal(null)}
+          onConfirm={() => confirmActivateRuleTemplate(activationRequestModal)}
+          saving={
+            saving ===
+            `${activationRequestModal.type}-${activationRequestModal.id}`
+          }
+        />
+      ) : null}
     </div>
   );
 }
@@ -2707,6 +2826,69 @@ function DeleteConfirmModal({
             onClick={() => void onConfirm()}
           >
             {saving ? "Удаление..." : "Удалить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActivationConfirmModal({
+  modal,
+  saving,
+  onClose,
+  onConfirm,
+}: {
+  modal: RuleActivationRequestModal;
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  return (
+    <div
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 p-4 backdrop-blur-sm"
+      role="dialog"
+    >
+      <div className="w-full max-w-lg rounded-lg border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-cyan-300">
+            Подтвердите активацию
+          </p>
+          <h3 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Активировать {modal.label} «{modal.name}»?
+          </h3>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          После подтверждения элемент сразу попадет в игровой модуль и будет
+          отображаться в визуальном редакторе для выбранных клубов.
+        </p>
+        <div className="mt-4 rounded-lg border border-cyan-200 bg-cyan-50 p-3 dark:border-cyan-900/60 dark:bg-cyan-950/30">
+          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-900 dark:text-cyan-200">
+            Клубы
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-cyan-950 dark:text-cyan-100">
+            {modal.stores.map((store) => (
+              <li key={store}>{store}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            className={smallButtonClass}
+            disabled={saving}
+            onClick={onClose}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            className={primaryButtonClass}
+            disabled={saving}
+            onClick={() => void onConfirm()}
+          >
+            {saving ? "Активируем..." : "Да, активировать"}
           </button>
         </div>
       </div>
@@ -8273,102 +8455,6 @@ function PromoBannerCardPreview({
   );
 }
 
-function VisualEventSyncBanner({
-  status,
-  saving,
-  onOpenDraft,
-  onPublish,
-}: {
-  status: GuestGameVisualEventSyncStatus;
-  saving: "draft" | "publish" | null;
-  onOpenDraft: () => void;
-  onPublish: () => void;
-}) {
-  const visibleStores = status.stores.slice(0, 3);
-  const hiddenCount = Math.max(0, status.stores.length - visibleStores.length);
-  const storeNames = compactStoreNames(
-    status.stores.map((store) => store.storeName),
-  );
-
-  return (
-    <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-wide">
-            Нужна публикация игровых событий
-          </p>
-          <h2 className="mt-1 text-base font-bold">
-            Изменена конфигурация в клубах: {storeNames || "клуб не выбран"}
-          </h2>
-          <p className="mt-1 text-sm leading-6 text-amber-900/85 dark:text-amber-100/85">
-            В расширенных правилах лутбоксы или задания отличаются от
-            опубликованного визуального редактора. Сохраните черновик для
-            проверки или сразу опубликуйте актуальный список событий.
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/40"
-            disabled={saving !== null}
-            onClick={onOpenDraft}
-          >
-            {saving === "draft" ? "Сохраняем..." : "Открыть черновик"}
-          </button>
-          <button
-            type="button"
-            className="rounded-lg bg-zinc-950 px-3 py-2 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-500 dark:bg-cyan-300 dark:text-zinc-950 dark:hover:bg-cyan-200"
-            disabled={saving !== null}
-            onClick={onPublish}
-          >
-            {saving === "publish" ? "Публикуем..." : "Опубликовать изменения"}
-          </button>
-        </div>
-      </div>
-      <div className="mt-3 grid gap-2 lg:grid-cols-3">
-        {visibleStores.map((store) => (
-          <div
-            key={store.storeId}
-            className="rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100"
-          >
-            <p className="font-bold">{store.storeName}</p>
-            <p className="mt-1">{visualEventSyncStoreSummary(store)}</p>
-          </div>
-        ))}
-        {hiddenCount ? (
-          <div className="rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-xs font-bold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
-            Еще {hiddenCount} клуб.
-          </div>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function visualEventSyncStoreSummary(
-  store: GuestGameVisualEventSyncStatus["stores"][number],
-) {
-  const parts = [
-    visualEventSyncPart("новые лутбоксы", store.addedLootBoxes),
-    visualEventSyncPart("убрать лутбоксы", store.removedLootBoxes),
-    visualEventSyncPart("новые задания", store.addedMissions),
-    visualEventSyncPart("убрать задания", store.removedMissions),
-  ].filter(Boolean);
-
-  return parts.length ? parts.join("; ") : "есть изменения в событиях";
-}
-
-function visualEventSyncPart(label: string, items: string[]) {
-  if (!items.length) {
-    return "";
-  }
-
-  const shown = items.slice(0, 2).join(", ");
-  const rest = items.length > 2 ? ` +${items.length - 2}` : "";
-
-  return `${label}: ${shown}${rest}`;
-}
-
 function promoBannerPreviewTitleStyle(title: string): CSSProperties {
   const size = promoBannerPreviewTitleSize(title);
 
@@ -12919,6 +13005,15 @@ function ruleTemplateLabel(type: RuleTemplateType) {
     case "promo-cards":
       return "промо-баннер";
   }
+}
+
+function activationTargetStoreNames(storeIds: string[], stores: Store[]) {
+  if (!storeIds.length) {
+    return ["Все активные клубы сети"];
+  }
+
+  const storeNameById = new Map(stores.map((store) => [store.id, store.name]));
+  return storeIds.map((id) => storeNameById.get(id) ?? `Клуб ${id}`);
 }
 
 function buildDeleteActivityModal(

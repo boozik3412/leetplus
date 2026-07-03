@@ -186,7 +186,6 @@ type LootBoxForm = {
   audienceId: string;
   segment: string;
   sessionType: string;
-  packetMode: string;
   tariffGroupId: string;
   tariffPeriodId: string;
   tariffTypeId: string;
@@ -241,7 +240,6 @@ type MissionForm = {
   perGuestLimit: string;
   totalRewardLimit: string;
   sessionType: string;
-  packetMode: string;
   tariffGroupId: string;
   tariffPeriodId: string;
   tariffTypeId: string;
@@ -285,7 +283,6 @@ type SeasonForm = {
   xpPacketSessionBonus: string;
   xpGuestLog: string;
   sessionType: string;
-  packetMode: string;
   tariffGroupId: string;
   tariffPeriodId: string;
   tariffTypeId: string;
@@ -723,21 +720,14 @@ const automaticLedgerRewardTypes = new Set([
 ]);
 
 const sessionTypeOptions = [
-  { value: "", label: "любой тип" },
-  { value: "regular_session", label: "обычная сессия" },
+  { value: "regular_session", label: "почасовая сессия" },
   { value: "packet_hours", label: "пакет часов" },
-];
-
-const packetModeOptions = [
-  { value: "ANY", label: "любой формат" },
-  { value: "PACKET_ONLY", label: "только пакет часов" },
-  { value: "NON_PACKET_ONLY", label: "только обычная сессия" },
 ];
 
 const dryRunPacketOptions = [
   { value: "", label: "не указано" },
   { value: "true", label: "пакет часов" },
-  { value: "false", label: "обычная сессия" },
+  { value: "false", label: "почасовая сессия" },
 ];
 
 const statusLabels: Record<GuestGameStatus, string> = {
@@ -901,7 +891,6 @@ const defaultLootBoxForm: LootBoxForm = {
   audienceId: "",
   segment: "quiet_hours",
   sessionType: "",
-  packetMode: "ANY",
   tariffGroupId: "",
   tariffPeriodId: "",
   tariffTypeId: "",
@@ -927,7 +916,6 @@ const defaultLootBoxForm: LootBoxForm = {
     weekdayMode: "WEEKDAYS",
     weekdays: [1, 2, 3, 4, 5],
     hours: ["10:00-16:00"],
-    packetMode: "ANY",
   }),
   limitsText: jsonText({
     perGuestPerWeek: 1,
@@ -999,7 +987,6 @@ const defaultMissionForm: MissionForm = {
   perGuestLimit: "1",
   totalRewardLimit: "100",
   sessionType: "",
-  packetMode: "ANY",
   tariffGroupId: "",
   tariffPeriodId: "",
   tariffTypeId: "",
@@ -1024,7 +1011,6 @@ const defaultMissionForm: MissionForm = {
   conditionsText: jsonText({
     windowDays: 7,
     weekdaysOnly: true,
-    packetMode: "ANY",
     requiresLangameFact: true,
   }),
   antiFraudText: jsonText({
@@ -1051,7 +1037,6 @@ const defaultSeasonForm: SeasonForm = {
   xpPacketSessionBonus: "15",
   xpGuestLog: "5",
   sessionType: "",
-  packetMode: "ANY",
   tariffGroupId: "",
   tariffPeriodId: "",
   tariffTypeId: "",
@@ -1071,7 +1056,6 @@ const defaultSeasonForm: SeasonForm = {
     missionCompletion: 50,
     packetSessionBonus: 15,
     guestLog: 5,
-    packetMode: "ANY",
   }),
   levelsText: jsonText([
     { level: 1, xp: 0, freeReward: "Старт сезона" },
@@ -3148,6 +3132,9 @@ function DryRunTab({
                 value={form.sessionType}
                 onChange={(event) => update("sessionType", event.target.value)}
               >
+                <option value="" disabled>
+                  Выберите тип
+                </option>
                 {sessionTypeOptions.map((option) => (
                   <option key={option.value || "any"} value={option.value}>
                     {option.label}
@@ -6976,23 +6963,11 @@ function LootBoxesTab({
                       setForm({ ...form, sessionType: event.target.value })
                     }
                   >
+                    <option value="" disabled>
+                      Выберите тип
+                    </option>
                     {sessionTypeOptions.map((option) => (
                       <option key={option.value || "any"} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Пакет часов">
-                  <select
-                    className={fieldClass}
-                    value={form.packetMode}
-                    onChange={(event) =>
-                      setForm({ ...form, packetMode: event.target.value })
-                    }
-                  >
-                    {packetModeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
@@ -7064,7 +7039,6 @@ function LootBoxesTab({
             item.audience?.name ?? "все гости",
             optionLabel(lootBoxSegmentOptions, item.segment ?? ""),
             `тип: ${sessionTypeLabel(item.sessionType)}`,
-            packetModeLabel(stringRule(item.periodRules, "packetMode", "ANY")),
             tariffRuleSummary(item.periodRules),
             guestLogRuleSummary(item.periodRules),
             formatMoney(item.budgetAmount ?? 0),
@@ -7318,7 +7292,6 @@ function MissionsTab({
           meta={[
             item.audience?.name ?? "все гости",
             `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
-            packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
             tariffRuleSummary(item.conditions),
             guestLogRuleSummary(item.conditions, item.antiFraudRules),
             missionMetricSummary(item.conditions),
@@ -7549,7 +7522,6 @@ function SeasonsTab({
           meta={[
             item.audience?.name ?? "все гости",
             `тип: ${sessionTypeLabel(stringRule(item.xpRules, "sessionType", ""))}`,
-            packetModeLabel(stringRule(item.xpRules, "packetMode", "ANY")),
             tariffRuleSummary(item.xpRules),
             guestLogRuleSummary(item.xpRules),
             formatDate(item.periodFrom),
@@ -9780,21 +9752,11 @@ function MissionBusinessRules({
             value={form.sessionType}
             onChange={(event) => onChange({ sessionType: event.target.value })}
           >
+            <option value="" disabled>
+              Выберите тип
+            </option>
             {sessionTypeOptions.map((option) => (
               <option key={option.value || "any"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Пакет часов">
-          <select
-            className={fieldClass}
-            value={form.packetMode}
-            onChange={(event) => onChange({ packetMode: event.target.value })}
-          >
-            {packetModeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
@@ -10167,28 +10129,18 @@ function SeasonBusinessRules({
           />
         </Field>
       </div>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Тип сессии">
           <select
             className={fieldClass}
             value={form.sessionType}
             onChange={(event) => onChange({ sessionType: event.target.value })}
           >
+            <option value="" disabled>
+              Выберите тип
+            </option>
             {sessionTypeOptions.map((option) => (
               <option key={option.value || "any"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Пакет часов">
-          <select
-            className={fieldClass}
-            value={form.packetMode}
-            onChange={(event) => onChange({ packetMode: event.target.value })}
-          >
-            {packetModeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
@@ -12669,7 +12621,6 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     audienceId: lootBox.audience?.id ?? "",
     segment: lootBox.segment ?? "",
     sessionType: lootBox.sessionType ?? "",
-    packetMode: stringRule(lootBox.periodRules, "packetMode", "ANY"),
     tariffGroupId: stringRule(lootBox.periodRules, "tariffGroupId", ""),
     tariffPeriodId: stringRule(lootBox.periodRules, "tariffPeriodId", ""),
     tariffTypeId: stringRule(lootBox.periodRules, "tariffTypeId", ""),
@@ -12751,7 +12702,6 @@ function missionToForm(mission: GuestGameMission): MissionForm {
       ? String(mission.totalRewardLimit)
       : "",
     sessionType: stringRule(mission.conditions, "sessionType", ""),
-    packetMode: stringRule(mission.conditions, "packetMode", "ANY"),
     tariffGroupId: stringRule(mission.conditions, "tariffGroupId", ""),
     tariffPeriodId: stringRule(mission.conditions, "tariffPeriodId", ""),
     tariffTypeId: stringRule(mission.conditions, "tariffTypeId", ""),
@@ -12833,7 +12783,6 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     ),
     xpGuestLog: numberRule(season.xpRules, "guestLog", "5"),
     sessionType: stringRule(season.xpRules, "sessionType", ""),
-    packetMode: stringRule(season.xpRules, "packetMode", "ANY"),
     tariffGroupId: stringRule(season.xpRules, "tariffGroupId", ""),
     tariffPeriodId: stringRule(season.xpRules, "tariffPeriodId", ""),
     tariffTypeId: stringRule(season.xpRules, "tariffTypeId", ""),
@@ -13545,7 +13494,6 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
     weekdaysOnly: form.weekdayMode === "WEEKDAYS",
     weekdays,
     hours: usesTimeWindow ? [`${start}-${end}`] : [],
-    packetMode: form.packetMode,
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
@@ -13652,7 +13600,6 @@ function buildMissionConditions(form: MissionForm) {
     windowDays: optionalNumber(form.windowDays),
     weekdaysOnly: form.weekdaysOnly,
     sessionType: nullable(form.sessionType),
-    packetMode: form.packetMode,
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
@@ -13720,7 +13667,6 @@ function buildSeasonXpRules(form: SeasonForm) {
     packetSessionBonus: numeric(form.xpPacketSessionBonus, 0),
     guestLog: numeric(form.xpGuestLog, 0),
     sessionType: nullable(form.sessionType),
-    packetMode: form.packetMode,
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
@@ -14596,15 +14542,6 @@ function sessionTypeLabel(value: string | null) {
   );
 }
 
-function packetModeLabel(value: string | null) {
-  return (
-    packetModeOptions.find((option) => option.value === (value ?? "ANY"))
-      ?.label ??
-    value ??
-    "любой формат"
-  );
-}
-
 function trackingId(prefix: string, value: string | null | undefined) {
   const compact = (value ?? "")
     .replace(/[^a-zA-Z0-9]/g, "")
@@ -14659,7 +14596,7 @@ function packetStateLabel(value: boolean | null) {
     return "пакет часов";
   }
   if (value === false) {
-    return "обычная";
+    return "почасовая";
   }
   return "не указано";
 }

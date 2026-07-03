@@ -203,7 +203,7 @@ const rewardApprovalProgressUnitLabels: Record<string, string> = {
 };
 
 const rewardApprovalSessionTypeLabels: Record<string, string> = {
-  regular_session: 'обычная сессия',
+  regular_session: 'почасовая сессия',
   packet_hours: 'пакет часов',
 };
 
@@ -15691,7 +15691,7 @@ function rewardApprovalLootBoxConditions(
       ? `Аудитория: ${rewardApprovalSegmentLabel(lootBox.segment)}`
       : null,
     ...rewardApprovalPeriodRuleLines(periodRules),
-    ...rewardApprovalSessionRuleLines(lootBox.sessionType, periodRules),
+    ...rewardApprovalSessionRuleLines(lootBox.sessionType),
     ...rewardApprovalGuestLogRuleLines(periodRules),
     ...rewardApprovalLimitRuleLines(limits),
   ];
@@ -15850,15 +15850,11 @@ function rewardApprovalPeriodRuleLines(rules: Record<string, unknown>) {
   return values;
 }
 
-function rewardApprovalSessionRuleLines(
-  sessionType: string | null,
-  rules: Record<string, unknown>,
-) {
+function rewardApprovalSessionRuleLines(sessionType: string | null) {
   const values: Array<string | null> = [];
   const normalizedSessionType = sessionType
     ? normalizeSessionType(sessionType)
     : null;
-  const packetMode = nullableString(rules.packetMode)?.toUpperCase();
 
   if (normalizedSessionType && normalizedSessionType !== 'any') {
     values.push(
@@ -15867,12 +15863,6 @@ function rewardApprovalSessionRuleLines(
         rewardApprovalHumanToken(normalizedSessionType)
       }`,
     );
-  }
-
-  if (packetMode === 'PACKET_ONLY') {
-    values.push('Пакет часов: только пакет');
-  } else if (packetMode === 'NON_PACKET_ONLY') {
-    values.push('Пакет часов: без пакета');
   }
 
   return values;
@@ -16023,7 +16013,6 @@ function rewardApprovalIsOperationalReason(value: string) {
     'Выбранный клуб входит в область правила',
     'Доступно для всей сети',
     'Бюджет не задан',
-    'Пакет часов не ограничен',
     'Выдача требует подтверждения сотрудником',
   ].includes(value);
 }
@@ -16312,7 +16301,6 @@ function evaluateLootBoxDryRun(
   );
   appendDryRunSessionConditionCheck(
     rule.sessionType,
-    dryRunRecord(rule.periodRules).packetMode,
     context,
     blockers,
     reasons,
@@ -16670,7 +16658,6 @@ function appendDryRunPeriodRules(
 
 function appendDryRunSessionConditionCheck(
   sessionTypeValue: unknown,
-  packetModeValue: unknown,
   context: DryRunContext,
   blockers: string[],
   reasons: string[],
@@ -16690,34 +16677,6 @@ function appendDryRunSessionConditionCheck(
     }
   } else if (expectedType) {
     reasons.push(`Тип сессии правила: ${expectedType}`);
-  }
-
-  const packetMode = dryRunString(packetModeValue)?.toUpperCase() ?? 'ANY';
-  if (packetMode === 'ANY' || packetMode === 'ALL') {
-    reasons.push('Пакет часов не ограничен');
-    return;
-  }
-
-  if (context.sessionPacket == null) {
-    blockers.push('Факт сессии не содержит признак пакета часов');
-    return;
-  }
-
-  if (packetMode === 'PACKET_ONLY') {
-    if (context.sessionPacket) {
-      reasons.push('Сессия проходит по пакету часов');
-    } else {
-      blockers.push('Правило доступно только для пакетов часов');
-    }
-    return;
-  }
-
-  if (packetMode === 'NON_PACKET_ONLY') {
-    if (!context.sessionPacket) {
-      reasons.push('Сессия обычная, без пакета часов');
-    } else {
-      blockers.push('Правило доступно только для обычных сессий');
-    }
   }
 }
 
@@ -16918,7 +16877,6 @@ function appendDryRunMissionConditions(
 
   appendDryRunSessionConditionCheck(
     conditions.sessionType,
-    conditions.packetMode,
     context,
     blockers,
     reasons,
@@ -17013,7 +16971,6 @@ function appendDryRunSeasonXpRules(
 
   appendDryRunSessionConditionCheck(
     rules.sessionType,
-    rules.packetMode,
     context,
     blockers,
     reasons,

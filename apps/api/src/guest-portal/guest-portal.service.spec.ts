@@ -1583,7 +1583,7 @@ describe('GuestPortalService', () => {
         triggerKind: 'SESSION_START',
         sessionType: 'packet_hours',
         limits: { perGuestPerWeek: 2 },
-        periodRules: { packetMode: 'PACKET_ONLY' },
+        periodRules: {},
       });
       processLiveSessionStartForPayload.mockResolvedValue({
         processed: true,
@@ -1655,7 +1655,6 @@ describe('GuestPortalService', () => {
         sessionType: 'packet_hours',
         limits: { perGuestPerWeek: 2 },
         periodRules: {
-          packetMode: 'PACKET_ONLY',
           tariffGroupId: 'packet-group',
           tariffPeriodId: 'packet-period',
           tariffTypeId: 'packet-type',

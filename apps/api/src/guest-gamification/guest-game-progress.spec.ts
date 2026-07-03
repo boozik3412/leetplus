@@ -111,7 +111,6 @@ describe('guest game progress trigger matching', () => {
         progressTarget: 1,
         conditions: {
           sessionType: 'packet_hours',
-          packetMode: 'PACKET_ONLY',
           metric: { eventTypes: ['SESSION_START'], target: 1 },
         },
       },
@@ -129,7 +128,6 @@ describe('guest game progress trigger matching', () => {
         progressTarget: 1,
         conditions: {
           sessionType: 'packet_hours',
-          packetMode: 'PACKET_ONLY',
           metric: { eventTypes: ['SESSION_START'], target: 1 },
         },
       },

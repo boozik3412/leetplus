@@ -12654,24 +12654,6 @@ function lootBoxUnlockSessionMatches(
     }
   }
 
-  const packetMode =
-    stringField(jsonRecord(row.periodRules).packetMode)?.toUpperCase() ?? 'ANY';
-  if (packetMode === 'ANY' || packetMode === 'ALL') {
-    return true;
-  }
-
-  if (event.sessionPacket == null) {
-    return false;
-  }
-
-  if (packetMode === 'PACKET_ONLY') {
-    return event.sessionPacket === true;
-  }
-
-  if (packetMode === 'NON_PACKET_ONLY') {
-    return event.sessionPacket === false;
-  }
-
   return true;
 }
 
@@ -14452,7 +14434,7 @@ function mapSessionActivity(row: {
 }): GuestPortalActivityItem {
   const description = [
     row.durationMinutes == null ? null : `${row.durationMinutes} мин`,
-    row.packet ? 'пакет часов' : 'обычная сессия',
+    row.packet ? 'пакет часов' : 'почасовая сессия',
     row.normalStop === false ? 'завершена нестандартно' : null,
   ]
     .filter((item): item is string => Boolean(item))

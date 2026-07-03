@@ -4037,7 +4037,6 @@ describe('GuestGamificationService', () => {
       jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
         activeLootBox({
           sessionType: 'packet_hours',
-          periodRules: { packetMode: 'PACKET_ONLY' },
         }),
       ]);
       jest.spyOn(service, 'getMissions').mockResolvedValue([]);

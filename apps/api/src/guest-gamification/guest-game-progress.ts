@@ -327,17 +327,6 @@ function matchesSessionType(
     }
   }
 
-  const packetMode =
-    progressString(conditions.packetMode)?.toUpperCase() ?? 'ANY';
-
-  if (packetMode === 'PACKET_ONLY') {
-    return event.sessionPacket === true;
-  }
-
-  if (packetMode === 'NON_PACKET_ONLY') {
-    return event.sessionPacket === false;
-  }
-
   return true;
 }
 

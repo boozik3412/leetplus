@@ -388,18 +388,23 @@ export class LangameClient {
     baseUrl: string,
     apiKey: string,
     payload: Record<string, string>,
+    options: LangameRequestOptions = {},
   ) {
     const path = '/guests/search';
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${path}`);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-KEY': apiKey,
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-KEY': apiKey,
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+      options.timeoutMs,
+    );
 
     if (!response.ok) {
       const errorDetails = await this.readErrorDetails(response);

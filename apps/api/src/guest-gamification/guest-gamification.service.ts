@@ -2649,8 +2649,8 @@ function jsonRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
     : {};
 }
 
-function visualEditorSourceRecord(value: Prisma.JsonValue | null) {
-  return jsonRecord(value).source === 'visual_editor';
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function finiteJsonNumber(value: unknown): number | null {
@@ -8842,6 +8842,7 @@ export class GuestGamificationService {
       {
         externalDomain: guest.externalDomain,
         externalGuestId,
+        currentCountHours: guest.currentCountHours,
       },
       guestId,
       expectedStoreId,
@@ -8871,6 +8872,7 @@ export class GuestGamificationService {
     guest: {
       externalDomain: string | null;
       externalGuestId: string;
+      currentCountHours?: Prisma.Decimal | number | string | null;
     },
     guestId: string,
     expectedStoreId: string | null,
@@ -8902,6 +8904,11 @@ export class GuestGamificationService {
     if (!liveSession?.externalSessionId) {
       return { result: null, cache: false };
     }
+
+    liveSession = this.resolveCheckInSessionTypeFromGuestBalance(
+      liveSession,
+      guest,
+    );
 
     const storeId = this.liveSessionStartStoreId(
       liveSession,
@@ -9098,6 +9105,11 @@ export class GuestGamificationService {
         'Активная сессия гостя в Langame не найдена. Чекин доступен только гостю, который сейчас находится в клубе.',
       );
     }
+
+    liveSession = this.resolveCheckInSessionTypeFromGuestBalance(
+      liveSession,
+      guest,
+    );
 
     const checkInStore = liveSession.store ?? expectedStore;
 
@@ -11190,6 +11202,7 @@ export class GuestGamificationService {
     guest: {
       externalDomain: string | null;
       externalGuestId: string;
+      currentCountHours?: Prisma.Decimal | number | string | null;
     },
     options: CheckInLookupOptions = {},
   ): Promise<CheckInLiveSession | null> {
@@ -11222,7 +11235,13 @@ export class GuestGamificationService {
         });
 
         if (session) {
-          return session;
+          return this.resolveCheckInSessionTypeFromLiveGuestBalance(session, {
+            apiKey,
+            source,
+            externalGuestId,
+            guest,
+            timeoutMs: options.timeoutMs,
+          });
         }
       } catch {
         continue;
@@ -11293,6 +11312,107 @@ export class GuestGamificationService {
     }
 
     return 3;
+  }
+
+  private async resolveCheckInSessionTypeFromLiveGuestBalance(
+    session: CheckInLiveSession,
+    params: {
+      apiKey: string;
+      source: { baseUrl: string };
+      externalGuestId: string;
+      guest: { currentCountHours?: Prisma.Decimal | number | string | null };
+      timeoutMs?: number;
+    },
+  ): Promise<CheckInLiveSession> {
+    const localSession = this.resolveCheckInSessionTypeFromGuestBalance(
+      session,
+      params.guest,
+    );
+
+    if (localSession.sessionPacket === true) {
+      return localSession;
+    }
+
+    const currentCountHours = await this.findLiveGuestCurrentCountHours(
+      params,
+    );
+
+    return this.resolveCheckInSessionTypeFromGuestBalance(localSession, {
+      currentCountHours,
+    });
+  }
+
+  private async findLiveGuestCurrentCountHours(params: {
+    apiKey: string;
+    source: { baseUrl: string };
+    externalGuestId: string;
+    timeoutMs?: number;
+  }): Promise<string | number | null> {
+    try {
+      const payload = await this.langameClient.searchGuests(
+        params.source.baseUrl,
+        params.apiKey,
+        { guest_id: params.externalGuestId },
+        { timeoutMs: params.timeoutMs },
+      );
+      const rows = this.checkInGuestSearchRows(payload);
+      const row =
+        rows.find((item) =>
+          [
+            item.guest_id,
+            item.real_guest_id,
+            item.id,
+          ].some(
+            (value) => this.checkInScalar(value) === params.externalGuestId,
+          ),
+        ) ?? rows[0];
+      const value = row?.current_count_hours;
+
+      return typeof value === 'string' || typeof value === 'number'
+        ? value
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private checkInGuestSearchRows(payload: unknown): Record<string, unknown>[] {
+    if (Array.isArray(payload)) {
+      return payload.filter(isRecord);
+    }
+
+    if (!isRecord(payload)) {
+      return [];
+    }
+
+    if (this.checkInLooksLikeGuestSearchRow(payload)) {
+      return [payload];
+    }
+
+    for (const key of ['data', 'guests', 'items', 'results', 'result']) {
+      const value = payload[key];
+
+      if (Array.isArray(value)) {
+        return value.filter(isRecord);
+      }
+
+      if (isRecord(value) && this.checkInLooksLikeGuestSearchRow(value)) {
+        return [value];
+      }
+    }
+
+    return [];
+  }
+
+  private checkInLooksLikeGuestSearchRow(row: Record<string, unknown>) {
+    return Boolean(
+      row.guest_id ??
+        row.real_guest_id ??
+        row.id ??
+        row.phone ??
+        row.email ??
+        row.fio,
+    );
   }
 
   private async findCheckInSessionInSource(params: {
@@ -11445,6 +11565,7 @@ export class GuestGamificationService {
     guest: {
       externalDomain: string | null;
       externalGuestId: string;
+      currentCountHours?: Prisma.Decimal | number | string | null;
     },
     expectedStore: CheckInExpectedStore | null,
   ): Promise<CheckInLiveSession | null> {
@@ -11504,6 +11625,10 @@ export class GuestGamificationService {
           timeZone: expectedStore.timeZone,
         }
       : row.store;
+    const sessionPacket =
+      row.packet === true || this.guestHasCurrentPacketHours(guest)
+        ? true
+        : row.packet;
 
     return {
       externalDomain: row.externalDomain ?? guest.externalDomain ?? '',
@@ -11513,8 +11638,8 @@ export class GuestGamificationService {
       externalUuid: row.externalUuid,
       startedAt: row.startedAt,
       durationMinutes: row.durationMinutes,
-      sessionType: row.packet ? 'packet_hours' : 'regular_session',
-      sessionPacket: row.packet,
+      sessionType: sessionPacket ? 'packet_hours' : 'regular_session',
+      sessionPacket,
       store,
       raw: {
         id: row.externalSessionId,
@@ -11522,10 +11647,46 @@ export class GuestGamificationService {
         date_start: row.startedAt?.toISOString() ?? null,
         date_stop: null,
         UUID: row.externalUuid,
-        packet: row.packet,
+        packet: sessionPacket,
         list_clubs_id: row.externalClubId,
       },
     };
+  }
+
+  private resolveCheckInSessionTypeFromGuestBalance(
+    session: CheckInLiveSession,
+    guest: { currentCountHours?: Prisma.Decimal | number | string | null },
+  ): CheckInLiveSession {
+    if (
+      session.sessionPacket === true ||
+      !this.guestHasCurrentPacketHours(guest)
+    ) {
+      return session;
+    }
+
+    return {
+      ...session,
+      sessionType: 'packet_hours',
+      sessionPacket: true,
+      raw: {
+        ...session.raw,
+        packet: true,
+      },
+    };
+  }
+
+  private guestHasCurrentPacketHours(guest: {
+    currentCountHours?: Prisma.Decimal | number | string | null;
+  }): boolean {
+    const currentCountHours = guest.currentCountHours;
+
+    if (currentCountHours == null) {
+      return false;
+    }
+
+    const value = Number(currentCountHours);
+
+    return Number.isFinite(value) && value > 0;
   }
 
   private checkInSessionGuestIdMatches(
@@ -11909,6 +12070,7 @@ export class GuestGamificationService {
         fullNameMasked: true,
         phoneMasked: true,
         emailMasked: true,
+        currentCountHours: true,
       },
     });
 

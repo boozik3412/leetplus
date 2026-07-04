@@ -573,6 +573,7 @@ function ReadyGameView({
   const [promoCode, setPromoCode] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [checkInPending, setCheckInPending] = useState(false);
+  const [summaryRefreshPending, setSummaryRefreshPending] = useState(false);
   const [nicknamePending, setNicknamePending] = useState(false);
   const [questsExpanded, setQuestsExpanded] = useState(false);
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
@@ -734,6 +735,39 @@ function ReadyGameView({
     }
   }
 
+  async function refreshGameSummary({
+    pendingMessage = "Обновляем лутбоксы.",
+    successMessage = "Лутбоксы обновлены.",
+  }: {
+    pendingMessage?: string;
+    successMessage?: string | null;
+  } = {}) {
+    if (summaryRefreshPending) {
+      showToast("Проверка уже идет.");
+      return null;
+    }
+
+    setSummaryRefreshPending(true);
+    showToast(pendingMessage);
+
+    try {
+      const nextSummary = await loadGameSummary();
+
+      applySummaryWithQuestDialog(nextSummary);
+
+      if (successMessage) {
+        showToast(successMessage);
+      }
+
+      return nextSummary;
+    } catch (error) {
+      showToast(getErrorMessage(error, "Не удалось обновить лутбоксы."));
+      return null;
+    } finally {
+      setSummaryRefreshPending(false);
+    }
+  }
+
   function toggleQuestsExpanded() {
     const nextExpanded = !questsExpanded;
 
@@ -807,20 +841,50 @@ function ReadyGameView({
     router.refresh();
   }
 
-  function openLootboxOverlay(card: HomeLootCard) {
-    setSelectedLootId(card.id);
-
-    if (!card.openable) {
-      showToast(card.openBlocker ?? "Лутбокс сейчас недоступен.");
-      return;
-    }
-
+  function showLootboxOverlay(card: HomeLootCard) {
     lootboxOpenRunRef.current += 1;
     setLootboxOverlayCard(card);
     setLootboxOverlayPhase("ready");
     setLootboxRoulette(null);
     emitLootboxEvent("overlay-open", { lootBoxId: card.id });
     showToast("Контейнер готов к открытию.");
+  }
+
+  async function openLootboxOverlay(card: HomeLootCard) {
+    setSelectedLootId(card.id);
+
+    if (card.openable) {
+      showLootboxOverlay(card);
+      return;
+    }
+
+    if (lootBoxNeedsPackageRefresh(card)) {
+      const nextSummary = await refreshGameSummary({
+        pendingMessage: "Проверяем пакет часов в Langame.",
+        successMessage: null,
+      });
+      if (!nextSummary) {
+        return;
+      }
+
+      const updatedCard = buildHomeLootCards(nextSummary, card.id).find(
+        (item) => item.id === card.id,
+      );
+
+      if (updatedCard?.openable) {
+        showLootboxOverlay(updatedCard);
+        return;
+      }
+
+      showToast(
+        updatedCard?.openBlocker ??
+          card.openBlocker ??
+          "Пакет пока не найден. Подождите несколько секунд и проверьте еще раз.",
+      );
+      return;
+    }
+
+    showToast(card.openBlocker ?? "Лутбокс сейчас недоступен.");
   }
 
   async function beginLootboxOpening() {
@@ -1073,6 +1137,8 @@ function ReadyGameView({
           <HomeLootBoxes
             sectionRef={lootBoxesRef}
             cards={lootCards}
+            refreshPending={summaryRefreshPending}
+            onRefresh={() => void refreshGameSummary()}
             onSelect={openLootboxOverlay}
           />
 
@@ -1274,10 +1340,14 @@ function HomeBannerGrid({
 function HomeLootBoxes({
   sectionRef,
   cards,
+  refreshPending,
+  onRefresh,
   onSelect,
 }: {
   sectionRef?: RefObject<HTMLElement | null>;
   cards: HomeLootCard[];
+  refreshPending: boolean;
+  onRefresh: () => void;
   onSelect: (card: HomeLootCard) => void;
 }) {
   return (
@@ -1294,9 +1364,15 @@ function HomeLootBoxes({
             Быстрые награды за активность в клубе и прохождение цепочки заданий.
           </p>
         </span>
-        <span className="lp-club-icon-badge" aria-hidden="true">
+        <button
+          type="button"
+          className="lp-club-icon-badge lp-club-refresh-button"
+          onClick={onRefresh}
+          disabled={refreshPending}
+          aria-label={refreshPending ? "Обновляем лутбоксы" : "Обновить лутбоксы"}
+        >
           <RefreshIcon />
-        </span>
+        </button>
       </div>
 
       <div className="lp-club-loot-grid">
@@ -1310,10 +1386,11 @@ function HomeLootBoxes({
               "lp-lootbox-entry",
               card.active ? "is-active" : "",
               !card.openable ? "is-disabled" : "",
+              lootBoxNeedsPackageRefresh(card) ? "is-checkable" : "",
             ].join(" ")}
             aria-haspopup={card.openable ? "dialog" : undefined}
             aria-controls="lootboxOverlay"
-            aria-disabled={!card.openable}
+            aria-disabled={!card.openable && !lootBoxNeedsPackageRefresh(card)}
             onClick={() => onSelect(card)}
           >
             <span className="lp-lootbox-entry-top">
@@ -1336,7 +1413,14 @@ function HomeLootBoxes({
               />
             </span>
             <span className="lp-lootbox-entry-bottom">
-              <span>{lootboxCardHint(card)}</span>
+              <span>
+                {lootboxCardHint(card)}
+                {lootBoxNeedsPackageRefresh(card) ? (
+                  <span className="lp-lootbox-entry-verify">
+                    Я купил пакет - проверить
+                  </span>
+                ) : null}
+              </span>
               <span className="lp-lootbox-mini-lock" aria-hidden="true">
                 <LockIcon />
               </span>
@@ -3307,6 +3391,16 @@ function lootboxCardHint(card: HomeLootCard) {
   }
 
   return "Нажмите, чтобы посмотреть контейнер";
+}
+
+function lootBoxNeedsPackageRefresh(
+  card: Pick<HomeLootCard, "openable" | "triggerKind" | "sessionType">,
+) {
+  return (
+    !card.openable &&
+    normalizeGameRuleTrigger(card.triggerKind) === "SESSION_START" &&
+    normalizeGameRuleSessionType(card.sessionType) === "packet_hours"
+  );
 }
 
 function lootBoxUnlockHint(triggerKind: string, sessionType: string | null) {
@@ -6883,11 +6977,13 @@ const clubHomeCss = `
 
 .lp-club-menu-button,
 .lp-club-icon-badge {
+  appearance: none;
   display: inline-grid;
   place-items: center;
   width: 44px;
   height: 44px;
   flex: 0 0 auto;
+  padding: 0;
   border: 1px solid rgba(196, 224, 225, 0.2);
   border-radius: 8px;
   color: #edf7f8;
@@ -6900,6 +6996,31 @@ const clubHomeCss = `
 
 .lp-club-menu-button {
   cursor: pointer;
+}
+
+.lp-club-refresh-button {
+  cursor: pointer;
+}
+
+.lp-club-refresh-button:disabled {
+  cursor: progress;
+  opacity: 0.58;
+}
+
+.lp-club-refresh-button:disabled:hover {
+  border-color: rgba(196, 224, 225, 0.2);
+  background: rgba(196, 224, 225, 0.035);
+  transform: none;
+}
+
+.lp-club-refresh-button:disabled svg {
+  animation: lp-refresh-spin 900ms linear infinite;
+}
+
+@keyframes lp-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .lp-club-menu {
@@ -7462,6 +7583,21 @@ const clubHomeCss = `
   transform: none;
 }
 
+.lootbox-entry.is-disabled.is-checkable {
+  border-color: rgba(208, 170, 108, 0.32);
+  cursor: pointer;
+  opacity: 0.78;
+}
+
+.lootbox-entry.is-disabled.is-checkable:hover,
+.lootbox-entry.is-disabled.is-checkable:focus-visible {
+  border-color: rgba(131, 228, 236, 0.55);
+  box-shadow:
+    0 24px 78px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.14);
+  transform: translateY(-1px);
+}
+
 .lp-lootbox-entry-top,
 .lp-lootbox-entry-bottom {
   position: relative;
@@ -7536,6 +7672,26 @@ const clubHomeCss = `
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.lp-lootbox-entry-verify {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 7px;
+  padding: 5px 8px;
+  border: 1px solid rgba(131, 228, 236, 0.32);
+  border-radius: 999px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lootbox-entry.is-checkable .lp-lootbox-mini-lock {
+  border-color: rgba(131, 228, 236, 0.54);
+  color: var(--cyan);
 }
 
 .lp-lootbox-mini-lock {

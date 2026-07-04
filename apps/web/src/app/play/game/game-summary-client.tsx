@@ -301,6 +301,7 @@ type QuestCompletionDialog = {
   statusLabel: string;
   receivedAt: string;
 };
+type UnavailableLootboxMessage = string | null;
 type QuestBoardStyle = CSSProperties &
   Partial<
     Record<
@@ -574,6 +575,10 @@ function ReadyGameView({
   const [menuOpen, setMenuOpen] = useState(false);
   const [checkInPending, setCheckInPending] = useState(false);
   const [summaryRefreshPending, setSummaryRefreshPending] = useState(false);
+  const [unavailableLootboxCard, setUnavailableLootboxCard] =
+    useState<HomeLootCard | null>(null);
+  const [unavailableLootboxMessage, setUnavailableLootboxMessage] =
+    useState<UnavailableLootboxMessage>(null);
   const [nicknamePending, setNicknamePending] = useState(false);
   const [questsExpanded, setQuestsExpanded] = useState(false);
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
@@ -682,6 +687,23 @@ function ReadyGameView({
   }, [lootboxOverlayCard]);
 
   useEffect(() => {
+    if (!unavailableLootboxCard) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setUnavailableLootboxCard(null);
+        setUnavailableLootboxMessage(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [unavailableLootboxCard]);
+
+  useEffect(() => {
     if (!questsExpanded) {
       return;
     }
@@ -738,30 +760,38 @@ function ReadyGameView({
   async function refreshGameSummary({
     pendingMessage = "Обновляем лутбоксы.",
     successMessage = "Лутбоксы обновлены.",
+    silent = false,
   }: {
     pendingMessage?: string;
     successMessage?: string | null;
+    silent?: boolean;
   } = {}) {
     if (summaryRefreshPending) {
-      showToast("Проверка уже идет.");
+      if (!silent) {
+        showToast("Проверка уже идет.");
+      }
       return null;
     }
 
     setSummaryRefreshPending(true);
-    showToast(pendingMessage);
+    if (!silent) {
+      showToast(pendingMessage);
+    }
 
     try {
       const nextSummary = await loadGameSummary();
 
       applySummaryWithQuestDialog(nextSummary);
 
-      if (successMessage) {
+      if (successMessage && !silent) {
         showToast(successMessage);
       }
 
       return nextSummary;
     } catch (error) {
-      showToast(getErrorMessage(error, "Не удалось обновить лутбоксы."));
+      if (!silent) {
+        showToast(getErrorMessage(error, "Не удалось обновить лутбоксы."));
+      }
       return null;
     } finally {
       setSummaryRefreshPending(false);
@@ -843,6 +873,8 @@ function ReadyGameView({
 
   function showLootboxOverlay(card: HomeLootCard) {
     lootboxOpenRunRef.current += 1;
+    setUnavailableLootboxCard(null);
+    setUnavailableLootboxMessage(null);
     setLootboxOverlayCard(card);
     setLootboxOverlayPhase("ready");
     setLootboxRoulette(null);
@@ -850,7 +882,7 @@ function ReadyGameView({
     showToast("Контейнер готов к открытию.");
   }
 
-  async function openLootboxOverlay(card: HomeLootCard) {
+  function openLootboxOverlay(card: HomeLootCard) {
     setSelectedLootId(card.id);
 
     if (card.openable) {
@@ -858,33 +890,49 @@ function ReadyGameView({
       return;
     }
 
-    if (lootBoxNeedsPackageRefresh(card)) {
-      const nextSummary = await refreshGameSummary({
-        pendingMessage: "Проверяем пакет часов в Langame.",
-        successMessage: null,
-      });
-      if (!nextSummary) {
-        return;
-      }
+    setUnavailableLootboxCard(card);
+    setUnavailableLootboxMessage(null);
+  }
 
-      const updatedCard = buildHomeLootCards(nextSummary, card.id).find(
-        (item) => item.id === card.id,
-      );
+  function closeUnavailableLootboxModal() {
+    setUnavailableLootboxCard(null);
+    setUnavailableLootboxMessage(null);
+  }
 
-      if (updatedCard?.openable) {
-        showLootboxOverlay(updatedCard);
-        return;
-      }
+  async function refreshUnavailableLootboxConditions() {
+    if (!unavailableLootboxCard) {
+      return;
+    }
 
-      showToast(
-        updatedCard?.openBlocker ??
-          card.openBlocker ??
-          "Пакет пока не найден. Подождите несколько секунд и проверьте еще раз.",
+    setUnavailableLootboxMessage(null);
+
+    const nextSummary = await refreshGameSummary({
+      pendingMessage: "Проверяем условия открытия.",
+      successMessage: null,
+      silent: true,
+    });
+
+    if (!nextSummary) {
+      setUnavailableLootboxMessage(
+        "Не удалось проверить условия. Попробуйте еще раз.",
       );
       return;
     }
 
-    showToast(card.openBlocker ?? "Лутбокс сейчас недоступен.");
+    const updatedCard = buildHomeLootCards(
+      nextSummary,
+      unavailableLootboxCard.id,
+    ).find((item) => item.id === unavailableLootboxCard.id);
+
+    if (updatedCard?.openable) {
+      showLootboxOverlay(updatedCard);
+      return;
+    }
+
+    setUnavailableLootboxCard(updatedCard ?? unavailableLootboxCard);
+    setUnavailableLootboxMessage(
+      lootBoxUnavailableCheckMessage(updatedCard ?? unavailableLootboxCard),
+    );
   }
 
   async function beginLootboxOpening() {
@@ -1208,12 +1256,106 @@ function ReadyGameView({
         />
       ) : null}
 
+      {unavailableLootboxCard ? (
+        <LootboxUnavailableModal
+          card={unavailableLootboxCard}
+          checking={summaryRefreshPending}
+          message={unavailableLootboxMessage}
+          onClose={closeUnavailableLootboxModal}
+          onRefresh={refreshUnavailableLootboxConditions}
+        />
+      ) : null}
+
       {questCompletionDialog ? (
         <QuestCompletionModal
           completion={questCompletionDialog}
           onClose={() => setQuestCompletionDialog(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function LootboxUnavailableModal({
+  card,
+  checking,
+  message,
+  onClose,
+  onRefresh,
+}: {
+  card: HomeLootCard;
+  checking: boolean;
+  message: UnavailableLootboxMessage;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const requirements = lootBoxGuestRequirementLines(card);
+
+  return (
+    <div
+      id="lootboxUnavailable"
+      className="lp-quest-complete-overlay lp-lootbox-unavailable-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lootboxUnavailableTitle"
+    >
+      <div className="lp-quest-complete-dialog lp-lootbox-unavailable-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть окно"
+          onClick={onClose}
+        >
+          ×
+        </button>
+        <span className="lp-quest-complete-kicker lp-lootbox-unavailable-kicker">
+          Кейс недоступен
+        </span>
+        <h3 id="lootboxUnavailableTitle">{card.title}</h3>
+        <p className="lp-lootbox-unavailable-lead">
+          Пока условия открытия не выполнены.
+        </p>
+
+        <div className="lp-lootbox-unavailable-block">
+          <span>Что нужно сделать</span>
+          <ul>
+            {requirements.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+
+        {card.openBlocker ? (
+          <div className="lp-lootbox-unavailable-note">
+            <span>Сейчас</span>
+            <strong>{card.openBlocker}</strong>
+          </div>
+        ) : null}
+
+        {message ? (
+          <p className="lp-lootbox-unavailable-status" role="status">
+            {message}
+          </p>
+        ) : null}
+
+        <div className="lp-lootbox-unavailable-actions">
+          <button
+            type="button"
+            className="lp-lootbox-unavailable-secondary"
+            onClick={onClose}
+          >
+            Понятно
+          </button>
+          <button
+            type="button"
+            className="lp-lootbox-unavailable-primary"
+            onClick={onRefresh}
+            disabled={checking}
+          >
+            {checking ? "Проверяем..." : "Проверить условия"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1386,11 +1528,9 @@ function HomeLootBoxes({
               "lp-lootbox-entry",
               card.active ? "is-active" : "",
               !card.openable ? "is-disabled" : "",
-              lootBoxNeedsPackageRefresh(card) ? "is-checkable" : "",
             ].join(" ")}
-            aria-haspopup={card.openable ? "dialog" : undefined}
-            aria-controls="lootboxOverlay"
-            aria-disabled={!card.openable && !lootBoxNeedsPackageRefresh(card)}
+            aria-haspopup="dialog"
+            aria-controls={card.openable ? "lootboxOverlay" : "lootboxUnavailable"}
             onClick={() => onSelect(card)}
           >
             <span className="lp-lootbox-entry-top">
@@ -1413,14 +1553,7 @@ function HomeLootBoxes({
               />
             </span>
             <span className="lp-lootbox-entry-bottom">
-              <span>
-                {lootboxCardHint(card)}
-                {lootBoxNeedsPackageRefresh(card) ? (
-                  <span className="lp-lootbox-entry-verify">
-                    Я купил пакет - проверить
-                  </span>
-                ) : null}
-              </span>
+              <span>{lootboxCardHint(card)}</span>
               <span className="lp-lootbox-mini-lock" aria-hidden="true">
                 <LockIcon />
               </span>
@@ -3393,18 +3526,94 @@ function lootboxCardHint(card: HomeLootCard) {
   return "Нажмите, чтобы посмотреть контейнер";
 }
 
-function lootBoxNeedsPackageRefresh(
-  card: Pick<HomeLootCard, "openable" | "triggerKind" | "sessionType">,
-) {
-  return (
-    !card.openable &&
-    normalizeGameRuleTrigger(card.triggerKind) === "SESSION_START" &&
-    normalizeGameRuleSessionType(card.sessionType) === "packet_hours"
-  );
-}
-
 function lootBoxUnlockHint(triggerKind: string, sessionType: string | null) {
   return `Откроется ${gameRuleUnlockCondition(triggerKind, sessionType)}`;
+}
+
+function lootBoxGuestRequirementLines(card: HomeLootCard) {
+  const lines = [guestActionRequirementLabel(card.triggerKind, card.sessionType)];
+
+  if (card.periodicLimitPeriod && card.status === "лимит") {
+    lines.push(lootBoxPeriodicWaitRequirement(card.periodicLimitPeriod));
+  } else if (card.weeklyLimit != null && card.status === "лимит") {
+    lines.push("Дождитесь новой недели, чтобы снова открыть этот кейс.");
+  } else if (card.dailyLimit != null && card.status === "лимит") {
+    lines.push("Дождитесь завтра, чтобы снова попробовать открыть этот кейс.");
+  }
+
+  return Array.from(new Set(lines));
+}
+
+function guestActionRequirementLabel(
+  triggerKind: string,
+  sessionType: string | null,
+) {
+  const normalized = normalizeGameRuleTrigger(triggerKind);
+  const normalizedSessionType = normalizeGameRuleSessionType(sessionType);
+
+  if (normalized === "SESSION_START") {
+    if (normalizedSessionType === "packet_hours") {
+      return "Начните игровую сессию с пакетом часов.";
+    }
+
+    if (normalizedSessionType === "regular_session") {
+      return "Начните игровую сессию с почасовой оплатой.";
+    }
+
+    return "Начните игровую сессию в клубе.";
+  }
+
+  switch (normalized) {
+    case "APP_OPEN":
+      return "Откройте игровой модуль.";
+    case "CHECK_IN":
+      return "Сделайте чекин в игровом модуле, находясь в клубе.";
+    case "VISIT":
+      return "Придите в клуб, чтобы система зафиксировала визит.";
+    case "PLAY_HOUR":
+      return "Поиграйте нужное время в клубе.";
+    case "BAR_PURCHASE":
+      return "Сделайте покупку в баре клуба.";
+    case "PRODUCT_PURCHASE":
+      return "Сделайте покупку в клубе.";
+    case "BALANCE_TOPUP":
+      return "Пополните баланс в клубе.";
+    case "GUEST_LOG":
+      return "Выполните нужное действие в клубе.";
+    case "REFERRAL_ACCEPTED":
+      return "Пригласите друга, чтобы он стал гостем клуба.";
+    case "REPEAT_VISIT":
+      return "Вернитесь в клуб еще раз.";
+    case "MISSION_COMPLETED":
+      return "Выполните нужное задание.";
+    default:
+      return `Выполните условие: ${gameRuleEventLabel(triggerKind)}.`;
+  }
+}
+
+function lootBoxPeriodicWaitRequirement(
+  period: NonNullable<HomeLootCard["periodicLimitPeriod"]>,
+) {
+  if (period === "DAILY") {
+    return "Дождитесь завтра, чтобы снова открыть этот кейс.";
+  }
+
+  if (period === "MONTHLY") {
+    return "Дождитесь следующего месяца, чтобы снова открыть этот кейс.";
+  }
+
+  return "Дождитесь следующей недели, чтобы снова открыть этот кейс.";
+}
+
+function lootBoxUnavailableCheckMessage(card: HomeLootCard) {
+  if (
+    normalizeGameRuleTrigger(card.triggerKind) === "SESSION_START" &&
+    normalizeGameRuleSessionType(card.sessionType) === "packet_hours"
+  ) {
+    return "Пакет часов пока не найден. Если вы только что купили пакет, подождите несколько секунд и нажмите проверку еще раз.";
+  }
+
+  return "Условия пока не выполнены. Если вы уже сделали нужное действие, подождите несколько секунд и проверьте еще раз.";
 }
 
 function gameRuleUnlockCondition(
@@ -7570,7 +7779,7 @@ const clubHomeCss = `
 
 .lootbox-entry.is-disabled {
   border-color: rgba(196, 224, 225, 0.12);
-  cursor: not-allowed;
+  cursor: pointer;
   opacity: 0.62;
 }
 
@@ -7581,21 +7790,6 @@ const clubHomeCss = `
     0 24px 70px rgba(0, 0, 0, 0.38),
     inset 0 0 0 1px rgba(131, 228, 236, 0.07);
   transform: none;
-}
-
-.lootbox-entry.is-disabled.is-checkable {
-  border-color: rgba(208, 170, 108, 0.32);
-  cursor: pointer;
-  opacity: 0.78;
-}
-
-.lootbox-entry.is-disabled.is-checkable:hover,
-.lootbox-entry.is-disabled.is-checkable:focus-visible {
-  border-color: rgba(131, 228, 236, 0.55);
-  box-shadow:
-    0 24px 78px rgba(0, 0, 0, 0.42),
-    inset 0 0 0 1px rgba(131, 228, 236, 0.14);
-  transform: translateY(-1px);
 }
 
 .lp-lootbox-entry-top,
@@ -7672,26 +7866,6 @@ const clubHomeCss = `
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
-}
-
-.lp-lootbox-entry-verify {
-  display: inline-flex;
-  width: fit-content;
-  margin-top: 7px;
-  padding: 5px 8px;
-  border: 1px solid rgba(131, 228, 236, 0.32);
-  border-radius: 999px;
-  color: var(--cyan);
-  background: rgba(131, 228, 236, 0.08);
-  font-size: 9px;
-  font-weight: 860;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.lootbox-entry.is-checkable .lp-lootbox-mini-lock {
-  border-color: rgba(131, 228, 236, 0.54);
-  color: var(--cyan);
 }
 
 .lp-lootbox-mini-lock {
@@ -7829,6 +8003,134 @@ const clubHomeCss = `
   letter-spacing: 0;
   background: linear-gradient(135deg, var(--amber), #f4dba0);
   cursor: pointer;
+}
+
+.lp-lootbox-unavailable-dialog {
+  width: min(500px, 100%);
+  border-color: rgba(131, 228, 236, 0.34);
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.1), transparent 44%),
+    rgba(5, 12, 14, 0.98);
+}
+
+.lp-lootbox-unavailable-kicker {
+  border-color: rgba(131, 228, 236, 0.36);
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+}
+
+.lp-lootbox-unavailable-lead {
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.lp-lootbox-unavailable-block,
+.lp-lootbox-unavailable-note {
+  display: grid;
+  gap: 9px;
+  border: 1px solid rgba(196, 224, 225, 0.1);
+  border-radius: 8px;
+  padding: 13px;
+  background: rgba(196, 224, 225, 0.035);
+}
+
+.lp-lootbox-unavailable-block > span,
+.lp-lootbox-unavailable-note > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-unavailable-block ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lp-lootbox-unavailable-block li {
+  position: relative;
+  min-height: 22px;
+  padding-left: 20px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.lp-lootbox-unavailable-block li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.58em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 14px rgba(131, 228, 236, 0.52);
+}
+
+.lp-lootbox-unavailable-note strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 620;
+}
+
+.lp-lootbox-unavailable-status {
+  margin: 0;
+  border: 1px solid rgba(208, 170, 108, 0.26);
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: var(--amber);
+  background: rgba(208, 170, 108, 0.08);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.lp-lootbox-unavailable-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.lp-lootbox-unavailable-primary,
+.lp-lootbox-unavailable-secondary {
+  min-height: 42px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 860;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.lp-lootbox-unavailable-primary {
+  border: 1px solid rgba(131, 228, 236, 0.52);
+  color: #061013;
+  background: linear-gradient(135deg, var(--cyan), #9be7dd);
+}
+
+.lp-lootbox-unavailable-primary:disabled {
+  cursor: progress;
+  opacity: 0.58;
+}
+
+.lp-lootbox-unavailable-secondary {
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  color: var(--text);
+  background: rgba(196, 224, 225, 0.045);
+}
+
+.lp-lootbox-unavailable-primary:hover,
+.lp-lootbox-unavailable-primary:focus-visible,
+.lp-lootbox-unavailable-secondary:hover,
+.lp-lootbox-unavailable-secondary:focus-visible {
+  border-color: rgba(131, 228, 236, 0.64);
+  outline: none;
 }
 
 .lp-battlepass-detail-dialog {
@@ -11568,6 +11870,10 @@ const clubHomeCss = `
 
   .lp-club-static-actions {
     flex-direction: column;
+  }
+
+  .lp-lootbox-unavailable-actions {
+    grid-template-columns: 1fr;
   }
 }
 `;

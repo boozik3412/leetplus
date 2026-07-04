@@ -1123,14 +1123,22 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
         <button type="button" data-format="bold" title="Ctrl+B">B</button>
         <button type="button" data-format="italic" title="Ctrl+I"><em>I</em></button>
         <button type="button" data-format="underline" title="Ctrl+U"><u>U</u></button>
-        <label class="color-tool" title="Цвет текста">
-          <span>A</span>
-          <input type="color" data-color-command="foreColor" value="#18181b" aria-label="Цвет текста" />
-        </label>
-        <label class="color-tool" title="Маркер">
-          <span>Маркер</span>
-          <input type="color" data-color-command="hiliteColor" value="#fde68a" aria-label="Цвет выделения" />
-        </label>
+        <div class="color-group" data-color-group="foreColor" aria-label="Цвет текста">
+          <span class="color-label">A</span>
+          <div class="color-palette"><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#18181b" style="--swatch-color: #18181b" title="Черный" aria-label="Черный"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#71717a" style="--swatch-color: #71717a" title="Серый" aria-label="Серый"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#dc2626" style="--swatch-color: #dc2626" title="Красный" aria-label="Красный"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#ea580c" style="--swatch-color: #ea580c" title="Оранжевый" aria-label="Оранжевый"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#ca8a04" style="--swatch-color: #ca8a04" title="Желтый" aria-label="Желтый"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#16a34a" style="--swatch-color: #16a34a" title="Зеленый" aria-label="Зеленый"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#0891b2" style="--swatch-color: #0891b2" title="Бирюзовый" aria-label="Бирюзовый"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#2563eb" style="--swatch-color: #2563eb" title="Синий" aria-label="Синий"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#7c3aed" style="--swatch-color: #7c3aed" title="Фиолетовый" aria-label="Фиолетовый"></button><button type="button" class="color-swatch" data-color-command="foreColor" data-color-value="#db2777" style="--swatch-color: #db2777" title="Розовый" aria-label="Розовый"></button></div>
+          <label class="color-tool" title="Другой цвет текста">
+            <input type="color" data-color-picker="foreColor" value="#18181b" aria-label="Другой цвет текста" />
+          </label>
+          <button type="button" class="color-apply" data-apply-color="foreColor" title="Применить выбранный цвет текста">✓</button>
+        </div>
+        <div class="color-group" data-color-group="hiliteColor" aria-label="Маркер">
+          <span class="color-label">Маркер</span>
+          <div class="color-palette"><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#fef08a" style="--swatch-color: #fef08a" title="Желтый маркер" aria-label="Желтый маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#fde68a" style="--swatch-color: #fde68a" title="Янтарный маркер" aria-label="Янтарный маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#bbf7d0" style="--swatch-color: #bbf7d0" title="Зеленый маркер" aria-label="Зеленый маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#a5f3fc" style="--swatch-color: #a5f3fc" title="Голубой маркер" aria-label="Голубой маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#bfdbfe" style="--swatch-color: #bfdbfe" title="Синий маркер" aria-label="Синий маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#ddd6fe" style="--swatch-color: #ddd6fe" title="Фиолетовый маркер" aria-label="Фиолетовый маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#fbcfe8" style="--swatch-color: #fbcfe8" title="Розовый маркер" aria-label="Розовый маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#fecaca" style="--swatch-color: #fecaca" title="Красный маркер" aria-label="Красный маркер"></button><button type="button" class="color-swatch" data-color-command="hiliteColor" data-color-value="#e4e4e7" style="--swatch-color: #e4e4e7" title="Серый маркер" aria-label="Серый маркер"></button></div>
+          <label class="color-tool" title="Другой цвет маркера">
+            <input type="color" data-color-picker="hiliteColor" value="#fde68a" aria-label="Другой цвет маркера" />
+          </label>
+          <button type="button" class="color-apply" data-apply-color="hiliteColor" title="Применить выбранный маркер">✓</button>
+        </div>
         <span class="toolbar-separator" aria-hidden="true"></span>
         <button type="button" data-format="alignLeft" title="По левому краю">L</button>
         <button type="button" data-format="alignCenter" title="По центру">C</button>
@@ -1206,8 +1214,14 @@ function buildReadingWindowHtml(data: KnowledgeReadingWindowData) {
     .editor-toolbar button, .editor-toolbar .color-tool { min-height: 38px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; padding: 8px 10px; color: #18181b; font-weight: 800; cursor: pointer; }
     .editor-toolbar button:hover, .editor-toolbar .color-tool:hover { border-color: #10b981; }
     .editor-toolbar .primary { border-color: #10b981; background: #10b981; color: #052e16; }
-    .editor-toolbar .color-tool { display: inline-flex; align-items: center; gap: 7px; }
+    .editor-toolbar .color-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; border: 1px solid #bbf7d0; border-radius: 10px; background: rgba(255,255,255,.74); padding: 6px; }
+    .editor-toolbar .color-label { font-size: 12px; font-weight: 900; }
+    .editor-toolbar .color-palette { display: flex; flex-wrap: wrap; gap: 4px; max-width: 118px; }
+    .editor-toolbar .color-swatch { width: 18px; min-width: 18px; height: 18px; min-height: 18px; border: 1px solid rgba(24,24,27,.22); border-radius: 999px; background: var(--swatch-color); padding: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.45); }
+    .editor-toolbar .color-swatch.is-active { outline: 2px solid #10b981; outline-offset: 1px; }
+    .editor-toolbar .color-tool { display: inline-flex; min-height: 28px; align-items: center; gap: 7px; padding: 3px; }
     .editor-toolbar .color-tool input { width: 24px; height: 24px; border: 0; background: transparent; padding: 0; cursor: pointer; }
+    .editor-toolbar .color-apply { min-width: 30px; min-height: 30px; padding: 4px 8px; }
     .toolbar-separator { width: 1px; align-self: stretch; background: #bbf7d0; }
     #edit-status { color: #047857; font-size: 13px; font-weight: 700; }
     #read-status { margin: 0; font-size: 13px; }
@@ -1789,7 +1803,42 @@ function wireKnowledgeReadingWindow(
     });
   }
 
+  const selectedColors: Record<string, string> = {
+    foreColor: "#18181b",
+    hiliteColor: "#fde68a",
+  };
+
+  function setSelectedColor(command: string, value: string) {
+    if (!selectedColors[command] || !/^#[0-9a-f]{6}$/i.test(value)) {
+      return;
+    }
+
+    selectedColors[command] = value;
+
+    doc
+      .querySelectorAll<HTMLButtonElement>(
+        `[data-color-command="${command}"][data-color-value]`,
+      )
+      .forEach((swatch) => {
+        swatch.classList.toggle(
+          "is-active",
+          swatch.getAttribute("data-color-value")?.toLowerCase() ===
+            value.toLowerCase(),
+        );
+      });
+
+    const picker = doc.querySelector<HTMLInputElement>(
+      `[data-color-picker="${command}"]`,
+    );
+
+    if (picker && picker.value.toLowerCase() !== value.toLowerCase()) {
+      picker.value = value;
+    }
+  }
+
   function applyColorCommand(command: string, value: string) {
+    setSelectedColor(command, value);
+
     if (command === "hiliteColor") {
       const highlighted = runEditorCommand(command, value);
 
@@ -1881,15 +1930,54 @@ function wireKnowledgeReadingWindow(
     });
   });
 
-  doc.querySelectorAll<HTMLInputElement>("[data-color-command]").forEach((tool) => {
-    tool.addEventListener("mousedown", saveCurrentSelection);
-    tool.addEventListener("input", () => {
-      const command = tool.getAttribute("data-color-command");
+  doc
+    .querySelectorAll<HTMLButtonElement>("[data-color-command][data-color-value]")
+    .forEach((tool) => {
+      tool.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        saveCurrentSelection();
+      });
+      tool.addEventListener("click", () => {
+        const command = tool.getAttribute("data-color-command");
+        const value = tool.getAttribute("data-color-value");
 
-      if (command && /^#[0-9a-f]{6}$/i.test(tool.value)) {
-        applyColorCommand(command, tool.value);
+        if (command && value) {
+          applyColorCommand(command, value);
+        }
+      });
+    });
+
+  doc.querySelectorAll<HTMLInputElement>("[data-color-picker]").forEach((tool) => {
+    tool.addEventListener("mousedown", saveCurrentSelection);
+
+    const updateSelectedColor = () => {
+      const command = tool.getAttribute("data-color-picker");
+
+      if (command) {
+        setSelectedColor(command, tool.value);
+      }
+    };
+
+    tool.addEventListener("input", updateSelectedColor);
+    tool.addEventListener("change", updateSelectedColor);
+  });
+
+  doc.querySelectorAll<HTMLButtonElement>("[data-apply-color]").forEach((tool) => {
+    tool.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      saveCurrentSelection();
+    });
+    tool.addEventListener("click", () => {
+      const command = tool.getAttribute("data-apply-color");
+
+      if (command && selectedColors[command]) {
+        applyColorCommand(command, selectedColors[command]);
       }
     });
+  });
+
+  Object.entries(selectedColors).forEach(([command, value]) => {
+    setSelectedColor(command, value);
   });
 
   doc.addEventListener("keydown", (event) => {

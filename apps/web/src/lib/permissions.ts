@@ -566,11 +566,13 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   SENIOR_ADMINISTRATOR: [
     "view_communications",
     "manage_communications",
+    "approve_guest_game_rewards",
     ...shiftStaffCapabilities,
   ],
   CLUB_ADMINISTRATOR: [
     "view_communications",
     "manage_communications",
+    "approve_guest_game_rewards",
     ...shiftStaffCapabilities,
   ],
   TRAINEE: [

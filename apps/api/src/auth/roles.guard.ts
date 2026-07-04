@@ -330,10 +330,19 @@ export class RolesGuard implements CanActivate {
         return 'approve_guest_game_rewards';
       }
 
+      if (path.startsWith('/guests/gamification/deliveries/export')) {
+        return 'approve_guest_game_rewards';
+      }
+
       return 'view_guest_gamification';
     }
 
-    if (path.startsWith('/guests/gamification/rewards')) {
+    if (
+      path.startsWith('/guests/gamification/rewards') ||
+      path.startsWith('/guests/gamification/deliveries/prepare') ||
+      path.startsWith('/guests/gamification/deliveries/dispatch') ||
+      path.startsWith('/guests/gamification/deliveries/')
+    ) {
       return 'approve_guest_game_rewards';
     }
 

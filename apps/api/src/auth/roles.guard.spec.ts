@@ -614,6 +614,66 @@ describe('RolesGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
+  it('lets senior and club administrators approve rewards without viewing or managing game rules', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    [UserRole.SENIOR_ADMINISTRATOR, UserRole.CLUB_ADMINISTRATOR].forEach(
+      (role) => {
+        const permissions = resolveUserCapabilities({ role });
+
+        expect(
+          guard.canActivate(
+            createContext({
+              method: 'POST',
+              path: '/guests/gamification/rewards/redeem',
+              user: { role, permissions },
+            }),
+          ),
+        ).toBe(true);
+
+        expect(
+          guard.canActivate(
+            createContext({
+              method: 'POST',
+              path: '/guests/gamification/deliveries/prepare',
+              user: { role, permissions },
+            }),
+          ),
+        ).toBe(true);
+
+        expect(
+          guard.canActivate(
+            createContext({
+              method: 'PATCH',
+              path: '/guests/gamification/deliveries/delivery-1',
+              user: { role, permissions },
+            }),
+          ),
+        ).toBe(true);
+
+        expect(() =>
+          guard.canActivate(
+            createContext({
+              method: 'GET',
+              path: '/guests/gamification/workspace',
+              user: { role, permissions },
+            }),
+          ),
+        ).toThrow(ForbiddenException);
+
+        expect(() =>
+          guard.canActivate(
+            createContext({
+              method: 'POST',
+              path: '/guests/gamification/loot-boxes',
+              user: { role, permissions },
+            }),
+          ),
+        ).toThrow(ForbiddenException);
+      },
+    );
+  });
+
   it('allows user access managers when route metadata includes them', () => {
     reflector.getAllAndOverride.mockReturnValue([
       UserRole.OWNER,

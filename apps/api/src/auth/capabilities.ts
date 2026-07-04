@@ -508,11 +508,13 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
   [UserRole.SENIOR_ADMINISTRATOR]: [
     'view_communications',
     'manage_communications',
+    'approve_guest_game_rewards',
     ...shiftStaffCapabilities,
   ],
   [UserRole.CLUB_ADMINISTRATOR]: [
     'view_communications',
     'manage_communications',
+    'approve_guest_game_rewards',
     ...shiftStaffCapabilities,
   ],
   [UserRole.TRAINEE]: [

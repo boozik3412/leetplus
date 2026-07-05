@@ -5,6 +5,13 @@ import {
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import { hasCapability, resolveUserCapabilities } from '../auth/capabilities';
+import {
+  appendShiftReportMessageMetadata,
+  readShiftReportMessageShiftId,
+  STAFF_SHIFT_REPORT_MARKER_PREFIX,
+  STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+  stripShiftReportMessageMetadata,
+} from './staff-shift-report-message-metadata';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -14,6 +21,8 @@ const messageKinds = ['MESSAGE', 'ANNOUNCEMENT', 'INCIDENT'] as const;
 const messagePriorities = ['NORMAL', 'HIGH', 'URGENT'] as const;
 const roleScopes = ['ALL_STAFF', 'MANAGERS', 'ADMINISTRATORS'] as const;
 const STAFF_CHAT_MESSAGE_MAX_ATTACHMENTS = 20;
+const STAFF_CHAT_SHIFT_REPORT_RECONCILE_DAYS = 14;
+const STAFF_CHAT_SHIFT_REPORT_FALLBACK_TIME_ZONE = 'Asia/Yekaterinburg';
 export const STAFF_CHAT_NOTIFICATION_CHANNEL_NAME = 'Уведомления';
 export const STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION =
   'Системные уведомления о назначении задач, курсов, изменениях регламентов и других событиях персонала.';
@@ -310,6 +319,10 @@ export class StaffTeamChatService {
       channels[0] ??
       null;
 
+    if (activeChannel?.name === STAFF_CHAT_REPORTING_CHANNEL_NAME) {
+      await this.reconcileShiftReportMessages(tenantId, activeChannel.id);
+    }
+
     const stats = await this.buildChannelStats(
       tenantId,
       user.id,
@@ -385,11 +398,30 @@ export class StaffTeamChatService {
     const accessWhere = await this.buildAccessibleChannelWhere(user, tenantId);
     const filters = this.resolveFilters(query);
 
-    const channels = await this.prisma.staffChatChannel.findMany({
+    let channels = await this.prisma.staffChatChannel.findMany({
       where: accessWhere,
-      select: { id: true, updatedAt: true },
+      select: { id: true, name: true, updatedAt: true },
       orderBy: [{ isDefault: 'desc' }, { scope: 'asc' }, { name: 'asc' }],
     });
+    const reportingChannel = filters.channelId
+      ? channels.find(
+          (channel) =>
+            channel.id === filters.channelId &&
+            channel.name === STAFF_CHAT_REPORTING_CHANNEL_NAME,
+        )
+      : null;
+    const reconciledAt = reportingChannel
+      ? await this.reconcileShiftReportMessages(tenantId, reportingChannel.id)
+      : null;
+
+    if (reconciledAt) {
+      channels = channels.map((channel) =>
+        channel.id === reportingChannel?.id
+          ? { ...channel, updatedAt: reconciledAt }
+          : channel,
+      );
+    }
+
     const channelIds = channels.map((channel) => channel.id);
     const stats = await this.buildChannelStats(tenantId, user.id, channelIds);
     const totals = Array.from(stats.values()).reduce(
@@ -734,6 +766,326 @@ export class StaffTeamChatService {
     );
 
     return { channelId: channel.id, marked: count };
+  }
+
+  private async reconcileShiftReportMessages(
+    tenantId: string,
+    channelId: string,
+  ) {
+    const createdSince = new Date(
+      Date.now() - STAFF_CHAT_SHIFT_REPORT_RECONCILE_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const taggedMessages = await this.prisma.staffChatMessage.findMany({
+      where: {
+        tenantId,
+        channelId,
+        body: { contains: STAFF_SHIFT_REPORT_MARKER_PREFIX },
+        createdAt: { gte: createdSince },
+      },
+      select: { id: true, body: true },
+      orderBy: { createdAt: 'desc' },
+      take: 120,
+    });
+    const shiftIds = Array.from(
+      new Set(
+        taggedMessages
+          .map((message) => readShiftReportMessageShiftId(message.body))
+          .filter((shiftId): shiftId is string => Boolean(shiftId)),
+      ),
+    );
+    const taggedUpdates =
+      shiftIds.length > 0
+        ? await this.buildTaggedShiftReportMessageUpdates(
+            tenantId,
+            taggedMessages,
+            shiftIds,
+          )
+        : [];
+    const untaggedUpdates =
+      await this.buildUntaggedShiftReportMessageUpdates(
+        tenantId,
+        channelId,
+        createdSince,
+      );
+    const updates = [...taggedUpdates, ...untaggedUpdates];
+
+    if (updates.length === 0) {
+      return null;
+    }
+
+    const updatedAt = new Date();
+
+    await this.prisma.$transaction([
+      ...updates.map((update) =>
+        this.prisma.staffChatMessage.updateMany({
+          where: { id: update.id, tenantId },
+          data: { body: update.body, updatedAt },
+        }),
+      ),
+      this.prisma.staffChatChannel.updateMany({
+        where: { id: channelId, tenantId },
+        data: { updatedAt },
+      }),
+    ]);
+
+    return updatedAt;
+  }
+
+  private async buildTaggedShiftReportMessageUpdates(
+    tenantId: string,
+    messages: Array<{ id: string; body: string }>,
+    shiftIds: string[],
+  ) {
+    const shifts = await this.prisma.guestWorkingShift.findMany({
+      where: { tenantId, id: { in: shiftIds } },
+      include: { store: { select: { timeZone: true } } },
+    });
+    const shiftsById = new Map(shifts.map((shift) => [shift.id, shift]));
+
+    return messages
+      .map((message) => {
+        const shiftId = readShiftReportMessageShiftId(message.body);
+        const shift = shiftId ? shiftsById.get(shiftId) : null;
+
+        if (!shift) {
+          return null;
+        }
+
+        const visibleBody = stripShiftReportMessageMetadata(message.body);
+        const nextVisibleBody = this.upsertShiftReportWindowBlock(
+          visibleBody,
+          {
+            startedAt: shift.startedAt,
+            stoppedAt: shift.stoppedAt,
+          },
+          shift.store?.timeZone ?? STAFF_CHAT_SHIFT_REPORT_FALLBACK_TIME_ZONE,
+        );
+        const nextBody = appendShiftReportMessageMetadata(
+          nextVisibleBody,
+          shift.id,
+          STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+        );
+
+        return nextBody === message.body
+          ? null
+          : { id: message.id, body: nextBody };
+      })
+      .filter((update): update is { id: string; body: string } =>
+        Boolean(update),
+      );
+  }
+
+  private async buildUntaggedShiftReportMessageUpdates(
+    tenantId: string,
+    channelId: string,
+    createdSince: Date,
+  ) {
+    const messages = await this.prisma.staffChatMessage.findMany({
+      where: {
+        tenantId,
+        channelId,
+        createdAt: { gte: createdSince },
+        body: { contains: 'Касса смены: Langame /working_shifts/list.' },
+        NOT: [
+          { body: { contains: STAFF_SHIFT_REPORT_MARKER_PREFIX } },
+          { body: { contains: 'Старт смены:' } },
+        ],
+      },
+      select: {
+        id: true,
+        body: true,
+        authorUserId: true,
+        storeId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 40,
+    });
+
+    if (messages.length === 0) {
+      return [];
+    }
+
+    const authorUserIds = Array.from(
+      new Set(
+        messages
+          .map((message) => message.authorUserId)
+          .filter((userId): userId is string => Boolean(userId)),
+      ),
+    );
+    const members =
+      authorUserIds.length > 0
+        ? await this.prisma.staffMember.findMany({
+            where: { tenantId, userId: { in: authorUserIds } },
+            select: { userId: true, externalUserId: true, storeId: true },
+          })
+        : [];
+    const membersByUserId = new Map(
+      members.map((member) => [member.userId, member]),
+    );
+    const updates: Array<{ id: string; body: string }> = [];
+
+    for (const message of messages) {
+      const member = message.authorUserId
+        ? membersByUserId.get(message.authorUserId)
+        : null;
+      const shift = await this.findShiftForUntaggedReportMessage(
+        tenantId,
+        message,
+        member,
+      );
+
+      if (!shift) {
+        continue;
+      }
+
+      const nextVisibleBody = this.upsertShiftReportWindowBlock(
+        message.body,
+        {
+          startedAt: shift.startedAt,
+          stoppedAt: shift.stoppedAt,
+        },
+        shift.store?.timeZone ?? STAFF_CHAT_SHIFT_REPORT_FALLBACK_TIME_ZONE,
+      );
+      const nextBody = appendShiftReportMessageMetadata(
+        nextVisibleBody,
+        shift.id,
+        STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+      );
+
+      if (nextBody !== message.body) {
+        updates.push({ id: message.id, body: nextBody });
+      }
+    }
+
+    return updates;
+  }
+
+  private async findShiftForUntaggedReportMessage(
+    tenantId: string,
+    message: {
+      createdAt: Date;
+      storeId: string | null;
+    },
+    member:
+      | { externalUserId: string | null; storeId: string | null }
+      | null
+      | undefined,
+  ) {
+    const storeId = message.storeId ?? member?.storeId ?? null;
+    const externalUserId = member?.externalUserId ?? null;
+
+    if (!storeId || !externalUserId) {
+      return null;
+    }
+
+    const windowStartedAt = new Date(
+      message.createdAt.getTime() - 36 * 60 * 60 * 1000,
+    );
+    const windowStoppedAt = new Date(
+      message.createdAt.getTime() + 12 * 60 * 60 * 1000,
+    );
+    const candidates = await this.prisma.guestWorkingShift.findMany({
+      where: {
+        tenantId,
+        storeId,
+        externalUserId,
+        OR: [
+          { startedAt: { gte: windowStartedAt, lte: windowStoppedAt } },
+          { stoppedAt: { gte: windowStartedAt, lte: windowStoppedAt } },
+          { startedAt: { lte: message.createdAt }, stoppedAt: null },
+        ],
+      },
+      include: { store: { select: { timeZone: true } } },
+      orderBy: [
+        { stoppedAt: 'desc' },
+        { startedAt: 'desc' },
+        { updatedAt: 'desc' },
+      ],
+      take: 2,
+    });
+
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  private upsertShiftReportWindowBlock(
+    body: string,
+    shift: { startedAt: Date | null; stoppedAt: Date | null },
+    timeZone: string,
+  ) {
+    const windowLines = this.buildShiftReportWindowLines(shift, timeZone);
+
+    if (windowLines.length === 0) {
+      return stripShiftReportMessageMetadata(body);
+    }
+
+    const lines = stripShiftReportMessageMetadata(body).split('\n');
+    const startIndex = lines.findIndex((line) =>
+      line.trim().toLocaleLowerCase('ru-RU').startsWith('старт смены:'),
+    );
+
+    if (startIndex !== -1) {
+      const deleteCount = lines[startIndex + 1]
+        ?.trim()
+        .toLocaleLowerCase('ru-RU')
+        .startsWith('конец смены:')
+        ? 2
+        : 1;
+      lines.splice(startIndex, deleteCount, ...windowLines);
+
+      return lines.join('\n').trimEnd();
+    }
+
+    const stopIndex = lines.findIndex((line) =>
+      line.trim().toLocaleLowerCase('ru-RU').startsWith('конец смены:'),
+    );
+
+    if (stopIndex !== -1) {
+      lines.splice(stopIndex, 1, ...windowLines);
+
+      return lines.join('\n').trimEnd();
+    }
+
+    const dateIndex = lines.findIndex((line) =>
+      line.trim().toLocaleLowerCase('ru-RU').startsWith('дата:'),
+    );
+
+    if (dateIndex !== -1) {
+      lines.splice(dateIndex + 1, 0, ...windowLines);
+    } else {
+      lines.unshift(...windowLines, '');
+    }
+
+    return lines.join('\n').trimEnd();
+  }
+
+  private buildShiftReportWindowLines(
+    shift: { startedAt: Date | null; stoppedAt: Date | null },
+    timeZone: string,
+  ) {
+    if (!shift.startedAt) {
+      return [];
+    }
+
+    return [
+      `Старт смены: ${this.formatShiftReportDateTime(shift.startedAt, timeZone)}`,
+      `Конец смены: ${
+        shift.stoppedAt
+          ? this.formatShiftReportDateTime(shift.stoppedAt, timeZone)
+          : 'смена еще открыта'
+      }`,
+    ];
+  }
+
+  private formatShiftReportDateTime(value: Date, timeZone: string) {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(value);
   }
 
   private resolveFilters(

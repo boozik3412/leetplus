@@ -15,9 +15,15 @@ import {
   STAFF_CHAT_REPORTING_CHANNEL_DESCRIPTION,
   STAFF_CHAT_REPORTING_CHANNEL_NAME,
 } from './staff-team-chat.service';
+import {
+  appendShiftReportMessageMetadata,
+  STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+  stripShiftReportMessageMetadata,
+} from './staff-shift-report-message-metadata';
 
 const SHIFT_REPORT_LANGAME_PAGE_LIMIT = 100;
 const SHIFT_REPORT_RECENT_WINDOW_HOURS = 96;
+const SHIFT_REPORT_FALLBACK_TIME_ZONE = 'Asia/Yekaterinburg';
 
 export type StaffShiftReportAttachment = {
   id: string;
@@ -103,6 +109,7 @@ export type StaffShiftReportDraftQuery = {
 export type StaffShiftReportSendDto = {
   body?: string | null;
   storeId?: string | null;
+  shiftId?: string | null;
   attachmentIds?: string[] | null;
 };
 
@@ -113,7 +120,7 @@ export type StaffShiftReportSendResult = {
 };
 
 type ShiftReportActiveShift = Prisma.GuestWorkingShiftGetPayload<{
-  include: { store: { select: { id: true; name: true } } };
+  include: { store: { select: { id: true; name: true; timeZone: true } } };
 }>;
 
 type ShiftReportStore = {
@@ -280,6 +287,9 @@ export class StaffShiftReportsService {
         checklists,
         tasks,
         attachments,
+        shiftStartedAt: activeShift?.startedAt ?? null,
+        shiftStoppedAt: activeShift?.stoppedAt ?? null,
+        timeZone: activeShift?.store?.timeZone ?? timeZone,
         financials,
       }),
     };
@@ -290,13 +300,24 @@ export class StaffShiftReportsService {
     dto: StaffShiftReportSendDto,
   ): Promise<StaffShiftReportSendResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const body = this.normalizeRequiredString(dto.body, 'Report body', 12000);
+    const rawBody = this.normalizeRequiredString(
+      dto.body,
+      'Report body',
+      STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+    );
     const attachmentIds = await this.resolveAttachmentIds(
       tenantId,
       user.id,
       dto.attachmentIds,
     );
-    const storeId = await this.resolveStoreId(tenantId, dto.storeId);
+    const requestedStoreId = await this.resolveStoreId(tenantId, dto.storeId);
+    const shift = await this.resolveReportShiftForSend(
+      tenantId,
+      dto.shiftId,
+      requestedStoreId,
+    );
+    const storeId = shift?.storeId ?? requestedStoreId;
+    const body = this.prepareReportBodyForSend(rawBody, shift);
     const channel = await this.ensureReportingChannel(tenantId);
 
     const message = await this.prisma.$transaction(async (tx) => {
@@ -335,6 +356,57 @@ export class StaffShiftReportsService {
     };
   }
 
+  private async resolveReportShiftForSend(
+    tenantId: string,
+    shiftId: string | null | undefined,
+    storeId: string | null,
+  ) {
+    const normalizedShiftId = this.normalizeOptionalString(shiftId);
+
+    if (!normalizedShiftId) {
+      return null;
+    }
+
+    const shift = await this.findShiftById(
+      tenantId,
+      normalizedShiftId,
+      storeId,
+    );
+
+    if (!shift) {
+      throw new BadRequestException('Shift not found');
+    }
+
+    return shift;
+  }
+
+  private prepareReportBodyForSend(
+    body: string,
+    shift: ShiftReportActiveShift | null,
+  ) {
+    const cleanBody = stripShiftReportMessageMetadata(body);
+
+    if (!shift) {
+      return appendShiftReportMessageMetadata(
+        cleanBody,
+        null,
+        STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+      );
+    }
+
+    const bodyWithShiftWindow = this.upsertShiftWindowBlock(
+      cleanBody,
+      shift,
+      shift.store?.timeZone ?? SHIFT_REPORT_FALLBACK_TIME_ZONE,
+    );
+
+    return appendShiftReportMessageMetadata(
+      bodyWithShiftWindow,
+      shift.id,
+      STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+    );
+  }
+
   private async findShiftById(
     tenantId: string,
     shiftId: string,
@@ -346,7 +418,7 @@ export class StaffShiftReportsService {
         tenantId,
         ...(storeId ? { storeId } : {}),
       },
-      include: { store: { select: { id: true, name: true } } },
+      include: { store: { select: { id: true, name: true, timeZone: true } } },
     });
 
     if (scopedShift || !storeId) {
@@ -358,7 +430,7 @@ export class StaffShiftReportsService {
         id: shiftId,
         tenantId,
       },
-      include: { store: { select: { id: true, name: true } } },
+      include: { store: { select: { id: true, name: true, timeZone: true } } },
     });
   }
 
@@ -384,7 +456,7 @@ export class StaffShiftReportsService {
         ...(storeId ? { storeId } : {}),
         stoppedAt: null,
       },
-      include: { store: { select: { id: true, name: true } } },
+      include: { store: { select: { id: true, name: true, timeZone: true } } },
       orderBy: [{ startedAt: 'desc' }, { updatedAt: 'desc' }],
     });
 
@@ -407,7 +479,7 @@ export class StaffShiftReportsService {
           { stoppedAt: { gte: recentSince } },
         ],
       },
-      include: { store: { select: { id: true, name: true } } },
+      include: { store: { select: { id: true, name: true, timeZone: true } } },
       orderBy: [
         { stoppedAt: 'desc' },
         { startedAt: 'desc' },
@@ -844,7 +916,7 @@ export class StaffShiftReportsService {
         storeId,
         stoppedAt: null,
       },
-      include: { store: { select: { id: true, name: true } } },
+      include: { store: { select: { id: true, name: true, timeZone: true } } },
       orderBy: [{ startedAt: 'desc' }, { updatedAt: 'desc' }],
       take: 15,
     });
@@ -859,7 +931,7 @@ export class StaffShiftReportsService {
           ...(selectedShiftId ? [{ id: selectedShiftId }] : []),
         ],
       },
-      include: { store: { select: { id: true, name: true } } },
+      include: { store: { select: { id: true, name: true, timeZone: true } } },
       orderBy: [
         { stoppedAt: 'desc' },
         { startedAt: 'desc' },
@@ -1275,6 +1347,9 @@ export class StaffShiftReportsService {
     }>;
     tasks: Array<{ title: string; status: string }>;
     attachments: StaffShiftReportAttachment[];
+    shiftStartedAt: Date | null;
+    shiftStoppedAt: Date | null;
+    timeZone: string;
     financials: StaffShiftReportFinancials;
   }) {
     const checklistLines = input.checklists.length
@@ -1309,6 +1384,11 @@ export class StaffShiftReportsService {
     return [
       `Клуб: ${input.clubName}`,
       `Дата: ${input.dateLabel} (${input.dayPartLabel})`,
+      ...this.buildShiftWindowLines({
+        startedAt: input.shiftStartedAt,
+        stoppedAt: input.shiftStoppedAt,
+        timeZone: input.timeZone,
+      }),
       `Администратор: ${input.administratorName}`,
       `Наличные: ${this.formatMoneyOrBlank(input.financials.cashAmount)}${cashNote}`,
       `Безналичные: ${this.formatMoneyOrBlank(this.cashlessTotal(input.financials))}${cashlessBreakdown}`,
@@ -1333,6 +1413,80 @@ export class StaffShiftReportsService {
       'Фото и файлы:',
       ...attachmentLines,
     ].join('\n');
+  }
+
+  private buildShiftWindowLines(input: {
+    startedAt: Date | null;
+    stoppedAt: Date | null;
+    timeZone: string;
+  }) {
+    if (!input.startedAt) {
+      return [];
+    }
+
+    return [
+      `Старт смены: ${this.formatDateTime(input.startedAt, input.timeZone)}`,
+      `Конец смены: ${
+        input.stoppedAt
+          ? this.formatDateTime(input.stoppedAt, input.timeZone)
+          : 'смена еще открыта'
+      }`,
+    ];
+  }
+
+  private upsertShiftWindowBlock(
+    body: string,
+    shift: ShiftReportActiveShift,
+    timeZone: string,
+  ) {
+    const windowLines = this.buildShiftWindowLines({
+      startedAt: shift.startedAt,
+      stoppedAt: shift.stoppedAt,
+      timeZone,
+    });
+
+    if (windowLines.length === 0) {
+      return stripShiftReportMessageMetadata(body);
+    }
+
+    const lines = stripShiftReportMessageMetadata(body).split('\n');
+    const startIndex = lines.findIndex((line) =>
+      line.trim().toLocaleLowerCase('ru-RU').startsWith('старт смены:'),
+    );
+
+    if (startIndex !== -1) {
+      const deleteCount = lines[startIndex + 1]
+        ?.trim()
+        .toLocaleLowerCase('ru-RU')
+        .startsWith('конец смены:')
+        ? 2
+        : 1;
+      lines.splice(startIndex, deleteCount, ...windowLines);
+
+      return lines.join('\n').trimEnd();
+    }
+
+    const stopIndex = lines.findIndex((line) =>
+      line.trim().toLocaleLowerCase('ru-RU').startsWith('конец смены:'),
+    );
+
+    if (stopIndex !== -1) {
+      lines.splice(stopIndex, 1, ...windowLines);
+
+      return lines.join('\n').trimEnd();
+    }
+
+    const dateIndex = lines.findIndex((line) =>
+      line.trim().toLocaleLowerCase('ru-RU').startsWith('дата:'),
+    );
+
+    if (dateIndex !== -1) {
+      lines.splice(dateIndex + 1, 0, ...windowLines);
+    } else {
+      lines.unshift(...windowLines, '');
+    }
+
+    return lines.join('\n').trimEnd();
   }
 
   private async ensureReportingChannel(tenantId: string) {
@@ -1741,6 +1895,17 @@ export class StaffShiftReportsService {
     }
 
     return value as Record<string, unknown>;
+  }
+
+  private formatDateTime(value: Date, timeZone: string) {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(value);
   }
 
   private formatDate(value: Date, timeZone: string) {

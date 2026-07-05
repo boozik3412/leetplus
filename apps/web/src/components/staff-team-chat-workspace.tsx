@@ -110,6 +110,8 @@ const emptyChannelForm: ChannelFormState = {
 
 const TEAM_CHAT_LIVE_REFRESH_MS = 12_000;
 const SYSTEM_NOTIFICATION_CHANNEL_NAME = "Уведомления";
+const SHIFT_REPORT_METADATA_PATTERN =
+  /\n*\[leetplus:shift-report:[^\]]+\]\s*$/i;
 
 function getChannelReadSnapshot(channel: StaffChatChannel) {
   return `${channel.messagesCount}:${channel.lastMessageAt ?? ""}`;
@@ -1561,7 +1563,9 @@ function MessageCard({
   const authorName =
     message.authorUser?.fullName ?? message.authorUser?.email ?? "LeetPlus";
   const authorInitial = authorName.trim().slice(0, 1).toUpperCase() || "L";
-  const messageContent = parseMessageAction(message.body);
+  const messageContent = parseMessageAction(
+    stripShiftReportMetadata(message.body),
+  );
 
   return (
     <article
@@ -1949,6 +1953,10 @@ function MessageActionLink({
   );
 }
 
+function stripShiftReportMetadata(body: string) {
+  return body.replace(SHIFT_REPORT_METADATA_PATTERN, "").trimEnd();
+}
+
 function parseMessageAction(body: string) {
   const lines = body.split("\n");
   const actionLineIndex = findLastTextLineIndex(lines);
@@ -2173,7 +2181,7 @@ function channelScopeLabel(channel: StaffChatChannel) {
 }
 
 function buildTaskTitle(message: StaffChatMessage) {
-  const firstLine = message.body
+  const firstLine = stripShiftReportMetadata(message.body)
     .split("\n")
     .map((line) => line.trim())
     .find(Boolean);
@@ -2196,7 +2204,7 @@ function buildTaskDescription(
     message.store ? `Клуб: ${message.store.name}` : "Клуб: вся сеть",
     "",
     "Сообщение:",
-    message.body,
+    stripShiftReportMetadata(message.body),
   ];
 
   if (message.attachments.length > 0) {

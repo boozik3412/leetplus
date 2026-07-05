@@ -121,6 +121,7 @@ export function StaffShiftReportEditor({
       body: JSON.stringify({
         body,
         storeId: activeDraft.storeId,
+        shiftId: activeDraft.selectedShiftId,
         attachmentIds,
       }),
     });

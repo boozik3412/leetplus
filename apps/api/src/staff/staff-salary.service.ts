@@ -16,6 +16,7 @@ const administratorRoles = [
 
 const salarySchemeStatuses = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
 const salaryPeriodTypes = ['MONTHLY', 'BIWEEKLY', 'WEEKLY', 'CUSTOM'] as const;
+const salaryCalculationPeriodModes = ['MONTH', 'CUSTOM'] as const;
 const salaryRoleScopes = [
   'ADMINISTRATOR',
   'SENIOR_ADMINISTRATOR',
@@ -87,17 +88,27 @@ type StaffSalarySchemeRow = Prisma.StaffSalarySchemeGetPayload<{
 
 type SalarySchemeStatus = (typeof salarySchemeStatuses)[number];
 type SalaryPeriodType = (typeof salaryPeriodTypes)[number];
+type SalaryCalculationPeriodMode =
+  (typeof salaryCalculationPeriodModes)[number];
 type SalaryRoleScope = (typeof salaryRoleScopes)[number];
 type StoreOption = { id: string; name: string; isActive: boolean };
 type SalaryPenaltyRules = typeof defaultPenaltyRules;
 
+type QueryValue = string | string[] | undefined;
+
 export type StaffSalaryQuery = {
-  dateFrom?: string;
-  dateTo?: string;
-  storeId?: string;
-  userId?: string;
-  schemeId?: string;
-  search?: string;
+  dateFrom?: QueryValue;
+  dateTo?: QueryValue;
+  storeId?: QueryValue;
+  storeIds?: QueryValue;
+  userId?: QueryValue;
+  userIds?: QueryValue;
+  schemeId?: QueryValue;
+  search?: QueryValue;
+  calculate?: QueryValue;
+  periodMode?: QueryValue;
+  month?: QueryValue;
+  roleScope?: QueryValue;
 };
 
 export type StaffSalarySchemeDto = {
@@ -115,14 +126,30 @@ export type StaffSalarySchemeDto = {
 };
 
 type ResolvedSalaryFilters = {
+  calculate: boolean;
+  periodMode: SalaryCalculationPeriodMode;
+  month: string;
   dateFrom: string;
   dateTo: string;
   start: Date;
   end: Date;
   storeId: string | null;
+  storeIds: string[] | null;
   userId: string | null;
+  userIds: string[];
+  roleScope: SalaryRoleScope;
   schemeId: string | null;
   search: string | null;
+};
+
+export type StaffSalaryPeriodDto = StaffSalaryQuery;
+
+export type StaffSalaryPeriodAdjustmentDto = {
+  shiftDelta?: number | string | null;
+  shiftCount?: number | string | null;
+  bonusAmount?: number | string | null;
+  penaltyAmount?: number | string | null;
+  comment?: string | null;
 };
 
 type SalaryFactBucket = {
@@ -204,7 +231,7 @@ export class StaffSalaryService {
     this.ensureSalaryAccess(user);
     const filters = this.resolveFilters(query);
     const allowedStoreIds = await this.resolveAllowedStoreIds(user, tenantId);
-    this.ensureStoreAccess(user, filters.storeId, allowedStoreIds);
+    this.ensureStoreFilterAccess(user, filters.storeIds, allowedStoreIds);
 
     const [stores, schemes, users, products] = await Promise.all([
       this.prisma.store.findMany({
@@ -247,20 +274,34 @@ export class StaffSalaryService {
       this.buildSalaryProductOptions(tenantId, filters, allowedStoreIds),
     ]);
 
+    const calculationUsers = filters.calculate
+      ? this.filterCalculationUsers(users, filters)
+      : [];
     const rows = await this.buildSalaryRows({
       tenantId,
       filters,
       schemes,
-      users,
+      users: calculationUsers,
       allowedStoreIds,
+    });
+    const periods = await this.prisma.staffSalaryPeriod.findMany({
+      where: { tenantId },
+      orderBy: [{ dateFrom: 'desc' }, { createdAt: 'desc' }],
+      take: 24,
     });
 
     return {
       filters: {
+        calculate: filters.calculate,
+        periodMode: filters.periodMode,
+        month: filters.month,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
         storeId: filters.storeId,
+        storeIds: filters.storeIds ?? [],
         userId: filters.userId,
+        userIds: filters.userIds,
+        roleScope: filters.roleScope,
         schemeId: filters.schemeId,
         search: filters.search,
       },
@@ -280,6 +321,7 @@ export class StaffSalaryService {
       },
       schemes: schemes.map((scheme) => this.toSchemeResponse(scheme)),
       rows,
+      periods: periods.map((period) => this.toPeriodResponse(period)),
       stores,
       products,
       users: users.map((row) => ({
@@ -422,7 +464,7 @@ export class StaffSalaryService {
           tenantId: input.tenantId,
           assignedToUserId: { in: userIds },
           ...this.buildStoreFactWhere(
-            input.filters.storeId,
+            input.filters.storeIds,
             input.allowedStoreIds,
           ),
           OR: [
@@ -450,7 +492,7 @@ export class StaffSalaryService {
           tenantId: input.tenantId,
           assignedToUserId: { in: userIds },
           ...this.buildStoreFactWhere(
-            input.filters.storeId,
+            input.filters.storeIds,
             input.allowedStoreIds,
           ),
           OR: [
@@ -489,7 +531,7 @@ export class StaffSalaryService {
           status: 'ACTIVE',
           occurredAt: { gte: input.filters.start, lte: input.filters.end },
           ...this.buildStoreFactWhere(
-            input.filters.storeId,
+            input.filters.storeIds,
             input.allowedStoreIds,
           ),
         },
@@ -640,7 +682,7 @@ export class StaffSalaryService {
             where: {
               tenantId: input.tenantId,
               ...this.buildStoreFactWhere(
-                input.filters.storeId,
+                input.filters.storeIds,
                 input.allowedStoreIds,
               ),
               OR: shiftWhereParts,
@@ -777,18 +819,128 @@ export class StaffSalaryService {
     });
   }
 
-  private async buildSalesByShift(
-    tenantId: string,
-    shifts: SalaryShiftRow[],
+  async createPeriod(user: AuthenticatedUser, dto: StaffSalaryPeriodDto) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    this.ensureSalaryAccess(user);
+    const filters = this.resolveFilters({ ...dto, calculate: '1' });
+    const allowedStoreIds = await this.resolveAllowedStoreIds(user, tenantId);
+    this.ensureStoreFilterAccess(user, filters.storeIds, allowedStoreIds);
+    const [schemes, users] = await Promise.all([
+      this.prisma.staffSalaryScheme.findMany({
+        where: this.buildSchemeWhere(tenantId, allowedStoreIds),
+        select: salarySchemeSelect,
+        orderBy: [{ status: 'asc' }, { storeId: 'asc' }, { updatedAt: 'desc' }],
+      }),
+      this.prisma.user.findMany({
+        where: this.buildUserWhere(tenantId, filters, allowedStoreIds),
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          storeAccesses: {
+            select: {
+              store: { select: { id: true, name: true, isActive: true } },
+            },
+            orderBy: { store: { name: 'asc' } },
+          },
+          staffMember: {
+            select: {
+              id: true,
+              displayName: true,
+              storeId: true,
+              externalProvider: true,
+              externalDomain: true,
+              externalUserId: true,
+              store: { select: { id: true, name: true, isActive: true } },
+            },
+          },
+        },
+        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      }),
+    ]);
+    const rows = await this.buildSalaryRows({
+      tenantId,
+      filters,
+      schemes,
+      users: this.filterCalculationUsers(users, filters),
+      allowedStoreIds,
+    });
+    const totals = this.buildPeriodTotals(rows);
+    const period = await this.prisma.staffSalaryPeriod.create({
+      data: {
+        tenantId,
+        createdByUserId: user.id,
+        title: this.buildPeriodTitle(filters),
+        periodMode: filters.periodMode,
+        dateFrom: filters.start,
+        dateTo: filters.end,
+        storeIds: filters.storeIds ?? [],
+        roleScope: filters.roleScope,
+        userIds: filters.userIds,
+        rows: rows,
+        ...totals,
+      },
+    });
+
+    return this.toPeriodResponse(period);
+  }
+
+  async updatePeriodRowAdjustment(
+    user: AuthenticatedUser,
+    periodId: string,
+    userId: string,
+    dto: StaffSalaryPeriodAdjustmentDto,
   ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    this.ensureSalaryAccess(user);
+    const period = await this.prisma.staffSalaryPeriod.findFirst({
+      where: { tenantId, id: periodId },
+    });
+
+    if (!period) {
+      throw new NotFoundException('Salary period not found');
+    }
+
+    const rows = this.normalizePeriodRows(period.rows).map((row) => {
+      if (row.id !== userId) {
+        return row;
+      }
+
+      const originalShifts =
+        this.safeMoneyNumber(row.originalShifts) ??
+        this.safeMoneyNumber(row.shifts) ??
+        0;
+      const requestedShiftCount = this.safeMoneyNumber(dto.shiftCount);
+
+      return this.applyPeriodRowAdjustment(row, {
+        shiftDelta:
+          requestedShiftCount === null
+            ? (this.safeMoneyNumber(dto.shiftDelta) ?? 0)
+            : requestedShiftCount - originalShifts,
+        bonusAmount: this.safeMoneyNumber(dto.bonusAmount) ?? 0,
+        penaltyAmount: this.safeMoneyNumber(dto.penaltyAmount) ?? 0,
+        comment: this.normalizeOptionalString(dto.comment),
+      });
+    });
+    const totals = this.buildPeriodTotals(rows);
+    const updated = await this.prisma.staffSalaryPeriod.update({
+      where: { id: period.id },
+      data: {
+        rows: rows as unknown as Prisma.InputJsonValue,
+        ...totals,
+      },
+    });
+
+    return this.toPeriodResponse(updated);
+  }
+
+  private async buildSalesByShift(tenantId: string, shifts: SalaryShiftRow[]) {
     const closedShifts = shifts
-      .filter(
-        (shift) => shift.storeId && shift.startedAt && shift.stoppedAt,
-      )
+      .filter((shift) => shift.storeId && shift.startedAt && shift.stoppedAt)
       .sort(
         (left, right) =>
-          (left.startedAt?.getTime() ?? 0) -
-          (right.startedAt?.getTime() ?? 0),
+          (left.startedAt?.getTime() ?? 0) - (right.startedAt?.getTime() ?? 0),
       );
 
     if (closedShifts.length === 0) {
@@ -944,9 +1096,11 @@ export class StaffSalaryService {
     );
     const pool = scoped.length > 0 ? scoped : visibleSchemes;
 
-    if (filters.storeId) {
+    const selectedStoreIds = filters.storeIds ?? [];
+
+    if (selectedStoreIds.length === 1) {
       const storeScheme = pool.find(
-        (scheme) => scheme.storeId === filters.storeId,
+        (scheme) => scheme.storeId === selectedStoreIds[0],
       );
 
       if (storeScheme) {
@@ -954,8 +1108,16 @@ export class StaffSalaryService {
       }
     }
 
+    const scopedUserStoreIds =
+      selectedStoreIds.length > 0
+        ? new Set(
+            Array.from(userStoreIds).filter((storeId) =>
+              selectedStoreIds.includes(storeId),
+            ),
+          )
+        : userStoreIds;
     const userStoreScheme = pool.find(
-      (scheme) => scheme.storeId && userStoreIds.has(scheme.storeId),
+      (scheme) => scheme.storeId && scopedUserStoreIds.has(scheme.storeId),
     );
 
     return (
@@ -1054,7 +1216,11 @@ export class StaffSalaryService {
       );
     }
 
-    if (usesShiftFacts && shiftMetrics.shifts === 0 && shiftMetrics.openShifts === 0) {
+    if (
+      usesShiftFacts &&
+      shiftMetrics.shifts === 0 &&
+      shiftMetrics.openShifts === 0
+    ) {
       warnings.push(
         'Закрытых смен Langame за период не найдено. Проверьте клуб, период и привязку сотрудника к Langame.',
       );
@@ -1112,6 +1278,26 @@ export class StaffSalaryService {
     return task.status !== 'DONE' && task.dueAt <= periodEnd;
   }
 
+  private filterCalculationUsers(
+    users: SalaryUserRow[],
+    filters: ResolvedSalaryFilters,
+  ) {
+    if (filters.userIds.length > 0) {
+      const selected = new Set(filters.userIds);
+      return users.filter((row) => selected.has(row.id));
+    }
+
+    if (filters.roleScope === 'SENIOR_ADMINISTRATOR') {
+      return users.filter((row) => row.role === UserRole.SENIOR_ADMINISTRATOR);
+    }
+
+    if (filters.roleScope === 'CLUB_ADMINISTRATOR') {
+      return users.filter((row) => row.role === UserRole.CLUB_ADMINISTRATOR);
+    }
+
+    return users;
+  }
+
   private buildStoreWhere(tenantId: string, allowedStoreIds: string[] | null) {
     const where: Prisma.StoreWhereInput = { tenantId };
 
@@ -1128,7 +1314,7 @@ export class StaffSalaryService {
     allowedStoreIds: string[] | null,
   ) {
     const storeFactWhere = this.buildStoreFactWhere(
-      filters.storeId,
+      filters.storeIds,
       allowedStoreIds,
     );
     const productWhere: Prisma.ProductWhereInput = {
@@ -1136,7 +1322,7 @@ export class StaffSalaryService {
       isActive: true,
     };
 
-    if (filters.storeId || allowedStoreIds) {
+    if (filters.storeIds || allowedStoreIds) {
       productWhere.salesFacts = {
         some: {
           tenantId,
@@ -1178,7 +1364,8 @@ export class StaffSalaryService {
     const storesByProductId = new Map<string, Map<string, StoreOption>>();
 
     salesFacts.forEach((fact) => {
-      const stores = storesByProductId.get(fact.productId) ?? new Map();
+      const stores =
+        storesByProductId.get(fact.productId) ?? new Map<string, StoreOption>();
       stores.set(fact.store.id, fact.store);
       storesByProductId.set(fact.productId, stores);
     });
@@ -1189,9 +1376,9 @@ export class StaffSalaryService {
       name: product.name,
       categoryName: product.category?.name ?? null,
       salePrice: this.toNumber(product.salePrice),
-      stores: Array.from(storesByProductId.get(product.id)?.values() ?? []).sort(
-        (left, right) => left.name.localeCompare(right.name, 'ru'),
-      ),
+      stores: Array.from(
+        storesByProductId.get(product.id)?.values() ?? [],
+      ).sort((left, right) => left.name.localeCompare(right.name, 'ru')),
     }));
   }
 
@@ -1227,14 +1414,14 @@ export class StaffSalaryService {
       ];
     }
 
-    const storeId = filters.storeId;
+    const storeIds = filters.storeIds;
 
-    if (storeId) {
+    if (storeIds && storeIds.length > 0) {
       where.AND = [
         ...(Array.isArray(where.AND) ? where.AND : []),
         {
           OR: [
-            { storeAccesses: { some: { storeId } } },
+            { storeAccesses: { some: { storeId: { in: storeIds } } } },
             { storeAccesses: { none: {} } },
           ],
         },
@@ -1255,18 +1442,21 @@ export class StaffSalaryService {
   }
 
   private buildStoreFactWhere(
-    storeId: string | null,
+    storeIds: string[] | null,
     allowedStoreIds: string[] | null,
   ) {
-    if (storeId) {
-      return { storeId };
+    const targetStoreIds =
+      storeIds && storeIds.length > 0 ? storeIds : allowedStoreIds;
+
+    if (!targetStoreIds || targetStoreIds.length === 0) {
+      return {};
     }
 
-    if (allowedStoreIds) {
-      return { storeId: { in: allowedStoreIds } };
+    if (targetStoreIds.length === 1) {
+      return { storeId: targetStoreIds[0] };
     }
 
-    return {};
+    return { storeId: { in: targetStoreIds } };
   }
 
   private toSchemeResponse(scheme: StaffSalarySchemeRow) {
@@ -1384,6 +1574,130 @@ export class StaffSalaryService {
     return Array.from(rows.values());
   }
 
+  private buildPeriodTotals(rows: Array<Record<string, unknown>>) {
+    return {
+      totalEmployees: rows.length,
+      totalBaseAmount: this.toSignedDecimal(this.sum(rows, 'baseAmount')),
+      totalShiftAmount: this.toSignedDecimal(this.sum(rows, 'shiftAmount')),
+      totalHourlyAmount: this.toSignedDecimal(this.sum(rows, 'hourlyAmount')),
+      totalBonusAmount: this.toSignedDecimal(this.sum(rows, 'bonusAmount')),
+      totalPenaltyAmount: this.toSignedDecimal(this.sum(rows, 'penaltyAmount')),
+      totalNetAmount: this.toSignedDecimal(this.sum(rows, 'netAmount')),
+    };
+  }
+
+  private toSignedDecimal(value: number) {
+    return new Prisma.Decimal(this.roundMoney(value).toFixed(2));
+  }
+
+  private buildPeriodTitle(filters: ResolvedSalaryFilters) {
+    if (filters.periodMode === 'MONTH') {
+      return `Зарплата за ${filters.month}`;
+    }
+
+    return `Зарплата за ${filters.dateFrom} - ${filters.dateTo}`;
+  }
+
+  private toPeriodResponse(period: {
+    id: string;
+    title: string;
+    status: string;
+    periodMode: string;
+    dateFrom: Date;
+    dateTo: Date;
+    storeIds: string[];
+    roleScope: string;
+    userIds: string[];
+    rows: Prisma.JsonValue;
+    totalEmployees: number;
+    totalBaseAmount: Prisma.Decimal;
+    totalShiftAmount: Prisma.Decimal;
+    totalHourlyAmount: Prisma.Decimal;
+    totalBonusAmount: Prisma.Decimal;
+    totalPenaltyAmount: Prisma.Decimal;
+    totalNetAmount: Prisma.Decimal;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return {
+      id: period.id,
+      title: period.title,
+      status: period.status,
+      periodMode: period.periodMode,
+      dateFrom: this.toDateOnly(period.dateFrom),
+      dateTo: this.toDateOnly(period.dateTo),
+      storeIds: period.storeIds,
+      roleScope: period.roleScope,
+      userIds: period.userIds,
+      rows: this.normalizePeriodRows(period.rows),
+      totalEmployees: period.totalEmployees,
+      totalBaseAmount: this.toNumber(period.totalBaseAmount),
+      totalShiftAmount: this.toNumber(period.totalShiftAmount),
+      totalHourlyAmount: this.toNumber(period.totalHourlyAmount),
+      totalBonusAmount: this.toNumber(period.totalBonusAmount),
+      totalPenaltyAmount: this.toNumber(period.totalPenaltyAmount),
+      totalNetAmount: this.toNumber(period.totalNetAmount),
+      createdAt: period.createdAt.toISOString(),
+      updatedAt: period.updatedAt.toISOString(),
+    };
+  }
+
+  private normalizePeriodRows(value: Prisma.JsonValue) {
+    return Array.isArray(value)
+      ? (value as Array<Record<string, unknown>>)
+      : [];
+  }
+
+  private applyPeriodRowAdjustment(
+    row: Record<string, unknown>,
+    adjustment: {
+      shiftDelta: number;
+      bonusAmount: number;
+      penaltyAmount: number;
+      comment: string | null;
+    },
+  ) {
+    const scheme = this.isPlainObject(row.scheme) ? row.scheme : {};
+    const shiftRate = this.safeMoneyNumber(scheme.shiftRate) ?? 0;
+    const originalShifts =
+      this.safeMoneyNumber(row.originalShifts) ??
+      this.safeMoneyNumber(row.shifts) ??
+      0;
+    const nextShifts = Math.max(0, originalShifts + adjustment.shiftDelta);
+    const shiftAmount = this.roundMoney(nextShifts * shiftRate);
+    const baseAmount = this.safeMoneyNumber(row.baseAmount) ?? 0;
+    const hourlyAmount = this.safeMoneyNumber(row.hourlyAmount) ?? 0;
+    const originalBonusAmount =
+      this.safeMoneyNumber(row.originalBonusAmount) ??
+      this.safeMoneyNumber(row.bonusAmount) ??
+      0;
+    const originalPenaltyAmount =
+      this.safeMoneyNumber(row.originalPenaltyAmount) ??
+      this.safeMoneyNumber(row.penaltyAmount) ??
+      0;
+    const bonusAmount = this.roundMoney(
+      originalBonusAmount + adjustment.bonusAmount,
+    );
+    const penaltyAmount = this.roundMoney(
+      originalPenaltyAmount + adjustment.penaltyAmount,
+    );
+
+    return {
+      ...row,
+      originalShifts,
+      originalBonusAmount,
+      originalPenaltyAmount,
+      shifts: nextShifts,
+      shiftAmount,
+      bonusAmount,
+      penaltyAmount,
+      netAmount: this.roundMoney(
+        baseAmount + shiftAmount + hourlyAmount + bonusAmount - penaltyAmount,
+      ),
+      manualAdjustment: adjustment,
+    };
+  }
+
   private readPenaltyRules(value: Prisma.JsonValue | null | undefined) {
     const rules = this.isPlainObject(value) ? value : {};
     const includeDisciplineFinesValue: unknown = rules.includeDisciplineFines;
@@ -1429,6 +1743,24 @@ export class StaffSalaryService {
     });
 
     return accesses.map((access) => access.storeId);
+  }
+
+  private ensureStoreFilterAccess(
+    user: AuthenticatedUser,
+    storeIds: string[] | null,
+    allowedStoreIds: string[] | null,
+  ) {
+    if (!allowedStoreIds || !storeIds || storeIds.length === 0) {
+      return;
+    }
+
+    if (storeIds.some((storeId) => !allowedStoreIds.includes(storeId))) {
+      throw new ForbiddenException(
+        'Club manager can access only own club salary data',
+      );
+    }
+
+    void user;
   }
 
   private ensureStoreAccess(
@@ -1480,28 +1812,84 @@ export class StaffSalaryService {
   }
 
   private resolveFilters(query: StaffSalaryQuery): ResolvedSalaryFilters {
-    const dateTo =
-      this.normalizeDate(query.dateTo) ?? this.toDateOnly(new Date());
-    const dateFrom =
-      this.normalizeDate(query.dateFrom) ??
-      this.toDateOnly(this.addDays(new Date(`${dateTo}T00:00:00.000Z`), -29));
-    const start = new Date(`${dateFrom}T00:00:00.000Z`);
-    const end = new Date(`${dateTo}T23:59:59.999Z`);
+    const periodMode = this.resolveCalculationPeriodMode(query.periodMode);
+    const month =
+      this.normalizeMonth(query.month) ?? this.toMonthOnly(new Date());
+    const range =
+      periodMode === 'MONTH'
+        ? this.monthDateRange(month)
+        : {
+            dateFrom:
+              this.normalizeDate(query.dateFrom) ??
+              this.toDateOnly(
+                this.addDays(
+                  new Date(
+                    `${this.normalizeDate(query.dateTo) ?? this.toDateOnly(new Date())}T00:00:00.000Z`,
+                  ),
+                  -29,
+                ),
+              ),
+            dateTo:
+              this.normalizeDate(query.dateTo) ?? this.toDateOnly(new Date()),
+          };
+    const start = new Date(`${range.dateFrom}T00:00:00.000Z`);
+    const end = new Date(`${range.dateTo}T23:59:59.999Z`);
 
     if (start > end) {
       throw new BadRequestException('dateFrom must be before dateTo');
     }
 
+    const storeIds = this.normalizeIdList(query.storeIds ?? query.storeId);
+    const userIds = this.normalizeIdList(query.userIds ?? query.userId);
+
     return {
-      dateFrom,
-      dateTo,
+      calculate: this.normalizeBooleanFlag(query.calculate),
+      periodMode,
+      month,
+      dateFrom: range.dateFrom,
+      dateTo: range.dateTo,
       start,
       end,
-      storeId: this.normalizeOptionalString(query.storeId),
-      userId: this.normalizeOptionalString(query.userId),
-      schemeId: this.normalizeOptionalString(query.schemeId),
-      search: this.normalizeOptionalString(query.search),
+      storeId: storeIds.length === 1 ? storeIds[0] : null,
+      storeIds: storeIds.length > 0 ? storeIds : null,
+      userId: userIds.length === 1 ? userIds[0] : null,
+      userIds,
+      roleScope: this.resolveOptionalRoleScope(query.roleScope),
+      schemeId: this.normalizeOptionalString(
+        this.firstQueryValue(query.schemeId),
+      ),
+      search: this.normalizeOptionalString(this.firstQueryValue(query.search)),
     };
+  }
+
+  private resolveCalculationPeriodMode(
+    value: QueryValue,
+  ): SalaryCalculationPeriodMode {
+    const normalized = this.normalizeOptionalString(
+      this.firstQueryValue(value),
+    );
+
+    if (
+      salaryCalculationPeriodModes.includes(
+        normalized as SalaryCalculationPeriodMode,
+      )
+    ) {
+      return normalized as SalaryCalculationPeriodMode;
+    }
+
+    return 'MONTH';
+  }
+
+  private resolveOptionalRoleScope(value: QueryValue): SalaryRoleScope {
+    const normalized = this.normalizeOptionalString(
+      this.firstQueryValue(value),
+    );
+
+    if (!normalized) {
+      return 'ADMINISTRATOR';
+    }
+
+    return this.resolveRoleScope(normalized);
   }
 
   private resolveSchemeStatus(value: unknown): SalarySchemeStatus {
@@ -1542,8 +1930,10 @@ export class StaffSalaryService {
     return new Prisma.Decimal(number.toFixed(2));
   }
 
-  private normalizeDate(value: string | undefined) {
-    const normalized = this.normalizeOptionalString(value);
+  private normalizeDate(value: QueryValue) {
+    const normalized = this.normalizeOptionalString(
+      this.firstQueryValue(value),
+    );
 
     if (!normalized) {
       return null;
@@ -1564,6 +1954,58 @@ export class StaffSalaryService {
     }
 
     return normalized;
+  }
+
+  private normalizeMonth(value: QueryValue) {
+    const normalized = this.normalizeOptionalString(
+      this.firstQueryValue(value),
+    );
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (!/^\d{4}-\d{2}$/.test(normalized)) {
+      throw new BadRequestException('Month must use YYYY-MM format');
+    }
+
+    return normalized;
+  }
+
+  private monthDateRange(month: string) {
+    const [year, monthValue] = month.split('-').map(Number);
+    const dateFrom = `${month}-01`;
+    const dateTo = this.toDateOnly(new Date(Date.UTC(year, monthValue, 0)));
+
+    return { dateFrom, dateTo };
+  }
+
+  private toMonthOnly(date: Date) {
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    return `${date.getUTCFullYear()}-${month}`;
+  }
+
+  private normalizeIdList(value: QueryValue) {
+    return Array.from(
+      new Set(
+        (Array.isArray(value) ? value : [value])
+          .filter((item): item is string => typeof item === 'string')
+          .flatMap((item) => item.split(','))
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  private normalizeBooleanFlag(value: QueryValue) {
+    const normalized = this.normalizeOptionalString(
+      this.firstQueryValue(value),
+    );
+    return normalized === '1' || normalized === 'true' || normalized === 'yes';
+  }
+
+  private firstQueryValue(value: QueryValue) {
+    return Array.isArray(value) ? value[0] : value;
   }
 
   private normalizeOptionalString(value: unknown) {

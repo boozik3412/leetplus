@@ -3098,6 +3098,33 @@ model StaffSalaryScheme {
   @@index([createdByUserId], map: "staff_salary_scheme_created_by_idx")
 }
 
+model StaffSalaryPeriod {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  createdByUserId    String?
+  title              String
+  status             String   @default("DRAFT")
+  periodMode         String   @default("CUSTOM")
+  dateFrom           DateTime
+  dateTo             DateTime
+  storeIds           String[] @default([])
+  roleScope          String   @default("ADMINISTRATOR")
+  userIds            String[] @default([])
+  rows               Json     @default("[]")
+  totalEmployees     Int      @default(0)
+  totalBaseAmount    Decimal  @default(0) @db.Decimal(12, 2)
+  totalShiftAmount   Decimal  @default(0) @db.Decimal(12, 2)
+  totalHourlyAmount  Decimal  @default(0) @db.Decimal(12, 2)
+  totalBonusAmount   Decimal  @default(0) @db.Decimal(12, 2)
+  totalPenaltyAmount Decimal  @default(0) @db.Decimal(12, 2)
+  totalNetAmount     Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId, dateFrom, dateTo], map: "staff_salary_period_range_idx")
+  @@index([tenantId, createdAt], map: "staff_salary_period_created_idx")
+}
+
 model StaffChatChannel {
   id              String   @id @default(uuid())
   tenantId        String

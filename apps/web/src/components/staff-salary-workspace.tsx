@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { getRoleLabel } from "@/lib/roles";
 import type {
+  StaffSalaryPeriod,
   StaffSalaryPeriodType,
   StaffSalaryRoleScope,
   StaffSalaryScheme,
@@ -77,40 +78,93 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
     createProductBonusDrafts(workspace.schemes[0]?.bonusRules.productSaleBonuses),
   );
 
-  const cards = useMemo(
-    () =>
-      [
-        {
-          label: "К выплате",
-          value: formatMoney(workspace.summary.totalNetAmount),
-        },
-        {
-          label: "Оклад",
-          value: formatMoney(workspace.summary.totalBaseAmount),
-        },
-        {
-          label: "Премии",
-          value: formatMoney(workspace.summary.totalBonusAmount),
-        },
-        {
-          label: "Удержания",
-          value: formatMoney(workspace.summary.totalPenaltyAmount),
-        },
-        {
-          label: "Смены",
-          value: formatNumber(workspace.summary.shifts),
-        },
-        {
-          label: "Часы",
-          value: formatHours(workspace.summary.hours),
-        },
-        {
-          label: "Открытые",
-          value: formatNumber(workspace.summary.openShifts),
-        },
-      ] as const,
-    [workspace.summary],
+  const [showCalculationForm, setShowCalculationForm] = useState(false);
+  const [periodMode, setPeriodMode] = useState<"MONTH" | "CUSTOM">("MONTH");
+  const [expandedPeriodId, setExpandedPeriodId] = useState<string | null>(
+    workspace.periods[0]?.id ?? null,
   );
+  const [periodMessage, setPeriodMessage] = useState<string | null>(null);
+  const [periodSaving, setPeriodSaving] = useState(false);
+
+
+  async function handleCreatePeriod(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPeriodSaving(true);
+    setPeriodMessage(null);
+
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      calculate: "1",
+      periodMode: String(form.get("periodMode") ?? "MONTH"),
+      month: String(form.get("month") ?? ""),
+      dateFrom: String(form.get("dateFrom") ?? ""),
+      dateTo: String(form.get("dateTo") ?? ""),
+      storeIds: form.getAll("storeIds").map((value) => String(value)),
+      roleScope: String(form.get("roleScope") ?? "ADMINISTRATOR"),
+      userIds: form.getAll("userIds").map((value) => String(value)),
+    };
+
+    try {
+      const response = await fetch("/api/staff/salary/periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setPeriodMessage(data?.message ?? "Не удалось сформировать период");
+        return;
+      }
+
+      const period = (await response.json()) as StaffSalaryPeriod;
+      setExpandedPeriodId(period.id);
+      setShowCalculationForm(false);
+      setPeriodMessage("Период сформирован");
+      router.refresh();
+    } finally {
+      setPeriodSaving(false);
+    }
+  }
+
+  async function handleAdjustmentSubmit(
+    event: FormEvent<HTMLFormElement>,
+    periodId: string,
+    userId: string,
+  ) {
+    event.preventDefault();
+    setPeriodMessage(null);
+    const form = new FormData(event.currentTarget);
+    const response = await fetch(
+      "/api/staff/salary/periods/" +
+        encodeURIComponent(periodId) +
+        "/rows/" +
+        encodeURIComponent(userId),
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shiftCount: String(form.get("shiftCount") ?? ""),
+          bonusAmount: String(form.get("bonusAmount") ?? "0"),
+          penaltyAmount: String(form.get("penaltyAmount") ?? "0"),
+          comment: String(form.get("comment") ?? ""),
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as {
+        message?: string;
+      } | null;
+      setPeriodMessage(data?.message ?? "Не удалось сохранить корректировку");
+      return;
+    }
+
+    setPeriodMessage("Корректировка сохранена");
+    router.refresh();
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -134,7 +188,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
       title: String(form.get("title") ?? ""),
       description: String(form.get("description") ?? ""),
       storeId: String(form.get("storeId") ?? "") || null,
-      status: String(form.get("status") ?? "DRAFT"),
+      status: String(form.get("status") ?? "ACTIVE"),
       roleScope: String(form.get("roleScope") ?? "ADMINISTRATOR"),
       periodType: String(form.get("periodType") ?? "MONTHLY"),
       fixedAmount: String(form.get("fixedAmount") ?? "0"),
@@ -189,21 +243,19 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
 
   return (
     <div className="mt-6 space-y-6">
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
-        {cards.map((card) => (
-          <div
-            key={card.label}
-            className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"
-          >
-            <p className="text-xs font-bold uppercase text-zinc-500">
-              {card.label}
-            </p>
-            <p className="mt-2 text-2xl font-semibold">{card.value}</p>
-          </div>
-        ))}
-      </section>
-
-      <SalaryPeriodBlock workspace={workspace} />
+      <SalaryPeriodsPanel
+        expandedPeriodId={expandedPeriodId}
+        onAdjustmentSubmit={handleAdjustmentSubmit}
+        onCreatePeriod={handleCreatePeriod}
+        onToggleExpanded={setExpandedPeriodId}
+        periodMessage={periodMessage}
+        periodMode={periodMode}
+        periodSaving={periodSaving}
+        setPeriodMode={setPeriodMode}
+        setShowCalculationForm={setShowCalculationForm}
+        showCalculationForm={showCalculationForm}
+        workspace={workspace}
+      />
 
       <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
@@ -322,7 +374,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
               </span>
               <select
                 name="status"
-                defaultValue={selectedScheme?.status ?? "DRAFT"}
+                defaultValue={selectedScheme?.status ?? "ACTIVE"}
                 className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               >
                 {Object.entries(statusLabels).map(([value, label]) => (
@@ -606,177 +658,407 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
 }
 
 
-function SalaryPeriodBlock({ workspace }: Props) {
+function SalaryPeriodsPanel({
+  expandedPeriodId,
+  onAdjustmentSubmit,
+  onCreatePeriod,
+  onToggleExpanded,
+  periodMessage,
+  periodMode,
+  periodSaving,
+  setPeriodMode,
+  setShowCalculationForm,
+  showCalculationForm,
+  workspace,
+}: Props & {
+  expandedPeriodId: string | null;
+  onAdjustmentSubmit: (
+    event: FormEvent<HTMLFormElement>,
+    periodId: string,
+    userId: string,
+  ) => void;
+  onCreatePeriod: (event: FormEvent<HTMLFormElement>) => void;
+  onToggleExpanded: (id: string | null) => void;
+  periodMessage: string | null;
+  periodMode: "MONTH" | "CUSTOM";
+  periodSaving: boolean;
+  setPeriodMode: (value: "MONTH" | "CUSTOM") => void;
+  setShowCalculationForm: (value: boolean) => void;
+  showCalculationForm: boolean;
+}) {
+  const today = new Date();
+  const defaultMonth = [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, "0"),
+  ].join("-");
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-            Зарплата за период
+            Расчетные периоды
           </p>
-          <h2 className="mt-1 text-xl font-semibold">Расчет зарплаты</h2>
+          <h2 className="mt-1 text-xl font-semibold">Зарплата по периодам</h2>
         </div>
-        <p className="max-w-2xl text-sm text-zinc-500">
-          Расчет берет закрытые смены Langame за выбранный период и применяет
-          подходящие правила зарплаты, премии, предупреждения и штрафы.
-        </p>
+        <button
+          type="button"
+          onClick={() => setShowCalculationForm(!showCalculationForm)}
+          className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+        >
+          Рассчитать зарплату за период
+        </button>
       </div>
 
-      <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
-          <thead className="text-xs uppercase text-zinc-500">
-            <tr className="border-b border-zinc-200 dark:border-zinc-800">
-              <th className="py-2 pr-4">Сотрудник и клубы</th>
-              <th className="py-2 pr-4">Правила</th>
-              <th className="py-2 pr-4">Смены</th>
-              <th className="py-2 pr-4">Калькулятор</th>
-              <th className="py-2 pr-4">Премии</th>
-              <th className="py-2 pr-4">Удержания</th>
-              <th className="py-2 pr-4">Итог</th>
-            </tr>
-          </thead>
-          <tbody>
-            {workspace.rows.map((row) => {
-              const shiftRate = row.scheme?.shiftRate ?? 0;
-              const hourlyRate = row.scheme?.hourlyRate ?? 0;
-              const visibleStores =
-                row.shiftStores.length > 0 ? row.shiftStores : row.user.stores;
-              const storeLabel =
-                visibleStores.length > 0
-                  ? visibleStores.map((store) => store.name).join(", ")
-                  : "вся сеть";
+      {showCalculationForm ? (
+        <form
+          onSubmit={onCreatePeriod}
+          className="mt-4 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
+        >
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <label className="block text-sm">
+              <span className="text-xs font-semibold uppercase text-zinc-500">
+                Расчет
+              </span>
+              <select
+                name="periodMode"
+                value={periodMode}
+                onChange={(event) =>
+                  setPeriodMode(event.target.value as "MONTH" | "CUSTOM")
+                }
+                className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="MONTH">За месяц</option>
+                <option value="CUSTOM">За период</option>
+              </select>
+            </label>
 
-              return (
-                <tr
-                  key={row.id}
-                  className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-900"
-                >
-                  <td className="min-w-56 py-3 pr-4">
-                    <p className="font-semibold">
-                      {row.user.fullName ?? row.user.email}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {getRoleLabel(row.user.role)}
-                    </p>
-                    <p className="mt-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                      {storeLabel}
-                    </p>
-                    {row.sourceWarnings.length > 0 ? (
-                      <div className="mt-2 space-y-1">
-                        {row.sourceWarnings.map((warning) => (
-                          <p key={warning} className="text-xs text-amber-600">
-                            {warning}
-                          </p>
-                        ))}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="min-w-44 py-3 pr-4">
-                    {row.scheme ? (
-                      <>
-                        <p className="font-medium">{row.scheme.title}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {row.scheme.store?.name ?? "Вся сеть"}
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {statusLabels[row.scheme.status]}
-                        </p>
-                      </>
-                    ) : (
-                      <span className="text-zinc-500">Не выбраны</span>
-                    )}
-                  </td>
-                  <td className="py-3 pr-4">
-                    <p>{formatNumber(row.shifts)} смен</p>
-                    <p className="text-xs text-zinc-500">
-                      {formatHours(row.hours)}
-                    </p>
-                    {row.openShifts > 0 ? (
-                      <p className="mt-1 text-xs text-amber-600">
-                        открытых: {formatNumber(row.openShifts)}
-                      </p>
-                    ) : null}
-                  </td>
-                  <td className="min-w-64 py-3 pr-4">
-                    <div className="space-y-1 text-xs text-zinc-600 dark:text-zinc-300">
-                      <p>Оклад: {formatMoney(row.baseAmount)}</p>
-                      <p>
-                        Смены: {formatNumber(row.shifts)} x{" "}
-                        {formatMoney(shiftRate)} ={" "}
-                        {formatMoney(row.shiftAmount)}
-                      </p>
-                      <p>
-                        Часы: {formatHours(row.hours)} x{" "}
-                        {formatMoney(hourlyRate)} ={" "}
-                        {formatMoney(row.hourlyAmount)}
-                      </p>
-                    </div>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <p className="font-semibold text-emerald-600">
-                      {formatMoney(row.bonusAmount)}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      задач вовремя: {row.tasks.completedOnTime}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      чек-листов принято: {row.checklists.accepted}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      бар: {formatMoney(row.sales.barRevenueBonusAmount)} от{" "}
-                      {formatMoney(row.sales.barRevenue)}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      товары: {formatMoney(row.sales.productSaleBonusAmount)}
-                    </p>
-                    {row.sales.productSaleBonuses.length > 0 ? (
-                      <div className="mt-1 space-y-1">
-                        {row.sales.productSaleBonuses.map((item) => (
-                          <p
-                            key={item.productId}
-                            className="text-xs text-zinc-500"
-                          >
-                            {item.productName}: {formatNumber(item.quantity)} x{" "}
-                            {formatMoney(item.amount)}
-                          </p>
-                        ))}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="py-3 pr-4">
-                    <p className="font-semibold text-red-500">
-                      {formatMoney(row.penaltyAmount)}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      просрочек: {row.tasks.overdue}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      предупреждений: {row.discipline.warnings}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      штрафов: {row.discipline.fines}
-                    </p>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <p className="text-lg font-semibold">
-                      {formatMoney(row.netAmount)}
-                    </p>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+            {periodMode === "MONTH" ? (
+              <label className="block text-sm">
+                <span className="text-xs font-semibold uppercase text-zinc-500">
+                  Месяц
+                </span>
+                <input
+                  type="month"
+                  name="month"
+                  defaultValue={workspace.filters.month || defaultMonth}
+                  className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+            ) : (
+              <>
+                <label className="block text-sm">
+                  <span className="text-xs font-semibold uppercase text-zinc-500">
+                    С даты
+                  </span>
+                  <input
+                    type="date"
+                    name="dateFrom"
+                    defaultValue={workspace.filters.dateFrom}
+                    className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-xs font-semibold uppercase text-zinc-500">
+                    По дату
+                  </span>
+                  <input
+                    type="date"
+                    name="dateTo"
+                    defaultValue={workspace.filters.dateTo}
+                    className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                </label>
+              </>
+            )}
 
-      {workspace.rows.length === 0 ? (
-        <div className="mt-4 rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
-          Администраторы по выбранным фильтрам не найдены.
-        </div>
+            <label className="block text-sm">
+              <span className="text-xs font-semibold uppercase text-zinc-500">
+                Роль
+              </span>
+              <select
+                name="roleScope"
+                defaultValue="ADMINISTRATOR"
+                className="mt-1 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                {Object.entries(roleScopeLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <fieldset className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+              <legend className="px-1 text-xs font-semibold uppercase text-zinc-500">
+                Клубы
+              </legend>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {workspace.stores.map((store) => (
+                  <label key={store.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      name="storeIds"
+                      value={store.id}
+                      className="h-4 w-4 rounded border-zinc-300"
+                    />
+                    <span>{store.name}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+              <legend className="px-1 text-xs font-semibold uppercase text-zinc-500">
+                Сотрудники
+              </legend>
+              <div className="mt-2 max-h-56 space-y-2 overflow-auto pr-2">
+                {workspace.users.map((user) => (
+                  <label key={user.id} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      name="userIds"
+                      value={user.id}
+                      className="mt-0.5 h-4 w-4 rounded border-zinc-300"
+                    />
+                    <span>
+                      <span className="block font-medium">
+                        {user.fullName ?? user.email}
+                      </span>
+                      <span className="text-xs text-zinc-500">
+                        {getRoleLabel(user.role)}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              disabled={periodSaving}
+              className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950"
+            >
+              {periodSaving ? "Расчет..." : "Сформировать период"}
+            </button>
+            {periodMessage ? (
+              <span className="text-sm text-zinc-500">{periodMessage}</span>
+            ) : null}
+          </div>
+        </form>
+      ) : periodMessage ? (
+        <p className="mt-3 text-sm text-zinc-500">{periodMessage}</p>
       ) : null}
+
+      <div className="mt-4 space-y-2">
+        {workspace.periods.map((period) => (
+          <div
+            key={period.id}
+            className="rounded-lg border border-zinc-200 dark:border-zinc-800"
+          >
+            <button
+              type="button"
+              onClick={() =>
+                onToggleExpanded(
+                  expandedPeriodId === period.id ? null : period.id,
+                )
+              }
+              className="grid w-full gap-3 p-4 text-left md:grid-cols-[minmax(0,1fr)_140px_170px]"
+            >
+              <div>
+                <p className="font-semibold">{period.title}</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {period.dateFrom} - {period.dateTo}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase text-zinc-500">
+                  Сотрудников
+                </p>
+                <p className="mt-1 font-semibold">
+                  {formatNumber(period.totalEmployees)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase text-zinc-500">
+                  Общая сумма
+                </p>
+                <p className="mt-1 text-lg font-semibold">
+                  {formatMoney(period.totalNetAmount)}
+                </p>
+              </div>
+            </button>
+
+            {expandedPeriodId === period.id ? (
+              <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="text-xs uppercase text-zinc-500">
+                      <tr className="border-b border-zinc-200 dark:border-zinc-800">
+                        <th className="py-2 pr-4">Сотрудник</th>
+                        <th className="py-2 pr-4">Калькулятор</th>
+                        <th className="py-2 pr-4">Премии</th>
+                        <th className="py-2 pr-4">Удержания</th>
+                        <th className="py-2 pr-4">Итог</th>
+                        <th className="py-2 pr-4">Корректировка</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {period.rows.map((row) => {
+                        const shiftRate = row.scheme?.shiftRate ?? 0;
+                        const hourlyRate = row.scheme?.hourlyRate ?? 0;
+                        const visibleStores =
+                          row.shiftStores.length > 0
+                            ? row.shiftStores
+                            : row.user.stores;
+                        const storeLabel =
+                          visibleStores.length > 0
+                            ? visibleStores.map((store) => store.name).join(", ")
+                            : "вся сеть";
+
+                        return (
+                          <tr
+                            key={row.id}
+                            className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-900"
+                          >
+                            <td className="min-w-56 py-3 pr-4">
+                              <p className="font-semibold">
+                                {row.user.fullName ?? row.user.email}
+                              </p>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {getRoleLabel(row.user.role)}
+                              </p>
+                              <p className="mt-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                                {storeLabel}
+                              </p>
+                            </td>
+                            <td className="min-w-64 py-3 pr-4 text-xs text-zinc-600 dark:text-zinc-300">
+                              <p>Оклад: {formatMoney(row.baseAmount)}</p>
+                              <p>
+                                Смены: {formatNumber(row.shifts)} x{" "}
+                                {formatMoney(shiftRate)} ={" "}
+                                {formatMoney(row.shiftAmount)}
+                              </p>
+                              <p>
+                                Часы: {formatHours(row.hours)} x{" "}
+                                {formatMoney(hourlyRate)} ={" "}
+                                {formatMoney(row.hourlyAmount)}
+                              </p>
+                              {row.originalShifts !== undefined &&
+                              row.originalShifts !== row.shifts ? (
+                                <p className="text-amber-600">
+                                  исходно: {formatNumber(row.originalShifts)} смен
+                                </p>
+                              ) : null}
+                            </td>
+                            <td className="py-3 pr-4">
+                              <p className="font-semibold text-emerald-600">
+                                {formatMoney(row.bonusAmount)}
+                              </p>
+                              {row.manualAdjustment?.bonusAmount ? (
+                                <p className="mt-1 text-xs text-zinc-500">
+                                  вручную:{" "}
+                                  {formatMoney(row.manualAdjustment.bonusAmount)}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td className="py-3 pr-4">
+                              <p className="font-semibold text-red-500">
+                                {formatMoney(row.penaltyAmount)}
+                              </p>
+                              {row.manualAdjustment?.penaltyAmount ? (
+                                <p className="mt-1 text-xs text-zinc-500">
+                                  вручную:{" "}
+                                  {formatMoney(row.manualAdjustment.penaltyAmount)}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td className="py-3 pr-4">
+                              <p className="text-lg font-semibold">
+                                {formatMoney(row.netAmount)}
+                              </p>
+                            </td>
+                            <td className="min-w-72 py-3 pr-4">
+                              <form
+                                onSubmit={(event) =>
+                                  onAdjustmentSubmit(event, period.id, row.id)
+                                }
+                                className="grid gap-2"
+                              >
+                                <div className="grid grid-cols-3 gap-2">
+                                  <label className="text-xs font-semibold uppercase text-zinc-500">
+                                    Смены
+                                    <input
+                                      name="shiftCount"
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      defaultValue={numberValue(row.shifts)}
+                                      className="mt-1 h-9 w-full rounded-md border border-zinc-300 bg-white px-2 text-xs font-normal normal-case text-zinc-950 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                                    />
+                                  </label>
+                                  <label className="text-xs font-semibold uppercase text-zinc-500">
+                                    Премия
+                                    <input
+                                      name="bonusAmount"
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      defaultValue={
+                                        row.manualAdjustment?.bonusAmount ?? 0
+                                      }
+                                      className="mt-1 h-9 w-full rounded-md border border-zinc-300 bg-white px-2 text-xs font-normal normal-case text-zinc-950 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                                    />
+                                  </label>
+                                  <label className="text-xs font-semibold uppercase text-zinc-500">
+                                    Штраф
+                                    <input
+                                      name="penaltyAmount"
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      defaultValue={
+                                        row.manualAdjustment?.penaltyAmount ?? 0
+                                      }
+                                      className="mt-1 h-9 w-full rounded-md border border-zinc-300 bg-white px-2 text-xs font-normal normal-case text-zinc-950 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                                    />
+                                  </label>
+                                </div>
+                                <input
+                                  name="comment"
+                                  defaultValue={row.manualAdjustment?.comment ?? ""}
+                                  className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+                                  placeholder="Комментарий"
+                                />
+                                <button className="h-9 rounded-md border border-zinc-300 text-xs font-semibold transition hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900">
+                                  Применить
+                                </button>
+                              </form>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ))}
+
+        {workspace.periods.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
+            Расчетных периодов пока нет.
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
+
 
 function Input({
   label,

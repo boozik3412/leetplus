@@ -16,6 +16,8 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
   StaffSalaryService,
+  type StaffSalaryPeriodAdjustmentDto,
+  type StaffSalaryPeriodDto,
   type StaffSalaryQuery,
   type StaffSalarySchemeDto,
 } from './staff-salary.service';
@@ -37,6 +39,29 @@ export class StaffSalaryController {
     @Query() query: StaffSalaryQuery,
   ) {
     return this.staffSalaryService.getWorkspace(user, query);
+  }
+
+  @Post('periods')
+  createPeriod(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StaffSalaryPeriodDto,
+  ) {
+    return this.staffSalaryService.createPeriod(user, dto);
+  }
+
+  @Patch('periods/:id/rows/:userId')
+  updatePeriodRowAdjustment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body() dto: StaffSalaryPeriodAdjustmentDto,
+  ) {
+    return this.staffSalaryService.updatePeriodRowAdjustment(
+      user,
+      id,
+      userId,
+      dto,
+    );
   }
 
   @Post('schemes')

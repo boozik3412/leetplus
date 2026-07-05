@@ -13,9 +13,15 @@ export type StaffSalaryFilters = {
   dateFrom?: string;
   dateTo?: string;
   storeId?: string;
+  storeIds?: string | string[];
   userId?: string;
+  userIds?: string | string[];
   schemeId?: string;
   search?: string;
+  calculate?: string;
+  periodMode?: "MONTH" | "CUSTOM";
+  month?: string;
+  roleScope?: StaffSalaryRoleScope;
 };
 
 export type StaffSalaryProductSaleBonusRule = {
@@ -93,6 +99,15 @@ export type StaffSalaryRow = {
   openShifts: number;
   hours: number;
   shiftStores: StaffTaskStore[];
+  originalShifts?: number;
+  originalBonusAmount?: number;
+  originalPenaltyAmount?: number;
+  manualAdjustment?: {
+    shiftDelta: number;
+    bonusAmount: number;
+    penaltyAmount: number;
+    comment: string | null;
+  };
   sales: {
     barRevenue: number;
     barRevenueBonusAmount: number;
@@ -124,10 +139,38 @@ export type StaffSalaryRow = {
   sourceWarnings: string[];
 };
 
+export type StaffSalaryPeriod = {
+  id: string;
+  title: string;
+  status: string;
+  periodMode: "MONTH" | "CUSTOM";
+  dateFrom: string;
+  dateTo: string;
+  storeIds: string[];
+  roleScope: StaffSalaryRoleScope;
+  userIds: string[];
+  rows: StaffSalaryRow[];
+  totalEmployees: number;
+  totalBaseAmount: number;
+  totalShiftAmount: number;
+  totalHourlyAmount: number;
+  totalBonusAmount: number;
+  totalPenaltyAmount: number;
+  totalNetAmount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StaffSalaryWorkspace = {
   filters: Required<Pick<StaffSalaryFilters, "dateFrom" | "dateTo">> & {
+    calculate: boolean;
+    periodMode: "MONTH" | "CUSTOM";
+    month: string;
     storeId: string | null;
+    storeIds: string[];
     userId: string | null;
+    userIds: string[];
+    roleScope: StaffSalaryRoleScope;
     schemeId: string | null;
     search: string | null;
   };
@@ -146,6 +189,7 @@ export type StaffSalaryWorkspace = {
   };
   schemes: StaffSalaryScheme[];
   rows: StaffSalaryRow[];
+  periods: StaffSalaryPeriod[];
   stores: StaffTaskStore[];
   products: StaffSalaryProductOption[];
   users: StaffSalaryUser[];
@@ -166,11 +210,15 @@ export async function getStaffSalaryWorkspace(
   return response.json() as Promise<StaffSalaryWorkspace>;
 }
 
-function query(filters: Record<string, string | undefined>) {
+function query(filters: Record<string, string | string[] | undefined>) {
   const params = new URLSearchParams();
 
   Object.entries(filters).forEach(([key, value]) => {
-    if (value) {
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item) params.append(key, item);
+      });
+    } else if (value) {
       params.set(key, value);
     }
   });

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -29,11 +29,27 @@ const salaryManagerRoles = [
   UserRole.STANDARDS_MANAGER,
 ] as const;
 
-const defaultBonusRules = {
+type SalaryProductSaleBonusRule = {
+  productId: string;
+  amount: number;
+};
+
+type SalaryBonusRules = {
+  taskDoneOnTimeAmount: number;
+  acceptedChecklistAmount: number;
+  perfectChecklistAmount: number;
+  noViolationAmount: number;
+  barRevenuePercent: number;
+  productSaleBonuses: SalaryProductSaleBonusRule[];
+};
+
+const defaultBonusRules: SalaryBonusRules = {
   taskDoneOnTimeAmount: 0,
   acceptedChecklistAmount: 0,
   perfectChecklistAmount: 0,
   noViolationAmount: 0,
+  barRevenuePercent: 0,
+  productSaleBonuses: [],
 };
 
 const defaultPenaltyRules = {
@@ -73,7 +89,6 @@ type SalarySchemeStatus = (typeof salarySchemeStatuses)[number];
 type SalaryPeriodType = (typeof salaryPeriodTypes)[number];
 type SalaryRoleScope = (typeof salaryRoleScopes)[number];
 type StoreOption = { id: string; name: string; isActive: boolean };
-type SalaryBonusRules = typeof defaultBonusRules;
 type SalaryPenaltyRules = typeof defaultPenaltyRules;
 
 export type StaffSalaryQuery = {
@@ -124,6 +139,59 @@ type SalaryFactBucket = {
   shiftIds: Set<string>;
 };
 
+type SalaryUserRow = {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: UserRole;
+  storeAccesses: Array<{ store: StoreOption }>;
+  staffMember: {
+    id: string;
+    displayName: string;
+    storeId: string | null;
+    externalProvider: IntegrationProvider | null;
+    externalDomain: string | null;
+    externalUserId: string | null;
+    store: StoreOption | null;
+  } | null;
+};
+
+type SalaryShiftRow = {
+  id: string;
+  storeId: string | null;
+  durationMinutes: number | null;
+  startedAt: Date | null;
+  stoppedAt: Date | null;
+  externalProvider: IntegrationProvider | null;
+  externalDomain: string | null;
+  externalUserId: string | null;
+  store: StoreOption | null;
+};
+
+type SalarySaleRow = {
+  id: string;
+  storeId: string;
+  productId: string;
+  saleDate: Date;
+  quantity: Prisma.Decimal;
+  revenue: Prisma.Decimal;
+  productNameAtSale: string | null;
+  product: {
+    id: string;
+    name: string;
+    article: string;
+    category: { name: string } | null;
+  };
+};
+
+type SalaryProductBonusLine = {
+  productId: string;
+  productName: string;
+  quantity: number;
+  amount: number;
+  totalAmount: number;
+};
+
 @Injectable()
 export class StaffSalaryService {
   constructor(
@@ -138,7 +206,7 @@ export class StaffSalaryService {
     const allowedStoreIds = await this.resolveAllowedStoreIds(user, tenantId);
     this.ensureStoreAccess(user, filters.storeId, allowedStoreIds);
 
-    const [stores, schemes, users] = await Promise.all([
+    const [stores, schemes, users, products] = await Promise.all([
       this.prisma.store.findMany({
         where: this.buildStoreWhere(tenantId, allowedStoreIds),
         select: { id: true, name: true, isActive: true },
@@ -162,9 +230,21 @@ export class StaffSalaryService {
             },
             orderBy: { store: { name: 'asc' } },
           },
+          staffMember: {
+            select: {
+              id: true,
+              displayName: true,
+              storeId: true,
+              externalProvider: true,
+              externalDomain: true,
+              externalUserId: true,
+              store: { select: { id: true, name: true, isActive: true } },
+            },
+          },
         },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),
+      this.buildSalaryProductOptions(tenantId, filters, allowedStoreIds),
     ]);
 
     const rows = await this.buildSalaryRows({
@@ -195,11 +275,13 @@ export class StaffSalaryService {
         totalPenaltyAmount: this.sum(rows, 'penaltyAmount'),
         totalNetAmount: this.sum(rows, 'netAmount'),
         shifts: rows.reduce((sum, row) => sum + row.shifts, 0),
+        openShifts: rows.reduce((sum, row) => sum + row.openShifts, 0),
         hours: this.roundMoney(rows.reduce((sum, row) => sum + row.hours, 0)),
       },
       schemes: schemes.map((scheme) => this.toSchemeResponse(scheme)),
       rows,
       stores,
+      products,
       users: users.map((row) => ({
         id: row.id,
         email: row.email,
@@ -325,13 +407,7 @@ export class StaffSalaryService {
     tenantId: string;
     filters: ResolvedSalaryFilters;
     schemes: StaffSalarySchemeRow[];
-    users: Array<{
-      id: string;
-      email: string;
-      fullName: string | null;
-      role: UserRole;
-      storeAccesses: Array<{ store: StoreOption }>;
-    }>;
+    users: SalaryUserRow[];
     allowedStoreIds: string[] | null;
   }) {
     const userIds = input.users.map((row) => row.id);
@@ -511,19 +587,94 @@ export class StaffSalaryService {
         ),
       ),
     );
-    const shifts =
-      allShiftIds.length > 0
+    const identityFilters = input.users
+      .map((row) => {
+        const member = row.staffMember;
+
+        if (!member?.externalDomain || !member.externalUserId) {
+          return null;
+        }
+
+        return {
+          userId: row.id,
+          externalProvider:
+            member.externalProvider ?? IntegrationProvider.LANGAME,
+          externalDomain: member.externalDomain,
+          externalUserId: member.externalUserId,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+    const userIdByShiftIdentity = new Map(
+      identityFilters.map((row) => [
+        this.salaryExternalIdentityKey(
+          row.externalProvider,
+          row.externalDomain,
+          row.externalUserId,
+        ),
+        row.userId,
+      ]),
+    );
+    const shiftWhereParts: Prisma.GuestWorkingShiftWhereInput[] = [];
+
+    if (allShiftIds.length > 0) {
+      shiftWhereParts.push({
+        id: { in: allShiftIds },
+        startedAt: { gte: input.filters.start, lte: input.filters.end },
+      });
+    }
+
+    if (identityFilters.length > 0) {
+      shiftWhereParts.push({
+        startedAt: { gte: input.filters.start, lte: input.filters.end },
+        OR: identityFilters.map((row) => ({
+          externalProvider: row.externalProvider,
+          externalDomain: row.externalDomain,
+          externalUserId: row.externalUserId,
+        })),
+      });
+    }
+
+    const shifts: SalaryShiftRow[] =
+      shiftWhereParts.length > 0
         ? await this.prisma.guestWorkingShift.findMany({
-            where: { tenantId: input.tenantId, id: { in: allShiftIds } },
+            where: {
+              tenantId: input.tenantId,
+              ...this.buildStoreFactWhere(
+                input.filters.storeId,
+                input.allowedStoreIds,
+              ),
+              OR: shiftWhereParts,
+            },
             select: {
               id: true,
+              storeId: true,
               durationMinutes: true,
               startedAt: true,
               stoppedAt: true,
+              externalProvider: true,
+              externalDomain: true,
+              externalUserId: true,
+              store: { select: { id: true, name: true, isActive: true } },
             },
           })
         : [];
     const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
+
+    shifts.forEach((shift) => {
+      const userId = userIdByShiftIdentity.get(
+        this.salaryExternalIdentityKey(
+          shift.externalProvider,
+          shift.externalDomain,
+          shift.externalUserId,
+        ),
+      );
+
+      if (userId) {
+        getBucket(userId).shiftIds.add(shift.id);
+      }
+    });
+
+    const salesByShiftId = await this.buildSalesByShift(input.tenantId, shifts);
 
     return input.users.map((row) => {
       const bucket = buckets.get(row.id) ?? getBucket(row.id);
@@ -534,6 +685,18 @@ export class StaffSalaryService {
       const hourlyRate = this.toNumber(scheme?.hourlyRate);
       const shiftRate = this.toNumber(scheme?.shiftRate);
       const shiftMetrics = this.resolveShiftMetrics(bucket, shiftById);
+      const salesMetrics = this.resolveSalesMetrics(
+        bucket,
+        salesByShiftId,
+        bonusRules,
+      );
+      const hasExternalIdentity = Boolean(
+        this.salaryExternalIdentityKey(
+          row.staffMember?.externalProvider ?? null,
+          row.staffMember?.externalDomain ?? null,
+          row.staffMember?.externalUserId ?? null,
+        ),
+      );
       const bonusAmount = this.roundMoney(
         bucket.tasksCompletedOnTime * bonusRules.taskDoneOnTimeAmount +
           bucket.checklistsAccepted * bonusRules.acceptedChecklistAmount +
@@ -544,7 +707,9 @@ export class StaffSalaryService {
             : 0) +
           (bucket.warnings === 0 && bucket.fines === 0
             ? bonusRules.noViolationAmount
-            : 0),
+            : 0) +
+          salesMetrics.barRevenueBonusAmount +
+          salesMetrics.productSaleBonusAmount,
       );
       const penaltyAmount = this.roundMoney(
         bucket.tasksOverdue * penaltyRules.overdueTaskAmount +
@@ -578,7 +743,15 @@ export class StaffSalaryService {
         penaltyAmount,
         netAmount,
         shifts: shiftMetrics.shifts,
+        openShifts: shiftMetrics.openShifts,
         hours: shiftMetrics.hours,
+        shiftStores: shiftMetrics.stores,
+        sales: {
+          barRevenue: salesMetrics.barRevenue,
+          barRevenueBonusAmount: salesMetrics.barRevenueBonusAmount,
+          productSaleBonusAmount: salesMetrics.productSaleBonusAmount,
+          productSaleBonuses: salesMetrics.productSaleBonuses,
+        },
         tasks: {
           total: bucket.tasksTotal,
           completedOnTime: bucket.tasksCompletedOnTime,
@@ -595,9 +768,150 @@ export class StaffSalaryService {
           fines: bucket.fines,
           fineAmount: this.roundMoney(bucket.disciplineFineAmount),
         },
-        sourceWarnings: this.buildSourceWarnings(scheme, shiftMetrics.shifts),
+        sourceWarnings: this.buildSourceWarnings(
+          scheme,
+          shiftMetrics,
+          hasExternalIdentity,
+        ),
       };
     });
+  }
+
+  private async buildSalesByShift(
+    tenantId: string,
+    shifts: SalaryShiftRow[],
+  ) {
+    const closedShifts = shifts
+      .filter(
+        (shift) => shift.storeId && shift.startedAt && shift.stoppedAt,
+      )
+      .sort(
+        (left, right) =>
+          (left.startedAt?.getTime() ?? 0) -
+          (right.startedAt?.getTime() ?? 0),
+      );
+
+    if (closedShifts.length === 0) {
+      return new Map<string, SalarySaleRow[]>();
+    }
+
+    const sales = await this.prisma.salesFact.findMany({
+      where: {
+        tenantId,
+        isCanceled: false,
+        OR: closedShifts.map((shift) => ({
+          storeId: shift.storeId as string,
+          saleDate: {
+            gte: shift.startedAt as Date,
+            lte: shift.stoppedAt as Date,
+          },
+        })),
+      },
+      select: {
+        id: true,
+        storeId: true,
+        productId: true,
+        saleDate: true,
+        quantity: true,
+        revenue: true,
+        productNameAtSale: true,
+        product: {
+          select: {
+            id: true,
+            name: true,
+            article: true,
+            category: { select: { name: true } },
+          },
+        },
+      },
+    });
+    const shiftsByStoreId = new Map<string, SalaryShiftRow[]>();
+
+    closedShifts.forEach((shift) => {
+      const rows = shiftsByStoreId.get(shift.storeId as string) ?? [];
+      rows.push(shift);
+      shiftsByStoreId.set(shift.storeId as string, rows);
+    });
+
+    const salesByShiftId = new Map<string, SalarySaleRow[]>();
+
+    sales.forEach((sale) => {
+      const matchingShift = (shiftsByStoreId.get(sale.storeId) ?? []).find(
+        (shift) =>
+          shift.startedAt &&
+          shift.stoppedAt &&
+          sale.saleDate >= shift.startedAt &&
+          sale.saleDate <= shift.stoppedAt,
+      );
+
+      if (!matchingShift) {
+        return;
+      }
+
+      const rows = salesByShiftId.get(matchingShift.id) ?? [];
+      rows.push(sale);
+      salesByShiftId.set(matchingShift.id, rows);
+    });
+
+    return salesByShiftId;
+  }
+
+  private resolveSalesMetrics(
+    bucket: SalaryFactBucket,
+    salesByShiftId: Map<string, SalarySaleRow[]>,
+    bonusRules: SalaryBonusRules,
+  ) {
+    const sales = Array.from(bucket.shiftIds).flatMap(
+      (shiftId) => salesByShiftId.get(shiftId) ?? [],
+    );
+    const barRevenue = this.roundMoney(
+      sales.reduce((sum, sale) => sum + this.toNumber(sale.revenue), 0),
+    );
+    const barRevenueBonusAmount = this.roundMoney(
+      (barRevenue * bonusRules.barRevenuePercent) / 100,
+    );
+    const saleQuantityByProductId = new Map<
+      string,
+      { productName: string; quantity: number }
+    >();
+
+    sales.forEach((sale) => {
+      const current = saleQuantityByProductId.get(sale.productId) ?? {
+        productName: sale.productNameAtSale ?? sale.product.name,
+        quantity: 0,
+      };
+      current.quantity = this.roundMoney(
+        current.quantity + this.toNumber(sale.quantity),
+      );
+      saleQuantityByProductId.set(sale.productId, current);
+    });
+
+    const productSaleBonuses: SalaryProductBonusLine[] =
+      bonusRules.productSaleBonuses
+        .map((rule) => {
+          const sale = saleQuantityByProductId.get(rule.productId);
+          const quantity = sale?.quantity ?? 0;
+          const totalAmount = this.roundMoney(quantity * rule.amount);
+
+          return {
+            productId: rule.productId,
+            productName: sale?.productName ?? 'Товар не продавался',
+            quantity,
+            amount: rule.amount,
+            totalAmount,
+          };
+        })
+        .filter((row) => row.quantity > 0 && row.totalAmount > 0);
+    const productSaleBonusAmount = this.roundMoney(
+      productSaleBonuses.reduce((sum, row) => sum + row.totalAmount, 0),
+    );
+
+    return {
+      barRevenue,
+      barRevenueBonusAmount,
+      productSaleBonusAmount,
+      productSaleBonuses,
+    };
   }
 
   private pickSchemeForUser(
@@ -654,35 +968,37 @@ export class StaffSalaryService {
 
   private resolveShiftMetrics(
     bucket: SalaryFactBucket,
-    shiftById: Map<
-      string,
-      {
-        id: string;
-        durationMinutes: number | null;
-        startedAt: Date | null;
-        stoppedAt: Date | null;
-      }
-    >,
+    shiftById: Map<string, SalaryShiftRow>,
   ) {
-    const shifts: Array<{
-      id: string;
-      durationMinutes: number | null;
-      startedAt: Date | null;
-      stoppedAt: Date | null;
-    }> = [];
+    const shifts: SalaryShiftRow[] = [];
+    const stores = new Map<string, StoreOption>();
     bucket.shiftIds.forEach((id) => {
       const shift = shiftById.get(id);
 
       if (shift) {
         shifts.push(shift);
+
+        if (shift.store) {
+          stores.set(shift.store.id, shift.store);
+        }
       }
     });
+
+    let closedShifts = 0;
+    let openShifts = 0;
     const minutes = shifts.reduce((sum, shift) => {
+      if (!shift.stoppedAt) {
+        openShifts += 1;
+        return sum;
+      }
+
+      closedShifts += 1;
+
       if (shift.durationMinutes) {
         return sum + shift.durationMinutes;
       }
 
-      if (shift.startedAt && shift.stoppedAt) {
+      if (shift.startedAt) {
         return (
           sum +
           Math.max(
@@ -698,30 +1014,71 @@ export class StaffSalaryService {
     }, 0);
 
     return {
-      shifts: shifts.length,
+      shifts: closedShifts,
+      openShifts,
       hours: this.roundMoney(minutes / 60),
+      stores: Array.from(stores.values()).sort((left, right) =>
+        left.name.localeCompare(right.name, 'ru'),
+      ),
     };
   }
 
   private buildSourceWarnings(
     scheme: StaffSalarySchemeRow | null,
-    linkedShifts: number,
+    shiftMetrics: { shifts: number; openShifts: number },
+    hasExternalIdentity: boolean,
   ) {
     const warnings: string[] = [];
+    const usesShiftFacts =
+      !scheme ||
+      this.toNumber(scheme.shiftRate) > 0 ||
+      this.toNumber(scheme.hourlyRate) > 0;
 
     if (!scheme) {
       warnings.push(
-        'Нет активной схемы зарплаты: расчет показывает только факты без начислений.',
+        'Нет активных правил зарплаты: расчет показывает только факты без начислений.',
+      );
+    } else if (scheme.status === 'DRAFT') {
+      warnings.push(
+        'Выбран черновик правил. Для автоподбора и рабочего расчета переведите правила в статус «Активна».',
       );
     }
 
-    if (linkedShifts === 0) {
+    if (usesShiftFacts && !hasExternalIdentity && shiftMetrics.shifts === 0) {
       warnings.push(
-        'Смены учитываются только когда они связаны с задачей или чек-листом сотрудника.',
+        'У сотрудника не указан Langame user_id: смены не попадут в расчет.',
+      );
+    } else if (usesShiftFacts && !hasExternalIdentity) {
+      warnings.push(
+        'Langame user_id не указан, поэтому смены найдены только через связанные задачи или чек-листы.',
+      );
+    }
+
+    if (usesShiftFacts && shiftMetrics.shifts === 0 && shiftMetrics.openShifts === 0) {
+      warnings.push(
+        'Закрытых смен Langame за период не найдено. Проверьте клуб, период и привязку сотрудника к Langame.',
+      );
+    }
+
+    if (shiftMetrics.openShifts > 0) {
+      warnings.push(
+        'Есть открытые смены Langame: они появятся в начислениях после закрытия смены.',
       );
     }
 
     return warnings;
+  }
+
+  private salaryExternalIdentityKey(
+    provider: IntegrationProvider | null,
+    domain: string | null,
+    userId: string | null,
+  ) {
+    if (!domain || !userId) {
+      return null;
+    }
+
+    return `${provider ?? IntegrationProvider.LANGAME}:${domain}:${userId}`;
   }
 
   private isTaskDoneOnTime(task: {
@@ -763,6 +1120,79 @@ export class StaffSalaryService {
     }
 
     return where;
+  }
+
+  private async buildSalaryProductOptions(
+    tenantId: string,
+    filters: ResolvedSalaryFilters,
+    allowedStoreIds: string[] | null,
+  ) {
+    const storeFactWhere = this.buildStoreFactWhere(
+      filters.storeId,
+      allowedStoreIds,
+    );
+    const productWhere: Prisma.ProductWhereInput = {
+      tenantId,
+      isActive: true,
+    };
+
+    if (filters.storeId || allowedStoreIds) {
+      productWhere.salesFacts = {
+        some: {
+          tenantId,
+          isCanceled: false,
+          ...storeFactWhere,
+        },
+      };
+    }
+
+    const products = await this.prisma.product.findMany({
+      where: productWhere,
+      select: {
+        id: true,
+        article: true,
+        name: true,
+        salePrice: true,
+        category: { select: { name: true } },
+      },
+      orderBy: [{ name: 'asc' }, { article: 'asc' }],
+      take: 500,
+    });
+    const productIds = products.map((product) => product.id);
+    const salesFacts =
+      productIds.length > 0
+        ? await this.prisma.salesFact.findMany({
+            where: {
+              tenantId,
+              productId: { in: productIds },
+              isCanceled: false,
+              ...storeFactWhere,
+            },
+            select: {
+              productId: true,
+              store: { select: { id: true, name: true, isActive: true } },
+            },
+            distinct: ['productId', 'storeId'],
+          })
+        : [];
+    const storesByProductId = new Map<string, Map<string, StoreOption>>();
+
+    salesFacts.forEach((fact) => {
+      const stores = storesByProductId.get(fact.productId) ?? new Map();
+      stores.set(fact.store.id, fact.store);
+      storesByProductId.set(fact.productId, stores);
+    });
+
+    return products.map((product) => ({
+      id: product.id,
+      article: product.article,
+      name: product.name,
+      categoryName: product.category?.name ?? null,
+      salePrice: this.toNumber(product.salePrice),
+      stores: Array.from(storesByProductId.get(product.id)?.values() ?? []).sort(
+        (left, right) => left.name.localeCompare(right.name, 'ru'),
+      ),
+    }));
   }
 
   private buildSchemeWhere(tenantId: string, allowedStoreIds: string[] | null) {
@@ -876,6 +1306,12 @@ export class StaffSalaryService {
       noViolationAmount:
         this.safeMoneyNumber(value?.noViolationAmount) ??
         defaultBonusRules.noViolationAmount,
+      barRevenuePercent:
+        this.safePercentNumber(value?.barRevenuePercent) ??
+        defaultBonusRules.barRevenuePercent,
+      productSaleBonuses: this.normalizeProductSaleBonuses(
+        value?.productSaleBonuses,
+      ),
     };
   }
 
@@ -914,7 +1350,38 @@ export class StaffSalaryService {
       noViolationAmount:
         this.safeMoneyNumber(rules.noViolationAmount) ??
         defaultBonusRules.noViolationAmount,
+      barRevenuePercent:
+        this.safePercentNumber(rules.barRevenuePercent) ??
+        defaultBonusRules.barRevenuePercent,
+      productSaleBonuses: this.normalizeProductSaleBonuses(
+        rules.productSaleBonuses,
+      ),
     };
+  }
+
+  private normalizeProductSaleBonuses(value: unknown) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    const rows = new Map<string, SalaryProductSaleBonusRule>();
+
+    value.forEach((item) => {
+      if (!this.isPlainObject(item)) {
+        return;
+      }
+
+      const productId = this.normalizeOptionalString(item.productId);
+      const amount = this.safeMoneyNumber(item.amount);
+
+      if (!productId || amount === null || amount <= 0) {
+        return;
+      }
+
+      rows.set(productId, { productId, amount });
+    });
+
+    return Array.from(rows.values());
   }
 
   private readPenaltyRules(value: Prisma.JsonValue | null | undefined) {
@@ -1109,6 +1576,16 @@ export class StaffSalaryService {
 
   private isPlainObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  private safePercentNumber(value: unknown) {
+    const number = this.safeMoneyNumber(value);
+
+    if (number === null || number < 0) {
+      return null;
+    }
+
+    return Math.min(number, 100);
   }
 
   private safeMoneyNumber(value: unknown) {

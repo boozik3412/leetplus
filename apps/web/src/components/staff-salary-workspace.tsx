@@ -9,6 +9,7 @@ import type {
   StaffSalaryScheme,
   StaffSalarySchemeStatus,
   StaffSalaryWorkspace,
+  StaffSalaryProductSaleBonusRule,
 } from "@/lib/staff-salary";
 
 type Props = {
@@ -52,12 +53,29 @@ function numberValue(value: number) {
   return Number.isFinite(value) ? String(value) : "0";
 }
 
+function createProductBonusDrafts(
+  rules: StaffSalaryProductSaleBonusRule[] | undefined,
+) {
+  const rows = (rules ?? []).map((rule, index) => ({
+    id: `${rule.productId}-${index}`,
+    productId: rule.productId,
+    amount: numberValue(rule.amount),
+  }));
+
+  return rows.length > 0
+    ? rows
+    : [{ id: "product-bonus-new", productId: "", amount: "0" }];
+}
+
 export function StaffSalaryWorkspaceView({ workspace }: Props) {
   const router = useRouter();
   const [selectedScheme, setSelectedScheme] =
     useState<StaffSalaryScheme | null>(workspace.schemes[0] ?? null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [productBonusRows, setProductBonusRows] = useState(() =>
+    createProductBonusDrafts(workspace.schemes[0]?.bonusRules.productSaleBonuses),
+  );
 
   const cards = useMemo(
     () =>
@@ -86,6 +104,10 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
           label: "Часы",
           value: formatHours(workspace.summary.hours),
         },
+        {
+          label: "Открытые",
+          value: formatNumber(workspace.summary.openShifts),
+        },
       ] as const,
     [workspace.summary],
   );
@@ -96,6 +118,18 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
     setMessage(null);
 
     const form = new FormData(event.currentTarget);
+    const productBonusProductIds = form
+      .getAll("productSaleBonusProductId")
+      .map((value) => String(value));
+    const productBonusAmounts = form
+      .getAll("productSaleBonusAmount")
+      .map((value) => String(value));
+    const productSaleBonuses = productBonusProductIds
+      .map((productId, index) => ({
+        productId,
+        amount: productBonusAmounts[index] ?? "0",
+      }))
+      .filter((row) => row.productId && Number(row.amount) > 0);
     const payload = {
       title: String(form.get("title") ?? ""),
       description: String(form.get("description") ?? ""),
@@ -115,6 +149,8 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
           form.get("perfectChecklistAmount") ?? "0",
         ),
         noViolationAmount: String(form.get("noViolationAmount") ?? "0"),
+        barRevenuePercent: String(form.get("barRevenuePercent") ?? "0"),
+        productSaleBonuses,
       },
       penaltyRules: {
         overdueTaskAmount: String(form.get("overdueTaskAmount") ?? "0"),
@@ -153,7 +189,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
 
   return (
     <div className="mt-6 space-y-6">
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
         {cards.map((card) => (
           <div
             key={card.label}
@@ -166,6 +202,8 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
           </div>
         ))}
       </section>
+
+      <SalaryPeriodBlock workspace={workspace} />
 
       <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
@@ -182,6 +220,7 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
               type="button"
               onClick={() => {
                 setSelectedScheme(null);
+                setProductBonusRows(createProductBonusDrafts(undefined));
                 setMessage(null);
               }}
               className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
@@ -198,6 +237,11 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
                   type="button"
                   onClick={() => {
                     setSelectedScheme(scheme);
+                    setProductBonusRows(
+                      createProductBonusDrafts(
+                        scheme.bonusRules.productSaleBonuses,
+                      ),
+                    );
                     setMessage(null);
                   }}
                   className={[
@@ -388,6 +432,107 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
                   selectedScheme?.bonusRules.noViolationAmount ?? 0,
                 )}
               />
+              <Input
+                label="% от выручки бара"
+                name="barRevenuePercent"
+                type="number"
+                defaultValue={numberValue(
+                  selectedScheme?.bonusRules.barRevenuePercent ?? 0,
+                )}
+              />
+              <div className="sm:col-span-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Бонусы за товары</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setProductBonusRows((rows) => [
+                        ...rows,
+                        {
+                          id: `product-bonus-${Date.now()}`,
+                          productId: "",
+                          amount: "0",
+                        },
+                      ])
+                    }
+                    className="h-8 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    Добавить товар
+                  </button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {productBonusRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_36px]"
+                    >
+                      <select
+                        name="productSaleBonusProductId"
+                        value={row.productId}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setProductBonusRows((rows) =>
+                            rows.map((item) =>
+                              item.id === row.id
+                                ? { ...item, productId: value }
+                                : item,
+                            ),
+                          );
+                        }}
+                        className="h-10 min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                      >
+                        <option value="">Выберите товар</option>
+                        {workspace.products.map((product) => (
+                          <option key={product.id} value={product.id}>
+                            {product.name}
+                            {product.categoryName
+                              ? ` · ${product.categoryName}`
+                              : ""}
+                            {product.stores.length > 0
+                              ? ` · ${product.stores
+                                  .map((store) => store.name)
+                                  .join(", ")}`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        name="productSaleBonusAmount"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={row.amount}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setProductBonusRows((rows) =>
+                            rows.map((item) =>
+                              item.id === row.id
+                                ? { ...item, amount: value }
+                                : item,
+                            ),
+                          );
+                        }}
+                        className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                        placeholder="руб/шт"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProductBonusRows((rows) =>
+                            rows.length > 1
+                              ? rows.filter((item) => item.id !== row.id)
+                              : createProductBonusDrafts(undefined),
+                          )
+                        }
+                        className="h-10 rounded-md border border-zinc-300 text-sm font-semibold transition hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                        aria-label="Удалить товарный бонус"
+                      >
+                        x
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </RuleBox>
 
             <RuleBox title="Удержания">
@@ -455,48 +600,66 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
         </form>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Расчет
-            </p>
-            <h2 className="mt-1 text-xl font-semibold">Расчет зарплаты</h2>
-          </div>
-          <p className="max-w-2xl text-sm text-zinc-500">
-            Расчет собирает оклад, смены, часы, премии, просрочки, чек-листы,
-            предупреждения и штрафы за выбранный период.
-          </p>
-        </div>
 
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="text-xs uppercase text-zinc-500">
-              <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                <th className="py-2 pr-4">Сотрудник</th>
-                <th className="py-2 pr-4">Правила</th>
-                <th className="py-2 pr-4">Смены</th>
-                <th className="py-2 pr-4">Основа</th>
-                <th className="py-2 pr-4">Премии</th>
-                <th className="py-2 pr-4">Удержания</th>
-                <th className="py-2 pr-4">К выплате</th>
-              </tr>
-            </thead>
-            <tbody>
-              {workspace.rows.map((row) => (
+    </div>
+  );
+}
+
+
+function SalaryPeriodBlock({ workspace }: Props) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+            Зарплата за период
+          </p>
+          <h2 className="mt-1 text-xl font-semibold">Расчет зарплаты</h2>
+        </div>
+        <p className="max-w-2xl text-sm text-zinc-500">
+          Расчет берет закрытые смены Langame за выбранный период и применяет
+          подходящие правила зарплаты, премии, предупреждения и штрафы.
+        </p>
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="text-xs uppercase text-zinc-500">
+            <tr className="border-b border-zinc-200 dark:border-zinc-800">
+              <th className="py-2 pr-4">Сотрудник и клубы</th>
+              <th className="py-2 pr-4">Правила</th>
+              <th className="py-2 pr-4">Смены</th>
+              <th className="py-2 pr-4">Калькулятор</th>
+              <th className="py-2 pr-4">Премии</th>
+              <th className="py-2 pr-4">Удержания</th>
+              <th className="py-2 pr-4">Итог</th>
+            </tr>
+          </thead>
+          <tbody>
+            {workspace.rows.map((row) => {
+              const shiftRate = row.scheme?.shiftRate ?? 0;
+              const hourlyRate = row.scheme?.hourlyRate ?? 0;
+              const visibleStores =
+                row.shiftStores.length > 0 ? row.shiftStores : row.user.stores;
+              const storeLabel =
+                visibleStores.length > 0
+                  ? visibleStores.map((store) => store.name).join(", ")
+                  : "вся сеть";
+
+              return (
                 <tr
                   key={row.id}
                   className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-900"
                 >
-                  <td className="py-3 pr-4">
+                  <td className="min-w-56 py-3 pr-4">
                     <p className="font-semibold">
                       {row.user.fullName ?? row.user.email}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {getRoleLabel(row.user.role)} ·{" "}
-                      {row.user.stores.length > 0
-                        ? row.user.stores.map((store) => store.name).join(", ")
-                        : "вся сеть"}
+                      {getRoleLabel(row.user.role)}
+                    </p>
+                    <p className="mt-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                      {storeLabel}
                     </p>
                     {row.sourceWarnings.length > 0 ? (
                       <div className="mt-2 space-y-1">
@@ -508,16 +671,19 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
                       </div>
                     ) : null}
                   </td>
-                  <td className="py-3 pr-4">
+                  <td className="min-w-44 py-3 pr-4">
                     {row.scheme ? (
                       <>
                         <p className="font-medium">{row.scheme.title}</p>
                         <p className="mt-1 text-xs text-zinc-500">
                           {row.scheme.store?.name ?? "Вся сеть"}
                         </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {statusLabels[row.scheme.status]}
+                        </p>
                       </>
                     ) : (
-                      <span className="text-zinc-500">Не выбрана</span>
+                      <span className="text-zinc-500">Не выбраны</span>
                     )}
                   </td>
                   <td className="py-3 pr-4">
@@ -525,30 +691,70 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
                     <p className="text-xs text-zinc-500">
                       {formatHours(row.hours)}
                     </p>
+                    {row.openShifts > 0 ? (
+                      <p className="mt-1 text-xs text-amber-600">
+                        открытых: {formatNumber(row.openShifts)}
+                      </p>
+                    ) : null}
+                  </td>
+                  <td className="min-w-64 py-3 pr-4">
+                    <div className="space-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+                      <p>Оклад: {formatMoney(row.baseAmount)}</p>
+                      <p>
+                        Смены: {formatNumber(row.shifts)} x{" "}
+                        {formatMoney(shiftRate)} ={" "}
+                        {formatMoney(row.shiftAmount)}
+                      </p>
+                      <p>
+                        Часы: {formatHours(row.hours)} x{" "}
+                        {formatMoney(hourlyRate)} ={" "}
+                        {formatMoney(row.hourlyAmount)}
+                      </p>
+                    </div>
                   </td>
                   <td className="py-3 pr-4">
-                    <p>{formatMoney(row.baseAmount)}</p>
-                    <p className="text-xs text-zinc-500">
-                      смены {formatMoney(row.shiftAmount)}, часы{" "}
-                      {formatMoney(row.hourlyAmount)}
-                    </p>
-                  </td>
-                  <td className="py-3 pr-4">
-                    <p className="text-emerald-600">
+                    <p className="font-semibold text-emerald-600">
                       {formatMoney(row.bonusAmount)}
                     </p>
-                    <p className="text-xs text-zinc-500">
-                      задач вовремя {row.tasks.completedOnTime}, чек-листов{" "}
-                      {row.checklists.accepted}
+                    <p className="mt-1 text-xs text-zinc-500">
+                      задач вовремя: {row.tasks.completedOnTime}
                     </p>
+                    <p className="text-xs text-zinc-500">
+                      чек-листов принято: {row.checklists.accepted}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      бар: {formatMoney(row.sales.barRevenueBonusAmount)} от{" "}
+                      {formatMoney(row.sales.barRevenue)}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      товары: {formatMoney(row.sales.productSaleBonusAmount)}
+                    </p>
+                    {row.sales.productSaleBonuses.length > 0 ? (
+                      <div className="mt-1 space-y-1">
+                        {row.sales.productSaleBonuses.map((item) => (
+                          <p
+                            key={item.productId}
+                            className="text-xs text-zinc-500"
+                          >
+                            {item.productName}: {formatNumber(item.quantity)} x{" "}
+                            {formatMoney(item.amount)}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
                   </td>
                   <td className="py-3 pr-4">
-                    <p className="text-red-500">
+                    <p className="font-semibold text-red-500">
                       {formatMoney(row.penaltyAmount)}
                     </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      просрочек: {row.tasks.overdue}
+                    </p>
                     <p className="text-xs text-zinc-500">
-                      просрочек {row.tasks.overdue}, штрафов{" "}
-                      {row.discipline.fines}
+                      предупреждений: {row.discipline.warnings}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      штрафов: {row.discipline.fines}
                     </p>
                   </td>
                   <td className="py-3 pr-4">
@@ -557,18 +763,18 @@ export function StaffSalaryWorkspaceView({ workspace }: Props) {
                     </p>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
-        {workspace.rows.length === 0 ? (
-          <div className="mt-4 rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
-            Администраторы по выбранным фильтрам не найдены.
-          </div>
-        ) : null}
-      </section>
-    </div>
+      {workspace.rows.length === 0 ? (
+        <div className="mt-4 rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
+          Администраторы по выбранным фильтрам не найдены.
+        </div>
+      ) : null}
+    </section>
   );
 }
 

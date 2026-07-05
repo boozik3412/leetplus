@@ -18,11 +18,18 @@ export type StaffSalaryFilters = {
   search?: string;
 };
 
+export type StaffSalaryProductSaleBonusRule = {
+  productId: string;
+  amount: number;
+};
+
 export type StaffSalaryBonusRules = {
   taskDoneOnTimeAmount: number;
   acceptedChecklistAmount: number;
   perfectChecklistAmount: number;
   noViolationAmount: number;
+  barRevenuePercent: number;
+  productSaleBonuses: StaffSalaryProductSaleBonusRule[];
 };
 
 export type StaffSalaryPenaltyRules = {
@@ -63,6 +70,15 @@ export type StaffSalaryUser = {
   role: UserRole;
 };
 
+export type StaffSalaryProductOption = {
+  id: string;
+  article: string;
+  name: string;
+  categoryName: string | null;
+  salePrice: number;
+  stores: StaffTaskStore[];
+};
+
 export type StaffSalaryRow = {
   id: string;
   user: StaffSalaryUser & { stores: StaffTaskStore[] };
@@ -74,7 +90,21 @@ export type StaffSalaryRow = {
   penaltyAmount: number;
   netAmount: number;
   shifts: number;
+  openShifts: number;
   hours: number;
+  shiftStores: StaffTaskStore[];
+  sales: {
+    barRevenue: number;
+    barRevenueBonusAmount: number;
+    productSaleBonusAmount: number;
+    productSaleBonuses: Array<{
+      productId: string;
+      productName: string;
+      quantity: number;
+      amount: number;
+      totalAmount: number;
+    }>;
+  };
   tasks: {
     total: number;
     completedOnTime: number;
@@ -111,11 +141,13 @@ export type StaffSalaryWorkspace = {
     totalPenaltyAmount: number;
     totalNetAmount: number;
     shifts: number;
+    openShifts: number;
     hours: number;
   };
   schemes: StaffSalaryScheme[];
   rows: StaffSalaryRow[];
   stores: StaffTaskStore[];
+  products: StaffSalaryProductOption[];
   users: StaffSalaryUser[];
 };
 

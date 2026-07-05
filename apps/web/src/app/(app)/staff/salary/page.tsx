@@ -128,7 +128,7 @@ export default async function StaffSalaryPage({
                   className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 />
                 <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
-                  Показать
+                  Рассчитать
                 </button>
               </div>
             </label>

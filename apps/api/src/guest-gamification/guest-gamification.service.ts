@@ -8920,7 +8920,7 @@ export class GuestGamificationService {
     }
 
     const occurredAt = liveSession.startedAt ?? new Date();
-    const result = await this.processEvent(user, {
+    const processDto: GuestGameProcessEventDto = {
       profileId: nullableId(dto.profileId),
       guestId,
       storeId,
@@ -8939,9 +8939,44 @@ export class GuestGamificationService {
       note:
         nullableString(dto.note) ??
         'Гость открыл игровой модуль во время активной Langame-сессии; старт сессии обработан live-проверкой.',
-    });
+    };
+    const result = this.syncLiveSessionStartResult(
+      await this.processEvent(user, processDto),
+      processDto,
+    );
 
-    return { result, cache: true };
+    return { result, cache: liveSession.sessionPacket === true };
+  }
+
+  private syncLiveSessionStartResult(
+    result: GuestGameProcessEventResult,
+    dto: GuestGameProcessEventDto,
+  ): GuestGameProcessEventResult {
+    if (!result.summary.idempotent) {
+      return result;
+    }
+
+    const payload = jsonRecord(result.event.payload);
+    const input = jsonRecord(
+      (payload.input ?? null) as Prisma.JsonValue | null,
+    );
+    const nextInput = result.dryRun.input;
+    const sameLiveSessionState =
+      nullableString(input.sessionType) === nextInput.sessionType &&
+      nullableBooleanValue(input.sessionPacket) === nextInput.sessionPacket &&
+      finiteJsonNumber(input.sessionMinutes) === nextInput.sessionMinutes;
+
+    if (sameLiveSessionState) {
+      return result;
+    }
+
+    return {
+      ...result,
+      event: {
+        ...result.event,
+        payload: buildProcessPayload(dto, result.dryRun) as Prisma.JsonValue,
+      },
+    };
   }
 
   private async hasActiveSessionStartRules(user: AuthenticatedUser) {

@@ -4986,14 +4986,20 @@ describe('GuestGamificationService', () => {
           externalUuid: 'uuid-1',
           startedAt: new Date('2026-06-10T09:45:00.000Z'),
           durationMinutes: 15,
-          sessionType: 'regular_session',
-          sessionPacket: false,
+          sessionType: 'packet_hours',
+          sessionPacket: true,
           store: null,
           raw: {},
         });
       const processEventSpy = jest.spyOn(service, 'processEvent').mockResolvedValue({
         processed: true,
-        dryRun: {},
+        dryRun: dryRunResult({
+          input: {
+            sessionType: 'packet_hours',
+            sessionPacket: true,
+            sessionMinutes: 15,
+          },
+        }),
         event: {
           eventType: 'SESSION_START',
           occurredAt: '2026-06-10T09:45:00.000Z',
@@ -5001,8 +5007,8 @@ describe('GuestGamificationService', () => {
             sourceFactKind: 'GUEST_SESSION',
             store: { id: 'store-1' },
             input: {
-              sessionType: 'regular_session',
-              sessionPacket: false,
+              sessionType: 'packet_hours',
+              sessionPacket: true,
               sessionMinutes: 15,
             },
           },
@@ -5030,6 +5036,131 @@ describe('GuestGamificationService', () => {
       expect(processEventSpy).toHaveBeenCalledTimes(1);
       expect(first?.summary.idempotent).toBe(true);
       expect(second).toBe(first);
+    });
+
+    it('refreshes an idempotent live session payload when the same session becomes packet hours', async () => {
+      const { service } = createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+      });
+      const findActiveSessionSpy = jest
+        .spyOn(service as any, 'findActiveCheckInSession')
+        .mockResolvedValueOnce({
+          externalDomain: 'club-1',
+          externalSessionId: 'session-1',
+          externalGuestId: 'lg-guest-1',
+          externalClubId: 'club-external-1',
+          externalUuid: 'uuid-1',
+          startedAt: new Date('2026-06-10T09:45:00.000Z'),
+          durationMinutes: 15,
+          sessionType: 'regular_session',
+          sessionPacket: false,
+          store: null,
+          raw: {},
+        })
+        .mockResolvedValueOnce({
+          externalDomain: 'club-1',
+          externalSessionId: 'session-1',
+          externalGuestId: 'lg-guest-1',
+          externalClubId: 'club-external-1',
+          externalUuid: 'uuid-1',
+          startedAt: new Date('2026-06-10T09:45:00.000Z'),
+          durationMinutes: 15,
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          store: null,
+          raw: { packet: true },
+        });
+      const staleRegularEvent = eventResult({
+        occurredAt: '2026-06-10T09:45:00.000Z',
+        payload: {
+          sourceFactKind: 'GUEST_SESSION',
+          store: { id: 'store-1' },
+          input: {
+            sessionType: 'regular_session',
+            sessionPacket: false,
+            sessionMinutes: 15,
+          },
+        },
+      });
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValueOnce({
+          processed: true,
+          dryRun: dryRunResult({
+            input: {
+              sessionType: 'regular_session',
+              sessionPacket: false,
+              sessionMinutes: 15,
+            },
+          }),
+          event: staleRegularEvent,
+          rewards: [],
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: 0,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+            idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+            idempotent: false,
+            langameWrite: false,
+          },
+          note: 'processed',
+        })
+        .mockResolvedValueOnce({
+          processed: true,
+          dryRun: dryRunResult({
+            input: {
+              sessionType: 'packet_hours',
+              sessionPacket: true,
+              sessionMinutes: 15,
+            },
+          }),
+          event: staleRegularEvent,
+          rewards: [],
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: 0,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+            idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+            idempotent: true,
+            langameWrite: false,
+          },
+          note: 'idempotent',
+        });
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+      const refreshed = await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(findActiveSessionSpy).toHaveBeenCalledTimes(2);
+      expect(processEventSpy).toHaveBeenCalledTimes(2);
+      expect(refreshed?.event.payload).toMatchObject({
+        input: {
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sessionMinutes: 15,
+        },
+      });
     });
 
     it('matches an open Langame session by real_guest_id', async () => {

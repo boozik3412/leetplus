@@ -17017,21 +17017,11 @@ function dryRunRuleActivatedAt(
 ) {
   const limits = dryRunRecord(rule.limits);
   const conditions = dryRunRecord(rule.conditions);
-  const explicitDate = [
+  return [
     dryRunDateOrNull(limits.restartedAt),
     dryRunDateOrNull(limits.activatedAt),
     dryRunDateOrNull(conditions.activatedAt),
   ].reduce(maxDate, null);
-
-  if (explicitDate) {
-    return explicitDate;
-  }
-
-  if (rule.status !== 'ACTIVE') {
-    return null;
-  }
-
-  return dryRunDateOrNull(rule.updatedAt);
 }
 
 function ruleMetadataWithActivatedAt(value: unknown): Prisma.InputJsonObject {

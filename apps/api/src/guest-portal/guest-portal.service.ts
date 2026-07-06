@@ -3699,6 +3699,7 @@ export class GuestPortalService {
     const unlockInput = unlockEvent
       ? portalEventToProgressEvent(unlockEvent)
       : null;
+    const ruleOccurredAt = unlockEvent?.occurredAt ?? openedAt;
 
     if (!openState.openable) {
       throw new BadRequestException(
@@ -3732,7 +3733,7 @@ export class GuestPortalService {
       lootBoxId: lootBox.id,
       storeId: context.store.id,
       eventType: lootBox.triggerKind,
-      occurredAt: openedAt.toISOString(),
+      occurredAt: ruleOccurredAt.toISOString(),
       ...(unlockInput
         ? {
             sessionType: unlockInput.sessionType,
@@ -12508,9 +12509,10 @@ function buildLootBoxOpenState(
     };
   }
 
+  const scheduleCheckedAt = unlockEvent?.occurredAt ?? now;
   const scheduleBlocker = lootBoxScheduleBlocker(
     row.periodRules,
-    now,
+    scheduleCheckedAt,
     timeZone,
   );
 

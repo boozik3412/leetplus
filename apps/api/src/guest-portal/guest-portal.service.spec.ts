@@ -1666,6 +1666,121 @@ describe('GuestPortalService', () => {
       });
     });
 
+    it('opens a session-start lootbox after the time window when the saved unlock happened inside it', async () => {
+      jest
+        .useFakeTimers()
+        .setSystemTime(new Date('2026-07-06T10:30:00.000Z'));
+
+      try {
+        const { guestGamificationService, prisma, service } = createService({
+          GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+          WEB_URL: 'https://leetplus.ru',
+        });
+        const portal = portalPayloadFixture();
+        mockGameSummarySession(service, portal);
+        jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+          tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+          store: {
+            id: portal.store.id,
+            publicSlug: portal.store.publicSlug,
+            name: portal.store.name,
+            address: portal.store.address,
+            externalDomain: null,
+            integrationSourceId: null,
+            timeZone: 'Asia/Yekaterinburg',
+          },
+        });
+        jest
+          .spyOn(service as any, 'findGuest')
+          .mockResolvedValue({ id: 'guest-1' });
+        jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+          id: portal.profile.id,
+          guestId: 'guest-1',
+        });
+        prisma.guestGameLootBox.findFirst.mockResolvedValue({
+          id: 'loot-morning',
+          tenantId: 'tenant-1',
+          name: 'Morning lootbox',
+          status: 'ACTIVE',
+          storeIds: [portal.store.id],
+          triggerKind: 'SESSION_START',
+          limits: { perGuestPerWeek: 2, totalPerDay: 30 },
+          periodRules: { hours: ['08:00-14:00'] },
+        });
+        prisma.guestGameEvent.findMany.mockResolvedValue([
+          {
+            eventType: 'SESSION_START',
+            occurredAt: new Date('2026-07-06T05:30:00.000Z'),
+            payload: {
+              sourceFactKind: 'GUEST_SESSION',
+              store: { id: portal.store.id, name: portal.store.name },
+              input: {
+                sessionType: 'regular_session',
+                sessionPacket: false,
+                sessionMinutes: 90,
+              },
+              rules: [
+                {
+                  id: 'loot-morning',
+                  kind: 'LOOT_BOX',
+                  eligible: true,
+                  blockers: [],
+                },
+              ],
+            },
+          },
+        ]);
+        prisma.guestGameReward.count.mockResolvedValue(0);
+        prisma.guestGameEvent.count.mockResolvedValue(0);
+        guestGamificationService.dryRun.mockResolvedValue({
+          rules: [
+            {
+              kind: 'LOOT_BOX',
+              id: 'loot-morning',
+              eligible: true,
+              blockers: [],
+            },
+          ],
+        });
+        guestGamificationService.processEvent.mockResolvedValue({
+          summary: {
+            idempotent: false,
+            createdRewards: 1,
+            queuedRewardAmount: 100,
+          },
+          rewards: [{ rewardLabel: '100 bonuses' }],
+        });
+
+        await expect(
+          service.openLootBox('Bearer guest-token', 'loot-morning'),
+        ).resolves.toMatchObject({
+          processed: true,
+          createdRewards: 1,
+        });
+
+        expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({
+            lootBoxId: 'loot-morning',
+            eventType: 'SESSION_START',
+            occurredAt: '2026-07-06T05:30:00.000Z',
+            sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+          }),
+        );
+        expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.objectContaining({
+            lootBoxId: 'loot-morning',
+            eventType: 'SESSION_START',
+            occurredAt: '2026-07-06T05:30:00.000Z',
+            sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('does not unlock a packet-only session lootbox for a regular live session', async () => {
       const { guestGamificationService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',

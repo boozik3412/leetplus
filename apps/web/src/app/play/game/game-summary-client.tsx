@@ -3689,7 +3689,7 @@ function guestActionRequirementLabel(
 
   if (normalized === "SESSION_START") {
     if (normalizedSessionType === "packet_hours") {
-      return "Начните игровую сессию с пакетом часов.";
+      return "Начните игровую сессию с пакетом или абонементом.";
     }
 
     if (normalizedSessionType === "regular_session") {
@@ -3746,7 +3746,7 @@ function lootBoxUnavailableCheckMessage(card: HomeLootCard) {
     normalizeGameRuleTrigger(card.triggerKind) === "SESSION_START" &&
     normalizeGameRuleSessionType(card.sessionType) === "packet_hours"
   ) {
-    return "Пакет часов пока не найден. Если вы только что купили пакет, подождите несколько секунд и нажмите проверку еще раз.";
+    return "Пакет или абонемент пока не найден. Если вы только что купили пакет или абонемент, подождите несколько секунд и нажмите проверку еще раз.";
   }
 
   return "Условия пока не выполнены. Если вы уже сделали нужное действие, подождите несколько секунд и проверьте еще раз.";
@@ -3841,7 +3841,7 @@ function gameRuleSessionRequirement(value: string | null) {
   const normalized = normalizeGameRuleSessionType(value);
 
   if (normalized === "packet_hours") {
-    return "с пакетом часов";
+    return "с пакетом или абонементом";
   }
 
   if (normalized === "regular_session") {
@@ -3855,7 +3855,7 @@ function gameRuleSessionShortLabel(value: string | null) {
   const normalized = normalizeGameRuleSessionType(value);
 
   if (normalized === "packet_hours") {
-    return "пакет часов";
+    return "пакет или абонемент";
   }
 
   if (normalized === "regular_session") {
@@ -3873,7 +3873,17 @@ function normalizeGameRuleSessionType(value: string | null) {
   const normalized = (value ?? "").trim().toLowerCase();
 
   if (
-    ["packet_hours", "packet", "package", "package_hours"].includes(normalized)
+    [
+      "packet_hours",
+      "packet",
+      "package",
+      "package_hours",
+      "subscription",
+      "membership",
+      "abonement",
+      "abonnement",
+      "абонемент",
+    ].includes(normalized)
   ) {
     return "packet_hours";
   }

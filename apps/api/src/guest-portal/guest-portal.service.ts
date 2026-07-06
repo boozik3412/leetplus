@@ -12851,7 +12851,19 @@ function normalizePortalGuestLogType(value: string) {
 function normalizeGuestPortalSessionType(value: string | null | undefined) {
   const normalized = (value ?? '').trim().toLowerCase();
 
-  if (['packet_hours', 'packet', 'package', 'package_hours'].includes(normalized)) {
+  if (
+    [
+      'packet_hours',
+      'packet',
+      'package',
+      'package_hours',
+      'subscription',
+      'membership',
+      'abonement',
+      'abonnement',
+      'абонемент',
+    ].includes(normalized)
+  ) {
     return 'packet_hours';
   }
 
@@ -12872,7 +12884,7 @@ function guestPortalSessionRequirementLabel(value: string | null | undefined) {
   const normalized = normalizeGuestPortalSessionType(value);
 
   if (normalized === 'packet_hours') {
-    return 'с пакетом часов';
+    return 'с пакетом или абонементом';
   }
 
   if (normalized === 'regular_session') {
@@ -14556,7 +14568,7 @@ function mapSessionActivity(row: {
 }): GuestPortalActivityItem {
   const description = [
     row.durationMinutes == null ? null : `${row.durationMinutes} мин`,
-    row.packet ? 'пакет часов' : 'почасовая сессия',
+    row.packet ? 'пакет или абонемент' : 'почасовая сессия',
     row.normalStop === false ? 'завершена нестандартно' : null,
   ]
     .filter((item): item is string => Boolean(item))

@@ -729,12 +729,12 @@ const automaticLedgerRewardTypes = new Set([
 
 const sessionTypeOptions = [
   { value: "regular_session", label: "почасовая сессия" },
-  { value: "packet_hours", label: "пакет часов" },
+  { value: "packet_hours", label: "пакет или абонемент" },
 ];
 
 const dryRunPacketOptions = [
   { value: "", label: "не указано" },
-  { value: "true", label: "пакет часов" },
+  { value: "true", label: "пакет или абонемент" },
   { value: "false", label: "почасовая сессия" },
 ];
 
@@ -3434,7 +3434,7 @@ function DryRunTab({
               </select>
             </label>
             <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-              Пакет часов
+              Пакет или абонемент
               <select
                 className={fieldClass}
                 value={form.sessionPacket}
@@ -7826,8 +7826,8 @@ function CheckInTab({
                   </select>
                   <OptionHelp>
                     Оставьте любой тип, если чек-ин доступен при любой активной
-                    сессии. Выберите пакет часов или почасовую сессию для
-                    дополнительного ограничения.
+                    сессии. Выберите пакет/абонемент или почасовую сессию
+                    для дополнительного ограничения.
                   </OptionHelp>
                 </Field>
               </div>
@@ -15129,9 +15129,17 @@ function normalizeUiSessionType(value: string | null | undefined) {
   const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
 
   if (
-    ["packet_hours", "packet", "package", "package_hours"].includes(
-      normalized,
-    )
+    [
+      "packet_hours",
+      "packet",
+      "package",
+      "package_hours",
+      "subscription",
+      "membership",
+      "abonement",
+      "abonnement",
+      "абонемент",
+    ].includes(normalized)
   ) {
     return "packet_hours";
   }
@@ -15167,7 +15175,7 @@ function battlePassLevelRows(season: GuestGameSeason) {
 
 function packetStateLabel(value: boolean | null) {
   if (value === true) {
-    return "пакет часов";
+    return "пакет или абонемент";
   }
   if (value === false) {
     return "почасовая";

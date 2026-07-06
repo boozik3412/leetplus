@@ -334,7 +334,17 @@ function normalizeProgressSessionType(value: string | null | undefined) {
   const normalized = (value ?? '').trim().toLowerCase().replace(/\s+/g, '_');
 
   if (
-    ['packet_hours', 'packet', 'package', 'package_hours'].includes(normalized)
+    [
+      'packet_hours',
+      'packet',
+      'package',
+      'package_hours',
+      'subscription',
+      'membership',
+      'abonement',
+      'abonnement',
+      'абонемент',
+    ].includes(normalized)
   ) {
     return 'packet_hours';
   }

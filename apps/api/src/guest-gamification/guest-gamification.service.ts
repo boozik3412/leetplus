@@ -20,7 +20,10 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
 import { parseLangameDate } from '../integrations/langame-date';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
-import type { LangameGuestSession } from '../integrations/langame.types';
+import type {
+  LangameGuestSession,
+  LangameTransaction,
+} from '../integrations/langame.types';
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffTeamChatService } from '../staff/staff-team-chat.service';
@@ -204,7 +207,7 @@ const rewardApprovalProgressUnitLabels: Record<string, string> = {
 
 const rewardApprovalSessionTypeLabels: Record<string, string> = {
   regular_session: 'почасовая сессия',
-  packet_hours: 'пакет часов',
+  packet_hours: 'пакет или абонемент',
 };
 
 type StatusValue = (typeof statusValues)[number];
@@ -11378,10 +11381,24 @@ export class GuestGamificationService {
     const currentCountHours = await this.findLiveGuestCurrentCountHours(
       params,
     );
+    const sessionWithLiveBalance = this.resolveCheckInSessionTypeFromGuestBalance(
+      localSession,
+      {
+        currentCountHours,
+      },
+    );
 
-    return this.resolveCheckInSessionTypeFromGuestBalance(localSession, {
-      currentCountHours,
-    });
+    if (sessionWithLiveBalance.sessionPacket === true) {
+      return sessionWithLiveBalance;
+    }
+
+    if (
+      await this.hasLivePacketHoursTransaction(sessionWithLiveBalance, params)
+    ) {
+      return this.markCheckInSessionAsPacket(sessionWithLiveBalance);
+    }
+
+    return sessionWithLiveBalance;
   }
 
   private async findLiveGuestCurrentCountHours(params: {
@@ -11416,6 +11433,209 @@ export class GuestGamificationService {
     } catch {
       return null;
     }
+  }
+
+  private async hasLivePacketHoursTransaction(
+    session: CheckInLiveSession,
+    params: {
+      apiKey: string;
+      source: { baseUrl: string };
+      externalGuestId: string;
+      timeoutMs?: number;
+    },
+  ): Promise<boolean> {
+    const dateRange = this.checkInSessionTransactionPeriod(session);
+    const pageLimit = 200;
+    const maxPages = 5;
+
+    try {
+      for (let page = 1; page <= maxPages; page += 1) {
+        const rows = await this.langameClient.listTransactions(
+          params.source.baseUrl,
+          params.apiKey,
+          {
+            page,
+            pageLimit,
+            dateFrom: dateRange.dateFrom,
+            dateTo: dateRange.dateTo,
+          },
+        );
+
+        if (
+          rows.some((row) =>
+            this.isPacketHoursTransactionForSession(
+              row,
+              session,
+              params.externalGuestId,
+            ),
+          )
+        ) {
+          return true;
+        }
+
+        if (rows.length < pageLimit) {
+          break;
+        }
+      }
+    } catch {
+      return false;
+    }
+
+    return false;
+  }
+
+  private checkInSessionTransactionPeriod(session: CheckInLiveSession) {
+    const startedAt = session.startedAt ?? new Date();
+    const from = new Date(startedAt);
+    from.setUTCDate(from.getUTCDate() - 1);
+
+    return {
+      dateFrom: this.checkInDateParam(from),
+      dateTo: this.checkInDateParam(new Date()),
+    };
+  }
+
+  private isPacketHoursTransactionForSession(
+    row: LangameTransaction,
+    session: CheckInLiveSession,
+    externalGuestId: string,
+  ) {
+    if (!this.checkInTransactionGuestMatches(row, externalGuestId)) {
+      return false;
+    }
+
+    if (!this.checkInTransactionSessionOrStoreMatches(row, session)) {
+      return false;
+    }
+
+    return this.checkInTransactionLooksLikePacketHours(row);
+  }
+
+  private checkInTransactionGuestMatches(
+    row: LangameTransaction,
+    externalGuestId: string,
+  ) {
+    return [row.real_guest_id, row.guest_id].some(
+      (value) => this.checkInScalar(value) === externalGuestId,
+    );
+  }
+
+  private checkInTransactionSessionOrStoreMatches(
+    row: LangameTransaction,
+    session: CheckInLiveSession,
+  ) {
+    const transactionSessionId = this.checkInScalar(row.session_id);
+    const transactionClubId = this.checkInScalar(
+      row.club_id ?? row.list_clubs_id,
+    );
+
+    if (
+      transactionSessionId &&
+      session.externalSessionId &&
+      transactionSessionId === session.externalSessionId
+    ) {
+      return true;
+    }
+
+    return Boolean(
+      transactionClubId &&
+        session.externalClubId &&
+        transactionClubId === session.externalClubId &&
+        this.checkInTransactionIsInSessionWindow(row, session),
+    );
+  }
+
+  private checkInTransactionIsInSessionWindow(
+    row: LangameTransaction,
+    session: CheckInLiveSession,
+  ) {
+    if (!session.startedAt) {
+      return false;
+    }
+
+    const happenedAt = this.parseCheckInLangameDate(
+      this.checkInTransactionDate(row),
+      session.store?.timeZone ?? null,
+    );
+
+    if (!happenedAt) {
+      return false;
+    }
+
+    return happenedAt.getTime() >= session.startedAt.getTime() - 15 * 60_000;
+  }
+
+  private checkInTransactionDate(row: LangameTransaction) {
+    return this.checkInScalar(
+      row.date ??
+        row.date_normal ??
+        row.date_insert ??
+        row.created_at ??
+        row.created ??
+        row.time ??
+        row.datetime ??
+        row.date_update,
+    );
+  }
+
+  private checkInTransactionLooksLikePacketHours(row: LangameTransaction) {
+    const text = [
+      row.type,
+      row.comment,
+      (row as LangameTransaction & Record<string, unknown>).name,
+      (row as LangameTransaction & Record<string, unknown>).title,
+      (row as LangameTransaction & Record<string, unknown>).description,
+      (row as LangameTransaction & Record<string, unknown>).operation_type,
+      (row as LangameTransaction & Record<string, unknown>).operation_name,
+    ]
+      .map((value) => this.checkInScalar(value)?.toLowerCase())
+      .filter(Boolean)
+      .join(' ');
+
+    if (!text) {
+      return false;
+    }
+
+    const hasStrongPacketHoursMarker =
+      text.includes('packet_hours') ||
+      text.includes('package_hours') ||
+      text.includes('count_hours') ||
+      text.includes('пакет часов') ||
+      text === 'packet';
+    const hasPacketMarker =
+      text.includes('packet') ||
+      text.includes('package') ||
+      text.includes('count_hours') ||
+      text.includes('count hours') ||
+      text.includes('hours package') ||
+      text.includes('package hours') ||
+      text.includes('пакет');
+    const hasHoursMarker =
+      text.includes('hour') ||
+      text.includes('hours') ||
+      text.includes('час') ||
+      text.includes('часов');
+    const hasSubscriptionMarker =
+      text.includes('subscription') ||
+      text.includes('membership') ||
+      text.includes('abonement') ||
+      text.includes('abonnement') ||
+      text.includes('абонемент');
+    const hasPrepaidMarker =
+      text.includes('prepaid') || text.includes('предоплат');
+    const hasCancellationMarker =
+      text.includes('refund') ||
+      text.includes('cancel') ||
+      text.includes('возврат') ||
+      text.includes('отмена');
+
+    return (
+      !hasCancellationMarker &&
+      (hasStrongPacketHoursMarker ||
+        (hasPacketMarker && hasHoursMarker) ||
+        hasSubscriptionMarker ||
+        hasPrepaidMarker)
+    );
   }
 
   private checkInGuestSearchRows(payload: unknown): Record<string, unknown>[] {
@@ -11706,6 +11926,12 @@ export class GuestGamificationService {
       return session;
     }
 
+    return this.markCheckInSessionAsPacket(session);
+  }
+
+  private markCheckInSessionAsPacket(
+    session: CheckInLiveSession,
+  ): CheckInLiveSession {
     return {
       ...session,
       sessionType: 'packet_hours',
@@ -15295,7 +15521,7 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       details: [
         row.store?.name,
         sessionMinutes ? `${sessionMinutes} мин` : null,
-        row.packet ? 'пакет' : null,
+        row.packet ? 'пакет/абонемент' : null,
         row.normalStop === false ? 'нестандартное завершение' : null,
       ]
         .filter(Boolean)
@@ -17428,7 +17654,7 @@ function appendDryRunSeasonXpRules(
   appendDryRunGuestLogTypeCheck(rules, context, blockers, reasons);
 
   if (dryRunOptionalNumber(rules.packetSessionBonus) != null) {
-    reasons.push('Battle Pass учитывает бонус за пакет часов');
+    reasons.push('Battle Pass учитывает бонус за пакет или абонемент');
   }
 }
 
@@ -17902,7 +18128,17 @@ function normalizeSessionType(value: string) {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, '_');
 
   if (
-    ['packet_hours', 'packet', 'package', 'package_hours'].includes(normalized)
+    [
+      'packet_hours',
+      'packet',
+      'package',
+      'package_hours',
+      'subscription',
+      'membership',
+      'abonement',
+      'abonnement',
+      'абонемент',
+    ].includes(normalized)
   ) {
     return 'packet_hours';
   }

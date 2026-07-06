@@ -185,6 +185,7 @@ function createService(
     postEndpoint: jest.fn(),
     listGuestSessions: jest.fn(),
     searchGuests: jest.fn(),
+    listTransactions: jest.fn(),
   };
   const bonusLedgerSchedulerService = {
     getRuntimeStatus: jest.fn(() => schedulerStatus),
@@ -4971,6 +4972,186 @@ describe('GuestGamificationService', () => {
         { guest_id: 'lg-guest-1' },
         expect.any(Object),
       );
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sourceFactId: 'session-1',
+        }),
+      );
+    });
+
+    it('treats the live session as packet when Langame transactions show a package-hours activation', async () => {
+      const { service, langameSettingsService, langameClient } = createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        currentCountHours: null,
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337-РџСѓС€РєРёРЅСЃРєР°СЏ',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+        integrationSourceId: 'source-1',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      langameSettingsService.resolveTenantAccess.mockResolvedValue({
+        apiKey: 'api-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: 'club-1',
+            baseUrl: 'https://langame.example',
+          },
+        ],
+      });
+      langameClient.listGuestSessions.mockResolvedValue([
+        {
+          id: 'session-1',
+          guest_id: 'lg-guest-1',
+          list_clubs_id: 'club-external-1',
+          date_start: '2026-06-10 09:45:00',
+          date_stop: null,
+          packet: 0,
+        },
+      ]);
+      langameClient.searchGuests.mockResolvedValue({
+        data: [
+          {
+            guest_id: 'lg-guest-1',
+            current_count_hours: '0',
+          },
+        ],
+      });
+      langameClient.listTransactions.mockResolvedValue([
+        {
+          id: 'tx-1',
+          guest_id: 'lg-guest-1',
+          session_id: 'session-1',
+          list_clubs_id: 'club-external-1',
+          date: '2026-06-10 09:50:00',
+          type: 'packet',
+          comment: null,
+          sum: 500,
+        },
+      ]);
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue({
+          processed: true,
+          summary: {
+            idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          },
+        } as GuestGameProcessEventResult);
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(langameClient.listTransactions).toHaveBeenCalledWith(
+        'https://langame.example',
+        'api-key',
+        expect.objectContaining({
+          page: 1,
+          pageLimit: 200,
+        }),
+      );
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sourceFactId: 'session-1',
+        }),
+      );
+    });
+
+    it('treats the live session as packet when Langame transactions show an abonnement activation', async () => {
+      const { service, langameSettingsService, langameClient } = createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        currentCountHours: null,
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337-Пушкинская',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+        integrationSourceId: 'source-1',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      langameSettingsService.resolveTenantAccess.mockResolvedValue({
+        apiKey: 'api-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: 'club-1',
+            baseUrl: 'https://langame.example',
+          },
+        ],
+      });
+      langameClient.listGuestSessions.mockResolvedValue([
+        {
+          id: 'session-1',
+          guest_id: 'lg-guest-1',
+          list_clubs_id: 'club-external-1',
+          date_start: '2026-07-06 12:53:00',
+          date_stop: null,
+          packet: 0,
+        },
+      ]);
+      langameClient.searchGuests.mockResolvedValue({
+        data: [
+          {
+            guest_id: 'lg-guest-1',
+            current_count_hours: '0',
+          },
+        ],
+      });
+      langameClient.listTransactions.mockResolvedValue([
+        {
+          id: 'tx-1',
+          guest_id: 'lg-guest-1',
+          session_id: 'session-1',
+          list_clubs_id: 'club-external-1',
+          date: '2026-07-06 17:00:00',
+          type: 'bonus',
+          comment: 'Покупка абонемент ADMIN 10 ЧАСОВ, 0 руб + 500 бонусы',
+          sum: 0,
+        },
+      ]);
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue({
+          processed: true,
+          summary: {
+            idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          },
+        } as GuestGameProcessEventResult);
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
       expect(processEventSpy).toHaveBeenCalledWith(
         user,
         expect.objectContaining({

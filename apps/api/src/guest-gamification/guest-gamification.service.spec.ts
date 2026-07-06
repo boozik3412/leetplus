@@ -3983,6 +3983,87 @@ describe('GuestGamificationService', () => {
       expect(langameClient.postEndpoint).not.toHaveBeenCalled();
     });
 
+    it('checks mission weekday limits in the selected club timezone', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337 Pushkinskaya',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          conditions: { weekdaysOnly: true },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        storeId: 'store-1',
+        occurredAt: '2026-06-12T20:30:00.000Z',
+        sessionType: 'regular_session',
+      });
+
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 0,
+        blockedRules: 1,
+      });
+      expect(result.rules[0]).toMatchObject({
+        id: 'mission-1',
+        kind: 'MISSION',
+        eligible: false,
+      });
+    });
+
+    it('allows mission weekend limits in the selected club timezone', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337 Pushkinskaya',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          conditions: {
+            weekdayMode: 'WEEKENDS',
+            weekdays: [0, 6],
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        storeId: 'store-1',
+        occurredAt: '2026-06-12T20:30:00.000Z',
+        sessionType: 'regular_session',
+      });
+
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 1,
+        blockedRules: 0,
+      });
+      expect(result.rules[0]).toMatchObject({
+        id: 'mission-1',
+        kind: 'MISSION',
+        eligible: true,
+      });
+    });
+
     it('selects a loot box prize by configured weighted probabilities', async () => {
       const { service } = createService();
       const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.9);

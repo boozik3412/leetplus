@@ -12588,6 +12588,7 @@ function buildLootBoxOpenState(
 
 function findLootBoxUnlockEvent(
   row: {
+    id: string;
     triggerKind: string;
     sessionType?: string | null;
     limits: Prisma.JsonValue | null;
@@ -12604,15 +12605,23 @@ function findLootBoxUnlockEvent(
   const restartedAt = lootBoxRestartedAt(jsonRecord(row.limits));
 
   if (guestGameTriggerMatches(row.triggerKind, 'SESSION_START')) {
-    return liveSessionStartUnlockEvent &&
+    if (
+      liveSessionStartUnlockEvent &&
       lootBoxUnlockEventMatches(
         row,
         liveSessionStartUnlockEvent,
         storeId,
         restartedAt,
       )
-      ? liveSessionStartUnlockEvent
-      : null;
+    ) {
+      return liveSessionStartUnlockEvent;
+    }
+
+    return (
+      unlockEvents.find((event) =>
+        lootBoxUnlockEventMatches(row, event, storeId, restartedAt, true),
+      ) ?? null
+    );
   }
 
   return (
@@ -12624,6 +12633,7 @@ function findLootBoxUnlockEvent(
 
 function lootBoxUnlockEventMatches(
   row: {
+    id?: string;
     triggerKind: string;
     sessionType?: string | null;
     periodRules?: Prisma.JsonValue | null;
@@ -12631,6 +12641,7 @@ function lootBoxUnlockEventMatches(
   event: GuestPortalLootBoxUnlockEventRow,
   storeId: string | null,
   restartedAt: Date | null,
+  requireLootBoxRuleUnlock = false,
 ) {
   if (!guestGameTriggerMatches(row.triggerKind, event.eventType)) {
     return false;
@@ -12652,11 +12663,43 @@ function lootBoxUnlockEventMatches(
     return false;
   }
 
+  if (requireLootBoxRuleUnlock && !lootBoxUnlockEventHasRuleUnlock(row, event)) {
+    return false;
+  }
+
   return (
     lootBoxUnlockSessionMatches(row, progressEvent) &&
     lootBoxUnlockTariffMatches(row.periodRules, progressEvent) &&
     lootBoxUnlockGuestLogTypeMatches(row.periodRules, progressEvent)
   );
+}
+
+function lootBoxUnlockEventHasRuleUnlock(
+  row: { id?: string; triggerKind: string },
+  event: GuestPortalLootBoxUnlockEventRow,
+) {
+  if (!row.id || !guestGameTriggerMatches(row.triggerKind, 'SESSION_START')) {
+    return true;
+  }
+
+  const payload = jsonRecord(event.payload);
+  const rules = Array.isArray(payload.rules) ? payload.rules : [];
+
+  return rules.some((item) => {
+    const rule = jsonRecord(item);
+    const blockers = Array.isArray(rule.blockers)
+      ? rule.blockers.filter(
+          (blocker): blocker is string => typeof blocker === 'string',
+        )
+      : [];
+
+    return (
+      stringField(rule.id) === row.id &&
+      stringField(rule.kind) === 'LOOT_BOX' &&
+      (rule.eligible === true ||
+        blockers.some((blocker) => blocker.includes('разблокирован')))
+    );
+  });
 }
 
 function lootBoxUnlockSessionMatches(

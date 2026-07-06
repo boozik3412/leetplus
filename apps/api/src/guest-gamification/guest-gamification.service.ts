@@ -17340,6 +17340,13 @@ function appendDryRunMissionConditions(
     blockers,
     reasons,
   );
+  appendDryRunPeriodRules(
+    conditions,
+    context.occurredAt,
+    context.timeZone,
+    blockers,
+    reasons,
+  );
 
   if (minSessionMinutes != null && context.sessionMinutes < minSessionMinutes) {
     blockers.push(
@@ -17357,12 +17364,6 @@ function appendDryRunMissionConditions(
     reasons.push(`Сумма покупки подходит: ${context.spendAmount} руб`);
   }
 
-  if (
-    conditions.weekdaysOnly === true &&
-    [0, 6].includes(context.occurredAt.getDay())
-  ) {
-    blockers.push('Задание доступно только по будням');
-  }
   if (conditions.requiresLangameFact === true) {
     reasons.push('Факт Langame обязателен для боевого подтверждения');
   }

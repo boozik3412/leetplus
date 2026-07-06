@@ -8940,7 +8940,7 @@ export class GuestGamificationService {
         nullableString(dto.note) ??
         'Гость открыл игровой модуль во время активной Langame-сессии; старт сессии обработан live-проверкой.',
     };
-    const result = this.syncLiveSessionStartResult(
+    const result = await this.syncLiveSessionStartResult(
       await this.processEvent(user, processDto),
       processDto,
     );
@@ -8948,10 +8948,10 @@ export class GuestGamificationService {
     return { result, cache: liveSession.sessionPacket === true };
   }
 
-  private syncLiveSessionStartResult(
+  private async syncLiveSessionStartResult(
     result: GuestGameProcessEventResult,
     dto: GuestGameProcessEventDto,
-  ): GuestGameProcessEventResult {
+  ): Promise<GuestGameProcessEventResult> {
     if (!result.summary.idempotent) {
       return result;
     }
@@ -8970,11 +8970,18 @@ export class GuestGamificationService {
       return result;
     }
 
+    const nextPayload = buildProcessPayload(dto, result.dryRun);
+
+    await this.prisma.guestGameEvent.update({
+      where: { id: result.event.id },
+      data: { payload: nextPayload },
+    });
+
     return {
       ...result,
       event: {
         ...result.event,
-        payload: buildProcessPayload(dto, result.dryRun) as Prisma.JsonValue,
+        payload: nextPayload as Prisma.JsonValue,
       },
     };
   }

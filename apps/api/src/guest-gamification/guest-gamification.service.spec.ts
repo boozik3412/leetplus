@@ -45,6 +45,7 @@ function createPrismaMock() {
       create: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      update: jest.fn(),
     },
     guestGameReward: {
       count: jest.fn(),
@@ -5120,7 +5121,7 @@ describe('GuestGamificationService', () => {
     });
 
     it('refreshes an idempotent live session payload when the same session becomes packet hours', async () => {
-      const { service } = createService();
+      const { service, prisma } = createService();
 
       jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
         id: 'guest-1',
@@ -5235,6 +5236,18 @@ describe('GuestGamificationService', () => {
 
       expect(findActiveSessionSpy).toHaveBeenCalledTimes(2);
       expect(processEventSpy).toHaveBeenCalledTimes(2);
+      expect(prisma.guestGameEvent.update).toHaveBeenCalledWith({
+        where: { id: 'event-1' },
+        data: {
+          payload: expect.objectContaining({
+            input: expect.objectContaining({
+              sessionType: 'packet_hours',
+              sessionPacket: true,
+              sessionMinutes: 15,
+            }),
+          }),
+        },
+      });
       expect(refreshed?.event.payload).toMatchObject({
         input: {
           sessionType: 'packet_hours',

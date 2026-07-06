@@ -567,6 +567,9 @@ function ReadyGameView({
     useState<LootboxOverlayPhase>("ready");
   const [lootboxRoulette, setLootboxRoulette] =
     useState<LootboxRouletteState | null>(null);
+  const [lootboxOverlayError, setLootboxOverlayError] = useState<string | null>(
+    null,
+  );
   const lootboxRewardRef = useRef<HTMLButtonElement | null>(null);
   const lootboxOpenRunRef = useRef(0);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -678,6 +681,7 @@ function ReadyGameView({
         setLootboxOverlayCard(null);
         setLootboxOverlayPhase("ready");
         setLootboxRoulette(null);
+        setLootboxOverlayError(null);
         emitLootboxEvent("overlay-close");
       }
     }
@@ -879,6 +883,7 @@ function ReadyGameView({
     setLootboxOverlayCard(card);
     setLootboxOverlayPhase("ready");
     setLootboxRoulette(null);
+    setLootboxOverlayError(null);
     emitLootboxEvent("overlay-open", { lootBoxId: card.id });
     showToast("Контейнер готов к открытию.");
   }
@@ -946,6 +951,7 @@ function ReadyGameView({
 
     lootboxOpenRunRef.current = runId;
     setLootboxRoulette(null);
+    setLootboxOverlayError(null);
     setLootboxOverlayPhase("charging");
     emitLootboxEvent("charge-start", { lootBoxId: currentCard.id });
     showToast("Контейнер активируется.");
@@ -1011,10 +1017,59 @@ function ReadyGameView({
         return;
       }
 
+      const message = getErrorMessage(
+        error,
+        "Лутбокс сейчас недоступен.",
+      );
       setLootboxRoulette(null);
       setLootboxOverlayPhase("ready");
-      showToast(getErrorMessage(error, "Лутбокс сейчас недоступен."));
+      setLootboxOverlayError(message);
+      showToast(message);
     }
+  }
+
+  async function refreshLootboxOverlayConditions() {
+    if (!lootboxOverlayCard) {
+      return;
+    }
+
+    const currentCard = lootboxOverlayCard;
+    setLootboxOverlayError(null);
+
+    const nextSummary = await refreshGameSummary({
+      pendingMessage: "Проверяем условия открытия.",
+      successMessage: null,
+      silent: true,
+    });
+
+    if (!nextSummary) {
+      setLootboxOverlayError(
+        "Не удалось проверить условия. Попробуйте еще раз.",
+      );
+      return;
+    }
+
+    const updatedCard = buildHomeLootCards(nextSummary, currentCard.id).find(
+      (item) => item.id === currentCard.id,
+    );
+
+    if (!updatedCard) {
+      setLootboxOverlayError("Лутбокс больше не найден в игровом модуле.");
+      return;
+    }
+
+    setLootboxOverlayCard(updatedCard);
+
+    if (!updatedCard.openable) {
+      setLootboxOverlayError(
+        lootboxCardBlockedTooltip(updatedCard) ??
+          updatedCard.openBlocker ??
+          lootBoxUnavailableCheckMessage(updatedCard),
+      );
+      return;
+    }
+
+    showToast("Условия обновлены. Контейнер можно открыть.");
   }
 
   function finishLootboxRoulette(skipped: boolean) {
@@ -1055,6 +1110,7 @@ function ReadyGameView({
     setLootboxOverlayCard(null);
     setLootboxOverlayPhase("ready");
     setLootboxRoulette(null);
+    setLootboxOverlayError(null);
     emitLootboxEvent("overlay-close");
   }
 
@@ -1249,10 +1305,13 @@ function ReadyGameView({
           card={lootboxOverlayCard}
           phase={lootboxOverlayPhase}
           roulette={lootboxRoulette}
+          errorMessage={lootboxOverlayError}
+          checkingConditions={summaryRefreshPending}
           rewardRef={lootboxRewardRef}
           onOpen={beginLootboxOpening}
           onClose={closeLootboxOverlay}
           onCollect={collectLootboxReward}
+          onRefreshConditions={refreshLootboxOverlayConditions}
           onRouletteFinish={finishLootboxRoulette}
         />
       ) : null}
@@ -1598,19 +1657,25 @@ function LootboxOpeningOverlay({
   card,
   phase,
   roulette,
+  errorMessage,
+  checkingConditions,
   rewardRef,
   onOpen,
   onClose,
   onCollect,
+  onRefreshConditions,
   onRouletteFinish,
 }: {
   card: HomeLootCard;
   phase: LootboxOverlayPhase;
   roulette: LootboxRouletteState | null;
+  errorMessage: string | null;
+  checkingConditions: boolean;
   rewardRef: RefObject<HTMLButtonElement | null>;
   onOpen: () => void;
   onClose: () => void;
   onCollect: () => void;
+  onRefreshConditions: () => void;
   onRouletteFinish: (skipped: boolean) => void;
 }) {
   const rouletteTrackRef = useRef<HTMLDivElement | null>(null);
@@ -1654,6 +1719,8 @@ function LootboxOpeningOverlay({
       ? "Забрать результат"
       : isOpening || isCharging || isRolling
         ? "Открывается"
+        : errorMessage
+          ? "Попробовать еще раз"
         : "Открыть контейнер";
   const handlePrimaryAction = isCollected
     ? onClose
@@ -1829,6 +1896,20 @@ function LootboxOpeningOverlay({
           <p>{statusLabel}</p>
         </div>
 
+        {errorMessage ? (
+          <div className="lp-lootbox-open-error" role="alert">
+            <span>Почему не открывается</span>
+            <strong>{errorMessage}</strong>
+            <button
+              type="button"
+              onClick={onRefreshConditions}
+              disabled={checkingConditions}
+            >
+              {checkingConditions ? "Проверяем..." : "Проверить условия"}
+            </button>
+          </div>
+        ) : null}
+
         {rouletteVisible && roulette ? (
           <div
             className={[
@@ -1956,7 +2037,7 @@ function LootboxOpeningOverlay({
           <button
             type="button"
             className="lp-club-primary-link"
-            disabled={isOpening || isCharging || isRolling}
+            disabled={isOpening || isCharging || isRolling || checkingConditions}
             onClick={handlePrimaryAction}
           >
             {primaryActionLabel}
@@ -8591,6 +8672,63 @@ const clubHomeCss = `
   color: #c2d0d1;
   font-size: 14px;
   line-height: 1.55;
+}
+
+.lp-lootbox-open-error {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 9px;
+  width: min(540px, 100%);
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(208, 170, 108, 0.42);
+  border-radius: 8px;
+  color: var(--text);
+  background:
+    linear-gradient(135deg, rgba(208, 170, 108, 0.13), transparent 72%),
+    rgba(4, 11, 14, 0.74);
+  box-shadow: inset 0 0 0 1px rgba(208, 170, 108, 0.08);
+}
+
+.lp-lootbox-open-error span {
+  color: var(--amber);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-open-error strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
+.lp-lootbox-open-error button {
+  width: fit-content;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid rgba(131, 228, 236, 0.36);
+  border-radius: 8px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-open-error button:hover,
+.lp-lootbox-open-error button:focus-visible {
+  border-color: rgba(131, 228, 236, 0.72);
+  color: var(--text);
+}
+
+.lp-lootbox-open-error button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .lp-lootbox-roulette {

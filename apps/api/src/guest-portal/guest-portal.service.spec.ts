@@ -1677,7 +1677,33 @@ describe('GuestPortalService', () => {
           WEB_URL: 'https://leetplus.ru',
         });
         const portal = portalPayloadFixture();
-        mockGameSummarySession(service, portal);
+        const { processLiveSessionStartForPayload } = mockGameSummarySession(
+          service,
+          portal,
+        );
+        processLiveSessionStartForPayload.mockResolvedValue({
+          event: {
+            eventType: 'SESSION_START',
+            occurredAt: '2026-07-06T10:30:00.000Z',
+            payload: {
+              sourceFactKind: 'GUEST_SESSION',
+              store: { id: portal.store.id, name: portal.store.name },
+              input: {
+                sessionType: 'regular_session',
+                sessionPacket: false,
+                sessionMinutes: 90,
+              },
+              rules: [
+                {
+                  id: 'loot-morning',
+                  kind: 'LOOT_BOX',
+                  eligible: true,
+                  blockers: [],
+                },
+              ],
+            },
+          },
+        });
         jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
           tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
           store: {

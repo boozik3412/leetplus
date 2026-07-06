@@ -3694,6 +3694,7 @@ export class GuestPortalService {
       lootBox,
       unlockEvents,
       context.store.id,
+      context.store.timeZone,
       liveSessionStartUnlockEvent,
     );
     const unlockInput = unlockEvent
@@ -12492,6 +12493,7 @@ function buildLootBoxOpenState(
     row,
     unlockEvents,
     storeId,
+    storeTimeZone,
     liveSessionStartUnlockEvent,
   );
 
@@ -12598,6 +12600,7 @@ function findLootBoxUnlockEvent(
   },
   unlockEvents: GuestPortalLootBoxUnlockEventRow[],
   storeId: string | null,
+  storeTimeZone: string | null = null,
   liveSessionStartUnlockEvent: GuestPortalLootBoxUnlockEventRow | null = null,
 ) {
   if (row.triggerKind === GAME_APP_OPEN_EVENT_TYPE) {
@@ -12607,7 +12610,7 @@ function findLootBoxUnlockEvent(
   const restartedAt = lootBoxRestartedAt(jsonRecord(row.limits));
 
   if (guestGameTriggerMatches(row.triggerKind, 'SESSION_START')) {
-    if (
+    const candidates = [
       liveSessionStartUnlockEvent &&
       lootBoxUnlockEventMatches(
         row,
@@ -12615,15 +12618,34 @@ function findLootBoxUnlockEvent(
         storeId,
         restartedAt,
       )
-    ) {
-      return liveSessionStartUnlockEvent;
+        ? liveSessionStartUnlockEvent
+        : null,
+      ...unlockEvents.filter((event) =>
+        lootBoxUnlockEventMatches(row, event, storeId, restartedAt, true),
+      ),
+    ].filter((event): event is GuestPortalLootBoxUnlockEventRow =>
+      Boolean(event),
+    );
+
+    if (!candidates.length) {
+      return null;
     }
 
-    return (
-      unlockEvents.find((event) =>
-        lootBoxUnlockEventMatches(row, event, storeId, restartedAt, true),
-      ) ?? null
+    const timeZone = guestGameTimeZone(storeTimeZone);
+    const scheduledCandidate = candidates.find(
+      (event) =>
+        !lootBoxScheduleBlocker(
+          row.periodRules ?? null,
+          event.occurredAt,
+          timeZone,
+        ),
     );
+
+    if (scheduledCandidate) {
+      return scheduledCandidate;
+    }
+
+    return candidates[0] ?? null;
   }
 
   return (

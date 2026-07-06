@@ -57,6 +57,7 @@ type HomeLootCard = {
   status: string;
   active: boolean;
   openable: boolean;
+  openState: GuestPortalGameSummary["lootBoxes"]["featured"][number]["openState"];
   openBlocker: string | null;
   rewardLabel: string | null;
   caseRarity: GuestPortalLootBoxRarity;
@@ -1519,7 +1520,13 @@ function HomeLootBoxes({
 
       <div className="lp-club-loot-grid">
         {cards.length ? (
-          cards.map((card, index) => (
+          cards.map((card, index) => {
+            const blockedTooltip = lootboxCardBlockedTooltip(card);
+            const tooltipId = blockedTooltip
+              ? `lootbox-blocker-${card.id}`
+              : undefined;
+
+            return (
           <button
             key={card.id}
             type="button"
@@ -1531,6 +1538,8 @@ function HomeLootBoxes({
             ].join(" ")}
             aria-haspopup="dialog"
             aria-controls={card.openable ? "lootboxOverlay" : "lootboxUnavailable"}
+            aria-describedby={tooltipId}
+            title={blockedTooltip ?? undefined}
             onClick={() => onSelect(card)}
           >
             <span className="lp-lootbox-entry-top">
@@ -1540,7 +1549,21 @@ function HomeLootBoxes({
                 </span>
                 <strong>{card.title}</strong>
               </span>
-              <span className="lp-lootbox-entry-state">{card.status}</span>
+              <span className="lp-lootbox-entry-state-wrap">
+                <span className="lp-lootbox-entry-state">{card.status}</span>
+                {blockedTooltip ? (
+                  <span className="lp-lootbox-blocker-chip">
+                    почему?
+                    <span
+                      id={tooltipId}
+                      className="lp-lootbox-blocker-tooltip"
+                      role="tooltip"
+                    >
+                      {blockedTooltip}
+                    </span>
+                  </span>
+                ) : null}
+              </span>
             </span>
             <span className="lp-lootbox-entry-art" aria-hidden="true">
               <Image
@@ -1559,7 +1582,8 @@ function HomeLootBoxes({
               </span>
             </span>
           </button>
-          ))
+            );
+          })
         ) : (
           <p className="lp-club-loot-empty">
             Клуб пока не опубликовал активные лутбоксы.
@@ -3450,6 +3474,7 @@ function buildHomeLootCards(
     status: lootboxCardStatus(lootBox),
     active: false,
     openable: lootBox.openable,
+    openState: lootBox.openState,
     openBlocker: lootBox.openBlocker,
     rewardLabel: lootBox.rewardLabel,
     caseRarity: normalizeLootboxRarity(lootBox.caseRarity) ?? "common",
@@ -3493,6 +3518,36 @@ function lootboxCardStatus(
   }
 
   return "доступен";
+}
+
+function lootboxCardBlockedTooltip(card: HomeLootCard) {
+  if (card.openable) {
+    return null;
+  }
+
+  const blocker =
+    card.openBlocker?.trim() ||
+    (card.openState === "LIMIT_REACHED"
+      ? "достигнут лимит открытия"
+      : lootboxCardHint(card));
+  const requirements = lootBoxGuestRequirementLines(card);
+  const diagnostics = [
+    `openState=${card.openState}`,
+    `trigger=${normalizeGameRuleTrigger(card.triggerKind)}`,
+    card.sessionType
+      ? `sessionType=${normalizeGameRuleSessionType(card.sessionType)}`
+      : null,
+  ].filter(Boolean);
+
+  return [
+    `Кейс нельзя открыть: ${blocker}.`,
+    requirements.length
+      ? `Что должно быть выполнено: ${requirements.join(" ")}`
+      : null,
+    `Диагностика: ${diagnostics.join(", ")}.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function lootboxCardHint(card: HomeLootCard) {
@@ -7825,6 +7880,72 @@ const clubHomeCss = `
   color: var(--amber);
 }
 
+.lp-lootbox-entry-state-wrap {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 48%;
+}
+
+.lp-lootbox-blocker-chip {
+  position: relative;
+  display: inline-flex;
+  min-height: 22px;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  border: 1px solid rgba(208, 170, 108, 0.54);
+  border-radius: 999px;
+  color: var(--amber);
+  background: rgba(208, 170, 108, 0.12);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lp-lootbox-blocker-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(286px, calc(100vw - 52px));
+  padding: 10px 12px;
+  border: 1px solid rgba(131, 228, 236, 0.36);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(4, 11, 14, 0.98);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.45;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    visibility 160ms ease;
+  pointer-events: none;
+}
+
+.lootbox-entry:hover .lp-lootbox-blocker-tooltip,
+.lootbox-entry:focus-visible .lp-lootbox-blocker-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 .lp-lootbox-entry-art {
   position: relative;
   z-index: 1;
@@ -12127,6 +12248,7 @@ function buildLootboxRouletteState({
         status: "",
         active: false,
         openable: item.openable,
+        openState: item.openState,
         openBlocker: item.openBlocker,
         rewardLabel: item.rewardLabel,
         caseRarity: normalizeLootboxRarity(item.caseRarity) ?? "common",

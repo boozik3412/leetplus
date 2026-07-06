@@ -70,6 +70,7 @@ export type TabId =
   | "profiles"
   | "lootBoxes"
   | "missions"
+  | "checkIn"
   | "seasons"
   | "promoCards"
   | "rewards"
@@ -406,6 +407,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
   { id: "profiles", label: "Профили" },
   { id: "lootBoxes", label: "Лутбоксы" },
   { id: "missions", label: "Задания" },
+  { id: "checkIn", label: "Чекин" },
   { id: "seasons", label: "Battle Pass" },
   { id: "promoCards", label: "Промо баннеры" },
   { id: "testRun", label: "Тест запуска" },
@@ -687,6 +689,10 @@ const rewardTypeOptions = [
   { value: "MERCH", label: "Физический приз" },
   { value: "BATTLE_PASS_REWARD", label: "Награда Battle Pass" },
 ];
+
+const checkInRewardTypeOptions = rewardTypeOptions.filter((option) =>
+  ["XP", "BONUS_BALANCE"].includes(option.value),
+);
 
 const lootBoxRewardTypeOptions = rewardTypeOptions.filter(
   (option) => !["BALANCE", "BATTLE_PASS_REWARD"].includes(option.value),
@@ -1023,6 +1029,60 @@ const defaultMissionForm: MissionForm = {
   note: "Факт визита берем из Langame, выдачу подтверждает кассир.",
 };
 
+const defaultCheckInMissionForm: MissionForm = {
+  ...defaultMissionForm,
+  name: "Чекин в клубе",
+  status: "DRAFT",
+  missionType: "CHECK_IN",
+  triggerKind: "CHECK_IN",
+  rewardType: "XP",
+  rewardAmount: "0",
+  rewardLabel: "XP за чекин",
+  xpReward: "20",
+  progressTarget: "1",
+  progressUnit: "check_in",
+  budgetAmount: "0",
+  perGuestLimit: "",
+  totalRewardLimit: "",
+  sessionType: "",
+  tariffGroupId: "",
+  tariffPeriodId: "",
+  tariffTypeId: "",
+  guestLogTypes: "",
+  blockedGuestLogTypes: "",
+  metricAggregation: "count",
+  metricEventTypes: "CHECK_IN",
+  metricHours: "",
+  metricProductIds: "",
+  metricExternalProductIds: "",
+  metricCategoryIds: "",
+  metricCategoryNames: "",
+  windowDays: "",
+  weekdaysOnly: false,
+  minSessionMinutes: "",
+  minSpendAmount: "",
+  questEnabled: false,
+  questSteps: [],
+  requireLangameFact: false,
+  denySameDayRepeat: false,
+  requireCashierConfirmation: false,
+  conditionsText: jsonText({
+    source: "business_controls",
+    metric: {
+      aggregation: "count",
+      eventTypes: ["CHECK_IN"],
+      target: 1,
+    },
+    progressTarget: 1,
+    progressUnit: "check_in",
+  }),
+  antiFraudText: jsonText({
+    source: "business_controls",
+  }),
+  manualApprovalRequired: false,
+  note: "Чекин доступен гостю с активной сессией в выбранном клубе. Повторный чекин в том же клубе доступен на следующий календарный день по времени клуба.",
+};
+
 const defaultSeasonForm: SeasonForm = {
   name: "Клубный сезон",
   status: "DRAFT",
@@ -1267,6 +1327,14 @@ export function GuestGamificationPanel({
       ),
     [workspace.rewards],
   );
+  const checkInMissions = useMemo(
+    () => workspace.missions.filter(isCheckInMission),
+    [workspace.missions],
+  );
+  const regularMissions = useMemo(
+    () => workspace.missions.filter((mission) => !isCheckInMission(mission)),
+    [workspace.missions],
+  );
 
   function editProfile(profile: GuestGameProfile) {
     setProfileForm(profileToForm(profile));
@@ -1303,7 +1371,7 @@ export function GuestGamificationPanel({
     setMissionForm(missionToForm(mission));
     setEditingMissionId(mission.id);
     setIsMissionFormOpen(true);
-    setActiveTab("missions");
+    setActiveTab(isCheckInMission(mission) ? "checkIn" : "missions");
   }
 
   function createMission() {
@@ -1313,8 +1381,28 @@ export function GuestGamificationPanel({
     setActiveTab("missions");
   }
 
+  function editCheckInMission(mission: GuestGameMission) {
+    setMissionForm(normalizeCheckInMissionForm(missionToForm(mission)));
+    setEditingMissionId(mission.id);
+    setIsMissionFormOpen(true);
+    setActiveTab("checkIn");
+  }
+
+  function createCheckInMission() {
+    setMissionForm(defaultCheckInMissionForm);
+    setEditingMissionId(null);
+    setIsMissionFormOpen(true);
+    setActiveTab("checkIn");
+  }
+
   function resetMissionForm() {
     setMissionForm(defaultMissionForm);
+    setEditingMissionId(null);
+    setIsMissionFormOpen(false);
+  }
+
+  function resetCheckInMissionForm() {
+    setMissionForm(defaultCheckInMissionForm);
     setEditingMissionId(null);
     setIsMissionFormOpen(false);
   }
@@ -2615,7 +2703,7 @@ export function GuestGamificationPanel({
         <MissionsTab
           form={missionForm}
           setForm={setMissionForm}
-          missions={workspace.missions}
+          missions={regularMissions}
           audiences={audiences}
           stores={stores}
           products={products}
@@ -2627,6 +2715,27 @@ export function GuestGamificationPanel({
           onEdit={editMission}
           onCreateNew={createMission}
           onReset={resetMissionForm}
+          onStatus={updateRuleStatus}
+          onDelete={deleteRuleTemplate}
+          saving={saving}
+          canManage={access.canManageRules}
+        />
+      ) : null}
+
+      {activeTab === "checkIn" ? (
+        <CheckInTab
+          form={missionForm}
+          setForm={setMissionForm}
+          missions={checkInMissions}
+          audiences={audiences}
+          stores={stores}
+          tariffSnapshots={workspace.tariffSnapshots}
+          editingId={editingMissionId}
+          isFormOpen={isMissionFormOpen}
+          onSave={saveMission}
+          onEdit={editCheckInMission}
+          onCreateNew={createCheckInMission}
+          onReset={resetCheckInMissionForm}
           onStatus={updateRuleStatus}
           onDelete={deleteRuleTemplate}
           saving={saving}
@@ -4005,6 +4114,14 @@ function OverviewTab({
   const activePromoCards = workspace.promoCards.filter(
     (promoCard) => promoCard.status === "ACTIVE",
   ).length;
+  const activeCheckInMissions = workspace.missions.filter(
+    (mission) => mission.status === "ACTIVE" && isCheckInMission(mission),
+  ).length;
+  const activeRegularMissions = workspace.missions.filter(
+    (mission) => mission.status === "ACTIVE" && !isCheckInMission(mission),
+  ).length;
+  const checkInMissionCount = workspace.missions.filter(isCheckInMission).length;
+  const regularMissionCount = workspace.missions.length - checkInMissionCount;
 
   return (
     <div className="space-y-5">
@@ -4025,7 +4142,7 @@ function OverviewTab({
           </div>
         </div>
 
-        <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
           <ScenarioStepCard
             step="1"
             title="Игровые профили"
@@ -4036,6 +4153,14 @@ function OverviewTab({
           />
           <ScenarioStepCard
             step="2"
+            title="Чекин"
+            text="Включить кнопку чекина и награду за подтвержденную активную сессию."
+            metric={`${activeCheckInMissions} активных`}
+            action="Настроить"
+            onClick={() => onOpenTab("checkIn")}
+          />
+          <ScenarioStepCard
+            step="3"
             title="Лутбокс"
             text="Настроить открытие при старте сессии, клубы, лимиты и призы."
             metric={`${workspace.summary.activeLootBoxes} активных`}
@@ -4043,15 +4168,15 @@ function OverviewTab({
             onClick={() => onOpenTab("lootBoxes")}
           />
           <ScenarioStepCard
-            step="3"
+            step="4"
             title="Задания"
             text="Задать задания по визитам, часам, бару или реактивации."
-            metric={`${workspace.summary.activeMissions} активных`}
+            metric={`${activeRegularMissions} активных`}
             action="Собрать"
             onClick={() => onOpenTab("missions")}
           />
           <ScenarioStepCard
-            step="4"
+            step="5"
             title="Battle Pass"
             text="Создать сезон, уровни, free/premium дорожки и XP-правила."
             metric={`${workspace.summary.activeSeasons} сезонов`}
@@ -4059,7 +4184,7 @@ function OverviewTab({
             onClick={() => onOpenTab("seasons")}
           />
           <ScenarioStepCard
-            step="5"
+            step="6"
             title="Промо баннеры"
             text="Показать сторис-баннеры на главном экране клуба."
             metric={`${promoBannerUsage.visibleCardIds.size} показывается`}
@@ -4067,7 +4192,7 @@ function OverviewTab({
             onClick={() => onOpenTab("promoCards")}
           />
           <ScenarioStepCard
-            step="6"
+            step="7"
             title="Выдача"
             text="Проверить очередь, согласовать награду и закрыть статус."
             metric={`${workspace.summary.pendingRewards} к выдаче`}
@@ -4157,16 +4282,21 @@ function OverviewTab({
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <section className="space-y-3">
           <SectionTitle title="Активные контуры" />
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-5">
             <StatusMetric
               label="Лутбоксы"
               value={workspace.summary.activeLootBoxes}
               hint={`${workspace.lootBoxes.length} всего`}
             />
             <StatusMetric
+              label="Чекин"
+              value={activeCheckInMissions}
+              hint={`${checkInMissionCount} всего`}
+            />
+            <StatusMetric
               label="Задания"
-              value={workspace.summary.activeMissions}
-              hint={`${workspace.missions.length} всего`}
+              value={activeRegularMissions}
+              hint={`${regularMissionCount} всего`}
             />
             <StatusMetric
               label="Сезоны"
@@ -7482,6 +7612,320 @@ function MissionsTab({
             formatMoney(item.budgetAmount ?? 0),
           ]}
           details={<MissionQuestStepIdSummary mission={item} />}
+          onEdit={() => onEdit(item)}
+          onStatus={(status) => onStatus("missions", item.id, status)}
+          saving={saving === `missions-${item.id}`}
+          onDelete={() => onDelete("missions", item.id, item.name)}
+          deleteSaving={saving === `missions-delete-${item.id}`}
+          canManage={canManage}
+        />
+      )}
+    />
+  );
+}
+
+function CheckInTab({
+  form,
+  setForm,
+  missions,
+  audiences,
+  stores,
+  tariffSnapshots,
+  editingId,
+  isFormOpen,
+  onSave,
+  onEdit,
+  onCreateNew,
+  onReset,
+  onStatus,
+  onDelete,
+  saving,
+  canManage,
+}: {
+  form: MissionForm;
+  setForm: (form: MissionForm) => void;
+  missions: GuestGameMission[];
+  audiences: GuestAudience[];
+  stores: Store[];
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  editingId: string | null;
+  isFormOpen: boolean;
+  onSave: () => Promise<void>;
+  onEdit: (mission: GuestGameMission) => void;
+  onCreateNew: () => void;
+  onReset: () => void;
+  onStatus: (
+    type: RuleTemplateType,
+    id: string,
+    status: GuestGameStatus,
+  ) => Promise<void>;
+  onDelete: (type: RuleTemplateType, id: string, name: string) => Promise<void>;
+  saving: string | null;
+  canManage: boolean;
+}) {
+  const showForm = isFormOpen && isCheckInMissionForm(form);
+  const checkInTitle = form.name.trim();
+  const formTitle =
+    editingId && showForm && checkInTitle
+      ? `Редактирование чек-ина "${checkInTitle}"`
+      : editingId && showForm
+        ? "Редактирование чек-ина"
+        : "Настройка чек-ина";
+  const rewardIsXp = form.rewardType === "XP";
+
+  function patchForm(patch: Partial<MissionForm>) {
+    setForm(normalizeCheckInMissionForm({ ...form, ...patch }));
+  }
+
+  function selectRewardType(rewardType: string) {
+    const nextIsXp = rewardType === "XP";
+    const currentLabel = form.rewardLabel.trim();
+
+    patchForm({
+      rewardType,
+      rewardAmount: nextIsXp
+        ? "0"
+        : form.rewardAmount && form.rewardAmount !== "0"
+          ? form.rewardAmount
+          : "50",
+      xpReward: nextIsXp
+        ? form.xpReward && form.xpReward !== "0"
+          ? form.xpReward
+          : "20"
+        : "0",
+      rewardLabel:
+        currentLabel && currentLabel !== "XP за чекин" && currentLabel !== "Бонусы за чекин"
+          ? currentLabel
+          : nextIsXp
+            ? "XP за чекин"
+            : "Бонусы за чекин",
+    });
+  }
+
+  return (
+    <RulesLayout
+      canManage={canManage}
+      formTitle={formTitle}
+      formAction={
+        !showForm ? (
+          <button
+            type="button"
+            className={`${primaryButtonClass} sm:min-w-52`}
+            onClick={onCreateNew}
+          >
+            Создать правило чек-ина
+          </button>
+        ) : undefined
+      }
+      form={
+        showForm ? (
+          <div className="space-y-3">
+            <RuleCommonFields
+              status={form.status}
+              name={form.name}
+              rewardType={form.rewardType}
+              rewardAmount={form.rewardAmount}
+              rewardLabel={form.rewardLabel}
+              audienceId={form.audienceId}
+              budgetAmount={form.budgetAmount}
+              manualApprovalRequired={form.manualApprovalRequired}
+              note={form.note}
+              audiences={audiences}
+              hideRewardFields
+              onChange={(patch) => patchForm(patch)}
+            />
+
+            <FormSection title="Награда за чек-ин">
+              <div className="grid gap-3 md:grid-cols-3">
+                <Field label="Тип награды">
+                  <OptionSelect
+                    options={checkInRewardTypeOptions}
+                    value={form.rewardType}
+                    preservedLabel="Сохраненный тип награды"
+                    onChange={selectRewardType}
+                  />
+                </Field>
+                {rewardIsXp ? (
+                  <Field label="XP за чек-ин">
+                    <input
+                      className={fieldClass}
+                      type="number"
+                      min="0"
+                      value={form.xpReward}
+                      onChange={(event) =>
+                        patchForm({ xpReward: event.target.value })
+                      }
+                    />
+                  </Field>
+                ) : (
+                  <Field label="Бонусы Langame">
+                    <input
+                      className={fieldClass}
+                      type="number"
+                      min="0"
+                      value={form.rewardAmount}
+                      onChange={(event) =>
+                        patchForm({ rewardAmount: event.target.value })
+                      }
+                    />
+                  </Field>
+                )}
+                <Field label="Текст награды">
+                  <input
+                    className={fieldClass}
+                    value={form.rewardLabel}
+                    onChange={(event) =>
+                      patchForm({ rewardLabel: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+            </FormSection>
+
+            <FormSection title="Кнопка и клубы">
+              <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-sm leading-6 text-cyan-900 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-100">
+                Кнопка чек-ина появится в игровом модуле выбранных клубов, когда
+                правило активно. Backend дополнительно проверяет активную
+                сессию гостя в Langame и не дает сделать повторный чек-ин в том
+                же клубе до следующего календарного дня по времени клуба.
+              </div>
+              <StoreSelect
+                stores={stores}
+                value={form.storeIds}
+                onChange={(storeIds) => patchForm({ storeIds })}
+              />
+            </FormSection>
+
+            <FormSection title="Условия активной сессии">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Тип задания">
+                  <input
+                    className={fieldClass}
+                    value="Чекин в клубе"
+                    disabled
+                    readOnly
+                  />
+                  <OptionHelp>
+                    Чекин срабатывает только от события CHECK_IN.
+                  </OptionHelp>
+                </Field>
+                <Field label="Тип сессии">
+                  <select
+                    className={fieldClass}
+                    value={form.sessionType}
+                    onChange={(event) =>
+                      patchForm({ sessionType: event.target.value })
+                    }
+                  >
+                    <option value="">любой тип</option>
+                    {sessionTypeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <OptionHelp>
+                    Оставьте любой тип, если чек-ин доступен при любой активной
+                    сессии. Выберите пакет часов или почасовую сессию для
+                    дополнительного ограничения.
+                  </OptionHelp>
+                </Field>
+              </div>
+              <TariffConditionFields
+                snapshots={tariffSnapshots}
+                tariffGroupId={form.tariffGroupId}
+                tariffPeriodId={form.tariffPeriodId}
+                tariffTypeId={form.tariffTypeId}
+                onChange={patchForm}
+              />
+            </FormSection>
+
+            <FormSection title="Служебные ограничения">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Общий лимит наград">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    min="0"
+                    placeholder="без лимита"
+                    value={form.totalRewardLimit}
+                    onChange={(event) =>
+                      patchForm({ totalRewardLimit: event.target.value })
+                    }
+                  />
+                  <OptionHelp>
+                    Лимит на одного гостя не задается здесь по умолчанию:
+                    повторный чек-ин уже ограничен одним разом в день в одном
+                    клубе.
+                  </OptionHelp>
+                </Field>
+                <div className="space-y-2">
+                  <ToggleField
+                    label="Подтверждает кассир"
+                    checked={form.requireCashierConfirmation}
+                    onChange={(requireCashierConfirmation) =>
+                      patchForm({ requireCashierConfirmation })
+                    }
+                  />
+                  <ToggleField
+                    label="Требовать ручную выдачу"
+                    checked={form.manualApprovalRequired}
+                    onChange={(manualApprovalRequired) =>
+                      patchForm({ manualApprovalRequired })
+                    }
+                  />
+                </div>
+              </div>
+            </FormSection>
+
+            <button
+              type="button"
+              className={primaryButtonClass}
+              disabled={saving === "mission"}
+              onClick={onSave}
+            >
+              {editingId ? "Сохранить" : "Создать правило чек-ина"}
+            </button>
+            {editingId ? (
+              <button type="button" className={smallButtonClass} onClick={onReset}>
+                Сбросить выбор
+              </button>
+            ) : null}
+          </div>
+        ) : null
+      }
+      listTitle="Настройки чек-ина"
+      listSummary={
+        <div className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-900 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-100">
+          Эти правила управляют кнопкой чек-ина в игровом модуле. Активное
+          правило сразу попадает в визуальный редактор выбранного клуба.
+        </div>
+      }
+      items={missions}
+      layout="stacked"
+      renderItem={(item) => (
+        <RuleCard
+          key={item.id}
+          eyebrow="Сохраненное правило"
+          trackingId={trackingId("CHECKIN", item.id)}
+          title={item.name}
+          status={item.status}
+          subtitle={`Кнопка чек-ина · ${
+            item.rewardLabel ?? rewardTypeLabelFromValue(item.rewardType)
+          }`}
+          meta={[
+            storeScopeLabel(item.storeIds, stores),
+            item.audience?.name ?? "все гости",
+            `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
+            tariffRuleSummary(item.conditions),
+            item.manualApprovalRequired ? "ручная выдача" : "автовыдача",
+          ]}
+          details={
+            <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              Один гость может сделать чек-ин в одном клубе один раз за
+              календарный день по времени клуба.
+            </p>
+          }
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("missions", item.id, status)}
           saving={saving === `missions-${item.id}`}
@@ -12841,6 +13285,41 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     antiFraudText: jsonFormValue(mission.antiFraudRules),
     manualApprovalRequired: mission.manualApprovalRequired,
     note: mission.note ?? "",
+  };
+}
+
+function isCheckInMission(mission: GuestGameMission) {
+  return mission.missionType === "CHECK_IN" || mission.triggerKind === "CHECK_IN";
+}
+
+function isCheckInMissionForm(form: MissionForm) {
+  return form.missionType === "CHECK_IN" || form.triggerKind === "CHECK_IN";
+}
+
+function normalizeCheckInMissionForm(form: MissionForm): MissionForm {
+  return {
+    ...form,
+    missionType: "CHECK_IN",
+    triggerKind: "CHECK_IN",
+    rewardType: form.rewardType || "XP",
+    rewardAmount: form.rewardType === "XP" ? "0" : form.rewardAmount || "50",
+    rewardLabel:
+      form.rewardLabel ||
+      (form.rewardType === "BONUS_BALANCE" ? "Бонусы за чекин" : "XP за чекин"),
+    xpReward:
+      form.rewardType === "BONUS_BALANCE"
+        ? "0"
+        : form.xpReward && form.xpReward !== "0"
+          ? form.xpReward
+          : "20",
+    progressTarget: form.progressTarget || "1",
+    progressUnit: form.progressUnit || "check_in",
+    metricAggregation: form.metricAggregation || "count",
+    metricEventTypes: form.metricEventTypes || "CHECK_IN",
+    questEnabled: false,
+    questSteps: [],
+    requireLangameFact: false,
+    denySameDayRepeat: false,
   };
 }
 

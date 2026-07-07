@@ -5402,7 +5402,7 @@ describe('GuestGamificationService', () => {
         {
           guest_id: 'lg-guest-1',
           club_id: 'club-external-1',
-          date: '2026-07-06 17:00:49',
+          date: '2026-07-07 11:45:00',
           type: 'Покупка абонемент ADMIN 10 ЧАСОВ, 0 ₽ + 500 бонусы',
         },
       ]);
@@ -5437,6 +5437,87 @@ describe('GuestGamificationService', () => {
           sessionType: 'packet_hours',
           sessionPacket: true,
           sourceFactId: 'session-1',
+        }),
+      );
+    });
+
+    it('does not classify a new hourly session as packet from an old subscription guest log', async () => {
+      const { service, langameSettingsService, langameClient } =
+        createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        currentCountHours: null,
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337-Rodonitovaya',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+        integrationSourceId: 'source-1',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      langameSettingsService.resolveTenantAccess.mockResolvedValue({
+        apiKey: 'api-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: 'club-1',
+            baseUrl: 'https://langame.example',
+          },
+        ],
+      });
+      langameClient.listGuestSessions.mockResolvedValue([
+        {
+          id: 'session-hourly',
+          guest_id: 'lg-guest-1',
+          list_clubs_id: 'club-external-1',
+          date_start: '2026-07-07 14:53:00',
+          date_stop: null,
+          packet: 0,
+        },
+      ]);
+      langameClient.searchGuests.mockResolvedValue({
+        data: [],
+      });
+      langameClient.listTransactions.mockResolvedValue([]);
+      langameClient.listGuestLogs.mockResolvedValue([
+        {
+          guest_id: 'lg-guest-1',
+          club_id: 'club-external-1',
+          date: '2026-07-06 17:00:49',
+          type: 'success_subscription_buy_log',
+        },
+      ]);
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue({
+          processed: true,
+          summary: {
+            idempotencyKey:
+              'guest-game:GUEST_SESSION:SESSION_START:session-hourly',
+          },
+        } as GuestGameProcessEventResult);
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(langameClient.listGuestLogs).toHaveBeenCalled();
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          sessionType: 'regular_session',
+          sessionPacket: null,
+          sourceFactId: 'session-hourly',
         }),
       );
     });

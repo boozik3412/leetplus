@@ -3507,6 +3507,7 @@ export class GuestGamificationService {
       text: text ? text.slice(0, 240) : null,
       guestMatches: this.checkInGuestLogGuestMatches(row, externalGuestId),
       storeMatches: this.checkInGuestLogStoreMatches(row, session),
+      sessionWindowMatches: this.checkInGuestLogIsInSessionWindow(row, session),
       looksLikePacketOrSubscription:
         this.checkInGuestLogLooksLikePacketHours(row),
     };
@@ -12159,6 +12160,7 @@ export class GuestGamificationService {
     return (
       this.checkInGuestLogGuestMatches(row, externalGuestId) &&
       this.checkInGuestLogStoreMatches(row, session) &&
+      this.checkInGuestLogIsInSessionWindow(row, session) &&
       this.checkInGuestLogLooksLikePacketHours(row)
     );
   }
@@ -12208,6 +12210,35 @@ export class GuestGamificationService {
     );
   }
 
+  private checkInGuestLogIsInSessionWindow(
+    row: LangameGuestLog,
+    session: CheckInLiveSession,
+  ) {
+    if (!session.startedAt) {
+      return false;
+    }
+
+    const happenedAt = this.parseCheckInLangameDate(
+      this.checkInGuestLogDate(row),
+      session.store?.timeZone ?? null,
+    );
+
+    if (!happenedAt) {
+      return false;
+    }
+
+    const startedAtMs = session.startedAt.getTime();
+    const durationMs = Math.max(session.durationMinutes ?? 0, 0) * 60_000;
+    const toleranceMs = 15 * 60_000;
+    const lowerBound = startedAtMs - toleranceMs;
+    const upperBound = startedAtMs + Math.max(durationMs, toleranceMs);
+
+    return (
+      happenedAt.getTime() >= lowerBound &&
+      happenedAt.getTime() <= upperBound + toleranceMs
+    );
+  }
+
   private checkInGuestLogLooksLikePacketHours(row: LangameGuestLog) {
     return this.checkInRecordLooksLikePacketHours(row);
   }
@@ -12241,6 +12272,7 @@ export class GuestGamificationService {
       text.includes('hour') ||
       text.includes('hours') ||
       text.includes('час') ||
+      text.includes('часа') ||
       text.includes('часов');
     const hasSubscriptionMarker =
       text.includes('subscription') ||

@@ -185,7 +185,8 @@ function createService(
     postEndpoint: jest.fn(),
     listGuestSessions: jest.fn(),
     searchGuests: jest.fn(),
-    listTransactions: jest.fn(),
+    listTransactions: jest.fn().mockResolvedValue([]),
+    listGuestLogs: jest.fn().mockResolvedValue([]),
   };
   const bonusLedgerSchedulerService = {
     getRuntimeStatus: jest.fn(() => schedulerStatus),
@@ -4769,10 +4770,10 @@ describe('GuestGamificationService', () => {
             sourceFactId: 'session-without-club',
             payload: {
               langameSessionResolution: {
-                externalClubId: null,
+                externalClubId: 'push-club',
                 selectedStoreId: 'store-push',
                 resolvedStoreId: 'store-push',
-                storeResolvedBy: 'selected_store_fallback',
+                storeResolvedBy: 'langame_session',
               },
             },
           }),
@@ -5244,6 +5245,102 @@ describe('GuestGamificationService', () => {
         storeId: 'store-1',
       });
 
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sourceFactId: 'session-1',
+        }),
+      );
+    });
+
+    it('treats the live session as packet when Langame guest logs show an active abonnement', async () => {
+      const { service, langameSettingsService, langameClient } =
+        createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        currentCountHours: null,
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337-Пушкинская',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+        integrationSourceId: 'source-1',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      langameSettingsService.resolveTenantAccess.mockResolvedValue({
+        apiKey: 'api-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: 'club-1',
+            baseUrl: 'https://langame.example',
+          },
+        ],
+      });
+      langameClient.listGuestSessions.mockResolvedValue([
+        {
+          id: 'session-1',
+          guest_id: 'lg-guest-1',
+          date_start: '2026-07-07 11:43:00',
+          date_stop: null,
+          packet: 0,
+        },
+      ]);
+      langameClient.searchGuests.mockResolvedValue({
+        data: [],
+      });
+      langameClient.listTransactions.mockResolvedValue([
+        {
+          id: 'tx-1',
+          guest_id: 'lg-guest-1',
+          club_id: 'club-external-1',
+          date: '2026-07-06 17:00:49',
+          type: null,
+          comment: null,
+          sum: 0,
+        },
+      ]);
+      langameClient.listGuestLogs.mockResolvedValue([
+        {
+          guest_id: 'lg-guest-1',
+          club_id: 'club-external-1',
+          date: '2026-07-06 17:00:49',
+          type: 'Покупка абонемент ADMIN 10 ЧАСОВ, 0 ₽ + 500 бонусы',
+        },
+      ]);
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue({
+          processed: true,
+          summary: {
+            idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          },
+        } as GuestGameProcessEventResult);
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(langameClient.listGuestLogs).toHaveBeenCalledWith(
+        'https://langame.example',
+        'api-key',
+        expect.objectContaining({
+          page: 1,
+          pageLimit: 200,
+        }),
+      );
       expect(processEventSpy).toHaveBeenCalledWith(
         user,
         expect.objectContaining({

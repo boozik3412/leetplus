@@ -3815,7 +3815,7 @@ export class GuestPortalService {
       !visualLootBoxRefsContain(visualLootBoxRefs, lootBox)
     ) {
       this.logGuestGameDebug(
-        'open-failed',
+        'open-visual-ref-missing',
         {
           traceId,
           tenantId: context.tenant.id,
@@ -3825,9 +3825,6 @@ export class GuestPortalService {
           reason: 'visual_editor_not_published',
         },
         'warn',
-      );
-      throw new BadRequestException(
-        'Лутбокс не опубликован для этого клуба в визуальном редакторе.',
       );
     }
 
@@ -15637,17 +15634,17 @@ function guestGameDebugProcessResult(
       id: result.event.id,
       eventType: result.event.eventType,
       occurredAt: result.event.occurredAt,
-      sourceFactId: result.summary.idempotencyKey,
+      sourceFactId: result.summary?.idempotencyKey ?? null,
     },
-    input: guestGameDebugProgressInput(result.dryRun.input),
+    input: guestGameDebugProgressInput(result.dryRun?.input),
     summary: {
-      idempotent: result.summary.idempotent,
-      appliedXpDelta: result.summary.appliedXpDelta,
-      createdRewards: result.summary.createdRewards,
-      queuedRewardAmount: result.summary.queuedRewardAmount,
-      langameWrite: result.summary.langameWrite,
+      idempotent: result.summary?.idempotent ?? null,
+      appliedXpDelta: result.summary?.appliedXpDelta ?? null,
+      createdRewards: result.summary?.createdRewards ?? null,
+      queuedRewardAmount: result.summary?.queuedRewardAmount ?? null,
+      langameWrite: result.summary?.langameWrite ?? null,
     },
-    lootBoxRules: result.dryRun.rules
+    lootBoxRules: (result.dryRun?.rules ?? [])
       .filter((rule) => rule.kind === 'LOOT_BOX')
       .map(guestGameDebugDryRunRule),
   };

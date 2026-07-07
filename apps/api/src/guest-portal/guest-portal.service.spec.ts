@@ -2249,6 +2249,9 @@ describe('GuestPortalService', () => {
         storeIds: [portal.store.id],
         triggerKind: 'APP_OPEN',
       });
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValueOnce({
+        payload: { lootBoxes: [{ id: 'other-lootbox' }] },
+      });
       prisma.guestGameReward.count.mockResolvedValue(0);
       prisma.guestGameEvent.count.mockResolvedValue(1);
       guestGamificationService.dryRun.mockResolvedValue({

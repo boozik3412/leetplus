@@ -11977,6 +11977,7 @@ export class GuestGamificationService {
             pageLimit,
             dateFrom: dateRange.dateFrom,
             dateTo: dateRange.dateTo,
+            guestId: params.externalGuestId,
           },
         );
         pagesChecked += 1;

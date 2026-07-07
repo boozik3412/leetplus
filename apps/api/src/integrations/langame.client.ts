@@ -163,6 +163,7 @@ export class LangameClient {
       pageLimit: number;
       dateFrom: string;
       dateTo: string;
+      guestId?: string;
     },
   ) {
     return this.getListWithDateFallback<LangameGuestLog>(
@@ -174,6 +175,7 @@ export class LangameClient {
         page_limit: String(params.pageLimit),
         date_from: params.dateFrom,
         date_to: params.dateTo,
+        ...(params.guestId ? { guest_id: params.guestId } : {}),
       },
     );
   }

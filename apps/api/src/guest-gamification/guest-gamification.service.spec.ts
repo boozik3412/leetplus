@@ -5339,6 +5339,7 @@ describe('GuestGamificationService', () => {
         expect.objectContaining({
           page: 1,
           pageLimit: 200,
+          guestId: 'lg-guest-1',
         }),
       );
       expect(processEventSpy).toHaveBeenCalledWith(

@@ -4986,6 +4986,93 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('refreshes cached open sessions from Langame balance when an existing abonnement is active', async () => {
+      const { service, prisma, langameSettingsService, langameClient } =
+        createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        currentCountHours: null,
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337-Пушкинская',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+        integrationSourceId: 'source-1',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      langameSettingsService.resolveTenantAccess.mockResolvedValue({
+        apiKey: 'api-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: 'club-1',
+            baseUrl: 'https://langame.example',
+          },
+        ],
+      });
+      langameClient.listGuestSessions.mockResolvedValue([]);
+      prisma.guestSession.findFirst.mockResolvedValue({
+        externalDomain: 'club-1',
+        externalSessionId: 'session-1',
+        externalGuestId: 'lg-guest-1',
+        externalClubId: 'club-external-1',
+        externalUuid: 'uuid-1',
+        startedAt: new Date('2026-07-07T07:10:00.000Z'),
+        durationMinutes: 40,
+        packet: false,
+        store: {
+          id: 'store-1',
+          name: '1337-Пушкинская',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      });
+      langameClient.searchGuests.mockResolvedValue({
+        data: [
+          {
+            guest_id: 'lg-guest-1',
+            current_count_hours: '4.25',
+          },
+        ],
+      });
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue({
+          processed: true,
+          summary: {
+            idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          },
+        } as GuestGameProcessEventResult);
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(langameClient.searchGuests).toHaveBeenCalledWith(
+        'https://langame.example',
+        'api-key',
+        { guest_id: 'lg-guest-1' },
+        expect.any(Object),
+      );
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sourceFactId: 'session-1',
+        }),
+      );
+    });
+
     it('treats the live session as packet when Langame transactions show a package-hours activation', async () => {
       const { service, langameSettingsService, langameClient } =
         createService();

@@ -3503,14 +3503,18 @@ export class GuestGamificationService {
       return null;
     }
 
+    const event = result.event ?? null;
+    const input = result.dryRun?.input ?? null;
+    const rules = result.dryRun?.rules ?? [];
+
     return {
-      eventId: result.event.id,
-      eventType: result.event.eventType,
-      occurredAt: result.event.occurredAt,
+      eventId: event?.id ?? null,
+      eventType: event?.eventType ?? null,
+      occurredAt: event?.occurredAt ?? null,
       input: {
-        sessionType: result.dryRun.input.sessionType,
-        sessionPacket: result.dryRun.input.sessionPacket,
-        sessionMinutes: result.dryRun.input.sessionMinutes,
+        sessionType: input?.sessionType ?? null,
+        sessionPacket: input?.sessionPacket ?? null,
+        sessionMinutes: input?.sessionMinutes ?? null,
       },
       summary: {
         idempotent: result.summary.idempotent,
@@ -3519,7 +3523,7 @@ export class GuestGamificationService {
         queuedRewardAmount: result.summary.queuedRewardAmount,
         idempotencyKey: result.summary.idempotencyKey,
       },
-      lootBoxRules: result.dryRun.rules
+      lootBoxRules: rules
         .filter((rule) => rule.kind === 'LOOT_BOX')
         .map((rule) => ({
           id: rule.id,
@@ -11583,10 +11587,63 @@ export class GuestGamificationService {
       }
     }
 
-    return this.findCachedCheckInSession(
+    const cachedSession = await this.findCachedCheckInSession(
       tenantId,
       guest,
       options.expectedStore ?? null,
+    );
+
+    if (!cachedSession) {
+      return null;
+    }
+
+    const cachedSource = this.checkInSourceForCachedSession(
+      orderedSources,
+      cachedSession,
+    );
+
+    if (!cachedSource) {
+      this.logGuestGameDebug('live-session-start-cached-fallback', {
+        tenantId,
+        externalGuestId,
+        reason: 'source_not_found',
+        session: this.guestGameDebugSession(cachedSession),
+      });
+      return cachedSession;
+    }
+
+    const refreshedSession =
+      await this.resolveCheckInSessionTypeFromLiveGuestBalance(cachedSession, {
+        apiKey,
+        source: cachedSource,
+        externalGuestId,
+        guest,
+        timeoutMs: options.timeoutMs,
+      });
+
+    this.logGuestGameDebug('live-session-start-cached-fallback', {
+      tenantId,
+      externalGuestId,
+      apiSource: this.guestGameDebugSource(cachedSource),
+      session: this.guestGameDebugSession(refreshedSession),
+      sessionChanged:
+        refreshedSession.sessionPacket !== cachedSession.sessionPacket ||
+        refreshedSession.sessionType !== cachedSession.sessionType,
+    });
+
+    return refreshedSession;
+  }
+
+  private checkInSourceForCachedSession(
+    sources: Array<{ id: string; domain: string; baseUrl: string }>,
+    session: CheckInLiveSession,
+  ) {
+    const sessionDomain = nullableString(session.externalDomain);
+
+    return (
+      sources.find((source) => source.domain === sessionDomain) ??
+      sources[0] ??
+      null
     );
   }
 

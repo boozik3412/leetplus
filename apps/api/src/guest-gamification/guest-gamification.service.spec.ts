@@ -4850,7 +4850,7 @@ describe('GuestGamificationService', () => {
       expect(result).toBe(processResult);
     });
 
-    it('treats an already running session as packet when the guest has active package hours', async () => {
+    it('keeps an already running live regular session regular when only local guest balance looks packeted', async () => {
       const { service } = createService();
 
       jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
@@ -4899,8 +4899,8 @@ describe('GuestGamificationService', () => {
         user,
         expect.objectContaining({
           eventType: 'SESSION_START',
-          sessionType: 'packet_hours',
-          sessionPacket: true,
+          sessionType: 'regular_session',
+          sessionPacket: false,
           sourceFactId: 'session-1',
         }),
       );
@@ -4914,7 +4914,7 @@ describe('GuestGamificationService', () => {
         id: 'guest-1',
         externalDomain: 'club-1',
         externalGuestId: 'lg-guest-1',
-        currentCountHours: null,
+        currentCountHours: 600,
       });
       jest
         .spyOn(service as any, 'hasActiveSessionStartRules')
@@ -4995,7 +4995,7 @@ describe('GuestGamificationService', () => {
         id: 'guest-1',
         externalDomain: 'club-1',
         externalGuestId: 'lg-guest-1',
-        currentCountHours: null,
+        currentCountHours: 600,
       });
       jest
         .spyOn(service as any, 'hasActiveSessionStartRules')

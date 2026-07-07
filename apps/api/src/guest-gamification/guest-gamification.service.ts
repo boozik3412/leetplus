@@ -9182,11 +9182,6 @@ export class GuestGamificationService {
       return { result: null, cache: false };
     }
 
-    liveSession = this.resolveCheckInSessionTypeFromGuestBalance(
-      liveSession,
-      guest,
-    );
-
     this.logGuestGameDebug('live-session-start-found', {
       tenantId: user.tenantId,
       guestId,
@@ -11731,25 +11726,9 @@ export class GuestGamificationService {
       timeoutMs?: number;
     },
   ): Promise<CheckInLiveSession> {
-    const localSession = this.resolveCheckInSessionTypeFromGuestBalance(
-      session,
-      params.guest,
-    );
-
-    if (localSession.sessionPacket === true) {
-      this.logGuestGameDebug('live-session-type-detected', {
-        source: 'local_guest_balance',
-        apiSource: this.guestGameDebugSource(params.source),
-        externalGuestId: params.externalGuestId,
-        localCurrentCountHours: params.guest.currentCountHours ?? null,
-        session: this.guestGameDebugSession(localSession),
-      });
-      return localSession;
-    }
-
     const currentCountHours = await this.findLiveGuestCurrentCountHours(params);
     const sessionWithLiveBalance =
-      this.resolveCheckInSessionTypeFromGuestBalance(localSession, {
+      this.resolveCheckInSessionTypeFromGuestBalance(session, {
         currentCountHours,
       });
 

@@ -121,6 +121,72 @@ type GuestPortalProfileUpdateResponse = {
   summary: GuestPortalGameSummary;
   message: string;
 };
+
+function debugGuestGame(stage: string, payload: Record<string, unknown> = {}) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const logger = globalThis.console;
+    logger.info(`[guest-game-debug:${stage}]`, payload);
+  } catch {
+    // Diagnostics must never affect the guest flow.
+  }
+}
+
+function debugHomeLootCard(card: HomeLootCard | null | undefined) {
+  if (!card) {
+    return null;
+  }
+
+  return {
+    id: card.id,
+    title: card.title,
+    triggerKind: card.triggerKind,
+    sessionType: card.sessionType,
+    status: card.status,
+    openable: card.openable,
+    openState: card.openState,
+    openBlocker: card.openBlocker,
+    weeklyOpenedCount: card.weeklyOpenedCount,
+    weeklyLimit: card.weeklyLimit,
+    dailyOpenedCount: card.dailyOpenedCount,
+    dailyLimit: card.dailyLimit,
+    periodicLimitPeriod: card.periodicLimitPeriod,
+    periodicOpenedCount: card.periodicOpenedCount,
+  };
+}
+
+function debugSummarySnapshot(summary: GuestPortalGameSummary) {
+  return {
+    generatedAt: summary.generatedAt,
+    tenant: summary.tenant.slug,
+    storeId: summary.store.id,
+    storeName: summary.store.name,
+    profileId: summary.profile.id,
+    contactMasked: summary.profile.contactMasked,
+    lootBoxesTotal: summary.lootBoxes.total,
+    featuredLootBoxes: summary.lootBoxes.featured.map((lootBox) => ({
+      id: lootBox.id,
+      name: lootBox.name,
+      triggerKind: lootBox.triggerKind,
+      sessionType: lootBox.sessionType,
+      openable: lootBox.openable,
+      openState: lootBox.openState,
+      openBlocker: lootBox.openBlocker,
+      openedCount: lootBox.openedCount,
+      readyRewards: lootBox.readyRewards,
+      weeklyOpenedCount: lootBox.weeklyOpenedCount,
+      weeklyLimit: lootBox.weeklyLimit,
+      dailyOpenedCount: lootBox.dailyOpenedCount,
+      dailyLimit: lootBox.dailyLimit,
+      periodicLimitPeriod: lootBox.periodicLimitPeriod,
+      periodicOpenedCount: lootBox.periodicOpenedCount,
+    })),
+  };
+}
+
 type BannerTitleStyle = CSSProperties &
   Partial<
     Record<
@@ -782,11 +848,21 @@ function ReadyGameView({
     if (!silent) {
       showToast(pendingMessage);
     }
+    debugGuestGame("summary-refresh-start", {
+      pendingMessage,
+      successMessage,
+      silent,
+      currentSummary: debugSummarySnapshot(summary),
+      currentCards: lootCards.map(debugHomeLootCard),
+    });
 
     try {
       const nextSummary = await loadGameSummary();
 
       applySummaryWithQuestDialog(nextSummary);
+      debugGuestGame("summary-refresh-success", {
+        nextSummary: debugSummarySnapshot(nextSummary),
+      });
 
       if (successMessage && !silent) {
         showToast(successMessage);
@@ -794,8 +870,13 @@ function ReadyGameView({
 
       return nextSummary;
     } catch (error) {
+      const message = getErrorMessage(error, "Не удалось обновить лутбоксы.");
+      debugGuestGame("summary-refresh-error", {
+        message,
+        error,
+      });
       if (!silent) {
-        showToast(getErrorMessage(error, "Не удалось обновить лутбоксы."));
+        showToast(message);
       }
       return null;
     } finally {
@@ -885,11 +966,18 @@ function ReadyGameView({
     setLootboxRoulette(null);
     setLootboxOverlayError(null);
     emitLootboxEvent("overlay-open", { lootBoxId: card.id });
+    debugGuestGame("lootbox-overlay-open", {
+      card: debugHomeLootCard(card),
+    });
     showToast("Контейнер готов к открытию.");
   }
 
   function openLootboxOverlay(card: HomeLootCard) {
     setSelectedLootId(card.id);
+    debugGuestGame("lootbox-card-click", {
+      card: debugHomeLootCard(card),
+      summary: debugSummarySnapshot(summary),
+    });
 
     if (card.openable) {
       showLootboxOverlay(card);
@@ -910,6 +998,9 @@ function ReadyGameView({
       return;
     }
 
+    debugGuestGame("lootbox-unavailable-refresh-start", {
+      card: debugHomeLootCard(unavailableLootboxCard),
+    });
     setUnavailableLootboxMessage(null);
 
     const nextSummary = await refreshGameSummary({
@@ -919,6 +1010,9 @@ function ReadyGameView({
     });
 
     if (!nextSummary) {
+      debugGuestGame("lootbox-unavailable-refresh-error", {
+        card: debugHomeLootCard(unavailableLootboxCard),
+      });
       setUnavailableLootboxMessage(
         "Не удалось проверить условия. Попробуйте еще раз.",
       );
@@ -931,10 +1025,20 @@ function ReadyGameView({
     ).find((item) => item.id === unavailableLootboxCard.id);
 
     if (updatedCard?.openable) {
+      debugGuestGame("lootbox-unavailable-refresh-openable", {
+        card: debugHomeLootCard(updatedCard),
+      });
       showLootboxOverlay(updatedCard);
       return;
     }
 
+    debugGuestGame("lootbox-unavailable-refresh-blocked", {
+      previousCard: debugHomeLootCard(unavailableLootboxCard),
+      updatedCard: debugHomeLootCard(updatedCard ?? unavailableLootboxCard),
+      message: lootBoxUnavailableCheckMessage(
+        updatedCard ?? unavailableLootboxCard,
+      ),
+    });
     setUnavailableLootboxCard(updatedCard ?? unavailableLootboxCard);
     setUnavailableLootboxMessage(
       lootBoxUnavailableCheckMessage(updatedCard ?? unavailableLootboxCard),
@@ -954,6 +1058,11 @@ function ReadyGameView({
     setLootboxOverlayError(null);
     setLootboxOverlayPhase("charging");
     emitLootboxEvent("charge-start", { lootBoxId: currentCard.id });
+    debugGuestGame("lootbox-open-start", {
+      runId,
+      card: debugHomeLootCard(currentCard),
+      summary: debugSummarySnapshot(summary),
+    });
     showToast("Контейнер активируется.");
 
     try {
@@ -1011,6 +1120,12 @@ function ReadyGameView({
       setLootboxOverlayCard(nextCard);
       setLootboxRoulette(roulette);
       setLootboxOverlayPhase("rolling");
+      debugGuestGame("lootbox-open-success", {
+        runId,
+        card: debugHomeLootCard(nextCard),
+        rewards: result.rewards,
+        resultSummary: debugSummarySnapshot(result.summary),
+      });
       showToast("Маячок выбирает награду.");
     } catch (error) {
       if (lootboxOpenRunRef.current !== runId) {
@@ -1024,6 +1139,12 @@ function ReadyGameView({
       setLootboxRoulette(null);
       setLootboxOverlayPhase("ready");
       setLootboxOverlayError(message);
+      debugGuestGame("lootbox-open-error", {
+        runId,
+        card: debugHomeLootCard(currentCard),
+        message,
+        error,
+      });
       showToast(message);
     }
   }
@@ -1035,6 +1156,9 @@ function ReadyGameView({
 
     const currentCard = lootboxOverlayCard;
     setLootboxOverlayError(null);
+    debugGuestGame("lootbox-overlay-refresh-start", {
+      card: debugHomeLootCard(currentCard),
+    });
 
     const nextSummary = await refreshGameSummary({
       pendingMessage: "Проверяем условия открытия.",
@@ -1046,6 +1170,9 @@ function ReadyGameView({
       setLootboxOverlayError(
         "Не удалось проверить условия. Попробуйте еще раз.",
       );
+      debugGuestGame("lootbox-overlay-refresh-error", {
+        card: debugHomeLootCard(currentCard),
+      });
       return;
     }
 
@@ -1055,10 +1182,19 @@ function ReadyGameView({
 
     if (!updatedCard) {
       setLootboxOverlayError("Лутбокс больше не найден в игровом модуле.");
+      debugGuestGame("lootbox-overlay-refresh-missing", {
+        card: debugHomeLootCard(currentCard),
+        nextSummary: debugSummarySnapshot(nextSummary),
+      });
       return;
     }
 
     setLootboxOverlayCard(updatedCard);
+    debugGuestGame("lootbox-overlay-refresh-result", {
+      previousCard: debugHomeLootCard(currentCard),
+      updatedCard: debugHomeLootCard(updatedCard),
+      nextSummary: debugSummarySnapshot(nextSummary),
+    });
 
     if (!updatedCard.openable) {
       setLootboxOverlayError(
@@ -12189,8 +12325,15 @@ function isCheckInMission(mission: GameMission) {
 }
 
 async function loadGameSummary() {
+  const startedAt = Date.now();
+  debugGuestGame("api-summary-start");
   const response = await fetch("/api/guest-portal/session/game-summary", {
     cache: "no-store",
+  });
+  debugGuestGame("api-summary-response", {
+    status: response.status,
+    ok: response.ok,
+    durationMs: Date.now() - startedAt,
   });
 
   if (response.status === 401) {
@@ -12203,7 +12346,10 @@ async function loadGameSummary() {
     );
   }
 
-  return (await response.json()) as GuestPortalGameSummary;
+  const summary = (await response.json()) as GuestPortalGameSummary;
+  debugGuestGame("api-summary-data", debugSummarySnapshot(summary));
+
+  return summary;
 }
 
 async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
@@ -12272,6 +12418,8 @@ async function checkInGameSession(): Promise<GuestPortalCheckInResponse> {
 async function openGameLootBox(
   lootBoxId: string,
 ): Promise<GuestPortalLootBoxOpenResponse> {
+  const startedAt = Date.now();
+  debugGuestGame("api-lootbox-open-start", { lootBoxId });
   const response = await fetch(
     `/api/guest-portal/session/loot-boxes/${encodeURIComponent(lootBoxId)}/open`,
     {
@@ -12279,6 +12427,12 @@ async function openGameLootBox(
       cache: "no-store",
     },
   );
+  debugGuestGame("api-lootbox-open-response", {
+    lootBoxId,
+    status: response.status,
+    ok: response.ok,
+    durationMs: Date.now() - startedAt,
+  });
 
   if (response.status === 401) {
     throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
@@ -12290,7 +12444,17 @@ async function openGameLootBox(
     );
   }
 
-  return (await response.json()) as GuestPortalLootBoxOpenResponse;
+  const result = (await response.json()) as GuestPortalLootBoxOpenResponse;
+  debugGuestGame("api-lootbox-open-data", {
+    lootBoxId,
+    idempotent: result.idempotent,
+    createdRewards: result.createdRewards,
+    queuedRewardAmount: result.queuedRewardAmount,
+    rewards: result.rewards,
+    summary: debugSummarySnapshot(result.summary),
+  });
+
+  return result;
 }
 
 async function logoutGameSession() {

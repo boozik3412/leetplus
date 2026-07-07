@@ -349,7 +349,9 @@ function normalizeProgressSessionType(value: string | null | undefined) {
     return 'packet_hours';
   }
 
-  if (['regular_session', 'regular', 'common', 'default'].includes(normalized)) {
+  if (
+    ['regular_session', 'regular', 'common', 'default'].includes(normalized)
+  ) {
     return 'regular_session';
   }
 

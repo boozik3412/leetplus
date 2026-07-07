@@ -801,12 +801,11 @@ export class StaffTeamChatService {
             shiftIds,
           )
         : [];
-    const untaggedUpdates =
-      await this.buildUntaggedShiftReportMessageUpdates(
-        tenantId,
-        channelId,
-        createdSince,
-      );
+    const untaggedUpdates = await this.buildUntaggedShiftReportMessageUpdates(
+      tenantId,
+      channelId,
+      createdSince,
+    );
     const updates = [...taggedUpdates, ...untaggedUpdates];
 
     if (updates.length === 0) {

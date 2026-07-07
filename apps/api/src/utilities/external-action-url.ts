@@ -49,5 +49,13 @@ function hasUrlScheme(value: string) {
 }
 
 function hasUnsafeUrlCharacters(value: string) {
-  return /[\u0000-\u001f\u007f\s]/.test(value);
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+
+    if (code <= 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+
+  return false;
 }

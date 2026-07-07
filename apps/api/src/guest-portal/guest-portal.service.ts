@@ -3,6 +3,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -1518,6 +1519,8 @@ type GuestPortalVisualLootBoxRef = {
 
 @Injectable()
 export class GuestPortalService {
+  private readonly logger = new Logger(GuestPortalService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
@@ -1526,6 +1529,48 @@ export class GuestPortalService {
     private readonly guestGamificationService: GuestGamificationService,
     private readonly secretEncryptionService: SecretEncryptionService,
   ) {}
+
+  private gameDebugTraceId(prefix: string) {
+    return `${prefix}-${randomUUID().slice(0, 8)}`;
+  }
+
+  private logGuestGameDebug(
+    stage: string,
+    payload: Record<string, unknown>,
+    level: 'log' | 'warn' = 'log',
+  ) {
+    const message = `[guest-game-debug:${stage}] ${guestGameDebugJson(payload)}`;
+
+    if (level === 'warn') {
+      this.logger.warn(message);
+      return;
+    }
+
+    this.logger.log(message);
+  }
+
+  private guestGameDebugPayloadScope(payload: GuestPortalTokenPayload) {
+    return {
+      tenantId: payload.tenantId,
+      storeId: payload.storeId,
+      profileId: payload.profileId ?? null,
+      guestId: payload.guestId ?? null,
+      sub: guestGameDebugShortValue(payload.sub),
+    };
+  }
+
+  private guestGameDebugPortalScope(
+    payload: GuestPortalTokenPayload,
+    portal: GuestPortalPayload,
+  ) {
+    return {
+      ...this.guestGameDebugPayloadScope(payload),
+      storeName: portal.store.name,
+      profileId: portal.profile.id,
+      contactMasked: portal.profile.contactMasked,
+      guestFound: portal.guestFound,
+    };
+  }
 
   async getPublicConfig(
     tenantSlug: string,
@@ -3352,9 +3397,16 @@ export class GuestPortalService {
   async getGameSummary(
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
+    const traceId = this.gameDebugTraceId('summary');
     const payload = await this.verifyGuestToken(authorization);
-    const liveSessionStartResult =
-      await this.processLiveSessionStartForPayload(payload);
+    this.logGuestGameDebug('summary-request', {
+      traceId,
+      ...this.guestGameDebugPayloadScope(payload),
+    });
+    const liveSessionStartResult = await this.processLiveSessionStartForPayload(
+      payload,
+      traceId,
+    );
     const portal = await this.buildPortalPayload(payload, {
       liveSessionStartResult,
     });
@@ -3363,11 +3415,32 @@ export class GuestPortalService {
       portal.profile.id,
     );
 
-    return buildGameSummaryFromPortal(portal, {
+    const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
     });
+
+    this.logGuestGameDebug('summary-result', {
+      traceId,
+      ...this.guestGameDebugPortalScope(payload, portal),
+      liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      portalLootBoxes: portal.gamification.lootBoxes.map(
+        guestGameDebugLootBoxState,
+      ),
+      featuredLootBoxes: summary.lootBoxes.featured.map(
+        guestGameDebugLootBoxState,
+      ),
+      nextActions: summary.nextActions.map((action) => ({
+        kind: action.kind,
+        title: action.title,
+        statusLabel: action.statusLabel,
+        progressPercent: action.progressPercent,
+        anchor: action.anchor,
+      })),
+    });
+
+    return summary;
   }
 
   async updateProfile(
@@ -3451,11 +3524,13 @@ export class GuestPortalService {
       );
     }
 
-    const liveSessionStartResult = await this.processLiveSessionStartForPayload({
-      ...payload,
-      guestId: guest?.id ?? profile.guestId ?? null,
-      profileId: profile.id,
-    });
+    const liveSessionStartResult = await this.processLiveSessionStartForPayload(
+      {
+        ...payload,
+        guestId: guest?.id ?? profile.guestId ?? null,
+        profileId: profile.id,
+      },
+    );
 
     const openedAt = new Date();
     const openedDate = openedAt.toISOString().slice(0, 10);
@@ -3542,11 +3617,20 @@ export class GuestPortalService {
 
   private async processLiveSessionStartForPayload(
     payload: GuestPortalTokenPayload,
+    traceId: string | null = null,
   ) {
     const context = await this.getTenantStoreByIds(
       payload.tenantId,
       payload.storeId,
     );
+    this.logGuestGameDebug('live-session-start-lookup', {
+      traceId,
+      ...this.guestGameDebugPayloadScope(payload),
+      storeName: context.store.name,
+      storeTimeZone: context.store.timeZone ?? null,
+      externalDomain: context.store.externalDomain ?? null,
+      externalClubId: context.store.externalClubId ?? null,
+    });
     let guest = await this.findGuest(payload, context.store);
     guest = this.guestMatchesStoreDomain(guest, context.store) ? guest : null;
     const profile = await this.findProfile(payload, guest?.id ?? null);
@@ -3576,6 +3660,17 @@ export class GuestPortalService {
     const guestId = guest?.id ?? null;
 
     if (!profile?.id || !guestId) {
+      this.logGuestGameDebug(
+        'live-session-start-skipped',
+        {
+          traceId,
+          ...this.guestGameDebugPayloadScope(payload),
+          resolvedProfileId: profile?.id ?? null,
+          resolvedGuestId: guestId,
+          reason: !profile?.id ? 'profile_not_found' : 'guest_not_found',
+        },
+        'warn',
+      );
       return null;
     }
 
@@ -3590,12 +3685,35 @@ export class GuestPortalService {
       tenantStatus: TenantLifecycleStatus.ACTIVE,
     };
 
-    return this.guestGamificationService.processLiveSessionStart(actor, {
+    const result = await this.guestGamificationService.processLiveSessionStart(
+      actor,
+      {
+        profileId: profile.id,
+        guestId,
+        storeId: context.store.id,
+        note: 'Гость обновил игровой модуль во время активной Langame-сессии.',
+      },
+    );
+
+    this.logGuestGameDebug('live-session-start-result', {
+      traceId,
+      tenantId: context.tenant.id,
+      storeId: context.store.id,
       profileId: profile.id,
       guestId,
-      storeId: context.store.id,
-      note: 'Гость обновил игровой модуль во время активной Langame-сессии.',
+      contactMasked:
+        this.gameProfilePhoneMasked(
+          profile.phoneEncrypted ?? null,
+          guest?.phoneEncrypted ?? null,
+          null,
+        ) ??
+        profile.contactMasked ??
+        guest?.phoneMasked ??
+        null,
+      result: guestGameDebugProcessResult(result),
     });
+
+    return result;
   }
 
   async openLootBox(
@@ -3616,8 +3734,16 @@ export class GuestPortalService {
     payload: GuestPortalTokenPayload,
     id: string,
   ): Promise<GuestPortalLootBoxOpenResponse> {
-    const liveSessionStartResult =
-      await this.processLiveSessionStartForPayload(payload);
+    const traceId = this.gameDebugTraceId('open');
+    this.logGuestGameDebug('open-request', {
+      traceId,
+      ...this.guestGameDebugPayloadScope(payload),
+      lootBoxId: id,
+    });
+    const liveSessionStartResult = await this.processLiveSessionStartForPayload(
+      payload,
+      traceId,
+    );
 
     const context = await this.getTenantStoreByIds(
       payload.tenantId,
@@ -3627,6 +3753,16 @@ export class GuestPortalService {
     const profile = await this.findProfile(payload, guest?.id ?? null);
 
     if (!profile) {
+      this.logGuestGameDebug(
+        'open-failed',
+        {
+          traceId,
+          ...this.guestGameDebugPayloadScope(payload),
+          lootBoxId: id,
+          reason: 'profile_not_found',
+        },
+        'warn',
+      );
       throw new BadRequestException(
         'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
       );
@@ -3641,10 +3777,31 @@ export class GuestPortalService {
     });
 
     if (!lootBox) {
+      this.logGuestGameDebug(
+        'open-failed',
+        {
+          traceId,
+          ...this.guestGameDebugPayloadScope(payload),
+          lootBoxId: id,
+          reason: 'loot_box_not_found_or_inactive',
+        },
+        'warn',
+      );
       throw new NotFoundException('Лутбокс не найден.');
     }
 
     if (!matchesStore(lootBox.storeIds, context.store.id)) {
+      this.logGuestGameDebug(
+        'open-failed',
+        {
+          traceId,
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          reason: 'store_not_matched',
+        },
+        'warn',
+      );
       throw new BadRequestException('Лутбокс недоступен в выбранном клубе.');
     }
 
@@ -3657,6 +3814,18 @@ export class GuestPortalService {
       visualLootBoxRefs &&
       !visualLootBoxRefsContain(visualLootBoxRefs, lootBox)
     ) {
+      this.logGuestGameDebug(
+        'open-failed',
+        {
+          traceId,
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          visualLootBoxRefs,
+          reason: 'visual_editor_not_published',
+        },
+        'warn',
+      );
       throw new BadRequestException(
         'Лутбокс не опубликован для этого клуба в визуальном редакторе.',
       );
@@ -3664,20 +3833,22 @@ export class GuestPortalService {
 
     const openedAt = new Date();
     const ownerGuestId = guest?.id ?? profile.guestId ?? null;
-    const [currentRewards, unlockEvents, audienceMemberIds] = await Promise.all([
-      this.findPortalRewards(
-        context.tenant.id,
-        context.store.id,
-        ownerGuestId,
-        profile.id,
-      ),
-      this.findPortalLootBoxUnlockEvents(
-        context.tenant.id,
-        ownerGuestId,
-        profile.id,
-      ),
-      this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
-    ]);
+    const [currentRewards, unlockEvents, audienceMemberIds] = await Promise.all(
+      [
+        this.findPortalRewards(
+          context.tenant.id,
+          context.store.id,
+          ownerGuestId,
+          profile.id,
+        ),
+        this.findPortalLootBoxUnlockEvents(
+          context.tenant.id,
+          ownerGuestId,
+          profile.id,
+        ),
+        this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
+      ],
+    );
     const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
       liveSessionStartResult,
     );
@@ -3702,7 +3873,61 @@ export class GuestPortalService {
       : null;
     const ruleOccurredAt = unlockEvent?.occurredAt ?? openedAt;
 
+    this.logGuestGameDebug('open-state', {
+      traceId,
+      tenantId: context.tenant.id,
+      storeId: context.store.id,
+      storeName: context.store.name,
+      storeTimeZone: context.store.timeZone ?? null,
+      profileId: profile.id,
+      guestId: ownerGuestId,
+      contactMasked:
+        this.gameProfilePhoneMasked(
+          profile.phoneEncrypted ?? null,
+          guest?.phoneEncrypted ?? null,
+          null,
+        ) ??
+        profile.contactMasked ??
+        guest?.phoneMasked ??
+        null,
+      lootBox: guestGameDebugLootBoxRule(lootBox),
+      liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      liveUnlockEvent: guestGameDebugUnlockEvent(liveSessionStartUnlockEvent),
+      unlockEvent: guestGameDebugUnlockEvent(unlockEvent),
+      unlockInput: guestGameDebugProgressInput(unlockInput),
+      rewardCounts: {
+        currentRewards: currentRewards.length,
+        unlockEvents: unlockEvents.length,
+        audienceMembers: audienceMemberIds.size,
+      },
+      openState: guestGameDebugLootBoxState({
+        ...lootBox,
+        ...openState,
+        openedCount: currentRewards.filter(
+          (reward) => reward.lootBoxId === lootBox.id,
+        ).length,
+        readyRewards: 0,
+        waitingApprovalRewards: 0,
+        redeemedRewards: 0,
+        latestReward: null,
+      }),
+    });
+
     if (!openState.openable) {
+      this.logGuestGameDebug(
+        'open-blocked-by-state',
+        {
+          traceId,
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          profileId: profile.id,
+          guestId: ownerGuestId,
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          openState,
+          unlockEvent: guestGameDebugUnlockEvent(unlockEvent),
+        },
+        'warn',
+      );
       throw new BadRequestException(
         openState.openBlocker ?? 'Лутбокс сейчас недоступен.',
       );
@@ -3767,6 +3992,36 @@ export class GuestPortalService {
       (item) => item.kind === 'LOOT_BOX' && item.id === lootBox.id,
     );
 
+    this.logGuestGameDebug(
+      'open-dry-run',
+      {
+        traceId,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        profileId: profile.id,
+        guestId: ownerGuestId,
+        lootBox: guestGameDebugLootBoxRule(lootBox),
+        sourceFactId,
+        occurredAt: processDto.occurredAt,
+        processInput: {
+          eventType: processDto.eventType,
+          sessionType: processDto.sessionType ?? null,
+          sessionPacket: processDto.sessionPacket ?? null,
+          sessionMinutes: processDto.sessionMinutes ?? null,
+          spendAmount: processDto.spendAmount ?? null,
+          tariffGroupId: processDto.tariffGroupId ?? null,
+          tariffPeriodId: processDto.tariffPeriodId ?? null,
+          tariffTypeId: processDto.tariffTypeId ?? null,
+          guestLogType: processDto.guestLogType ?? null,
+        },
+        targetRule: guestGameDebugDryRunRule(rule),
+        lootBoxRules: dryRun.rules
+          .filter((item) => item.kind === 'LOOT_BOX')
+          .map(guestGameDebugDryRunRule),
+      },
+      rule?.eligible ? 'log' : 'warn',
+    );
+
     if (!rule?.eligible) {
       throw new BadRequestException(
         rule?.blockers[0] ?? 'Лутбокс сейчас недоступен.',
@@ -3793,6 +4048,26 @@ export class GuestPortalService {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
+    });
+
+    this.logGuestGameDebug('open-success', {
+      traceId,
+      tenantId: context.tenant.id,
+      storeId: context.store.id,
+      profileId: profile.id,
+      guestId: ownerGuestId,
+      lootBox: guestGameDebugLootBoxRule(lootBox),
+      processSummary: processResult.summary,
+      rewards: processResult.rewards.map((reward) => ({
+        id: reward.id,
+        rewardLabel: reward.rewardLabel,
+        rewardType: reward.rewardType,
+        rewardAmount: reward.rewardAmount,
+        walletState: reward.walletState,
+      })),
+      featuredLootBoxes: summary.lootBoxes.featured.map(
+        guestGameDebugLootBoxState,
+      ),
     });
 
     return {
@@ -12311,10 +12586,7 @@ function filterLootBoxesByVisualRefs<T extends { id: string; name: string }>(
     }
   }
 
-  return [
-    ...orderedRows,
-    ...rows.filter((row) => !orderedIds.has(row.id)),
-  ];
+  return [...orderedRows, ...rows.filter((row) => !orderedIds.has(row.id))];
 }
 
 function visualLootBoxRefsContain(
@@ -12463,15 +12735,14 @@ function buildLootBoxOpenState(
       guestGameSameLocalDay(reward.qualifiedAt, now, timeZone),
   ).length;
   const periodicOpenedCount = periodicLimitPeriod
-    ? lootBoxRewards.filter(
-        (reward) =>
-          lootBoxRewardWithinPeriod(
-            reward.qualifiedAt,
-            now,
-            periodicLimitPeriod,
-            timeZone,
-            restartedAt,
-          ),
+    ? lootBoxRewards.filter((reward) =>
+        lootBoxRewardWithinPeriod(
+          reward.qualifiedAt,
+          now,
+          periodicLimitPeriod,
+          timeZone,
+          restartedAt,
+        ),
       ).length
     : 0;
 
@@ -12687,7 +12958,10 @@ function lootBoxUnlockEventMatches(
     return false;
   }
 
-  if (requireLootBoxRuleUnlock && !lootBoxUnlockEventHasRuleUnlock(row, event)) {
+  if (
+    requireLootBoxRuleUnlock &&
+    !lootBoxUnlockEventHasRuleUnlock(row, event)
+  ) {
     return false;
   }
 
@@ -12867,7 +13141,9 @@ function normalizeGuestPortalSessionType(value: string | null | undefined) {
     return 'packet_hours';
   }
 
-  if (['regular_session', 'regular', 'common', 'default'].includes(normalized)) {
+  if (
+    ['regular_session', 'regular', 'common', 'default'].includes(normalized)
+  ) {
     return 'regular_session';
   }
 
@@ -15196,6 +15472,237 @@ function portalEventToProgressEvent(row: {
     categoryName: stringField(input.categoryName),
     supplierName: stringField(input.supplierName),
     quantity: numberField(input.quantity),
+  };
+}
+
+function guestGameDebugJson(payload: Record<string, unknown>) {
+  try {
+    return JSON.stringify(payload, guestGameDebugJsonReplacer);
+  } catch (error) {
+    return JSON.stringify({
+      serializationError:
+        error instanceof Error ? error.message : 'failed_to_serialize',
+    });
+  }
+}
+
+function guestGameDebugJsonReplacer(_key: string, value: unknown) {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (value && typeof value === 'object') {
+    const decimalLike = value as {
+      constructor?: { name?: string };
+      toString?: () => string;
+    };
+    const name = decimalLike.constructor?.name;
+
+    if (name === 'Decimal' && typeof decimalLike.toString === 'function') {
+      return decimalLike.toString();
+    }
+  }
+
+  return value;
+}
+
+function guestGameDebugShortValue(value: unknown) {
+  const text = stringField(value);
+
+  if (!text) {
+    return null;
+  }
+
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function guestGameDebugLootBoxState(
+  lootBox: Partial<GuestPortalLootBox> & {
+    id?: string;
+    name?: string;
+    triggerKind?: string;
+    sessionType?: string | null;
+  },
+) {
+  return {
+    id: lootBox.id ?? null,
+    name: lootBox.name ?? null,
+    triggerKind: lootBox.triggerKind ?? null,
+    sessionType: lootBox.sessionType ?? null,
+    openState: lootBox.openState ?? null,
+    openable: lootBox.openable ?? null,
+    openBlocker: lootBox.openBlocker ?? null,
+    openedCount: lootBox.openedCount ?? null,
+    readyRewards: lootBox.readyRewards ?? null,
+    waitingApprovalRewards: lootBox.waitingApprovalRewards ?? null,
+    redeemedRewards: lootBox.redeemedRewards ?? null,
+    weeklyOpenedCount: lootBox.weeklyOpenedCount ?? null,
+    weeklyLimit: lootBox.weeklyLimit ?? null,
+    dailyOpenedCount: lootBox.dailyOpenedCount ?? null,
+    dailyLimit: lootBox.dailyLimit ?? null,
+    periodicLimitPeriod: lootBox.periodicLimitPeriod ?? null,
+    periodicOpenedCount: lootBox.periodicOpenedCount ?? null,
+    latestReward: lootBox.latestReward
+      ? {
+          id: lootBox.latestReward.id,
+          walletState: lootBox.latestReward.walletState,
+          rewardLabel: lootBox.latestReward.rewardLabel,
+          qualifiedAt: lootBox.latestReward.qualifiedAt,
+        }
+      : null,
+  };
+}
+
+function guestGameDebugLootBoxRule(row: {
+  id: string;
+  name: string;
+  status?: string;
+  triggerKind: string;
+  sessionType?: string | null;
+  storeIds?: Prisma.JsonValue | null;
+  limits?: Prisma.JsonValue | null;
+  periodRules?: Prisma.JsonValue | null;
+}) {
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status ?? null,
+    triggerKind: row.triggerKind,
+    sessionType: row.sessionType ?? null,
+    storeIds: row.storeIds ?? null,
+    limits: guestGameDebugLimits(row.limits ?? null),
+    periodRules: guestGameDebugPeriodRules(row.periodRules ?? null),
+  };
+}
+
+function guestGameDebugLimits(value: Prisma.JsonValue | null | undefined) {
+  const limits = jsonRecord(value);
+
+  return {
+    perGuestPerWeek: limits.perGuestPerWeek ?? null,
+    totalPerDay: limits.totalPerDay ?? null,
+    periodicLimit: limits.periodicLimit ?? null,
+    restartedAt: limits.restartedAt ?? null,
+  };
+}
+
+function guestGameDebugPeriodRules(value: Prisma.JsonValue | null | undefined) {
+  const rules = jsonRecord(value);
+
+  return {
+    schedule: rules.schedule ?? null,
+    startTime: rules.startTime ?? null,
+    endTime: rules.endTime ?? null,
+    days: rules.days ?? null,
+    tariffGroupId: rules.tariffGroupId ?? null,
+    tariffGroupIds: rules.tariffGroupIds ?? null,
+    tariffPeriodId: rules.tariffPeriodId ?? null,
+    tariffPeriodIds: rules.tariffPeriodIds ?? null,
+    tariffTypeId: rules.tariffTypeId ?? null,
+    tariffTypeIds: rules.tariffTypeIds ?? null,
+    guestLogType: rules.guestLogType ?? null,
+    guestLogTypes: rules.guestLogTypes ?? null,
+    blockedGuestLogTypes: rules.blockedGuestLogTypes ?? null,
+  };
+}
+
+function guestGameDebugUnlockEvent(
+  row: GuestPortalLootBoxUnlockEventRow | null | undefined,
+) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    eventType: row.eventType,
+    occurredAt: row.occurredAt.toISOString(),
+    input: guestGameDebugProgressInput(portalEventToProgressEvent(row)),
+  };
+}
+
+function guestGameDebugProcessResult(
+  result: GuestGameProcessEventResult | null | undefined,
+) {
+  if (!result) {
+    return null;
+  }
+
+  return {
+    processed: result.processed,
+    event: {
+      id: result.event.id,
+      eventType: result.event.eventType,
+      occurredAt: result.event.occurredAt,
+      sourceFactId: result.summary.idempotencyKey,
+    },
+    input: guestGameDebugProgressInput(result.dryRun.input),
+    summary: {
+      idempotent: result.summary.idempotent,
+      appliedXpDelta: result.summary.appliedXpDelta,
+      createdRewards: result.summary.createdRewards,
+      queuedRewardAmount: result.summary.queuedRewardAmount,
+      langameWrite: result.summary.langameWrite,
+    },
+    lootBoxRules: result.dryRun.rules
+      .filter((rule) => rule.kind === 'LOOT_BOX')
+      .map(guestGameDebugDryRunRule),
+  };
+}
+
+function guestGameDebugProgressInput(
+  input: Partial<GuestGameProgressEvent> | null | undefined,
+) {
+  if (!input) {
+    return null;
+  }
+
+  return {
+    eventType: input.eventType ?? null,
+    storeId: input.storeId ?? null,
+    sessionType: input.sessionType ?? null,
+    sessionPacket: input.sessionPacket ?? null,
+    sessionMinutes: input.sessionMinutes ?? null,
+    spendAmount: input.spendAmount ?? null,
+    tariffGroupId: input.tariffGroupId ?? null,
+    tariffPeriodId: input.tariffPeriodId ?? null,
+    tariffTypeId: input.tariffTypeId ?? null,
+    guestLogType: input.guestLogType ?? null,
+    productId: input.productId ?? null,
+    externalProductId: input.externalProductId ?? null,
+    categoryId: input.categoryId ?? null,
+    productName: input.productName ?? null,
+    categoryName: input.categoryName ?? null,
+    supplierName: input.supplierName ?? null,
+    quantity: input.quantity ?? null,
+  };
+}
+
+function guestGameDebugDryRunRule(rule: unknown) {
+  if (!rule || typeof rule !== 'object') {
+    return null;
+  }
+
+  const item = rule as Record<string, unknown>;
+
+  return {
+    id: stringField(item.id),
+    kind: stringField(item.kind),
+    name: stringField(item.name),
+    status: stringField(item.status),
+    eligible: item.eligible === true,
+    blockers: Array.isArray(item.blockers)
+      ? item.blockers.filter(
+          (blocker): blocker is string => typeof blocker === 'string',
+        )
+      : [],
+    progress: item.progress ?? null,
+    rewardLabel: stringField(item.rewardLabel),
+    selectedRewardLabel: stringField(item.selectedRewardLabel),
+    selectedReward: item.selectedReward ?? null,
   };
 }
 

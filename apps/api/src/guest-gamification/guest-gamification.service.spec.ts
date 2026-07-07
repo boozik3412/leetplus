@@ -3191,7 +3191,9 @@ describe('GuestGamificationService', () => {
             mainPrize: null,
             levelRewards: [],
           },
-          lootBoxes: [visualLootBoxItem({ id: 'loot-old', title: 'Старый кейс' })],
+          lootBoxes: [
+            visualLootBoxItem({ id: 'loot-old', title: 'Старый кейс' }),
+          ],
           missions: [],
         }),
       });
@@ -3597,14 +3599,14 @@ describe('GuestGamificationService', () => {
       });
       prisma.store.findMany.mockResolvedValue([store]);
 
-      await expect(service.deleteLootBox(user, 'loot-delete')).rejects.toMatchObject(
-        {
-          response: expect.objectContaining({
-            code: 'GAME_RULE_ACTIVE',
-            storeNames: [expect.stringContaining('1337-Пушкинская')],
-          }),
-        },
-      );
+      await expect(
+        service.deleteLootBox(user, 'loot-delete'),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'GAME_RULE_ACTIVE',
+          storeNames: [expect.stringContaining('1337-Пушкинская')],
+        }),
+      });
       expect(prisma.guestGameEvent.count).not.toHaveBeenCalled();
       expect(prisma.guestGameReward.count).not.toHaveBeenCalled();
       expect(prisma.guestGameLootBox.delete).not.toHaveBeenCalled();
@@ -4904,7 +4906,8 @@ describe('GuestGamificationService', () => {
     });
 
     it('refreshes active package hours from Langame when they changed after the session started', async () => {
-      const { service, langameSettingsService, langameClient } = createService();
+      const { service, langameSettingsService, langameClient } =
+        createService();
 
       jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
         id: 'guest-1',
@@ -4984,7 +4987,8 @@ describe('GuestGamificationService', () => {
     });
 
     it('treats the live session as packet when Langame transactions show a package-hours activation', async () => {
-      const { service, langameSettingsService, langameClient } = createService();
+      const { service, langameSettingsService, langameClient } =
+        createService();
 
       jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
         id: 'guest-1',
@@ -5078,7 +5082,8 @@ describe('GuestGamificationService', () => {
     });
 
     it('treats the live session as packet when Langame transactions show an abonnement activation', async () => {
-      const { service, langameSettingsService, langameClient } = createService();
+      const { service, langameSettingsService, langameClient } =
+        createService();
 
       jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
         id: 'guest-1',
@@ -5254,35 +5259,37 @@ describe('GuestGamificationService', () => {
           store: null,
           raw: {},
         });
-      const processEventSpy = jest.spyOn(service, 'processEvent').mockResolvedValue({
-        processed: true,
-        dryRun: dryRunResult({
-          input: {
-            sessionType: 'packet_hours',
-            sessionPacket: true,
-            sessionMinutes: 15,
-          },
-        }),
-        event: {
-          eventType: 'SESSION_START',
-          occurredAt: '2026-06-10T09:45:00.000Z',
-          payload: {
-            sourceFactKind: 'GUEST_SESSION',
-            store: { id: 'store-1' },
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue({
+          processed: true,
+          dryRun: dryRunResult({
             input: {
               sessionType: 'packet_hours',
               sessionPacket: true,
               sessionMinutes: 15,
             },
+          }),
+          event: {
+            eventType: 'SESSION_START',
+            occurredAt: '2026-06-10T09:45:00.000Z',
+            payload: {
+              sourceFactKind: 'GUEST_SESSION',
+              store: { id: 'store-1' },
+              input: {
+                sessionType: 'packet_hours',
+                sessionPacket: true,
+                sessionMinutes: 15,
+              },
+            },
           },
-        },
-        rewards: [],
-        summary: {
-          idempotent: true,
-          createdRewards: 0,
-          queuedRewardAmount: 0,
-        },
-      } as any);
+          rewards: [],
+          summary: {
+            idempotent: true,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+          },
+        } as any);
 
       const first = await service.processLiveSessionStart(user, {
         profileId: 'profile-1',

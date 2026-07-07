@@ -3328,6 +3328,41 @@ function isPilotFirstBonusLedgerRow(row: BonusLedgerAuditRow) {
   );
 }
 
+function guestGamificationDebugJson(payload: Record<string, unknown>) {
+  try {
+    return JSON.stringify(payload, guestGamificationDebugJsonReplacer);
+  } catch (error) {
+    return JSON.stringify({
+      serializationError:
+        error instanceof Error ? error.message : 'failed_to_serialize',
+    });
+  }
+}
+
+function guestGamificationDebugJsonReplacer(_key: string, value: unknown) {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (value && typeof value === 'object') {
+    const decimalLike = value as {
+      constructor?: { name?: string };
+      toString?: () => string;
+    };
+    const name = decimalLike.constructor?.name;
+
+    if (name === 'Decimal' && typeof decimalLike.toString === 'function') {
+      return decimalLike.toString();
+    }
+  }
+
+  return value;
+}
+
 @Injectable()
 export class GuestGamificationService {
   private readonly logger = new Logger(GuestGamificationService.name);
@@ -3350,6 +3385,151 @@ export class GuestGamificationService {
     @Optional()
     private readonly staffTeamChatService?: StaffTeamChatService,
   ) {}
+
+  private logGuestGameDebug(
+    stage: string,
+    payload: Record<string, unknown>,
+    level: 'log' | 'warn' = 'log',
+  ) {
+    const message = `[guest-game-debug:${stage}] ${guestGamificationDebugJson(
+      payload,
+    )}`;
+
+    if (level === 'warn') {
+      this.logger.warn(message);
+      return;
+    }
+
+    this.logger.log(message);
+  }
+
+  private guestGameDebugSource(source: { baseUrl?: string | null }) {
+    const baseUrl = nullableString(source.baseUrl);
+
+    if (!baseUrl) {
+      return null;
+    }
+
+    try {
+      return new URL(baseUrl).host;
+    } catch {
+      return baseUrl.slice(0, 120);
+    }
+  }
+
+  private guestGameDebugStore(store: CheckInExpectedStore | null) {
+    if (!store) {
+      return null;
+    }
+
+    return {
+      id: store.id,
+      name: store.name,
+      externalDomain: store.externalDomain,
+      externalClubId: store.externalClubId,
+      integrationSourceId: store.integrationSourceId,
+      timeZone: store.timeZone,
+    };
+  }
+
+  private guestGameDebugSession(session: CheckInLiveSession | null) {
+    if (!session) {
+      return null;
+    }
+
+    return {
+      externalSessionId: session.externalSessionId,
+      externalDomain: session.externalDomain,
+      externalClubId: session.externalClubId,
+      startedAt: session.startedAt?.toISOString() ?? null,
+      durationMinutes: session.durationMinutes,
+      sessionType: session.sessionType,
+      sessionPacket: session.sessionPacket,
+      store: session.store
+        ? {
+            id: session.store.id,
+            name: session.store.name,
+            timeZone: session.store.timeZone,
+          }
+        : null,
+    };
+  }
+
+  private guestGameDebugTransaction(
+    row: LangameTransaction,
+    session: CheckInLiveSession,
+    externalGuestId: string,
+  ) {
+    const record = row as LangameTransaction & Record<string, unknown>;
+    const text = [
+      row.type,
+      row.comment,
+      record.name,
+      record.title,
+      record.description,
+      record.operation_type,
+      record.operation_name,
+    ]
+      .map((value) => this.checkInScalar(value))
+      .filter(Boolean)
+      .join(' | ');
+
+    return {
+      id:
+        this.checkInScalar(record.id) ??
+        this.checkInScalar(record.transaction_id) ??
+        null,
+      realGuestId: this.checkInScalar(row.real_guest_id),
+      guestId: this.checkInScalar(row.guest_id),
+      sessionId: this.checkInScalar(row.session_id),
+      clubId: this.checkInScalar(row.club_id ?? row.list_clubs_id),
+      date: this.checkInTransactionDate(row),
+      type: this.checkInScalar(row.type),
+      text: text ? text.slice(0, 240) : null,
+      guestMatches: this.checkInTransactionGuestMatches(row, externalGuestId),
+      sessionOrStoreMatches: this.checkInTransactionSessionOrStoreMatches(
+        row,
+        session,
+      ),
+      looksLikePacketOrSubscription:
+        this.checkInTransactionLooksLikePacketHours(row),
+    };
+  }
+
+  private guestGameDebugProcessResult(
+    result: GuestGameProcessEventResult | null,
+  ) {
+    if (!result) {
+      return null;
+    }
+
+    return {
+      eventId: result.event.id,
+      eventType: result.event.eventType,
+      occurredAt: result.event.occurredAt,
+      input: {
+        sessionType: result.dryRun.input.sessionType,
+        sessionPacket: result.dryRun.input.sessionPacket,
+        sessionMinutes: result.dryRun.input.sessionMinutes,
+      },
+      summary: {
+        idempotent: result.summary.idempotent,
+        appliedXpDelta: result.summary.appliedXpDelta,
+        createdRewards: result.summary.createdRewards,
+        queuedRewardAmount: result.summary.queuedRewardAmount,
+        idempotencyKey: result.summary.idempotencyKey,
+      },
+      lootBoxRules: result.dryRun.rules
+        .filter((rule) => rule.kind === 'LOOT_BOX')
+        .map((rule) => ({
+          id: rule.id,
+          name: rule.name,
+          eligible: rule.eligible,
+          status: rule.status,
+          blockers: rule.blockers,
+        })),
+    };
+  }
 
   async getWorkspace(
     user: AuthenticatedUser,
@@ -6020,15 +6200,14 @@ export class GuestGamificationService {
     options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const lootBox = await this.assertLootBox(user, id);
-    const detachedVisualEditorItems =
-      await this.prepareRuleDelete(
-        user,
-        'lootBox',
-        lootBox.id,
-        `лутбокс "${lootBox.name}"`,
-        lootBox,
-        options,
-      );
+    const detachedVisualEditorItems = await this.prepareRuleDelete(
+      user,
+      'lootBox',
+      lootBox.id,
+      `лутбокс "${lootBox.name}"`,
+      lootBox,
+      options,
+    );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, lootBoxId: lootBox.id },
@@ -6109,15 +6288,14 @@ export class GuestGamificationService {
     options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const mission = await this.assertMission(user, id);
-    const detachedVisualEditorItems =
-      await this.prepareRuleDelete(
-        user,
-        'mission',
-        mission.id,
-        `задание "${mission.name}"`,
-        mission,
-        options,
-      );
+    const detachedVisualEditorItems = await this.prepareRuleDelete(
+      user,
+      'mission',
+      mission.id,
+      `задание "${mission.name}"`,
+      mission,
+      options,
+    );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, missionId: mission.id },
@@ -6188,15 +6366,14 @@ export class GuestGamificationService {
     options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const season = await this.assertSeason(user, id);
-    const detachedVisualEditorItems =
-      await this.prepareRuleDelete(
-        user,
-        'season',
-        season.id,
-        `Battle Pass "${season.name}"`,
-        season,
-        options,
-      );
+    const detachedVisualEditorItems = await this.prepareRuleDelete(
+      user,
+      'season',
+      season.id,
+      `Battle Pass "${season.name}"`,
+      season,
+      options,
+    );
     const [detachedEvents, detachedRewards] = await Promise.all([
       this.prisma.guestGameEvent.count({
         where: { tenantId: user.tenantId, seasonId: season.id },
@@ -6267,15 +6444,14 @@ export class GuestGamificationService {
     options: GuestGameRuleDeleteOptions = {},
   ): Promise<GuestGameRuleDeleteResult> {
     const promoCard = await this.assertPromoCard(user, id);
-    const detachedVisualEditorItems =
-      await this.prepareRuleDelete(
-        user,
-        'promoCard',
-        promoCard.id,
-        `промо-баннер "${promoCard.title}"`,
-        promoCard,
-        options,
-      );
+    const detachedVisualEditorItems = await this.prepareRuleDelete(
+      user,
+      'promoCard',
+      promoCard.id,
+      `промо-баннер "${promoCard.title}"`,
+      promoCard,
+      options,
+    );
 
     await this.prisma.guestGamePromoCard.delete({
       where: { id: promoCard.id },
@@ -6491,14 +6667,18 @@ export class GuestGamificationService {
     );
     const requestedStoreIds = uniqueStrings(
       Array.isArray(dto.storeIds)
-        ? dto.storeIds.filter((item): item is string => typeof item === 'string')
+        ? dto.storeIds.filter(
+            (item): item is string => typeof item === 'string',
+          )
         : [],
     );
     const targetStoreIds = requestedStoreIds.length
       ? requestedStoreIds
       : statusBefore.stores.map((item) => item.storeId);
     const targetStoreIdSet = new Set(targetStoreIds);
-    const targetStores = stores.filter((store) => targetStoreIdSet.has(store.id));
+    const targetStores = stores.filter((store) =>
+      targetStoreIdSet.has(store.id),
+    );
     const drafts: GuestGameVisualDraft[] = [];
 
     for (const store of targetStores) {
@@ -6665,7 +6845,8 @@ export class GuestGamificationService {
         (item) =>
           item.status === 'ACTIVE' &&
           visualRulePeriodIsActive(item.periodFrom, item.periodTo) &&
-          (item.missionType === 'CHECK_IN' || item.triggerKind === 'CHECK_IN') &&
+          (item.missionType === 'CHECK_IN' ||
+            item.triggerKind === 'CHECK_IN') &&
           ruleMatchesStoreIds(item.storeIds, storeId),
       ) ?? null;
     const liveLootBoxes = rules.lootBoxes
@@ -7296,7 +7477,11 @@ export class GuestGamificationService {
     });
 
     if (publish) {
-      await this.applyVisualCheckInRule(user, store.id, materializedPayload.checkIn);
+      await this.applyVisualCheckInRule(
+        user,
+        store.id,
+        materializedPayload.checkIn,
+      );
       await this.reconcilePublishedVisualEditorPayload(
         user,
         store.id,
@@ -8544,7 +8729,10 @@ export class GuestGamificationService {
       profileId: profile?.id ?? null,
       guestId: guest?.id ?? null,
     });
-    const audienceMemberIds = await this.getDryRunAudienceMemberIds(user, guest);
+    const audienceMemberIds = await this.getDryRunAudienceMemberIds(
+      user,
+      guest,
+    );
     const context: DryRunContext = {
       eventType,
       occurredAt,
@@ -8811,6 +8999,17 @@ export class GuestGamificationService {
     const guestId = nullableId(dto.guestId);
 
     if (!guestId) {
+      this.logGuestGameDebug(
+        'live-session-start-skipped',
+        {
+          tenantId: user.tenantId,
+          storeId: nullableId(dto.storeId),
+          profileId: nullableId(dto.profileId),
+          guestId: null,
+          reason: 'guest_id_missing',
+        },
+        'warn',
+      );
       return null;
     }
 
@@ -8818,6 +9017,17 @@ export class GuestGamificationService {
     const externalGuestId = nullableString(guest.externalGuestId);
 
     if (!externalGuestId) {
+      this.logGuestGameDebug(
+        'live-session-start-skipped',
+        {
+          tenantId: user.tenantId,
+          storeId: nullableId(dto.storeId),
+          profileId: nullableId(dto.profileId),
+          guestId,
+          reason: 'external_guest_id_missing',
+        },
+        'warn',
+      );
       return null;
     }
 
@@ -8830,6 +9040,13 @@ export class GuestGamificationService {
     const cached = this.readLiveSessionStartCache(cacheKey);
 
     if (cached !== undefined) {
+      this.logGuestGameDebug('live-session-start-cache-hit', {
+        tenantId: user.tenantId,
+        guestId,
+        storeId: expectedStoreId,
+        cacheKey,
+        result: this.guestGameDebugProcessResult(cached),
+      });
       return cached;
     }
 
@@ -8881,6 +9098,12 @@ export class GuestGamificationService {
     expectedStoreId: string | null,
   ): Promise<LiveSessionStartProcessOutcome> {
     if (!(await this.hasActiveSessionStartRules(user))) {
+      this.logGuestGameDebug('live-session-start-skipped', {
+        tenantId: user.tenantId,
+        guestId,
+        storeId: expectedStoreId,
+        reason: 'no_active_session_start_rules',
+      });
       return { result: null, cache: true };
     }
 
@@ -8892,12 +9115,33 @@ export class GuestGamificationService {
       : null;
     let liveSession: CheckInLiveSession | null;
 
+    this.logGuestGameDebug('live-session-start-query', {
+      tenantId: user.tenantId,
+      guestId,
+      profileId: nullableId(dto.profileId),
+      expectedStoreId,
+      expectedStore: this.guestGameDebugStore(checkInExpectedStore),
+      externalDomain: guest.externalDomain,
+      externalGuestId: guest.externalGuestId,
+      localCurrentCountHours: guest.currentCountHours ?? null,
+    });
+
     try {
       liveSession = await this.findActiveCheckInSession(user.tenantId, guest, {
         timeoutMs: this.liveSessionStartLookupTimeoutMs(),
         expectedStore: checkInExpectedStore,
       });
     } catch (error) {
+      this.logGuestGameDebug(
+        'live-session-start-query-failed',
+        {
+          tenantId: user.tenantId,
+          guestId,
+          expectedStoreId,
+          error: this.checkInErrorMessage(error),
+        },
+        'warn',
+      );
       this.logger.warn(
         `Failed to check live session start for guest ${guestId}: ${this.checkInErrorMessage(error)}`,
       );
@@ -8905,6 +9149,16 @@ export class GuestGamificationService {
     }
 
     if (!liveSession?.externalSessionId) {
+      this.logGuestGameDebug(
+        'live-session-start-not-found',
+        {
+          tenantId: user.tenantId,
+          guestId,
+          expectedStoreId,
+          expectedStore: this.guestGameDebugStore(checkInExpectedStore),
+        },
+        'warn',
+      );
       return { result: null, cache: false };
     }
 
@@ -8913,12 +9167,29 @@ export class GuestGamificationService {
       guest,
     );
 
+    this.logGuestGameDebug('live-session-start-found', {
+      tenantId: user.tenantId,
+      guestId,
+      expectedStoreId,
+      liveSession: this.guestGameDebugSession(liveSession),
+    });
+
     const storeId = this.liveSessionStartStoreId(
       liveSession,
       checkInExpectedStore,
     );
 
     if (expectedStoreId && !storeId) {
+      this.logGuestGameDebug(
+        'live-session-start-store-mismatch',
+        {
+          tenantId: user.tenantId,
+          guestId,
+          expectedStoreId,
+          liveSession: this.guestGameDebugSession(liveSession),
+        },
+        'warn',
+      );
       return { result: null, cache: false };
     }
 
@@ -8943,10 +9214,31 @@ export class GuestGamificationService {
         nullableString(dto.note) ??
         'Гость открыл игровой модуль во время активной Langame-сессии; старт сессии обработан live-проверкой.',
     };
+    this.logGuestGameDebug('live-session-start-process-event', {
+      tenantId: user.tenantId,
+      guestId,
+      profileId: processDto.profileId,
+      storeId: processDto.storeId,
+      eventType: processDto.eventType,
+      occurredAt: processDto.occurredAt,
+      sessionType: processDto.sessionType,
+      sessionPacket: processDto.sessionPacket,
+      sessionMinutes: processDto.sessionMinutes,
+      sourceFactId: processDto.sourceFactId,
+      liveSession: this.guestGameDebugSession(liveSession),
+    });
     const result = await this.syncLiveSessionStartResult(
       await this.processEvent(user, processDto),
       processDto,
     );
+
+    this.logGuestGameDebug('live-session-start-processed', {
+      tenantId: user.tenantId,
+      guestId,
+      expectedStoreId,
+      cache: liveSession.sessionPacket === true,
+      result: this.guestGameDebugProcessResult(result),
+    });
 
     return { result, cache: liveSession.sessionPacket === true };
   }
@@ -8960,9 +9252,7 @@ export class GuestGamificationService {
     }
 
     const payload = jsonRecord(result.event.payload);
-    const input = jsonRecord(
-      (payload.input ?? null) as Prisma.JsonValue | null,
-    );
+    const input = jsonRecord(payload.input ?? null);
     const nextInput = result.dryRun.input;
     const sameLiveSessionState =
       nullableString(input.sessionType) === nextInput.sessionType &&
@@ -11318,8 +11608,7 @@ export class GuestGamificationService {
           return Boolean(expectedDomain && source.domain === expectedDomain);
         })
       : [];
-    const candidateSources =
-      scopedSources.length > 0 ? scopedSources : sources;
+    const candidateSources = scopedSources.length > 0 ? scopedSources : sources;
 
     return [...candidateSources].sort(
       (left, right) =>
@@ -11375,26 +11664,51 @@ export class GuestGamificationService {
     );
 
     if (localSession.sessionPacket === true) {
+      this.logGuestGameDebug('live-session-type-detected', {
+        source: 'local_guest_balance',
+        apiSource: this.guestGameDebugSource(params.source),
+        externalGuestId: params.externalGuestId,
+        localCurrentCountHours: params.guest.currentCountHours ?? null,
+        session: this.guestGameDebugSession(localSession),
+      });
       return localSession;
     }
 
-    const currentCountHours = await this.findLiveGuestCurrentCountHours(
-      params,
-    );
-    const sessionWithLiveBalance = this.resolveCheckInSessionTypeFromGuestBalance(
-      localSession,
-      {
+    const currentCountHours = await this.findLiveGuestCurrentCountHours(params);
+    const sessionWithLiveBalance =
+      this.resolveCheckInSessionTypeFromGuestBalance(localSession, {
         currentCountHours,
-      },
-    );
+      });
 
     if (sessionWithLiveBalance.sessionPacket === true) {
+      this.logGuestGameDebug('live-session-type-detected', {
+        source: 'live_guest_balance',
+        apiSource: this.guestGameDebugSource(params.source),
+        externalGuestId: params.externalGuestId,
+        localCurrentCountHours: params.guest.currentCountHours ?? null,
+        liveCurrentCountHours: currentCountHours,
+        session: this.guestGameDebugSession(sessionWithLiveBalance),
+      });
       return sessionWithLiveBalance;
     }
 
-    if (
-      await this.hasLivePacketHoursTransaction(sessionWithLiveBalance, params)
-    ) {
+    const transactionMatched = await this.hasLivePacketHoursTransaction(
+      sessionWithLiveBalance,
+      params,
+    );
+
+    this.logGuestGameDebug('live-session-type-evaluated', {
+      apiSource: this.guestGameDebugSource(params.source),
+      externalGuestId: params.externalGuestId,
+      localCurrentCountHours: params.guest.currentCountHours ?? null,
+      liveCurrentCountHours: currentCountHours,
+      transactionMatched,
+      sessionBeforeTransaction: this.guestGameDebugSession(
+        sessionWithLiveBalance,
+      ),
+    });
+
+    if (transactionMatched) {
       return this.markCheckInSessionAsPacket(sessionWithLiveBalance);
     }
 
@@ -11417,20 +11731,39 @@ export class GuestGamificationService {
       const rows = this.checkInGuestSearchRows(payload);
       const row =
         rows.find((item) =>
-          [
-            item.guest_id,
-            item.real_guest_id,
-            item.id,
-          ].some(
+          [item.guest_id, item.real_guest_id, item.id].some(
             (value) => this.checkInScalar(value) === params.externalGuestId,
           ),
         ) ?? rows[0];
       const value = row?.current_count_hours;
 
+      this.logGuestGameDebug('live-guest-balance', {
+        apiSource: this.guestGameDebugSource(params.source),
+        externalGuestId: params.externalGuestId,
+        rows: rows.length,
+        matchedRow: row
+          ? {
+              guestId: this.checkInScalar(row.guest_id),
+              realGuestId: this.checkInScalar(row.real_guest_id),
+              id: this.checkInScalar(row.id),
+              currentCountHours: value ?? null,
+            }
+          : null,
+      });
+
       return typeof value === 'string' || typeof value === 'number'
         ? value
         : null;
-    } catch {
+    } catch (error) {
+      this.logGuestGameDebug(
+        'live-guest-balance-failed',
+        {
+          apiSource: this.guestGameDebugSource(params.source),
+          externalGuestId: params.externalGuestId,
+          error: this.checkInErrorMessage(error),
+        },
+        'warn',
+      );
       return null;
     }
   }
@@ -11447,6 +11780,9 @@ export class GuestGamificationService {
     const dateRange = this.checkInSessionTransactionPeriod(session);
     const pageLimit = 200;
     const maxPages = 5;
+    let pagesChecked = 0;
+    let rowsChecked = 0;
+    const candidateRows: Array<Record<string, unknown>> = [];
 
     try {
       for (let page = 1; page <= maxPages; page += 1) {
@@ -11460,26 +11796,80 @@ export class GuestGamificationService {
             dateTo: dateRange.dateTo,
           },
         );
+        pagesChecked += 1;
+        rowsChecked += rows.length;
 
-        if (
-          rows.some((row) =>
+        for (const row of rows) {
+          const debugRow = this.guestGameDebugTransaction(
+            row,
+            session,
+            params.externalGuestId,
+          );
+
+          if (
+            candidateRows.length < 8 &&
+            (debugRow.guestMatches ||
+              debugRow.sessionOrStoreMatches ||
+              debugRow.looksLikePacketOrSubscription)
+          ) {
+            candidateRows.push(debugRow);
+          }
+
+          if (
             this.isPacketHoursTransactionForSession(
               row,
               session,
               params.externalGuestId,
-            ),
-          )
-        ) {
-          return true;
+            )
+          ) {
+            this.logGuestGameDebug('live-packet-transaction-match', {
+              apiSource: this.guestGameDebugSource(params.source),
+              externalGuestId: params.externalGuestId,
+              dateRange,
+              page,
+              pagesChecked,
+              rowsChecked,
+              session: this.guestGameDebugSession(session),
+              transaction: debugRow,
+            });
+            return true;
+          }
         }
 
         if (rows.length < pageLimit) {
           break;
         }
       }
-    } catch {
+    } catch (error) {
+      this.logGuestGameDebug(
+        'live-packet-transaction-failed',
+        {
+          apiSource: this.guestGameDebugSource(params.source),
+          externalGuestId: params.externalGuestId,
+          dateRange,
+          pagesChecked,
+          rowsChecked,
+          session: this.guestGameDebugSession(session),
+          error: this.checkInErrorMessage(error),
+        },
+        'warn',
+      );
       return false;
     }
+
+    this.logGuestGameDebug(
+      'live-packet-transaction-not-found',
+      {
+        apiSource: this.guestGameDebugSource(params.source),
+        externalGuestId: params.externalGuestId,
+        dateRange,
+        pagesChecked,
+        rowsChecked,
+        session: this.guestGameDebugSession(session),
+        candidateRows,
+      },
+      'warn',
+    );
 
     return false;
   }
@@ -11539,9 +11929,9 @@ export class GuestGamificationService {
 
     return Boolean(
       transactionClubId &&
-        session.externalClubId &&
-        transactionClubId === session.externalClubId &&
-        this.checkInTransactionIsInSessionWindow(row, session),
+      session.externalClubId &&
+      transactionClubId === session.externalClubId &&
+      this.checkInTransactionIsInSessionWindow(row, session),
     );
   }
 
@@ -11669,11 +12059,11 @@ export class GuestGamificationService {
   private checkInLooksLikeGuestSearchRow(row: Record<string, unknown>) {
     return Boolean(
       row.guest_id ??
-        row.real_guest_id ??
-        row.id ??
-        row.phone ??
-        row.email ??
-        row.fio,
+      row.real_guest_id ??
+      row.id ??
+      row.phone ??
+      row.email ??
+      row.fio,
     );
   }
 
@@ -11799,11 +12189,7 @@ export class GuestGamificationService {
     const expectedDomain = nullableString(expectedStore.externalDomain);
     const expectedClubId = nullableString(expectedStore.externalClubId);
 
-    if (
-      expectedSourceId &&
-      source.id !== expectedSourceId &&
-      !expectedDomain
-    ) {
+    if (expectedSourceId && source.id !== expectedSourceId && !expectedDomain) {
       return false;
     }
 
@@ -11991,10 +12377,7 @@ export class GuestGamificationService {
       timeZone?: string | null;
     },
   ): Promise<{ occurredAt: Date } | null> {
-    const day = this.checkInLocalDayWindow(
-      params.checkedAt,
-      params.timeZone,
-    );
+    const day = this.checkInLocalDayWindow(params.checkedAt, params.timeZone);
     const rows = await this.prisma.guestGameEvent.findMany({
       where: {
         tenantId: user.tenantId,
@@ -12039,9 +12422,7 @@ export class GuestGamificationService {
     const normalizedTimeZone = this.checkInTimeZone(timeZone);
     const localDate = this.checkInLocalDateParts(value, normalizedTimeZone);
     const fromLabel = checkInDateLabel(localDate);
-    const toLabel = checkInDateLabel(
-      checkInAddLocalDays(localDate, 1),
-    );
+    const toLabel = checkInDateLabel(checkInAddLocalDays(localDate, 1));
 
     return {
       from:
@@ -12061,9 +12442,7 @@ export class GuestGamificationService {
         month: '2-digit',
         day: '2-digit',
       }).formatToParts(value);
-      const valueByType = new Map(
-        parts.map((part) => [part.type, part.value]),
-      );
+      const valueByType = new Map(parts.map((part) => [part.type, part.value]));
 
       return {
         year: Number(valueByType.get('year')),
@@ -12716,9 +13095,9 @@ function visualEventSyncDiff(
 function visualEventSyncStoreIsDirty(store: GuestGameVisualEventSyncStore) {
   return Boolean(
     store.addedLootBoxes.length ||
-      store.removedLootBoxes.length ||
-      store.addedMissions.length ||
-      store.removedMissions.length,
+    store.removedLootBoxes.length ||
+    store.addedMissions.length ||
+    store.removedMissions.length,
   );
 }
 
@@ -14832,7 +15211,9 @@ function checkInAddLocalDays(
   parts: { year: number; month: number; day: number },
   days: number,
 ) {
-  const next = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  const next = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day + days),
+  );
 
   return {
     year: next.getUTCFullYear(),
@@ -17731,7 +18112,10 @@ function appendDryRunLootBoxLimits(
     }
   }
 
-  if (perGuestPerWeek != null && (!needsGuest || context.profile || context.guest)) {
+  if (
+    perGuestPerWeek != null &&
+    (!needsGuest || context.profile || context.guest)
+  ) {
     const weeklyCount = guestRewards.filter((reward) =>
       dryRunIsWithinLastDays(reward.qualifiedAt, context.occurredAt, 7),
     ).length;
@@ -18143,7 +18527,9 @@ function normalizeSessionType(value: string) {
     return 'packet_hours';
   }
 
-  if (['regular_session', 'regular', 'common', 'default'].includes(normalized)) {
+  if (
+    ['regular_session', 'regular', 'common', 'default'].includes(normalized)
+  ) {
     return 'regular_session';
   }
 
@@ -18311,11 +18697,7 @@ function dryRunTimeToMinutes(value: string | undefined) {
   return hours * 60 + minutes;
 }
 
-function dryRunIsSameDay(
-  value: string,
-  reference: Date,
-  timeZone: string,
-) {
+function dryRunIsSameDay(value: string, reference: Date, timeZone: string) {
   const date = new Date(value);
 
   return (
@@ -18331,11 +18713,7 @@ function dryRunIsWithinLastDays(value: string, reference: Date, days: number) {
   return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
 }
 
-function dryRunIsSameMonth(
-  value: string,
-  reference: Date,
-  timeZone: string,
-) {
+function dryRunIsSameMonth(value: string, reference: Date, timeZone: string) {
   const date = new Date(value);
 
   return (
@@ -18930,7 +19308,10 @@ function normalizeVisualEditorPayload(
             'PROMOCODE',
           ).toUpperCase(),
           rewardAmount: visualNumberOrNull(itemRecord.rewardAmount),
-          rewardLabel: visualString(itemRecord.rewardLabel, 'Награда за задание'),
+          rewardLabel: visualString(
+            itemRecord.rewardLabel,
+            'Награда за задание',
+          ),
           progressTarget: visualIntOrNull(itemRecord.progressTarget, 1, 100000),
           progressUnit: visualNullableString(itemRecord.progressUnit),
           questSteps: visualArray(itemRecord.questSteps)
@@ -19803,7 +20184,9 @@ function mergeVisualBattlePassFromLive(
     return liveBattlePass ?? visualBattlePassFromSeason(null);
   }
 
-  const seasonExists = seasons.some((season) => season.id === baseBattlePass.id);
+  const seasonExists = seasons.some(
+    (season) => season.id === baseBattlePass.id,
+  );
   if (!seasonExists || baseBattlePass.status === 'ACTIVE') {
     return liveBattlePass ?? visualBattlePassFromSeason(null);
   }

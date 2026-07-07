@@ -1667,9 +1667,7 @@ describe('GuestPortalService', () => {
     });
 
     it('opens a session-start lootbox after the time window when the saved unlock happened inside it', async () => {
-      jest
-        .useFakeTimers()
-        .setSystemTime(new Date('2026-07-06T10:30:00.000Z'));
+      jest.useFakeTimers().setSystemTime(new Date('2026-07-06T10:30:00.000Z'));
 
       try {
         const { guestGamificationService, prisma, service } = createService({

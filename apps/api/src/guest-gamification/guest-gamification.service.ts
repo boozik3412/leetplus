@@ -11769,15 +11769,20 @@ export class GuestGamificationService {
       sessionWithLiveBalance,
       params,
     );
-    const guestLogMatched = transactionMatched
-      ? false
-      : await this.hasLivePacketHoursGuestLog(sessionWithLiveBalance, params);
+    const liveBalanceExplicitlyEmpty = this.guestHasExplicitZeroPacketHours({
+      currentCountHours,
+    });
+    const guestLogMatched =
+      transactionMatched || liveBalanceExplicitlyEmpty
+        ? false
+        : await this.hasLivePacketHoursGuestLog(sessionWithLiveBalance, params);
 
     this.logGuestGameDebug('live-session-type-evaluated', {
       apiSource: this.guestGameDebugSource(params.source),
       externalGuestId: params.externalGuestId,
       localCurrentCountHours: params.guest.currentCountHours ?? null,
       liveCurrentCountHours: currentCountHours,
+      liveBalanceExplicitlyEmpty,
       transactionMatched,
       guestLogMatched,
       sessionBeforeTransaction: this.guestGameDebugSession(
@@ -12090,7 +12095,10 @@ export class GuestGamificationService {
       row.club_id ?? row.list_clubs_id,
     );
 
-    return Boolean(!transactionClubId && this.checkInTransactionDate(row));
+    return Boolean(
+      !transactionClubId &&
+      this.checkInTransactionIsInSessionWindow(row, session),
+    );
   }
 
   private checkInTransactionGuestMatches(
@@ -12360,6 +12368,7 @@ export class GuestGamificationService {
   }): Promise<CheckInLiveSession | null> {
     const pageLimit = 200;
     const maxPages = 5;
+    const candidates: CheckInLiveSession[] = [];
 
     for (let page = 1; page <= maxPages; page += 1) {
       const rows = await this.langameClient.listGuestSessions(
@@ -12414,7 +12423,7 @@ export class GuestGamificationService {
           );
 
           if (session.externalSessionId) {
-            return {
+            candidates.push({
               ...session,
               externalClubId:
                 nullableString(session.externalClubId) ??
@@ -12423,7 +12432,7 @@ export class GuestGamificationService {
               store: store
                 ? { id: store.id, name: store.name, timeZone: store.timeZone }
                 : null,
-            };
+            });
           }
         }
       }
@@ -12433,7 +12442,12 @@ export class GuestGamificationService {
       }
     }
 
-    return null;
+    return (
+      candidates.sort(
+        (left, right) =>
+          (right.startedAt?.getTime() ?? 0) - (left.startedAt?.getTime() ?? 0),
+      )[0] ?? null
+    );
   }
 
   private toCheckInLiveSession(
@@ -12445,9 +12459,7 @@ export class GuestGamificationService {
       this.checkInScalar(row.date_start),
       timeZone,
     );
-    const packet =
-      this.checkInBoolean(row.packet) ||
-      this.checkInSessionLooksLikePacketHours(row);
+    const packet = this.checkInSessionLooksLikePacketHours(row) ? true : null;
 
     return {
       externalDomain,
@@ -12636,6 +12648,24 @@ export class GuestGamificationService {
     const value = Number(currentCountHours);
 
     return Number.isFinite(value) && value > 0;
+  }
+
+  private guestHasExplicitZeroPacketHours(guest: {
+    currentCountHours?: Prisma.Decimal | number | string | null;
+  }): boolean {
+    const currentCountHours = guest.currentCountHours;
+
+    if (currentCountHours == null) {
+      return false;
+    }
+
+    if (typeof currentCountHours === 'string' && !currentCountHours.trim()) {
+      return false;
+    }
+
+    const value = Number(currentCountHours);
+
+    return Number.isFinite(value) && value <= 0;
   }
 
   private checkInSessionGuestIdMatches(

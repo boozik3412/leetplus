@@ -213,6 +213,7 @@ type LootBoxForm = {
   limitsText: string;
   probabilityRulesText: string;
   budgetAmount: string;
+  budgetUnlimited: boolean;
   antiFraudText: string;
   manualApprovalRequired: boolean;
   note: string;
@@ -240,6 +241,7 @@ type MissionForm = {
   periodFrom: string;
   periodTo: string;
   budgetAmount: string;
+  budgetUnlimited: boolean;
   perGuestLimit: string;
   totalRewardLimit: string;
   sessionType: string;
@@ -304,6 +306,7 @@ type SeasonForm = {
   premiumEnabled: boolean;
   premiumUpgradeMode: string;
   budgetAmount: string;
+  budgetUnlimited: boolean;
   manualApprovalRequired: boolean;
   note: string;
 };
@@ -945,6 +948,7 @@ const defaultLootBoxForm: LootBoxForm = {
     })),
   }),
   budgetAmount: "5000",
+  budgetUnlimited: false,
   antiFraudText: jsonText({
     source: "business_controls",
   }),
@@ -992,6 +996,7 @@ const defaultMissionForm: MissionForm = {
   periodFrom: "",
   periodTo: "",
   budgetAmount: "7000",
+  budgetUnlimited: false,
   perGuestLimit: "1",
   totalRewardLimit: "100",
   sessionType: "",
@@ -1042,6 +1047,7 @@ const defaultCheckInMissionForm: MissionForm = {
   progressTarget: "1",
   progressUnit: "check_in",
   budgetAmount: "0",
+  budgetUnlimited: false,
   perGuestLimit: "",
   totalRewardLimit: "",
   sessionType: "",
@@ -1136,6 +1142,7 @@ const defaultSeasonForm: SeasonForm = {
   premiumEnabled: false,
   premiumUpgradeMode: "manual",
   budgetAmount: "15000",
+  budgetUnlimited: false,
   manualApprovalRequired: true,
   note: "Premium включается вручную после оплаты или решения управляющего.",
 };
@@ -1594,7 +1601,7 @@ export function GuestGamificationPanel({
         periodRules: buildLootBoxPeriodRules(lootBoxForm),
         limits: buildLootBoxLimits(lootBoxForm),
         probabilityRules: buildLootBoxProbabilityRules(lootBoxForm),
-        budgetAmount: lootBoxForm.budgetAmount,
+        budgetAmount: lootBoxForm.budgetUnlimited ? null : lootBoxForm.budgetAmount,
         antiFraudRules: buildLootBoxAntiFraudRules(),
         manualApprovalRequired: lootBoxForm.manualApprovalRequired,
         note: nullable(lootBoxForm.note),
@@ -1660,7 +1667,7 @@ export function GuestGamificationPanel({
         storeIds: missionForm.storeIds,
         periodFrom: nullable(missionForm.periodFrom),
         periodTo: nullable(missionForm.periodTo),
-        budgetAmount: missionForm.budgetAmount,
+        budgetAmount: missionForm.budgetUnlimited ? null : missionForm.budgetAmount,
         perGuestLimit: missionForm.perGuestLimit,
         totalRewardLimit: missionForm.totalRewardLimit,
         conditions: buildMissionConditions(missionForm),
@@ -1728,7 +1735,7 @@ export function GuestGamificationPanel({
         premiumRewards: buildSeasonRewards(seasonForm, "premium"),
         premiumEnabled: seasonForm.premiumEnabled,
         premiumUpgradeMode: nullable(seasonForm.premiumUpgradeMode),
-        budgetAmount: seasonForm.budgetAmount,
+        budgetAmount: seasonForm.budgetUnlimited ? null : seasonForm.budgetAmount,
         manualApprovalRequired: seasonForm.manualApprovalRequired,
         note: nullable(seasonForm.note),
       };
@@ -7203,6 +7210,7 @@ function LootBoxesTab({
               rewardLabel={form.rewardLabel}
               audienceId={form.audienceId}
               budgetAmount={form.budgetAmount}
+              budgetUnlimited={form.budgetUnlimited}
               manualApprovalRequired={form.manualApprovalRequired}
               note={form.note}
               audiences={audiences}
@@ -7353,7 +7361,7 @@ function LootBoxesTab({
             `тип: ${sessionTypeLabel(item.sessionType)}`,
             tariffRuleSummary(item.periodRules),
             guestLogRuleSummary(item.periodRules),
-            formatMoney(item.budgetAmount ?? 0),
+            formatBudgetAmount(item.budgetAmount),
           ]}
           details={<LootBoxRulePrizeSummary lootBox={item} />}
           onEdit={() => onEdit(item)}
@@ -7448,6 +7456,7 @@ function MissionsTab({
             rewardLabel={form.rewardLabel}
             audienceId={form.audienceId}
             budgetAmount={form.budgetAmount}
+            budgetUnlimited={form.budgetUnlimited}
             manualApprovalRequired={form.manualApprovalRequired}
             note={form.note}
             audiences={audiences}
@@ -7609,7 +7618,7 @@ function MissionsTab({
             missionMetricSummary(item.conditions),
             questRuleSummary(item.conditions),
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
-            formatMoney(item.budgetAmount ?? 0),
+            formatBudgetAmount(item.budgetAmount),
           ]}
           details={<MissionQuestStepIdSummary mission={item} />}
           onEdit={() => onEdit(item)}
@@ -7728,6 +7737,7 @@ function CheckInTab({
               rewardLabel={form.rewardLabel}
               audienceId={form.audienceId}
               budgetAmount={form.budgetAmount}
+              budgetUnlimited={form.budgetUnlimited}
               manualApprovalRequired={form.manualApprovalRequired}
               note={form.note}
               audiences={audiences}
@@ -8092,16 +8102,11 @@ function SeasonsTab({
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Бюджет">
-              <input
-                className={fieldClass}
-                type="number"
-                value={form.budgetAmount}
-                onChange={(event) =>
-                  setForm({ ...form, budgetAmount: event.target.value })
-                }
-              />
-            </Field>
+            <BudgetField
+              value={form.budgetAmount}
+              unlimited={form.budgetUnlimited}
+              onChange={(patch) => setForm({ ...form, ...patch })}
+            />
             <RewardApprovalSelect
               manualApprovalRequired={form.manualApprovalRequired}
               onChange={(manualApprovalRequired) =>
@@ -8151,7 +8156,7 @@ function SeasonsTab({
             tariffRuleSummary(item.xpRules),
             guestLogRuleSummary(item.xpRules),
             formatDate(item.periodFrom),
-            formatMoney(item.budgetAmount ?? 0),
+            formatBudgetAmount(item.budgetAmount),
           ]}
           details={<BattlePassLevelIdSummary season={item} />}
           onEdit={() => onEdit(item)}
@@ -9555,7 +9560,6 @@ function LootBoxBusinessRules({
 }) {
   const updatePrizes = (prizes: LootBoxPrizeForm[]) =>
     onChange(lootBoxPrizePatch(form, prizes));
-  const hasWeeklyLootBoxLimit = form.perGuestPerWeek.trim().length > 0;
   const isPeriodicLootBox = form.periodicLimitEnabled;
 
   return (
@@ -9596,6 +9600,9 @@ function LootBoxBusinessRules({
                 onChange({
                   periodicLimitEnabled: event.target.checked,
                   periodicLimitPeriod: form.periodicLimitPeriod || "DAILY",
+                  perGuestPerWeek: event.target.checked
+                    ? form.perGuestPerWeek
+                    : form.perGuestPerWeek || "1",
                 })
               }
             />
@@ -9627,46 +9634,22 @@ function LootBoxBusinessRules({
               </span>
             </label>
           ) : (
-            <>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
-                  <input
-                    type="radio"
-                    checked={!hasWeeklyLootBoxLimit}
-                    onChange={() => onChange({ perGuestPerWeek: "" })}
-                  />
-                  <span>Сколько угодно</span>
-                </label>
-                <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
-                  <input
-                    type="radio"
-                    checked={hasWeeklyLootBoxLimit}
-                    onChange={() =>
-                      onChange({ perGuestPerWeek: form.perGuestPerWeek || "1" })
-                    }
-                  />
-                  <span>Задать количество</span>
-                </label>
-              </div>
-              {hasWeeklyLootBoxLimit ? (
-                <label className="mt-3 block text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                  Открытий на гостя в неделю
-                  <input
-                    className={fieldClass}
-                    type="number"
-                    min="1"
-                    value={form.perGuestPerWeek}
-                    onChange={(event) =>
-                      onChange({ perGuestPerWeek: event.target.value })
-                    }
-                  />
-                </label>
-              ) : (
-                <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                  LeetPlus не будет ограничивать количество открытий этим недельным лимитом.
-                </p>
-              )}
-            </>
+            <label className="mt-3 block text-sm font-medium text-zinc-700 dark:text-zinc-200">
+              Открытий на гостя в неделю
+              <input
+                className={fieldClass}
+                type="number"
+                min="1"
+                value={form.perGuestPerWeek}
+                onChange={(event) =>
+                  onChange({ perGuestPerWeek: event.target.value })
+                }
+              />
+              <span className="mt-1 block text-xs font-normal leading-5 text-zinc-500 dark:text-zinc-400">
+                Укажите, сколько раз один гость может открыть этот лутбокс за
+                неделю. Для регулярных кейсов включите периодичность выше.
+              </span>
+            </label>
           )}
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -10892,6 +10875,42 @@ function ToggleField({
   );
 }
 
+function BudgetField({
+  value,
+  unlimited,
+  onChange,
+}: {
+  value: string;
+  unlimited: boolean;
+  onChange: (patch: { budgetAmount?: string; budgetUnlimited?: boolean }) => void;
+}) {
+  return (
+    <Field label="Бюджет">
+      <div className="space-y-2">
+        <input
+          className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
+          type="number"
+          min="0"
+          value={unlimited ? "" : value}
+          disabled={unlimited}
+          placeholder={unlimited ? "Без ограничений" : undefined}
+          onChange={(event) => onChange({ budgetAmount: event.target.value })}
+        />
+        <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+          <span>Безлимит</span>
+          <input
+            type="checkbox"
+            checked={unlimited}
+            onChange={(event) =>
+              onChange({ budgetUnlimited: event.target.checked })
+            }
+          />
+        </label>
+      </div>
+    </Field>
+  );
+}
+
 function RuleCommonFields({
   status,
   name,
@@ -10900,6 +10919,7 @@ function RuleCommonFields({
   rewardLabel,
   audienceId,
   budgetAmount,
+  budgetUnlimited,
   manualApprovalRequired,
   note,
   audiences,
@@ -10913,6 +10933,7 @@ function RuleCommonFields({
   rewardLabel: string;
   audienceId: string;
   budgetAmount: string;
+  budgetUnlimited: boolean;
   manualApprovalRequired: boolean;
   note: string;
   audiences: GuestAudience[];
@@ -10941,16 +10962,11 @@ function RuleCommonFields({
       <FormSection title={hideRewardFields ? "Бюджет и выдача" : "Награда и бюджет"}>
         {hideRewardFields ? (
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
-            <Field label="Бюджет">
-              <input
-                className={fieldClass}
-                type="number"
-                value={budgetAmount}
-                onChange={(event) =>
-                  onChange({ budgetAmount: event.target.value })
-                }
-              />
-            </Field>
+            <BudgetField
+              value={budgetAmount}
+              unlimited={budgetUnlimited}
+              onChange={onChange}
+            />
             <RewardApprovalSelect
               manualApprovalRequired={manualApprovalRequired}
               onChange={(nextManualApprovalRequired) =>
@@ -10983,16 +10999,11 @@ function RuleCommonFields({
                   }
                 />
               </Field>
-              <Field label="Бюджет">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  value={budgetAmount}
-                  onChange={(event) =>
-                    onChange({ budgetAmount: event.target.value })
-                  }
-                />
-              </Field>
+              <BudgetField
+                value={budgetAmount}
+                unlimited={budgetUnlimited}
+                onChange={onChange}
+              />
             </div>
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
               <Field label="Название награды">
@@ -13167,7 +13178,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     selectedWeekdays: lootBoxSelectedWeekdays(lootBox.periodRules),
     hourFrom: timeWindowPart(lootBox.periodRules, 0, "10:00"),
     hourTo: timeWindowPart(lootBox.periodRules, 1, "16:00"),
-    perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", ""),
+    perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", "1"),
     periodicLimitEnabled:
       lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) != null,
     periodicLimitPeriod:
@@ -13199,6 +13210,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
       defaultLootBoxForm.probabilityRulesText,
     ),
     budgetAmount: moneyFormValue(lootBox.budgetAmount),
+    budgetUnlimited: lootBox.budgetAmount == null,
     antiFraudText: jsonFormValue(lootBox.antiFraudRules),
     manualApprovalRequired: lootBox.manualApprovalRequired,
     note: lootBox.note ?? "",
@@ -13227,6 +13239,7 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     periodFrom: dateInputValue(mission.periodFrom),
     periodTo: dateInputValue(mission.periodTo),
     budgetAmount: moneyFormValue(mission.budgetAmount),
+    budgetUnlimited: mission.budgetAmount == null,
     perGuestLimit: mission.perGuestLimit ? String(mission.perGuestLimit) : "",
     totalRewardLimit: mission.totalRewardLimit
       ? String(mission.totalRewardLimit)
@@ -13369,6 +13382,7 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     premiumEnabled: season.premiumEnabled,
     premiumUpgradeMode: season.premiumUpgradeMode ?? "",
     budgetAmount: moneyFormValue(season.budgetAmount),
+    budgetUnlimited: season.budgetAmount == null,
     manualApprovalRequired: season.manualApprovalRequired,
     note: season.note ?? "",
   };
@@ -14081,7 +14095,7 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
 function buildLootBoxLimits(form: LootBoxForm) {
   const perGuestPerWeek = form.periodicLimitEnabled
     ? null
-    : optionalNumber(form.perGuestPerWeek);
+    : optionalNumber(form.perGuestPerWeek) ?? 1;
   const totalPerDay = optionalNumber(form.totalPerDay);
 
   return {
@@ -14900,6 +14914,10 @@ function formatMoney(value: number) {
     currency: "RUB",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatBudgetAmount(value: number | null | undefined) {
+  return value == null ? "Безлимит" : formatMoney(value);
 }
 
 function formatPercent(value: number) {

@@ -17,6 +17,8 @@ const MAX_SYNC_PAGES_PER_SOURCE = 20;
 const DEFAULT_BASELINE_DAYS = 7;
 const SYNC_OVERLAP_DAYS = 1;
 const RUNNING_SYNC_STALE_MS = 5 * 60 * 1000;
+const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
+const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
 
 const SOURCE_GUEST_LOG = 'LANGAME_GUEST_LOG';
 const SOURCE_GUEST_SESSION = 'LANGAME_GUEST_SESSION';
@@ -647,12 +649,220 @@ export class GuestActivityLedgerService {
       factsCount += persisted.factsCreated;
     }
 
+    const inferredPackageUsageFacts =
+      await this.inferPackageSubscriptionUsageFacts(context, window);
+    factsCount += inferredPackageUsageFacts;
+
     return {
       rawRecordsCount,
       factsCount,
       sourceCounts,
+      inferredPackageUsageFacts,
       partial,
     };
+  }
+
+  private async inferPackageSubscriptionUsageFacts(
+    context: LedgerSyncContext,
+    window: SyncWindow,
+  ) {
+    const sessionSignals = await this.prisma.guestActivityRawRecord.findMany({
+      where: {
+        tenantId: context.tenantId,
+        profileId: context.profile.id,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: context.externalDomain,
+        sourceKind: SOURCE_GUEST_LOG,
+        rawType: { in: ['start_session_on', 'expand_session_on'] },
+        happenedAt: {
+          gte: window.from,
+          lte: window.to,
+        },
+      },
+      orderBy: { happenedAt: 'asc' },
+      select: {
+        id: true,
+        sourceHash: true,
+        rawType: true,
+        rawText: true,
+        happenedAt: true,
+        sourceLocalDate: true,
+        externalClubId: true,
+        storeId: true,
+        sessionExternalId: true,
+      },
+    });
+
+    if (sessionSignals.length === 0) {
+      return 0;
+    }
+
+    const purchaseFacts = await this.prisma.guestActivityFact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        profileId: context.profile.id,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: context.externalDomain,
+        factType: 'PACKAGE_OR_SUBSCRIPTION_PURCHASED',
+        happenedAt: {
+          gte: subtractDays(window.from, INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS),
+          lte: window.to,
+        },
+      },
+      orderBy: { happenedAt: 'desc' },
+      select: {
+        id: true,
+        happenedAt: true,
+        sourceLocalDate: true,
+        storeId: true,
+        tariffName: true,
+        tariffType: true,
+        confidence: true,
+        evidence: true,
+      },
+    });
+
+    const nearbyRawSignals =
+      await this.prisma.guestActivityRawRecord.findMany({
+        where: {
+          tenantId: context.tenantId,
+          profileId: context.profile.id,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: context.externalDomain,
+          happenedAt: {
+            gte: new Date(
+              window.from.getTime() - INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS,
+            ),
+            lte: new Date(
+              window.to.getTime() + INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS,
+            ),
+          },
+          OR: [
+            { sourceKind: SOURCE_TRANSACTION },
+            {
+              sourceKind: SOURCE_GUEST_LOG,
+              rawType: {
+                in: [
+                  'success_subscription_buy_log',
+                  'widrawed_rubbles_and_bonuses',
+                ],
+              },
+            },
+          ],
+        },
+        orderBy: { happenedAt: 'asc' },
+        select: {
+          id: true,
+          sourceKind: true,
+          rawType: true,
+          rawText: true,
+          happenedAt: true,
+          storeId: true,
+          amount: true,
+          bonusAmount: true,
+        },
+      });
+
+    let factsCreated = 0;
+
+    for (const signal of sessionSignals) {
+      if (!signal.happenedAt) {
+        continue;
+      }
+
+      const purchase = purchaseFacts.find(
+        (fact) =>
+          Boolean(fact.happenedAt) &&
+          fact.happenedAt!.getTime() <= signal.happenedAt!.getTime() &&
+          signal.happenedAt!.getTime() - fact.happenedAt!.getTime() <=
+            INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000 &&
+          storesMatchOrUnknown(fact.storeId, signal.storeId),
+      );
+      const nearbyRawSignal = nearbyRawSignals.find((raw) =>
+        isPackageUsageRawSignalNearSession(raw, signal),
+      );
+
+      if (!purchase && !nearbyRawSignal) {
+        continue;
+      }
+
+      const beforeFact = await this.prisma.guestActivityFact.findUnique({
+        where: {
+          tenantId_factType_sourceHash: {
+            tenantId: context.tenantId,
+            factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+            sourceHash: signal.sourceHash,
+          },
+        },
+        select: { id: true },
+      });
+
+      await this.prisma.guestActivityFact.upsert({
+        where: {
+          tenantId_factType_sourceHash: {
+            tenantId: context.tenantId,
+            factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+            sourceHash: signal.sourceHash,
+          },
+        },
+        create: {
+          tenantId: context.tenantId,
+          rawRecordId: signal.id,
+          guestId: context.guest?.id ?? null,
+          profileId: context.profile.id,
+          storeId: signal.storeId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: context.externalDomain,
+          externalGuestId: context.externalGuestId,
+          externalClubId: signal.externalClubId,
+          sourceKind: SOURCE_GUEST_LOG,
+          sourceHash: signal.sourceHash,
+          factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+          happenedAt: signal.happenedAt,
+          sourceLocalDate: signal.sourceLocalDate,
+          sessionExternalId: signal.sessionExternalId,
+          tariffName: purchase?.tariffName ?? null,
+          tariffType: 'package_or_subscription',
+          amount: null,
+          bonusAmount: null,
+          durationMinutes: null,
+          confidence: 'INFERRED',
+          evidence: buildInferredPackageUsageEvidence(
+            signal,
+            purchase,
+            nearbyRawSignal,
+          ),
+        },
+        update: {
+          rawRecordId: signal.id,
+          guestId: context.guest?.id ?? null,
+          profileId: context.profile.id,
+          storeId: signal.storeId,
+          happenedAt: signal.happenedAt,
+          sourceLocalDate: signal.sourceLocalDate,
+          sessionExternalId: signal.sessionExternalId,
+          tariffName: purchase?.tariffName ?? null,
+          tariffType: 'package_or_subscription',
+          confidence: 'INFERRED',
+          evidence: buildInferredPackageUsageEvidence(
+            signal,
+            purchase,
+            nearbyRawSignal,
+          ),
+        },
+      });
+
+      await this.prisma.guestActivityRawRecord.update({
+        where: { id: signal.id },
+        data: { parseStatus: 'FACTS_CREATED' },
+      });
+
+      if (!beforeFact) {
+        factsCreated += 1;
+      }
+    }
+
+    return factsCreated;
   }
 
   private async fetchPaged<T>(
@@ -1506,6 +1716,138 @@ function isPackageOrSubscriptionText(text: string) {
     /по\s+тарифу\s+[^.]*\d+\s*час/.test(text) ||
     /\b\d+\s*час(?:ов|а)?\b/.test(text)
   );
+}
+
+function storesMatchOrUnknown(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  return !left || !right || left === right;
+}
+
+function isPackageUsageRawSignalNearSession(
+  raw: {
+    sourceKind: string;
+    rawType: string | null;
+    rawText: string | null;
+    happenedAt: Date | null;
+    storeId: string | null;
+    amount: Prisma.Decimal | number | string | null;
+    bonusAmount: Prisma.Decimal | number | string | null;
+  },
+  session: {
+    happenedAt: Date | null;
+    storeId: string | null;
+  },
+) {
+  if (!raw.happenedAt || !session.happenedAt) {
+    return false;
+  }
+
+  if (!storesMatchOrUnknown(raw.storeId, session.storeId)) {
+    return false;
+  }
+
+  const deltaMs = Math.abs(
+    raw.happenedAt.getTime() - session.happenedAt.getTime(),
+  );
+
+  if (deltaMs > INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS) {
+    return false;
+  }
+
+  const rawType = normalizeSearchText(raw.rawType);
+  const rawText = normalizeSearchText(raw.rawText);
+
+  return (
+    rawType === 'success_subscription_buy_log' ||
+    rawType === 'widrawed_rubbles_and_bonuses' ||
+    isPackageOrSubscriptionText(rawText) ||
+    isNegativeAmount(raw.amount) ||
+    isNegativeAmount(raw.bonusAmount)
+  );
+}
+
+function isNegativeAmount(value: Prisma.Decimal | number | string | null) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  return Number(value) < 0;
+}
+
+function buildInferredPackageUsageEvidence(
+  signal: {
+    id: string;
+    rawType: string | null;
+    rawText: string | null;
+    happenedAt: Date | null;
+  },
+  purchase:
+    | {
+        id: string;
+        happenedAt: Date | null;
+        sourceLocalDate: string | null;
+        tariffName: string | null;
+        tariffType: string | null;
+        confidence: string;
+        evidence: Prisma.JsonValue | null;
+      }
+    | undefined,
+  nearbyRawSignal:
+    | {
+        id: string;
+        sourceKind: string;
+        rawType: string | null;
+        rawText: string | null;
+        happenedAt: Date | null;
+        amount: Prisma.Decimal | number | string | null;
+        bonusAmount: Prisma.Decimal | number | string | null;
+      }
+    | undefined,
+): Prisma.InputJsonValue {
+  return {
+    sourceKind: SOURCE_GUEST_LOG,
+    inference: 'recent_package_or_subscription_signal_near_session',
+    confidenceNote:
+      'Langame guest logs expose start/extend technical events separately from subscription purchase events, so usage is inferred for diagnostics only.',
+    sessionSignal: {
+      rawRecordId: signal.id,
+      rawType: signal.rawType,
+      rawText: signal.rawText,
+      happenedAt: signal.happenedAt?.toISOString() ?? null,
+    },
+    matchedPurchase: purchase
+      ? {
+          factId: purchase.id,
+          happenedAt: purchase.happenedAt?.toISOString() ?? null,
+          sourceLocalDate: purchase.sourceLocalDate,
+          tariffName: purchase.tariffName,
+          tariffType: purchase.tariffType,
+          confidence: purchase.confidence,
+        }
+      : null,
+    nearbySignal: nearbyRawSignal
+      ? {
+          rawRecordId: nearbyRawSignal.id,
+          sourceKind: nearbyRawSignal.sourceKind,
+          rawType: nearbyRawSignal.rawType,
+          rawText: nearbyRawSignal.rawText,
+          happenedAt: nearbyRawSignal.happenedAt?.toISOString() ?? null,
+          amount:
+            nearbyRawSignal.amount === null
+              ? null
+              : String(nearbyRawSignal.amount),
+          bonusAmount:
+            nearbyRawSignal.bonusAmount === null
+              ? null
+              : String(nearbyRawSignal.bonusAmount),
+        }
+      : null,
+    lookbackDays: INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS,
+    signalWindowMinutes:
+      INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS / 1000 / 60,
+  };
 }
 
 function normalizeSearchText(value: unknown) {

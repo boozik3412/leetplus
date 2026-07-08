@@ -21,8 +21,8 @@ describe('GuestActivityLedgerService', () => {
     integrationSourceId: sourceId,
     timeZone: 'Asia/Yekaterinburg',
   };
-  let rawRecords: Map<string, { id: string; parseStatus?: string }>;
-  let facts: Map<string, { id: string }>;
+  let rawRecords: Map<string, Record<string, any>>;
+  let facts: Map<string, Record<string, any>>;
   let syncState: {
     status: string;
     lastStartedAt: Date | null;
@@ -34,6 +34,82 @@ describe('GuestActivityLedgerService', () => {
   let prisma: any;
   let langameClient: any;
   let service: GuestActivityLedgerService;
+
+  const selectFields = (row: Record<string, any>, select?: Record<string, boolean>) => {
+    if (!select) {
+      return row;
+    }
+
+    return Object.fromEntries(
+      Object.entries(select)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => [key, row[key]]),
+    );
+  };
+
+  const inDateRange = (
+    value: Date | null | undefined,
+    range?: { gte?: Date; lte?: Date },
+  ) => {
+    if (!range) {
+      return true;
+    }
+
+    if (!value) {
+      return false;
+    }
+
+    return (
+      (!range.gte || value.getTime() >= range.gte.getTime()) &&
+      (!range.lte || value.getTime() <= range.lte.getTime())
+    );
+  };
+
+  const matchesRawWhere = (row: Record<string, any>, where: Record<string, any>) => {
+    if (where.profileId && row.profileId !== where.profileId) {
+      return false;
+    }
+
+    if (where.externalDomain && row.externalDomain !== where.externalDomain) {
+      return false;
+    }
+
+    if (where.sourceKind && row.sourceKind !== where.sourceKind) {
+      return false;
+    }
+
+    if (where.rawType?.in && !where.rawType.in.includes(row.rawType)) {
+      return false;
+    }
+
+    if (!inDateRange(row.happenedAt, where.happenedAt)) {
+      return false;
+    }
+
+    if (Array.isArray(where.OR)) {
+      return where.OR.some((clause: Record<string, any>) =>
+        matchesRawWhere(row, { ...where, OR: undefined, ...clause }),
+      );
+    }
+
+    return true;
+  };
+
+  const matchesFactWhere = (row: Record<string, any>, where: Record<string, any>) => {
+    if (where.profileId && row.profileId !== where.profileId) {
+      return false;
+    }
+
+    if (where.externalDomain && row.externalDomain !== where.externalDomain) {
+      return false;
+    }
+
+    if (where.factType && row.factType !== where.factType) {
+      return false;
+    }
+
+    return inDateRange(row.happenedAt, where.happenedAt);
+  };
 
   beforeEach(() => {
     rawRecords = new Map();
@@ -107,15 +183,16 @@ describe('GuestActivityLedgerService', () => {
               .sourceHash;
           return Promise.resolve(rawRecords.get(hash) ?? null);
         }),
-        upsert: jest.fn().mockImplementation(({ where, create }) => {
+        upsert: jest.fn().mockImplementation(({ where, create, update }) => {
           const hash =
             where.tenantId_sourceKind_externalProvider_externalDomain_sourceHash
               .sourceHash;
           const existing = rawRecords.get(hash);
           if (existing) {
+            Object.assign(existing, update);
             return Promise.resolve(existing);
           }
-          const record = { id: `raw-${rawRecords.size + 1}` };
+          const record = { ...create, id: `raw-${rawRecords.size + 1}` };
           rawRecords.set(hash, record);
           return Promise.resolve(record);
         }),
@@ -128,7 +205,12 @@ describe('GuestActivityLedgerService', () => {
           }
           return Promise.resolve(record);
         }),
-        findMany: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockImplementation(({ where, select }) => {
+          const rows = Array.from(rawRecords.values()).filter((row) =>
+            matchesRawWhere(row, where ?? {}),
+          );
+          return Promise.resolve(rows.map((row) => selectFields(row, select)));
+        }),
       },
       guestActivityFact: {
         findUnique: jest.fn().mockImplementation(({ where }) => {
@@ -137,18 +219,24 @@ describe('GuestActivityLedgerService', () => {
             facts.get(`${unique.factType}:${unique.sourceHash}`) ?? null,
           );
         }),
-        upsert: jest.fn().mockImplementation(({ where }) => {
+        upsert: jest.fn().mockImplementation(({ where, create, update }) => {
           const unique = where.tenantId_factType_sourceHash;
           const key = `${unique.factType}:${unique.sourceHash}`;
           const existing = facts.get(key);
           if (existing) {
+            Object.assign(existing, update);
             return Promise.resolve(existing);
           }
-          const fact = { id: `fact-${facts.size + 1}` };
+          const fact = { ...create, id: `fact-${facts.size + 1}` };
           facts.set(key, fact);
           return Promise.resolve(fact);
         }),
-        findMany: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockImplementation(({ where, select }) => {
+          const rows = Array.from(facts.values()).filter((row) =>
+            matchesFactWhere(row, where ?? {}),
+          );
+          return Promise.resolve(rows.map((row) => selectFields(row, select)));
+        }),
       },
     };
     langameClient = {
@@ -209,6 +297,55 @@ describe('GuestActivityLedgerService', () => {
         key.startsWith('PACKAGE_OR_SUBSCRIPTION_USED:'),
       ),
     ).toBe(true);
+  });
+
+  it('infers package or subscription usage from technical Langame session logs', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([
+      {
+        guest_id: externalGuestId,
+        club_id: '15',
+        date: '06.07.2026 17:00:49',
+        type: 'success_subscription_buy_log',
+      },
+      {
+        guest_id: externalGuestId,
+        club_id: '15',
+        date: '07.07.2026 18:16:53',
+        type: 'start_session_on',
+      },
+      {
+        guest_id: externalGuestId,
+        club_id: '15',
+        date: '07.07.2026 18:17:10',
+        type: 'expand_session_on',
+      },
+    ]);
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'TECHNICAL_LOGS',
+    });
+
+    const inferredUsageFacts = Array.from(facts.values()).filter(
+      (fact) =>
+        fact.factType === 'PACKAGE_OR_SUBSCRIPTION_USED' &&
+        fact.confidence === 'INFERRED',
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(
+      Array.from(facts.values()).some(
+        (fact) => fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PURCHASED',
+      ),
+    ).toBe(true);
+    expect(inferredUsageFacts).toHaveLength(2);
+    expect(inferredUsageFacts[0].evidence).toEqual(
+      expect.objectContaining({
+        inference: 'recent_package_or_subscription_signal_near_session',
+      }),
+    );
   });
 
   it('keeps repeated sync idempotent with the same source hashes', async () => {

@@ -84,13 +84,41 @@ export type LangameGuestSession = {
   packet?: number | boolean | null;
   club_id?: number | string | null;
   list_clubs_id?: number | string | null;
-};
+} & Record<string, unknown>;
 
 export type LangameGuestLog = {
   guest_id?: number | string | null;
+  real_guest_id?: number | string | null;
+  club_id?: number | string | null;
+  list_clubs_id?: number | string | null;
+  session_id?: number | string | null;
+  UUID?: string | null;
   type?: string | number | null;
   date?: string | null;
-};
+  date_normal?: string | null;
+  date_insert?: string | null;
+  date_update?: string | null;
+  created_at?: string | null;
+  created?: string | null;
+  time?: string | null;
+  datetime?: string | null;
+  comment?: string | null;
+  name?: string | null;
+  title?: string | null;
+  description?: string | null;
+  message?: string | null;
+  text?: string | null;
+  tariff?: string | null;
+  tarif?: string | null;
+  tariff_name?: string | null;
+  tarif_name?: string | null;
+  sum?: number | string | null;
+  amount?: number | string | null;
+  balance?: number | string | null;
+  bonus?: number | string | null;
+  bonuses?: number | string | null;
+  bonus_balance?: number | string | null;
+} & Record<string, unknown>;
 
 export type LangameTransaction = {
   id: number | string;
@@ -121,7 +149,7 @@ export type LangameTransaction = {
   mobile?: number | boolean | null;
   soft?: number | boolean | null;
   comment?: string | null;
-};
+} & Record<string, unknown>;
 
 export type LangameOperationLog = {
   date_normal: string;

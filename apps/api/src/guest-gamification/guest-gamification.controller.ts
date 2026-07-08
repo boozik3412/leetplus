@@ -27,6 +27,10 @@ import {
   type GuestGameBonusLedgerStatus,
 } from './guest-bonus-ledger.service';
 import {
+  GuestActivityLedgerService,
+  type GuestActivityLedgerDiagnostics,
+} from './guest-activity-ledger.service';
+import {
   GuestGamificationService,
   type GuestGameCheckInDto,
   type GuestGameCheckInResult,
@@ -90,6 +94,7 @@ import {
 export class GuestGamificationController {
   constructor(
     private readonly gamificationService: GuestGamificationService,
+    private readonly activityLedgerService: GuestActivityLedgerService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
   ) {}
 
@@ -113,6 +118,22 @@ export class GuestGamificationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestGameSnapshotFactsResult> {
     return this.gamificationService.getSnapshotFacts(user);
+  }
+
+  @Get('activity-ledger/diagnostics')
+  getActivityLedgerDiagnostics(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('profileId') profileId?: string,
+    @Query('guestId') guestId?: string,
+    @Query('externalGuestId') externalGuestId?: string,
+    @Query('limit') limit?: string,
+  ): Promise<GuestActivityLedgerDiagnostics> {
+    return this.activityLedgerService.getDiagnostics(user, {
+      profileId,
+      guestId,
+      externalGuestId,
+      limit,
+    });
   }
 
   @Post('process-event')

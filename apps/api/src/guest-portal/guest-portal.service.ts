@@ -28,6 +28,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
 import {
   GuestGamificationService,
   type GuestGameCheckInResult,
@@ -1527,6 +1528,7 @@ export class GuestPortalService {
     private readonly jwtService: JwtService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly guestGamificationService: GuestGamificationService,
+    private readonly guestActivityLedgerService: GuestActivityLedgerService,
     private readonly secretEncryptionService: SecretEncryptionService,
   ) {}
 
@@ -1557,6 +1559,24 @@ export class GuestPortalService {
       guestId: payload.guestId ?? null,
       sub: guestGameDebugShortValue(payload.sub),
     };
+  }
+
+  private scheduleGuestActivityLedgerSync(
+    payload: GuestPortalTokenPayload,
+    profileId: string | null | undefined,
+    reason: string,
+  ) {
+    if (!profileId) {
+      return;
+    }
+
+    this.guestActivityLedgerService.scheduleProfileSync({
+      tenantId: payload.tenantId,
+      storeId: payload.storeId,
+      profileId,
+      guestId: payload.guestId ?? null,
+      reason,
+    });
   }
 
   private guestGameDebugPortalScope(
@@ -3391,7 +3411,11 @@ export class GuestPortalService {
 
   async getSession(authorization: string | undefined) {
     const payload = await this.verifyGuestToken(authorization);
-    return this.buildPortalPayload(payload);
+    const portal = await this.buildPortalPayload(payload);
+
+    this.scheduleGuestActivityLedgerSync(payload, portal.profile.id, 'SESSION');
+
+    return portal;
   }
 
   async getGameSummary(
@@ -3410,6 +3434,11 @@ export class GuestPortalService {
     const portal = await this.buildPortalPayload(payload, {
       liveSessionStartResult,
     });
+    this.scheduleGuestActivityLedgerSync(
+      payload,
+      portal.profile.id,
+      'GAME_SUMMARY',
+    );
     const referralStats = await this.getGameReferralStats(
       payload.tenantId,
       portal.profile.id,
@@ -3530,6 +3559,15 @@ export class GuestPortalService {
         guestId: guest?.id ?? profile.guestId ?? null,
         profileId: profile.id,
       },
+    );
+    this.scheduleGuestActivityLedgerSync(
+      {
+        ...payload,
+        guestId: guest?.id ?? profile.guestId ?? null,
+        profileId: profile.id,
+      },
+      profile.id,
+      'APP_OPEN',
     );
 
     const openedAt = new Date();

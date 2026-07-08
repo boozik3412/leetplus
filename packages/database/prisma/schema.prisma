@@ -181,6 +181,9 @@ model Tenant {
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
   guestGameEvents                      GuestGameEvent[]
   guestGameLogTypeMappings             GuestGameLogTypeMapping[]
+  guestActivityRawRecords              GuestActivityRawRecord[]
+  guestActivityFacts                   GuestActivityFact[]
+  guestActivitySyncStates              GuestActivitySyncState[]
   guestGameTelegramLinkChallenges      GuestGameTelegramLinkChallenge[]
   guestGamePromoCards                  GuestGamePromoCard[]
   guestGameVisualDrafts                GuestGameVisualDraft[]
@@ -507,6 +510,9 @@ model Store {
   salesFacts                   SalesFact[]
   guestSessions                GuestSession[]
   guestTransactions            GuestTransaction[]
+  guestActivityRawRecords      GuestActivityRawRecord[]
+  guestActivityFacts           GuestActivityFact[]
+  guestActivitySyncStates      GuestActivitySyncState[]
   guestOperationLogs           GuestOperationLog[]
   guestWorkingShifts           GuestWorkingShift[]
   clubRevenueFacts             ClubRevenueFact[]
@@ -869,6 +875,8 @@ model IntegrationSource {
   endpointProfileRuns  LangameEndpointProfileRun[]
   endpointSnapshotRuns LangameEndpointSnapshotRun[]
   tariffSnapshotItems  LangameTariffSnapshotItem[]
+  guestActivityRawRecords GuestActivityRawRecord[]
+  guestActivitySyncStates GuestActivitySyncState[]
 
   @@unique([tenantId, provider, domain])
   @@index([tenantId])
@@ -1115,6 +1123,9 @@ model Guest {
   sessions              GuestSession[]
   logs                  GuestLog[]
   transactions          GuestTransaction[]
+  activityRawRecords    GuestActivityRawRecord[]
+  activityFacts         GuestActivityFact[]
+  activitySyncStates    GuestActivitySyncState[]
   workingShifts         GuestWorkingShift[]
   crmEvents             GuestCrmEvent[]
   crmLeads              GuestCrmLead[]
@@ -1496,6 +1507,9 @@ model GuestGameProfile {
   bonusLedgerEntries GuestBonusLedgerEntry[]
   deliveries    GuestGameDelivery[]
   events        GuestGameEvent[]
+  activityRawRecords GuestActivityRawRecord[]
+  activityFacts      GuestActivityFact[]
+  activitySyncStates GuestActivitySyncState[]
   telegramLinkChallenges GuestGameTelegramLinkChallenge[]
   portalOtpChallenges GuestPortalOtpChallenge[]
 
@@ -2148,6 +2162,133 @@ model GuestTransaction {
   @@index([tenantId, externalGuestId])
   @@index([guestId])
   @@index([storeId])
+}
+
+model GuestActivityRawRecord {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  guestId             String?
+  profileId           String?
+  storeId             String?
+  integrationSourceId String?
+  externalProvider    IntegrationProvider @default(LANGAME)
+  externalDomain      String
+  externalGuestId     String
+  externalClubId      String?
+  sourceKind          String
+  sourceKey           String
+  sourceHash          String
+  rawType             String?
+  rawText             String?
+  happenedAt          DateTime?
+  sourceLocalDate     String?
+  sessionExternalId   String?
+  amount              Decimal?            @db.Decimal(12, 2)
+  bonusAmount         Decimal?            @db.Decimal(12, 2)
+  rawPayload          Json
+  parseStatus         String              @default("PENDING")
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  guest             Guest?             @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  profile           GuestGameProfile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  store             Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  facts             GuestActivityFact[]
+
+  @@unique([tenantId, sourceKind, externalProvider, externalDomain, sourceHash], map: "guest_activity_raw_source_hash_uidx")
+  @@index([tenantId, happenedAt], map: "guest_activity_raw_happened_idx")
+  @@index([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_activity_raw_external_guest_idx")
+  @@index([tenantId, sourceKind], map: "guest_activity_raw_kind_idx")
+  @@index([tenantId, rawType], map: "guest_activity_raw_type_idx")
+  @@index([guestId], map: "guest_activity_raw_guest_idx")
+  @@index([profileId], map: "guest_activity_raw_profile_idx")
+  @@index([storeId], map: "guest_activity_raw_store_idx")
+  @@index([integrationSourceId], map: "guest_activity_raw_source_idx")
+}
+
+model GuestActivityFact {
+  id                String              @id @default(uuid())
+  tenantId          String
+  rawRecordId       String?
+  guestId           String?
+  profileId         String?
+  storeId           String?
+  externalProvider  IntegrationProvider @default(LANGAME)
+  externalDomain    String
+  externalGuestId   String
+  externalClubId    String?
+  sourceKind        String
+  sourceHash        String
+  factType          String
+  happenedAt        DateTime?
+  sourceLocalDate   String?
+  sessionExternalId String?
+  tariffName        String?
+  tariffType        String?
+  amount            Decimal?            @db.Decimal(12, 2)
+  bonusAmount       Decimal?            @db.Decimal(12, 2)
+  durationMinutes   Int?
+  confidence        String              @default("UNKNOWN")
+  evidence          Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  tenant    Tenant                  @relation(fields: [tenantId], references: [id])
+  rawRecord GuestActivityRawRecord? @relation(fields: [rawRecordId], references: [id], onDelete: Cascade)
+  guest     Guest?                  @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  profile   GuestGameProfile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  store     Store?                  @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, factType, sourceHash], map: "guest_activity_fact_hash_uidx")
+  @@index([tenantId, happenedAt], map: "guest_activity_fact_happened_idx")
+  @@index([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_activity_fact_external_guest_idx")
+  @@index([tenantId, factType, happenedAt], map: "guest_activity_fact_type_idx")
+  @@index([tenantId, tariffType], map: "guest_activity_fact_tariff_type_idx")
+  @@index([rawRecordId], map: "guest_activity_fact_raw_idx")
+  @@index([guestId], map: "guest_activity_fact_guest_idx")
+  @@index([profileId], map: "guest_activity_fact_profile_idx")
+  @@index([storeId], map: "guest_activity_fact_store_idx")
+}
+
+model GuestActivitySyncState {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  guestId             String?
+  profileId           String?
+  storeId             String?
+  integrationSourceId String?
+  externalProvider    IntegrationProvider @default(LANGAME)
+  externalDomain      String
+  externalGuestId     String
+  status              String              @default("IDLE")
+  syncFrom            DateTime?
+  lastRequestedFrom   DateTime?
+  lastRequestedTo     DateTime?
+  lastSuccessfulTo    DateTime?
+  lastStartedAt       DateTime?
+  lastFinishedAt      DateTime?
+  rawRecordsCount     Int                 @default(0)
+  factsCount          Int                 @default(0)
+  diagnostics         Json?
+  errorMessage        String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  guest             Guest?             @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  profile           GuestGameProfile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  store             Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_activity_sync_external_guest_uidx")
+  @@index([tenantId, status, lastStartedAt], map: "guest_activity_sync_status_idx")
+  @@index([tenantId, lastSuccessfulTo], map: "guest_activity_sync_success_idx")
+  @@index([guestId], map: "guest_activity_sync_guest_idx")
+  @@index([profileId], map: "guest_activity_sync_profile_idx")
+  @@index([storeId], map: "guest_activity_sync_store_idx")
+  @@index([integrationSourceId], map: "guest_activity_sync_source_idx")
 }
 
 model GuestOperationLog {

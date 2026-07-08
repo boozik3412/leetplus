@@ -10926,10 +10926,10 @@ function SeasonBusinessRules({
         {form.levelSteps.map((step, index) => (
           <div
             key={step.id || `${step.level}-${index}`}
-            className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/45"
+            className="relative space-y-4 rounded-xl border border-t-4 border-zinc-200 border-t-cyan-500 bg-white p-4 shadow-sm ring-1 ring-black/5 dark:border-zinc-700 dark:border-t-cyan-400 dark:bg-zinc-950/70 dark:shadow-black/30 dark:ring-cyan-400/10"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+              <span className="inline-flex items-center rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-cyan-700 ring-1 ring-cyan-200 dark:bg-cyan-950/40 dark:text-cyan-200 dark:ring-cyan-500/30">
                 Шаг {index + 1}
               </span>
               <button

@@ -2957,7 +2957,7 @@ function battlePassRewardFromLevel(
     plannedReward: rewardLabel,
     type,
     rarity,
-    status: battlePassRewardStatus(level, battlePass),
+    status: battlePassRewardStatus(level),
     image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
     rewardValue: battlePassRewardValue(rewardLabel, type, level.xp),
   };
@@ -2992,20 +2992,13 @@ function battlePassRewardFromQuest(
   };
 }
 
-function battlePassRewardStatus(
-  level: HomeBattlePassLevel,
-  battlePass: HomeBattlePassSeason,
-): BattlePassRewardStatus {
-  if (level.current && battlePass.readyRewards > 0) {
-    return "ready";
+function battlePassRewardStatus(level: HomeBattlePassLevel): BattlePassRewardStatus {
+  if (level.reached) {
+    return "claimed";
   }
 
   if (level.current) {
     return "current";
-  }
-
-  if (level.reached) {
-    return "claimed";
   }
 
   return "locked";

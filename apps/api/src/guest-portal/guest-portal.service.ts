@@ -332,6 +332,7 @@ type TenantStoreContext = {
     id: string;
     name: string;
     slug: string;
+    gameLogoUrl: string | null;
   };
   store: {
     id: string;
@@ -342,6 +343,7 @@ type TenantStoreContext = {
     externalDomain: string | null;
     externalClubId: string | null;
     integrationSourceId: string | null;
+    gameLogoUrl: string | null;
   };
 };
 
@@ -384,12 +386,14 @@ export type GuestPortalPublicConfig = {
   tenant: {
     name: string;
     slug: string;
+    gameLogoUrl: string | null;
   };
   store: {
     id: string;
     publicSlug: string | null;
     name: string;
     address: string | null;
+    gameLogoUrl: string | null;
   };
   otp: {
     ttlMinutes: number;
@@ -437,6 +441,7 @@ export type GuestPortalGamificationClubDirectory = {
     tenant: {
       name: string;
       slug: string;
+      gameLogoUrl: string | null;
     };
     store: {
       id: string;
@@ -444,6 +449,7 @@ export type GuestPortalGamificationClubDirectory = {
       name: string;
       city: string | null;
       address: string | null;
+      gameLogoUrl: string | null;
     };
     location: {
       city: string | null;
@@ -1602,6 +1608,7 @@ export class GuestPortalService {
       tenant: {
         name: context.tenant.name,
         slug: context.tenant.slug,
+        gameLogoUrl: context.tenant.gameLogoUrl,
       },
       store: context.store,
       otp: {
@@ -1627,6 +1634,7 @@ export class GuestPortalService {
           name: true,
           city: true,
           address: true,
+          gameLogoUrl: true,
           latitude: true,
           longitude: true,
           externalProvider: true,
@@ -1637,6 +1645,7 @@ export class GuestPortalService {
               id: true,
               name: true,
               slug: true,
+              gameLogoUrl: true,
             },
           },
         },
@@ -1705,6 +1714,7 @@ export class GuestPortalService {
           tenant: {
             name: store.tenant.name,
             slug: store.tenant.slug,
+            gameLogoUrl: store.tenant.gameLogoUrl,
           },
           store: {
             id: store.id,
@@ -1712,6 +1722,7 @@ export class GuestPortalService {
             name: store.name,
             city,
             address: store.address,
+            gameLogoUrl: store.gameLogoUrl,
           },
           location: {
             city,
@@ -7907,6 +7918,7 @@ export class GuestPortalService {
       tenant: {
         name: context.tenant.name,
         slug: context.tenant.slug,
+        gameLogoUrl: context.tenant.gameLogoUrl,
       },
       store: context.store,
       guestFound: Boolean(guest || profile || crmLead),
@@ -8503,6 +8515,7 @@ export class GuestPortalService {
         id: true,
         name: true,
         slug: true,
+        gameLogoUrl: true,
         stores: {
           where: {
             OR: [{ id: storeId }, { publicSlug: storeId }],
@@ -8513,6 +8526,7 @@ export class GuestPortalService {
             publicSlug: true,
             name: true,
             address: true,
+            gameLogoUrl: true,
             timeZone: true,
             externalDomain: true,
             externalClubId: true,
@@ -8534,6 +8548,7 @@ export class GuestPortalService {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
+        gameLogoUrl: tenant.gameLogoUrl,
       },
       store,
     };
@@ -8552,6 +8567,7 @@ export class GuestPortalService {
         id: true,
         name: true,
         slug: true,
+        gameLogoUrl: true,
         stores: {
           where: {
             id: storeId,
@@ -8562,6 +8578,7 @@ export class GuestPortalService {
             publicSlug: true,
             name: true,
             address: true,
+            gameLogoUrl: true,
             timeZone: true,
             externalDomain: true,
             externalClubId: true,
@@ -8583,6 +8600,7 @@ export class GuestPortalService {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
+        gameLogoUrl: tenant.gameLogoUrl,
       },
       store,
     };

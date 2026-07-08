@@ -11,6 +11,7 @@ export type Store = {
   latitude?: string | number | null;
   longitude?: string | number | null;
   yandexMapsUrl?: string | null;
+  gameLogoUrl?: string | null;
   timeZone?: string | null;
   externalDomain?: string | null;
   externalClubId?: string | null;

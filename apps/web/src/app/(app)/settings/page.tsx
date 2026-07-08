@@ -1,6 +1,8 @@
+import { BrandingSettingsForm } from "@/components/branding-settings-form";
 import { LangameSettingsForm } from "@/components/langame-settings-form";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { getBrandingSettings } from "@/lib/branding-settings";
 import { getLangameSettings } from "@/lib/langame-settings";
 import { can } from "@/lib/permissions";
 
@@ -28,7 +30,10 @@ export default async function SettingsPage() {
     );
   }
 
-  const langameSettings = await getLangameSettings();
+  const [langameSettings, brandingSettings] = await Promise.all([
+    getLangameSettings(),
+    getBrandingSettings(),
+  ]);
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
@@ -54,6 +59,7 @@ export default async function SettingsPage() {
           </p>
         </div>
 
+        <BrandingSettingsForm initialSettings={brandingSettings} />
         <LangameSettingsForm initialSettings={langameSettings} />
       </div>
     </main>

@@ -676,6 +676,11 @@ function ReadyGameView({
     summary.rewards.ready[0]?.rewardLabel ??
     summary.rewards.latestBonus?.title ??
     "Главная награда";
+  const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
+  const brandLogoTitle = summary.store.gameLogoUrl
+    ? summary.store.name
+    : summary.tenant.name;
+
   const syncQuestBoardBounds = useCallback(() => {
     const shell = shellRef.current;
     const lootBoxes = lootBoxesRef.current;
@@ -1343,7 +1348,7 @@ function ReadyGameView({
 
         <div className="lp-club-network">
           <Link href="/start" className="lp-club-brand" aria-label="LeetPlus">
-            <BrandMark />
+            <BrandMark logoUrl={brandLogoUrl} title={brandLogoTitle} />
             <span>{summary.tenant.name}</span>
           </Link>
           <Link href="/game/clubs" className="lp-club-switch">
@@ -4498,7 +4503,21 @@ function formatPlayerPhoneMasked(value: string | null) {
   return value?.trim() || null;
 }
 
-function BrandMark() {
+function BrandMark({
+  logoUrl,
+  title,
+}: {
+  logoUrl?: string | null;
+  title: string;
+}) {
+  if (logoUrl) {
+    return (
+      <span className="lp-club-brand-mark is-custom-logo" title={title}>
+        <img src={logoUrl} alt="" />
+      </span>
+    );
+  }
+
   return <span className="lp-club-brand-mark" aria-hidden="true" />;
 }
 
@@ -7638,6 +7657,23 @@ const clubHomeCss = `
 .lp-club-brand-mark::after {
   inset: 14px;
   border-color: var(--amber);
+}
+
+.lp-club-brand-mark.is-custom-logo {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lp-club-brand-mark.is-custom-logo::before,
+.lp-club-brand-mark.is-custom-logo::after {
+  display: none;
+}
+
+.lp-club-brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .lp-club-switch {

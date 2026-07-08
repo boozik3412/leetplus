@@ -128,6 +128,7 @@ model Tenant {
   name            String
   slug            String                @unique
   domain          String?
+  gameLogoUrl     String?
   status          TenantLifecycleStatus @default(ACTIVE)
   statusChangedAt DateTime?
   statusReason    String?
@@ -493,6 +494,7 @@ model Store {
   latitude              Decimal?             @db.Decimal(9, 6)
   longitude             Decimal?             @db.Decimal(9, 6)
   yandexMapsUrl         String?
+  gameLogoUrl           String?
   gamificationEnabled   Boolean              @default(false)
   timeZone              String?
   isActive              Boolean              @default(true)

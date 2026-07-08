@@ -4,12 +4,14 @@ export type GuestPortalPublicConfig = {
   tenant: {
     name: string;
     slug: string;
+    gameLogoUrl: string | null;
   };
   store: {
     id: string;
     publicSlug: string | null;
     name: string;
     address: string | null;
+    gameLogoUrl: string | null;
   };
   otp: {
     ttlMinutes: number;
@@ -76,6 +78,7 @@ export type GuestPortalGamificationClub = {
   tenant: {
     name: string;
     slug: string;
+    gameLogoUrl: string | null;
   };
   store: {
     id: string;
@@ -83,6 +86,7 @@ export type GuestPortalGamificationClub = {
     name: string;
     city: string | null;
     address: string | null;
+    gameLogoUrl: string | null;
   };
   location: {
     city: string | null;

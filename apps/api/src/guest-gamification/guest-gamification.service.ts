@@ -20191,7 +20191,11 @@ function buildVisualEditorPreviewSummary(
 
   return {
     generatedAt: now,
-    tenant: { name: user.tenantSlug ?? 'LeetPlus', slug: user.tenantSlug },
+    tenant: {
+      name: user.tenantSlug ?? 'LeetPlus',
+      slug: user.tenantSlug,
+      gameLogoUrl: null,
+    },
     store: {
       id: store.id,
       name: store.name,
@@ -20201,6 +20205,7 @@ function buildVisualEditorPreviewSummary(
       latitude: store.latitude == null ? null : Number(store.latitude),
       longitude: store.longitude == null ? null : Number(store.longitude),
       yandexMapsUrl: null,
+      gameLogoUrl: null,
       gamificationEnabled: store.gamificationEnabled,
       isActive: store.isActive,
     },

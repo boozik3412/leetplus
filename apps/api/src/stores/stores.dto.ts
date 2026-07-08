@@ -8,6 +8,7 @@ export type CreateStoreDto = {
   latitude?: number | string | null;
   longitude?: number | string | null;
   yandexMapsUrl?: string | null;
+  gameLogoUrl?: string | null;
   timeZone?: string | null;
   gamificationEnabled?: boolean;
 };

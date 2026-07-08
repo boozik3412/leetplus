@@ -1,0 +1,2 @@
+ALTER TABLE "Tenant" ADD COLUMN "gameLogoUrl" TEXT;
+ALTER TABLE "Store" ADD COLUMN "gameLogoUrl" TEXT;

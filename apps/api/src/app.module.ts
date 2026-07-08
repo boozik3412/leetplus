@@ -15,6 +15,7 @@ import { MarketingModule } from './marketing/marketing.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { ReportsModule } from './reports/reports.module';
+import { SettingsModule } from './settings/settings.module';
 import { StaffModule } from './staff/staff.module';
 import { StoresModule } from './stores/stores.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
@@ -43,6 +44,7 @@ import { UsersModule } from './users/users.module';
     GuestGamificationModule,
     GuestPortalModule,
     MarketingModule,
+    SettingsModule,
     StaffModule,
     UtilitiesModule,
     UsersModule,

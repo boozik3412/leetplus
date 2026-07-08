@@ -384,6 +384,9 @@ export type GuestPortalPayload = {
       levels: Array<{
         level: number;
         xp: number;
+        title: string | null;
+        condition: string | null;
+        description: string | null;
         freeReward: string | null;
         premiumReward: string | null;
         reached: boolean;
@@ -726,6 +729,9 @@ export type GuestPortalGameSummary = {
           GuestPortalPayload["gamification"]["seasons"][number]["levels"][number],
           | "level"
           | "xp"
+          | "title"
+          | "condition"
+          | "description"
           | "freeReward"
           | "premiumReward"
           | "reached"

@@ -460,6 +460,7 @@ const rewardInclude = {
       id: true,
       name: true,
       status: true,
+      levels: true,
       seasonType: true,
       periodFrom: true,
       periodTo: true,
@@ -1123,6 +1124,7 @@ export type GuestGameReward = {
     | 'REDEEMED'
     | 'CANCELED'
     | 'EXPIRED';
+  activityLabel: string;
   source: RewardSource;
   externalProvider: string | null;
   externalDomain: string | null;
@@ -1153,7 +1155,10 @@ export type GuestGameReward = {
     id: string;
     name: string;
     status: string;
+    missionType: string;
+    triggerKind: string;
     xpReward: number;
+    progressUnit: string | null;
   } | null;
   season: { id: string; name: string; status: string } | null;
   store: { id: string; name: string } | null;
@@ -11382,6 +11387,10 @@ export class GuestGamificationService {
       return 'Лутбокс';
     }
 
+    if (row.mission && rewardMissionIsCheckIn(row.mission)) {
+      return 'Чекин';
+    }
+
     if (row.missionId) {
       return 'Задание';
     }
@@ -13616,6 +13625,82 @@ function ruleDeleteActivityConfirmation(
   };
 }
 
+function rewardActivityLabel(row: RewardRow) {
+  if (row.lootBox) {
+    return `Лутбокс "${row.lootBox.name}"`;
+  }
+
+  if (row.mission) {
+    if (rewardMissionIsCheckIn(row.mission)) {
+      return 'Чекин';
+    }
+
+    return `Задание "${row.mission.name}"`;
+  }
+
+  if (row.season) {
+    const stepNumber = rewardBattlePassStepNumber(row);
+
+    return stepNumber
+      ? `Battlepass шаг №${stepNumber}`
+      : `Battlepass "${row.season.name}"`;
+  }
+
+  return row.source === 'MANUAL' || row.source === 'CASHIER'
+    ? 'Ручная награда'
+    : 'Игровое событие';
+}
+
+function rewardMissionIsCheckIn(mission: NonNullable<RewardRow['mission']>) {
+  return (
+    mission.missionType === 'CHECK_IN' || mission.triggerKind === 'CHECK_IN'
+  );
+}
+
+function rewardBattlePassStepNumber(row: RewardRow) {
+  const evidence = jsonRecord(row.evidence);
+  const rule = jsonRecord(evidence.rule as Prisma.JsonValue | null);
+  const directStep = [
+    evidence.level,
+    evidence.levelNumber,
+    evidence.step,
+    evidence.stepNumber,
+    rule.level,
+    rule.levelNumber,
+    rule.step,
+    rule.stepNumber,
+  ]
+    .map((value) => dryRunNumber(value, 0))
+    .find((value) => value > 0);
+
+  if (directStep) {
+    return Math.trunc(directStep);
+  }
+
+  const rewardLabel = row.rewardLabel.trim();
+  const levels = dryRunArray(row.season?.levels)
+    .map((item) => dryRunRecord(item))
+    .map((item) => {
+      const level = dryRunNumber(item.level, 0);
+      const freeReward = dryRunString(item.freeReward);
+      const premiumReward = dryRunString(item.premiumReward);
+      const combinedReward = [freeReward, premiumReward]
+        .filter(Boolean)
+        .join(' + ');
+
+      return {
+        level,
+        labels: [freeReward, premiumReward, combinedReward].filter(Boolean),
+      };
+    })
+    .filter((item) => item.level > 0);
+
+  return (
+    levels.find((item) => item.labels.some((label) => label === rewardLabel))
+      ?.level ?? null
+  );
+}
+
 function mapReward(row: RewardRow): GuestGameReward {
   const walletState = rewardWalletState(row.status, row.expiresAt);
 
@@ -13623,6 +13708,7 @@ function mapReward(row: RewardRow): GuestGameReward {
     id: row.id,
     status: row.status as RewardStatus,
     walletState,
+    activityLabel: rewardActivityLabel(row),
     source: row.source as RewardSource,
     externalProvider: row.externalProvider,
     externalDomain: row.externalDomain,
@@ -13657,9 +13743,31 @@ function mapReward(row: RewardRow): GuestGameReward {
             row.guest.phoneMasked ?? row.guest.emailMasked ?? 'нет контакта',
         }
       : null,
-    lootBox: row.lootBox,
-    mission: row.mission,
-    season: row.season,
+    lootBox: row.lootBox
+      ? {
+          id: row.lootBox.id,
+          name: row.lootBox.name,
+          status: row.lootBox.status,
+        }
+      : null,
+    mission: row.mission
+      ? {
+          id: row.mission.id,
+          name: row.mission.name,
+          status: row.mission.status,
+          missionType: row.mission.missionType,
+          triggerKind: row.mission.triggerKind,
+          xpReward: row.mission.xpReward,
+          progressUnit: row.mission.progressUnit,
+        }
+      : null,
+    season: row.season
+      ? {
+          id: row.season.id,
+          name: row.season.name,
+          status: row.season.status,
+        }
+      : null,
     store: row.store,
     createdBy: mapUser(row.createdByUser),
     approvedBy: mapUser(row.approvedByUser),

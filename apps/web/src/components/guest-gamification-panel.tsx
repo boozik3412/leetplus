@@ -272,6 +272,17 @@ type MissionForm = {
   note: string;
 };
 
+type SeasonLevelStepForm = {
+  id: string;
+  level: string;
+  xp: string;
+  title: string;
+  condition: string;
+  description: string;
+  freeReward: string;
+  premiumReward: string;
+};
+
 type SeasonForm = {
   name: string;
   status: GuestGameStatus;
@@ -299,6 +310,7 @@ type SeasonForm = {
   premiumRewardEvery: string;
   freeRewardLabel: string;
   premiumRewardLabel: string;
+  levelSteps: SeasonLevelStepForm[];
   xpRulesText: string;
   levelsText: string;
   freeRewardsText: string;
@@ -1089,6 +1101,49 @@ const defaultCheckInMissionForm: MissionForm = {
   note: "Чекин доступен гостю с активной сессией в выбранном клубе. Повторный чекин в том же клубе доступен на следующий календарный день по времени клуба.",
 };
 
+const defaultSeasonLevelSteps: SeasonLevelStepForm[] = [
+  {
+    id: "level-1",
+    level: "1",
+    xp: "0",
+    title: "Старт сезона",
+    condition: "Начните участие в сезоне клуба.",
+    description: "Первый этап открывает сезон и показывает прогресс гостя.",
+    freeReward: "Старт сезона",
+    premiumReward: "",
+  },
+  {
+    id: "level-2",
+    level: "2",
+    xp: "250",
+    title: "Промокод бара",
+    condition: "Наберите 250 XP в игровом модуле.",
+    description: "Гость получает награду после достижения второго уровня.",
+    freeReward: "Промокод бара",
+    premiumReward: "Усиленный промокод",
+  },
+  {
+    id: "level-3",
+    level: "3",
+    xp: "500",
+    title: "Бонус на следующий визит",
+    condition: "Наберите 500 XP в игровом модуле.",
+    description: "Промежуточный этап сезона с бонусом на следующий визит.",
+    freeReward: "Бонус на следующий визит",
+    premiumReward: "",
+  },
+  {
+    id: "level-4",
+    level: "4",
+    xp: "900",
+    title: "Игровое время",
+    condition: "Наберите 900 XP в игровом модуле.",
+    description: "Финальный этап базовой лестницы сезона.",
+    freeReward: "Игровое время с подтверждением",
+    premiumReward: "Турнирный билет",
+  },
+];
+
 const defaultSeasonForm: SeasonForm = {
   name: "Клубный сезон",
   status: "DRAFT",
@@ -1116,6 +1171,7 @@ const defaultSeasonForm: SeasonForm = {
   premiumRewardEvery: "2",
   freeRewardLabel: "Промокод бара",
   premiumRewardLabel: "Усиленный промокод",
+  levelSteps: defaultSeasonLevelSteps.map((step) => ({ ...step })),
   xpRulesText: jsonText({
     visit: 20,
     checkIn: 20,
@@ -10577,10 +10633,50 @@ function SeasonBusinessRules({
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   onChange: (patch: Partial<SeasonForm>) => void;
 }) {
+  const updateStep = (index: number, patch: Partial<SeasonLevelStepForm>) => {
+    onChange({
+      levelSteps: form.levelSteps.map((step, stepIndex) =>
+        stepIndex === index ? { ...step, ...patch } : step,
+      ),
+    });
+  };
+  const rebuildSteps = () => {
+    const levelSteps = buildAutomaticSeasonLevelSteps(form);
+    onChange({ levelSteps, levelCount: String(levelSteps.length) });
+  };
+  const addStep = () => {
+    const nextLevel =
+      form.levelSteps.reduce(
+        (maxLevel, step) => Math.max(maxLevel, numeric(step.level, 0)),
+        0,
+      ) + 1;
+    const xpPerLevel = Math.max(1, numeric(form.xpPerLevel, 250));
+    onChange({
+      levelCount: String(Math.max(numeric(form.levelCount, 0), nextLevel)),
+      levelSteps: [
+        ...form.levelSteps,
+        {
+          id: nextSeasonStepId(),
+          level: String(nextLevel),
+          xp: String((nextLevel - 1) * xpPerLevel),
+          title: `Этап ${nextLevel}`,
+          condition: `Наберите ${(nextLevel - 1) * xpPerLevel} XP в сезоне.`,
+          description: "",
+          freeReward: "",
+          premiumReward: "",
+        },
+      ],
+    });
+  };
+  const removeStep = (index: number) => {
+    const levelSteps = form.levelSteps.filter((_, stepIndex) => stepIndex !== index);
+    onChange({ levelSteps, levelCount: String(Math.max(1, levelSteps.length)) });
+  };
+
   return (
     <BusinessRuleSection
       title="Лестница Battle Pass"
-      description="Задайте XP за действия, количество уровней и частоту наград. Система соберет free и premium дорожки сама."
+      description="Задайте XP за действия и настройте каждый этап: что нужно сделать гостю и какую награду он получит."
     >
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Field label="XP за визит">
@@ -10721,7 +10817,7 @@ function SeasonBusinessRules({
         </Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Free награда">
+        <Field label="Free награда по умолчанию">
           <input
             className={fieldClass}
             value={form.freeRewardLabel}
@@ -10730,7 +10826,7 @@ function SeasonBusinessRules({
             }
           />
         </Field>
-        <Field label="Premium награда">
+        <Field label="Premium награда по умолчанию">
           <input
             className={fieldClass}
             value={form.premiumRewardLabel}
@@ -10739,6 +10835,107 @@ function SeasonBusinessRules({
             }
           />
         </Field>
+      </div>
+
+      <div className="space-y-3 rounded-lg border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/35">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-zinc-950 dark:text-white">
+              Шаги Battle Pass
+            </h4>
+            <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              Каждый шаг можно настроить отдельно: условие, пояснение и награды
+              для free/premium дорожек.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={smallButtonClass} onClick={rebuildSteps}>
+              Сформировать по XP
+            </button>
+            <button type="button" className={smallButtonClass} onClick={addStep}>
+              Добавить шаг
+            </button>
+          </div>
+        </div>
+        {form.levelSteps.map((step, index) => (
+          <div
+            key={step.id || `${step.level}-${index}`}
+            className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/45"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                Шаг {index + 1}
+              </span>
+              <button
+                type="button"
+                className={dangerButtonClass}
+                disabled={form.levelSteps.length <= 1}
+                onClick={() => removeStep(index)}
+              >
+                Удалить шаг
+              </button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Уровень">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  min="1"
+                  value={step.level}
+                  onChange={(event) => updateStep(index, { level: event.target.value })}
+                />
+              </Field>
+              <Field label="XP для открытия">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  min="0"
+                  value={step.xp}
+                  onChange={(event) => updateStep(index, { xp: event.target.value })}
+                />
+              </Field>
+              <Field label="Название этапа">
+                <input
+                  className={fieldClass}
+                  value={step.title}
+                  onChange={(event) => updateStep(index, { title: event.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <Field label="Что должен сделать гость">
+                <textarea
+                  className={`${fieldClass} min-h-[72px] resize-y`}
+                  value={step.condition}
+                  onChange={(event) => updateStep(index, { condition: event.target.value })}
+                />
+              </Field>
+              <Field label="Подробное пояснение">
+                <textarea
+                  className={`${fieldClass} min-h-[72px] resize-y`}
+                  value={step.description}
+                  onChange={(event) => updateStep(index, { description: event.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Free награда">
+                <input
+                  className={fieldClass}
+                  value={step.freeReward}
+                  onChange={(event) => updateStep(index, { freeReward: event.target.value })}
+                />
+              </Field>
+              <Field label="Premium награда">
+                <input
+                  className={fieldClass}
+                  value={step.premiumReward}
+                  onChange={(event) => updateStep(index, { premiumReward: event.target.value })}
+                />
+              </Field>
+            </div>
+          </div>
+        ))}
       </div>
     </BusinessRuleSection>
   );
@@ -11363,16 +11560,27 @@ function formatRewardPhone(reward: GuestGameReward) {
 }
 
 function rewardActivityLabel(reward: GuestGameReward) {
+  if (reward.activityLabel?.trim()) {
+    return reward.activityLabel;
+  }
+
   if (reward.lootBox) {
-    return "Лутбокс";
+    return `Лутбокс "${reward.lootBox.name}"`;
   }
 
   if (reward.mission) {
-    return "Задание";
+    if (
+      reward.mission.missionType === "CHECK_IN" ||
+      reward.mission.triggerKind === "CHECK_IN"
+    ) {
+      return "Чекин";
+    }
+
+    return `Задание "${reward.mission.name}"`;
   }
 
   if (reward.season) {
-    return "Battle Pass";
+    return `Battlepass "${reward.season.name}"`;
   }
 
   if (reward.source === "MANUAL" || reward.source === "CASHIER") {
@@ -13375,6 +13583,7 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     premiumRewardEvery: rewardFrequency(season.premiumRewards, "2"),
     freeRewardLabel: rewardLabel(season.freeRewards, "Промокод бара"),
     premiumRewardLabel: rewardLabel(season.premiumRewards, "Усиленный промокод"),
+    levelSteps: seasonLevelStepsToForm(season.levels),
     xpRulesText: jsonFormValue(season.xpRules, defaultSeasonForm.xpRulesText),
     levelsText: jsonFormValue(season.levels, defaultSeasonForm.levelsText),
     freeRewardsText: jsonFormValue(season.freeRewards),
@@ -14264,25 +14473,22 @@ function buildSeasonXpRules(form: SeasonForm) {
 }
 
 function buildSeasonLevels(form: SeasonForm) {
-  const levelCount = Math.max(1, numeric(form.levelCount, 1));
-  const xpPerLevel = Math.max(1, numeric(form.xpPerLevel, 1));
+  const customLevels = seasonLevelStepFormsToLevels(form);
 
-  return Array.from({ length: levelCount }, (_, index) => {
-    const level = index + 1;
-    return {
-      level,
-      xp: index * xpPerLevel,
-      freeReward: levelRewardLabel(level, form.freeRewardEvery, form.freeRewardLabel),
-      premiumReward: levelRewardLabel(
-        level,
-        form.premiumRewardEvery,
-        form.premiumRewardLabel,
-      ),
-    };
-  });
+  if (customLevels.length) {
+    return customLevels;
+  }
+
+  return buildAutomaticSeasonLevels(form);
 }
 
 function buildSeasonRewards(form: SeasonForm, track: "free" | "premium") {
+  const customRewards = seasonLevelStepFormsToRewards(form, track);
+
+  if (form.levelSteps.length) {
+    return customRewards;
+  }
+
   const levelCount = Math.max(1, numeric(form.levelCount, 1));
   const every = numeric(
     track === "free" ? form.freeRewardEvery : form.premiumRewardEvery,
@@ -14298,6 +14504,119 @@ function buildSeasonRewards(form: SeasonForm, track: "free" | "premium") {
   return Array.from({ length: levelCount }, (_, index) => index + 1)
     .filter((level) => level % every === 0)
     .map((level) => ({ level, reward: label.trim(), track }));
+}
+
+function buildAutomaticSeasonLevels(form: SeasonForm) {
+  const levelCount = Math.max(1, numeric(form.levelCount, 1));
+  const xpPerLevel = Math.max(1, numeric(form.xpPerLevel, 1));
+
+  return Array.from({ length: levelCount }, (_, index) => {
+    const level = index + 1;
+    return {
+      level,
+      xp: index * xpPerLevel,
+      title: `Этап ${level}`,
+      condition: `Наберите ${index * xpPerLevel} XP в сезоне.`,
+      description: null,
+      freeReward: levelRewardLabel(level, form.freeRewardEvery, form.freeRewardLabel),
+      premiumReward: levelRewardLabel(
+        level,
+        form.premiumRewardEvery,
+        form.premiumRewardLabel,
+      ),
+    };
+  });
+}
+
+function buildAutomaticSeasonLevelSteps(form: SeasonForm): SeasonLevelStepForm[] {
+  return buildAutomaticSeasonLevels(form).map((level) => ({
+    id: nextSeasonStepId(),
+    level: String(level.level),
+    xp: String(level.xp),
+    title: level.title,
+    condition: level.condition,
+    description: level.description ?? "",
+    freeReward: level.freeReward ?? "",
+    premiumReward: level.premiumReward ?? "",
+  }));
+}
+
+function seasonLevelStepFormsToLevels(form: SeasonForm) {
+  return form.levelSteps
+    .map((step, index) => {
+      const level = Math.max(1, numeric(step.level, index + 1));
+      const xp = Math.max(0, numeric(step.xp, index * Math.max(1, numeric(form.xpPerLevel, 1))));
+
+      return {
+        level,
+        xp,
+        title: nullable(step.title) ?? `Этап ${level}`,
+        condition: nullable(step.condition),
+        description: nullable(step.description),
+        freeReward: nullable(step.freeReward),
+        premiumReward: nullable(step.premiumReward),
+      };
+    })
+    .filter((step) => step.title || step.freeReward || step.premiumReward)
+    .sort((left, right) => left.level - right.level || left.xp - right.xp);
+}
+
+function seasonLevelStepFormsToRewards(
+  form: SeasonForm,
+  track: "free" | "premium",
+) {
+  return seasonLevelStepFormsToLevels(form)
+    .map((step) => ({
+      level: step.level,
+      reward: track === "free" ? step.freeReward : step.premiumReward,
+      track,
+    }))
+    .filter(
+      (item): item is { level: number; reward: string; track: "free" | "premium" } =>
+        Boolean(item.reward?.trim()),
+    );
+}
+
+function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
+  const steps = arrayRule(value)
+    .map((item, index) => {
+      const row = asRecord(item);
+      const level = numeric(String(row.level ?? ""), index + 1);
+      const xp = numeric(String(row.xp ?? ""), Math.max(0, index * 250));
+      const freeReward = recordString(row, "freeReward");
+      const premiumReward = recordString(row, "premiumReward");
+      const title =
+        recordString(row, "title") ??
+        freeReward ??
+        premiumReward ??
+        `Этап ${level}`;
+
+      return {
+        id: recordString(row, "id") ?? `level-${level}-${index}`,
+        level: String(level),
+        xp: String(xp),
+        title,
+        condition: recordString(row, "condition") ?? `Наберите ${xp} XP в сезоне.`,
+        description: recordString(row, "description") ?? "",
+        freeReward: freeReward ?? "",
+        premiumReward: premiumReward ?? "",
+      };
+    })
+    .filter((step) => step.title.trim().length > 0);
+
+  return steps.length
+    ? steps
+    : defaultSeasonLevelSteps.map((step) => ({ ...step }));
+}
+
+function recordString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function nextSeasonStepId() {
+  return `level-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function levelRewardLabel(level: number, everyValue: string, label: string) {

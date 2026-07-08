@@ -315,6 +315,7 @@ export type GuestGameReward = {
     | "REDEEMED"
     | "CANCELED"
     | "EXPIRED";
+  activityLabel?: string;
   source: string;
   externalProvider: string | null;
   externalDomain: string | null;
@@ -341,7 +342,15 @@ export type GuestGameReward = {
   > | null;
   guest: GuestGameProfile["guest"];
   lootBox: { id: string; name: string; status: string } | null;
-  mission: { id: string; name: string; status: string; xpReward: number } | null;
+  mission: {
+    id: string;
+    name: string;
+    status: string;
+    missionType?: string;
+    triggerKind?: string;
+    xpReward: number;
+    progressUnit?: string | null;
+  } | null;
   season: { id: string; name: string; status: string } | null;
   store: { id: string; name: string } | null;
   createdBy: GuestGameUser | null;

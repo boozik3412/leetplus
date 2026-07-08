@@ -1302,6 +1302,9 @@ export type GuestPortalSeason = {
   levels: Array<{
     level: number;
     xp: number;
+    title: string | null;
+    condition: string | null;
+    description: string | null;
     freeReward: string | null;
     premiumReward: string | null;
     reached: boolean;
@@ -15065,6 +15068,9 @@ function seasonLevels(value: Prisma.JsonValue, xp: number) {
       return {
         level,
         xp: requiredXp,
+        title: stringField(row.title),
+        condition: stringField(row.condition),
+        description: stringField(row.description),
         freeReward: stringField(row.freeReward),
         premiumReward: stringField(row.premiumReward),
         reached: xp >= requiredXp,

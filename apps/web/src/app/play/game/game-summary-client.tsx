@@ -238,6 +238,9 @@ type BattlePassRewardCard = {
   level: number;
   title: string;
   subtitle: string;
+  condition?: string | null;
+  description?: string | null;
+  plannedReward?: string | null;
   type: BattlePassRewardType;
   rarity: GuestPortalLootBoxRarity;
   status: BattlePassRewardStatus;
@@ -1402,6 +1405,8 @@ function ReadyGameView({
 
         <PlayerProfilePanel
           summary={summary}
+          profileLogoUrl={brandLogoUrl}
+          profileLogoTitle={brandLogoTitle}
           completedQuestCount={completedQuestCount}
           questTotalCount={questTotalCount}
           quests={playerQuests}
@@ -2508,11 +2513,11 @@ function BattlePassQuestModal({
     null;
   const statusLabel = quest?.status ?? battlePassRewardStatusLabel(reward.status);
   const condition = stripBattlePassDetailPrefix(
-    quest?.condition ?? reward.subtitle,
+    quest?.condition ?? reward.condition ?? reward.description ?? reward.subtitle,
     "Условие",
   );
   const plannedReward = stripBattlePassDetailPrefix(
-    quest?.reward ?? reward.title,
+    quest?.reward ?? reward.plannedReward ?? reward.title,
     "Награда",
   );
   const fallbackRewardStatus = mission?.rewardStatus ?? null;
@@ -2867,23 +2872,27 @@ function battlePassRewardFromLevel(
   level: HomeBattlePassLevel,
   battlePass: HomeBattlePassSeason,
 ): BattlePassRewardCard {
-  const title =
+  const rewardLabel =
     level.freeReward ??
     level.premiumReward ??
     `${formatNumber(level.xp)} XP`;
-  const rarity = inferBattlePassRewardRarity(title);
-  const type = inferBattlePassRewardType(title);
+  const title = level.title ?? rewardLabel;
+  const rarity = inferBattlePassRewardRarity(rewardLabel);
+  const type = inferBattlePassRewardType(rewardLabel);
 
   return {
     id: `${battlePass.id}:${level.level}`,
     level: level.level,
     title: battlePassRewardTitle(title, type),
-    subtitle: battlePassRewardSubtitle(level, type),
+    subtitle: level.condition ?? level.description ?? battlePassRewardSubtitle(level, type),
+    condition: level.condition,
+    description: level.description,
+    plannedReward: rewardLabel,
     type,
     rarity,
     status: battlePassRewardStatus(level, battlePass),
     image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
-    rewardValue: battlePassRewardValue(title, type, level.xp),
+    rewardValue: battlePassRewardValue(rewardLabel, type, level.xp),
   };
 }
 
@@ -3131,6 +3140,8 @@ function battlePassSeasonTimeLabel(value: string | null | undefined) {
 }
 function PlayerProfilePanel({
   summary,
+  profileLogoUrl,
+  profileLogoTitle,
   completedQuestCount,
   questTotalCount,
   quests,
@@ -3149,6 +3160,8 @@ function PlayerProfilePanel({
   onQuestsToggle,
 }: {
   summary: GuestPortalGameSummary;
+  profileLogoUrl: string | null;
+  profileLogoTitle: string;
   completedQuestCount: number;
   questTotalCount: number;
   quests: PlayerQuest[];
@@ -3236,8 +3249,12 @@ function PlayerProfilePanel({
   return (
     <aside id="profile" className="lp-club-profile-panel" aria-label="Профиль игрока">
       <div className="lp-club-profile-logo">
-        <div className="lp-club-avatar" aria-hidden="true">
-          <ProfileIcon />
+        <div
+          className={["lp-club-avatar", profileLogoUrl ? "is-custom-logo" : ""].join(" ")}
+          title={profileLogoUrl ? profileLogoTitle : undefined}
+          aria-hidden="true"
+        >
+          {profileLogoUrl ? <img src={profileLogoUrl} alt="" /> : <ProfileIcon />}
         </div>
         <div className="lp-club-profile-copy">
           {nicknameEditing ? (
@@ -10368,6 +10385,19 @@ const clubHomeCss = `
   border-radius: 50%;
   color: var(--cyan);
   background: rgba(131, 228, 236, 0.06);
+}
+
+.lp-club-avatar.is-custom-logo {
+  overflow: hidden;
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lp-club-avatar.is-custom-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .lp-club-profile-logo strong {

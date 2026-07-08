@@ -4009,6 +4009,7 @@ export class GuestPortalService {
       storeId: context.store.id,
       eventType: lootBox.triggerKind,
       occurredAt: ruleOccurredAt.toISOString(),
+      limitOccurredAt: openedAt.toISOString(),
       ...(unlockInput
         ? {
             sessionType: unlockInput.sessionType,
@@ -4052,6 +4053,7 @@ export class GuestPortalService {
         lootBox: guestGameDebugLootBoxRule(lootBox),
         sourceFactId,
         occurredAt: processDto.occurredAt,
+        limitOccurredAt: processDto.limitOccurredAt,
         processInput: {
           eventType: processDto.eventType,
           sessionType: processDto.sessionType ?? null,
@@ -12801,6 +12803,18 @@ function buildLootBoxOpenState(
         ),
       ).length
     : 0;
+  const periodicLatestRewardAt =
+    periodicLimitPeriod && periodicOpenedCount > 0
+      ? latestLootBoxRewardQualifiedAt(lootBoxRewards, (reward) =>
+          lootBoxRewardWithinPeriod(
+            reward.qualifiedAt,
+            now,
+            periodicLimitPeriod,
+            timeZone,
+            restartedAt,
+          ),
+        )
+      : null;
 
   if (row.audienceId && !audienceMemberIds.has(row.audienceId)) {
     return {
@@ -12866,6 +12880,8 @@ function buildLootBoxOpenState(
       openBlocker: lootBoxPeriodicLimitBlocker(
         periodicLimitPeriod,
         periodicOpenedCount,
+        periodicLatestRewardAt,
+        timeZone,
       ),
       weeklyOpenedCount,
       weeklyLimit,
@@ -15216,15 +15232,39 @@ function lootBoxPeriodicLimitPeriod(
 function lootBoxPeriodicLimitBlocker(
   period: GuestPortalLootBoxPeriodicLimitPeriod,
   count: number,
+  latestRewardAt: Date | null = null,
+  timeZone: string = DEFAULT_GUEST_GAME_TIME_ZONE,
 ) {
+  if (period === 'DAILY' && latestRewardAt) {
+    return `Этот лутбокс можно открывать не чаще одного раза в сутки. Последнее открытие было ${formatGuestGameLocalDateTime(
+      latestRewardAt,
+      timeZone,
+    )}.`;
+  }
+
   const label =
     period === 'DAILY'
-      ? 'сегодня'
+      ? 'за последние сутки'
       : period === 'WEEKLY'
         ? 'на этой неделе'
         : 'в этом месяце';
 
   return `Периодический лутбокс уже открыт ${label}: ${count}/1.`;
+}
+
+function formatGuestGameLocalDateTime(value: Date, timeZone: string) {
+  try {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(value);
+  } catch {
+    return value.toISOString();
+  }
 }
 
 function lootBoxScheduleBlocker(
@@ -15421,7 +15461,7 @@ function lootBoxRewardWithinPeriod(
   }
 
   if (period === 'DAILY') {
-    return guestGameSameLocalDay(value, reference, timeZone);
+    return lootBoxRewardWithinLastHours(value, reference, 24);
   }
 
   if (period === 'MONTHLY') {
@@ -15433,6 +15473,28 @@ function lootBoxRewardWithinPeriod(
 
 function lootBoxRewardAfterRestart(value: Date, restartedAt: Date | null) {
   return !restartedAt || value.getTime() >= restartedAt.getTime();
+}
+
+function lootBoxRewardWithinLastHours(
+  value: Date,
+  reference: Date,
+  hours: number,
+) {
+  const diff = reference.getTime() - value.getTime();
+
+  return diff >= 0 && diff < hours * 60 * 60 * 1000;
+}
+
+function latestLootBoxRewardQualifiedAt(
+  rewards: GuestPortalRewardRow[],
+  predicate: (reward: GuestPortalRewardRow) => boolean,
+) {
+  const latest = rewards
+    .filter(predicate)
+    .map((reward) => reward.qualifiedAt)
+    .sort((left, right) => right.getTime() - left.getTime())[0];
+
+  return latest ?? null;
 }
 
 function lootBoxRestartedAt(limits: Record<string, unknown>) {

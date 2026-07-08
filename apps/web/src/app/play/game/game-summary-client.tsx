@@ -1058,7 +1058,7 @@ function ReadyGameView({
       return;
     }
 
-    const currentCard = lootboxOverlayCard;
+    let currentCard = lootboxOverlayCard;
     const runId = lootboxOpenRunRef.current + 1;
 
     lootboxOpenRunRef.current = runId;
@@ -1071,9 +1071,76 @@ function ReadyGameView({
       card: debugHomeLootCard(currentCard),
       summary: debugSummarySnapshot(summary),
     });
-    showToast("Контейнер активируется.");
+    showToast("Проверяем условия открытия.");
 
     try {
+      const nextSummary = await refreshGameSummary({
+        pendingMessage: "Проверяем условия открытия.",
+        successMessage: null,
+        silent: true,
+      });
+
+      if (lootboxOpenRunRef.current !== runId) {
+        return;
+      }
+
+      if (!nextSummary) {
+        const message =
+          "Не удалось проверить условия открытия. Попробуйте еще раз.";
+
+        setLootboxOverlayPhase("ready");
+        setLootboxOverlayError(message);
+        debugGuestGame("lootbox-open-preflight-error", {
+          runId,
+          card: debugHomeLootCard(currentCard),
+        });
+        showToast(message);
+        return;
+      }
+
+      const refreshedCard = buildHomeLootCards(
+        nextSummary,
+        currentCard.id,
+      ).find((item) => item.id === currentCard.id);
+
+      if (!refreshedCard) {
+        const message =
+          "Лутбокс больше не найден в игровом модуле.";
+
+        setLootboxOverlayPhase("ready");
+        setLootboxOverlayError(message);
+        debugGuestGame("lootbox-open-preflight-missing", {
+          runId,
+          card: debugHomeLootCard(currentCard),
+          nextSummary: debugSummarySnapshot(nextSummary),
+        });
+        showToast(message);
+        return;
+      }
+
+      currentCard = refreshedCard;
+      setLootboxOverlayCard(refreshedCard);
+
+      if (!refreshedCard.openable) {
+        const message =
+          lootboxCardBlockedTooltip(refreshedCard) ??
+          refreshedCard.openBlocker ??
+          lootBoxUnavailableCheckMessage(refreshedCard);
+
+        setLootboxOverlayPhase("ready");
+        setLootboxOverlayError(message);
+        debugGuestGame("lootbox-open-preflight-blocked", {
+          runId,
+          card: debugHomeLootCard(refreshedCard),
+          message,
+          nextSummary: debugSummarySnapshot(nextSummary),
+        });
+        showToast(message);
+        return;
+      }
+
+      showToast("Контейнер активируется.");
+
       const [result] = await Promise.all([
         openGameLootBox(currentCard.id),
         wait(LOOTBOX_CHARGE_MIN_MS),

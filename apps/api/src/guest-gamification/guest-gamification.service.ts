@@ -2254,6 +2254,7 @@ export type GuestGameDryRunDto = {
   storeId?: string | null;
   eventType?: string | null;
   occurredAt?: string | null;
+  limitOccurredAt?: string | null;
   sessionType?: string | null;
   sessionPacket?: boolean | string | null;
   sessionMinutes?: number | string | null;
@@ -8720,6 +8721,7 @@ export class GuestGamificationService {
     const eventType = stringValue(dto.eventType) ?? 'SESSION_START';
     const lootBoxId = nullableId(dto.lootBoxId);
     const occurredAt = dateValue(dto.occurredAt) ?? new Date();
+    const limitOccurredAt = dateValue(dto.limitOccurredAt) ?? occurredAt;
     const sessionType = nullableString(dto.sessionType) ?? null;
     const sessionPacket = nullableBooleanValue(dto.sessionPacket);
     const sessionMinutes = Math.max(0, intValue(dto.sessionMinutes) ?? 120);
@@ -8762,6 +8764,7 @@ export class GuestGamificationService {
     const context: DryRunContext = {
       eventType,
       occurredAt,
+      limitOccurredAt,
       profile,
       guest,
       storeId: store?.id ?? null,
@@ -17757,6 +17760,7 @@ function currentEventToProgressEvent(
 type DryRunContext = {
   eventType: string;
   occurredAt: Date;
+  limitOccurredAt: Date;
   profile: GuestGameProfile | null;
   guest: GuestGameProfile['guest'];
   storeId: string | null;
@@ -18535,17 +18539,29 @@ function appendDryRunLootBoxLimits(
     const periodicCount = guestRewards.filter((reward) =>
       dryRunIsWithinLootBoxPeriod(
         reward.qualifiedAt,
-        context.occurredAt,
+        context.limitOccurredAt,
         periodicLimit,
         context.timeZone,
       ),
     ).length;
 
     if (periodicCount >= 1) {
+      const latestRewardAt = dryRunLatestRewardAt(
+        guestRewards,
+        periodicLimit,
+        context,
+      );
       blockers.push(
-        `Периодический лутбокс уже открыт ${lootBoxPeriodicLimitPastLabel(
-          periodicLimit,
-        )}: ${periodicCount}/1`,
+        latestRewardAt
+          ? lootBoxPeriodicLimitBlocker(
+              periodicLimit,
+              periodicCount,
+              latestRewardAt,
+              context.timeZone,
+            )
+          : `Периодический лутбокс уже открыт ${lootBoxPeriodicLimitPastLabel(
+              periodicLimit,
+            )}: ${periodicCount}/1`,
       );
     } else {
       reasons.push(
@@ -19154,7 +19170,7 @@ function dryRunIsWithinLastDays(value: string, reference: Date, days: number) {
   const date = new Date(value);
   const diff = reference.getTime() - date.getTime();
 
-  return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
+  return diff >= 0 && diff < days * 24 * 60 * 60 * 1000;
 }
 
 function dryRunIsSameMonth(value: string, reference: Date, timeZone: string) {
@@ -19173,7 +19189,7 @@ function dryRunIsWithinLootBoxPeriod(
   timeZone: string,
 ) {
   if (period === 'DAILY') {
-    return dryRunIsSameDay(value, reference, timeZone);
+    return dryRunIsWithinLastDays(value, reference, 1);
   }
 
   if (period === 'MONTHLY') {
@@ -19181,6 +19197,60 @@ function dryRunIsWithinLootBoxPeriod(
   }
 
   return dryRunIsWithinLastDays(value, reference, 7);
+}
+
+function dryRunLatestRewardAt(
+  rewards: GuestGameReward[],
+  period: LootBoxPeriodicLimitPeriod,
+  context: DryRunContext,
+) {
+  const latest = rewards
+    .filter((reward) =>
+      dryRunIsWithinLootBoxPeriod(
+        reward.qualifiedAt,
+        context.limitOccurredAt,
+        period,
+        context.timeZone,
+      ),
+    )
+    .map((reward) => new Date(reward.qualifiedAt))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => right.getTime() - left.getTime())[0];
+
+  return latest ?? null;
+}
+
+function lootBoxPeriodicLimitBlocker(
+  period: LootBoxPeriodicLimitPeriod,
+  count: number,
+  latestRewardAt: Date,
+  timeZone: string,
+) {
+  if (period === 'DAILY') {
+    return `Этот лутбокс можно открывать не чаще одного раза в сутки. Последнее открытие было ${formatDryRunLocalDateTime(
+      latestRewardAt,
+      timeZone,
+    )}.`;
+  }
+
+  return `Периодический лутбокс уже открыт ${lootBoxPeriodicLimitPastLabel(
+    period,
+  )}: ${count}/1`;
+}
+
+function formatDryRunLocalDateTime(value: Date, timeZone: string) {
+  try {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(value);
+  } catch {
+    return value.toISOString();
+  }
 }
 
 function lootBoxPeriodicLimitPeriod(

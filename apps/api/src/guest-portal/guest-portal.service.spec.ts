@@ -2442,13 +2442,148 @@ describe('GuestPortalService', () => {
       try {
         await expect(
           service.openLootBox('Bearer guest-token', 'loot-app'),
-        ).rejects.toThrow('Периодический лутбокс уже открыт сегодня');
+        ).rejects.toThrow('не чаще одного раза в сутки');
       } finally {
         jest.useRealTimers();
       }
 
       expect(guestGamificationService.dryRun).not.toHaveBeenCalled();
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
+    });
+
+    it('uses actual opening time for daily periodic lootbox limits', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-22T10:00:00.000Z'));
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const portal = portalPayloadFixture();
+      mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-daily-session',
+        tenantId: 'tenant-1',
+        name: 'Daily session lootbox',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'SESSION_START',
+        sessionType: 'packet_hours',
+        limits: { periodicLimit: 'DAILY' },
+        periodRules: {},
+      });
+      prisma.guestGameEvent.findMany.mockResolvedValue([
+        {
+          eventType: 'SESSION_START',
+          occurredAt: new Date('2026-06-21T08:00:00.000Z'),
+          payload: {
+            sourceFactKind: 'GUEST_SESSION',
+            store: { id: portal.store.id, name: portal.store.name },
+            input: {
+              sessionType: 'packet_hours',
+              sessionPacket: true,
+              sessionMinutes: 180,
+            },
+            rules: [
+              {
+                id: 'loot-daily-session',
+                kind: 'LOOT_BOX',
+                eligible: false,
+                blockers: [
+                  'Лутбокс разблокирован: награда создается только при открытии гостем.',
+                ],
+              },
+            ],
+          },
+        },
+      ]);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-yesterday-1',
+          status: 'APPROVED',
+          lootBoxId: 'loot-daily-session',
+          missionId: null,
+          seasonId: null,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: new Prisma.Decimal(50),
+          rewardLabel: '50 бонусов',
+          rewardCode: null,
+          qualifiedAt: new Date('2026-06-21T08:00:00.000Z'),
+          expiresAt: null,
+        },
+        {
+          id: 'reward-yesterday-2',
+          status: 'APPROVED',
+          lootBoxId: 'loot-daily-session',
+          missionId: null,
+          seasonId: null,
+          rewardType: 'BONUS_BALANCE',
+          rewardAmount: new Prisma.Decimal(50),
+          rewardLabel: '50 бонусов',
+          rewardCode: null,
+          qualifiedAt: new Date('2026-06-21T08:30:00.000Z'),
+          expiresAt: null,
+        },
+      ]);
+      prisma.guestGameReward.count.mockResolvedValue(0);
+      prisma.guestGameEvent.count.mockResolvedValue(0);
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-daily-session',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 50,
+        },
+        rewards: [{ rewardLabel: '50 бонусов' }],
+      });
+
+      try {
+        await service.openLootBox('Bearer guest-token', 'loot-daily-session');
+      } finally {
+        jest.useRealTimers();
+      }
+
+      expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-daily-session',
+          occurredAt: '2026-06-21T08:00:00.000Z',
+          limitOccurredAt: '2026-06-22T10:00:00.000Z',
+        }),
+      );
+      expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-daily-session',
+          limitOccurredAt: '2026-06-22T10:00:00.000Z',
+        }),
+      );
     });
 
     it('ignores lootbox openings made before the rule was restarted', async () => {

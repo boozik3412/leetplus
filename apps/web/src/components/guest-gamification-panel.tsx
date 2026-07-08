@@ -281,6 +281,32 @@ type SeasonLevelStepForm = {
   description: string;
   freeReward: string;
   premiumReward: string;
+  triggerKind?: string;
+  sessionType?: string;
+  timeWindowMode?: LootBoxTimeWindowMode;
+  weekdayMode?: LootBoxWeekdayMode;
+  selectedWeekdays?: number[];
+  hourFrom?: string;
+  hourTo?: string;
+  tariffGroupId?: string;
+  tariffPeriodId?: string;
+  tariffTypeId?: string;
+  guestLogTypes?: string;
+  blockedGuestLogTypes?: string;
+  freeRewardType?: string;
+  freeRewardAmount?: string;
+  freeRewardLabel?: string;
+  freeRewardCode?: string;
+  freeRewardLootBoxName?: string;
+  freeRewardLootBoxRarity?: LootBoxCaseRarity;
+  freeRewardDelivery?: string;
+  premiumRewardType?: string;
+  premiumRewardAmount?: string;
+  premiumRewardLabel?: string;
+  premiumRewardCode?: string;
+  premiumRewardLootBoxName?: string;
+  premiumRewardLootBoxRarity?: LootBoxCaseRarity;
+  premiumRewardDelivery?: string;
 };
 
 type SeasonForm = {
@@ -712,6 +738,19 @@ const checkInRewardTypeOptions = rewardTypeOptions.filter((option) =>
 const lootBoxRewardTypeOptions = rewardTypeOptions.filter(
   (option) => !["BALANCE", "BATTLE_PASS_REWARD"].includes(option.value),
 );
+
+const battlePassStepRewardTypeOptions = [
+  { value: "", label: "Без награды" },
+  { value: "BONUS_BALANCE", label: "Бонусы Langame" },
+  { value: "PROMOCODE", label: "Промокод" },
+  { value: "LOOT_BOX", label: "Лутбокс" },
+  { value: "ADMIN_OTHER", label: "Иной приз" },
+];
+
+const battlePassStepRewardDeliveryOptions = [
+  { value: "AUTO", label: "Автоматическая выдача" },
+  { value: "ADMIN", label: "Администратором" },
+];
 
 const legacyRewardTypeLabelOptions = [
   { value: "BONUS", label: "Бонусы Langame (старый тип)" },
@@ -1780,7 +1819,7 @@ export function GuestGamificationPanel({
       const payload = {
         name: seasonForm.name,
         status: seasonForm.status,
-        seasonType: seasonForm.seasonType,
+        seasonType: "CLUB_SEASON",
         audienceId: nullable(seasonForm.audienceId),
         storeIds: seasonForm.storeIds,
         periodFrom: nullable(seasonForm.periodFrom),
@@ -8090,10 +8129,9 @@ function SeasonsTab({
             <Field label="Тип сезона">
               <input
                 className={fieldClass}
-                value={form.seasonType}
-                onChange={(event) =>
-                  setForm({ ...form, seasonType: event.target.value })
-                }
+                value="Клубный сезон"
+                disabled
+                readOnly
               />
             </Field>
             <AudienceSelect
@@ -8205,7 +8243,9 @@ function SeasonsTab({
           trackingId={trackingId("BP", item.id)}
           title={item.name}
           status={item.status}
-          subtitle={`${item.seasonType} · ${item.premiumEnabled ? "premium" : "free"}`}
+          subtitle={`${seasonTypeLabel(item.seasonType)} · ${
+            item.premiumEnabled ? "premium" : "free"
+          }`}
           meta={[
             item.audience?.name ?? "все гости",
             `тип: ${sessionTypeLabel(stringRule(item.xpRules, "sessionType", ""))}`,
@@ -10664,6 +10704,32 @@ function SeasonBusinessRules({
           description: "",
           freeReward: "",
           premiumReward: "",
+          triggerKind: "",
+          sessionType: "",
+          timeWindowMode: "ANY",
+          weekdayMode: "ANY",
+          selectedWeekdays: weekdayPresets.ANY,
+          hourFrom: "10:00",
+          hourTo: "16:00",
+          tariffGroupId: "",
+          tariffPeriodId: "",
+          tariffTypeId: "",
+          guestLogTypes: "",
+          blockedGuestLogTypes: "",
+          freeRewardType: "",
+          freeRewardAmount: "",
+          freeRewardLabel: "",
+          freeRewardCode: "",
+          freeRewardLootBoxName: "",
+          freeRewardLootBoxRarity: "common",
+          freeRewardDelivery: "AUTO",
+          premiumRewardType: "",
+          premiumRewardAmount: "",
+          premiumRewardLabel: "",
+          premiumRewardCode: "",
+          premiumRewardLootBoxName: "",
+          premiumRewardLootBoxRarity: "common",
+          premiumRewardDelivery: "AUTO",
         },
       ],
     });
@@ -10918,26 +10984,384 @@ function SeasonBusinessRules({
                 />
               </Field>
             </div>
+            <SeasonStepActivationFields
+              step={step}
+              tariffSnapshots={tariffSnapshots}
+              onChange={(patch) => updateStep(index, patch)}
+            />
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Free награда">
-                <input
-                  className={fieldClass}
-                  value={step.freeReward}
-                  onChange={(event) => updateStep(index, { freeReward: event.target.value })}
-                />
-              </Field>
-              <Field label="Premium награда">
-                <input
-                  className={fieldClass}
-                  value={step.premiumReward}
-                  onChange={(event) => updateStep(index, { premiumReward: event.target.value })}
-                />
-              </Field>
+              <SeasonStepRewardFields
+                title="Free награда"
+                prefix="free"
+                step={step}
+                onChange={(patch) => updateStep(index, patch)}
+              />
+              <SeasonStepRewardFields
+                title="Premium награда"
+                prefix="premium"
+                step={step}
+                onChange={(patch) => updateStep(index, patch)}
+              />
             </div>
           </div>
         ))}
       </div>
     </BusinessRuleSection>
+  );
+}
+
+function SeasonStepActivationFields({
+  step,
+  tariffSnapshots,
+  onChange,
+}: {
+  step: SeasonLevelStepForm;
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  onChange: (patch: Partial<SeasonLevelStepForm>) => void;
+}) {
+  const triggerKind = step.triggerKind ?? "";
+  const timeWindowMode = step.timeWindowMode ?? "ANY";
+  const weekdayMode = step.weekdayMode ?? "ANY";
+  const selectedWeekdays = step.selectedWeekdays?.length
+    ? step.selectedWeekdays
+    : weekdayPresets.CUSTOM;
+  const usesTimeWindow = timeWindowMode !== "ANY";
+  const usesCustomWeekdays = weekdayMode === "CUSTOM";
+
+  const setWeekdayMode = (nextMode: LootBoxWeekdayMode) => {
+    onChange({
+      weekdayMode: nextMode,
+      selectedWeekdays:
+        nextMode === "CUSTOM" ? selectedWeekdays : weekdayPresets[nextMode],
+    });
+  };
+  const toggleWeekday = (weekday: number) => {
+    const next = selectedWeekdays.includes(weekday)
+      ? selectedWeekdays.filter((item) => item !== weekday)
+      : [...selectedWeekdays, weekday];
+
+    onChange({
+      weekdayMode: "CUSTOM",
+      selectedWeekdays: sortWeekdays(next),
+    });
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+        Условия активации шага
+      </p>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Field label="Событие активации">
+          <select
+            className={fieldClass}
+            value={triggerKind}
+            onChange={(event) => onChange({ triggerKind: event.target.value })}
+          >
+            <option value="">По XP / уровню</option>
+            {lootBoxTriggerOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Тип сессии">
+          <select
+            className={fieldClass}
+            value={step.sessionType ?? ""}
+            onChange={(event) => onChange({ sessionType: event.target.value })}
+          >
+            <option value="">Любой тип</option>
+            {sessionTypeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Field label="Когда активировать">
+          <select
+            className={fieldClass}
+            value={timeWindowMode}
+            onChange={(event) =>
+              onChange({
+                timeWindowMode: event.target.value as LootBoxTimeWindowMode,
+              })
+            }
+          >
+            {lootBoxTimeWindowOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="По каким дням">
+          <select
+            className={fieldClass}
+            value={weekdayMode}
+            onChange={(event) =>
+              setWeekdayMode(event.target.value as LootBoxWeekdayMode)
+            }
+          >
+            {lootBoxWeekdayOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      {usesTimeWindow ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Начало окна">
+            <input
+              className={fieldClass}
+              type="time"
+              value={step.hourFrom ?? "10:00"}
+              onChange={(event) => onChange({ hourFrom: event.target.value })}
+            />
+          </Field>
+          <Field label="Конец окна">
+            <input
+              className={fieldClass}
+              type="time"
+              value={step.hourTo ?? "16:00"}
+              onChange={(event) => onChange({ hourTo: event.target.value })}
+            />
+          </Field>
+        </div>
+      ) : null}
+      {usesCustomWeekdays ? (
+        <div className="flex flex-wrap gap-2">
+          {weekdayOptions.map((weekday) => {
+            const active = selectedWeekdays.includes(weekday.value);
+
+            return (
+              <button
+                key={weekday.value}
+                type="button"
+                className={[
+                  "rounded-lg border px-3 py-2 text-xs font-bold transition",
+                  active
+                    ? "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+                    : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300",
+                ].join(" ")}
+                onClick={() => toggleWeekday(weekday.value)}
+              >
+                {weekday.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      <TariffConditionFields
+        snapshots={tariffSnapshots}
+        tariffGroupId={step.tariffGroupId ?? ""}
+        tariffPeriodId={step.tariffPeriodId ?? ""}
+        tariffTypeId={step.tariffTypeId ?? ""}
+        onChange={onChange}
+      />
+      {triggerKind === "GUEST_LOG" ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <Field label="Какие события Langame засчитывать">
+            <textarea
+              className={`${fieldClass} min-h-[72px] resize-y`}
+              value={step.guestLogTypes ?? ""}
+              onChange={(event) =>
+                onChange({ guestLogTypes: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Какие события не засчитывать">
+            <textarea
+              className={`${fieldClass} min-h-[72px] resize-y`}
+              value={step.blockedGuestLogTypes ?? ""}
+              onChange={(event) =>
+                onChange({ blockedGuestLogTypes: event.target.value })
+              }
+            />
+          </Field>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SeasonStepRewardFields({
+  title,
+  prefix,
+  step,
+  onChange,
+}: {
+  title: string;
+  prefix: "free" | "premium";
+  step: SeasonLevelStepForm;
+  onChange: (patch: Partial<SeasonLevelStepForm>) => void;
+}) {
+  const typeKey = `${prefix}RewardType` as const;
+  const amountKey = `${prefix}RewardAmount` as const;
+  const labelKey = `${prefix}RewardLabel` as const;
+  const codeKey = `${prefix}RewardCode` as const;
+  const lootBoxNameKey = `${prefix}RewardLootBoxName` as const;
+  const lootBoxRarityKey = `${prefix}RewardLootBoxRarity` as const;
+  const deliveryKey = `${prefix}RewardDelivery` as const;
+  const legacyKey = `${prefix}Reward` as const;
+  const rewardType =
+    step[typeKey] ?? (step[legacyKey]?.trim() ? "ADMIN_OTHER" : "");
+
+  const patchReward = (patch: Partial<SeasonLevelStepForm>) => {
+    const next = { ...step, ...patch };
+    const legacyLabel = seasonStepRewardLabel(next, prefix);
+
+    onChange({
+      ...patch,
+      [legacyKey]: legacyLabel,
+    });
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {title}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Тип награды">
+          <select
+            className={fieldClass}
+            value={rewardType}
+            onChange={(event) =>
+              patchReward({ [typeKey]: event.target.value } as Partial<SeasonLevelStepForm>)
+            }
+          >
+            {battlePassStepRewardTypeOptions.map((option) => (
+              <option key={option.value || "none"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Выдача">
+          <select
+            className={fieldClass}
+            value={step[deliveryKey] ?? "AUTO"}
+            onChange={(event) =>
+              patchReward({
+                [deliveryKey]: event.target.value,
+              } as Partial<SeasonLevelStepForm>)
+            }
+          >
+            {battlePassStepRewardDeliveryOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      {rewardType === "BONUS_BALANCE" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Сумма бонусов">
+            <input
+              className={fieldClass}
+              type="number"
+              min="0"
+              value={step[amountKey] ?? ""}
+              onChange={(event) =>
+                patchReward({
+                  [amountKey]: event.target.value,
+                } as Partial<SeasonLevelStepForm>)
+              }
+            />
+          </Field>
+          <Field label="Название награды">
+            <input
+              className={fieldClass}
+              value={step[labelKey] ?? ""}
+              onChange={(event) =>
+                patchReward({
+                  [labelKey]: event.target.value,
+                } as Partial<SeasonLevelStepForm>)
+              }
+            />
+          </Field>
+        </div>
+      ) : null}
+      {rewardType === "PROMOCODE" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Название промокода">
+            <input
+              className={fieldClass}
+              value={step[labelKey] ?? ""}
+              onChange={(event) =>
+                patchReward({
+                  [labelKey]: event.target.value,
+                } as Partial<SeasonLevelStepForm>)
+              }
+            />
+          </Field>
+          <Field label="Код или префикс">
+            <input
+              className={fieldClass}
+              value={step[codeKey] ?? ""}
+              onChange={(event) =>
+                patchReward({
+                  [codeKey]: event.target.value,
+                } as Partial<SeasonLevelStepForm>)
+              }
+            />
+          </Field>
+        </div>
+      ) : null}
+      {rewardType === "LOOT_BOX" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Название лутбокса">
+            <input
+              className={fieldClass}
+              value={step[lootBoxNameKey] ?? ""}
+              onChange={(event) =>
+                patchReward({
+                  [lootBoxNameKey]: event.target.value,
+                } as Partial<SeasonLevelStepForm>)
+              }
+            />
+          </Field>
+          <Field label="Качество кейса">
+            <select
+              className={fieldClass}
+              value={step[lootBoxRarityKey] ?? "common"}
+              onChange={(event) =>
+                patchReward({
+                  [lootBoxRarityKey]: event.target.value as LootBoxCaseRarity,
+                } as Partial<SeasonLevelStepForm>)
+              }
+            >
+              {lootBoxCaseRarityOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      ) : null}
+      {rewardType === "ADMIN_OTHER" ? (
+        <Field label="Что выдать">
+          <input
+            className={fieldClass}
+            value={step[labelKey] ?? step[legacyKey] ?? ""}
+            onChange={(event) =>
+              patchReward({
+                [labelKey]: event.target.value,
+              } as Partial<SeasonLevelStepForm>)
+            }
+          />
+        </Field>
+      ) : null}
+    </div>
   );
 }
 
@@ -14538,6 +14962,32 @@ function buildAutomaticSeasonLevelSteps(form: SeasonForm): SeasonLevelStepForm[]
     description: level.description ?? "",
     freeReward: level.freeReward ?? "",
     premiumReward: level.premiumReward ?? "",
+    triggerKind: "",
+    sessionType: "",
+    timeWindowMode: "ANY",
+    weekdayMode: "ANY",
+    selectedWeekdays: weekdayPresets.ANY,
+    hourFrom: "10:00",
+    hourTo: "16:00",
+    tariffGroupId: "",
+    tariffPeriodId: "",
+    tariffTypeId: "",
+    guestLogTypes: "",
+    blockedGuestLogTypes: "",
+    freeRewardType: level.freeReward ? "ADMIN_OTHER" : "",
+    freeRewardAmount: "",
+    freeRewardLabel: level.freeReward ?? "",
+    freeRewardCode: "",
+    freeRewardLootBoxName: "",
+    freeRewardLootBoxRarity: "common",
+    freeRewardDelivery: "ADMIN",
+    premiumRewardType: level.premiumReward ? "ADMIN_OTHER" : "",
+    premiumRewardAmount: "",
+    premiumRewardLabel: level.premiumReward ?? "",
+    premiumRewardCode: "",
+    premiumRewardLootBoxName: "",
+    premiumRewardLootBoxRarity: "common",
+    premiumRewardDelivery: "ADMIN",
   }));
 }
 
@@ -14546,6 +14996,8 @@ function seasonLevelStepFormsToLevels(form: SeasonForm) {
     .map((step, index) => {
       const level = Math.max(1, numeric(step.level, index + 1));
       const xp = Math.max(0, numeric(step.xp, index * Math.max(1, numeric(form.xpPerLevel, 1))));
+      const freeReward = seasonStepRewardLabel(step, "free");
+      const premiumReward = seasonStepRewardLabel(step, "premium");
 
       return {
         level,
@@ -14553,8 +15005,11 @@ function seasonLevelStepFormsToLevels(form: SeasonForm) {
         title: nullable(step.title) ?? `Этап ${level}`,
         condition: nullable(step.condition),
         description: nullable(step.description),
-        freeReward: nullable(step.freeReward),
-        premiumReward: nullable(step.premiumReward),
+        activationRules: seasonStepActivationRules(step),
+        freeReward: nullable(freeReward),
+        premiumReward: nullable(premiumReward),
+        freeRewardDetails: seasonStepRewardDefinition(step, "free"),
+        premiumRewardDetails: seasonStepRewardDefinition(step, "premium"),
       };
     })
     .filter((step) => step.title || step.freeReward || step.premiumReward)
@@ -14566,15 +15021,119 @@ function seasonLevelStepFormsToRewards(
   track: "free" | "premium",
 ) {
   return seasonLevelStepFormsToLevels(form)
-    .map((step) => ({
-      level: step.level,
-      reward: track === "free" ? step.freeReward : step.premiumReward,
-      track,
-    }))
-    .filter(
-      (item): item is { level: number; reward: string; track: "free" | "premium" } =>
-        Boolean(item.reward?.trim()),
-    );
+    .map((step) => {
+      const details =
+        track === "free" ? step.freeRewardDetails : step.premiumRewardDetails;
+      const reward = track === "free" ? step.freeReward : step.premiumReward;
+
+      return {
+        level: step.level,
+        reward,
+        track,
+        ...(details
+          ? {
+              rewardType: details.type,
+              delivery: details.delivery,
+              details,
+            }
+          : {}),
+      };
+    })
+    .filter((item) => Boolean(item.reward?.trim()))
+    .map((item) => ({ ...item, reward: item.reward ?? "" }));
+}
+
+function seasonStepActivationRules(step: SeasonLevelStepForm) {
+  const timeWindowMode = step.timeWindowMode ?? "ANY";
+  const weekdayMode = step.weekdayMode ?? "ANY";
+  const selectedWeekdays = step.selectedWeekdays?.length
+    ? sortWeekdays(step.selectedWeekdays)
+    : weekdayPresets[weekdayMode];
+  const usesTimeWindow = timeWindowMode !== "ANY";
+  const usesGuestLogTypes = step.triggerKind === "GUEST_LOG";
+
+  return {
+    source: "battle_pass_step",
+    triggerKind: nullable(step.triggerKind ?? ""),
+    sessionType: nullable(step.sessionType ?? ""),
+    timeWindowMode,
+    weekdayMode,
+    quietHoursEnabled: usesTimeWindow,
+    weekdaysOnly: weekdayMode === "WEEKDAYS",
+    weekdays: weekdayMode === "ANY" ? [] : selectedWeekdays,
+    hours: usesTimeWindow
+      ? [`${step.hourFrom || "10:00"}-${step.hourTo || "16:00"}`]
+      : [],
+    tariffGroupId: nullable(step.tariffGroupId ?? ""),
+    tariffPeriodId: nullable(step.tariffPeriodId ?? ""),
+    tariffTypeId: nullable(step.tariffTypeId ?? ""),
+    guestLogTypes: usesGuestLogTypes ? csvList(step.guestLogTypes ?? "") : [],
+    blockedGuestLogTypes: usesGuestLogTypes
+      ? csvList(step.blockedGuestLogTypes ?? "")
+      : [],
+  };
+}
+
+function seasonStepRewardDefinition(
+  step: SeasonLevelStepForm,
+  track: "free" | "premium",
+) {
+  const legacyReward = track === "free" ? step.freeReward : step.premiumReward;
+  const rewardType =
+    (track === "free" ? step.freeRewardType : step.premiumRewardType) ??
+    (legacyReward?.trim() ? "ADMIN_OTHER" : "");
+
+  if (!rewardType) {
+    return null;
+  }
+
+  const amountValue =
+    track === "free" ? step.freeRewardAmount : step.premiumRewardAmount;
+  const labelValue =
+    track === "free" ? step.freeRewardLabel : step.premiumRewardLabel;
+  const codeValue = track === "free" ? step.freeRewardCode : step.premiumRewardCode;
+  const lootBoxNameValue =
+    track === "free" ? step.freeRewardLootBoxName : step.premiumRewardLootBoxName;
+  const lootBoxRarityValue =
+    track === "free"
+      ? step.freeRewardLootBoxRarity
+      : step.premiumRewardLootBoxRarity;
+  const deliveryValue =
+    track === "free" ? step.freeRewardDelivery : step.premiumRewardDelivery;
+  const amount = optionalNumber(amountValue ?? "");
+  const rawLabel = (labelValue ?? legacyReward ?? "").trim();
+  const label =
+    rawLabel ||
+    (rewardType === "BONUS_BALANCE" && amount != null
+      ? `${amount} бонусов`
+      : rewardType === "PROMOCODE"
+        ? "Промокод"
+        : rewardType === "LOOT_BOX"
+          ? nullable(lootBoxNameValue ?? "") ?? "Лутбокс Battle Pass"
+          : "Ручная награда");
+
+  return {
+    type: rewardType,
+    label,
+    amount,
+    code: nullable(codeValue ?? ""),
+    delivery: deliveryValue === "ADMIN" ? "ADMIN" : "AUTO",
+    ...(rewardType === "LOOT_BOX"
+      ? {
+          lootBox: {
+            name: nullable(lootBoxNameValue ?? "") ?? label,
+            caseRarity: lootBoxRarityValue ?? "common",
+          },
+        }
+      : {}),
+  };
+}
+
+function seasonStepRewardLabel(
+  step: SeasonLevelStepForm,
+  track: "free" | "premium",
+) {
+  return seasonStepRewardDefinition(step, track)?.label ?? "";
 }
 
 function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
@@ -14585,6 +15144,9 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
       const xp = numeric(String(row.xp ?? ""), Math.max(0, index * 250));
       const freeReward = recordString(row, "freeReward");
       const premiumReward = recordString(row, "premiumReward");
+      const activationRules = asRecord(row.activationRules);
+      const freeRewardDetails = asRecord(row.freeRewardDetails);
+      const premiumRewardDetails = asRecord(row.premiumRewardDetails);
       const title =
         recordString(row, "title") ??
         freeReward ??
@@ -14600,6 +15162,47 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
         description: recordString(row, "description") ?? "",
         freeReward: freeReward ?? "",
         premiumReward: premiumReward ?? "",
+        triggerKind: recordString(activationRules, "triggerKind") ?? "",
+        sessionType: recordString(activationRules, "sessionType") ?? "",
+        timeWindowMode: lootBoxTimeWindowMode(activationRules),
+        weekdayMode: lootBoxWeekdayMode(activationRules),
+        selectedWeekdays: numberArrayRule(activationRules, "weekdays"),
+        hourFrom: timeWindowPart(activationRules, 0, "10:00"),
+        hourTo: timeWindowPart(activationRules, 1, "16:00"),
+        tariffGroupId: recordString(activationRules, "tariffGroupId") ?? "",
+        tariffPeriodId: recordString(activationRules, "tariffPeriodId") ?? "",
+        tariffTypeId: recordString(activationRules, "tariffTypeId") ?? "",
+        guestLogTypes: stringListRule(activationRules, "guestLogTypes"),
+        blockedGuestLogTypes: stringListRule(
+          activationRules,
+          "blockedGuestLogTypes",
+        ),
+        freeRewardType:
+          recordString(freeRewardDetails, "type") ??
+          (freeReward ? "ADMIN_OTHER" : ""),
+        freeRewardAmount: numberRule(freeRewardDetails, "amount", ""),
+        freeRewardLabel:
+          recordString(freeRewardDetails, "label") ?? freeReward ?? "",
+        freeRewardCode: recordString(freeRewardDetails, "code") ?? "",
+        freeRewardLootBoxName:
+          recordString(asRecord(freeRewardDetails.lootBox), "name") ?? "",
+        freeRewardLootBoxRarity:
+          lootBoxCaseRarity(asRecord(freeRewardDetails.lootBox)) ?? "common",
+        freeRewardDelivery:
+          recordString(freeRewardDetails, "delivery") ?? "AUTO",
+        premiumRewardType:
+          recordString(premiumRewardDetails, "type") ??
+          (premiumReward ? "ADMIN_OTHER" : ""),
+        premiumRewardAmount: numberRule(premiumRewardDetails, "amount", ""),
+        premiumRewardLabel:
+          recordString(premiumRewardDetails, "label") ?? premiumReward ?? "",
+        premiumRewardCode: recordString(premiumRewardDetails, "code") ?? "",
+        premiumRewardLootBoxName:
+          recordString(asRecord(premiumRewardDetails.lootBox), "name") ?? "",
+        premiumRewardLootBoxRarity:
+          lootBoxCaseRarity(asRecord(premiumRewardDetails.lootBox)) ?? "common",
+        premiumRewardDelivery:
+          recordString(premiumRewardDetails, "delivery") ?? "AUTO",
       };
     })
     .filter((step) => step.title.trim().length > 0);
@@ -14797,6 +15400,10 @@ function optionLabel(
   value: string,
 ) {
   return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function seasonTypeLabel(value: string) {
+  return value === "CLUB_SEASON" ? "Клубный сезон" : value || "Клубный сезон";
 }
 
 function rewardTypeLabelFromValue(value: string) {

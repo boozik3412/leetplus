@@ -6473,6 +6473,65 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('records guest lootbox openings at the actual open time for periodic limits', async () => {
+      const { service } = createService();
+      const unlockedAt = '2026-06-09T08:00:00.000Z';
+      const openedAt = '2026-06-10T10:15:00.000Z';
+      const baseRule = dryRunResult().rules[0];
+
+      jest.spyOn(service as any, 'createReward').mockResolvedValue(
+        rewardResult({
+          status: 'APPROVED',
+          qualifiedAt: openedAt,
+        }),
+      );
+
+      await (service as any).createProcessRewards(
+        user,
+        {
+          eventType: 'SESSION_START',
+          storeId: 'store-1',
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+          limitOccurredAt: openedAt,
+        },
+        dryRunResult({
+          eventType: 'SESSION_START',
+          occurredAt: unlockedAt,
+          rules: [
+            {
+              ...baseRule,
+              id: 'loot-box-1',
+              kind: 'LOOT_BOX',
+              name: 'Daily lootbox',
+              rewardType: 'BONUS',
+              rewardAmount: 50,
+              rewardLabel: '50 bonus points',
+              selectedRewardLabel: '50 bonus points',
+            },
+          ],
+        }),
+        'profile-1',
+        {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'loot-open-1',
+        },
+      );
+
+      expect((service as any).createReward).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          lootBoxId: 'loot-box-1',
+          qualifiedAt: openedAt,
+          evidence: expect.objectContaining({
+            occurredAt: unlockedAt,
+            limitOccurredAt: openedAt,
+            qualifiedAt: openedAt,
+          }),
+        }),
+      );
+    });
+
     it('creates process rewards as canceled for staff test profiles when accrual is explicitly disabled', async () => {
       const { service, prisma, configService } = createService();
 

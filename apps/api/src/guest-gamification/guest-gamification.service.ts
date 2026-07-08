@@ -121,6 +121,7 @@ const snapshotFactSources = [
 const tariffSnapshotFreshMs = 24 * 60 * 60 * 1000;
 const gameEffectWindowDays = 14;
 const defaultGuestGameTimeZone = 'Asia/Yekaterinburg';
+const guestLootBoxOpenSourceKind = 'GUEST_LOOT_BOX_OPEN';
 const tariffSnapshotDefinitions = [
   {
     endpointKey: 'tariffsByDays',
@@ -9664,6 +9665,7 @@ export class GuestGamificationService {
       const externalId = eventReference
         ? `${eventReference.externalId}:reward:${rule.kind}:${rule.id}`
         : null;
+      const qualifiedAt = processRewardQualifiedAt(dto, dryRun, rule);
 
       try {
         const reward = await this.createReward(user, {
@@ -9698,7 +9700,7 @@ export class GuestGamificationService {
             rule.kind === 'LOOT_BOX'
               ? rule.selectedReward?.chancePercent
               : null,
-          qualifiedAt: dryRun.occurredAt,
+          qualifiedAt,
           note: staffTestBlocked
             ? 'Создано как тест сотрудника; автоматическое начисление в Langame заблокировано.'
             : staffTestReason
@@ -9711,6 +9713,8 @@ export class GuestGamificationService {
             sourceFactKind: nullableString(dto.sourceFactKind),
             eventType: dryRun.eventType,
             occurredAt: dryRun.occurredAt,
+            limitOccurredAt: nullableString(dto.limitOccurredAt),
+            qualifiedAt,
             input: dryRun.input,
             rule,
             ...(staffTestReason
@@ -17138,6 +17142,21 @@ function rewardRuleLink(rule: GuestGameDryRunRule) {
   }
 
   return { seasonId: rule.id };
+}
+
+function processRewardQualifiedAt(
+  dto: GuestGameProcessEventDto,
+  dryRun: GuestGameDryRunResult,
+  rule: GuestGameDryRunRule,
+) {
+  if (
+    rule.kind === 'LOOT_BOX' &&
+    nullableString(dto.sourceFactKind) === guestLootBoxOpenSourceKind
+  ) {
+    return dateValue(dto.limitOccurredAt)?.toISOString() ?? dryRun.occurredAt;
+  }
+
+  return dryRun.occurredAt;
 }
 
 function buildRewardApprovalConditions(row: RewardRow) {

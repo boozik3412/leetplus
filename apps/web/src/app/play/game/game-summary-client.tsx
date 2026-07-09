@@ -7858,8 +7858,9 @@ const clubHomeCss = `
 
 .lp-club-brand-mark.is-custom-logo {
   overflow: visible;
+  border: 0;
   border-radius: 0;
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
 }
 
 .lp-club-brand-mark.is-custom-logo::before,
@@ -7872,6 +7873,7 @@ const clubHomeCss = `
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
 }
 
 .lp-club-switch {
@@ -10575,9 +10577,10 @@ const clubHomeCss = `
 
 .lp-club-avatar.is-custom-logo {
   overflow: visible;
-  padding: 7px;
+  padding: 0;
+  border: 0;
   border-radius: 0;
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
 }
 
 .lp-club-avatar.is-custom-logo img {
@@ -10585,6 +10588,7 @@ const clubHomeCss = `
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
 }
 
 .lp-club-profile-logo strong {

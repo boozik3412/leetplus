@@ -3618,7 +3618,7 @@ function PlayerProfilePanel({
             })
           ) : (
             <p className="lp-club-quest-empty">
-              Задания появятся после настройки клуба.
+              Пока нет доступных заданий.
             </p>
           )}
         </div>

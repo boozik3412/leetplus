@@ -669,8 +669,10 @@ function ReadyGameView({
   const checkInAction =
     summary.nextActions.find((action) => action.kind === "CHECK_IN") ?? null;
   const checkInAvailable = isCheckInAvailable(summary);
-  const completedQuestCount = summary.progress.summary.missionsCompleted;
-  const questTotalCount = summary.missions.total || playerQuests.length;
+  const completedQuestCount = playerQuests.filter(
+    (quest) => quest.status === "done",
+  ).length;
+  const questTotalCount = playerQuests.length;
   const battlePassProgress = clampPercent(
     summary.battlePass.active?.progressPercent ?? summary.journey.summary.readyPercent,
   );
@@ -3518,11 +3520,11 @@ function PlayerProfilePanel({
 
       <section
         className="lp-club-quest-widget quest-widget"
-        aria-label="Квесты игрока"
+        aria-label="Задания игрока"
       >
         <div className="lp-club-quest-widget-head">
           <span>
-            <span className="lp-club-small-label">Квесты</span>
+            <span className="lp-club-small-label">Задания</span>
             <strong>Быстрые задачи</strong>
           </span>
           <span className="lp-club-quest-widget-actions">
@@ -3616,7 +3618,7 @@ function PlayerProfilePanel({
             })
           ) : (
             <p className="lp-club-quest-empty">
-              Квесты появятся после настройки клуба.
+              Задания появятся после настройки клуба.
             </p>
           )}
         </div>
@@ -3784,8 +3786,10 @@ function buildHomeBanners(
   primaryAction: GameNextAction | null,
   primaryActionHref: string | null,
 ): HomeBanner[] {
-  const featuredMission = summary.missions.featured[0] ?? null;
-  const secondMission = summary.missions.featured[1] ?? null;
+  const featuredMissions =
+    summary.missions.featured.filter(isPlayerQuestMission);
+  const featuredMission = featuredMissions[0] ?? null;
+  const secondMission = featuredMissions[1] ?? null;
   const fallbackBanners: HomeBanner[] = [
     {
       id: "primary",
@@ -4219,21 +4223,23 @@ function normalizeGameRuleSessionType(value: string | null) {
 }
 
 function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
-  return summary.missions.featured.map((mission) => {
-    const status = playerQuestStatus(mission);
-    const progress = playerQuestProgress(mission);
-    const reward = playerQuestReward(mission);
+  return summary.missions.featured
+    .filter(isPlayerQuestMission)
+    .map((mission) => {
+      const status = playerQuestStatus(mission);
+      const progress = playerQuestProgress(mission);
+      const reward = playerQuestReward(mission);
 
-    return {
-      id: mission.id,
-      title: mission.name,
-      description: playerQuestDescription(mission, reward),
-      status,
-      label: playerQuestStatusLabel(status),
-      progress,
-      reward,
-    };
-  });
+      return {
+        id: mission.id,
+        title: mission.name,
+        description: playerQuestDescription(mission, reward),
+        status,
+        label: playerQuestStatusLabel(status),
+        progress,
+        reward,
+      };
+    });
 }
 
 function findNewQuestCompletion(
@@ -4500,22 +4506,24 @@ function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest
       label: homeQuestStateLabel(step.status),
       reward: "Награда: прогресс сезона и доступ к следующему этапу.",
     }));
-  const missionQuests = summary.missions.featured.map((mission) => {
-    const progress = playerQuestProgress(mission);
+  const missionQuests = summary.missions.featured
+    .filter(isPlayerQuestMission)
+    .map((mission) => {
+      const progress = playerQuestProgress(mission);
 
-    return {
-      id: mission.id,
-      sourceKind: "mission" as const,
-      sourceId: mission.id,
-      title: mission.name,
-      description: missionBattlePassDescription(mission),
-      state: mission.progressPercent >= 100 ? "complete" : "locked",
-      label: mission.progressPercent >= 100 ? "готово" : "квест",
-      reward: missionBattlePassReward(mission),
-      progress,
-      periodTo: mission.periodTo,
-    };
-  });
+      return {
+        id: mission.id,
+        sourceKind: "mission" as const,
+        sourceId: mission.id,
+        title: mission.name,
+        description: missionBattlePassDescription(mission),
+        state: mission.progressPercent >= 100 ? "complete" : "locked",
+        label: mission.progressPercent >= 100 ? "готово" : "квест",
+        reward: missionBattlePassReward(mission),
+        progress,
+        periodTo: mission.periodTo,
+      };
+    });
   const fallback = [
     {
       id: "promo",
@@ -12602,6 +12610,10 @@ function isCheckInMission(mission: GameMission) {
     progressUnit === "чек-ин" ||
     missionName.includes("чекин")
   );
+}
+
+function isPlayerQuestMission(mission: GameMission) {
+  return !isCheckInMission(mission);
 }
 
 async function loadGameSummary() {

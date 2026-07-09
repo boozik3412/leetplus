@@ -107,6 +107,9 @@ export type GuestPortalGamificationClub = {
     gamificationEnabled: boolean;
     configuredByStore: boolean;
     bonusWriteReady: boolean;
+    langameReady: boolean;
+    checkInReady: boolean;
+    integrationMessage: string | null;
   };
 };
 

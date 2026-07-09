@@ -31,6 +31,12 @@ function createPrismaMock() {
     guestGroup: {
       findMany: jest.fn(),
     },
+    integrationCredential: {
+      findMany: jest.fn(),
+    },
+    integrationSource: {
+      findMany: jest.fn(),
+    },
     store: {
       findMany: jest.fn(),
     },
@@ -166,6 +172,38 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestCrmLead.update.mockResolvedValue({});
   prisma.guestCrmEvent.findMany.mockResolvedValue([]);
   prisma.guestGroup.findMany.mockResolvedValue([]);
+  prisma.integrationCredential.findMany.mockResolvedValue([
+    {
+      id: 'langame-credential-1',
+      tenantId: 'tenant-1',
+      apiKeyEncrypted: 'encrypted-api-key',
+    },
+    {
+      id: 'langame-credential-2',
+      tenantId: 'tenant-2',
+      apiKeyEncrypted: 'encrypted-api-key',
+    },
+  ]);
+  prisma.integrationSource.findMany.mockResolvedValue([
+    {
+      id: 'source-1',
+      tenantId: 'tenant-1',
+      credentialId: 'langame-credential-1',
+      domain: '46',
+    },
+    {
+      id: 'source-1337',
+      tenantId: 'tenant-1',
+      credentialId: 'langame-credential-1',
+      domain: '1337.langame.ru',
+    },
+    {
+      id: 'source-2',
+      tenantId: 'tenant-2',
+      credentialId: 'langame-credential-2',
+      domain: '46',
+    },
+  ]);
   prisma.store.findMany.mockResolvedValue([]);
   prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
   prisma.guestPortalOtpChallenge.count.mockResolvedValue(0);

@@ -3468,7 +3468,7 @@ export class GuestGamificationService {
     session: CheckInLiveSession,
     externalGuestId: string,
   ) {
-    const record = row as LangameTransaction & Record<string, unknown>;
+    const record = row;
     const text = this.checkInPacketMarkerText(record);
 
     return {
@@ -3498,7 +3498,7 @@ export class GuestGamificationService {
     session: CheckInLiveSession,
     externalGuestId: string,
   ) {
-    const record = row as LangameGuestLog & Record<string, unknown>;
+    const record = row;
     const text = this.checkInPacketMarkerText(record);
 
     return {
@@ -9488,6 +9488,7 @@ export class GuestGamificationService {
       await this.assertCheckInAvailableToday(user, {
         guestId: guest.id,
         storeId: checkInStore.id,
+        externalDomain: liveSession.externalDomain,
         checkedAt,
         timeZone: checkInStore.timeZone,
       });
@@ -9500,11 +9501,18 @@ export class GuestGamificationService {
       guest.externalGuestId,
     ].join(':');
     const storeResolvedBy =
-      checkInStore && expectedStore && !liveSession.externalClubId
-        ? 'selected_store_fallback'
-        : checkInStore
-          ? 'langame_session'
-          : 'none';
+      checkInStore &&
+      expectedStore &&
+      checkInStore.id === expectedStore.id &&
+      expectedStore.externalDomain &&
+      liveSession.externalDomain === expectedStore.externalDomain &&
+      liveSession.externalClubId !== expectedStore.externalClubId
+        ? 'selected_store_domain_fallback'
+        : checkInStore && expectedStore && !liveSession.externalClubId
+          ? 'selected_store_fallback'
+          : checkInStore
+            ? 'langame_session'
+            : 'none';
     const processResult = await this.processEvent(user, {
       guestId: guest.id,
       storeId: checkInStore?.id ?? null,
@@ -12185,7 +12193,7 @@ export class GuestGamificationService {
     row: LangameGuestLog,
     externalGuestId: string,
   ) {
-    const record = row as LangameGuestLog & Record<string, unknown>;
+    const record = row;
 
     return [
       row.guest_id,
@@ -12199,7 +12207,7 @@ export class GuestGamificationService {
     row: LangameGuestLog,
     session: CheckInLiveSession,
   ) {
-    const record = row as LangameGuestLog & Record<string, unknown>;
+    const record = row;
     const logClubId = this.checkInScalar(
       record.club_id ?? record.list_clubs_id,
     );
@@ -12212,7 +12220,7 @@ export class GuestGamificationService {
   }
 
   private checkInGuestLogDate(row: LangameGuestLog) {
-    const record = row as LangameGuestLog & Record<string, unknown>;
+    const record = row;
 
     return this.checkInScalar(
       row.date ??
@@ -12524,6 +12532,13 @@ export class GuestGamificationService {
       return false;
     }
 
+    if (
+      (expectedDomain && source.domain === expectedDomain) ||
+      (expectedSourceId && source.id === expectedSourceId)
+    ) {
+      return true;
+    }
+
     if (expectedClubId && externalClubId) {
       return externalClubId === expectedClubId;
     }
@@ -12551,8 +12566,9 @@ export class GuestGamificationService {
     const expectedClubId = nullableString(expectedStore?.externalClubId);
     const cachedExternalDomain =
       expectedDomain ?? nullableString(guest.externalDomain);
-    const expectedScope =
-      expectedStoreId || expectedClubId
+    const expectedScope = expectedDomain
+      ? null
+      : expectedStoreId || expectedClubId
         ? {
             OR: [
               ...(expectedStoreId ? [{ storeId: expectedStoreId }] : []),
@@ -12707,6 +12723,7 @@ export class GuestGamificationService {
     params: {
       guestId: string;
       storeId: string;
+      externalDomain?: string | null;
       checkedAt: Date;
       timeZone?: string | null;
     },
@@ -12725,16 +12742,19 @@ export class GuestGamificationService {
     params: {
       guestId: string;
       storeId: string;
+      externalDomain?: string | null;
       checkedAt: Date;
       timeZone?: string | null;
     },
   ): Promise<{ occurredAt: Date } | null> {
     const day = this.checkInLocalDayWindow(params.checkedAt, params.timeZone);
+    const externalDomain = nullableString(params.externalDomain);
     const rows = await this.prisma.guestGameEvent.findMany({
       where: {
         tenantId: user.tenantId,
         guestId: params.guestId,
         eventType: 'CHECK_IN',
+        ...(externalDomain ? { externalDomain } : {}),
         occurredAt: {
           gte: day.from,
           lt: day.to,
@@ -12742,6 +12762,7 @@ export class GuestGamificationService {
       },
       select: {
         occurredAt: true,
+        externalDomain: true,
         payload: true,
       },
       orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
@@ -12749,8 +12770,10 @@ export class GuestGamificationService {
     });
 
     return (
-      rows.find(
-        (row) => this.checkInEventStoreId(row.payload) === params.storeId,
+      rows.find((row) =>
+        externalDomain
+          ? nullableString(row.externalDomain) === externalDomain
+          : this.checkInEventStoreId(row.payload) === params.storeId,
       ) ?? null
     );
   }
@@ -12828,7 +12851,7 @@ export class GuestGamificationService {
   }
 
   private checkInSessionExternalGuestIds(row: LangameGuestSession) {
-    const record = row as LangameGuestSession & Record<string, unknown>;
+    const record = row;
     const nestedGuest = this.checkInRecord(record.guest);
     const values = [
       record.real_guest_id,
@@ -12866,8 +12889,6 @@ export class GuestGamificationService {
     expectedStore: CheckInExpectedStore | null,
   ): Promise<CheckInResolvedStore | null> {
     if (expectedStore) {
-      const expectedClubId = nullableString(expectedStore.externalClubId);
-
       if (
         !this.checkInSessionMatchesExpectedStore(
           { id: integrationSourceId, domain: externalDomain },
@@ -12878,13 +12899,11 @@ export class GuestGamificationService {
         return null;
       }
 
-      if (expectedClubId) {
-        return {
-          id: expectedStore.id,
-          name: expectedStore.name,
-          timeZone: expectedStore.timeZone,
-        };
-      }
+      return {
+        id: expectedStore.id,
+        name: expectedStore.name,
+        timeZone: expectedStore.timeZone,
+      };
     }
 
     if (externalClubId) {
@@ -13029,16 +13048,23 @@ export class GuestGamificationService {
     }
 
     if (liveSession.store?.id) {
-      return liveSession.store.id === expectedStore.id
-        ? expectedStore.id
-        : null;
+      if (liveSession.store.id === expectedStore.id) {
+        return expectedStore.id;
+      }
+
+      if (
+        expectedStore.externalDomain &&
+        liveSession.externalDomain === expectedStore.externalDomain
+      ) {
+        return expectedStore.id;
+      }
+
+      return null;
     }
 
     if (
       expectedStore.externalDomain &&
-      liveSession.externalDomain === expectedStore.externalDomain &&
-      expectedStore.externalClubId &&
-      liveSession.externalClubId === expectedStore.externalClubId
+      liveSession.externalDomain === expectedStore.externalDomain
     ) {
       return expectedStore.id;
     }
@@ -18753,8 +18779,7 @@ function dryRunSeasonRewardLabel(
       .filter((reward) =>
         dryRunSeasonRewardMatchesLevelReward(reward, levelRewardLabels),
       )
-      .filter(dryRunSeasonRewardCountsAsStep)
-      .length,
+      .filter(dryRunSeasonRewardCountsAsStep).length,
   );
   const nextLevel = normalizedLevels[completedLevelCount] ?? null;
 

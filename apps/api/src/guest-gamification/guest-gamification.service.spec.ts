@@ -4498,6 +4498,7 @@ describe('GuestGamificationService', () => {
         prisma.guestGameEvent.findMany.mockResolvedValue([
           {
             occurredAt: new Date('2026-06-10T08:00:00.000Z'),
+            externalDomain: 'club-1',
             payload: { store: { id: 'store-1' } },
           },
         ]);
@@ -4514,6 +4515,7 @@ describe('GuestGamificationService', () => {
             tenantId: user.tenantId,
             guestId: 'guest-1',
             eventType: 'CHECK_IN',
+            externalDomain: 'club-1',
             occurredAt: {
               gte: new Date('2026-06-09T19:00:00.000Z'),
               lt: new Date('2026-06-10T19:00:00.000Z'),
@@ -4521,6 +4523,7 @@ describe('GuestGamificationService', () => {
           },
           select: {
             occurredAt: true,
+            externalDomain: true,
             payload: true,
           },
           orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
@@ -4532,7 +4535,7 @@ describe('GuestGamificationService', () => {
       }
     });
 
-    it('allows a check-in in another club on the same local calendar day', async () => {
+    it('allows a check-in when there is no same-domain check-in today', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-06-10T10:00:00.000Z'));
 
       try {
@@ -4558,12 +4561,7 @@ describe('GuestGamificationService', () => {
           .mockResolvedValue(processResult);
 
         mockCheckInGuestAndSession(service);
-        prisma.guestGameEvent.findMany.mockResolvedValue([
-          {
-            occurredAt: new Date('2026-06-10T08:00:00.000Z'),
-            payload: { store: { id: 'store-2' } },
-          },
-        ]);
+        prisma.guestGameEvent.findMany.mockResolvedValue([]);
 
         const result = await service.checkIn(user, {
           guestId: 'guest-1',
@@ -4585,6 +4583,35 @@ describe('GuestGamificationService', () => {
       }
     });
 
+    it('blocks a second check-in in another club on the same Langame domain', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-10T10:00:00.000Z'));
+
+      try {
+        const { service, prisma } = createService();
+        const processEventSpy = jest.spyOn(service, 'processEvent');
+
+        mockCheckInGuestAndSession(service);
+        prisma.guestGameEvent.findMany.mockResolvedValue([
+          {
+            occurredAt: new Date('2026-06-10T08:00:00.000Z'),
+            externalDomain: 'club-1',
+            payload: { store: { id: 'store-2' } },
+          },
+        ]);
+
+        await expect(
+          service.checkIn(user, {
+            guestId: 'guest-1',
+            storeId: 'store-1',
+          }),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(processEventSpy).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('uses the selected club id when Langame clubs share one domain', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-06-10T10:00:00.000Z'));
 
@@ -4601,7 +4628,8 @@ describe('GuestGamificationService', () => {
             appliedXpDelta: 0,
             createdRewards: 0,
             queuedRewardAmount: 0,
-            idempotencyKey: 'check-in:shared-domain:session-push:lg-guest-1',
+            idempotencyKey:
+              'check-in:shared-domain:session-holmogorova:lg-guest-1',
             idempotent: false,
             langameWrite: false,
           },
@@ -4642,20 +4670,10 @@ describe('GuestGamificationService', () => {
             guest_id: null,
             real_guest_id: 'lg-guest-1',
             list_clubs_id: 'holm-club',
-            date_start: '2026-06-10 09:30:00',
-            date_stop: null,
-            packet: 0,
-            UUID: 'uuid-holmogorova',
-          },
-          {
-            id: 'session-push',
-            guest_id: null,
-            real_guest_id: 'lg-guest-1',
-            list_clubs_id: 'push-club',
             date_start: '2026-06-10 09:45:00',
             date_stop: null,
             packet: 0,
-            UUID: 'uuid-push',
+            UUID: 'uuid-holmogorova',
           },
         ]);
 
@@ -4664,7 +4682,9 @@ describe('GuestGamificationService', () => {
           storeId: 'store-push',
         });
 
-        expect(result.liveSession.externalSessionId).toBe('session-push');
+        expect(result.liveSession.externalSessionId).toBe(
+          'session-holmogorova',
+        );
         expect(result.liveSession.store).toEqual({
           id: 'store-push',
           name: '1337-Пушкинская',
@@ -4675,8 +4695,16 @@ describe('GuestGamificationService', () => {
             guestId: 'guest-1',
             storeId: 'store-push',
             eventType: 'CHECK_IN',
-            sourceFactId: 'session-push',
+            sourceFactId: 'session-holmogorova',
             externalDomain: 'shared-domain',
+            payload: expect.objectContaining({
+              langameSessionResolution: expect.objectContaining({
+                externalClubId: 'holm-club',
+                selectedStoreId: 'store-push',
+                resolvedStoreId: 'store-push',
+                storeResolvedBy: 'selected_store_domain_fallback',
+              }),
+            }),
           }),
         );
       } finally {

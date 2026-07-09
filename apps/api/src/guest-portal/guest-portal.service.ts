@@ -340,11 +340,37 @@ type TenantStoreContext = {
     name: string;
     address: string | null;
     timeZone: string | null;
+    externalProvider: IntegrationProvider | null;
     externalDomain: string | null;
     externalClubId: string | null;
     integrationSourceId: string | null;
     gameLogoUrl: string | null;
   };
+};
+
+type LangameCheckInReadiness = {
+  ready: boolean;
+  message: string | null;
+};
+
+type LangameCheckInReadinessStore = {
+  name: string;
+  externalProvider: IntegrationProvider | null;
+  externalDomain: string | null;
+  integrationSourceId: string | null;
+};
+
+type LangameCheckInReadinessCredential = {
+  id: string;
+  tenantId: string;
+  apiKeyEncrypted: string | null;
+};
+
+type LangameCheckInReadinessSource = {
+  id: string;
+  tenantId: string;
+  credentialId: string;
+  domain: string;
 };
 
 type GuestPortalBuildOptions = {
@@ -470,6 +496,9 @@ export type GuestPortalGamificationClubDirectory = {
       gamificationEnabled: boolean;
       configuredByStore: boolean;
       bonusWriteReady: boolean;
+      langameReady: boolean;
+      checkInReady: boolean;
+      integrationMessage: string | null;
     };
   }>;
 };
@@ -1509,6 +1538,7 @@ type GuestPortalRewardRow = {
   rewardRarityLabel: string | null;
   rewardDropChance: Prisma.Decimal | null;
   rewardCode: string | null;
+  evidence: Prisma.JsonValue | null;
   qualifiedAt: Date;
   expiresAt: Date | null;
   lootBox?: { name: string } | null;
@@ -1625,7 +1655,14 @@ export class GuestPortalService {
   async getGamificationClubDirectory(
     query: { lat?: string; lng?: string; radiusKm?: string } = {},
   ): Promise<GuestPortalGamificationClubDirectory> {
-    const [stores, missions, lootBoxes, seasons] = await Promise.all([
+    const [
+      stores,
+      missions,
+      lootBoxes,
+      seasons,
+      langameCredentials,
+      langameSources,
+    ] = await Promise.all([
       this.prisma.store.findMany({
         where: {
           isActive: true,
@@ -1642,6 +1679,7 @@ export class GuestPortalService {
           longitude: true,
           externalProvider: true,
           externalDomain: true,
+          integrationSourceId: true,
           gamificationEnabled: true,
           tenant: {
             select: {
@@ -1678,6 +1716,29 @@ export class GuestPortalService {
           periodTo: true,
         },
       }),
+      this.prisma.integrationCredential.findMany({
+        where: {
+          provider: IntegrationProvider.LANGAME,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          apiKeyEncrypted: true,
+        },
+      }),
+      this.prisma.integrationSource.findMany({
+        where: {
+          provider: IntegrationProvider.LANGAME,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          credentialId: true,
+          domain: true,
+        },
+      }),
     ]);
     const guestLocation = geoPoint(query.lat, query.lng);
     const radiusKm = radiusNumber(query.radiusKm);
@@ -1711,6 +1772,12 @@ export class GuestPortalService {
           guestLocation && latitude !== null && longitude !== null
             ? haversineDistanceKm(guestLocation, { latitude, longitude })
             : null;
+        const langameReadiness = resolveLangameCheckInReadiness({
+          tenantId: store.tenant.id,
+          store,
+          credentials: langameCredentials,
+          sources: langameSources,
+        });
 
         return {
           id: `${store.tenant.slug}:${storeSlug}`,
@@ -1747,10 +1814,10 @@ export class GuestPortalService {
             activeRules,
             gamificationEnabled: store.gamificationEnabled || activeRules > 0,
             configuredByStore: store.gamificationEnabled,
-            bonusWriteReady:
-              bonusWriteEnabled &&
-              store.externalProvider === IntegrationProvider.LANGAME &&
-              Boolean(store.externalDomain),
+            bonusWriteReady: bonusWriteEnabled && langameReadiness.ready,
+            langameReady: langameReadiness.ready,
+            checkInReady: langameReadiness.ready,
+            integrationMessage: langameReadiness.message,
           },
         };
       })
@@ -1823,6 +1890,45 @@ export class GuestPortalService {
         'Этот клуб пока не подключен к игровому модулю LeetPlus.',
       );
     }
+  }
+
+  private async resolveContextLangameCheckInReadiness(
+    context: TenantStoreContext,
+  ): Promise<LangameCheckInReadiness> {
+    const [credentials, sources] = await Promise.all([
+      this.prisma.integrationCredential.findMany({
+        where: {
+          tenantId: context.tenant.id,
+          provider: IntegrationProvider.LANGAME,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          apiKeyEncrypted: true,
+        },
+      }),
+      this.prisma.integrationSource.findMany({
+        where: {
+          tenantId: context.tenant.id,
+          provider: IntegrationProvider.LANGAME,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          credentialId: true,
+          domain: true,
+        },
+      }),
+    ]);
+
+    return resolveLangameCheckInReadiness({
+      tenantId: context.tenant.id,
+      store: context.store,
+      credentials,
+      sources,
+    });
   }
 
   private buildGamificationVerificationPlan(): GuestPortalGamificationClubDirectory['verification'] {
@@ -4410,6 +4516,16 @@ export class GuestPortalService {
       payload.tenantId,
       payload.storeId,
     );
+    const checkInReadiness =
+      await this.resolveContextLangameCheckInReadiness(context);
+
+    if (!checkInReadiness.ready) {
+      throw new BadRequestException(
+        checkInReadiness.message ??
+          `Для клуба "${context.store.name}" интеграция Langame не готова к чек-ину.`,
+      );
+    }
+
     let guest = await this.findGuest(payload, context.store);
     guest = this.guestMatchesStoreDomain(guest, context.store) ? guest : null;
 
@@ -7867,9 +7983,15 @@ export class GuestPortalService {
       liveBalanceRefresh?.bonusBalanceSnapshot ?? bonusBalanceSnapshot,
       currentHours,
     );
+    const checkInReadiness =
+      await this.resolveContextLangameCheckInReadiness(context);
     const visibleMissions = missions
       .filter((item) => matchesStore(item.storeIds, context.store.id))
       .filter((item) => activePeriod(item.periodFrom, item.periodTo))
+      .filter(
+        (item) =>
+          checkInReadiness.ready || !isGuestPortalCheckInMissionRule(item),
+      )
       .slice(0, 6);
     const missionProgress = await this.buildMissionProgress(
       context.tenant.id,
@@ -7917,6 +8039,7 @@ export class GuestPortalService {
       missions: portalMissions,
       seasons: portalSeasons,
       rewards: portalRewards,
+      checkInReady: checkInReadiness.ready,
     });
 
     return {
@@ -8533,6 +8656,7 @@ export class GuestPortalService {
             address: true,
             gameLogoUrl: true,
             timeZone: true,
+            externalProvider: true,
             externalDomain: true,
             externalClubId: true,
             integrationSourceId: true,
@@ -8585,6 +8709,7 @@ export class GuestPortalService {
             address: true,
             gameLogoUrl: true,
             timeZone: true,
+            externalProvider: true,
             externalDomain: true,
             externalClubId: true,
             integrationSourceId: true,
@@ -13869,12 +13994,88 @@ function bonusLedgerEntryTypeLabel(entryType: string) {
   }
 }
 
+function resolveLangameCheckInReadiness(input: {
+  tenantId: string;
+  store: LangameCheckInReadinessStore;
+  credentials: LangameCheckInReadinessCredential[];
+  sources: LangameCheckInReadinessSource[];
+}): LangameCheckInReadiness {
+  if (
+    input.store.externalProvider &&
+    input.store.externalProvider !== IntegrationProvider.LANGAME
+  ) {
+    return {
+      ready: false,
+      message: `Для клуба "${input.store.name}" выбран не Langame как источник интеграции.`,
+    };
+  }
+
+  const sourceId = stringOrNull(input.store.integrationSourceId);
+  const storeDomain = stringOrNull(input.store.externalDomain);
+
+  if (!sourceId && !storeDomain) {
+    return {
+      ready: false,
+      message: `Для клуба "${input.store.name}" не указан Langame-домен или источник интеграции.`,
+    };
+  }
+
+  const credentials = input.credentials.filter(
+    (credential) =>
+      credential.tenantId === input.tenantId &&
+      Boolean(stringOrNull(credential.apiKeyEncrypted)),
+  );
+
+  if (credentials.length === 0) {
+    return {
+      ready: false,
+      message: `Для клуба "${input.store.name}" не найден активный Langame API-ключ.`,
+    };
+  }
+
+  const credentialIds = new Set(credentials.map((credential) => credential.id));
+  const normalizedDomain = storeDomain?.toLocaleLowerCase('ru-RU') ?? null;
+  const source = input.sources.find((item) => {
+    if (
+      item.tenantId !== input.tenantId ||
+      !credentialIds.has(item.credentialId)
+    ) {
+      return false;
+    }
+
+    return (
+      (sourceId && item.id === sourceId) ||
+      (normalizedDomain &&
+        item.domain.toLocaleLowerCase('ru-RU') === normalizedDomain)
+    );
+  });
+
+  if (!source) {
+    return {
+      ready: false,
+      message: `Для клуба "${input.store.name}" не найден активный Langame-домен, связанный с клубом.`,
+    };
+  }
+
+  return { ready: true, message: null };
+}
+
+function isGuestPortalCheckInMissionRule(mission: {
+  missionType?: string | null;
+  triggerKind?: string | null;
+}) {
+  return (
+    mission.missionType === 'CHECK_IN' || mission.triggerKind === 'CHECK_IN'
+  );
+}
+
 function buildNextActions(input: {
   guestFound: boolean;
   lootBoxes: GuestPortalLootBox[];
   missions: GuestPortalMission[];
   seasons: GuestPortalSeason[];
   rewards: GuestPortalReward[];
+  checkInReady: boolean;
 }): GuestPortalNextAction[] {
   const actions: GuestPortalNextAction[] = [];
   const readyReward = input.rewards.find(
@@ -13929,7 +14130,7 @@ function buildNextActions(input: {
     });
   }
 
-  if (checkInMission) {
+  if (checkInMission && input.checkInReady) {
     actions.push({
       id: `check-in:${checkInMission.id}`,
       kind: 'CHECK_IN',
@@ -15140,13 +15341,18 @@ function buildSeasonProgress(
         ? xp >= nextLevelXp
           ? 100
           : 0
-        : percent(xp - currentLevelXp, Math.max(1, nextLevelXp - currentLevelXp))
+        : percent(
+            xp - currentLevelXp,
+            Math.max(1, nextLevelXp - currentLevelXp),
+          )
       : 100;
 
   levels.forEach((level, index) => {
     level.reached = index < reachedLevelCount;
-    level.current = index === reachedLevelCount && reachedLevelCount < levels.length;
-    level.next = index === reachedLevelCount + 1 && reachedLevelCount < levels.length;
+    level.current =
+      index === reachedLevelCount && reachedLevelCount < levels.length;
+    level.next =
+      index === reachedLevelCount + 1 && reachedLevelCount < levels.length;
   });
 
   return {
@@ -15173,9 +15379,7 @@ function seasonRewardStateCountsAsReachedLevel(
   state: GuestPortalReward['walletState'],
 ) {
   return (
-    state === 'WAITING_APPROVAL' ||
-    state === 'READY' ||
-    state === 'REDEEMED'
+    state === 'WAITING_APPROVAL' || state === 'READY' || state === 'REDEEMED'
   );
 }
 

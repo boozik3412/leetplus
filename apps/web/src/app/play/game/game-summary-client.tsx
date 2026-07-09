@@ -2319,13 +2319,22 @@ function HomeBattlePass({
     mainReward?.type === "lootbox"
       ? mainReward.title
       : rewardLabel || mainReward?.title || "Сезонный контейнер";
+  const trackGapExpression = Array.from(
+    { length: Math.max(rewards.length - 1, 0) },
+    () => "var(--battlepass-card-gap)",
+  ).join(" - ");
+  const railEdgeOffset =
+    rewards.length > 1 && trackGapExpression
+      ? `calc((100% - ${trackGapExpression}) / ${rewards.length * 2})`
+      : "50%";
   const trackGridStyle = {
-    gridTemplateColumns: `repeat(${rewards.length}, var(--battlepass-card-width))`,
+    gridTemplateColumns: `repeat(${rewards.length}, minmax(var(--battlepass-card-width), 1fr))`,
   } as CSSProperties;
   const railStyle = {
     ...trackGridStyle,
     "--battlepass-line-scale": String(levelLineScale),
-  } as CSSProperties & Record<"--battlepass-line-scale", string>;
+    "--battlepass-rail-edge": railEdgeOffset,
+  } as CSSProperties & Record<"--battlepass-line-scale" | "--battlepass-rail-edge", string>;
 
   useEffect(() => {
     if (!detailReward && !helpOpen) {
@@ -2430,7 +2439,6 @@ function HomeBattlePass({
             </picture>
           </span>
           <span className="lp-club-battlepass-season-copy">
-            <small>Сезон {battlePassSeasonNumber(seasonName)}</small>
             <strong>{seasonName}</strong>
             <span>
               <b>{formatNumber(progress)}%</b>
@@ -3285,10 +3293,6 @@ function battlePassRewardTypeLabel(type: BattlePassRewardType) {
   } satisfies Record<BattlePassRewardType, string>;
 
   return labels[type];
-}
-
-function battlePassSeasonNumber(value: string) {
-  return value.match(/\d+/)?.[0].padStart(2, "0") ?? "01";
 }
 
 function battlePassSeasonTimeLabel(value: string | null | undefined) {
@@ -10048,7 +10052,6 @@ const clubHomeCss = `
 }
 
 .lp-club-battlepass-season-copy strong {
-  margin-top: 10px;
   color: var(--text);
   font-size: clamp(23px, 2vw, 30px);
   line-height: 1;
@@ -10192,7 +10195,8 @@ const clubHomeCss = `
 .lp-club-battlepass-reward-grid {
   display: grid;
   gap: var(--battlepass-card-gap);
-  width: max-content;
+  width: 100%;
+  min-width: max-content;
 }
 
 .lp-club-battlepass-level-rail {
@@ -10205,8 +10209,8 @@ const clubHomeCss = `
 .lp-club-battlepass-level-rail::after {
   content: "";
   position: absolute;
-  left: var(--battlepass-card-half);
-  right: var(--battlepass-card-half);
+  left: var(--battlepass-rail-edge, var(--battlepass-card-half));
+  right: var(--battlepass-rail-edge, var(--battlepass-card-half));
   top: 28px;
   z-index: -1;
   height: 3px;
@@ -10291,7 +10295,9 @@ const clubHomeCss = `
   display: grid;
   grid-template-rows: minmax(82px, 1fr) auto;
   align-items: end;
-  width: var(--battlepass-card-width);
+  justify-self: center;
+  width: 100%;
+  max-width: 158px;
   min-width: var(--battlepass-card-width);
   min-height: 204px;
   padding: 18px 13px 15px;

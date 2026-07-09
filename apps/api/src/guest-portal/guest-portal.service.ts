@@ -364,6 +364,7 @@ type LangameCheckInReadinessCredential = {
   id: string;
   tenantId: string;
   apiKeyEncrypted: string | null;
+  apiKeyEnvVar: string | null;
 };
 
 type LangameCheckInReadinessSource = {
@@ -1737,6 +1738,7 @@ export class GuestPortalService {
           id: true,
           tenantId: true,
           apiKeyEncrypted: true,
+          apiKeyEnvVar: true,
         },
       }),
       this.prisma.integrationSource.findMany({
@@ -1918,6 +1920,7 @@ export class GuestPortalService {
           id: true,
           tenantId: true,
           apiKeyEncrypted: true,
+          apiKeyEnvVar: true,
         },
       }),
       this.prisma.integrationSource.findMany({
@@ -14054,7 +14057,8 @@ function resolveLangameCheckInReadiness(input: {
   const credentials = input.credentials.filter(
     (credential) =>
       credential.tenantId === input.tenantId &&
-      Boolean(stringOrNull(credential.apiKeyEncrypted)),
+      (Boolean(stringOrNull(credential.apiKeyEncrypted)) ||
+        Boolean(stringOrNull(credential.apiKeyEnvVar))),
   );
 
   if (credentials.length === 0) {
@@ -14064,13 +14068,9 @@ function resolveLangameCheckInReadiness(input: {
     };
   }
 
-  const credentialIds = new Set(credentials.map((credential) => credential.id));
   const normalizedDomain = storeDomain?.toLocaleLowerCase('ru-RU') ?? null;
   const source = input.sources.find((item) => {
-    if (
-      item.tenantId !== input.tenantId ||
-      !credentialIds.has(item.credentialId)
-    ) {
+    if (item.tenantId !== input.tenantId) {
       return false;
     }
 

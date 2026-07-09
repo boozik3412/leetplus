@@ -181,11 +181,13 @@ function createService(configValues: Record<string, string | undefined> = {}) {
       id: 'langame-credential-1',
       tenantId: 'tenant-1',
       apiKeyEncrypted: 'encrypted-api-key',
+      apiKeyEnvVar: null,
     },
     {
       id: 'langame-credential-2',
       tenantId: 'tenant-2',
       apiKeyEncrypted: 'encrypted-api-key',
+      apiKeyEnvVar: null,
     },
   ]);
   prisma.integrationSource.findMany.mockResolvedValue([
@@ -3249,6 +3251,69 @@ describe('GuestPortalService', () => {
       expect(telegramOption?.nextAction).toContain(
         'API-side sender не требуется',
       );
+    });
+
+    it('keeps Langame clubs ready when active sources point to a newer empty credential', async () => {
+      const { prisma, service } = createService({
+        LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+      });
+
+      prisma.integrationCredential.findMany.mockResolvedValue([
+        {
+          id: 'credential-with-key',
+          tenantId: 'tenant-1',
+          apiKeyEncrypted: 'encrypted-api-key',
+          apiKeyEnvVar: null,
+        },
+        {
+          id: 'newer-empty-credential',
+          tenantId: 'tenant-1',
+          apiKeyEncrypted: null,
+          apiKeyEnvVar: null,
+        },
+      ]);
+      prisma.integrationSource.findMany.mockResolvedValue([
+        {
+          id: 'source-pushkinskaya',
+          tenantId: 'tenant-1',
+          credentialId: 'newer-empty-credential',
+          domain: '46.langamepro.ru',
+        },
+      ]);
+      prisma.store.findMany.mockResolvedValue([
+        {
+          id: 'store-pushkinskaya',
+          publicSlug: 'pushkinskaya',
+          name: '1337-Пушкинская',
+          city: null,
+          address: null,
+          latitude: null,
+          longitude: null,
+          gamificationEnabled: true,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '46.langamepro.ru',
+          externalClubId: '1',
+          integrationSourceId: 'source-pushkinskaya',
+          tenant: {
+            id: 'tenant-1',
+            name: 'Leet Clubs',
+            slug: 'leet',
+          },
+        },
+      ]);
+      prisma.guestGameMission.findMany.mockResolvedValue([]);
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+      prisma.guestGameSeason.findMany.mockResolvedValue([]);
+
+      const directory = await service.getGamificationClubDirectory({});
+
+      expect(directory.clubs).toHaveLength(1);
+      expect(directory.clubs[0].gamification).toMatchObject({
+        langameReady: true,
+        checkInReady: true,
+        bonusWriteReady: true,
+        integrationMessage: null,
+      });
     });
   });
 

@@ -10738,6 +10738,9 @@ function SeasonBusinessRules({
     const levelSteps = form.levelSteps.filter((_, stepIndex) => stepIndex !== index);
     onChange({ levelSteps, levelCount: String(Math.max(1, levelSteps.length)) });
   };
+  const mainRewardStepIndex = form.levelSteps.length - 1;
+  const mainRewardStep =
+    mainRewardStepIndex >= 0 ? form.levelSteps[mainRewardStepIndex] : null;
 
   return (
     <BusinessRuleSection
@@ -10902,6 +10905,42 @@ function SeasonBusinessRules({
           />
         </Field>
       </div>
+
+      {mainRewardStep ? (
+        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 ring-1 ring-amber-100 dark:border-amber-500/35 dark:bg-amber-950/20 dark:ring-amber-400/10">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-200">
+                Главная награда сезона
+              </p>
+              <h4 className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
+                Выдается за прохождение последнего шага Battle Pass
+              </h4>
+              <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                Сейчас это шаг {mainRewardStepIndex + 1}:{" "}
+                {mainRewardStep.title?.trim() || "финальный этап"}.
+              </p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-500/30">
+              Финал
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SeasonStepRewardFields
+              title="Главная Free награда"
+              prefix="free"
+              step={mainRewardStep}
+              onChange={(patch) => updateStep(mainRewardStepIndex, patch)}
+            />
+            <SeasonStepRewardFields
+              title="Главная Premium награда"
+              prefix="premium"
+              step={mainRewardStep}
+              onChange={(patch) => updateStep(mainRewardStepIndex, patch)}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="space-y-3 rounded-lg border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/35">
         <div className="flex flex-wrap items-start justify-between gap-3">

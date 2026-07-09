@@ -10743,7 +10743,7 @@ function buildGameSummaryFromPortal(
             nextRewardLabel: activeSeason.nextRewardLabel,
             readyRewards: activeSeason.readyRewards,
             waitingApprovalRewards: activeSeason.waitingApprovalRewards,
-            levels: featuredSeasonLevels(activeSeason.levels),
+            levels: activeSeason.levels,
           }
         : null,
     },
@@ -11394,18 +11394,6 @@ function progressRewardSourceLabel(
     default:
       return 'Ручная награда';
   }
-}
-
-function featuredSeasonLevels(levels: GuestPortalSeason['levels']) {
-  if (levels.length <= 5) {
-    return levels;
-  }
-
-  const activeIndex = levels.findIndex((level) => level.current || level.next);
-  const centerIndex = activeIndex >= 0 ? activeIndex : 0;
-  const start = Math.max(0, Math.min(centerIndex - 1, levels.length - 5));
-
-  return levels.slice(start, start + 5);
 }
 
 function otpChallengeStatus(status: GuestPortalOtpDeliveryStatus) {

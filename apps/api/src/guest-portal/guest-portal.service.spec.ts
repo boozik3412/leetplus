@@ -151,6 +151,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     processEvent: jest.fn(),
     processLiveSessionStart: jest.fn(),
   };
+  const guestActivityLedgerService = {
+    scheduleProfileSync: jest.fn(),
+  };
   const secretEncryptionService = {
     encrypt: jest.fn((value: string) => `encrypted:${value}`),
     decrypt: jest.fn(),
@@ -161,6 +164,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     jwtService as any,
     langameSettingsService as any,
     guestGamificationService as any,
+    guestActivityLedgerService as any,
     secretEncryptionService as any,
   );
 
@@ -332,6 +336,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
 
   return {
     guestGamificationService,
+    guestActivityLedgerService,
     jwtService,
     langameSettingsService,
     prisma,
@@ -1169,13 +1174,15 @@ describe('GuestPortalService', () => {
             id: 'season-1',
             currentLevel: 3,
             nextLevel: 4,
-            levels: [
+            levels: expect.arrayContaining([
+              expect.objectContaining({ level: 1, reached: true }),
               expect.objectContaining({ level: 2, reached: true }),
               expect.objectContaining({ level: 3, current: true }),
               expect.objectContaining({ level: 4, next: true }),
               expect.objectContaining({ level: 5, reached: false }),
               expect.objectContaining({ level: 6, reached: false }),
-            ],
+              expect.objectContaining({ level: 7, reached: false }),
+            ]),
           }),
         },
         progress: {
@@ -1327,9 +1334,11 @@ describe('GuestPortalService', () => {
       expect(summary.rewards.bonusHistory.items[0]).not.toHaveProperty(
         'langameResponse',
       );
-      expect(summary.battlePass.active?.levels).toHaveLength(5);
-      expect(summary.battlePass.active?.levels[0].level).toBe(2);
-      expect(summary.battlePass.active?.levels[4].level).toBe(6);
+      expect(summary.battlePass.active?.levels).toHaveLength(
+        portal.gamification.seasons[0].levels.length,
+      );
+      expect(summary.battlePass.active?.levels[0].level).toBe(1);
+      expect(summary.battlePass.active?.levels.at(-1)?.level).toBe(7);
       expect(summary).not.toHaveProperty('guestSnapshot');
       expect(summary.activity).not.toHaveProperty('timeline');
       expect(summary.activity).not.toHaveProperty('xpHistory');
@@ -6321,6 +6330,172 @@ describe('GuestPortalService', () => {
         openState: 'WAITING_EVENT',
         openable: false,
         openBlocker: 'Лутбокс доступен другой аудитории гостей.',
+      });
+    });
+    it('does not count old battle pass rewards before the active season window', async () => {
+      const { prisma, service } = createService();
+
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'LeetPlus', slug: 'demo' },
+        store: {
+          id: 'store-1',
+          publicSlug: 'pushkinskaya',
+          name: '1337-Pushkinskaya',
+          address: 'Pushkinskaya, 217',
+          timeZone: 'Asia/Yekaterinburg',
+          externalDomain: 'club-1',
+          externalClubId: '1',
+          integrationSourceId: null,
+        },
+      });
+      jest.spyOn(service as any, 'findGuest').mockResolvedValue({
+        id: 'guest-1',
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        externalGuestTypeId: null,
+        phoneMasked: '***6330',
+        emailMasked: null,
+        fullNameMasked: null,
+        phoneEncrypted: null,
+        currentCountHours: null,
+        lastSyncedAt: null,
+        isDisabled: false,
+      });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+        leadId: null,
+        displayName: 'Guest One',
+        contactMasked: '***6330',
+        phoneHash: 'phone-hash',
+        phoneEncrypted: null,
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentSource: 'telegram',
+        phoneConsentAt: new Date('2026-06-25T08:00:00.000Z'),
+        telegramIdentity: null,
+        maxIdentity: null,
+        unsubscribedAt: null,
+        xp: 0,
+        level: 1,
+        status: 'ACTIVE',
+        isStaffTest: false,
+        staffTestReason: null,
+        staffTestMatchedAt: null,
+        lastActivityAt: null,
+      });
+      prisma.guestGameSeason.findMany.mockResolvedValue([
+        {
+          id: 'season-1',
+          tenantId: 'tenant-1',
+          name: 'Season 67',
+          seasonType: 'CLUB_SEASON',
+          status: 'ACTIVE',
+          storeIds: ['store-1'],
+          premiumEnabled: false,
+          periodFrom: new Date('2026-07-09T00:00:00.000Z'),
+          periodTo: new Date('2026-10-01T00:00:00.000Z'),
+          levels: [
+            {
+              level: 1,
+              xp: 0,
+              title: 'Start',
+              condition: null,
+              description: null,
+              freeReward: '0 XP',
+              premiumReward: null,
+            },
+            {
+              level: 2,
+              xp: 250,
+              title: 'Promo',
+              condition: null,
+              description: null,
+              freeReward: 'Promo',
+              premiumReward: null,
+            },
+            {
+              level: 3,
+              xp: 500,
+              title: 'Lootbox',
+              condition: null,
+              description: null,
+              freeReward: 'Lootbox',
+              premiumReward: null,
+            },
+          ],
+        },
+      ]);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'old-season-reward-1',
+          status: 'REDEEMED',
+          lootBoxId: null,
+          missionId: null,
+          seasonId: 'season-1',
+          rewardType: 'BATTLE_PASS_REWARD',
+          rewardAmount: new Prisma.Decimal(0),
+          rewardLabel: '0 XP',
+          rewardRarity: null,
+          rewardRarityLabel: null,
+          rewardDropChance: null,
+          rewardCode: null,
+          evidence: { level: 1 },
+          qualifiedAt: new Date('2026-07-08T12:00:00.000Z'),
+          expiresAt: null,
+          lootBox: null,
+          mission: null,
+          season: { name: 'Season 67' },
+        },
+        {
+          id: 'old-season-reward-2',
+          status: 'APPROVED',
+          lootBoxId: null,
+          missionId: null,
+          seasonId: 'season-1',
+          rewardType: 'BATTLE_PASS_REWARD',
+          rewardAmount: new Prisma.Decimal(0),
+          rewardLabel: 'Promo',
+          rewardRarity: null,
+          rewardRarityLabel: null,
+          rewardDropChance: null,
+          rewardCode: null,
+          evidence: { level: 2 },
+          qualifiedAt: new Date('2026-07-08T12:05:00.000Z'),
+          expiresAt: null,
+          lootBox: null,
+          mission: null,
+          season: { name: 'Season 67' },
+        },
+      ]);
+
+      const portal = await (service as any).buildPortalPayload({
+        sub: 'profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash',
+      });
+
+      expect(portal.gamification.seasons[0]).toMatchObject({
+        id: 'season-1',
+        currentLevel: 1,
+        progressPercent: 0,
+        reachedLevels: 0,
+      });
+      expect(portal.gamification.seasons[0].levels[0]).toMatchObject({
+        level: 1,
+        reached: false,
+        current: true,
+      });
+      expect(portal.gamification.seasons[0].levels[1]).toMatchObject({
+        level: 2,
+        reached: false,
+        next: true,
       });
     });
   });

@@ -2997,6 +2997,20 @@ function stripBattlePassDetailPrefix(value: string, prefix: string) {
     .trim();
 }
 
+function battlePassTokenDensity(label: string) {
+  const length = Array.from(label.trim()).length;
+
+  if (length > 18) {
+    return "long";
+  }
+
+  if (length > 9) {
+    return "medium";
+  }
+
+  return "short";
+}
+
 function BattlePassRewardMedia({ reward }: { reward: BattlePassRewardCard }) {
   if (reward.type === "lootbox") {
     return (
@@ -3011,7 +3025,7 @@ function BattlePassRewardMedia({ reward }: { reward: BattlePassRewardCard }) {
   }
 
   const tokenLabel = reward.rewardValue ?? battlePassRewardTypeLabel(reward.type);
-  const tokenDensity = tokenLabel.length > 14 ? "long" : "short";
+  const tokenDensity = battlePassTokenDensity(tokenLabel);
 
   return (
     <span
@@ -10424,10 +10438,26 @@ const clubHomeCss = `
   letter-spacing: 0;
 }
 
+.lp-club-battlepass-token[data-density="medium"] {
+  padding: 9px;
+  font-size: 10.5px;
+  font-weight: 820;
+  line-height: 1.06;
+  letter-spacing: 0;
+}
+
+.lp-club-battlepass-token[data-density="medium"] > span,
 .lp-club-battlepass-token[data-density="long"] > span {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
+}
+
+.lp-club-battlepass-token[data-density="medium"] > span {
+  -webkit-line-clamp: 4;
+}
+
+.lp-club-battlepass-token[data-density="long"] > span {
   -webkit-line-clamp: 5;
 }
 

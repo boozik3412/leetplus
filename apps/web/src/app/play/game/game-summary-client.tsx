@@ -1466,7 +1466,6 @@ function ReadyGameView({
             progress={battlePassProgress}
             rewardLabel={mainRewardLabel}
             seasonName={summary.battlePass.active?.name ?? "Сезон клуба"}
-            onToast={showToast}
           />
         </div>
 
@@ -1793,10 +1792,7 @@ function HomeLootBoxes({
       <div className="lp-club-loot-grid">
         {cards.length ? (
           cards.map((card, index) => {
-            const blockedTooltip = lootboxCardBlockedTooltip(card);
-            const tooltipId = blockedTooltip
-              ? `lootbox-blocker-${card.id}`
-              : undefined;
+            const blockedReason = lootboxCardBlockedTooltip(card);
 
             return (
           <button
@@ -1810,8 +1806,6 @@ function HomeLootBoxes({
             ].join(" ")}
             aria-haspopup="dialog"
             aria-controls={card.openable ? "lootboxOverlay" : "lootboxUnavailable"}
-            aria-describedby={tooltipId}
-            title={blockedTooltip ?? undefined}
             onClick={() => onSelect(card)}
           >
             <span className="lp-lootbox-entry-top">
@@ -1823,16 +1817,9 @@ function HomeLootBoxes({
               </span>
               <span className="lp-lootbox-entry-state-wrap">
                 <span className="lp-lootbox-entry-state">{card.status}</span>
-                {blockedTooltip ? (
+                {blockedReason ? (
                   <span className="lp-lootbox-blocker-chip">
                     почему?
-                    <span
-                      id={tooltipId}
-                      className="lp-lootbox-blocker-tooltip"
-                      role="tooltip"
-                    >
-                      {blockedTooltip}
-                    </span>
                   </span>
                 ) : null}
               </span>
@@ -2269,7 +2256,6 @@ function HomeBattlePass({
   progress,
   rewardLabel,
   seasonName,
-  onToast,
 }: {
   sectionRef?: RefObject<HTMLElement | null>;
   summary: GuestPortalGameSummary;
@@ -2278,7 +2264,6 @@ function HomeBattlePass({
   progress: number;
   rewardLabel: string;
   seasonName: string;
-  onToast: (message: string) => void;
 }) {
   const rewards = useMemo(
     () => buildBattlePassRewardCards(battlePass, quests),
@@ -2291,6 +2276,7 @@ function HomeBattlePass({
     null;
   const [activeRewardId, setActiveRewardId] = useState<string | null>(null);
   const [detailRewardId, setDetailRewardId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const lastScrollEventRef = useRef(0);
   const selectedRewardId =
@@ -2340,27 +2326,28 @@ function HomeBattlePass({
   } as CSSProperties & Record<"--battlepass-line-scale", string>;
 
   useEffect(() => {
-    if (!detailReward) {
+    if (!detailReward && !helpOpen) {
       return;
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setDetailRewardId(null);
+        setHelpOpen(false);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [detailReward]);
+  }, [detailReward, helpOpen]);
 
   const handleHelpClick = () => {
     emitBattlePassEvent("help_click", {
       seasonId: battlePass?.id ?? null,
       seasonName,
     });
-    onToast("Баттлпасс открывает награды по мере роста уровня гостя.");
+    setHelpOpen(true);
   };
 
   const handleTrackScroll = () => {
@@ -2550,7 +2537,122 @@ function HomeBattlePass({
           onClose={() => setDetailRewardId(null)}
         />
       ) : null}
+
+      {helpOpen ? (
+        <BattlePassHelpModal
+          battlePass={battlePass}
+          seasonName={seasonName}
+          progress={progress}
+          totalLevels={totalLevels}
+          currentLevel={currentLevel}
+          currentReward={currentReward}
+          mainRewardLabel={mainRewardLabel}
+          mainRewardLevel={mainRewardLevel}
+          onClose={() => setHelpOpen(false)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function BattlePassHelpModal({
+  battlePass,
+  seasonName,
+  progress,
+  totalLevels,
+  currentLevel,
+  currentReward,
+  mainRewardLabel,
+  mainRewardLevel,
+  onClose,
+}: {
+  battlePass: GuestPortalGameSummary["battlePass"]["active"];
+  seasonName: string;
+  progress: number;
+  totalLevels: number;
+  currentLevel: number;
+  currentReward: BattlePassRewardCard | null;
+  mainRewardLabel: string;
+  mainRewardLevel: number;
+  onClose: () => void;
+}) {
+  const nextRewardLabel =
+    battlePass?.nextRewardLabel ??
+    currentReward?.plannedReward ??
+    currentReward?.rewardValue ??
+    currentReward?.title ??
+    mainRewardLabel;
+
+  return (
+    <div
+      className="lp-quest-complete-overlay lp-battlepass-detail-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="battlePassHelpTitle"
+    >
+      <div className="lp-quest-complete-dialog lp-battlepass-detail-dialog lp-battlepass-help-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть пояснение Battle Pass"
+          onClick={onClose}
+        >
+          ×
+        </button>
+        <span className="lp-quest-complete-kicker">Как работает</span>
+        <h3 id="battlePassHelpTitle">Баттлпасс клуба</h3>
+        <p className="lp-battlepass-detail-season">
+          {seasonName} · уровень {formatNumber(currentLevel)} из {formatNumber(totalLevels)}
+        </p>
+
+        <div className="lp-battlepass-detail-progress">
+          <div>
+            <span>Прогресс сезона</span>
+            <strong>{formatNumber(progress)}%</strong>
+          </div>
+          <span className="lp-battlepass-detail-meter">
+            <i style={{ width: `${clampPercent(progress)}%` }} />
+          </span>
+        </div>
+
+        <div className="lp-battlepass-detail-block">
+          <span>Что это</span>
+          <p>
+            Баттлпасс собирает цепочку клубных заданий и наград. Выполняйте
+            текущую задачу, чтобы продвигаться по этапам сезона.
+          </p>
+        </div>
+
+        <div className="lp-battlepass-detail-block">
+          <span>Как открыть уровни</span>
+          <ul className="lp-battlepass-help-list">
+            <li>Смотрите карточку с пометкой “Сейчас”.</li>
+            <li>Нажмите на этап, чтобы увидеть подробное условие и награду.</li>
+            <li>Когда условие выполнено, прогресс сезона перейдет к следующему этапу.</li>
+          </ul>
+        </div>
+
+        <div className="lp-battlepass-detail-block is-current">
+          <span>Награды</span>
+          <p>
+            Следующая награда: {nextRewardLabel}. Главная награда сезона:
+            {" "}
+            {mainRewardLabel}, открывается на уровне {formatNumber(mainRewardLevel)}.
+          </p>
+        </div>
+
+        {!battlePass ? (
+          <p className="lp-battlepass-help-note">
+            Сезон пока не запущен. Когда клуб опубликует Battle Pass, здесь
+            появятся этапы, условия и награды.
+          </p>
+        ) : null}
+
+        <button type="button" className="lp-quest-complete-action" onClick={onClose}>
+          Понятно
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -3319,7 +3421,6 @@ function PlayerProfilePanel({
         <div className="lp-club-profile-copy">
           {nicknameEditing ? (
             <label className="lp-club-nickname-editor">
-              <strong>Игровой профиль</strong>
               <input
                 ref={nicknameInputRef}
                 type="text"
@@ -3344,8 +3445,10 @@ function PlayerProfilePanel({
               title="Изменить никнейм"
               onClick={startNicknameEdit}
             >
-              <strong>Игровой профиль</strong>
-              <span>{summary.profile.displayName}</span>
+              <strong className="lp-club-nickname-title">
+                <span>{summary.profile.displayName}</span>
+                <PencilIcon />
+              </strong>
               {phoneMasked ? (
                 <span className="lp-club-profile-contact">{phoneMasked}</span>
               ) : null}
@@ -4644,6 +4747,23 @@ function ProfileIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
       <path d="M12 3 4.5 7.4v8.8L12 21l7.5-4.8V7.4L12 3Z" />
       <path d="M9 12.2 11.2 14 15.4 9.6" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
     </svg>
   );
 }
@@ -7737,7 +7857,8 @@ const clubHomeCss = `
 }
 
 .lp-club-brand-mark.is-custom-logo {
-  overflow: hidden;
+  overflow: visible;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -8251,41 +8372,6 @@ const clubHomeCss = `
   white-space: nowrap;
 }
 
-.lp-lootbox-blocker-tooltip {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 30;
-  width: min(286px, calc(100vw - 52px));
-  padding: 10px 12px;
-  border: 1px solid rgba(131, 228, 236, 0.36);
-  border-radius: 8px;
-  color: var(--text);
-  background: rgba(4, 11, 14, 0.98);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
-  font-size: 11px;
-  font-weight: 720;
-  line-height: 1.45;
-  text-align: left;
-  text-transform: none;
-  white-space: normal;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-4px);
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    visibility 160ms ease;
-  pointer-events: none;
-}
-
-.lootbox-entry:hover .lp-lootbox-blocker-tooltip,
-.lootbox-entry:focus-visible .lp-lootbox-blocker-tooltip {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
 .lp-lootbox-entry-art {
   position: relative;
   z-index: 1;
@@ -8705,6 +8791,46 @@ const clubHomeCss = `
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.lp-battlepass-help-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lp-battlepass-help-list li {
+  position: relative;
+  min-height: 22px;
+  padding-left: 20px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.lp-battlepass-help-list li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.58em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 14px rgba(131, 228, 236, 0.52);
+}
+
+.lp-battlepass-help-note {
+  margin: 0;
+  border: 1px solid rgba(208, 170, 108, 0.26);
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: var(--amber);
+  background: rgba(208, 170, 108, 0.08);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .lp-battlepass-planned-reward strong {
@@ -10448,8 +10574,9 @@ const clubHomeCss = `
 }
 
 .lp-club-avatar.is-custom-logo {
-  overflow: hidden;
+  overflow: visible;
   padding: 7px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -10485,7 +10612,6 @@ const clubHomeCss = `
   border-radius: 6px;
 }
 
-.lp-club-nickname-button span,
 .lp-club-profile-logo span span {
   display: block;
   margin-top: 7px;
@@ -10497,8 +10623,32 @@ const clubHomeCss = `
   overflow-wrap: anywhere;
 }
 
+.lp-club-profile-logo .lp-club-nickname-title {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  vertical-align: top;
+}
+
+.lp-club-nickname-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-club-nickname-title svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--cyan);
+  filter: drop-shadow(0 0 8px rgba(131, 228, 236, 0.34));
+}
+
 .lp-club-nickname-button .lp-club-profile-contact,
 .lp-club-nickname-editor .lp-club-profile-contact {
+  display: block;
   margin-top: 6px;
   color: rgba(168, 185, 186, 0.88);
   font-size: 11px;

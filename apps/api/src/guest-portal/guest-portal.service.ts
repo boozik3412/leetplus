@@ -770,6 +770,7 @@ export type GuestPortalPayload = {
   guestSnapshot: GuestPortalGuestSnapshot;
   gamification: {
     nextActions: GuestPortalNextAction[];
+    checkIn: GuestPortalCheckInSummary;
     lootBoxes: GuestPortalLootBox[];
     missions: GuestPortalMission[];
     seasons: GuestPortalSeason[];
@@ -1025,6 +1026,7 @@ export type GuestPortalGameSummary = {
     timeline: GuestPortalGameProgressTimelineItem[];
   };
   journey: GuestPortalGameJourney;
+  checkIn: GuestPortalCheckInSummary;
   nextActions: GuestPortalNextAction[];
   activity: Pick<
     GuestPortalPayload['activity']['summary'],
@@ -1307,6 +1309,16 @@ export type GuestPortalMissionStep = {
   progressCurrent: number;
   completed: boolean;
   current: boolean;
+};
+
+export type GuestPortalCheckInSummary = {
+  enabled: boolean;
+  ready: boolean;
+  title: string;
+  description: string;
+  rewardLabel: string | null;
+  xpReward: number;
+  blockedReason: string | null;
 };
 
 export type GuestPortalSeason = {
@@ -3961,6 +3973,22 @@ export class GuestPortalService {
         'warn',
       );
       throw new BadRequestException('Лутбокс недоступен в выбранном клубе.');
+    }
+
+    if (!portalLootBoxVisibleInCatalog(lootBox)) {
+      this.logGuestGameDebug(
+        'open-failed',
+        {
+          traceId,
+          ...this.guestGameDebugPayloadScope(payload),
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          reason: 'loot_box_reward_template_only',
+        },
+        'warn',
+      );
+      throw new BadRequestException(
+        'Подарочный лутбокс можно получить только как награду в задании или Battle Pass.',
+      );
     }
 
     const visualLootBoxRefs = await this.getPublishedVisualLootBoxRefs(
@@ -7985,13 +8013,18 @@ export class GuestPortalService {
     );
     const checkInReadiness =
       await this.resolveContextLangameCheckInReadiness(context);
-    const visibleMissions = missions
+    const storeMissions = missions
       .filter((item) => matchesStore(item.storeIds, context.store.id))
-      .filter((item) => activePeriod(item.periodFrom, item.periodTo))
-      .filter(
-        (item) =>
-          checkInReadiness.ready || !isGuestPortalCheckInMissionRule(item),
-      )
+      .filter((item) => activePeriod(item.periodFrom, item.periodTo));
+    const checkInMissionRule =
+      storeMissions.find(isGuestPortalCheckInMissionRule) ?? null;
+    const portalCheckIn = buildPortalCheckInSummary({
+      mission: checkInMissionRule,
+      ready: checkInReadiness.ready,
+      blockedReason: checkInReadiness.message,
+    });
+    const visibleMissions = storeMissions
+      .filter((item) => !isGuestPortalCheckInMissionRule(item))
       .slice(0, 6);
     const missionProgress = await this.buildMissionProgress(
       context.tenant.id,
@@ -8005,7 +8038,9 @@ export class GuestPortalService {
       options.liveSessionStartResult,
     );
     const portalLootBoxes = filterLootBoxesByVisualRefs(
-      lootBoxes.filter((item) => matchesStore(item.storeIds, context.store.id)),
+      lootBoxes
+        .filter(portalLootBoxVisibleInCatalog)
+        .filter((item) => matchesStore(item.storeIds, context.store.id)),
       publishedVisualLootBoxRefs,
     )
       .slice(0, 6)
@@ -8039,7 +8074,7 @@ export class GuestPortalService {
       missions: portalMissions,
       seasons: portalSeasons,
       rewards: portalRewards,
-      checkInReady: checkInReadiness.ready,
+      checkIn: portalCheckIn,
     });
 
     return {
@@ -8083,6 +8118,7 @@ export class GuestPortalService {
       guestSnapshot: buildGuestSnapshot(guest, crmLead, profile),
       gamification: {
         nextActions,
+        checkIn: portalCheckIn,
         lootBoxes: portalLootBoxes,
         missions: portalMissions,
         seasons: portalSeasons,
@@ -10110,16 +10146,12 @@ function telegramBotRewardsText(portal: GuestPortalPayload) {
 }
 
 function telegramBotCheckInText(portal: GuestPortalPayload) {
+  const checkIn = portal.gamification.checkIn;
   const action =
     portal.gamification.nextActions.find((item) => item.kind === 'CHECK_IN') ??
     null;
-  const mission = portal.gamification.missions.find(
-    (item) =>
-      item.missionType === 'CHECK_IN' &&
-      item.rewardStatus.state === 'IN_PROGRESS',
-  );
 
-  if (!action && !mission) {
+  if (!checkIn.enabled && !action) {
     return telegramBotParagraphs([
       'Чекин LeetPlus',
       telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
@@ -10130,19 +10162,19 @@ function telegramBotCheckInText(portal: GuestPortalPayload) {
     ]);
   }
 
-  const reward = mission?.rewardLabel ?? action?.description ?? null;
-  const progress =
-    mission && mission.progressTarget
-      ? `${formatTelegramBotInteger(mission.progressCurrent)}/${formatTelegramBotInteger(mission.progressTarget)}${mission.progressUnit ? ` ${mission.progressUnit}` : ''}`
-      : action?.statusLabel;
+  const reward = checkIn.rewardLabel ?? action?.description ?? null;
+  const progress = checkIn.ready ? (action?.statusLabel ?? 'доступно') : null;
 
   return telegramBotParagraphs([
     'Чекин LeetPlus',
     telegramBotSection('КЛУБ', [`Клуб: ${portal.store.name}.`]),
     telegramBotSection('ЗАДАНИЕ', [
-      action?.title ?? mission?.name ?? 'Чекин доступен.',
+      action?.title ?? checkIn.title,
       reward ? `Награда/условие: ${reward}` : null,
       progress ? `Прогресс: ${progress}.` : null,
+      !checkIn.ready && checkIn.blockedReason
+        ? `Пока недоступно: ${checkIn.blockedReason}`
+        : null,
     ]),
     'Откройте Mini App или игровой экран, чтобы выполнить чекин в подтвержденном клубном контексте.',
   ]);
@@ -10749,6 +10781,7 @@ function buildGameSummaryFromPortal(
     },
     progress,
     journey,
+    checkIn: portal.gamification.checkIn,
     nextActions: portal.gamification.nextActions.slice(0, 5),
     activity: {
       sessionsCount: portal.activity.summary.sessionsCount,
@@ -12287,6 +12320,7 @@ function formatTelegramBotBalance(value: number | null) {
 
 function telegramBotCheckInAvailable(portal: GuestPortalPayload) {
   return (
+    portal.gamification.checkIn.enabled ||
     portal.gamification.nextActions.some((item) => item.kind === 'CHECK_IN') ||
     portal.gamification.missions.some(
       (item) =>
@@ -12727,6 +12761,12 @@ function guestPortalPayloadWithLocalMatch(
   }
 
   return payload;
+}
+
+function portalLootBoxVisibleInCatalog(rule: { usageKind?: string | null }) {
+  const usageKind = rule.usageKind ?? 'STANDALONE';
+
+  return usageKind === 'STANDALONE' || usageKind === 'BOTH';
 }
 
 function filterLootBoxesByVisualRefs<T extends { id: string; name: string }>(
@@ -14060,13 +14100,54 @@ function isGuestPortalCheckInMissionRule(mission: {
   );
 }
 
+function buildPortalCheckInSummary(input: {
+  mission: {
+    name: string;
+    rewardLabel: string | null;
+    xpReward: number;
+  } | null;
+  ready: boolean;
+  blockedReason: string | null;
+}): GuestPortalCheckInSummary {
+  const fallbackTitle = 'Чекин в клубе';
+  const fallbackDescription = 'Зафиксируйте присутствие в выбранном клубе.';
+
+  if (!input.mission) {
+    return {
+      enabled: false,
+      ready: false,
+      title: fallbackTitle,
+      description: fallbackDescription,
+      rewardLabel: null,
+      xpReward: 0,
+      blockedReason: null,
+    };
+  }
+
+  const description =
+    input.mission.rewardLabel ??
+    (input.mission.xpReward > 0
+      ? `${input.mission.xpReward} XP за чекин.`
+      : fallbackDescription);
+
+  return {
+    enabled: true,
+    ready: input.ready,
+    title: input.mission.name || fallbackTitle,
+    description,
+    rewardLabel: input.mission.rewardLabel,
+    xpReward: input.mission.xpReward,
+    blockedReason: input.ready ? null : input.blockedReason,
+  };
+}
+
 function buildNextActions(input: {
   guestFound: boolean;
   lootBoxes: GuestPortalLootBox[];
   missions: GuestPortalMission[];
   seasons: GuestPortalSeason[];
   rewards: GuestPortalReward[];
-  checkInReady: boolean;
+  checkIn: GuestPortalCheckInSummary;
 }): GuestPortalNextAction[] {
   const actions: GuestPortalNextAction[] = [];
   const readyReward = input.rewards.find(
@@ -14079,11 +14160,6 @@ function buildNextActions(input: {
   const waitingMission = input.missions.find(
     (mission) =>
       mission.progressPercent >= 100 && mission.manualApprovalRequired,
-  );
-  const checkInMission = input.missions.find(
-    (mission) =>
-      mission.missionType === 'CHECK_IN' &&
-      mission.rewardStatus.state === 'IN_PROGRESS',
   );
   const season = input.seasons[0] ?? null;
 
@@ -14121,19 +14197,15 @@ function buildNextActions(input: {
     });
   }
 
-  if (checkInMission && input.checkInReady) {
+  if (input.checkIn.enabled && input.checkIn.ready) {
     actions.push({
-      id: `check-in:${checkInMission.id}`,
+      id: 'check-in',
       kind: 'CHECK_IN',
-      title: 'Сделайте чекин в клубе',
-      description:
-        checkInMission.rewardLabel ??
-        (checkInMission.xpReward > 0
-          ? `${checkInMission.xpReward} XP за чекин.`
-          : 'Чекин доступен для выбранного клуба.'),
+      title: input.checkIn.title,
+      description: input.checkIn.description,
       priority: actions.length ? 'MEDIUM' : 'HIGH',
       statusLabel: 'доступно',
-      progressPercent: checkInMission.progressPercent,
+      progressPercent: null,
       anchor: 'progress',
     });
   }

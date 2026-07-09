@@ -722,46 +722,45 @@ export class GuestActivityLedgerService {
       },
     });
 
-    const nearbyRawSignals =
-      await this.prisma.guestActivityRawRecord.findMany({
-        where: {
-          tenantId: context.tenantId,
-          profileId: context.profile.id,
-          externalProvider: IntegrationProvider.LANGAME,
-          externalDomain: context.externalDomain,
-          happenedAt: {
-            gte: new Date(
-              window.from.getTime() - INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS,
-            ),
-            lte: new Date(
-              window.to.getTime() + INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS,
-            ),
-          },
-          OR: [
-            { sourceKind: SOURCE_TRANSACTION },
-            {
-              sourceKind: SOURCE_GUEST_LOG,
-              rawType: {
-                in: [
-                  'success_subscription_buy_log',
-                  'widrawed_rubbles_and_bonuses',
-                ],
-              },
+    const nearbyRawSignals = await this.prisma.guestActivityRawRecord.findMany({
+      where: {
+        tenantId: context.tenantId,
+        profileId: context.profile.id,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: context.externalDomain,
+        happenedAt: {
+          gte: new Date(
+            window.from.getTime() - INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS,
+          ),
+          lte: new Date(
+            window.to.getTime() + INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS,
+          ),
+        },
+        OR: [
+          { sourceKind: SOURCE_TRANSACTION },
+          {
+            sourceKind: SOURCE_GUEST_LOG,
+            rawType: {
+              in: [
+                'success_subscription_buy_log',
+                'widrawed_rubbles_and_bonuses',
+              ],
             },
-          ],
-        },
-        orderBy: { happenedAt: 'asc' },
-        select: {
-          id: true,
-          sourceKind: true,
-          rawType: true,
-          rawText: true,
-          happenedAt: true,
-          storeId: true,
-          amount: true,
-          bonusAmount: true,
-        },
-      });
+          },
+        ],
+      },
+      orderBy: { happenedAt: 'asc' },
+      select: {
+        id: true,
+        sourceKind: true,
+        rawType: true,
+        rawText: true,
+        happenedAt: true,
+        storeId: true,
+        amount: true,
+        bonusAmount: true,
+      },
+    });
 
     let factsCreated = 0;
 
@@ -1845,8 +1844,7 @@ function buildInferredPackageUsageEvidence(
         }
       : null,
     lookbackDays: INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS,
-    signalWindowMinutes:
-      INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS / 1000 / 60,
+    signalWindowMinutes: INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS / 1000 / 60,
   };
 }
 

@@ -586,6 +586,15 @@ function portalPayloadFixture() {
           anchor: 'rewards',
         },
       ],
+      checkIn: {
+        enabled: false,
+        ready: false,
+        title: 'Чекин в клубе',
+        description: 'Зафиксируйте присутствие в выбранном клубе.',
+        rewardLabel: null,
+        xpReward: 0,
+        blockedReason: null,
+      },
       lootBoxes: [
         {
           id: 'loot-1',
@@ -1088,6 +1097,7 @@ describe('GuestPortalService', () => {
           bonusBalance: 250,
           bonusBalanceSource: 'ledger_current',
         },
+        checkIn: portal.gamification.checkIn,
         rewards: {
           summary: portal.gamification.rewardSummary,
           ready: [portal.gamification.rewards[0]],

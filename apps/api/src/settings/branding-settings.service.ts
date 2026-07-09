@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -63,9 +67,7 @@ export class BrandingSettingsService {
 
   async saveSettings(user: AuthenticatedUser, dto: BrandingSettingsDto) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const payload = (dto && typeof dto === 'object'
-      ? dto
-      : {}) as BrandingSettingsDto;
+    const payload = dto && typeof dto === 'object' ? dto : {};
     const tenantLogoUrl = this.normalizeLogoUrl(
       payload.tenantLogoUrl,
       'Логотип сети',
@@ -93,7 +95,9 @@ export class BrandingSettingsService {
         select: { id: true },
       });
       const existingIds = new Set(existingStores.map((store) => store.id));
-      const missingStoreId = storeIds.find((storeId) => !existingIds.has(storeId));
+      const missingStoreId = storeIds.find(
+        (storeId) => !existingIds.has(storeId),
+      );
 
       if (missingStoreId) {
         throw new BadRequestException('Клуб для логотипа не найден');
@@ -159,7 +163,9 @@ export class BrandingSettingsService {
     }
 
     if (typeof value !== 'string') {
-      throw new BadRequestException(`${label}: загрузите изображение PNG, JPG или WebP`);
+      throw new BadRequestException(
+        `${label}: загрузите изображение PNG, JPG или WebP`,
+      );
     }
 
     const trimmed = value.trim();

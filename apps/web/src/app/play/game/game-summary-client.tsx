@@ -668,6 +668,7 @@ function ReadyGameView({
   const playerQuests = useMemo(() => buildPlayerQuests(summary), [summary]);
   const checkInAction =
     summary.nextActions.find((action) => action.kind === "CHECK_IN") ?? null;
+  const checkInSummary = summary.checkIn ?? null;
   const checkInAvailable = isCheckInAvailable(summary);
   const completedQuestCount = playerQuests.filter(
     (quest) => quest.status === "done",
@@ -1479,6 +1480,7 @@ function ReadyGameView({
           questTotalCount={questTotalCount}
           quests={playerQuests}
           checkInAction={checkInAction}
+          checkInSummary={checkInSummary}
           checkInAvailable={checkInAvailable}
           checkInPending={checkInPending}
           questsExpanded={questsExpanded}
@@ -3328,6 +3330,7 @@ function PlayerProfilePanel({
   questTotalCount,
   quests,
   checkInAction,
+  checkInSummary,
   checkInAvailable,
   checkInPending,
   questsExpanded,
@@ -3348,6 +3351,7 @@ function PlayerProfilePanel({
   questTotalCount: number;
   quests: PlayerQuest[];
   checkInAction: GameNextAction | null;
+  checkInSummary: GuestPortalGameSummary["checkIn"] | null;
   checkInAvailable: boolean;
   checkInPending: boolean;
   questsExpanded: boolean;
@@ -3363,7 +3367,9 @@ function PlayerProfilePanel({
 }) {
   const compactQuests = quests.slice(0, 5);
   const checkInDescription =
-    checkInAction?.description ?? "Зафиксируйте присутствие в выбранном клубе.";
+    checkInAction?.description ??
+    checkInSummary?.description ??
+    "Зафиксируйте присутствие в выбранном клубе.";
   const [nicknameEditing, setNicknameEditing] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState(summary.profile.displayName);
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
@@ -3505,7 +3511,9 @@ function PlayerProfilePanel({
       {checkInAvailable ? (
         <section className="lp-club-checkin-card" aria-label="Чекин в клубе">
           <span className="lp-club-small-label">Чекин</span>
-          <strong>{checkInAction?.title ?? "Чекин в клубе"}</strong>
+          <strong>
+            {checkInAction?.title ?? checkInSummary?.title ?? "Чекин в клубе"}
+          </strong>
           <p>{checkInDescription}</p>
           <button type="button" disabled={checkInPending} onClick={onCheckIn}>
             {checkInPending ? "Проверяем" : "Сделать чекин"}
@@ -12630,6 +12638,7 @@ function gameActionButtonLabel(action: GameNextAction) {
 
 function isCheckInAvailable(summary: GuestPortalGameSummary) {
   return (
+    Boolean(summary.checkIn?.enabled) ||
     summary.nextActions.some((action) => action.kind === "CHECK_IN") ||
     summary.missions.featured.some(isCheckInMission)
   );

@@ -27,6 +27,7 @@ import type {
   GuestGameDeliveryDispatchResult,
   GuestGameDeliveryStatus,
   GuestGameLootBox,
+  GuestGameLootBoxUsageKind,
   GuestGameMission,
   GuestGamePilotRunbookAction,
   GuestGamePromoCard,
@@ -181,6 +182,7 @@ type LootBoxPeriodicLimitPeriod = "DAILY" | "WEEKLY" | "MONTHLY";
 type LootBoxForm = {
   name: string;
   status: GuestGameStatus;
+  usageKind: GuestGameLootBoxUsageKind;
   triggerKind: string;
   rewardType: string;
   rewardAmount: string;
@@ -297,6 +299,7 @@ type SeasonLevelStepForm = {
   freeRewardAmount?: string;
   freeRewardLabel?: string;
   freeRewardCode?: string;
+  freeRewardLootBoxId?: string;
   freeRewardLootBoxName?: string;
   freeRewardLootBoxRarity?: LootBoxCaseRarity;
   freeRewardDelivery?: string;
@@ -304,6 +307,7 @@ type SeasonLevelStepForm = {
   premiumRewardAmount?: string;
   premiumRewardLabel?: string;
   premiumRewardCode?: string;
+  premiumRewardLootBoxId?: string;
   premiumRewardLootBoxName?: string;
   premiumRewardLootBoxRarity?: LootBoxCaseRarity;
   premiumRewardDelivery?: string;
@@ -843,6 +847,34 @@ const lootBoxCaseRarityOptions = (
   Object.keys(lootBoxCaseRarityLabels) as LootBoxCaseRarity[]
 ).map((value) => ({ value, label: lootBoxCaseRarityLabels[value] }));
 
+const lootBoxUsageKindOptions: Array<{
+  value: GuestGameLootBoxUsageKind;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "STANDALONE",
+    label: "Витрина",
+    description: "Показывается отдельной карточкой в игровом модуле.",
+  },
+  {
+    value: "REWARD_TEMPLATE",
+    label: "Подарочный",
+    description: "Не отображается в витрине и используется только как награда.",
+  },
+  {
+    value: "BOTH",
+    label: "Витрина + подарок",
+    description: "Можно открыть в витрине и выдать как награду.",
+  },
+];
+
+const lootBoxUsageKindLabels: Record<GuestGameLootBoxUsageKind, string> = {
+  STANDALONE: "витрина",
+  REWARD_TEMPLATE: "подарочный",
+  BOTH: "витрина + подарок",
+};
+
 const rewardStatusActionLabels: Record<GuestGameRewardStatus, string> = {
   PENDING: "Вернуть к выдаче",
   APPROVED: "Согласовать",
@@ -945,6 +977,7 @@ const defaultLootBoxPrizes: LootBoxPrizeForm[] = [
 const defaultLootBoxForm: LootBoxForm = {
   name: "Лутбокс тихих часов",
   status: "DRAFT",
+  usageKind: "STANDALONE",
   triggerKind: "SESSION_START",
   rewardType: defaultLootBoxPrizes[0].rewardType,
   rewardAmount: defaultLootBoxPrizes[0].rewardAmount,
@@ -1685,6 +1718,7 @@ export function GuestGamificationPanel({
       const payload = {
         name: lootBoxForm.name,
         status: lootBoxForm.status,
+        usageKind: lootBoxForm.usageKind,
         triggerKind: lootBoxForm.triggerKind,
         rewardType: primaryPrize.rewardType,
         rewardAmount: primaryPrize.rewardAmount,
@@ -2853,6 +2887,7 @@ export function GuestGamificationPanel({
           audiences={audiences}
           stores={stores}
           tariffSnapshots={workspace.tariffSnapshots}
+          lootBoxes={workspace.lootBoxes}
           editingId={editingSeasonId}
           isFormOpen={isSeasonFormOpen}
           onSave={saveSeason}
@@ -7310,6 +7345,8 @@ function LootBoxesTab({
               note={form.note}
               audiences={audiences}
               hideRewardFields
+              ruleKind="lootBox"
+              lootBoxUsageKind={form.usageKind}
               onChange={(patch) => setForm({ ...form, ...patch })}
             />
             <FormSection title="Внешний вид кейса">
@@ -7454,6 +7491,7 @@ function LootBoxesTab({
             item.audience?.name ?? "все гости",
             optionLabel(lootBoxSegmentOptions, item.segment ?? ""),
             `тип: ${sessionTypeLabel(item.sessionType)}`,
+            lootBoxUsageKindLabels[item.usageKind],
             tariffRuleSummary(item.periodRules),
             guestLogRuleSummary(item.periodRules),
             formatBudgetAmount(item.budgetAmount),
@@ -7752,6 +7790,7 @@ function CheckInTab({
   audiences: GuestAudience[];
   stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+
   editingId: string | null;
   isFormOpen: boolean;
   onSave: () => Promise<void>;
@@ -8050,6 +8089,7 @@ function SeasonsTab({
   audiences,
   stores,
   tariffSnapshots,
+  lootBoxes,
   editingId,
   isFormOpen,
   onSave,
@@ -8067,6 +8107,7 @@ function SeasonsTab({
   audiences: GuestAudience[];
   stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  lootBoxes: GuestGameLootBox[];
   editingId: string | null;
   isFormOpen: boolean;
   onSave: () => Promise<void>;
@@ -8170,6 +8211,7 @@ function SeasonsTab({
           <SeasonBusinessRules
             form={form}
             tariffSnapshots={tariffSnapshots}
+            lootBoxes={lootBoxes}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -10667,10 +10709,12 @@ function MissionQuestChainFields({
 function SeasonBusinessRules({
   form,
   tariffSnapshots,
+  lootBoxes,
   onChange,
 }: {
   form: SeasonForm;
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  lootBoxes: GuestGameLootBox[];
   onChange: (patch: Partial<SeasonForm>) => void;
 }) {
   const updateStep = (index: number, patch: Partial<SeasonLevelStepForm>) => {
@@ -10720,6 +10764,7 @@ function SeasonBusinessRules({
           freeRewardAmount: "",
           freeRewardLabel: "",
           freeRewardCode: "",
+          freeRewardLootBoxId: "",
           freeRewardLootBoxName: "",
           freeRewardLootBoxRarity: "common",
           freeRewardDelivery: "AUTO",
@@ -10727,6 +10772,7 @@ function SeasonBusinessRules({
           premiumRewardAmount: "",
           premiumRewardLabel: "",
           premiumRewardCode: "",
+          premiumRewardLootBoxId: "",
           premiumRewardLootBoxName: "",
           premiumRewardLootBoxRarity: "common",
           premiumRewardDelivery: "AUTO",
@@ -10938,12 +10984,14 @@ function SeasonBusinessRules({
               title="Главная Free награда"
               prefix="free"
               step={mainRewardStep}
+              lootBoxes={lootBoxes}
               onChange={(patch) => updateStep(mainRewardStepIndex, patch)}
             />
             <SeasonStepRewardFields
               title="Главная Premium награда"
               prefix="premium"
               step={mainRewardStep}
+              lootBoxes={lootBoxes}
               onChange={(patch) => updateStep(mainRewardStepIndex, patch)}
             />
           </div>
@@ -11041,12 +11089,14 @@ function SeasonBusinessRules({
                 title="Free награда"
                 prefix="free"
                 step={step}
+                lootBoxes={lootBoxes}
                 onChange={(patch) => updateStep(index, patch)}
               />
               <SeasonStepRewardFields
                 title="Premium награда"
                 prefix="premium"
                 step={step}
+                lootBoxes={lootBoxes}
                 onChange={(patch) => updateStep(index, patch)}
               />
             </div>
@@ -11242,23 +11292,27 @@ function SeasonStepRewardFields({
   title,
   prefix,
   step,
+  lootBoxes,
   onChange,
 }: {
   title: string;
   prefix: "free" | "premium";
   step: SeasonLevelStepForm;
+  lootBoxes: GuestGameLootBox[];
   onChange: (patch: Partial<SeasonLevelStepForm>) => void;
 }) {
   const typeKey = `${prefix}RewardType` as const;
   const amountKey = `${prefix}RewardAmount` as const;
   const labelKey = `${prefix}RewardLabel` as const;
   const codeKey = `${prefix}RewardCode` as const;
+  const lootBoxIdKey = `${prefix}RewardLootBoxId` as const;
   const lootBoxNameKey = `${prefix}RewardLootBoxName` as const;
   const lootBoxRarityKey = `${prefix}RewardLootBoxRarity` as const;
   const deliveryKey = `${prefix}RewardDelivery` as const;
   const legacyKey = `${prefix}Reward` as const;
   const rewardType =
     step[typeKey] ?? (step[legacyKey]?.trim() ? "ADMIN_OTHER" : "");
+  const rewardLootBoxes = lootBoxes.filter(lootBoxCanBeRewardTemplate);
 
   const patchReward = (patch: Partial<SeasonLevelStepForm>) => {
     const next = { ...step, ...patch };
@@ -11364,35 +11418,71 @@ function SeasonStepRewardFields({
         </div>
       ) : null}
       {rewardType === "LOOT_BOX" ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Название лутбокса">
-            <input
-              className={fieldClass}
-              value={step[lootBoxNameKey] ?? ""}
-              onChange={(event) =>
-                patchReward({
-                  [lootBoxNameKey]: event.target.value,
-                } as Partial<SeasonLevelStepForm>)
-              }
-            />
-          </Field>
-          <Field label="Качество кейса">
+        <div className="space-y-3">
+          <Field label="Подарочный лутбокс">
             <select
               className={fieldClass}
-              value={step[lootBoxRarityKey] ?? "common"}
-              onChange={(event) =>
+              value={step[lootBoxIdKey] ?? ""}
+              onChange={(event) => {
+                const selectedLootBox =
+                  rewardLootBoxes.find(
+                    (lootBox) => lootBox.id === event.target.value,
+                  ) ?? null;
+
                 patchReward({
-                  [lootBoxRarityKey]: event.target.value as LootBoxCaseRarity,
-                } as Partial<SeasonLevelStepForm>)
-              }
+                  [lootBoxIdKey]: selectedLootBox?.id ?? "",
+                  [lootBoxNameKey]:
+                    selectedLootBox?.name ?? step[lootBoxNameKey] ?? "",
+                  [lootBoxRarityKey]: selectedLootBox
+                    ? lootBoxCaseRarity(selectedLootBox.probabilityRules)
+                    : (step[lootBoxRarityKey] ?? "common"),
+                  [labelKey]: selectedLootBox?.name ?? step[labelKey] ?? "",
+                } as Partial<SeasonLevelStepForm>);
+              }}
             >
-              {lootBoxCaseRarityOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+              <option value="">Создать вручную в описании награды</option>
+              {rewardLootBoxes.map((lootBox) => (
+                <option key={lootBox.id} value={lootBox.id}>
+                  {lootBox.name} · {lootBoxUsageKindLabels[lootBox.usageKind]}
                 </option>
               ))}
             </select>
+            <OptionHelp>
+              В списке только лутбоксы с назначением «Подарочный» или
+              «Витрина + подарок». Витринные кейсы сюда не попадают.
+            </OptionHelp>
           </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Название награды">
+              <input
+                className={fieldClass}
+                value={step[lootBoxNameKey] ?? ""}
+                onChange={(event) =>
+                  patchReward({
+                    [lootBoxIdKey]: "",
+                    [lootBoxNameKey]: event.target.value,
+                  } as Partial<SeasonLevelStepForm>)
+                }
+              />
+            </Field>
+            <Field label="Качество кейса">
+              <select
+                className={fieldClass}
+                value={step[lootBoxRarityKey] ?? "common"}
+                onChange={(event) =>
+                  patchReward({
+                    [lootBoxRarityKey]: event.target.value as LootBoxCaseRarity,
+                  } as Partial<SeasonLevelStepForm>)
+                }
+              >
+                {lootBoxCaseRarityOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
         </div>
       ) : null}
       {rewardType === "ADMIN_OTHER" ? (
@@ -11582,6 +11672,8 @@ function BudgetField({
 function RuleCommonFields({
   status,
   name,
+  ruleKind,
+  lootBoxUsageKind,
   rewardType,
   rewardAmount,
   rewardLabel,
@@ -11596,6 +11688,8 @@ function RuleCommonFields({
 }: {
   status: GuestGameStatus;
   name: string;
+  ruleKind?: "lootBox" | "mission";
+  lootBoxUsageKind?: GuestGameLootBoxUsageKind;
   rewardType: string;
   rewardAmount: string;
   rewardLabel: string;
@@ -11695,6 +11789,41 @@ function RuleCommonFields({
           </>
         )}
       </FormSection>
+      {ruleKind === "lootBox" ? (
+        <FormSection
+          title="Назначение лутбокса"
+          description="Выберите, где кейс будет использоваться: в витрине игрового модуля, как подарок за другие активности или в обоих сценариях."
+        >
+          <div className="grid gap-2 md:grid-cols-3">
+            {lootBoxUsageKindOptions.map((option) => {
+              const active = lootBoxUsageKind === option.value;
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={[
+                    "rounded-lg border p-3 text-left transition",
+                    active
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-200 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-50 dark:ring-emerald-600/30"
+                      : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-200 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/20",
+                  ].join(" ")}
+                  onClick={() =>
+                    onChange({
+                      usageKind: option.value,
+                    } as Partial<LootBoxForm & MissionForm>)
+                  }
+                >
+                  <span className="block text-sm font-bold">{option.label}</span>
+                  <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    {option.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </FormSection>
+      ) : null}
       <FormSection title="Аудитория и заметка">
         <AudienceSelect
           audiences={audiences}
@@ -13833,6 +13962,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
   return {
     name: lootBox.name,
     status: lootBox.status,
+    usageKind: lootBox.usageKind,
     triggerKind: lootBox.triggerKind,
     rewardType: lootBox.rewardType,
     rewardAmount: moneyFormValue(lootBox.rewardAmount),
@@ -15025,6 +15155,7 @@ function buildAutomaticSeasonLevelSteps(form: SeasonForm): SeasonLevelStepForm[]
     freeRewardAmount: "",
     freeRewardLabel: level.freeReward ?? "",
     freeRewardCode: "",
+    freeRewardLootBoxId: "",
     freeRewardLootBoxName: "",
     freeRewardLootBoxRarity: "common",
     freeRewardDelivery: "ADMIN",
@@ -15032,6 +15163,7 @@ function buildAutomaticSeasonLevelSteps(form: SeasonForm): SeasonLevelStepForm[]
     premiumRewardAmount: "",
     premiumRewardLabel: level.premiumReward ?? "",
     premiumRewardCode: "",
+    premiumRewardLootBoxId: "",
     premiumRewardLootBoxName: "",
     premiumRewardLootBoxRarity: "common",
     premiumRewardDelivery: "ADMIN",
@@ -15139,6 +15271,8 @@ function seasonStepRewardDefinition(
   const labelValue =
     track === "free" ? step.freeRewardLabel : step.premiumRewardLabel;
   const codeValue = track === "free" ? step.freeRewardCode : step.premiumRewardCode;
+  const lootBoxIdValue =
+    track === "free" ? step.freeRewardLootBoxId : step.premiumRewardLootBoxId;
   const lootBoxNameValue =
     track === "free" ? step.freeRewardLootBoxName : step.premiumRewardLootBoxName;
   const lootBoxRarityValue =
@@ -15168,6 +15302,7 @@ function seasonStepRewardDefinition(
     ...(rewardType === "LOOT_BOX"
       ? {
           lootBox: {
+            id: nullable(lootBoxIdValue ?? ""),
             name: nullable(lootBoxNameValue ?? "") ?? label,
             caseRarity: lootBoxRarityValue ?? "common",
           },
@@ -15231,6 +15366,10 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
         freeRewardLabel:
           recordString(freeRewardDetails, "label") ?? freeReward ?? "",
         freeRewardCode: recordString(freeRewardDetails, "code") ?? "",
+        freeRewardLootBoxId:
+          recordString(asRecord(freeRewardDetails.lootBox), "id") ??
+          recordString(freeRewardDetails, "lootBoxId") ??
+          "",
         freeRewardLootBoxName:
           recordString(asRecord(freeRewardDetails.lootBox), "name") ?? "",
         freeRewardLootBoxRarity:
@@ -15244,6 +15383,10 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
         premiumRewardLabel:
           recordString(premiumRewardDetails, "label") ?? premiumReward ?? "",
         premiumRewardCode: recordString(premiumRewardDetails, "code") ?? "",
+        premiumRewardLootBoxId:
+          recordString(asRecord(premiumRewardDetails.lootBox), "id") ??
+          recordString(premiumRewardDetails, "lootBoxId") ??
+          "",
         premiumRewardLootBoxName:
           recordString(asRecord(premiumRewardDetails.lootBox), "name") ?? "",
         premiumRewardLootBoxRarity:
@@ -15263,6 +15406,12 @@ function recordString(record: Record<string, unknown>, key: string) {
   const value = record[key];
 
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function lootBoxCanBeRewardTemplate(
+  lootBox: Pick<GuestGameLootBox, "usageKind">,
+) {
+  return lootBox.usageKind === "REWARD_TEMPLATE" || lootBox.usageKind === "BOTH";
 }
 
 function nextSeasonStepId() {

@@ -1014,7 +1014,9 @@ function LootBoxInspector({
   onRestartLootBox,
   restartingLootBoxId,
 }: InspectorProps) {
-  const lootBoxTemplates = templatesForStore(workspace.lootBoxes, storeId);
+  const lootBoxTemplates = templatesForStore(workspace.lootBoxes, storeId).filter(
+    isVisualEditorLootBoxTemplate,
+  );
 
   return (
     <CollectionInspector
@@ -2567,6 +2569,10 @@ function templatesForStore<T extends { storeIds: string[]; status: GuestGameStat
 
       return templateName(left).localeCompare(templateName(right), "ru");
     });
+}
+
+function isVisualEditorLootBoxTemplate(lootBox: GuestGameLootBox) {
+  return lootBox.usageKind === "STANDALONE" || lootBox.usageKind === "BOTH";
 }
 
 function templateName(value: unknown) {

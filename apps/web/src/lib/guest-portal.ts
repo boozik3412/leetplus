@@ -299,6 +299,15 @@ export type GuestPortalPayload = {
         | "profile"
         | "progress";
     }>;
+    checkIn: {
+      enabled: boolean;
+      ready: boolean;
+      title: string;
+      description: string;
+      rewardLabel: string | null;
+      xpReward: number;
+      blockedReason: string | null;
+    };
     lootBoxes: Array<{
       id: string;
       name: string;
@@ -762,6 +771,7 @@ export type GuestPortalGameSummary = {
     timeline: GuestPortalGameProgressTimelineItem[];
   };
   journey: GuestPortalGameJourney;
+  checkIn: GuestPortalPayload["gamification"]["checkIn"];
   nextActions: GuestPortalPayload["gamification"]["nextActions"];
   activity: Pick<
     GuestPortalPayload["activity"]["summary"],

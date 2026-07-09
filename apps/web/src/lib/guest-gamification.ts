@@ -22,6 +22,11 @@ export type GuestGameRewardRarity =
   | "epic"
   | "legendary";
 
+export type GuestGameLootBoxUsageKind =
+  | "STANDALONE"
+  | "REWARD_TEMPLATE"
+  | "BOTH";
+
 export type GuestGameUser = {
   id: string;
   displayName: string;
@@ -80,6 +85,7 @@ export type GuestGameLootBox = {
   id: string;
   name: string;
   status: GuestGameStatus;
+  usageKind: GuestGameLootBoxUsageKind;
   triggerKind: string;
   rewardType: string;
   rewardAmount: number | null;

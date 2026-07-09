@@ -48,6 +48,11 @@ const statusValues = [
   'FINISHED',
   'ARCHIVED',
 ] as const;
+const lootBoxUsageKindValues = [
+  'STANDALONE',
+  'REWARD_TEMPLATE',
+  'BOTH',
+] as const;
 const profileStatuses = ['ACTIVE', 'PAUSED', 'ARCHIVED'] as const;
 const rewardStatuses = [
   'PENDING',
@@ -853,7 +858,10 @@ export type GuestGameRuleBase = {
   createdBy: GuestGameUser | null;
 };
 
+export type GuestGameLootBoxUsageKind = (typeof lootBoxUsageKindValues)[number];
+
 export type GuestGameLootBox = GuestGameRuleBase & {
+  usageKind: GuestGameLootBoxUsageKind;
   triggerKind: string;
   segment: string | null;
   sessionType: string | null;
@@ -1930,6 +1938,7 @@ export type GuestGameProfileUpdateDto = Partial<GuestGameProfileDto>;
 export type GuestGameLootBoxDto = {
   name?: string;
   status?: string;
+  usageKind?: string | null;
   triggerKind?: string;
   rewardType?: string;
   rewardAmount?: number | string | null;
@@ -6877,7 +6886,8 @@ export class GuestGamificationService {
             item.triggerKind === 'CHECK_IN') &&
           ruleMatchesStoreIds(item.storeIds, storeId),
       ) ?? null;
-    const liveLootBoxes = rules.lootBoxes
+    const visibleLootBoxes = rules.lootBoxes?.filter(lootBoxVisibleInCatalog);
+    const liveLootBoxes = visibleLootBoxes
       ?.filter((item) => ruleMatchesPilotStore(item, storeId))
       .slice(0, 8)
       .map(visualLootBoxFromRule);
@@ -6910,11 +6920,11 @@ export class GuestGamificationService {
             rules.seasons,
           )
         : basePayload.battlePass,
-      lootBoxes: rules.lootBoxes
+      lootBoxes: visibleLootBoxes
         ? mergeVisualEditorRuleItems(
             basePayload.lootBoxes,
             liveLootBoxes ?? [],
-            rules.lootBoxes,
+            visibleLootBoxes,
             12,
           )
         : basePayload.lootBoxes,
@@ -7588,6 +7598,7 @@ export class GuestGamificationService {
     for (const lootBox of lootBoxes) {
       if (
         lootBox.status === 'ACTIVE' &&
+        lootBoxVisibleInCatalog(lootBox) &&
         !activeLootBoxIds.has(lootBox.id) &&
         ruleMatchesStoreIds(lootBox.storeIds, storeId)
       ) {
@@ -11049,6 +11060,11 @@ export class GuestGamificationService {
       createdByUserId: isCreate ? actorUserId(user) : undefined,
       name: requiredString(dto.name, 'Название лутбокса', isCreate),
       status,
+      usageKind: enumValue(
+        dto.usageKind,
+        lootBoxUsageKindValues,
+        isCreate ? 'STANDALONE' : undefined,
+      ),
       triggerKind:
         stringValue(dto.triggerKind) ??
         (isCreate ? 'SESSION_START' : undefined),
@@ -13296,11 +13312,24 @@ function isRegisteredGameProfile(profile: GuestGameProfile) {
   return !profile.createdBy && consent.phoneConsentStatus === 'GRANTED';
 }
 
+function lootBoxUsageKind(
+  value: string | null | undefined,
+): GuestGameLootBoxUsageKind {
+  return enumValue(value, lootBoxUsageKindValues, 'STANDALONE') ?? 'STANDALONE';
+}
+
+function lootBoxVisibleInCatalog(rule: { usageKind?: string | null }) {
+  const usageKind = lootBoxUsageKind(rule.usageKind);
+
+  return usageKind === 'STANDALONE' || usageKind === 'BOTH';
+}
+
 function mapLootBox(row: LootBoxRow): GuestGameLootBox {
   return {
     id: row.id,
     name: row.name,
     status: row.status as StatusValue,
+    usageKind: lootBoxUsageKind(row.usageKind),
     triggerKind: row.triggerKind,
     rewardType: row.rewardType,
     rewardAmount: numberOrNull(row.rewardAmount),
@@ -20678,6 +20707,20 @@ function buildVisualEditorPreviewSummary(
           anchor: 'rewards',
         },
       ],
+    },
+    checkIn: {
+      enabled: payload.checkIn.enabled,
+      ready: payload.checkIn.enabled,
+      title: 'Чекин в клубе',
+      description:
+        payload.checkIn.rewardLabel ??
+        (payload.checkIn.rewardMode === 'BONUS'
+          ? 'Бонусы за ежедневный чекин в клубе.'
+          : 'XP за ежедневный чекин в клубе.'),
+      rewardLabel: payload.checkIn.rewardLabel,
+      xpReward:
+        payload.checkIn.rewardMode === 'XP' ? (payload.checkIn.xp ?? 0) : 0,
+      blockedReason: null,
     },
     nextActions: nextActions.slice(0, 5),
     activity: {

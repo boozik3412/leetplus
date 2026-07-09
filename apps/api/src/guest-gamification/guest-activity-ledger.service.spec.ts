@@ -35,7 +35,10 @@ describe('GuestActivityLedgerService', () => {
   let langameClient: any;
   let service: GuestActivityLedgerService;
 
-  const selectFields = (row: Record<string, any>, select?: Record<string, boolean>) => {
+  const selectFields = (
+    row: Record<string, any>,
+    select?: Record<string, boolean>,
+  ) => {
     if (!select) {
       return row;
     }
@@ -65,7 +68,10 @@ describe('GuestActivityLedgerService', () => {
     );
   };
 
-  const matchesRawWhere = (row: Record<string, any>, where: Record<string, any>) => {
+  const matchesRawWhere = (
+    row: Record<string, any>,
+    where: Record<string, any>,
+  ) => {
     if (where.profileId && row.profileId !== where.profileId) {
       return false;
     }
@@ -95,7 +101,10 @@ describe('GuestActivityLedgerService', () => {
     return true;
   };
 
-  const matchesFactWhere = (row: Record<string, any>, where: Record<string, any>) => {
+  const matchesFactWhere = (
+    row: Record<string, any>,
+    where: Record<string, any>,
+  ) => {
     if (where.profileId && row.profileId !== where.profileId) {
       return false;
     }

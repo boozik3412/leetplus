@@ -1531,6 +1531,7 @@ model GuestGameLootBox {
   createdByUserId        String?
   name                   String
   status                 String    @default("DRAFT")
+  usageKind              String    @default("STANDALONE")
   triggerKind            String
   rewardType             String
   rewardAmount           Decimal?  @db.Decimal(12, 2)
@@ -1555,6 +1556,7 @@ model GuestGameLootBox {
   events        GuestGameEvent[]
 
   @@index([tenantId, status, updatedAt], map: "guest_game_loot_box_status_idx")
+  @@index([tenantId, usageKind, status], map: "guest_game_loot_box_usage_idx")
   @@index([tenantId, triggerKind], map: "guest_game_loot_box_trigger_idx")
   @@index([audienceId], map: "guest_game_loot_box_audience_idx")
   @@index([createdByUserId], map: "guest_game_loot_box_created_by_idx")

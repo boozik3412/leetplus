@@ -10741,6 +10741,14 @@ function SeasonBusinessRules({
   const mainRewardStepIndex = form.levelSteps.length - 1;
   const mainRewardStep =
     mainRewardStepIndex >= 0 ? form.levelSteps[mainRewardStepIndex] : null;
+  const sortedLevelSteps = form.levelSteps
+    .map((step, index) => ({ step, index }))
+    .sort((left, right) => {
+      const leftLevel = numeric(left.step.level, left.index + 1);
+      const rightLevel = numeric(right.step.level, right.index + 1);
+
+      return rightLevel - leftLevel || right.index - left.index;
+    });
 
   return (
     <BusinessRuleSection
@@ -10962,14 +10970,14 @@ function SeasonBusinessRules({
             </button>
           </div>
         </div>
-        {form.levelSteps.map((step, index) => (
+        {sortedLevelSteps.map(({ step, index }) => (
           <div
             key={step.id || `${step.level}-${index}`}
             className="relative space-y-4 rounded-xl border border-t-4 border-zinc-200 border-t-cyan-500 bg-white p-4 shadow-sm ring-1 ring-black/5 dark:border-zinc-700 dark:border-t-cyan-400 dark:bg-zinc-950/70 dark:shadow-black/30 dark:ring-cyan-400/10"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="inline-flex items-center rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-cyan-700 ring-1 ring-cyan-200 dark:bg-cyan-950/40 dark:text-cyan-200 dark:ring-cyan-500/30">
-                Шаг {index + 1}
+                Шаг {step.level.trim() || index + 1}
               </span>
               <button
                 type="button"

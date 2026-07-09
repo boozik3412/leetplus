@@ -1,3 +1,4 @@
+import type { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,6 +14,7 @@ type PrismaMock = {
   };
   integrationCredential: {
     findFirst: jest.Mock;
+    findMany: jest.Mock;
     upsert: jest.Mock;
   };
   integrationSource: {
@@ -41,6 +43,10 @@ type TenantContextMock = {
 type EncryptionMock = {
   encrypt: jest.Mock;
   decrypt: jest.Mock;
+};
+
+type ConfigServiceMock = {
+  get: jest.Mock;
 };
 
 type LangameClientMock = {
@@ -88,6 +94,7 @@ function createPrismaMock(): PrismaMock {
     },
     integrationCredential: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       upsert: jest.fn(),
     },
     integrationSource: {
@@ -114,6 +121,7 @@ describe('LangameSettingsService', () => {
   let prisma: PrismaMock;
   let tenantContext: TenantContextMock;
   let encryption: EncryptionMock;
+  let configService: ConfigServiceMock;
   let langameClient: LangameClientMock;
   let service: LangameSettingsService;
 
@@ -128,6 +136,9 @@ describe('LangameSettingsService', () => {
     encryption = {
       encrypt: jest.fn((value: string) => `encrypted:${value}`),
       decrypt: jest.fn((value: string) => value.replace('encrypted:', '')),
+    };
+    configService = {
+      get: jest.fn(),
     };
     langameClient = {
       getRoutes: jest.fn(),
@@ -144,9 +155,17 @@ describe('LangameSettingsService', () => {
       name: 'Demo Cyber Club',
     });
     prisma.integrationCredential.findFirst.mockResolvedValue(null);
+    prisma.integrationCredential.findMany.mockResolvedValue([
+      {
+        id: 'credential-1',
+        apiKeyEncrypted: 'encrypted:secret-key',
+        apiKeyEnvVar: null,
+      },
+    ]);
     prisma.integrationCredential.upsert.mockResolvedValue({
       id: 'credential-1',
       apiKeyEncrypted: 'encrypted:key',
+      apiKeyEnvVar: null,
     });
     prisma.integrationSource.findMany.mockResolvedValue([
       {
@@ -174,6 +193,7 @@ describe('LangameSettingsService', () => {
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
       encryption as unknown as SecretEncryptionService,
+      configService as unknown as ConfigService,
       langameClient as unknown as LangameClient,
     );
   });
@@ -182,12 +202,15 @@ describe('LangameSettingsService', () => {
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'F5',
     });
-    prisma.integrationCredential.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: 'credential-1',
-        apiKeyEncrypted: 'encrypted:secret-key',
-      });
+    prisma.integrationCredential.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'credential-1',
+          apiKeyEncrypted: 'encrypted:secret-key',
+          apiKeyEnvVar: null,
+        },
+      ]);
 
     await expect(
       service.saveSettings(user, {
@@ -226,11 +249,6 @@ describe('LangameSettingsService', () => {
   });
 
   it('resolves decrypted access for sync', async () => {
-    prisma.integrationCredential.findFirst.mockResolvedValue({
-      id: 'credential-1',
-      apiKeyEncrypted: 'encrypted:secret-key',
-    });
-
     await expect(service.resolveTenantAccess('tenant-1')).resolves.toEqual({
       apiKey: 'secret-key',
       sources: [
@@ -242,6 +260,42 @@ describe('LangameSettingsService', () => {
           isActive: true,
           lastSyncedAt: null,
         },
+      ],
+    });
+  });
+
+  it('keeps using a populated Langame credential when a newer empty one exists', async () => {
+    prisma.integrationCredential.findMany.mockResolvedValue([
+      {
+        id: 'empty-new-credential',
+        apiKeyEncrypted: null,
+        apiKeyEnvVar: null,
+      },
+      {
+        id: 'credential-with-key',
+        apiKeyEncrypted: 'encrypted:secret-key',
+        apiKeyEnvVar: null,
+      },
+    ]);
+    prisma.integrationSource.findMany.mockResolvedValue([
+      {
+        id: 'source-attached-to-empty',
+        credentialId: 'empty-new-credential',
+        name: '46.langamepro.ru',
+        domain: '46.langamepro.ru',
+        baseUrl: 'https://46.langamepro.ru/public_api',
+        isActive: true,
+        lastSyncedAt: null,
+      },
+    ]);
+
+    await expect(service.resolveTenantAccess('tenant-1')).resolves.toEqual({
+      apiKey: 'secret-key',
+      sources: [
+        expect.objectContaining({
+          id: 'source-attached-to-empty',
+          domain: '46.langamepro.ru',
+        }),
       ],
     });
   });

@@ -238,10 +238,21 @@ export function GuestGamificationVisualEditor({
         }),
     [stores],
   );
-  const [storeId, setStoreId] = useState(
-    selectableStores.some((store) => store.id === initialStoreId)
-      ? (initialStoreId ?? "")
-      : (selectableStores[0]?.id ?? ""),
+  const fallbackStoreId = useMemo(
+    () =>
+      selectableStores.some((store) => store.id === initialStoreId)
+        ? (initialStoreId ?? "")
+        : (selectableStores[0]?.id ?? ""),
+    [initialStoreId, selectableStores],
+  );
+  const [selectedStoreId, setStoreId] = useState<string | null>(null);
+  const storeId = useMemo(
+    () =>
+      selectedStoreId &&
+      selectableStores.some((store) => store.id === selectedStoreId)
+        ? selectedStoreId
+        : fallbackStoreId,
+    [fallbackStoreId, selectableStores, selectedStoreId],
   );
   const [draft, setDraft] = useState<GuestGameVisualDraft | null>(null);
   const [activeSection, setActiveSection] =
@@ -258,16 +269,6 @@ export function GuestGamificationVisualEditor({
   const payload = draft?.payload ?? null;
   const publishBlocked =
     Boolean(payload?.checkIn.enabled) && !payload?.checkIn.rewardMode;
-
-  useEffect(() => {
-    if (
-      initialStoreId &&
-      initialStoreId !== storeId &&
-      selectableStores.some((store) => store.id === initialStoreId)
-    ) {
-      setStoreId(initialStoreId);
-    }
-  }, [initialStoreId, selectableStores, storeId]);
 
   useEffect(() => {
     if (!storeId) {

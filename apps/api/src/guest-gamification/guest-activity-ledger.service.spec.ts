@@ -1,4 +1,7 @@
 import { IntegrationProvider } from '@prisma/client';
+import type { LangameClient } from '../integrations/langame.client';
+import type { LangameSettingsService } from '../integrations/langame-settings.service';
+import type { PrismaService } from '../prisma/prisma.service';
 import { GuestActivityLedgerService } from './guest-activity-ledger.service';
 
 describe('GuestActivityLedgerService', () => {
@@ -21,33 +24,115 @@ describe('GuestActivityLedgerService', () => {
     integrationSourceId: sourceId,
     timeZone: 'Asia/Yekaterinburg',
   };
-  let rawRecords: Map<string, Record<string, any>>;
-  let facts: Map<string, Record<string, any>>;
-  let syncState: {
+
+  type DateRange = { gte?: Date; lte?: Date };
+  type SelectShape = Record<string, boolean>;
+  type LedgerRow = Record<string, unknown> & {
+    id: string;
+    profileId?: string;
+    externalDomain?: string | null;
+    sourceKind?: string;
+    rawType?: string | null;
+    rawText?: string | null;
+    factType?: string;
+    sourceHash?: string;
+    happenedAt?: Date | null;
+    storeId?: string | null;
+    parseStatus?: string;
+    confidence?: string;
+    evidence?: unknown;
+  };
+  type NewLedgerRow = Omit<LedgerRow, 'id'> & Partial<Pick<LedgerRow, 'id'>>;
+  type RawWhere = {
+    profileId?: string;
+    externalDomain?: string;
+    sourceKind?: string;
+    rawType?: { in?: string[] };
+    happenedAt?: DateRange;
+    OR?: RawWhere[];
+  };
+  type FactWhere = {
+    profileId?: string;
+    externalDomain?: string;
+    factType?: string;
+    happenedAt?: DateRange;
+  };
+  type RawUniqueWhere = {
+    tenantId_sourceKind_externalProvider_externalDomain_sourceHash: {
+      sourceHash: string;
+    };
+  };
+  type FactUniqueWhere = {
+    tenantId_factType_sourceHash: {
+      factType: string;
+      sourceHash: string;
+    };
+  };
+  type SyncState = {
     status: string;
     lastStartedAt: Date | null;
     lastSuccessfulTo: Date | null;
     syncFrom: Date | null;
     rawRecordsCount: number;
     factsCount: number;
-  } | null;
-  let prisma: any;
-  let langameClient: any;
+  };
+  type SyncStateUpsertArgs = {
+    create: SyncState;
+    update: Partial<SyncState>;
+  };
+  type RawUpsertArgs = {
+    where: RawUniqueWhere;
+    create: NewLedgerRow;
+    update: Partial<LedgerRow>;
+  };
+  type RawUpdateArgs = {
+    where: { id: string };
+    data: Partial<LedgerRow>;
+  };
+  type RawFindManyArgs = {
+    where?: RawWhere;
+    select?: SelectShape;
+  };
+  type FactUpsertArgs = {
+    where: FactUniqueWhere;
+    create: NewLedgerRow;
+    update: Partial<LedgerRow>;
+  };
+  type FactFindManyArgs = {
+    where?: FactWhere;
+    select?: SelectShape;
+  };
+  type MockLangameSettingsService = {
+    resolveTenantAccess: jest.MockedFunction<
+      LangameSettingsService['resolveTenantAccess']
+    >;
+  };
+  type MockLangameClient = {
+    listGuestLogs: jest.MockedFunction<LangameClient['listGuestLogs']>;
+    listGuestSessions: jest.MockedFunction<LangameClient['listGuestSessions']>;
+    listTransactions: jest.MockedFunction<LangameClient['listTransactions']>;
+  };
+
+  let rawRecords: Map<string, LedgerRow>;
+  let facts: Map<string, LedgerRow>;
+  let syncState: SyncState | null;
+  let prisma: PrismaService;
+  let langameClient: MockLangameClient;
   let service: GuestActivityLedgerService;
 
-  const selectFields = (
-    row: Record<string, any>,
-    select?: Record<string, boolean>,
-  ) => {
+  const selectFields = (row: LedgerRow, select?: SelectShape) => {
     if (!select) {
       return row;
     }
 
-    return Object.fromEntries(
-      Object.entries(select)
-        .filter(([, enabled]) => enabled)
-        .map(([key]) => [key, row[key]]),
-    );
+    const selected: Record<string, unknown> = {};
+    for (const [key, enabled] of Object.entries(select)) {
+      if (enabled) {
+        selected[key] = row[key];
+      }
+    }
+
+    return selected;
   };
 
   const inDateRange = (
@@ -68,10 +153,7 @@ describe('GuestActivityLedgerService', () => {
     );
   };
 
-  const matchesRawWhere = (
-    row: Record<string, any>,
-    where: Record<string, any>,
-  ) => {
+  const matchesRawWhere = (row: LedgerRow, where: RawWhere) => {
     if (where.profileId && row.profileId !== where.profileId) {
       return false;
     }
@@ -93,7 +175,7 @@ describe('GuestActivityLedgerService', () => {
     }
 
     if (Array.isArray(where.OR)) {
-      return where.OR.some((clause: Record<string, any>) =>
+      return where.OR.some((clause) =>
         matchesRawWhere(row, { ...where, OR: undefined, ...clause }),
       );
     }
@@ -101,10 +183,7 @@ describe('GuestActivityLedgerService', () => {
     return true;
   };
 
-  const matchesFactWhere = (
-    row: Record<string, any>,
-    where: Record<string, any>,
-  ) => {
+  const matchesFactWhere = (row: LedgerRow, where: FactWhere) => {
     if (where.profileId && row.profileId !== where.profileId) {
       return false;
     }
@@ -169,112 +248,143 @@ describe('GuestActivityLedgerService', () => {
       },
       guestActivitySyncState: {
         findUnique: jest.fn().mockImplementation(() => syncState),
-        upsert: jest.fn().mockImplementation(({ create, update }) => {
-          syncState = {
-            ...(syncState ?? create),
-            ...update,
-            status: update.status ?? create.status,
-            lastSuccessfulTo:
-              update.lastSuccessfulTo === undefined
-                ? (syncState?.lastSuccessfulTo ?? create.lastSuccessfulTo)
-                : update.lastSuccessfulTo,
-            rawRecordsCount: update.rawRecordsCount ?? create.rawRecordsCount,
-            factsCount: update.factsCount ?? create.factsCount,
-          };
-          return Promise.resolve(syncState);
-        }),
+        upsert: jest
+          .fn()
+          .mockImplementation(({ create, update }: SyncStateUpsertArgs) => {
+            syncState = {
+              ...(syncState ?? create),
+              ...update,
+              status: update.status ?? create.status,
+              lastSuccessfulTo:
+                update.lastSuccessfulTo === undefined
+                  ? (syncState?.lastSuccessfulTo ?? create.lastSuccessfulTo)
+                  : update.lastSuccessfulTo,
+              rawRecordsCount: update.rawRecordsCount ?? create.rawRecordsCount,
+              factsCount: update.factsCount ?? create.factsCount,
+            };
+            return Promise.resolve(syncState);
+          }),
         findFirst: jest.fn(),
       },
       guestActivityRawRecord: {
-        findUnique: jest.fn().mockImplementation(({ where }) => {
-          const hash =
-            where.tenantId_sourceKind_externalProvider_externalDomain_sourceHash
-              .sourceHash;
-          return Promise.resolve(rawRecords.get(hash) ?? null);
-        }),
-        upsert: jest.fn().mockImplementation(({ where, create, update }) => {
-          const hash =
-            where.tenantId_sourceKind_externalProvider_externalDomain_sourceHash
-              .sourceHash;
-          const existing = rawRecords.get(hash);
-          if (existing) {
-            Object.assign(existing, update);
-            return Promise.resolve(existing);
-          }
-          const record = { ...create, id: `raw-${rawRecords.size + 1}` };
-          rawRecords.set(hash, record);
-          return Promise.resolve(record);
-        }),
-        update: jest.fn().mockImplementation(({ where, data }) => {
-          const record = Array.from(rawRecords.values()).find(
-            (item) => item.id === where.id,
-          );
-          if (record) {
-            record.parseStatus = data.parseStatus;
-          }
-          return Promise.resolve(record);
-        }),
-        findMany: jest.fn().mockImplementation(({ where, select }) => {
-          const rows = Array.from(rawRecords.values()).filter((row) =>
-            matchesRawWhere(row, where ?? {}),
-          );
-          return Promise.resolve(rows.map((row) => selectFields(row, select)));
-        }),
+        findUnique: jest
+          .fn()
+          .mockImplementation(({ where }: { where: RawUniqueWhere }) => {
+            const hash =
+              where
+                .tenantId_sourceKind_externalProvider_externalDomain_sourceHash
+                .sourceHash;
+            return Promise.resolve(rawRecords.get(hash) ?? null);
+          }),
+        upsert: jest
+          .fn()
+          .mockImplementation(({ where, create, update }: RawUpsertArgs) => {
+            const hash =
+              where
+                .tenantId_sourceKind_externalProvider_externalDomain_sourceHash
+                .sourceHash;
+            const existing = rawRecords.get(hash);
+            if (existing) {
+              Object.assign(existing, update);
+              return Promise.resolve(existing);
+            }
+            const record = { ...create, id: `raw-${rawRecords.size + 1}` };
+            rawRecords.set(hash, record);
+            return Promise.resolve(record);
+          }),
+        update: jest
+          .fn()
+          .mockImplementation(({ where, data }: RawUpdateArgs) => {
+            const record = Array.from(rawRecords.values()).find(
+              (item) => item.id === where.id,
+            );
+            if (record) {
+              record.parseStatus = data.parseStatus;
+            }
+            return Promise.resolve(record);
+          }),
+        findMany: jest
+          .fn()
+          .mockImplementation(({ where, select }: RawFindManyArgs) => {
+            const rows = Array.from(rawRecords.values()).filter((row) =>
+              matchesRawWhere(row, where ?? {}),
+            );
+            return Promise.resolve(
+              rows.map((row) => selectFields(row, select)),
+            );
+          }),
       },
       guestActivityFact: {
-        findUnique: jest.fn().mockImplementation(({ where }) => {
-          const unique = where.tenantId_factType_sourceHash;
-          return Promise.resolve(
-            facts.get(`${unique.factType}:${unique.sourceHash}`) ?? null,
-          );
-        }),
-        upsert: jest.fn().mockImplementation(({ where, create, update }) => {
-          const unique = where.tenantId_factType_sourceHash;
-          const key = `${unique.factType}:${unique.sourceHash}`;
-          const existing = facts.get(key);
-          if (existing) {
-            Object.assign(existing, update);
-            return Promise.resolve(existing);
-          }
-          const fact = { ...create, id: `fact-${facts.size + 1}` };
-          facts.set(key, fact);
-          return Promise.resolve(fact);
-        }),
-        findMany: jest.fn().mockImplementation(({ where, select }) => {
-          const rows = Array.from(facts.values()).filter((row) =>
-            matchesFactWhere(row, where ?? {}),
-          );
-          return Promise.resolve(rows.map((row) => selectFields(row, select)));
-        }),
+        findUnique: jest
+          .fn()
+          .mockImplementation(({ where }: { where: FactUniqueWhere }) => {
+            const unique = where.tenantId_factType_sourceHash;
+            return Promise.resolve(
+              facts.get(`${unique.factType}:${unique.sourceHash}`) ?? null,
+            );
+          }),
+        upsert: jest
+          .fn()
+          .mockImplementation(({ where, create, update }: FactUpsertArgs) => {
+            const unique = where.tenantId_factType_sourceHash;
+            const key = `${unique.factType}:${unique.sourceHash}`;
+            const existing = facts.get(key);
+            if (existing) {
+              Object.assign(existing, update);
+              return Promise.resolve(existing);
+            }
+            const fact = { ...create, id: `fact-${facts.size + 1}` };
+            facts.set(key, fact);
+            return Promise.resolve(fact);
+          }),
+        findMany: jest
+          .fn()
+          .mockImplementation(({ where, select }: FactFindManyArgs) => {
+            const rows = Array.from(facts.values()).filter((row) =>
+              matchesFactWhere(row, where ?? {}),
+            );
+            return Promise.resolve(
+              rows.map((row) => selectFields(row, select)),
+            );
+          }),
       },
-    };
+    } as unknown as PrismaService;
     langameClient = {
-      listGuestLogs: jest.fn().mockResolvedValue([
-        {
-          guest_id: externalGuestId,
-          club_id: '15',
-          date: '06.07.2026 17:00',
-          type: 'Покупка абонемент ADMIN 10 ЧАСОВ, 0 ₽ + 500 бонусы',
-        },
-        {
-          guest_id: externalGuestId,
-          club_id: '15',
-          date: '06.07.2026 17:00',
-          type: 'Продление сессии на 6 в центре 1337 по тарифу ADMIN 10 ЧАСОВ длительностью 600 мин.',
-        },
-      ]),
-      listGuestSessions: jest.fn().mockResolvedValue([]),
-      listTransactions: jest.fn().mockResolvedValue([]),
+      listGuestLogs: jest
+        .fn<LangameClient['listGuestLogs']>()
+        .mockResolvedValue([
+          {
+            guest_id: externalGuestId,
+            club_id: '15',
+            date: '06.07.2026 17:00',
+            type: 'Покупка абонемент ADMIN 10 ЧАСОВ, 0 ₽ + 500 бонусы',
+          },
+          {
+            guest_id: externalGuestId,
+            club_id: '15',
+            date: '06.07.2026 17:00',
+            type: 'Продление сессии на 6 в центре 1337 по тарифу ADMIN 10 ЧАСОВ длительностью 600 мин.',
+          },
+        ]),
+      listGuestSessions: jest
+        .fn<LangameClient['listGuestSessions']>()
+        .mockResolvedValue([]),
+      listTransactions: jest
+        .fn<LangameClient['listTransactions']>()
+        .mockResolvedValue([]),
     };
-    service = new GuestActivityLedgerService(
-      prisma,
-      {
-        resolveTenantAccess: jest.fn().mockResolvedValue({
+    const langameSettingsService: MockLangameSettingsService = {
+      resolveTenantAccess: jest
+        .fn<LangameSettingsService['resolveTenantAccess']>()
+        .mockResolvedValue({
           apiKey: 'api-key',
           sources: [source],
         }),
-      } as any,
-      langameClient,
+    };
+    service = new GuestActivityLedgerService(
+      prisma,
+      langameSettingsService as unknown as LangameSettingsService,
+      langameClient as unknown as LangameClient,
     );
   });
 

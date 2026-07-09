@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import {
+  IntegrationProvider,
+  Prisma,
+  type IntegrationCredential,
+} from '@prisma/client';
 import { readFile } from 'node:fs/promises';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -287,6 +292,7 @@ export class LangameSettingsService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly secretEncryptionService: SecretEncryptionService,
+    private readonly configService: ConfigService,
     private readonly langameClient: LangameClient,
   ) {}
 
@@ -409,8 +415,10 @@ export class LangameSettingsService {
     }
 
     const existingCredential = await this.findCredential(tenantId);
+    const existingApiKeyEncrypted = existingCredential?.apiKeyEncrypted ?? null;
+    const existingApiKeyEnvVar = existingCredential?.apiKeyEnvVar ?? null;
 
-    if (!apiKey && !existingCredential?.apiKeyEncrypted) {
+    if (!apiKey && !existingApiKeyEncrypted && !existingApiKeyEnvVar) {
       throw new BadRequestException('Langame API key is required');
     }
 
@@ -435,7 +443,8 @@ export class LangameSettingsService {
         name: CREDENTIAL_NAME,
         apiKeyEncrypted: apiKey
           ? this.secretEncryptionService.encrypt(apiKey)
-          : null,
+          : existingApiKeyEncrypted,
+        apiKeyEnvVar: apiKey ? null : existingApiKeyEnvVar,
       },
       update: {
         ...(apiKey
@@ -443,7 +452,10 @@ export class LangameSettingsService {
               apiKeyEncrypted: this.secretEncryptionService.encrypt(apiKey),
               apiKeyEnvVar: null,
             }
-          : {}),
+          : {
+              apiKeyEncrypted: existingApiKeyEncrypted,
+              apiKeyEnvVar: existingApiKeyEnvVar,
+            }),
         isActive: true,
       },
     });
@@ -493,9 +505,7 @@ export class LangameSettingsService {
       throw new BadRequestException('Langame integration is not configured');
     }
 
-    const apiKey = credential.apiKeyEncrypted
-      ? this.secretEncryptionService.decrypt(credential.apiKeyEncrypted)
-      : null;
+    const apiKey = this.resolveCredentialApiKey(credential);
 
     if (!apiKey) {
       throw new BadRequestException('Langame API key is not configured');
@@ -504,7 +514,6 @@ export class LangameSettingsService {
     const sources = await this.prisma.integrationSource.findMany({
       where: {
         tenantId,
-        credentialId: credential.id,
         provider: IntegrationProvider.LANGAME,
         isActive: true,
       },
@@ -2363,8 +2372,21 @@ export class LangameSettingsService {
     );
   }
 
-  private findCredential(tenantId: string) {
-    return this.prisma.integrationCredential.findFirst({
+  private resolveCredentialApiKey(
+    credential: Pick<IntegrationCredential, 'apiKeyEncrypted' | 'apiKeyEnvVar'>,
+  ) {
+    if (credential.apiKeyEncrypted) {
+      return this.secretEncryptionService.decrypt(credential.apiKeyEncrypted);
+    }
+
+    const envVar = credential.apiKeyEnvVar?.trim();
+    return envVar
+      ? (this.configService.get<string>(envVar)?.trim() ?? null)
+      : null;
+  }
+
+  private async findCredential(tenantId: string) {
+    const credentials = await this.prisma.integrationCredential.findMany({
       where: {
         tenantId,
         provider: IntegrationProvider.LANGAME,
@@ -2372,6 +2394,16 @@ export class LangameSettingsService {
       },
       orderBy: { updatedAt: 'desc' },
     });
+
+    return (
+      credentials.find(
+        (credential) =>
+          Boolean(credential.apiKeyEncrypted) ||
+          Boolean(credential.apiKeyEnvVar?.trim()),
+      ) ??
+      credentials[0] ??
+      null
+    );
   }
 
   private normalizeDomains(domains: string[]) {

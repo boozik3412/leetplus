@@ -1571,13 +1571,17 @@ function storeIdsFromJson(value: Prisma.JsonValue | null): string[] {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => String(item)).filter(Boolean);
+    return value
+      .map((item) => primitiveString(item))
+      .filter((item): item is string => Boolean(item));
   }
 
   if (typeof value === 'object') {
     const maybeStoreIds = (value as Record<string, unknown>).storeIds;
     if (Array.isArray(maybeStoreIds)) {
-      return maybeStoreIds.map((item) => String(item)).filter(Boolean);
+      return maybeStoreIds
+        .map((item) => primitiveString(item))
+        .filter((item): item is string => Boolean(item));
     }
   }
 
@@ -1849,10 +1853,7 @@ function buildInferredPackageUsageEvidence(
 }
 
 function normalizeSearchText(value: unknown) {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, 'е');
+  return (primitiveString(value) ?? '').trim().toLowerCase().replace(/ё/g, 'е');
 }
 
 function firstString(...values: unknown[]) {
@@ -1871,7 +1872,7 @@ function nullableString(value: unknown) {
     return null;
   }
 
-  const normalized = String(value).trim();
+  const normalized = primitiveString(value)?.trim() ?? '';
   return normalized ? normalized : null;
 }
 
@@ -1881,13 +1882,31 @@ function firstNumber(...values: unknown[]) {
       continue;
     }
 
-    const number = Number(String(value).replace(',', '.'));
+    const normalized = primitiveString(value);
+    if (!normalized) {
+      continue;
+    }
+
+    const number = Number(normalized.replace(',', '.'));
     if (Number.isFinite(number)) {
       return number;
     }
   }
 
   return null;
+}
+
+function primitiveString(value: unknown) {
+  switch (typeof value) {
+    case 'string':
+      return value;
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+      return String(value);
+    default:
+      return null;
+  }
 }
 
 function buildSourceHash(payload: unknown) {

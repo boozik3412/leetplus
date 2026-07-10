@@ -30,6 +30,7 @@ import {
   GuestActivityLedgerService,
   type GuestActivityLedgerDiagnostics,
 } from './guest-activity-ledger.service';
+import { GuestGamificationLogService } from './guest-gamification-log.service';
 import {
   GuestGamificationService,
   type GuestGameCheckInDto,
@@ -95,6 +96,7 @@ export class GuestGamificationController {
   constructor(
     private readonly gamificationService: GuestGamificationService,
     private readonly activityLedgerService: GuestActivityLedgerService,
+    private readonly gamificationLogService: GuestGamificationLogService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
   ) {}
 
@@ -133,6 +135,34 @@ export class GuestGamificationController {
       guestId,
       externalGuestId,
       limit,
+    });
+  }
+
+  @Get('log/search')
+  searchGamificationLogProfiles(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('q') query?: string,
+  ) {
+    return this.gamificationLogService.searchProfiles(user, query);
+  }
+
+  @Get('log/profiles/:profileId')
+  getGamificationLogProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('profileId') profileId: string,
+    @Query() query: Record<string, string | undefined>,
+  ) {
+    return this.gamificationLogService.getProfileLog(user, profileId, query);
+  }
+
+  @Post('log/profiles/:profileId/sync')
+  syncGamificationLogProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('profileId') profileId: string,
+    @Query('storeId') storeId?: string,
+  ) {
+    return this.gamificationLogService.syncProfile(user, profileId, {
+      storeId,
     });
   }
 

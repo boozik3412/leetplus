@@ -181,6 +181,7 @@ model Tenant {
   guestGameDeliveries                  GuestGameDelivery[]
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
   guestGameEvents                      GuestGameEvent[]
+  guestGameAuditEvents                 GuestGameAuditEvent[]
   guestGameLogTypeMappings             GuestGameLogTypeMapping[]
   guestActivityRawRecords              GuestActivityRawRecord[]
   guestActivityFacts                   GuestActivityFact[]
@@ -524,6 +525,7 @@ model Store {
   marketingMissionRewards      MarketingMissionReward[]
   guestGameRewards             GuestGameReward[]
   guestGameDeliveries          GuestGameDelivery[]
+  guestGameAuditEvents         GuestGameAuditEvent[]
   guestBonusLedgerEntries      GuestBonusLedgerEntry[]
   guestGameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
   guestGameVisualDrafts        GuestGameVisualDraft[]
@@ -1140,6 +1142,7 @@ model Guest {
   gameRewards           GuestGameReward[]
   gameDeliveries        GuestGameDelivery[]
   gameEvents            GuestGameEvent[]
+  gameAuditEvents       GuestGameAuditEvent[]
   gameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
   guestPortalOtpChallenges GuestPortalOtpChallenge[]
 
@@ -1509,6 +1512,7 @@ model GuestGameProfile {
   bonusLedgerEntries GuestBonusLedgerEntry[]
   deliveries    GuestGameDelivery[]
   events        GuestGameEvent[]
+  auditEvents   GuestGameAuditEvent[]
   activityRawRecords GuestActivityRawRecord[]
   activityFacts      GuestActivityFact[]
   activitySyncStates GuestActivitySyncState[]
@@ -1847,6 +1851,36 @@ model GuestGameEvent {
   @@index([missionId], map: "guest_game_event_mission_idx")
   @@index([seasonId], map: "guest_game_event_season_idx")
   @@index([createdByUserId], map: "guest_game_event_created_by_idx")
+}
+
+model GuestGameAuditEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  profileId   String?
+  guestId     String?
+  storeId     String?
+  entityType  String
+  entityId    String?
+  action      String
+  status      String
+  reasonCode  String?
+  reasonText  String?
+  traceId     String?
+  happenedAt  DateTime @default(now())
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id])
+  profile GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest   Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store   Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, happenedAt], map: "guest_game_audit_event_time_idx")
+  @@index([tenantId, action, happenedAt], map: "guest_game_audit_event_action_idx")
+  @@index([profileId, happenedAt], map: "guest_game_audit_event_profile_idx")
+  @@index([guestId, happenedAt], map: "guest_game_audit_event_guest_idx")
+  @@index([storeId, happenedAt], map: "guest_game_audit_event_store_idx")
+  @@index([entityType, entityId, happenedAt], map: "guest_game_audit_event_entity_idx")
 }
 
 model GuestGameLogTypeMapping {

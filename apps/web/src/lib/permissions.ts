@@ -816,6 +816,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "view_guest_gamification");
   }
 
+  if (href.startsWith("/gamification-log")) {
+    return can(user, "view_guest_gamification");
+  }
+
   if (href.startsWith("/staff/team-chat")) {
     return can(user, "view_communications");
   }

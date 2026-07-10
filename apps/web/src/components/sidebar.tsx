@@ -117,6 +117,7 @@ const navGroups: NavGroup[] = [
       { href: "/commercial/demo", label: "Демо-режим" },
       { href: "/commercial/tariffs", label: "Тарифы" },
       { href: "/users", label: "Пользователи и роли" },
+      { href: "/gamification-log", label: "Лог геймификации" },
       { href: "/stores", label: "Торговые точки" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },

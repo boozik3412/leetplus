@@ -1603,6 +1603,48 @@ export class GuestPortalService {
     this.logger.log(message);
   }
 
+  private recordGameAuditEvent(input: {
+    tenantId: string;
+    profileId?: string | null;
+    guestId?: string | null;
+    storeId?: string | null;
+    entityType: string;
+    entityId?: string | null;
+    action: string;
+    status: string;
+    reasonCode?: string | null;
+    reasonText?: string | null;
+    traceId?: string | null;
+    happenedAt?: Date;
+    payload?: Prisma.InputJsonValue;
+  }) {
+    void this.prisma.guestGameAuditEvent
+      .create({
+        data: {
+          tenantId: input.tenantId,
+          profileId: input.profileId ?? null,
+          guestId: input.guestId ?? null,
+          storeId: input.storeId ?? null,
+          entityType: input.entityType,
+          entityId: input.entityId ?? null,
+          action: input.action,
+          status: input.status,
+          reasonCode: input.reasonCode ?? null,
+          reasonText: input.reasonText ?? null,
+          traceId: input.traceId ?? null,
+          happenedAt: input.happenedAt ?? new Date(),
+          ...(input.payload ? { payload: input.payload } : {}),
+        },
+      })
+      .catch((error) => {
+        this.logger.warn(
+          `Guest game audit event was not saved: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+  }
+
   private guestGameDebugPayloadScope(payload: GuestPortalTokenPayload) {
     return {
       tenantId: payload.tenantId,
@@ -3604,6 +3646,23 @@ export class GuestPortalService {
       })),
     });
 
+    this.recordGameAuditEvent({
+      tenantId: payload.tenantId,
+      profileId: portal.profile.id,
+      guestId: payload.guestId ?? null,
+      storeId: payload.storeId,
+      entityType: 'GAME_SUMMARY',
+      action: 'GAME_SUMMARY',
+      status: 'SUCCESS',
+      traceId,
+      payload: {
+        lootBoxes: summary.lootBoxes.featured.length,
+        nextActions: summary.nextActions.length,
+        rewards: summary.rewards.recent.length,
+        liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      },
+    });
+
     return summary;
   }
 
@@ -3774,6 +3833,23 @@ export class GuestPortalService {
       referralStats,
     });
 
+    this.recordGameAuditEvent({
+      tenantId: context.tenant.id,
+      profileId: profile.id,
+      guestId: guest?.id ?? profile.guestId ?? null,
+      storeId: context.store.id,
+      entityType: 'APP',
+      action: 'APP_OPEN',
+      status: idempotent ? 'IDEMPOTENT' : 'SUCCESS',
+      happenedAt: openedAt,
+      payload: {
+        surface,
+        sourceFactId,
+        eventExternalId,
+        liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      },
+    });
+
     return {
       processed: true,
       idempotent,
@@ -3936,6 +4012,18 @@ export class GuestPortalService {
         },
         'warn',
       );
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        guestId: guest?.id ?? null,
+        storeId: context.store.id,
+        entityType: 'LOOT_BOX',
+        entityId: id,
+        action: 'LOOT_BOX_OPEN',
+        status: 'FAILED',
+        reasonCode: 'profile_not_found',
+        reasonText: 'Игровой профиль гостя не найден.',
+        traceId,
+      });
       throw new BadRequestException(
         'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
       );
@@ -3950,6 +4038,19 @@ export class GuestPortalService {
     });
 
     if (!lootBox) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        guestId: guest?.id ?? profile.guestId ?? null,
+        storeId: context.store.id,
+        entityType: 'LOOT_BOX',
+        entityId: id,
+        action: 'LOOT_BOX_OPEN',
+        status: 'FAILED',
+        reasonCode: 'loot_box_not_found_or_inactive',
+        reasonText: 'Лутбокс не найден или не активен.',
+        traceId,
+      });
       this.logGuestGameDebug(
         'open-failed',
         {
@@ -3964,6 +4065,22 @@ export class GuestPortalService {
     }
 
     if (!matchesStore(lootBox.storeIds, context.store.id)) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        guestId: guest?.id ?? profile.guestId ?? null,
+        storeId: context.store.id,
+        entityType: 'LOOT_BOX',
+        entityId: lootBox.id,
+        action: 'LOOT_BOX_OPEN',
+        status: 'BLOCKED',
+        reasonCode: 'store_not_matched',
+        reasonText: 'Лутбокс недоступен в выбранном клубе.',
+        traceId,
+        payload: {
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+        },
+      });
       this.logGuestGameDebug(
         'open-failed',
         {
@@ -3979,6 +4096,23 @@ export class GuestPortalService {
     }
 
     if (!portalLootBoxVisibleInCatalog(lootBox)) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        guestId: guest?.id ?? profile.guestId ?? null,
+        storeId: context.store.id,
+        entityType: 'LOOT_BOX',
+        entityId: lootBox.id,
+        action: 'LOOT_BOX_OPEN',
+        status: 'BLOCKED',
+        reasonCode: 'reward_template_only',
+        reasonText:
+          'Подарочный лутбокс доступен только как награда в задании или Battle Pass.',
+        traceId,
+        payload: {
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+        },
+      });
       this.logGuestGameDebug(
         'open-failed',
         {
@@ -4019,6 +4153,22 @@ export class GuestPortalService {
 
     const openedAt = new Date();
     const ownerGuestId = guest?.id ?? profile.guestId ?? null;
+    this.recordGameAuditEvent({
+      tenantId: context.tenant.id,
+      profileId: profile.id,
+      guestId: ownerGuestId,
+      storeId: context.store.id,
+      entityType: 'LOOT_BOX',
+      entityId: lootBox.id,
+      action: 'LOOT_BOX_OPEN_ATTEMPT',
+      status: 'STARTED',
+      traceId,
+      happenedAt: openedAt,
+      payload: {
+        lootBox: guestGameDebugLootBoxRule(lootBox),
+        liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+      },
+    });
     const [currentRewards, unlockEvents, audienceMemberIds] = await Promise.all(
       [
         this.findPortalRewards(
@@ -4100,6 +4250,25 @@ export class GuestPortalService {
     });
 
     if (!openState.openable) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        guestId: ownerGuestId,
+        storeId: context.store.id,
+        entityType: 'LOOT_BOX',
+        entityId: lootBox.id,
+        action: 'LOOT_BOX_OPEN',
+        status: 'BLOCKED',
+        reasonCode: 'open_state_blocked',
+        reasonText: openState.openBlocker ?? 'Лутбокс сейчас недоступен.',
+        traceId,
+        payload: {
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          openState,
+          unlockEvent: guestGameDebugUnlockEvent(unlockEvent),
+          liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+        },
+      });
       this.logGuestGameDebug(
         'open-blocked-by-state',
         {
@@ -4211,6 +4380,35 @@ export class GuestPortalService {
     );
 
     if (!rule?.eligible) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        guestId: ownerGuestId,
+        storeId: context.store.id,
+        entityType: 'LOOT_BOX',
+        entityId: lootBox.id,
+        action: 'LOOT_BOX_OPEN',
+        status: 'BLOCKED',
+        reasonCode: 'dry_run_blocked',
+        reasonText: rule?.blockers[0] ?? 'Лутбокс сейчас недоступен.',
+        traceId,
+        payload: {
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          sourceFactId,
+          processInput: {
+            eventType: processDto.eventType,
+            sessionType: processDto.sessionType ?? null,
+            sessionPacket: processDto.sessionPacket ?? null,
+            sessionMinutes: processDto.sessionMinutes ?? null,
+            spendAmount: processDto.spendAmount ?? null,
+            tariffGroupId: processDto.tariffGroupId ?? null,
+            tariffPeriodId: processDto.tariffPeriodId ?? null,
+            tariffTypeId: processDto.tariffTypeId ?? null,
+            guestLogType: processDto.guestLogType ?? null,
+          },
+          targetRule: guestGameDebugDryRunRule(rule),
+        },
+      });
       throw new BadRequestException(
         rule?.blockers[0] ?? 'Лутбокс сейчас недоступен.',
       );
@@ -4256,6 +4454,28 @@ export class GuestPortalService {
       featuredLootBoxes: summary.lootBoxes.featured.map(
         guestGameDebugLootBoxState,
       ),
+    });
+    this.recordGameAuditEvent({
+      tenantId: context.tenant.id,
+      profileId: profile.id,
+      guestId: ownerGuestId,
+      storeId: context.store.id,
+      entityType: 'LOOT_BOX',
+      entityId: lootBox.id,
+      action: 'LOOT_BOX_OPEN',
+      status: processResult.summary.idempotent ? 'IDEMPOTENT' : 'SUCCESS',
+      traceId,
+      payload: {
+        lootBox: guestGameDebugLootBoxRule(lootBox),
+        processSummary: processResult.summary,
+        rewards: processResult.rewards.map((reward) => ({
+          id: reward.id,
+          rewardLabel: reward.rewardLabel,
+          rewardType: reward.rewardType,
+          rewardAmount: reward.rewardAmount,
+          walletState: reward.walletState,
+        })),
+      },
     });
 
     return {
@@ -4396,6 +4616,21 @@ export class GuestPortalService {
     const clubId = `${context.tenant.slug}:${
       context.store.publicSlug ?? context.store.id
     }`;
+    this.recordGameAuditEvent({
+      tenantId: context.tenant.id,
+      profileId: targetProfile.id,
+      guestId: targetGuest?.id ?? targetProfile.guestId ?? null,
+      storeId: context.store.id,
+      entityType: 'CLUB',
+      entityId: context.store.id,
+      action: 'CLUB_SELECT',
+      status: 'SUCCESS',
+      payload: {
+        clubId,
+        storeName: context.store.name,
+        tenantSlug: context.tenant.slug,
+      },
+    });
 
     return {
       token,
@@ -4551,6 +4786,19 @@ export class GuestPortalService {
       await this.resolveContextLangameCheckInReadiness(context);
 
     if (!checkInReadiness.ready) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: payload.profileId ?? null,
+        guestId: payload.guestId ?? null,
+        storeId: context.store.id,
+        entityType: 'CHECK_IN',
+        action: 'CHECK_IN',
+        status: 'BLOCKED',
+        reasonCode: 'langame_check_in_not_ready',
+        reasonText:
+          checkInReadiness.message ??
+          `Для клуба "${context.store.name}" интеграция Langame не готова к чек-ину.`,
+      });
       throw new BadRequestException(
         checkInReadiness.message ??
           `Для клуба "${context.store.name}" интеграция Langame не готова к чек-ину.`,
@@ -4589,6 +4837,17 @@ export class GuestPortalService {
     }
 
     if (!guest) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: payload.profileId ?? null,
+        guestId: payload.guestId ?? null,
+        storeId: context.store.id,
+        entityType: 'CHECK_IN',
+        action: 'CHECK_IN',
+        status: 'BLOCKED',
+        reasonCode: 'guest_not_linked',
+        reasonText: 'Гость еще не сопоставлен с Langame.',
+      });
       throw new BadRequestException(
         'Гость еще не сопоставлен с Langame. Сначала подтвердите профиль гостя.',
       );
@@ -4608,6 +4867,31 @@ export class GuestPortalService {
       guestId: guest.id,
       storeId: context.store.id,
       note: stringField(dto.note) ?? 'Чекин гостя из публичного кабинета.',
+    });
+
+    this.recordGameAuditEvent({
+      tenantId: context.tenant.id,
+      profileId:
+        checkIn.processResult.event.profile?.id ?? payload.profileId ?? null,
+      guestId: guest.id,
+      storeId: context.store.id,
+      entityType: 'CHECK_IN',
+      entityId: checkIn.processResult.event.id,
+      action: 'CHECK_IN',
+      status: checkIn.processResult.summary.idempotent
+        ? 'IDEMPOTENT'
+        : 'SUCCESS',
+      payload: {
+        eventId: checkIn.processResult.event.id,
+        processSummary: checkIn.processResult.summary,
+        rewards: checkIn.processResult.rewards.map((reward) => ({
+          id: reward.id,
+          rewardLabel: reward.rewardLabel,
+          rewardType: reward.rewardType,
+          rewardAmount: reward.rewardAmount,
+          walletState: reward.walletState,
+        })),
+      },
     });
 
     return {

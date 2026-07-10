@@ -1064,11 +1064,17 @@ export function StaffKnowledgeBaseWorkspace({
       tags: tagsFromText(draft.tagsText),
       materials: draft.materials
         .map((material, index) => {
+          const normalizedUrl = material.url?.trim() || null;
+          const normalizedContent = material.content?.trim() || null;
           const normalizedMaterial = {
             ...material,
+            type:
+              material.type === "TEXT" && normalizedUrl && !normalizedContent
+                ? "EXTERNAL_LINK"
+                : material.type,
             title: material.title.trim(),
-            url: material.url?.trim() || null,
-            content: material.content?.trim() || null,
+            url: normalizedUrl,
+            content: normalizedContent,
             note: material.note?.trim() || null,
           };
           const hasPayload =
@@ -1952,11 +1958,19 @@ export function StaffKnowledgeBaseWorkspace({
                             </span>
                             <input
                               value={material.url ?? ""}
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const nextUrl = event.target.value;
+
                                 updateMaterial(material.id, {
-                                  url: event.target.value,
-                                })
-                              }
+                                  type:
+                                    material.type === "TEXT" &&
+                                    nextUrl.trim() &&
+                                    !material.content?.trim()
+                                      ? "EXTERNAL_LINK"
+                                      : material.type,
+                                  url: nextUrl,
+                                });
+                              }}
                               placeholder="https://..."
                               className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                             />

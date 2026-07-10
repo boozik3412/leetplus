@@ -1601,7 +1601,7 @@ export class StaffKnowledgeBaseService {
 
     rawMaterials.slice(0, 30).forEach((material, index) => {
       const record = this.asRecord(material);
-      const type = this.resolveOne(
+      let type = this.resolveOne(
         this.normalizeOptionalString(record.type),
         materialTypes,
         'TEXT',
@@ -1609,6 +1609,10 @@ export class StaffKnowledgeBaseService {
       const providedTitle = this.normalizeOptionalString(record.title);
       const url = this.normalizeOptionalString(record.url);
       const content = this.normalizeOptionalString(record.content);
+
+      if (type === 'TEXT' && url && !content) {
+        type = 'EXTERNAL_LINK';
+      }
 
       if (!providedTitle && !url && !content) {
         return;

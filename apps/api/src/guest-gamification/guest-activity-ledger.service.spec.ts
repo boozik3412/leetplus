@@ -113,6 +113,10 @@ describe('GuestActivityLedgerService', () => {
     listGuestLogs: jest.MockedFunction<LangameClient['listGuestLogs']>;
     listGuestSessions: jest.MockedFunction<LangameClient['listGuestSessions']>;
     listTransactions: jest.MockedFunction<LangameClient['listTransactions']>;
+    listProductExpenses: jest.MockedFunction<
+      LangameClient['listProductExpenses']
+    >;
+    listGoods: jest.MockedFunction<LangameClient['listGoods']>;
   };
 
   let rawRecords: Map<string, LedgerRow>;
@@ -374,6 +378,10 @@ describe('GuestActivityLedgerService', () => {
       listTransactions: jest
         .fn<LangameClient['listTransactions']>()
         .mockResolvedValue([]),
+      listProductExpenses: jest
+        .fn<LangameClient['listProductExpenses']>()
+        .mockResolvedValue([]),
+      listGoods: jest.fn<LangameClient['listGoods']>().mockResolvedValue([]),
     };
     const langameSettingsService: MockLangameSettingsService = {
       resolveTenantAccess: jest
@@ -547,6 +555,78 @@ describe('GuestActivityLedgerService', () => {
         confidence: 'EXACT',
         durationMinutes: 120,
         tariffType: 'package_or_subscription',
+      }),
+    );
+  });
+
+  it('normalizes Langame product expenses into product purchase facts', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listProductExpenses.mockResolvedValue([
+      {
+        id: 260973,
+        date: '10.07.2026 16:11:27',
+        list_goods_id: 415,
+        list_clubs_id: 15,
+        real_guest_id: externalGuestId,
+        guest_id: null,
+        price_purchase: null,
+        price_sale: 250,
+        count: 1,
+        cancel: 0,
+      },
+    ]);
+    langameClient.listGoods.mockResolvedValue([
+      { id: 415, name: 'Чебупицца Пепперони', count: 4 },
+    ]);
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PRODUCT_PURCHASES',
+    });
+
+    const productRaw = Array.from(rawRecords.values()).find(
+      (row) => row.sourceKind === 'LANGAME_PRODUCT_EXPENSE',
+    );
+    const productFact = Array.from(facts.values()).find(
+      (fact) => fact.factType === 'PRODUCT_PURCHASED',
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(langameClient.listProductExpenses).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ dateFrom: '2026-06-30' }),
+    );
+    expect(langameClient.listGoods).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      15,
+    );
+    expect(productRaw).toEqual(
+      expect.objectContaining({
+        rawType: 'PRODUCT_PURCHASE',
+        rawText: 'Чебупицца Пепперони',
+        amount: 250,
+        storeId,
+      }),
+    );
+    expect(productFact).toEqual(
+      expect.objectContaining({
+        confidence: 'EXACT',
+        amount: 250,
+        storeId,
+      }),
+    );
+    expect(productFact?.evidence).toEqual(
+      expect.objectContaining({
+        sourceKind: 'LANGAME_PRODUCT_EXPENSE',
+        productId: '415',
+        productName: 'Чебупицца Пепперони',
+        quantity: 1,
+        unitPrice: 250,
+        totalAmount: 250,
       }),
     );
   });

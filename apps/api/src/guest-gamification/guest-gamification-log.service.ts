@@ -830,6 +830,7 @@ function factTitle(factType: string) {
     HOURLY_PLAY_TIME_ACCUMULATED: 'Наиграно по почасовой оплате',
     PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED:
       'Наиграно по пакету или абонементу',
+    PRODUCT_PURCHASED: 'Покупка товара',
     BALANCE_WRITE_OFF: 'Списание баланса',
     BONUS_TOPUP: 'Начисление бонусов',
     VISIT: 'Визит',
@@ -952,6 +953,16 @@ function relevantFactsForRule(
     }
 
     return ['SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED'];
+  }
+
+  if (
+    trigger.includes('PRODUCT') ||
+    trigger.includes('GOODS') ||
+    trigger.includes('PURCHASE') ||
+    trigger.includes('BAR') ||
+    trigger.includes('ASSORTMENT')
+  ) {
+    return ['PRODUCT_PURCHASED'];
   }
 
   if (trigger.includes('CHECK_IN')) {

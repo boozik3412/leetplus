@@ -8,6 +8,7 @@ import { LangameSettingsService } from '../integrations/langame-settings.service
 import type {
   LangameGuestLog,
   LangameGuestSession,
+  LangameProductExpense,
   LangameTransaction,
 } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -23,6 +24,7 @@ const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
 const SOURCE_GUEST_LOG = 'LANGAME_GUEST_LOG';
 const SOURCE_GUEST_SESSION = 'LANGAME_GUEST_SESSION';
 const SOURCE_TRANSACTION = 'LANGAME_TRANSACTION';
+const SOURCE_PRODUCT_EXPENSE = 'LANGAME_PRODUCT_EXPENSE';
 
 type GuestActivityFactType =
   | 'SESSION_STARTED'
@@ -32,6 +34,7 @@ type GuestActivityFactType =
   | 'HOURLY_SESSION_STARTED'
   | 'HOURLY_PLAY_TIME_ACCUMULATED'
   | 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
+  | 'PRODUCT_PURCHASED'
   | 'BALANCE_WRITE_OFF'
   | 'BONUS_TOPUP'
   | 'VISIT'
@@ -109,6 +112,8 @@ type RawRecordDraft = {
   bonusAmount: number | null;
   rawPayload: Prisma.InputJsonValue;
 };
+
+type ProductNamesByClub = Map<string, Map<string, string>>;
 
 type FactDraft = {
   factType: GuestActivityFactType;
@@ -558,6 +563,7 @@ export class GuestActivityLedgerService {
       guestLogs: 0,
       sessions: 0,
       transactions: 0,
+      productExpenses: 0,
     };
     let partial = false;
     const dateFrom = formatDateParam(window.from);
@@ -615,6 +621,27 @@ export class GuestActivityLedgerService {
     sourceCounts.transactions = transactions.rows.length;
     partial ||= transactions.partial;
 
+    const productExpenses = await this.fetchPaged(
+      (page) =>
+        this.langameClient.listProductExpenses(
+          context.source.baseUrl,
+          context.apiKey,
+          {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+            dateFrom,
+            dateTo,
+          },
+        ),
+      (row) => this.rowMatchesGuest(row, context.externalGuestId),
+    );
+    sourceCounts.productExpenses = productExpenses.rows.length;
+    partial ||= productExpenses.partial;
+    const productNamesByClub = await this.fetchProductNamesByClub(
+      context,
+      productExpenses.rows,
+    );
+
     let rawRecordsCount = 0;
     let factsCount = 0;
 
@@ -646,6 +673,17 @@ export class GuestActivityLedgerService {
         SOURCE_TRANSACTION,
         row,
         this.buildRawRecordFromTransaction(context, row),
+      );
+      rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
+      factsCount += persisted.factsCreated;
+    }
+
+    for (const row of productExpenses.rows) {
+      const persisted = await this.persistRow(
+        context,
+        SOURCE_PRODUCT_EXPENSE,
+        row,
+        this.buildRawRecordFromProductExpense(context, row, productNamesByClub),
       );
       rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
       factsCount += persisted.factsCreated;
@@ -1032,6 +1070,79 @@ export class GuestActivityLedgerService {
     };
   }
 
+  private buildRawRecordFromProductExpense(
+    context: LedgerSyncContext,
+    row: LangameProductExpense,
+    productNamesByClub: ProductNamesByClub,
+  ): RawRecordDraft {
+    const externalClubId = firstString(row.list_clubs_id, row.club_id);
+    const storeId = this.resolveStoreId(context, externalClubId);
+    const productId = firstString(
+      row.list_goods_id,
+      row.goods_id,
+      row.good_id,
+      row.product_id,
+    );
+    const productName =
+      firstString(row.name, row.good_name, row.goods_name, row.product_name) ??
+      resolveProductName(productNamesByClub, externalClubId, productId);
+    const quantity = firstNumber(row.count, row.quantity, row.qty);
+    const unitPrice = firstNumber(row.price_sale, row.price, row.unit_price);
+    const totalAmount =
+      firstNumber(row.total, row.sum, row.amount) ??
+      (quantity !== null && unitPrice !== null ? quantity * unitPrice : null);
+    const payload = sanitizePayload({
+      ...row,
+      product_name_resolved: productName,
+    });
+    const happenedAt = parseLangameDate(
+      firstString(
+        row.date,
+        row.date_normal,
+        row.date_insert,
+        row.created_at,
+        row.created,
+        row.time,
+        row.datetime,
+      ),
+      context.timeZone,
+    );
+    const text = productName ?? extractText(row);
+    const sourceHash = buildSourceHash({
+      sourceKind: SOURCE_PRODUCT_EXPENSE,
+      externalDomain: context.externalDomain,
+      externalGuestId: context.externalGuestId,
+      expenseId: firstString(row.id),
+      happenedAt: happenedAt?.toISOString() ?? null,
+      externalClubId,
+      productId,
+      productName,
+      quantity,
+      unitPrice,
+      totalAmount,
+      canceled: isTruthyLangameFlag(row.cancel),
+      payload,
+    });
+
+    return {
+      sourceKind: SOURCE_PRODUCT_EXPENSE,
+      sourceKey: `${SOURCE_PRODUCT_EXPENSE}:${
+        firstString(row.id) ?? context.externalGuestId
+      }:${sourceHash.slice(0, 16)}`,
+      sourceHash,
+      rawType: 'PRODUCT_PURCHASE',
+      rawText: text,
+      happenedAt,
+      sourceLocalDate: sourceLocalDate(happenedAt, context.timeZone),
+      externalClubId,
+      storeId,
+      sessionExternalId: firstString(row.session_id, row.UUID),
+      amount: totalAmount,
+      bonusAmount: null,
+      rawPayload: payload,
+    };
+  }
+
   private async persistRow(
     context: LedgerSyncContext,
     sourceKind: string,
@@ -1189,6 +1300,10 @@ export class GuestActivityLedgerService {
       return this.normalizeSessionFacts(row, raw, timeZone);
     }
 
+    if (sourceKind === SOURCE_PRODUCT_EXPENSE) {
+      return this.normalizeProductExpenseFacts(row, raw);
+    }
+
     const text = normalizeSearchText(raw.rawText);
     const tariffName = extractTariffName(raw.rawText);
     const durationMinutes = extractDurationMinutes(raw.rawText);
@@ -1275,6 +1390,56 @@ export class GuestActivityLedgerService {
     return facts;
   }
 
+  private normalizeProductExpenseFacts(
+    row: Record<string, unknown>,
+    raw: RawRecordDraft,
+  ): FactDraft[] {
+    if (isTruthyLangameFlag(row.cancel)) {
+      return [];
+    }
+
+    const productId = firstString(
+      row.list_goods_id,
+      row.goods_id,
+      row.good_id,
+      row.product_id,
+    );
+    const productName = firstString(
+      row.product_name_resolved,
+      row.name,
+      row.good_name,
+      row.goods_name,
+      row.product_name,
+      raw.rawText,
+    );
+    const quantity = firstNumber(row.count, row.quantity, row.qty);
+    const unitPrice = firstNumber(row.price_sale, row.price, row.unit_price);
+
+    return [
+      {
+        factType: 'PRODUCT_PURCHASED',
+        happenedAt: raw.happenedAt,
+        sourceLocalDate: raw.sourceLocalDate,
+        externalClubId: raw.externalClubId,
+        storeId: raw.storeId,
+        sessionExternalId: raw.sessionExternalId,
+        tariffName: null,
+        tariffType: null,
+        amount: raw.amount,
+        bonusAmount: null,
+        durationMinutes: null,
+        confidence: 'EXACT',
+        evidence: sanitizePayload({
+          sourceKind: SOURCE_PRODUCT_EXPENSE,
+          productId,
+          productName,
+          quantity,
+          unitPrice,
+          totalAmount: raw.amount,
+        }),
+      },
+    ];
+  }
   private normalizeSessionFacts(
     row: Record<string, unknown>,
     raw: RawRecordDraft,
@@ -1564,6 +1729,56 @@ export class GuestActivityLedgerService {
     });
   }
 
+  private async fetchProductNamesByClub(
+    context: LedgerSyncContext,
+    rows: LangameProductExpense[],
+  ): Promise<ProductNamesByClub> {
+    const externalClubIds = Array.from(
+      new Set(
+        rows
+          .map((row) => firstString(row.list_clubs_id, row.club_id))
+          .filter((clubId): clubId is string => Boolean(clubId)),
+      ),
+    );
+    const productNamesByClub: ProductNamesByClub = new Map();
+
+    for (const externalClubId of externalClubIds) {
+      const clubId = Number(externalClubId);
+      if (!Number.isFinite(clubId)) {
+        continue;
+      }
+
+      try {
+        const goods = await this.langameClient.listGoods(
+          context.source.baseUrl,
+          context.apiKey,
+          clubId,
+        );
+        productNamesByClub.set(
+          externalClubId,
+          new Map(
+            goods
+              .map(
+                (good) =>
+                  [firstString(good.id), nullableString(good.name)] as const,
+              )
+              .filter(
+                (item): item is readonly [string, string] =>
+                  Boolean(item[0]) && Boolean(item[1]),
+              ),
+          ),
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to fetch Langame goods for club ${externalClubId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    return productNamesByClub;
+  }
   private rowMatchesGuest(
     row: Record<string, unknown>,
     externalGuestId: string,
@@ -1672,6 +1887,16 @@ function relevantFactsForRule(
       : ['SESSION_STARTED', 'HOURLY_SESSION_STARTED'];
   }
 
+  if (
+    trigger.includes('product') ||
+    trigger.includes('goods') ||
+    trigger.includes('purchase') ||
+    trigger.includes('bar') ||
+    trigger.includes('assortment')
+  ) {
+    return ['PRODUCT_PURCHASED'];
+  }
+
   if (trigger.includes('check')) {
     return ['VISIT', 'SESSION_STARTED'];
   }
@@ -1681,6 +1906,18 @@ function relevantFactsForRule(
   }
 
   return ['SESSION_STARTED', 'REWARD_TRACE'];
+}
+
+function resolveProductName(
+  productNamesByClub: ProductNamesByClub,
+  externalClubId: string | null,
+  productId: string | null,
+) {
+  if (!externalClubId || !productId) {
+    return null;
+  }
+
+  return productNamesByClub.get(externalClubId)?.get(productId) ?? null;
 }
 
 function sanitizePayload(value: unknown): Prisma.InputJsonValue {

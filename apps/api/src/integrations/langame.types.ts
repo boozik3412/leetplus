@@ -28,7 +28,7 @@ export type LangameProductExpense = {
   price_sale: number;
   count: number;
   cancel: number;
-};
+} & Record<string, unknown>;
 
 export type LangameGuest = {
   guest_id: number | string;

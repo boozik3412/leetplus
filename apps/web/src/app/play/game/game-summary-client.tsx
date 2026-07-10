@@ -220,6 +220,7 @@ type HomeBattleQuest = {
   x: string;
   y: string;
 };
+type BattlePassDetailProgress = NonNullable<HomeBattleQuest["progress"]>;
 type HomeBattlePassSeason = NonNullable<
   GuestPortalGameSummary["battlePass"]["active"]
 >;
@@ -246,6 +247,8 @@ type BattlePassRewardCard = {
   status: BattlePassRewardStatus;
   image?: string;
   rewardValue?: string;
+  xpThreshold?: number;
+  previousXpThreshold?: number;
   quest?: HomeBattleQuest;
 };
 type BattlePassEventName =
@@ -2545,7 +2548,6 @@ function HomeBattlePass({
         <BattlePassQuestModal
           reward={detailReward}
           summary={summary}
-          seasonName={seasonName}
           onClose={() => setDetailRewardId(null)}
         />
       ) : null}
@@ -2671,12 +2673,10 @@ function BattlePassHelpModal({
 function BattlePassQuestModal({
   reward,
   summary,
-  seasonName,
   onClose,
 }: {
   reward: BattlePassRewardCard;
   summary: GuestPortalGameSummary;
-  seasonName: string;
   onClose: () => void;
 }) {
   const quest = reward.quest ?? null;
@@ -2713,9 +2713,14 @@ function BattlePassQuestModal({
     lootBoxDrop?.qualifiedAt ??
     fallbackRewardStatus?.occurredAt ??
     null;
-  const progressPercent =
-    quest?.progress?.percent ??
-    (mission ? clampPercent(mission.progressPercent) : reward.status === "claimed" ? 100 : 0);
+  const progress = battlePassDetailProgress(
+    summary,
+    reward,
+    condition,
+    quest,
+    mission,
+    activeStep,
+  );
 
   return (
     <div
@@ -2737,41 +2742,35 @@ function BattlePassQuestModal({
         <h3 id="battlePassQuestTitle">
           {quest?.title ?? `Этап ${formatNumber(reward.level)}`}
         </h3>
-        <p className="lp-battlepass-detail-season">
-          {seasonName} · этап {formatNumber(reward.level)}
-        </p>
 
         <div className="lp-battlepass-detail-progress">
           <div>
             <span>Прогресс</span>
-            <strong>
-              {quest?.progress?.label ??
-                (mission
-                  ? `${Math.round(mission.progressPercent)}%`
-                  : `${formatNumber(reward.level)} / ${formatNumber(reward.level)}`)}
-            </strong>
+            <strong>{progress.label}</strong>
           </div>
           <span className="lp-battlepass-detail-meter">
-            <i style={{ width: `${clampPercent(progressPercent)}%` }} />
+            <i style={{ width: `${clampPercent(progress.percent)}%` }} />
           </span>
         </div>
 
-        <div className="lp-battlepass-detail-block">
-          <span>Задача</span>
-          <p>{condition}</p>
-        </div>
-
-        {activeStep ? (
-          <div className="lp-battlepass-detail-block is-current">
-            <span>Текущий шаг</span>
-            <strong>{activeStep.title}</strong>
-            <p>{formatMissionStepProgress(activeStep)}</p>
+        <div className="lp-battlepass-detail-lines">
+          <div className="lp-battlepass-detail-line">
+            <span>Задача</span>
+            <p>{condition}</p>
           </div>
-        ) : null}
 
-        <div className="lp-quest-complete-reward lp-battlepass-planned-reward">
-          <span>Награда</span>
-          <strong>{plannedReward}</strong>
+          {activeStep ? (
+            <div className="lp-battlepass-detail-line is-current">
+              <span>Текущий шаг</span>
+              <strong>{activeStep.title}</strong>
+              <p>{formatMissionStepProgress(activeStep)}</p>
+            </div>
+          ) : null}
+
+          <div className="lp-battlepass-detail-line is-reward">
+            <span>Награда</span>
+            <strong>{plannedReward}</strong>
+          </div>
         </div>
 
         {actualReward ? (
@@ -2866,6 +2865,99 @@ function findBattlePassQuestMission(
       (mission) => mission.id === quest.sourceId,
     ) ?? null
   );
+}
+
+function battlePassDetailProgress(
+  summary: GuestPortalGameSummary,
+  reward: BattlePassRewardCard,
+  condition: string,
+  quest: HomeBattleQuest | null,
+  mission: GameMission | GameMissionHistoryItem | null,
+  activeStep: GameMission["questSteps"][number] | null,
+): BattlePassDetailProgress {
+  if (quest?.progress) {
+    return quest.progress;
+  }
+
+  if (activeStep) {
+    const total = Math.max(1, activeStep.target);
+    const current = activeStep.completed
+      ? total
+      : Math.min(total, Math.max(0, activeStep.progressCurrent));
+
+    return {
+      current,
+      total,
+      label: `${formatNumber(current)} / ${formatNumber(total)}`,
+      percent: clampPercent((current / total) * 100),
+    };
+  }
+
+  if (mission) {
+    const lastStep = mission.questSteps[mission.questSteps.length - 1] ?? null;
+    const total = Math.max(1, mission.progressTarget ?? lastStep?.target ?? 1);
+    const current = Math.min(total, Math.max(0, mission.progressCurrent));
+
+    return {
+      current,
+      total,
+      label: playerQuestProgressLabel(current, total, mission.progressUnit),
+      percent: clampPercent(mission.progressPercent),
+    };
+  }
+
+  const textXpTarget = battlePassXpRequirementFromText(
+    condition,
+    reward.description,
+    reward.subtitle,
+  );
+  const threshold = Math.max(0, reward.xpThreshold ?? 0);
+  const previousThreshold = Math.max(0, reward.previousXpThreshold ?? 0);
+  const targetXp =
+    textXpTarget ?? (threshold > previousThreshold ? threshold - previousThreshold : null);
+
+  if (targetXp !== null) {
+    const currentXp = Math.max(
+      0,
+      Math.trunc(summary.progress.summary.xp || summary.profile.xp || 0),
+    );
+    const completed = reward.status === "claimed" || reward.status === "ready";
+    const current =
+      completed
+        ? targetXp
+        : Math.min(targetXp, Math.max(0, currentXp - previousThreshold));
+
+    return {
+      current,
+      total: targetXp,
+      label: `${formatNumber(current)} / ${formatNumber(targetXp)} XP`,
+      percent: clampPercent((current / Math.max(1, targetXp)) * 100),
+    };
+  }
+
+  const done = reward.status === "claimed" || reward.status === "ready";
+
+  return {
+    current: done ? 1 : 0,
+    total: 1,
+    label: done ? "Выполнено" : "Ожидает выполнения",
+    percent: done ? 100 : 0,
+  };
+}
+
+function battlePassXpRequirementFromText(
+  ...values: Array<string | null | undefined>
+) {
+  const text = values.filter(Boolean).join(" ");
+  const match = text.match(/(\d[\d\s]*)\s*XP/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const value = Number(match[1]?.replace(/\s/g, ""));
+
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function findBattlePassQuestReward(
@@ -3067,6 +3159,11 @@ function battlePassRewardFromLevel(
   level: HomeBattlePassLevel,
   battlePass: HomeBattlePassSeason,
 ): BattlePassRewardCard {
+  const orderedLevels = [...battlePass.levels].sort(
+    (left, right) => left.level - right.level,
+  );
+  const levelIndex = orderedLevels.findIndex((item) => item.level === level.level);
+  const previousLevel = levelIndex > 0 ? orderedLevels[levelIndex - 1] : null;
   const rewardLabel =
     level.freeReward ??
     level.premiumReward ??
@@ -3088,6 +3185,8 @@ function battlePassRewardFromLevel(
     status: battlePassRewardStatus(level),
     image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
     rewardValue: battlePassRewardValue(rewardLabel, type, level.xp),
+    xpThreshold: level.xp,
+    previousXpThreshold: previousLevel?.xp ?? 0,
   };
 }
 
@@ -8797,6 +8896,52 @@ const clubHomeCss = `
   inset: 0 auto 0 0;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--cyan), var(--teal));
+}
+
+.lp-battlepass-detail-lines {
+  display: grid;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.lp-battlepass-detail-line {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid rgba(196, 224, 225, 0.11);
+  padding-top: 12px;
+}
+
+.lp-battlepass-detail-line:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.lp-battlepass-detail-line span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-battlepass-detail-line p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.lp-battlepass-detail-line strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 820;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.lp-battlepass-detail-line.is-current strong,
+.lp-battlepass-detail-line.is-reward strong {
+  color: var(--cyan);
 }
 
 .lp-battlepass-detail-block,

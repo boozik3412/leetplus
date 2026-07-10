@@ -8404,8 +8404,7 @@ const clubHomeCss = `
   cursor: pointer;
   transition:
     border-color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease;
+    box-shadow 180ms ease;
 }
 
 .lootbox-entry::before {
@@ -8425,7 +8424,6 @@ const clubHomeCss = `
     0 30px 92px rgba(0, 0, 0, 0.48),
     0 0 32px rgba(131, 228, 236, 0.14);
   outline: none;
-  transform: translateY(-2px);
 }
 
 .lootbox-entry.is-disabled {
@@ -8440,7 +8438,6 @@ const clubHomeCss = `
   box-shadow:
     0 24px 70px rgba(0, 0, 0, 0.38),
     inset 0 0 0 1px rgba(131, 228, 236, 0.07);
-  transform: none;
 }
 
 .lp-lootbox-entry-top,
@@ -8538,7 +8535,51 @@ const clubHomeCss = `
     drop-shadow(0 24px 36px rgba(0, 0, 0, 0.52))
     drop-shadow(0 0 22px rgba(131, 228, 236, 0.2));
   transform: translateY(8px);
+  transform-origin: 50% 70%;
+  transition:
+    filter 180ms ease,
+    transform 180ms ease;
   user-select: none;
+  will-change: transform;
+}
+
+.lootbox-entry:hover .lp-lootbox-entry-art img,
+.lootbox-entry:focus-visible .lp-lootbox-entry-art img {
+  animation: lootboxEntryCaseHover 820ms ease-in-out infinite;
+  filter:
+    drop-shadow(0 28px 42px rgba(0, 0, 0, 0.56))
+    drop-shadow(0 0 30px rgba(131, 228, 236, 0.28));
+}
+
+@keyframes lootboxEntryCaseHover {
+  0%,
+  100% {
+    transform: translate3d(0, 3px, 0) rotate(0deg);
+  }
+
+  18% {
+    transform: translate3d(-3px, -3px, 0) rotate(-1.5deg);
+  }
+
+  38% {
+    transform: translate3d(3px, -5px, 0) rotate(1.4deg);
+  }
+
+  58% {
+    transform: translate3d(-2px, -4px, 0) rotate(-0.9deg);
+  }
+
+  78% {
+    transform: translate3d(2px, -2px, 0) rotate(0.8deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lootbox-entry:hover .lp-lootbox-entry-art img,
+  .lootbox-entry:focus-visible .lp-lootbox-entry-art img {
+    animation: none;
+    transform: translateY(2px);
+  }
 }
 
 .lp-lootbox-entry-bottom {

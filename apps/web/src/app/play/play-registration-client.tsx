@@ -2305,78 +2305,81 @@ function UserCallInstructionModal({
   phoneMasked: string;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const numberLabel = freeCall ? "Номер для звонка" : "Номер для входа";
+  const title = freeCall
+    ? "Звони на бесплатный номер"
+    : "Звони на номер для входа";
+
   return (
     <div
+      aria-describedby="user-call-auth-description"
       aria-labelledby="user-call-auth-title"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/78 px-4 py-6 backdrop-blur-sm"
+      onClick={onClose}
       role="dialog"
     >
-      <div className="w-full max-w-md rounded-lg border border-cyan-300/25 bg-[#090f18] p-5 shadow-2xl shadow-cyan-950/40">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200">
-              Вход по звонку
-            </p>
-            <h2
-              className="mt-2 text-2xl font-black leading-tight text-white"
-              id="user-call-auth-title"
-            >
-              Позвоните на бесплатный номер
-            </h2>
-          </div>
-          <button
-            aria-label="Закрыть окно"
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-xl font-bold text-slate-200 transition hover:border-cyan-300/40 hover:text-white"
-            onClick={onClose}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
+      <div
+        className="relative w-full max-w-[560px] border border-cyan-300/10 bg-[#050c0e] px-5 py-6 text-white shadow-2xl shadow-black/50 sm:px-7 sm:py-7"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          aria-label="Закрыть окно"
+          className="absolute right-4 top-4 flex size-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-xl font-bold text-slate-300 transition hover:border-cyan-300/40 hover:text-white"
+          onClick={onClose}
+          type="button"
+        >
+          ×
+        </button>
 
-        <p className="mt-4 text-sm leading-6 text-slate-300">
-          Для авторизации нужно именно совершить звонок с указанного телефона.
-          Нажмите кнопку ниже или наберите номер вручную. После проверки звонок
-          будет сброшен, код вводить не нужно.
+        <p className="pr-12 text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
+          Вход по звонку
+        </p>
+        <h2
+          className="mt-3 pr-12 text-3xl font-black leading-tight text-white sm:text-[32px]"
+          id="user-call-auth-title"
+        >
+          {title}
+        </h2>
+
+        <p
+          className="mt-9 max-w-[480px] text-base font-bold leading-5 text-white"
+          id="user-call-auth-description"
+        >
+          Для авторизации нужно позвонить на бесплатный номер с указанного
+          номера телефона. После проверки звонок будет сброшен. Никаких цифр
+          вводить не нужно, вход будет произведен автоматически.
         </p>
 
-        <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm">
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-bold uppercase text-slate-500">
-              Номер для звонка
-            </span>
-            <span className="font-black text-cyan-100">{callNumber}</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="font-bold uppercase text-slate-500">
-              Ваш телефон
-            </span>
-            <span className="font-black text-white">{phoneMasked}</span>
-          </div>
-          {freeCall ? (
-            <p className="mt-3 text-xs font-semibold leading-5 text-cyan-100/80">
-              Звонок бесплатный и нужен только для подтверждения номера.
-            </p>
-          ) : null}
-        </div>
+        <dl className="mt-7 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-3 text-base">
+          <dt className="font-black text-slate-600">{numberLabel}</dt>
+          <dd className="text-right font-black text-white">{callNumber}</dd>
+          <dt className="font-black text-slate-600">Ваш телефон</dt>
+          <dd className="text-right font-black text-white">{phoneMasked}</dd>
+        </dl>
 
-        <div className="mt-5 grid gap-2">
-          <a
-            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
-            href={callHref}
-            onClick={onClose}
-          >
-            Позвонить бесплатно: {callNumber}
-          </a>
-          <button
-            className="min-h-11 rounded-lg border border-white/10 bg-white/[0.04] px-4 text-sm font-black text-slate-200 transition hover:border-white/20 hover:bg-white/[0.07]"
-            onClick={onClose}
-            type="button"
-          >
-            Я понял
-          </button>
-        </div>
+        <p className="mt-8 text-center text-[clamp(34px,9vw,52px)] font-black leading-none text-cyan-300">
+          {callNumber}
+        </p>
+
+        <a
+          className="mt-6 flex min-h-12 w-full items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 sm:hidden"
+          href={callHref}
+          onClick={onClose}
+        >
+          Позвонить
+        </a>
       </div>
     </div>
   );

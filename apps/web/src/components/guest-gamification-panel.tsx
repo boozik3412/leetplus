@@ -7815,6 +7815,9 @@ function CheckInTab({
         ? "Редактирование чек-ина"
         : "Настройка чек-ина";
   const rewardIsXp = form.rewardType === "XP";
+  const xpRewardNumber = Number(form.xpReward);
+  const xpEnabled =
+    rewardIsXp || (Number.isFinite(xpRewardNumber) && xpRewardNumber > 0);
 
   function patchForm(patch: Partial<MissionForm>) {
     setForm(normalizeCheckInMissionForm({ ...form, ...patch }));
@@ -7835,13 +7838,23 @@ function CheckInTab({
         ? form.xpReward && form.xpReward !== "0"
           ? form.xpReward
           : "20"
-        : "0",
+        : form.xpReward,
       rewardLabel:
         currentLabel && currentLabel !== "XP за чекин" && currentLabel !== "Бонусы за чекин"
           ? currentLabel
           : nextIsXp
             ? "XP за чекин"
             : "Бонусы за чекин",
+    });
+  }
+
+  function toggleXpReward(enabled: boolean) {
+    patchForm({
+      xpReward: enabled
+        ? form.xpReward && form.xpReward !== "0"
+          ? form.xpReward
+          : "20"
+        : "0",
     });
   }
 
@@ -7880,8 +7893,8 @@ function CheckInTab({
             />
 
             <FormSection title="Награда за чек-ин">
-              <div className="grid gap-3 md:grid-cols-3">
-                <Field label="Тип награды">
+              <div className="grid gap-3 md:grid-cols-4">
+                <Field label="Основная награда">
                   <OptionSelect
                     options={checkInRewardTypeOptions}
                     value={form.rewardType}
@@ -7889,19 +7902,7 @@ function CheckInTab({
                     onChange={selectRewardType}
                   />
                 </Field>
-                {rewardIsXp ? (
-                  <Field label="XP за чек-ин">
-                    <input
-                      className={fieldClass}
-                      type="number"
-                      min="0"
-                      value={form.xpReward}
-                      onChange={(event) =>
-                        patchForm({ xpReward: event.target.value })
-                      }
-                    />
-                  </Field>
-                ) : (
+                {!rewardIsXp ? (
                   <Field label="Бонусы Langame">
                     <input
                       className={fieldClass}
@@ -7913,7 +7914,31 @@ function CheckInTab({
                       }
                     />
                   </Field>
-                )}
+                ) : null}
+                <Field label="Получать XP">
+                  <ToggleField
+                    label="Начислять опыт"
+                    checked={xpEnabled}
+                    disabled={rewardIsXp}
+                    onChange={toggleXpReward}
+                  />
+                </Field>
+                <Field label="XP за чек-ин">
+                  <input
+                    className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
+                    type="number"
+                    min="0"
+                    value={form.xpReward}
+                    disabled={!xpEnabled}
+                    onChange={(event) =>
+                      patchForm({ xpReward: event.target.value })
+                    }
+                  />
+                  <OptionHelp>
+                    Опыт начисляется вместе с основной наградой при каждом
+                    успешном чек-ине.
+                  </OptionHelp>
+                </Field>
                 <Field label="Текст награды">
                   <input
                     className={fieldClass}
@@ -8060,6 +8085,7 @@ function CheckInTab({
           meta={[
             storeScopeLabel(item.storeIds, stores),
             item.audience?.name ?? "все гости",
+            ...(item.xpReward > 0 ? [`+${item.xpReward} XP`] : []),
             `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
             tariffRuleSummary(item.conditions),
             item.manualApprovalRequired ? "ручная выдача" : "автовыдача",
@@ -11615,18 +11641,25 @@ function RewardApprovalSelect({
 function ToggleField({
   label,
   checked,
+  disabled,
   onChange,
 }: {
   label: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+    <label
+      className={`flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 ${
+        disabled ? "cursor-not-allowed opacity-60" : ""
+      }`}
+    >
       <span>{label}</span>
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
     </label>
@@ -14119,21 +14152,20 @@ function isCheckInMissionForm(form: MissionForm) {
 }
 
 function normalizeCheckInMissionForm(form: MissionForm): MissionForm {
+  const rewardType = form.rewardType || "XP";
+  const xpReward =
+    form.xpReward && form.xpReward !== "0" ? form.xpReward : "0";
+
   return {
     ...form,
     missionType: "CHECK_IN",
     triggerKind: "CHECK_IN",
-    rewardType: form.rewardType || "XP",
-    rewardAmount: form.rewardType === "XP" ? "0" : form.rewardAmount || "50",
+    rewardType,
+    rewardAmount: rewardType === "XP" ? "0" : form.rewardAmount || "50",
     rewardLabel:
       form.rewardLabel ||
-      (form.rewardType === "BONUS_BALANCE" ? "Бонусы за чекин" : "XP за чекин"),
-    xpReward:
-      form.rewardType === "BONUS_BALANCE"
-        ? "0"
-        : form.xpReward && form.xpReward !== "0"
-          ? form.xpReward
-          : "20",
+      (rewardType === "BONUS_BALANCE" ? "Бонусы за чекин" : "XP за чекин"),
+    xpReward: rewardType === "XP" && xpReward === "0" ? "20" : xpReward,
     progressTarget: form.progressTarget || "1",
     progressUnit: form.progressUnit || "check_in",
     metricAggregation: form.metricAggregation || "count",

@@ -20360,7 +20360,7 @@ function buildVisualCheckInMissionData(
 ) {
   const bonusMode = checkIn.rewardMode === 'BONUS';
   const amount = bonusMode ? (checkIn.bonusAmount ?? 0) : 0;
-  const xp = checkIn.rewardMode === 'XP' ? (checkIn.xp ?? 0) : 0;
+  const xp = Math.max(0, checkIn.xp ?? 0);
 
   return clean({
     tenantId: user.tenantId,
@@ -20718,8 +20718,7 @@ function buildVisualEditorPreviewSummary(
           ? 'Бонусы за ежедневный чекин в клубе.'
           : 'XP за ежедневный чекин в клубе.'),
       rewardLabel: payload.checkIn.rewardLabel,
-      xpReward:
-        payload.checkIn.rewardMode === 'XP' ? (payload.checkIn.xp ?? 0) : 0,
+      xpReward: Math.max(0, payload.checkIn.xp ?? 0),
       blockedReason: null,
     },
     nextActions: nextActions.slice(0, 5),

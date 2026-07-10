@@ -827,6 +827,9 @@ function factTitle(factType: string) {
     PACKAGE_OR_SUBSCRIPTION_PURCHASED: 'Покупка пакета или абонемента',
     PACKAGE_OR_SUBSCRIPTION_USED: 'Использование пакета или абонемента',
     HOURLY_SESSION_STARTED: 'Почасовая сессия',
+    HOURLY_PLAY_TIME_ACCUMULATED: 'Наиграно по почасовой оплате',
+    PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED:
+      'Наиграно по пакету или абонементу',
     BALANCE_WRITE_OFF: 'Списание баланса',
     BONUS_TOPUP: 'Начисление бонусов',
     VISIT: 'Визит',
@@ -923,8 +926,24 @@ function relevantFactsForRule(
   const trigger = (triggerKind ?? '').toUpperCase();
   const session = (sessionType ?? '').toUpperCase();
 
+  if (
+    trigger.includes('PLAY_TIME') ||
+    trigger.includes('TIME_PLAYED') ||
+    trigger.includes('MINUTE') ||
+    trigger.includes('HOUR')
+  ) {
+    return [
+      'HOURLY_PLAY_TIME_ACCUMULATED',
+      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    ];
+  }
+
   if (trigger.includes('SESSION')) {
-    if (session.includes('PACKET') || session.includes('PACKAGE')) {
+    if (
+      session.includes('PACKET') ||
+      session.includes('PACKAGE') ||
+      session.includes('SUBSCRIPTION')
+    ) {
       return ['PACKAGE_OR_SUBSCRIPTION_USED'];
     }
 

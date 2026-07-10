@@ -30,6 +30,8 @@ type GuestActivityFactType =
   | 'PACKAGE_OR_SUBSCRIPTION_PURCHASED'
   | 'PACKAGE_OR_SUBSCRIPTION_USED'
   | 'HOURLY_SESSION_STARTED'
+  | 'HOURLY_PLAY_TIME_ACCUMULATED'
+  | 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
   | 'BALANCE_WRITE_OFF'
   | 'BONUS_TOPUP'
   | 'VISIT'
@@ -1282,6 +1284,8 @@ export class GuestActivityLedgerService {
     const startedAt = parseLangameDate(firstString(row.date_start), timeZone);
     const stoppedAt = parseLangameDate(firstString(row.date_stop), timeZone);
     const sessionExternalId = firstString(row.id, row.UUID);
+    const isPackageSession = isTruthyLangameFlag(row.packet);
+    const playedMinutes = playedDurationMinutes(startedAt, stoppedAt);
 
     if (startedAt) {
       facts.push({
@@ -1299,24 +1303,45 @@ export class GuestActivityLedgerService {
         confidence: 'EXACT',
         evidence: { sourceKind: SOURCE_GUEST_SESSION },
       });
-      facts.push({
-        factType: 'HOURLY_SESSION_STARTED',
-        happenedAt: startedAt,
-        sourceLocalDate: sourceLocalDate(startedAt, timeZone),
-        externalClubId: raw.externalClubId,
-        storeId: raw.storeId,
-        sessionExternalId,
-        tariffName: null,
-        tariffType: 'hourly',
-        amount: null,
-        bonusAmount: null,
-        durationMinutes: null,
-        confidence: 'INFERRED',
-        evidence: {
-          sourceKind: SOURCE_GUEST_SESSION,
-          note: 'Langame session rows do not reliably separate hourly from packages.',
-        },
-      });
+      if (isPackageSession) {
+        facts.push({
+          factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
+          happenedAt: startedAt,
+          sourceLocalDate: sourceLocalDate(startedAt, timeZone),
+          externalClubId: raw.externalClubId,
+          storeId: raw.storeId,
+          sessionExternalId,
+          tariffName: null,
+          tariffType: 'package_or_subscription',
+          amount: null,
+          bonusAmount: null,
+          durationMinutes: null,
+          confidence: 'EXACT',
+          evidence: sanitizePayload({
+            sourceKind: SOURCE_GUEST_SESSION,
+            packet: row.packet,
+          }),
+        });
+      } else {
+        facts.push({
+          factType: 'HOURLY_SESSION_STARTED',
+          happenedAt: startedAt,
+          sourceLocalDate: sourceLocalDate(startedAt, timeZone),
+          externalClubId: raw.externalClubId,
+          storeId: raw.storeId,
+          sessionExternalId,
+          tariffName: null,
+          tariffType: 'hourly',
+          amount: null,
+          bonusAmount: null,
+          durationMinutes: null,
+          confidence: 'INFERRED',
+          evidence: {
+            sourceKind: SOURCE_GUEST_SESSION,
+            note: 'Langame session row has no packet/subscription marker.',
+          },
+        });
+      }
     }
 
     if (stoppedAt) {
@@ -1334,6 +1359,37 @@ export class GuestActivityLedgerService {
         durationMinutes: null,
         confidence: 'EXACT',
         evidence: { sourceKind: SOURCE_GUEST_SESSION },
+      });
+    }
+
+    if (playedMinutes !== null) {
+      const playTimeFactType: GuestActivityFactType = isPackageSession
+        ? 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
+        : 'HOURLY_PLAY_TIME_ACCUMULATED';
+      const tariffType = isPackageSession
+        ? 'package_or_subscription'
+        : 'hourly';
+
+      facts.push({
+        factType: playTimeFactType,
+        happenedAt: stoppedAt,
+        sourceLocalDate: sourceLocalDate(stoppedAt, timeZone),
+        externalClubId: raw.externalClubId,
+        storeId: raw.storeId,
+        sessionExternalId,
+        tariffName: null,
+        tariffType,
+        amount: null,
+        bonusAmount: null,
+        durationMinutes: playedMinutes,
+        confidence: 'EXACT',
+        evidence: sanitizePayload({
+          sourceKind: SOURCE_GUEST_SESSION,
+          startedAt: startedAt?.toISOString() ?? null,
+          stoppedAt: stoppedAt?.toISOString() ?? null,
+          packet: row.packet,
+          calculation: 'date_stop - date_start',
+        }),
       });
     }
 
@@ -1594,6 +1650,18 @@ function relevantFactsForRule(
 ) {
   const trigger = normalizeSearchText(triggerKind);
   const session = normalizeSearchText(sessionType);
+
+  if (
+    trigger.includes('play_time') ||
+    trigger.includes('time_played') ||
+    trigger.includes('minute') ||
+    trigger.includes('hour')
+  ) {
+    return [
+      'HOURLY_PLAY_TIME_ACCUMULATED',
+      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    ];
+  }
 
   if (trigger.includes('session')) {
     return session.includes('package') ||
@@ -1894,6 +1962,43 @@ function firstNumber(...values: unknown[]) {
   }
 
   return null;
+}
+
+function isTruthyLangameFlag(value: unknown) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value > 0;
+  }
+
+  const normalized = primitiveString(value)?.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (['1', 'true', 'yes', 'y', 'да'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'n', 'нет'].includes(normalized)) {
+    return false;
+  }
+
+  const numeric = Number(normalized.replace(',', '.'));
+  return Number.isFinite(numeric) ? numeric > 0 : false;
+}
+
+function playedDurationMinutes(startedAt: Date | null, stoppedAt: Date | null) {
+  if (!startedAt || !stoppedAt) {
+    return null;
+  }
+
+  const minutes = Math.round(
+    (stoppedAt.getTime() - startedAt.getTime()) / 60000,
+  );
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
 }
 
 function primitiveString(value: unknown) {

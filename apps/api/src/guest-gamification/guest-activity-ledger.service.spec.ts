@@ -41,6 +41,8 @@ describe('GuestActivityLedgerService', () => {
     parseStatus?: string;
     confidence?: string;
     evidence?: unknown;
+    tariffType?: string | null;
+    durationMinutes?: number | null;
   };
   type NewLedgerRow = Omit<LedgerRow, 'id'> & Partial<Pick<LedgerRow, 'id'>>;
   type RawWhere = {
@@ -463,6 +465,88 @@ describe('GuestActivityLedgerService', () => {
     expect(inferredUsageFacts[0].evidence).toEqual(
       expect.objectContaining({
         inference: 'recent_package_or_subscription_signal_near_session',
+      }),
+    );
+  });
+
+  it('normalizes completed hourly sessions into played minutes facts', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 'session-hourly-1',
+        guest_id: externalGuestId,
+        club_id: '15',
+        date_start: '07.07.2026 10:00',
+        date_stop: '07.07.2026 11:35',
+        packet: 0,
+      },
+    ]);
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'HOURLY_PLAY_TIME',
+    });
+
+    const playTimeFact = Array.from(facts.values()).find(
+      (fact) => fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED',
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(playTimeFact).toEqual(
+      expect.objectContaining({
+        confidence: 'EXACT',
+        durationMinutes: 95,
+        tariffType: 'hourly',
+      }),
+    );
+    expect(
+      Array.from(facts.values()).some(
+        (fact) =>
+          fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      ),
+    ).toBe(false);
+  });
+
+  it('normalizes completed packet sessions into package play minutes facts', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 'session-package-1',
+        guest_id: externalGuestId,
+        club_id: '15',
+        date_start: '07.07.2026 10:00',
+        date_stop: '07.07.2026 12:00',
+        packet: 1,
+      },
+    ]);
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PACKAGE_PLAY_TIME',
+    });
+
+    const playTimeFact = Array.from(facts.values()).find(
+      (fact) =>
+        fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(
+      Array.from(facts.values()).some(
+        (fact) =>
+          fact.factType === 'PACKAGE_OR_SUBSCRIPTION_USED' &&
+          fact.confidence === 'EXACT',
+      ),
+    ).toBe(true);
+    expect(playTimeFact).toEqual(
+      expect.objectContaining({
+        confidence: 'EXACT',
+        durationMinutes: 120,
+        tariffType: 'package_or_subscription',
       }),
     );
   });

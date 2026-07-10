@@ -7939,15 +7939,17 @@ function CheckInTab({
                     успешном чек-ине.
                   </OptionHelp>
                 </Field>
-                <Field label="Текст награды">
-                  <input
-                    className={fieldClass}
-                    value={form.rewardLabel}
-                    onChange={(event) =>
-                      patchForm({ rewardLabel: event.target.value })
-                    }
-                  />
-                </Field>
+                <div className="md:col-span-4">
+                  <Field label="Текст награды">
+                    <input
+                      className={fieldClass}
+                      value={form.rewardLabel}
+                      onChange={(event) =>
+                        patchForm({ rewardLabel: event.target.value })
+                      }
+                    />
+                  </Field>
+                </div>
               </div>
             </FormSection>
 

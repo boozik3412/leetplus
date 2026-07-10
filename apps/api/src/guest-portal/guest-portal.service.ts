@@ -8310,15 +8310,24 @@ export class GuestPortalService {
       ready: checkInReadiness.ready,
       blockedReason: checkInReadiness.message,
     });
-    const visibleMissions = storeMissions
-      .filter((item) => !isGuestPortalCheckInMissionRule(item))
-      .slice(0, 6);
+    const missionRules = storeMissions.filter(
+      (item) => !isGuestPortalCheckInMissionRule(item),
+    );
     const missionProgress = await this.buildMissionProgress(
       context.tenant.id,
       guest,
       profile,
-      visibleMissions,
+      missionRules,
     );
+    const visibleMissions = missionRules
+      .filter((item) =>
+        shouldShowGuestPortalMission(
+          item,
+          missionProgress.get(item.id),
+          rewards,
+        ),
+      )
+      .slice(0, 6);
     const portalRewards = rewards.map(mapReward).sort(comparePortalRewards);
     const bonusHistory = this.buildBonusHistory(bonusLedgerRows);
     const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
@@ -13747,6 +13756,30 @@ function buildLootBoxRewardState(
   };
 }
 
+function guestPortalMissionVisibility(value: Prisma.JsonValue | null) {
+  const visibility = stringField(jsonRecord(value).visibility);
+
+  return visibility?.toUpperCase() === 'HIDDEN' ? 'HIDDEN' : 'VISIBLE';
+}
+
+function shouldShowGuestPortalMission(
+  mission: { id: string; conditions: Prisma.JsonValue | null },
+  progress: GuestPortalMissionProgress | undefined,
+  rewards: GuestPortalRewardRow[],
+) {
+  if (guestPortalMissionVisibility(mission.conditions) !== 'HIDDEN') {
+    return true;
+  }
+
+  if ((progress?.percent ?? 0) >= 100) {
+    return true;
+  }
+
+  return rewards.some(
+    (reward) => reward.missionId === mission.id && reward.status !== 'CANCELED',
+  );
+}
+
 function mapMission(
   row: {
     id: string;
@@ -15624,9 +15657,9 @@ function seasonLevels(value: Prisma.JsonValue) {
 
       const row = item as Record<string, unknown>;
       const level = numberField(row.level);
-      const requiredXp = numberField(row.xp);
+      const requiredXp = numberField(row.xp) ?? 0;
 
-      if (level == null || requiredXp == null) {
+      if (level == null) {
         return null;
       }
 
@@ -15644,13 +15677,13 @@ function seasonLevels(value: Prisma.JsonValue) {
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
-    .sort((left, right) => left.xp - right.xp || left.level - right.level)
+    .sort((left, right) => left.level - right.level)
     .slice(0, 12);
 }
 
 function buildSeasonProgress(
   levels: GuestPortalSeasonLevel[],
-  xp: number,
+  _xp: number,
   rewards: Array<{
     seasonId: string | null;
     status: string;
@@ -15694,21 +15727,13 @@ function buildSeasonProgress(
   const current = levels[currentIndex] ?? null;
   const previous = currentIndex > 0 ? levels[currentIndex - 1] : null;
   const next = allLevelsReached ? null : (levels[currentIndex + 1] ?? null);
-  const currentLevelXp = previous?.xp ?? 0;
-  const nextLevelXp = allLevelsReached ? null : (current?.xp ?? null);
-  const xpToNextLevel =
-    typeof nextLevelXp === 'number' ? Math.max(0, nextLevelXp - xp) : null;
+  const currentLevelXp = reachedLevelCount;
+  const nextLevelXp = allLevelsReached ? null : reachedLevelCount + 1;
+  const xpToNextLevel = allLevelsReached ? null : 1;
   const progressPercent =
     allLevelsReached || levels.length === 0
       ? 100
-      : typeof nextLevelXp === 'number'
-        ? nextLevelXp <= currentLevelXp
-          ? 0
-          : percent(
-              xp - currentLevelXp,
-              Math.max(1, nextLevelXp - currentLevelXp),
-            )
-        : 0;
+      : percent(reachedLevelCount, Math.max(1, levels.length));
 
   levels.forEach((level, index) => {
     level.reached = index < reachedLevelCount;
@@ -15840,6 +15865,7 @@ function seasonLevelRewardLabels(levels: GuestPortalSeasonLevel[]) {
   levels.forEach((level) => {
     const freeReward = level.freeReward?.trim() ?? '';
     const premiumReward = level.premiumReward?.trim() ?? '';
+    const title = level.title?.trim() ?? '';
 
     if (freeReward) {
       labels.add(freeReward);
@@ -15850,6 +15876,10 @@ function seasonLevelRewardLabels(levels: GuestPortalSeasonLevel[]) {
     if (freeReward && premiumReward) {
       labels.add(`${freeReward} + ${premiumReward}`);
     }
+    if (title) {
+      labels.add(title);
+    }
+    labels.add(`Battle Pass шаг ${level.level}`);
   });
 
   return labels;
@@ -15874,10 +15904,13 @@ function seasonLevelByRewardLabel(
 
       const freeReward = level.freeReward?.trim() ?? '';
       const premiumReward = level.premiumReward?.trim() ?? '';
+      const title = level.title?.trim() ?? '';
 
       return (
         normalizedRewardLabel === freeReward ||
         normalizedRewardLabel === premiumReward ||
+        normalizedRewardLabel === title ||
+        normalizedRewardLabel === `Battle Pass шаг ${level.level}` ||
         (freeReward &&
           premiumReward &&
           normalizedRewardLabel === `${freeReward} + ${premiumReward}`)

@@ -409,6 +409,9 @@ export type GuestGameDryRunRule = {
   xpDelta: number;
   budgetAmount: number | null;
   progress: GuestGameDryRunProgress | null;
+  battlePassLevel?: number | null;
+  battlePassStep?: number | null;
+  battlePassStepTitle?: string | null;
   reasons: string[];
   blockers: string[];
 };

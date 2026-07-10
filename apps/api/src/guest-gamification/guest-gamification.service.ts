@@ -2326,6 +2326,9 @@ export type GuestGameDryRunRule = {
   xpDelta: number;
   budgetAmount: number | null;
   progress: GuestGameProgressResult | null;
+  battlePassLevel?: number | null;
+  battlePassStep?: number | null;
+  battlePassStepTitle?: string | null;
   reasons: string[];
   blockers: string[];
 };
@@ -17997,13 +18000,13 @@ function evaluateSeasonDryRun(
   const reasons: string[] = [];
   const blockers: string[] = [];
   const ruleRewards = dryRunRewardsForRule(context.rewards, 'season', rule.id);
-  const xpDelta = dryRunSeasonXp(rule.xpRules, context);
-  const selectedRewardLabel = dryRunSeasonRewardLabel(
-    rule,
-    context,
-    xpDelta,
+  const levels = dryRunSeasonLevels(rule.levels);
+  const completedLevelCount = dryRunSeasonCompletedLevelCount(
+    levels,
     ruleRewards,
+    context,
   );
+  const currentStep = levels[completedLevelCount] ?? null;
 
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
@@ -18016,7 +18019,18 @@ function evaluateSeasonDryRun(
     blockers,
     reasons,
   );
-  appendDryRunSeasonXpRules(rule.xpRules, context, blockers, reasons);
+
+  if (!levels.length) {
+    blockers.push('В Battle Pass нет настроенных шагов');
+  } else if (!currentStep) {
+    blockers.push('Все шаги Battle Pass уже выполнены');
+  } else {
+    reasons.push(
+      `Текущий шаг Battle Pass: ${currentStep.sequence}/${levels.length}`,
+    );
+    appendDryRunSeasonStepActivationCheck(currentStep, context, blockers, reasons);
+  }
+
   appendDryRunBudgetCheck(rule.budgetAmount, 0, ruleRewards, blockers, reasons);
 
   if (rule.premiumEnabled) {
@@ -18025,6 +18039,11 @@ function evaluateSeasonDryRun(
   if (rule.manualApprovalRequired) {
     reasons.push('Награды сезона требуют подтверждения сотрудником');
   }
+
+  const selectedRewardLabel =
+    currentStep && blockers.length === 0
+      ? dryRunSeasonStepRewardLabel(currentStep)
+      : null;
 
   return dryRunRuleResult({
     id: rule.id,
@@ -18037,9 +18056,12 @@ function evaluateSeasonDryRun(
     rewardLabel: selectedRewardLabel,
     selectedRewardLabel,
     selectedReward: null,
-    xpDelta,
+    xpDelta: 0,
     budgetAmount: rule.budgetAmount,
     progress: null,
+    battlePassLevel: currentStep?.level ?? null,
+    battlePassStep: currentStep?.sequence ?? null,
+    battlePassStepTitle: currentStep?.title ?? null,
     reasons,
     blockers,
   });
@@ -18540,28 +18562,6 @@ function appendDryRunMissionProgress(
   return progress;
 }
 
-function appendDryRunSeasonXpRules(
-  value: unknown,
-  context: DryRunContext,
-  blockers: string[],
-  reasons: string[],
-) {
-  const rules = dryRunRecord(value);
-
-  appendDryRunSessionConditionCheck(
-    rules.sessionType,
-    context,
-    blockers,
-    reasons,
-  );
-  appendDryRunTariffConditionCheck(rules, context, blockers, reasons);
-  appendDryRunGuestLogTypeCheck(rules, context, blockers, reasons);
-
-  if (dryRunOptionalNumber(rules.packetSessionBonus) != null) {
-    reasons.push('Battle Pass учитывает бонус за пакет или абонемент');
-  }
-}
-
 function appendDryRunBudgetCheck(
   budgetAmount: number | null,
   projectedAmount: number,
@@ -18745,110 +18745,196 @@ function dryRunRewardMatchesGuest(
   );
 }
 
-function dryRunSeasonXp(value: unknown, context: DryRunContext) {
-  const rules = dryRunRecord(value);
-  const eventType = context.eventType.toUpperCase();
-  const packetBonus =
-    context.sessionPacket === true
-      ? dryRunNumber(rules.packetSessionBonus, 0)
-      : 0;
+type DryRunSeasonLevel = {
+  level: number;
+  sequence: number;
+  title: string | null;
+  condition: string | null;
+  description: string | null;
+  activationRules: Record<string, unknown>;
+  freeReward: string | null;
+  premiumReward: string | null;
+};
 
-  if (eventType === 'PLAY_HOUR' || eventType === 'SESSION_STOP') {
-    return Math.round(
-      dryRunNumber(rules.playHour, 0) *
-        Math.max(1, context.sessionMinutes / 60) +
-        packetBonus,
-    );
-  }
-  if (eventType === 'BAR_PURCHASE' || eventType === 'PRODUCT_PURCHASE') {
-    return Math.round(dryRunNumber(rules.barPurchase, 0));
-  }
-  if (eventType === 'MISSION_COMPLETED') {
-    return Math.round(dryRunNumber(rules.missionCompletion, 0));
-  }
-  if (eventType === 'CHECK_IN') {
-    return Math.round(
-      dryRunNumber(rules.checkIn, dryRunNumber(rules.visit, 0)) + packetBonus,
-    );
-  }
-  if (eventType === 'SESSION_START' || eventType === 'VISIT') {
-    return Math.round(dryRunNumber(rules.visit, 0) + packetBonus);
-  }
-  if (eventType === 'GUEST_LOG' && context.guestLogType) {
-    return Math.round(dryRunNumber(rules.guestLog, 0));
-  }
+function dryRunSeasonLevels(value: unknown): DryRunSeasonLevel[] {
+  const levels = Array.isArray(value) ? value : [];
 
-  return 0;
+  return levels
+    .map((item, index) => {
+      const record = dryRunRecord(item);
+      const level = dryRunNumber(record.level, index + 1);
+
+      if (level <= 0) {
+        return null;
+      }
+
+      return {
+        level,
+        sequence: index + 1,
+        title: dryRunString(record.title),
+        condition: dryRunString(record.condition),
+        description: dryRunString(record.description),
+        activationRules: dryRunRecord(record.activationRules),
+        freeReward: dryRunString(record.freeReward),
+        premiumReward: dryRunString(record.premiumReward),
+      };
+    })
+    .filter((item): item is DryRunSeasonLevel => Boolean(item))
+    .sort((left, right) => left.level - right.level)
+    .map((level, index) => ({ ...level, sequence: index + 1 }));
 }
 
-function dryRunSeasonRewardLabel(
-  rule: GuestGameSeason,
+function appendDryRunSeasonStepActivationCheck(
+  step: DryRunSeasonLevel,
   context: DryRunContext,
-  xpDelta: number,
-  ruleRewards: GuestGameReward[],
+  blockers: string[],
+  reasons: string[],
 ) {
-  const levels = Array.isArray(rule.levels) ? rule.levels : [];
-  const currentXp = context.profile?.xp ?? 0;
-  const nextXp = currentXp + xpDelta;
-  const normalizedLevels = levels
-    .map((item) => dryRunRecord(item))
-    .map((item) => ({
-      level: dryRunNumber(item.level, 0),
-      xp: dryRunNumber(item.xp, 0),
-      freeReward: dryRunString(item.freeReward),
-      premiumReward: dryRunString(item.premiumReward),
-    }))
-    .filter((item) => item.level > 0)
-    .sort((left, right) => left.xp - right.xp || left.level - right.level);
-  const levelRewardLabels = dryRunSeasonLevelRewardLabels(normalizedLevels);
-  const completedLevelCount = Math.min(
-    normalizedLevels.length,
-    ruleRewards
-      .filter((reward) => dryRunRewardMatchesGuest(reward, context))
-      .filter((reward) =>
-        dryRunSeasonRewardMatchesLevelReward(reward, levelRewardLabels),
-      )
-      .filter(dryRunSeasonRewardCountsAsStep).length,
-  );
-  const nextLevel = normalizedLevels[completedLevelCount] ?? null;
+  const rules = step.activationRules;
+  const triggerKind = dryRunString(rules.triggerKind);
 
-  if (!nextLevel || nextLevel.xp > nextXp) {
+  if (!triggerKind) {
+    blockers.push(`Для шага ${step.sequence} не выбрано событие активации`);
+  } else {
+    appendDryRunTriggerCheck(triggerKind, context.eventType, blockers);
+  }
+
+  appendDryRunSessionConditionCheck(rules.sessionType, context, blockers, reasons);
+  appendDryRunTariffConditionCheck(rules, context, blockers, reasons);
+  appendDryRunGuestLogTypeCheck(rules, context, blockers, reasons);
+  appendDryRunPeriodRules(
+    rules,
+    context.occurredAt,
+    context.timeZone,
+    blockers,
+    reasons,
+  );
+}
+
+function dryRunSeasonCompletedLevelCount(
+  levels: DryRunSeasonLevel[],
+  rewards: GuestGameReward[],
+  context: DryRunContext,
+) {
+  const reachedLevels = dryRunSeasonReachedLevelNumbers(levels, rewards, context);
+  let completedLevelCount = 0;
+
+  for (const level of levels) {
+    if (!reachedLevels.has(level.level)) {
+      break;
+    }
+    completedLevelCount += 1;
+  }
+
+  return completedLevelCount;
+}
+
+function dryRunSeasonReachedLevelNumbers(
+  levels: DryRunSeasonLevel[],
+  rewards: GuestGameReward[],
+  context: DryRunContext,
+) {
+  const reachedLevels = new Set<number>();
+
+  rewards
+    .filter((reward) => dryRunRewardMatchesGuest(reward, context))
+    .filter(dryRunSeasonRewardCountsAsStep)
+    .forEach((reward) => {
+      const evidenceLevel = dryRunSeasonRewardLevelFromEvidence(reward.evidence);
+      const level =
+        (typeof evidenceLevel === 'number'
+          ? levels.find((item) => item.level === evidenceLevel)
+          : null) ??
+        dryRunSeasonLevelByRewardLabel(levels, reward.rewardLabel, reachedLevels);
+
+      if (level) {
+        reachedLevels.add(level.level);
+      }
+    });
+
+  return reachedLevels;
+}
+
+function dryRunSeasonRewardLevelFromEvidence(
+  value: Prisma.JsonValue | null | undefined,
+) {
+  const evidence = dryRunRecord(value);
+  const rule = dryRunRecord(evidence.rule);
+  const source = dryRunRecord(evidence.source);
+  const candidates = [
+    evidence.level,
+    evidence.levelNumber,
+    evidence.battlePassLevel,
+    evidence.battlePassLevelNumber,
+    evidence.battlePassStep,
+    evidence.battlePassStepNumber,
+    evidence.step,
+    evidence.stepNumber,
+    rule.level,
+    rule.levelNumber,
+    rule.battlePassLevel,
+    rule.battlePassLevelNumber,
+    rule.battlePassStep,
+    rule.battlePassStepNumber,
+    rule.step,
+    rule.stepNumber,
+    source.level,
+    source.levelNumber,
+    source.battlePassLevel,
+    source.battlePassLevelNumber,
+    source.step,
+    source.stepNumber,
+  ];
+
+  for (const candidate of candidates) {
+    const level = dryRunOptionalNumber(candidate);
+
+    if (typeof level === 'number' && level > 0) {
+      return Math.trunc(level);
+    }
+  }
+
+  return null;
+}
+
+function dryRunSeasonLevelByRewardLabel(
+  levels: DryRunSeasonLevel[],
+  rewardLabel: string,
+  alreadyReached: Set<number>,
+) {
+  const normalizedRewardLabel = rewardLabel.trim();
+
+  if (!normalizedRewardLabel) {
     return null;
   }
 
-  return [nextLevel.freeReward, nextLevel.premiumReward]
-    .filter(Boolean)
+  return (
+    levels.find((level) => {
+      if (alreadyReached.has(level.level)) {
+        return false;
+      }
+
+      const labels = [
+        level.freeReward,
+        level.premiumReward,
+        level.freeReward && level.premiumReward
+          ? `${level.freeReward} + ${level.premiumReward}`
+          : null,
+        level.title,
+        dryRunSeasonStepRewardLabel(level),
+      ].filter((item): item is string => Boolean(item?.trim()));
+
+      return labels.includes(normalizedRewardLabel);
+    }) ?? null
+  );
+}
+
+function dryRunSeasonStepRewardLabel(level: DryRunSeasonLevel) {
+  const rewardLabel = [level.freeReward, level.premiumReward]
+    .filter((item): item is string => Boolean(item?.trim()))
     .join(' + ');
-}
 
-function dryRunSeasonLevelRewardLabels(
-  levels: Array<{ freeReward: string | null; premiumReward: string | null }>,
-) {
-  const labels = new Set<string>();
-
-  levels.forEach((level) => {
-    const freeReward = level.freeReward?.trim() ?? '';
-    const premiumReward = level.premiumReward?.trim() ?? '';
-
-    if (freeReward) {
-      labels.add(freeReward);
-    }
-    if (premiumReward) {
-      labels.add(premiumReward);
-    }
-    if (freeReward && premiumReward) {
-      labels.add(`${freeReward} + ${premiumReward}`);
-    }
-  });
-
-  return labels;
-}
-
-function dryRunSeasonRewardMatchesLevelReward(
-  reward: GuestGameReward,
-  levelRewardLabels: Set<string>,
-) {
-  return levelRewardLabels.has(reward.rewardLabel.trim());
+  return rewardLabel || level.title || `Battle Pass шаг ${level.sequence}`;
 }
 
 function dryRunSeasonRewardCountsAsStep(reward: GuestGameReward) {

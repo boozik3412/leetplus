@@ -2457,7 +2457,7 @@ function HomeBattlePass({
             <small>Главная награда</small>
             <strong>Сезонный контейнер</strong>
             <span>{mainRewardLabel}</span>
-            <em>Открывается на уровне {formatNumber(mainRewardLevel)}</em>
+            <em>Открывается на шаге {formatNumber(mainRewardLevel)}</em>
           </span>
           <span className="lp-club-battlepass-main-case">
             <Image
@@ -2488,7 +2488,7 @@ function HomeBattlePass({
                     reward.status === "claimed" ? "is-done" : "",
                     reward.id === activeReward?.id ? "is-active" : "",
                   ].join(" ")}
-                  aria-label={`Уровень ${formatNumber(reward.level)}`}
+                  aria-label={`Шаг ${formatNumber(reward.level)}`}
                   onClick={() => focusReward(reward)}
                   onFocus={() => focusReward(reward)}
                 >
@@ -2616,7 +2616,7 @@ function BattlePassHelpModal({
         <span className="lp-quest-complete-kicker">Как работает</span>
         <h3 id="battlePassHelpTitle">Баттлпасс клуба</h3>
         <p className="lp-battlepass-detail-season">
-          {seasonName} · уровень {formatNumber(currentLevel)} из {formatNumber(totalLevels)}
+          {seasonName} · шаг {formatNumber(currentLevel)} из {formatNumber(totalLevels)}
         </p>
 
         <div className="lp-battlepass-detail-progress">
@@ -2638,7 +2638,7 @@ function BattlePassHelpModal({
         </div>
 
         <div className="lp-battlepass-detail-block">
-          <span>Как открыть уровни</span>
+          <span>Как проходить шаги</span>
           <ul className="lp-battlepass-help-list">
             <li>Смотрите карточку с пометкой “Сейчас”.</li>
             <li>Нажмите на этап, чтобы увидеть подробное условие и награду.</li>
@@ -2651,7 +2651,7 @@ function BattlePassHelpModal({
           <p>
             Следующая награда: {nextRewardLabel}. Главная награда сезона:
             {" "}
-            {mainRewardLabel}, открывается на уровне {formatNumber(mainRewardLevel)}.
+            {mainRewardLabel}, открывается на шаге {formatNumber(mainRewardLevel)}.
           </p>
         </div>
 
@@ -2906,35 +2906,6 @@ function battlePassDetailProgress(
     };
   }
 
-  const textXpTarget = battlePassXpRequirementFromText(
-    condition,
-    reward.description,
-    reward.subtitle,
-  );
-  const threshold = Math.max(0, reward.xpThreshold ?? 0);
-  const previousThreshold = Math.max(0, reward.previousXpThreshold ?? 0);
-  const targetXp =
-    textXpTarget ?? (threshold > previousThreshold ? threshold - previousThreshold : null);
-
-  if (targetXp !== null) {
-    const currentXp = Math.max(
-      0,
-      Math.trunc(summary.progress.summary.xp || summary.profile.xp || 0),
-    );
-    const completed = reward.status === "claimed" || reward.status === "ready";
-    const current =
-      completed
-        ? targetXp
-        : Math.min(targetXp, Math.max(0, currentXp - previousThreshold));
-
-    return {
-      current,
-      total: targetXp,
-      label: `${formatNumber(current)} / ${formatNumber(targetXp)} XP`,
-      percent: clampPercent((current / Math.max(1, targetXp)) * 100),
-    };
-  }
-
   const done = reward.status === "claimed" || reward.status === "ready";
 
   return {
@@ -2943,21 +2914,6 @@ function battlePassDetailProgress(
     label: done ? "Выполнено" : "Ожидает выполнения",
     percent: done ? 100 : 0,
   };
-}
-
-function battlePassXpRequirementFromText(
-  ...values: Array<string | null | undefined>
-) {
-  const text = values.filter(Boolean).join(" ");
-  const match = text.match(/(\d[\d\s]*)\s*XP/i);
-
-  if (!match) {
-    return null;
-  }
-
-  const value = Number(match[1]?.replace(/\s/g, ""));
-
-  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function findBattlePassQuestReward(
@@ -3167,7 +3123,8 @@ function battlePassRewardFromLevel(
   const rewardLabel =
     level.freeReward ??
     level.premiumReward ??
-    `${formatNumber(level.xp)} XP`;
+    level.title ??
+    `Battle Pass шаг ${formatNumber(level.level)}`;
   const title = level.title ?? rewardLabel;
   const rarity = inferBattlePassRewardRarity(rewardLabel);
   const type = inferBattlePassRewardType(rewardLabel);
@@ -3184,9 +3141,9 @@ function battlePassRewardFromLevel(
     rarity,
     status: battlePassRewardStatus(level),
     image: type === "lootbox" ? lootboxSkinForRarity(rarity) : undefined,
-    rewardValue: battlePassRewardValue(rewardLabel, type, level.xp),
-    xpThreshold: level.xp,
-    previousXpThreshold: previousLevel?.xp ?? 0,
+    rewardValue: battlePassRewardValue(rewardLabel, type, level.level),
+    xpThreshold: 0,
+    previousXpThreshold: previousLevel ? 0 : 0,
   };
 }
 
@@ -3280,7 +3237,7 @@ function battlePassRewardSubtitle(
     return `${typeLabel} · premium: ${level.premiumReward}`;
   }
 
-  return `${typeLabel} · ${formatNumber(level.xp)} XP`;
+  return level.condition ?? level.description ?? typeLabel;
 }
 
 function battlePassRewardValue(
@@ -6161,7 +6118,7 @@ function BonusHistoryPanel({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            Langame ledger
+            Игровой журнал
           </p>
           <h3 className="mt-1 text-sm font-black text-white">
             История начислений
@@ -7024,7 +6981,7 @@ function BattlePassPanel({
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <Metric
-              label="Уровень"
+              label="Шаг"
               value={formatNumber(battlePass.currentLevel)}
               note={
                 battlePass.nextLevel
@@ -7033,12 +6990,8 @@ function BattlePassPanel({
               }
             />
             <Metric
-              label="До уровня"
-              value={
-                battlePass.xpToNextLevel !== null
-                  ? `${formatNumber(battlePass.xpToNextLevel)} XP`
-                  : "0 XP"
-              }
+              label="До следующего шага"
+              value={battlePass.nextLevel ? "1 шаг" : "готово"}
               note={battlePass.nextRewardLabel ?? "награда не задана"}
             />
             <Metric
@@ -7053,7 +7006,7 @@ function BattlePassPanel({
             <div className="mt-5">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-black text-white">
-                  Дорожка уровней
+                  Шаги Battle Pass
                 </h3>
                 <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-bold text-zinc-300">
                   {formatNumber(battlePass.levels.length)} рядом
@@ -7064,7 +7017,8 @@ function BattlePassPanel({
                   const rewardText =
                     level.freeReward ??
                     level.premiumReward ??
-                    `${formatNumber(level.xp)} XP`;
+                    level.title ??
+                    `Шаг ${formatNumber(level.level)}`;
 
                   return (
                     <div
@@ -7083,7 +7037,7 @@ function BattlePassPanel({
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                            Уровень {formatNumber(level.level)}
+                            Шаг {formatNumber(level.level)}
                           </p>
                           <p className="mt-1 text-sm font-black text-white">
                             {rewardText}
@@ -7105,7 +7059,7 @@ function BattlePassPanel({
                         </span>
                       </div>
                       <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500">
-                        <span>{formatNumber(level.xp)} XP</span>
+                        <span>{level.condition ?? level.description ?? "Условие шага"}</span>
                         {level.freeReward && level.premiumReward ? (
                           <span>premium: {level.premiumReward}</span>
                         ) : null}

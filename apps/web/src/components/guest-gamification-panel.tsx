@@ -232,6 +232,7 @@ type MissionForm = {
   status: GuestGameStatus;
   missionType: string;
   triggerKind: string;
+  visibility: string;
   rewardType: string;
   rewardAmount: string;
   rewardLabel: string;
@@ -706,6 +707,18 @@ const progressUnitOptions = [
   { value: "step", label: "шаги" },
 ];
 
+const missionVisibilityOptions = [
+  { value: "VISIBLE", label: "Видимое" },
+  { value: "HIDDEN", label: "Скрытое" },
+];
+
+const missionVisibilityHelpText: Record<string, string> = {
+  VISIBLE:
+    "Задание будет видно гостям в игровом модуле сразу, если оно активно и подходит выбранному клубу.",
+  HIDDEN:
+    "Гости не увидят задание заранее. Оно появится только после выполнения как скрытая активность.",
+};
+
 const audienceHelpText: Record<string, string> = {
   "": "Правило доступно всем гостям выбранных клубов, если остальные условия совпали.",
   quiet_hours:
@@ -1069,6 +1082,7 @@ const defaultMissionForm: MissionForm = {
   status: "DRAFT",
   missionType: "REPEAT_VISIT",
   triggerKind: "REPEAT_VISIT",
+  visibility: "VISIBLE",
   rewardType: "PROMOCODE",
   rewardAmount: "0",
   rewardLabel: "Промокод на бар",
@@ -1109,6 +1123,7 @@ const defaultMissionForm: MissionForm = {
     windowDays: 7,
     weekdaysOnly: true,
     requiresLangameFact: true,
+    visibility: "VISIBLE",
   }),
   antiFraudText: jsonText({
     denySameDayRepeat: true,
@@ -1124,6 +1139,7 @@ const defaultCheckInMissionForm: MissionForm = {
   status: "DRAFT",
   missionType: "CHECK_IN",
   triggerKind: "CHECK_IN",
+  visibility: "VISIBLE",
   rewardType: "XP",
   rewardAmount: "0",
   rewardLabel: "XP за чекин",
@@ -1165,6 +1181,7 @@ const defaultCheckInMissionForm: MissionForm = {
     },
     progressTarget: 1,
     progressUnit: "check_in",
+    visibility: "VISIBLE",
   }),
   antiFraudText: jsonText({
     source: "business_controls",
@@ -1180,37 +1197,37 @@ const defaultSeasonLevelSteps: SeasonLevelStepForm[] = [
     xp: "0",
     title: "Старт сезона",
     condition: "Начните участие в сезоне клуба.",
-    description: "Первый этап открывает сезон и показывает прогресс гостя.",
+    description: "Первый шаг запускает последовательный прогресс гостя.",
     freeReward: "Старт сезона",
     premiumReward: "",
   },
   {
     id: "level-2",
     level: "2",
-    xp: "250",
-    title: "Промокод бара",
-    condition: "Наберите 250 XP в игровом модуле.",
-    description: "Гость получает награду после достижения второго уровня.",
+    xp: "0",
+    title: "Старт игровой сессии",
+    condition: "Начните игровую сессию в клубе.",
+    description: "Шаг выполнится после старта игровой сессии.",
     freeReward: "Промокод бара",
     premiumReward: "Усиленный промокод",
   },
   {
     id: "level-3",
     level: "3",
-    xp: "500",
-    title: "Бонус на следующий визит",
-    condition: "Наберите 500 XP в игровом модуле.",
-    description: "Промежуточный этап сезона с бонусом на следующий визит.",
+    xp: "0",
+    title: "Пакет или абонемент",
+    condition: "Начните игровую сессию с пакетом или абонементом.",
+    description: "Шаг выполнится после старта подходящей сессии.",
     freeReward: "Бонус на следующий визит",
     premiumReward: "",
   },
   {
     id: "level-4",
     level: "4",
-    xp: "900",
-    title: "Игровое время",
-    condition: "Наберите 900 XP в игровом модуле.",
-    description: "Финальный этап базовой лестницы сезона.",
+    xp: "0",
+    title: "Финальный шаг",
+    condition: "Выполните условие финального шага.",
+    description: "Финальный этап сезона с главной наградой.",
     freeReward: "Игровое время с подтверждением",
     premiumReward: "Турнирный билет",
   },
@@ -1224,13 +1241,13 @@ const defaultSeasonForm: SeasonForm = {
   storeIds: [],
   periodFrom: "",
   periodTo: "",
-  xpVisit: "20",
-  xpCheckIn: "20",
-  xpPlayHour: "10",
-  xpBarPurchase: "25",
-  xpMissionCompletion: "50",
-  xpPacketSessionBonus: "15",
-  xpGuestLog: "5",
+  xpVisit: "0",
+  xpCheckIn: "0",
+  xpPlayHour: "0",
+  xpBarPurchase: "0",
+  xpMissionCompletion: "0",
+  xpPacketSessionBonus: "0",
+  xpGuestLog: "0",
   sessionType: "",
   tariffGroupId: "",
   tariffPeriodId: "",
@@ -1238,7 +1255,7 @@ const defaultSeasonForm: SeasonForm = {
   guestLogTypes: "",
   blockedGuestLogTypes: "",
   levelCount: "4",
-  xpPerLevel: "250",
+  xpPerLevel: "0",
   freeRewardEvery: "2",
   premiumRewardEvery: "2",
   freeRewardLabel: "Промокод бара",
@@ -7608,18 +7625,16 @@ function MissionsTab({
                   "Тип помогает сотруднику понять сценарий задания. Условия выполнения задаются ниже."}
               </OptionHelp>
             </Field>
-            <Field label="Событие для появления">
+            <Field label="Видимость задания">
               <OptionSelect
-                options={dryRunEventOptions}
-                value={form.triggerKind}
-                preservedLabel="Сохраненное событие"
-                onChange={(triggerKind) =>
-                  setForm({ ...form, triggerKind })
-                }
+                options={missionVisibilityOptions}
+                value={form.visibility}
+                preservedLabel="Сохраненная видимость"
+                onChange={(visibility) => setForm({ ...form, visibility })}
               />
               <OptionHelp>
-                {triggerHelpText[form.triggerKind] ??
-                  "LeetPlus проверит правило, когда получит событие этого типа."}
+                {missionVisibilityHelpText[missionVisibilityValue(form.visibility)] ??
+                  missionVisibilityHelpText.VISIBLE}
               </OptionHelp>
             </Field>
           </div>
@@ -7650,7 +7665,10 @@ function MissionsTab({
                 value={form.progressUnit}
                 preservedLabel="Сохраненная единица"
                 onChange={(progressUnit) =>
-                  setForm({ ...form, progressUnit })
+                  setForm({
+                    ...form,
+                    ...missionProgressUnitPatch(form, progressUnit),
+                  })
                 }
               />
               <OptionHelp>
@@ -7745,6 +7763,7 @@ function MissionsTab({
           subtitle={`${missionTypeLabel(item.missionType)} · ${item.xpReward} XP`}
           meta={[
             item.audience?.name ?? "все гости",
+            missionVisibilitySummary(item.conditions),
             `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
             tariffRuleSummary(item.conditions),
             guestLogRuleSummary(item.conditions, item.antiFraudRules),
@@ -10487,14 +10506,17 @@ function MissionBusinessRules({
             />
           </Field>
         </div>
-        <MissionProductMetricSelector
-          products={products}
-          productIds={form.metricProductIds}
-          externalProductIds={form.metricExternalProductIds}
-          categoryIds={form.metricCategoryIds}
-          categoryNames={form.metricCategoryNames}
-          onChange={onChange}
-        />
+        {missionUsesProductMetric(form) ? (
+          <MissionProductMetricSelector
+            products={products}
+            selectedStoreIds={form.storeIds}
+            productIds={form.metricProductIds}
+            externalProductIds={form.metricExternalProductIds}
+            categoryIds={form.metricCategoryIds}
+            categoryNames={form.metricCategoryNames}
+            onChange={onChange}
+          />
+        ) : null}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Окно выполнения, дней">
@@ -10752,17 +10774,12 @@ function SeasonBusinessRules({
       ),
     });
   };
-  const rebuildSteps = () => {
-    const levelSteps = buildAutomaticSeasonLevelSteps(form);
-    onChange({ levelSteps, levelCount: String(levelSteps.length) });
-  };
   const addStep = () => {
     const nextLevel =
       form.levelSteps.reduce(
         (maxLevel, step) => Math.max(maxLevel, numeric(step.level, 0)),
         0,
       ) + 1;
-    const xpPerLevel = Math.max(1, numeric(form.xpPerLevel, 250));
     onChange({
       levelCount: String(Math.max(numeric(form.levelCount, 0), nextLevel)),
       levelSteps: [
@@ -10770,9 +10787,9 @@ function SeasonBusinessRules({
         {
           id: nextSeasonStepId(),
           level: String(nextLevel),
-          xp: String((nextLevel - 1) * xpPerLevel),
+          xp: "0",
           title: `Этап ${nextLevel}`,
-          condition: `Наберите ${(nextLevel - 1) * xpPerLevel} XP в сезоне.`,
+          condition: `Выполните условие шага ${nextLevel}.`,
           description: "",
           freeReward: "",
           premiumReward: "",
@@ -10827,165 +10844,12 @@ function SeasonBusinessRules({
   return (
     <BusinessRuleSection
       title="Лестница Battle Pass"
-      description="Задайте XP за действия и настройте каждый этап: что нужно сделать гостю и какую награду он получит."
+      description="Настройте последовательные шаги сезона: каждый следующий шаг станет доступен только после выполнения предыдущего."
     >
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <Field label="XP за визит">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.xpVisit}
-            onChange={(event) => onChange({ xpVisit: event.target.value })}
-          />
-        </Field>
-        <Field label="XP за чекин">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.xpCheckIn}
-            onChange={(event) => onChange({ xpCheckIn: event.target.value })}
-          />
-        </Field>
-        <Field label="XP за час">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.xpPlayHour}
-            onChange={(event) => onChange({ xpPlayHour: event.target.value })}
-          />
-        </Field>
-        <Field label="XP за бар">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.xpBarPurchase}
-            onChange={(event) =>
-              onChange({ xpBarPurchase: event.target.value })
-            }
-          />
-        </Field>
-        <Field label="XP за задание">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.xpMissionCompletion}
-            onChange={(event) =>
-              onChange({ xpMissionCompletion: event.target.value })
-            }
-          />
-        </Field>
-        <Field label="XP за guests/logs">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.xpGuestLog}
-            onChange={(event) => onChange({ xpGuestLog: event.target.value })}
-          />
-        </Field>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Тип сессии">
-          <select
-            className={fieldClass}
-            value={form.sessionType}
-            onChange={(event) => onChange({ sessionType: event.target.value })}
-          >
-            <option value="" disabled>
-              Выберите тип
-            </option>
-            {sessionTypeOptions.map((option) => (
-              <option key={option.value || "any"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Бонус XP за пакет">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.xpPacketSessionBonus}
-            onChange={(event) =>
-              onChange({ xpPacketSessionBonus: event.target.value })
-            }
-          />
-        </Field>
-      </div>
-      <TariffConditionFields
-        snapshots={tariffSnapshots}
-        tariffGroupId={form.tariffGroupId}
-        tariffPeriodId={form.tariffPeriodId}
-        tariffTypeId={form.tariffTypeId}
-        onChange={onChange}
-      />
-      <div className="grid gap-3 sm:grid-cols-4">
-        <Field label="Уровней">
-          <input
-            className={fieldClass}
-            type="number"
-            min="1"
-            value={form.levelCount}
-            onChange={(event) => onChange({ levelCount: event.target.value })}
-          />
-        </Field>
-        <Field label="XP на уровень">
-          <input
-            className={fieldClass}
-            type="number"
-            min="1"
-            value={form.xpPerLevel}
-            onChange={(event) => onChange({ xpPerLevel: event.target.value })}
-          />
-        </Field>
-        <Field label="Free каждые N уровней">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.freeRewardEvery}
-            onChange={(event) =>
-              onChange({ freeRewardEvery: event.target.value })
-            }
-          />
-        </Field>
-        <Field label="Premium каждые N уровней">
-          <input
-            className={fieldClass}
-            type="number"
-            min="0"
-            value={form.premiumRewardEvery}
-            onChange={(event) =>
-              onChange({ premiumRewardEvery: event.target.value })
-            }
-          />
-        </Field>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Free награда по умолчанию">
-          <input
-            className={fieldClass}
-            value={form.freeRewardLabel}
-            onChange={(event) =>
-              onChange({ freeRewardLabel: event.target.value })
-            }
-          />
-        </Field>
-        <Field label="Premium награда по умолчанию">
-          <input
-            className={fieldClass}
-            value={form.premiumRewardLabel}
-            onChange={(event) =>
-              onChange({ premiumRewardLabel: event.target.value })
-            }
-          />
-        </Field>
+      <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 text-sm leading-6 text-cyan-900 dark:border-cyan-500/30 dark:bg-cyan-950/20 dark:text-cyan-100">
+        Battle Pass теперь проходит по шагам. Настройте действие для каждого
+        шага ниже: первый шаг проверяется первым, второй начнет проверяться
+        только после выполнения первого, и так далее.
       </div>
 
       {mainRewardStep ? (
@@ -11033,14 +10897,11 @@ function SeasonBusinessRules({
               Шаги Battle Pass
             </h4>
             <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-              Каждый шаг можно настроить отдельно: условие, пояснение и награды
-              для free/premium дорожек.
+              Каждый шаг можно настроить отдельно: действие для выполнения,
+              пояснение и награды для free/premium дорожек.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={smallButtonClass} onClick={rebuildSteps}>
-              Сформировать по XP
-            </button>
             <button type="button" className={smallButtonClass} onClick={addStep}>
               Добавить шаг
             </button>
@@ -11064,23 +10925,14 @@ function SeasonBusinessRules({
                 Удалить шаг
               </button>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Уровень">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Порядок шага">
                 <input
                   className={fieldClass}
                   type="number"
                   min="1"
                   value={step.level}
                   onChange={(event) => updateStep(index, { level: event.target.value })}
-                />
-              </Field>
-              <Field label="XP для открытия">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  min="0"
-                  value={step.xp}
-                  onChange={(event) => updateStep(index, { xp: event.target.value })}
                 />
               </Field>
               <Field label="Название этапа">
@@ -11183,7 +11035,7 @@ function SeasonStepActivationFields({
             value={triggerKind}
             onChange={(event) => onChange({ triggerKind: event.target.value })}
           >
-            <option value="">По XP / уровню</option>
+            <option value="">Выберите действие</option>
             {lootBoxTriggerOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -13362,6 +13214,7 @@ type ProductCategoryOption = {
 
 function MissionProductMetricSelector({
   products,
+  selectedStoreIds,
   productIds,
   externalProductIds,
   categoryIds,
@@ -13369,6 +13222,7 @@ function MissionProductMetricSelector({
   onChange,
 }: {
   products: Product[];
+  selectedStoreIds: string[];
   productIds: string;
   externalProductIds: string;
   categoryIds: string;
@@ -13381,17 +13235,27 @@ function MissionProductMetricSelector({
   const selectedExternalProductIds = csvList(externalProductIds);
   const selectedCategoryIds = csvList(categoryIds);
   const selectedCategoryNames = csvList(categoryNames);
+  const availableProducts = useMemo(
+    () => filterProductsByMissionStores(products, selectedStoreIds),
+    [products, selectedStoreIds],
+  );
   const categoryOptions = useMemo(
-    () => productCategoryOptions(products, selectedCategoryIds, selectedCategoryNames),
-    [products, selectedCategoryIds, selectedCategoryNames],
+    () =>
+      productCategoryOptions(
+        availableProducts,
+        selectedCategoryIds,
+        selectedCategoryNames,
+      ),
+    [availableProducts, selectedCategoryIds, selectedCategoryNames],
   );
   const filteredProducts = useMemo(
     () =>
-      filterProductsForMission(products, productQuery, selectedProductIds).slice(
-        0,
-        10,
-      ),
-    [products, productQuery, selectedProductIds],
+      filterProductsForMission(
+        availableProducts,
+        productQuery,
+        selectedProductIds,
+      ).slice(0, 10),
+    [availableProducts, productQuery, selectedProductIds],
   );
   const filteredCategories = useMemo(
     () =>
@@ -13447,8 +13311,8 @@ function MissionProductMetricSelector({
           Товары
         </p>
         <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-          Найдите товар по названию или артикулу. В правило попадет внутренний
-          идентификатор, но сотруднику он не нужен.
+          Сначала выберите активный клуб выше, затем найдите один или несколько
+          товаров, которые гость должен купить.
         </p>
         <input
           className={fieldClass}
@@ -13477,7 +13341,7 @@ function MissionProductMetricSelector({
               ))
             ) : (
               <p className="px-2 py-3 text-xs text-zinc-500 dark:text-zinc-400">
-                Товар не найден в текущем ассортименте.
+                Товар не найден в ассортименте выбранных клубов.
               </p>
             )}
           </div>
@@ -13485,9 +13349,11 @@ function MissionProductMetricSelector({
         <SelectionChips
           items={selectedProducts}
           emptyLabel={
-            products.length
+            availableProducts.length
               ? "Конкретные товары не выбраны."
-              : "Ассортимент недоступен или пока пуст."
+              : selectedStoreIds.length
+                ? "В выбранных клубах ассортимент недоступен или пока пуст."
+                : "Выберите клуб выше, чтобы искать товары по его ассортименту."
           }
           onRemove={(productId) =>
             onChange({ metricProductIds: removeCsvToken(productIds, productId) })
@@ -13521,8 +13387,8 @@ function MissionProductMetricSelector({
           Категории товаров
         </p>
         <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-          Выберите категорию, если задание должно считать любую покупку из этой
-          группы.
+          Можно выбрать одну или несколько категорий вместо конкретных товаров.
+          Тогда засчитается любая покупка из выбранной категории.
         </p>
         <input
           className={fieldClass}
@@ -13647,6 +13513,88 @@ function filterCategoryOptions(
       !selectedCategoryIds.includes(category.id) &&
       !selectedCategoryNames.includes(category.label) &&
       category.label.toLowerCase().includes(normalized),
+  );
+}
+
+function missionVisibilityValue(value: string | null | undefined) {
+  return String(value ?? "").toUpperCase() === "HIDDEN" ? "HIDDEN" : "VISIBLE";
+}
+
+function missionVisibilitySummary(value: unknown) {
+  return missionVisibilityValue(stringRule(value, "visibility", "VISIBLE")) ===
+    "HIDDEN"
+    ? "скрытое"
+    : "видимое";
+}
+
+function missionUsesProductMetric(form: MissionForm) {
+  const metricEvents = csvList(form.metricEventTypes);
+
+  return (
+    form.progressUnit === "purchase" ||
+    form.progressUnit === "rub" ||
+    form.missionType === "PRODUCT_PURCHASE" ||
+    form.missionType === "BAR_PURCHASE" ||
+    form.triggerKind === "PRODUCT_PURCHASE" ||
+    form.triggerKind === "BAR_PURCHASE" ||
+    metricEvents.some(
+      (eventType) =>
+        eventType === "PRODUCT_PURCHASE" || eventType === "BAR_PURCHASE",
+    ) ||
+    csvList(form.metricProductIds).length > 0 ||
+    csvList(form.metricExternalProductIds).length > 0 ||
+    csvList(form.metricCategoryIds).length > 0 ||
+    csvList(form.metricCategoryNames).length > 0
+  );
+}
+
+function missionProgressUnitPatch(
+  form: MissionForm,
+  progressUnit: string,
+): Partial<MissionForm> {
+  if (progressUnit === "purchase") {
+    return {
+      progressUnit,
+      triggerKind: "PRODUCT_PURCHASE",
+      missionType: "PRODUCT_PURCHASE",
+      metricAggregation: "count",
+      metricEventTypes: appendCsvTokens(form.metricEventTypes, [
+        "PRODUCT_PURCHASE",
+        "BAR_PURCHASE",
+      ]),
+    };
+  }
+
+  if (progressUnit === "rub") {
+    return {
+      progressUnit,
+      triggerKind: "PRODUCT_PURCHASE",
+      missionType: "PRODUCT_PURCHASE",
+      metricAggregation: "sum",
+      metricEventTypes: appendCsvTokens(form.metricEventTypes, [
+        "PRODUCT_PURCHASE",
+        "BAR_PURCHASE",
+      ]),
+    };
+  }
+
+  return { progressUnit };
+}
+
+function filterProductsByMissionStores(
+  products: Product[],
+  selectedStoreIds: string[],
+) {
+  if (!selectedStoreIds.length) {
+    return [];
+  }
+
+  const storeIds = new Set(selectedStoreIds);
+
+  return products.filter(
+    (product) =>
+      (product.storeIds?.length ?? 0) === 0 ||
+      (product.storeIds ?? []).some((storeId) => storeIds.has(storeId)),
   );
 }
 
@@ -14072,6 +14020,9 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     status: mission.status,
     missionType: mission.missionType,
     triggerKind: mission.triggerKind,
+    visibility: missionVisibilityValue(
+      stringRule(mission.conditions, "visibility", "VISIBLE"),
+    ),
     rewardType: mission.rewardType,
     rewardAmount: moneyFormValue(mission.rewardAmount),
     rewardLabel: mission.rewardLabel ?? "",
@@ -15036,6 +14987,7 @@ function buildMissionConditions(form: MissionForm) {
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
     guestLogTypes: csvList(form.guestLogTypes),
+    visibility: missionVisibilityValue(form.visibility),
     minSessionMinutes: optionalNumber(form.minSessionMinutes),
     minSpendAmount: optionalNumber(form.minSpendAmount),
     requiresLangameFact: form.requireLangameFact,
@@ -15088,22 +15040,10 @@ function buildMissionAntiFraudRules(form: MissionForm) {
   };
 }
 
-function buildSeasonXpRules(form: SeasonForm) {
+function buildSeasonXpRules(_form: SeasonForm) {
   return {
-    source: "business_controls",
-    visit: numeric(form.xpVisit, 0),
-    checkIn: numeric(form.xpCheckIn, numeric(form.xpVisit, 0)),
-    playHour: numeric(form.xpPlayHour, 0),
-    barPurchase: numeric(form.xpBarPurchase, 0),
-    missionCompletion: numeric(form.xpMissionCompletion, 0),
-    packetSessionBonus: numeric(form.xpPacketSessionBonus, 0),
-    guestLog: numeric(form.xpGuestLog, 0),
-    sessionType: nullable(form.sessionType),
-    tariffGroupId: nullable(form.tariffGroupId),
-    tariffPeriodId: nullable(form.tariffPeriodId),
-    tariffTypeId: nullable(form.tariffTypeId),
-    guestLogTypes: csvList(form.guestLogTypes),
-    blockedGuestLogTypes: csvList(form.blockedGuestLogTypes),
+    source: "battle_pass_steps",
+    mode: "SEQUENTIAL_ACTIONS",
   };
 }
 
@@ -15118,40 +15058,19 @@ function buildSeasonLevels(form: SeasonForm) {
 }
 
 function buildSeasonRewards(form: SeasonForm, track: "free" | "premium") {
-  const customRewards = seasonLevelStepFormsToRewards(form, track);
-
-  if (form.levelSteps.length) {
-    return customRewards;
-  }
-
-  const levelCount = Math.max(1, numeric(form.levelCount, 1));
-  const every = numeric(
-    track === "free" ? form.freeRewardEvery : form.premiumRewardEvery,
-    0,
-  );
-  const label =
-    track === "free" ? form.freeRewardLabel : form.premiumRewardLabel;
-
-  if (!every || !label.trim()) {
-    return [];
-  }
-
-  return Array.from({ length: levelCount }, (_, index) => index + 1)
-    .filter((level) => level % every === 0)
-    .map((level) => ({ level, reward: label.trim(), track }));
+  return seasonLevelStepFormsToRewards(form, track);
 }
 
 function buildAutomaticSeasonLevels(form: SeasonForm) {
   const levelCount = Math.max(1, numeric(form.levelCount, 1));
-  const xpPerLevel = Math.max(1, numeric(form.xpPerLevel, 1));
 
   return Array.from({ length: levelCount }, (_, index) => {
     const level = index + 1;
     return {
       level,
-      xp: index * xpPerLevel,
+      xp: 0,
       title: `Этап ${level}`,
-      condition: `Наберите ${index * xpPerLevel} XP в сезоне.`,
+      condition: `Выполните условие шага ${level}.`,
       description: null,
       freeReward: levelRewardLabel(level, form.freeRewardEvery, form.freeRewardLabel),
       premiumReward: levelRewardLabel(
@@ -15208,13 +15127,14 @@ function seasonLevelStepFormsToLevels(form: SeasonForm) {
   return form.levelSteps
     .map((step, index) => {
       const level = Math.max(1, numeric(step.level, index + 1));
-      const xp = Math.max(0, numeric(step.xp, index * Math.max(1, numeric(form.xpPerLevel, 1))));
       const freeReward = seasonStepRewardLabel(step, "free");
       const premiumReward = seasonStepRewardLabel(step, "premium");
 
       return {
         level,
-        xp,
+        xp: 0,
+        sequence: index + 1,
+        unlockMode: "SEQUENTIAL_ACTION",
         title: nullable(step.title) ?? `Этап ${level}`,
         condition: nullable(step.condition),
         description: nullable(step.description),
@@ -15226,7 +15146,7 @@ function seasonLevelStepFormsToLevels(form: SeasonForm) {
       };
     })
     .filter((step) => step.title || step.freeReward || step.premiumReward)
-    .sort((left, right) => left.level - right.level || left.xp - right.xp);
+    .sort((left, right) => left.level - right.level);
 }
 
 function seasonLevelStepFormsToRewards(

@@ -20687,6 +20687,16 @@ function buildVisualEditorPreviewSummary(
         name: item.title,
         triggerKind: item.triggerKind,
         sessionType: null,
+        schedule: (() => {
+          const periodRules = buildVisualLootBoxPeriodRules(item);
+
+          return {
+            timeWindowMode: periodRules.timeWindowMode,
+            weekdayMode: periodRules.weekdayMode,
+            weekdays: periodRules.weekdays,
+            hours: periodRules.hours,
+          };
+        })(),
         rewardLabel: item.rewardLabel,
         rewardType: canonicalLootBoxRewardType(item.rewardType),
         caseRarity: visualLootBoxCaseRarity({ caseRarity: item.caseRarity }),

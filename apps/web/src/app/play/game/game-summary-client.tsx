@@ -54,6 +54,7 @@ type HomeLootCard = {
   description: string;
   triggerKind: string;
   sessionType: string | null;
+  schedule: GuestPortalGameSummary["lootBoxes"]["featured"][number]["schedule"];
   status: string;
   active: boolean;
   openable: boolean;
@@ -145,6 +146,7 @@ function debugHomeLootCard(card: HomeLootCard | null | undefined) {
     title: card.title,
     triggerKind: card.triggerKind,
     sessionType: card.sessionType,
+    schedule: card.schedule,
     status: card.status,
     openable: card.openable,
     openState: card.openState,
@@ -172,6 +174,7 @@ function debugSummarySnapshot(summary: GuestPortalGameSummary) {
       name: lootBox.name,
       triggerKind: lootBox.triggerKind,
       sessionType: lootBox.sessionType,
+      schedule: lootBox.schedule,
       openable: lootBox.openable,
       openState: lootBox.openState,
       openBlocker: lootBox.openBlocker,
@@ -3959,6 +3962,7 @@ function buildHomeLootCards(
       "Лутбокс с наградой за активность в клубе.",
     triggerKind: lootBox.triggerKind,
     sessionType: lootBox.sessionType,
+    schedule: lootBox.schedule,
     status: lootboxCardStatus(lootBox),
     active: false,
     openable: lootBox.openable,
@@ -4063,18 +4067,32 @@ function lootboxCardHint(card: HomeLootCard) {
   }
 
   if (card.status === "ожидает" || card.status === "ждет событие") {
-    return lootBoxUnlockHint(card.triggerKind, card.sessionType);
+    return lootBoxUnlockHint(card.triggerKind, card.sessionType, card.schedule);
   }
 
   return "Нажмите, чтобы посмотреть контейнер";
 }
 
-function lootBoxUnlockHint(triggerKind: string, sessionType: string | null) {
-  return `Откроется ${gameRuleUnlockCondition(triggerKind, sessionType)}`;
+function lootBoxUnlockHint(
+  triggerKind: string,
+  sessionType: string | null,
+  schedule?: HomeLootCard["schedule"] | null,
+) {
+  return `Откроется ${[
+    gameRuleUnlockCondition(triggerKind, sessionType),
+    lootBoxScheduleHint(schedule),
+  ]
+    .filter(Boolean)
+    .join(" ")}`;
 }
 
 function lootBoxGuestRequirementLines(card: HomeLootCard) {
   const lines = [guestActionRequirementLabel(card.triggerKind, card.sessionType)];
+  const scheduleRequirement = lootBoxScheduleRequirement(card.schedule);
+
+  if (scheduleRequirement) {
+    lines.push(scheduleRequirement);
+  }
 
   if (card.periodicLimitPeriod && card.status === "лимит") {
     lines.push(lootBoxPeriodicWaitRequirement(card.periodicLimitPeriod));
@@ -4085,6 +4103,128 @@ function lootBoxGuestRequirementLines(card: HomeLootCard) {
   }
 
   return Array.from(new Set(lines));
+}
+
+function lootBoxScheduleHint(
+  schedule?: HomeLootCard["schedule"] | null,
+): string | null {
+  if (!schedule) {
+    return null;
+  }
+
+  const dayHint = lootBoxScheduleDayHint(schedule);
+  const timeHint = lootBoxScheduleTimeHint(schedule);
+
+  return [dayHint, timeHint].filter(Boolean).join(" ") || null;
+}
+
+function lootBoxScheduleRequirement(
+  schedule?: HomeLootCard["schedule"] | null,
+): string | null {
+  const hint = lootBoxScheduleHint(schedule);
+
+  return hint ? `Открытие доступно только ${hint}.` : null;
+}
+
+function lootBoxScheduleDayHint(
+  schedule: HomeLootCard["schedule"],
+): string | null {
+  if (schedule.weekdayMode === "WEEKDAYS") {
+    return "в будние дни";
+  }
+
+  if (schedule.weekdayMode === "WEEKENDS") {
+    return "в выходные";
+  }
+
+  if (schedule.weekdayMode !== "CUSTOM") {
+    return null;
+  }
+
+  const weekdays = normalizeScheduleWeekdays(schedule.weekdays);
+
+  if (sameScheduleWeekdays(weekdays, [1, 2, 3, 4, 5])) {
+    return "в будние дни";
+  }
+
+  if (sameScheduleWeekdays(weekdays, [6, 0])) {
+    return "в выходные";
+  }
+
+  if (!weekdays.length) {
+    return null;
+  }
+
+  return `по ${joinRussianList(
+    weekdays.map((weekday) => SCHEDULE_WEEKDAY_DATIVE[weekday]),
+  )}`;
+}
+
+function lootBoxScheduleTimeHint(
+  schedule: HomeLootCard["schedule"],
+): string | null {
+  if (schedule.timeWindowMode === "ANY") {
+    return null;
+  }
+
+  const windows = schedule.hours
+    .map(formatScheduleTimeWindow)
+    .filter((item): item is string => Boolean(item));
+
+  if (!windows.length) {
+    return null;
+  }
+
+  return windows.length === 1
+    ? windows[0]
+    : `в интервалы ${joinRussianList(windows)}`;
+}
+
+function formatScheduleTimeWindow(value: string) {
+  const [from, to] = value
+    .split("-")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (from && to) {
+    return `с ${from} до ${to}`;
+  }
+
+  return value.trim() || null;
+}
+
+const SCHEDULE_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const SCHEDULE_WEEKDAY_DATIVE: Record<number, string> = {
+  1: "понедельникам",
+  2: "вторникам",
+  3: "средам",
+  4: "четвергам",
+  5: "пятницам",
+  6: "субботам",
+  0: "воскресеньям",
+};
+
+function normalizeScheduleWeekdays(value: number[]) {
+  return SCHEDULE_WEEKDAY_ORDER.filter((weekday) => value.includes(weekday));
+}
+
+function sameScheduleWeekdays(left: number[], right: number[]) {
+  const rightNormalized = normalizeScheduleWeekdays(right);
+
+  return (
+    left.length === rightNormalized.length &&
+    left.every((weekday, index) => weekday === rightNormalized[index])
+  );
+}
+
+function joinRussianList(value: string[]) {
+  const items = value.filter(Boolean);
+
+  if (items.length <= 1) {
+    return items[0] ?? "";
+  }
+
+  return `${items.slice(0, -1).join(", ")} и ${items.at(-1)}`;
 }
 
 function guestActionRequirementLabel(
@@ -13034,6 +13174,7 @@ function buildLootboxRouletteState({
           currentCard.description,
         triggerKind: item.triggerKind ?? currentCard.triggerKind,
         sessionType: item.sessionType ?? currentCard.sessionType,
+        schedule: item.schedule ?? currentCard.schedule,
         status: "",
         active: false,
         openable: item.openable,

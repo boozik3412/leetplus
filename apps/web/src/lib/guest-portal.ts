@@ -47,6 +47,13 @@ export type GuestPortalLootBoxRarity =
   | "epic"
   | "legendary";
 
+export type GuestPortalLootBoxSchedule = {
+  timeWindowMode: "ANY" | "QUIET_HOURS" | "CUSTOM";
+  weekdayMode: "ANY" | "WEEKDAYS" | "WEEKENDS" | "CUSTOM";
+  weekdays: number[];
+  hours: string[];
+};
+
 export type GuestPortalVerificationChannel =
   | "TELEGRAM_BOT"
   | "USER_CALL"
@@ -313,6 +320,7 @@ export type GuestPortalPayload = {
       name: string;
       triggerKind: string;
       sessionType: string | null;
+      schedule: GuestPortalLootBoxSchedule;
       rewardLabel: string | null;
       rewardType: string;
       caseRarity: GuestPortalLootBoxRarity;
@@ -656,6 +664,7 @@ export type GuestPortalGameSummary = {
         | "name"
         | "triggerKind"
         | "sessionType"
+        | "schedule"
         | "rewardLabel"
         | "rewardType"
         | "caseRarity"

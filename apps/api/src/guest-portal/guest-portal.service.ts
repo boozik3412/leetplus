@@ -81,6 +81,12 @@ const LOOTBOX_CASE_RARITY_LABELS = {
 
 type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
 type GuestPortalLootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
+type GuestPortalLootBoxTimeWindowMode = 'ANY' | 'QUIET_HOURS' | 'CUSTOM';
+type GuestPortalLootBoxWeekdayMode =
+  | 'ANY'
+  | 'WEEKDAYS'
+  | 'WEEKENDS'
+  | 'CUSTOM';
 const DEFAULT_GUEST_GAME_TIME_ZONE = 'Asia/Yekaterinburg';
 const USER_CALL_PROVIDER_SMS_RU_CALLCHECK = 'SMS_RU_CALLCHECK';
 const SMS_RU_CALLCHECK_BASE_URL = 'https://sms.ru';
@@ -913,6 +919,7 @@ export type GuestPortalGameSummary = {
         | 'name'
         | 'triggerKind'
         | 'sessionType'
+        | 'schedule'
         | 'rewardLabel'
         | 'rewardType'
         | 'caseRarity'
@@ -1222,6 +1229,7 @@ export type GuestPortalLootBox = {
   name: string;
   triggerKind: string;
   sessionType: string | null;
+  schedule: GuestPortalLootBoxSchedule;
   rewardLabel: string | null;
   rewardType: string;
   caseRarity: GuestPortalLootBoxCaseRarity;
@@ -1242,6 +1250,13 @@ export type GuestPortalLootBox = {
   waitingApprovalRewards: number;
   redeemedRewards: number;
   latestReward: GuestPortalLootBoxReward | null;
+};
+
+export type GuestPortalLootBoxSchedule = {
+  timeWindowMode: GuestPortalLootBoxTimeWindowMode;
+  weekdayMode: GuestPortalLootBoxWeekdayMode;
+  weekdays: number[];
+  hours: string[];
 };
 
 export type GuestPortalLootBoxReward = {
@@ -10981,6 +10996,7 @@ function buildGameSummaryFromPortal(
       name: lootBox.name,
       triggerKind: lootBox.triggerKind,
       sessionType: lootBox.sessionType,
+      schedule: lootBox.schedule,
       rewardLabel: lootBox.rewardLabel,
       rewardType: lootBox.rewardType,
       caseRarity: lootBox.caseRarity,
@@ -13169,6 +13185,7 @@ function mapLootBox(
     name: row.name,
     triggerKind: row.triggerKind,
     sessionType: row.sessionType ?? null,
+    schedule: mapLootBoxSchedule(row.periodRules),
     rewardLabel: row.rewardLabel,
     rewardType: row.rewardType,
     caseRarity,
@@ -13178,6 +13195,120 @@ function mapLootBox(
     ...openState,
     ...rewardState,
   };
+}
+
+function mapLootBoxSchedule(
+  value: Prisma.JsonValue | null,
+): GuestPortalLootBoxSchedule {
+  const rules = jsonRecord(value);
+  const hours = unknownStringArray(rules.hours)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const rawWeekdays = numberArrayField(rules.weekdays).filter(
+    (item) => item >= 0 && item <= 6,
+  );
+  const weekdayMode = lootBoxScheduleWeekdayMode(
+    rules.weekdayMode,
+    rawWeekdays,
+    rules.weekdaysOnly === true,
+  );
+
+  return {
+    timeWindowMode: lootBoxScheduleTimeWindowMode(
+      rules.timeWindowMode,
+      hours,
+      rules.quietHoursEnabled === true,
+    ),
+    weekdayMode,
+    weekdays: lootBoxScheduleWeekdays(weekdayMode, rawWeekdays),
+    hours,
+  };
+}
+
+function lootBoxScheduleTimeWindowMode(
+  value: unknown,
+  hours: string[],
+  quietHoursEnabled: boolean,
+): GuestPortalLootBoxTimeWindowMode {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+
+  if (
+    normalized === 'ANY' ||
+    normalized === 'QUIET_HOURS' ||
+    normalized === 'CUSTOM'
+  ) {
+    return normalized;
+  }
+
+  if (!hours.length && !quietHoursEnabled) {
+    return 'ANY';
+  }
+
+  return quietHoursEnabled ? 'QUIET_HOURS' : 'CUSTOM';
+}
+
+function lootBoxScheduleWeekdayMode(
+  value: unknown,
+  weekdays: number[],
+  weekdaysOnly: boolean,
+): GuestPortalLootBoxWeekdayMode {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+
+  if (
+    normalized === 'ANY' ||
+    normalized === 'WEEKDAYS' ||
+    normalized === 'WEEKENDS' ||
+    normalized === 'CUSTOM'
+  ) {
+    return normalized;
+  }
+
+  if (sameNumberSet(weekdays, [1, 2, 3, 4, 5])) {
+    return 'WEEKDAYS';
+  }
+
+  if (sameNumberSet(weekdays, [0, 6])) {
+    return 'WEEKENDS';
+  }
+
+  if (!weekdays.length || sameNumberSet(weekdays, [0, 1, 2, 3, 4, 5, 6])) {
+    return weekdaysOnly ? 'WEEKDAYS' : 'ANY';
+  }
+
+  return 'CUSTOM';
+}
+
+function lootBoxScheduleWeekdays(
+  mode: GuestPortalLootBoxWeekdayMode,
+  weekdays: number[],
+) {
+  if (mode === 'ANY') {
+    return [];
+  }
+
+  if (mode === 'WEEKDAYS') {
+    return [1, 2, 3, 4, 5];
+  }
+
+  if (mode === 'WEEKENDS') {
+    return [0, 6];
+  }
+
+  return uniqueSortedNumbers(weekdays);
+}
+
+function sameNumberSet(left: number[], right: number[]) {
+  const leftSorted = uniqueSortedNumbers(left);
+  const rightSorted = uniqueSortedNumbers(right);
+
+  return (
+    leftSorted.length === rightSorted.length &&
+    leftSorted.every((item, index) => item === rightSorted[index])
+  );
+}
+
+function uniqueSortedNumbers(value: number[]) {
+  return Array.from(new Set(value)).sort((left, right) => left - right);
 }
 
 function lootBoxCaseRarity(value: unknown): GuestPortalLootBoxCaseRarity {

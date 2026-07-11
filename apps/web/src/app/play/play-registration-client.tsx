@@ -263,10 +263,7 @@ export function PlayRegistrationClient({
     () => normalizeReferralCode(initialReferralCode),
     [initialReferralCode],
   );
-  const openClubSelectionAfterAuth = useCallback(() => {
-    router.replace("/game/clubs");
-  }, [router]);
-  const openActiveGameAfterAuth = useCallback(() => {
+  const openGameAfterAuth = useCallback(() => {
     router.replace("/game");
   }, [router]);
 
@@ -388,7 +385,7 @@ export function PlayRegistrationClient({
         }
 
         if (isGameAuth) {
-          openActiveGameAfterAuth();
+          openGameAfterAuth();
           return;
         }
 
@@ -424,7 +421,7 @@ export function PlayRegistrationClient({
     return () => {
       isActive = false;
     };
-  }, [isGameAuth, openActiveGameAfterAuth]);
+  }, [isGameAuth, openGameAfterAuth]);
 
   function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
@@ -488,7 +485,7 @@ export function PlayRegistrationClient({
           setLocalGameMatch(data.match ?? null);
           setTelegramAuth(null);
           setLangameMatch(null);
-          openClubSelectionAfterAuth();
+          openGameAfterAuth();
         }
 
         if (data.status === "EXPIRED" || data.status === "FAILED") {
@@ -522,7 +519,7 @@ export function PlayRegistrationClient({
       }
     };
   }, [
-    openClubSelectionAfterAuth,
+    openGameAfterAuth,
     portal,
     referralCode,
     selectedClub,
@@ -673,7 +670,7 @@ export function PlayRegistrationClient({
           setUserCallAuth(null);
           setLangameMatch(null);
           await checkLangameMatch();
-          openClubSelectionAfterAuth();
+          openGameAfterAuth();
         }
 
         if (data.status === "EXPIRED" || data.status === "FAILED") {
@@ -708,7 +705,7 @@ export function PlayRegistrationClient({
     };
   }, [
     checkLangameMatch,
-    openClubSelectionAfterAuth,
+    openGameAfterAuth,
     portal,
     referralCode,
     selectedClub,
@@ -1039,7 +1036,7 @@ export function PlayRegistrationClient({
       setLangameMatch(null);
       setMessage("Телефон подтвержден входящим звонком. Гостевой профиль готов.");
       await checkLangameMatch();
-      openClubSelectionAfterAuth();
+      openGameAfterAuth();
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1081,7 +1078,7 @@ export function PlayRegistrationClient({
       setLocalGameMatch(data.match ?? null);
       setMessage("Телефон подтвержден. Гостевой профиль готов.");
       await checkLangameMatch();
-      openClubSelectionAfterAuth();
+      openGameAfterAuth();
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1386,7 +1383,7 @@ export function PlayRegistrationClient({
                 ) : portal ? (
                     <VerifiedSummary
                       canCheckLangameMatch={canUsePhoneAuth}
-                      continueHref={isGameAuth ? "/game/clubs" : "/game"}
+                      continueHref="/game"
                       isCheckingLangame={isCheckingLangame}
                       langameMatch={langameMatch}
                       localGameMatch={localGameMatch}

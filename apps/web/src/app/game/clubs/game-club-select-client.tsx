@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -61,6 +62,7 @@ export function GameClubSelectClient({
   initialDirectory,
   loadError,
 }: GameClubSelectClientProps) {
+  const router = useRouter();
   const [directory] = useState(initialDirectory);
   const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
   const [sessionState, setSessionState] = useState<SessionState>("loading");
@@ -72,19 +74,10 @@ export function GameClubSelectClient({
   const [currentClubId, setCurrentClubId] = useState<string | null>(null);
   const [submittingClubId, setSubmittingClubId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const gameActionsRef = useRef<HTMLDivElement | null>(null);
 
   const showToast = useCallback((nextMessage: string) => {
     setToast(nextMessage);
     window.setTimeout(() => setToast(null), 2400);
-  }, []);
-  const scrollToGameActions = useCallback(() => {
-    window.setTimeout(() => {
-      gameActionsRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 80);
   }, []);
   const previewClubOnMap = useCallback(
     (club: GuestPortalGamificationClub) => {
@@ -205,7 +198,7 @@ export function GameClubSelectClient({
       setCurrentClubId(club.id);
       setSessionState("ready");
       showToast(data.message);
-      scrollToGameActions();
+      router.replace("/game");
     } catch (error) {
       setSelectedClubId(previousSelectedClubId ?? previousCurrentClubId);
       setCurrentClubId(previousCurrentClubId);
@@ -408,7 +401,7 @@ export function GameClubSelectClient({
                   : "Ожидает вход"}
               </strong>
             </SideBlock>
-            <div className="lp-club-actions" ref={gameActionsRef}>
+            <div className="lp-club-actions">
               <Link className="lp-club-primary" href="/game">
                 Открыть игру
                 <ArrowRightIcon />

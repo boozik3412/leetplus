@@ -15277,7 +15277,6 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
     .map((item, index) => {
       const row = asRecord(item);
       const level = numeric(String(row.level ?? ""), index + 1);
-      const xp = numeric(String(row.xp ?? ""), Math.max(0, index * 250));
       const freeReward = recordString(row, "freeReward");
       const premiumReward = recordString(row, "premiumReward");
       const activationRules = asRecord(row.activationRules);
@@ -15292,9 +15291,9 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
       return {
         id: recordString(row, "id") ?? `level-${level}-${index}`,
         level: String(level),
-        xp: String(xp),
+        xp: "0",
         title,
-        condition: recordString(row, "condition") ?? `Наберите ${xp} XP в сезоне.`,
+        condition: recordString(row, "condition") ?? `Выполните условие шага ${level}.`,
         description: recordString(row, "description") ?? "",
         freeReward: freeReward ?? "",
         premiumReward: premiumReward ?? "",

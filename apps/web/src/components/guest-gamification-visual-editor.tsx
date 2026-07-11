@@ -696,7 +696,7 @@ function VisualPreview({
                       {level.level}
                     </span>
                     <p className="mt-3 text-xs text-[#a8b9ba]">
-                      {level.reward || `${payload.battlePass.xpPerLevel * level.level} XP`}
+                      {level.reward || `Шаг ${level.level}`}
                     </p>
                   </div>
                 ))}
@@ -890,7 +890,7 @@ function BattlePassInspector({
       <InspectorTitle title="Battle Pass" />
       <TemplatePicker
         title="Шаблон Battle Pass"
-        description="Выберите сезон из расширенных настроек, чтобы применить уровни, XP и награды."
+        description="Выберите сезон из расширенных настроек, чтобы применить шаги и награды."
         items={seasonTemplates}
         emptyLabel="Готовых сезонов для выбранного клуба пока нет."
         getLabel={(season) => `${season.name} · ${statusLabel(season.status)}`}
@@ -905,10 +905,10 @@ function BattlePassInspector({
       />
       <TemplatePicker
         title="Шаги Battle Pass"
-        description="Можно подтянуть только награды уровней, не меняя название и статус текущего сезона."
+        description="Можно подтянуть шаги и награды, не меняя название и статус текущего сезона."
         items={seasonTemplates}
         emptyLabel="Нет сезонов с готовыми шагами."
-        getLabel={(season) => `${season.name} · уровни`}
+        getLabel={(season) => `${season.name} · шаги`}
         disabled={disabled}
         actionLabel="Подтянуть шаги"
         onApply={(season) => {
@@ -919,7 +919,6 @@ function BattlePassInspector({
             battlePass: {
               ...current.battlePass,
               levelCount: template.levelCount,
-              xpPerLevel: template.xpPerLevel,
               mainPrize: template.mainPrize,
               levelRewards: template.levelRewards,
             },
@@ -939,7 +938,7 @@ function BattlePassInspector({
       />
       <div className="grid gap-3 sm:grid-cols-2">
         <NumberField
-          label="Уровней"
+          label="Шагов"
           value={battlePass.levelCount}
           min={1}
           max={50}
@@ -954,18 +953,6 @@ function BattlePassInspector({
                   (item) => item.level <= levelCount,
                 ),
               },
-            }))
-          }
-        />
-        <NumberField
-          label="XP на уровень"
-          value={battlePass.xpPerLevel}
-          min={1}
-          disabled={disabled}
-          onChange={(xpPerLevel) =>
-            onChange((current) => ({
-              ...current,
-              battlePass: { ...current.battlePass, xpPerLevel },
             }))
           }
         />
@@ -2605,9 +2592,6 @@ function visualBattlePassFromSeasonTemplate(
       reward: templateString(item.freeReward ?? item.premiumReward, ""),
     }))
     .filter((item) => item.reward.trim());
-  const firstXp = templateNumber(levels[0]?.xp, 0);
-  const secondXp = templateNumber(levels[1]?.xp, firstXp + 250);
-  const xpPerLevel = Math.max(1, secondXp - firstXp);
 
   return {
     id: null,
@@ -2615,7 +2599,7 @@ function visualBattlePassFromSeasonTemplate(
     title: season.name,
     status: season.status,
     levelCount: Math.max(levels.length, levelRewards.length, 1),
-    xpPerLevel,
+    xpPerLevel: 0,
     mainPrize: levelRewards.at(-1)?.reward ?? null,
     levelRewards,
   };

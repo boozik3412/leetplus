@@ -2257,7 +2257,7 @@ function UserCallAuthPanel({
             className="lp-game-auth-call-action lp-game-auth-channel-primary flex min-h-11 w-full items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
             href={userCallAuth.callHref}
           >
-            Позвонить бесплатно: {userCallAuth.callNumber}
+            Открыть номер для входа: {userCallAuth.callNumber}
           </a>
         ) : (
           <button
@@ -2320,13 +2320,16 @@ function UserCallInstructionModal({
   const title = freeCall
     ? "Звони на бесплатный номер"
     : "Звони на номер для входа";
+  const description = freeCall
+    ? "Для авторизации нужно совершить звонок на бесплатный номер с указанного телефона. После проверки звонок будет сброшен. Никаких цифр вводить не нужно, вход будет произведен автоматически."
+    : "Для авторизации нужно совершить звонок на указанный номер с выбранного телефона. После проверки звонок будет сброшен. Никаких цифр вводить не нужно, вход будет произведен автоматически.";
 
   return (
     <div
       aria-describedby="user-call-auth-description"
       aria-labelledby="user-call-auth-title"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/78 px-4 py-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-6 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
     >
@@ -2357,9 +2360,7 @@ function UserCallInstructionModal({
           className="mt-9 max-w-[480px] text-base font-bold leading-5 text-white"
           id="user-call-auth-description"
         >
-          Для авторизации нужно позвонить на бесплатный номер с указанного
-          номера телефона. После проверки звонок будет сброшен. Никаких цифр
-          вводить не нужно, вход будет произведен автоматически.
+          {description}
         </p>
 
         <dl className="mt-7 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-3 text-base">
@@ -2378,7 +2379,7 @@ function UserCallInstructionModal({
           href={callHref}
           onClick={onClose}
         >
-          Позвонить
+          Позвонить сейчас
         </a>
       </div>
     </div>

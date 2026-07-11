@@ -377,6 +377,16 @@ type QuestCompletionDialog = {
   statusLabel: string;
   receivedAt: string;
 };
+type BattlePassLevelCompletionDialog = {
+  seasonId: string;
+  seasonName: string;
+  completedLevel: number;
+  completedTitle: string;
+  rewardLabel: string;
+  nextLevel: number | null;
+  nextTitle: string | null;
+  nextCondition: string | null;
+};
 type UnavailableLootboxMessage = string | null;
 type QuestBoardStyle = CSSProperties &
   Partial<
@@ -664,6 +674,10 @@ function ReadyGameView({
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
   const [questCompletionDialog, setQuestCompletionDialog] =
     useState<QuestCompletionDialog | null>(null);
+  const [queuedQuestCompletionDialog, setQueuedQuestCompletionDialog] =
+    useState<QuestCompletionDialog | null>(null);
+  const [battlePassCompletionDialog, setBattlePassCompletionDialog] =
+    useState<BattlePassLevelCompletionDialog | null>(null);
   const homeBanners = buildHomeBanners(
     summary,
     primaryAction,
@@ -837,11 +851,30 @@ function ReadyGameView({
 
   function applySummaryWithQuestDialog(nextSummary: GuestPortalGameSummary) {
     const completion = findNewQuestCompletion(summary, nextSummary);
+    const battlePassCompletion = findNewBattlePassLevelCompletion(
+      summary,
+      nextSummary,
+    );
 
     onSummaryChange(nextSummary);
 
+    if (battlePassCompletion) {
+      setBattlePassCompletionDialog(battlePassCompletion);
+      setQueuedQuestCompletionDialog(completion);
+      return;
+    }
+
     if (completion) {
       setQuestCompletionDialog(completion);
+    }
+  }
+
+  function closeBattlePassCompletionDialog() {
+    setBattlePassCompletionDialog(null);
+
+    if (queuedQuestCompletionDialog) {
+      setQuestCompletionDialog(queuedQuestCompletionDialog);
+      setQueuedQuestCompletionDialog(null);
     }
   }
 
@@ -1548,7 +1581,14 @@ function ReadyGameView({
         />
       ) : null}
 
-      {questCompletionDialog ? (
+      {battlePassCompletionDialog ? (
+        <BattlePassLevelCompletionModal
+          completion={battlePassCompletionDialog}
+          onClose={closeBattlePassCompletionDialog}
+        />
+      ) : null}
+
+      {questCompletionDialog && !battlePassCompletionDialog ? (
         <QuestCompletionModal
           completion={questCompletionDialog}
           onClose={() => setQuestCompletionDialog(null)}
@@ -2569,6 +2609,99 @@ function HomeBattlePass({
         />
       ) : null}
     </section>
+  );
+}
+
+function BattlePassLevelCompletionModal({
+  completion,
+  onClose,
+}: {
+  completion: BattlePassLevelCompletionDialog;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const hasNextLevel = completion.nextLevel !== null;
+
+  return (
+    <div
+      className="lp-quest-complete-overlay lp-battlepass-detail-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="battlePassLevelCompleteTitle"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) {
+          onClose();
+        }
+      }}
+    >
+      <div className="lp-quest-complete-dialog lp-battlepass-detail-dialog lp-battlepass-level-complete-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть поздравление"
+          onClick={onClose}
+        >
+          ×
+        </button>
+
+        <span className="lp-quest-complete-kicker">Уровень пройден</span>
+        <span className="lp-battlepass-level-complete-mark" aria-hidden="true">
+          {formatNumber(completion.completedLevel)}
+        </span>
+        <h3 id="battlePassLevelCompleteTitle">Поздравляем!</h3>
+        <p className="lp-battlepass-level-complete-lead">
+          Вы прошли уровень {formatNumber(completion.completedLevel)} баттлпасса
+          {completion.completedTitle
+            ? ` — «${completion.completedTitle}»`
+            : ""}
+          .
+        </p>
+
+        <div className="lp-battlepass-detail-lines">
+          <div className="lp-battlepass-detail-line is-reward">
+            <span>Награда уровня</span>
+            <strong>{completion.rewardLabel}</strong>
+          </div>
+
+          {hasNextLevel ? (
+            <div className="lp-battlepass-detail-line is-current">
+              <span>Следующий уровень</span>
+              <strong>
+                {formatNumber(completion.nextLevel ?? 0)}. {completion.nextTitle}
+              </strong>
+              <p>
+                Для прохождения следующего уровня вам необходимо: {completion.nextCondition}
+              </p>
+            </div>
+          ) : (
+            <div className="lp-battlepass-detail-line is-current">
+              <span>Сезон завершен</span>
+              <strong>Вы прошли весь баттлпасс «{completion.seasonName}».</strong>
+              <p>Все доступные уровни этого сезона выполнены.</p>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          className="lp-quest-complete-action"
+          onClick={onClose}
+        >
+          {hasNextLevel ? "К следующему уровню" : "Отлично"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -4504,6 +4637,65 @@ function findNewQuestCompletion(
   }
 
   return null;
+}
+
+function findNewBattlePassLevelCompletion(
+  previousSummary: GuestPortalGameSummary,
+  nextSummary: GuestPortalGameSummary,
+): BattlePassLevelCompletionDialog | null {
+  const previousSeason = previousSummary.battlePass.active;
+  const nextSeason = nextSummary.battlePass.active;
+
+  if (!previousSeason || !nextSeason || previousSeason.id !== nextSeason.id) {
+    return null;
+  }
+
+  const previouslyReachedLevels = new Set(
+    previousSeason.levels
+      .filter((level) => level.reached)
+      .map((level) => level.level),
+  );
+  const orderedLevels = [...nextSeason.levels].sort(
+    (left, right) => left.level - right.level,
+  );
+  const completedLevel = orderedLevels
+    .filter(
+      (level) => level.reached && !previouslyReachedLevels.has(level.level),
+    )
+    .at(-1);
+
+  if (!completedLevel) {
+    return null;
+  }
+
+  const nextLevel =
+    orderedLevels.find(
+      (level) => level.level > completedLevel.level && !level.reached,
+    ) ?? null;
+
+  return {
+    seasonId: nextSeason.id,
+    seasonName: nextSeason.name,
+    completedLevel: completedLevel.level,
+    completedTitle: completedLevel.title?.trim() ?? "",
+    rewardLabel:
+      completedLevel.freeReward?.trim() ||
+      completedLevel.premiumReward?.trim() ||
+      completedLevel.title?.trim() ||
+      "Награда уровня",
+    nextLevel: nextLevel?.level ?? null,
+    nextTitle: nextLevel
+      ? nextLevel.title?.trim() || `Уровень ${nextLevel.level}`
+      : null,
+    nextCondition: nextLevel
+      ? stripBattlePassDetailPrefix(
+          nextLevel.condition?.trim() ||
+            nextLevel.description?.trim() ||
+            "продолжить участие в активностях клуба",
+          "Условие",
+        )
+      : null,
+  };
 }
 
 function isMissionCompletedForDialog(mission: GameMission | GameMissionHistoryItem) {
@@ -8977,6 +9169,47 @@ const clubHomeCss = `
   border-color: rgba(131, 228, 236, 0.18);
   color: var(--cyan);
   background: rgba(131, 228, 236, 0.045);
+}
+
+.lp-battlepass-level-complete-dialog {
+  width: min(520px, 100%);
+  justify-items: start;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(131, 228, 236, 0.18), transparent 30%),
+    linear-gradient(145deg, rgba(131, 228, 236, 0.08), transparent 48%),
+    rgba(5, 12, 14, 0.99);
+}
+
+.lp-battlepass-level-complete-mark {
+  display: grid;
+  place-items: center;
+  width: 66px;
+  height: 66px;
+  border: 1px solid rgba(131, 228, 236, 0.54);
+  border-radius: 50%;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+  box-shadow:
+    0 0 0 7px rgba(131, 228, 236, 0.035),
+    0 0 34px rgba(131, 228, 236, 0.18);
+  font-size: 26px;
+  font-weight: 900;
+}
+
+.lp-battlepass-level-complete-lead {
+  max-width: 46ch;
+  margin: -3px 0 2px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.lp-battlepass-level-complete-dialog .lp-battlepass-detail-lines {
+  width: 100%;
+}
+
+.lp-battlepass-level-complete-dialog .lp-quest-complete-action {
+  width: 100%;
 }
 
 .lp-battlepass-detail-season {

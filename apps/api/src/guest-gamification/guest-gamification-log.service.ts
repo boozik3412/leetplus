@@ -990,6 +990,8 @@ export class GuestGamificationLogService {
           periodTo: null,
           periodRules: rule.periodRules,
           storeIds: guestGameStringArray(rule.storeIds),
+          progressTarget: null,
+          progressUnit: null,
         })),
       ...missions
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -1008,6 +1010,8 @@ export class GuestGamificationLogService {
           periodTo: rule.periodTo,
           periodRules: rule.conditions,
           storeIds: guestGameStringArray(rule.storeIds),
+          progressTarget: rule.progressTarget,
+          progressUnit: rule.progressUnit,
         })),
       ...seasons
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -1023,6 +1027,8 @@ export class GuestGamificationLogService {
           periodTo: rule.periodTo,
           periodRules: null,
           storeIds: guestGameStringArray(rule.storeIds),
+          progressTarget: null,
+          progressUnit: null,
         })),
     ].slice(0, options.limit);
 
@@ -1140,6 +1146,7 @@ export class GuestGamificationLogService {
           sourceFreshness,
           sourceFactKind: pairedShadowDecision?.sourceFactKind ?? null,
           sourceConfidence: shadowSourceFact?.confidence ?? null,
+          progress: ledgerEvaluation.progress,
           facts: matchingFacts.slice(0, 5).map((fact) => ({
             id: fact.id,
             factType: fact.factType,
@@ -1147,6 +1154,9 @@ export class GuestGamificationLogService {
             happenedAt: fact.happenedAt?.toISOString() ?? null,
             tariffName: fact.tariffName,
             tariffType: fact.tariffType,
+            amount: fact.amount?.toString() ?? null,
+            durationMinutes: fact.durationMinutes,
+            evidence: fact.evidence,
           })),
         },
         verdict: comparison.verdict,

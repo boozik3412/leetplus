@@ -13668,6 +13668,16 @@ function missionProgressUnitPatch(
   form: MissionForm,
   progressUnit: string,
 ): Partial<MissionForm> {
+  if (progressUnit === "minute") {
+    return {
+      progressUnit,
+      triggerKind: "PLAY_HOUR",
+      missionType: "PLAY_HOUR",
+      metricAggregation: "duration",
+      metricEventTypes: appendCsvTokens(form.metricEventTypes, ["PLAY_HOUR"]),
+    };
+  }
+
   if (progressUnit === "purchase") {
     return {
       progressUnit,

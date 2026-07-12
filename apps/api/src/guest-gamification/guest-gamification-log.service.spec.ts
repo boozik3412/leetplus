@@ -43,6 +43,8 @@ describe('evaluateLedgerRule', () => {
       hours: [],
     },
     storeIds: ['store-1'],
+    progressTarget: null,
+    progressUnit: null,
   };
 
   const fact = (happenedAt: string) => ({
@@ -54,6 +56,9 @@ describe('evaluateLedgerRule', () => {
     storeId: 'store-1',
     tariffName: null,
     tariffType: 'package_or_subscription',
+    amount: null,
+    durationMinutes: null,
+    evidence: null,
     store: { timeZone: 'Asia/Yekaterinburg' },
   });
 

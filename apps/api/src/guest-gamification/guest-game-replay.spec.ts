@@ -22,6 +22,8 @@ function rule(
     periodTo: null,
     periodRules: null,
     storeIds: [STORE_ID],
+    progressTarget: null,
+    progressUnit: null,
     ...overrides,
   };
 }
@@ -40,6 +42,9 @@ function fact(
     storeId: STORE_ID,
     tariffName: null,
     tariffType: null,
+    amount: null,
+    durationMinutes: null,
+    evidence: null,
     store: { timeZone: TIME_ZONE },
     ...overrides,
   };
@@ -149,7 +154,138 @@ describe('Игровой журнал: обезличенный replay-набо�
     expect(result.blockers.join(' ')).toContain('другому');
   });
 
-  it.todo(
-    'суммирует игровое время нужного типа только после activatedAt и сравнивает с порогом правила',
-  );
+  it('sums only hourly play time after activation and compares it with the target', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        id: 'play-120-hourly-minutes',
+        title: 'Play 120 minutes on hourly billing',
+        triggerKind: 'PLAY_HOUR',
+        sessionType: 'regular_session',
+        activatedAt: new Date('2026-07-10T10:00:00.000Z'),
+        progressTarget: 120,
+        progressUnit: 'minute',
+        periodRules: {
+          metric: { aggregation: 'duration', target: 120 },
+        },
+      }),
+      [
+        fact('HOURLY_PLAY_TIME_ACCUMULATED', '2026-07-10T09:00:00.000Z', {
+          durationMinutes: 90,
+        }),
+        fact('HOURLY_PLAY_TIME_ACCUMULATED', '2026-07-10T11:00:00.000Z', {
+          durationMinutes: 70,
+        }),
+        fact('HOURLY_PLAY_TIME_ACCUMULATED', '2026-07-10T13:00:00.000Z', {
+          durationMinutes: 50,
+        }),
+        fact(
+          'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+          '2026-07-10T12:00:00.000Z',
+          { durationMinutes: 500 },
+        ),
+      ],
+      STORE_ID,
+      new Date('2026-07-10T14:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('MATCHED');
+    expect(result.progress).toMatchObject({
+      aggregation: 'duration',
+      current: 120,
+      target: 120,
+      unit: 'minute',
+      matchedFacts: 2,
+    });
+  });
+
+  it('blocks accumulated play time while the target is not reached', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'PLAY_HOUR',
+        sessionType: 'packet_hours',
+        progressTarget: 120,
+        progressUnit: 'minute',
+        periodRules: { metric: { aggregation: 'duration', target: 120 } },
+      }),
+      [
+        fact(
+          'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+          '2026-07-11T12:00:00.000Z',
+          { durationMinutes: 75 },
+        ),
+      ],
+      STORE_ID,
+      new Date('2026-07-11T13:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('BLOCKED');
+    expect(result.progress).toMatchObject({ current: 75, target: 120 });
+  });
+
+  it('matches selected products and aggregates their spend', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'PRODUCT_PURCHASE',
+        sessionType: null,
+        progressTarget: 500,
+        progressUnit: 'rub',
+        periodRules: {
+          metric: {
+            aggregation: 'sum',
+            target: 500,
+            externalProductIds: ['langame-product-1'],
+          },
+        },
+      }),
+      [
+        fact('PRODUCT_PURCHASED', '2026-07-10T11:11:00.000Z', {
+          amount: 200,
+          evidence: { productId: 'langame-product-1', productName: 'Cola' },
+        }),
+        fact('PRODUCT_PURCHASED', '2026-07-10T12:11:00.000Z', {
+          amount: 300,
+          evidence: { productId: 'langame-product-1', productName: 'Cola' },
+        }),
+        fact('PRODUCT_PURCHASED', '2026-07-10T13:11:00.000Z', {
+          amount: 1000,
+          evidence: { productId: 'another-product', productName: 'Pizza' },
+        }),
+      ],
+      STORE_ID,
+      new Date('2026-07-10T14:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('MATCHED');
+    expect(result.progress).toMatchObject({ current: 500, target: 500 });
+    expect(result.facts).toHaveLength(2);
+  });
+
+  it('reports insufficient data when a configured product category is absent from facts', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'PRODUCT_PURCHASE',
+        sessionType: null,
+        progressTarget: 1,
+        progressUnit: 'purchase',
+        periodRules: {
+          metric: { categoryIds: ['drinks'], target: 1 },
+        },
+      }),
+      [
+        fact('PRODUCT_PURCHASED', '2026-07-10T11:11:00.000Z', {
+          amount: 200,
+          evidence: { productId: 'langame-product-1', productName: 'Cola' },
+        }),
+      ],
+      STORE_ID,
+      new Date('2026-07-10T14:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('INSUFFICIENT_DATA');
+    expect(result.blockers.join(' ')).toContain('categoryIds');
+  });
 });

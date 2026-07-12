@@ -9125,6 +9125,8 @@ export class GuestGamificationService {
           periodTo: null,
           periodRules: rule.periodRules,
           storeIds: guestGameStringArray(rule.storeIds),
+          progressTarget: null,
+          progressUnit: null,
         })),
         ...missions.map((rule) => ({
           type: 'MISSION',
@@ -9142,6 +9144,8 @@ export class GuestGamificationService {
           periodTo: rule.periodTo,
           periodRules: rule.conditions,
           storeIds: guestGameStringArray(rule.storeIds),
+          progressTarget: rule.progressTarget,
+          progressUnit: rule.progressUnit,
         })),
         ...seasons.map((rule) => ({
           type: 'BATTLE_PASS',
@@ -9156,6 +9160,8 @@ export class GuestGamificationService {
           periodTo: rule.periodTo,
           periodRules: rule.xpRules,
           storeIds: guestGameStringArray(rule.storeIds),
+          progressTarget: null,
+          progressUnit: null,
         })),
       ];
 
@@ -9196,6 +9202,7 @@ export class GuestGamificationService {
             rule,
             facts,
             dryRun.store?.id ?? null,
+            evaluatedTo,
           );
 
           return {
@@ -9206,7 +9213,7 @@ export class GuestGamificationService {
             eventId: nullableId(options.eventId),
             evaluationRunId: options.evaluationRunId,
             evaluationMode: 'SHADOW',
-            evaluatorVersion: 'ledger-v1',
+            evaluatorVersion: 'ledger-v2',
             ruleType: rule.type,
             ruleId: rule.id,
             ruleName: rule.title,
@@ -9234,7 +9241,11 @@ export class GuestGamificationService {
                 storeId: fact.storeId,
                 tariffName: fact.tariffName,
                 tariffType: fact.tariffType,
+                amount: fact.amount?.toString() ?? null,
+                durationMinutes: fact.durationMinutes,
+                evidence: fact.evidence,
               })),
+              progress: evaluation.progress,
             },
             evaluatedAt,
           };

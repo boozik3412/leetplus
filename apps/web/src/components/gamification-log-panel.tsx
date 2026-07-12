@@ -127,6 +127,13 @@ type ComparisonRow = {
     sourceFreshness: string;
     sourceFactKind: string | null;
     sourceConfidence: string | null;
+    progress: {
+      aggregation: "count" | "sum" | "duration" | "distinctDays" | "exists";
+      current: number;
+      target: number;
+      unit: string | null;
+      matchedFacts: number;
+    } | null;
     facts: Array<{
       id: string;
       factType: string;
@@ -134,6 +141,9 @@ type ComparisonRow = {
       happenedAt: string | null;
       tariffName: string | null;
       tariffType: string | null;
+      amount: string | null;
+      durationMinutes: number | null;
+      evidence: unknown;
     }>;
   };
   verdict: string;
@@ -1359,6 +1369,17 @@ function ComparisonList({
               <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
                 {row.ledger.reason}
               </p>
+              {row.ledger.progress ? (
+                <div className="mt-2 rounded border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900 dark:border-cyan-900 dark:bg-cyan-950/40 dark:text-cyan-100">
+                  Прогресс: {row.ledger.progress.current} /{" "}
+                  {row.ledger.progress.target}
+                  {row.ledger.progress.unit
+                    ? ` ${row.ledger.progress.unit}`
+                    : ""}
+                  {" · "}
+                  {row.ledger.progress.matchedFacts} фактов
+                </div>
+              ) : null}
               <details className="mt-2">
                 <summary className="cursor-pointer text-xs font-semibold text-zinc-500">
                   Факты-источники: {row.ledger.evidenceCount}

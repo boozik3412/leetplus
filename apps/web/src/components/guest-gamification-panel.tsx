@@ -10852,6 +10852,8 @@ function SeasonBusinessRules({
         только после выполнения первого, и так далее.
       </div>
 
+      <BattlePassRewardSummary form={form} lootBoxes={lootBoxes} />
+
       {mainRewardStep ? (
         <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 ring-1 ring-amber-100 dark:border-amber-500/35 dark:bg-amber-950/20 dark:ring-amber-400/10">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -10984,6 +10986,115 @@ function SeasonBusinessRules({
         ))}
       </div>
     </BusinessRuleSection>
+  );
+}
+
+type BattlePassRewardTrackSummary = {
+  rewardCount: number;
+  lootBoxCount: number;
+  linkedLootBoxCount: number;
+  minBonus: number;
+  expectedBonus: number;
+  maxBonus: number;
+  fixedRewards: string[];
+  unresolved: string[];
+};
+
+function BattlePassRewardSummary({
+  form,
+  lootBoxes,
+}: {
+  form: SeasonForm;
+  lootBoxes: GuestGameLootBox[];
+}) {
+  const free = battlePassRewardTrackSummary(form, "free", lootBoxes);
+  const premium = battlePassRewardTrackSummary(form, "premium", lootBoxes);
+  const tracks = [
+    { key: "free", label: "Free-дорожка", summary: free },
+    ...(form.premiumEnabled
+      ? [{ key: "premium", label: "Premium-дорожка", summary: premium }]
+      : []),
+  ];
+
+  return (
+    <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/30 dark:bg-emerald-950/15">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-200">
+          Итог за полное прохождение
+        </p>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          Диапазон учитывает суммы бонусов и все исходы привязанных
+          лутбоксов. Остальные призы перечислены отдельно и не переводятся в
+          бонусы или рубли.
+        </p>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {tracks.map(({ key, label, summary }) => (
+          <div
+            key={key}
+            className="rounded-lg border border-emerald-200/80 bg-white/80 p-3 dark:border-emerald-500/20 dark:bg-zinc-950/55"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+                {label}
+              </p>
+              <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-bold uppercase text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                {summary.rewardCount} наград
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <BattlePassRewardMetric
+                label="Минимум"
+                value={`${formatRewardNumber(summary.minBonus)} бонусов`}
+              />
+              <BattlePassRewardMetric
+                label="Ожидаемо"
+                value={`${formatRewardNumber(summary.expectedBonus)} бонусов`}
+              />
+              <BattlePassRewardMetric
+                label="Максимум"
+                value={`${formatRewardNumber(summary.maxBonus)} бонусов`}
+              />
+            </div>
+            {summary.lootBoxCount ? (
+              <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-300">
+                Лутбоксы: {summary.linkedLootBoxCount} из {summary.lootBoxCount}{" "}
+                привязаны к таблицам призов.
+              </p>
+            ) : null}
+            {summary.fixedRewards.length ? (
+              <p className="mt-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                Другие награды: {summary.fixedRewards.join(", ")}.
+              </p>
+            ) : null}
+            {summary.unresolved.length ? (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/25 dark:text-amber-100">
+                Нельзя посчитать: {summary.unresolved.join("; ")}.
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BattlePassRewardMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-md bg-zinc-100 px-2 py-2 dark:bg-zinc-900">
+      <p className="text-[10px] font-bold uppercase text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 break-words text-xs font-semibold text-zinc-950 dark:text-white">
+        {value}
+      </p>
+    </div>
   );
 }
 
@@ -11192,7 +11303,11 @@ function SeasonStepRewardFields({
   const legacyKey = `${prefix}Reward` as const;
   const rewardType =
     step[typeKey] ?? (step[legacyKey]?.trim() ? "ADMIN_OTHER" : "");
-  const rewardLootBoxes = lootBoxes.filter(lootBoxCanBeRewardTemplate);
+  const currentLootBoxId = step[lootBoxIdKey] ?? "";
+  const rewardLootBoxes = lootBoxes.filter(
+    (lootBox) =>
+      lootBoxCanBeRewardTemplate(lootBox) || lootBox.id === currentLootBoxId,
+  );
 
   const patchReward = (patch: Partial<SeasonLevelStepForm>) => {
     const next = { ...step, ...patch };
@@ -11299,7 +11414,7 @@ function SeasonStepRewardFields({
       ) : null}
       {rewardType === "LOOT_BOX" ? (
         <div className="space-y-3">
-          <Field label="Подарочный лутбокс">
+          <Field label="Лутбокс для награды">
             <select
               className={fieldClass}
               value={step[lootBoxIdKey] ?? ""}
@@ -11320,7 +11435,7 @@ function SeasonStepRewardFields({
                 } as Partial<SeasonLevelStepForm>);
               }}
             >
-              <option value="">Создать вручную в описании награды</option>
+              <option value="">Выберите конкретный лутбокс</option>
               {rewardLootBoxes.map((lootBox) => (
                 <option key={lootBox.id} value={lootBox.id}>
                   {lootBox.name} · {lootBoxUsageKindLabels[lootBox.usageKind]}
@@ -11328,8 +11443,9 @@ function SeasonStepRewardFields({
               ))}
             </select>
             <OptionHelp>
-              В списке только лутбоксы с назначением «Подарочный» или
-              «Витрина + подарок». Витринные кейсы сюда не попадают.
+              Можно использовать активный витринный или подарочный лутбокс.
+              Его таблица призов будет участвовать в расчете минимальной,
+              ожидаемой и максимальной награды Battle Pass.
             </OptionHelp>
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -15272,6 +15388,182 @@ function seasonStepRewardLabel(
   return seasonStepRewardDefinition(step, track)?.label ?? "";
 }
 
+function battlePassRewardTrackSummary(
+  form: SeasonForm,
+  track: "free" | "premium",
+  lootBoxes: GuestGameLootBox[],
+): BattlePassRewardTrackSummary {
+  const lootBoxesById = new Map(lootBoxes.map((lootBox) => [lootBox.id, lootBox]));
+  const summary: BattlePassRewardTrackSummary = {
+    rewardCount: 0,
+    lootBoxCount: 0,
+    linkedLootBoxCount: 0,
+    minBonus: 0,
+    expectedBonus: 0,
+    maxBonus: 0,
+    fixedRewards: [],
+    unresolved: [],
+  };
+
+  for (const step of form.levelSteps) {
+    const definition = seasonStepRewardDefinition(step, track);
+
+    if (!definition) {
+      continue;
+    }
+
+    summary.rewardCount += 1;
+
+    if (definition.type === "BONUS_BALANCE") {
+      const amount = definition.amount ?? bonusAmountFromRewardLabel(definition.label);
+
+      if (amount == null) {
+        summary.unresolved.push(`${definition.label}: не указана сумма бонусов`);
+        continue;
+      }
+
+      summary.minBonus += amount;
+      summary.expectedBonus += amount;
+      summary.maxBonus += amount;
+      continue;
+    }
+
+    if (definition.type !== "LOOT_BOX") {
+      summary.fixedRewards.push(definition.label);
+      continue;
+    }
+
+    summary.lootBoxCount += 1;
+    const rewardLootBox =
+      "lootBox" in definition ? definition.lootBox : undefined;
+    const linkedLootBoxId = rewardLootBox?.id ?? null;
+    const linkedLootBox = linkedLootBoxId
+      ? lootBoxesById.get(linkedLootBoxId)
+      : null;
+
+    if (!linkedLootBox) {
+      summary.unresolved.push(`${definition.label}: не выбран конкретный лутбокс`);
+      continue;
+    }
+
+    const prizes = lootBoxPrizesToForm(linkedLootBox.probabilityRules, {
+      rewardType: linkedLootBox.rewardType,
+      rewardAmount: String(linkedLootBox.rewardAmount ?? 0),
+      rewardLabel: linkedLootBox.rewardLabel ?? linkedLootBox.name,
+    }).filter((prize) => numeric(prize.chancePercent, 0) > 0);
+    const totalWeight = prizes.reduce(
+      (total, prize) => total + numeric(prize.chancePercent, 0),
+      0,
+    );
+
+    if (!prizes.length || totalWeight <= 0) {
+      summary.unresolved.push(`${definition.label}: нет корректной таблицы призов`);
+      continue;
+    }
+
+    const outcomes = prizes.map((prize) => {
+      if (!battlePassBonusRewardType(prize.rewardType)) {
+        return { bonusAmount: 0, weight: numeric(prize.chancePercent, 0) };
+      }
+
+      const amount = optionalNumber(prize.rewardAmount);
+      return {
+        bonusAmount: amount ?? 0,
+        weight: numeric(prize.chancePercent, 0),
+        missingAmount: amount == null,
+      };
+    });
+
+    if (outcomes.some((outcome) => outcome.missingAmount)) {
+      summary.unresolved.push(`${definition.label}: у приза не указана сумма бонусов`);
+      continue;
+    }
+
+    summary.linkedLootBoxCount += 1;
+    summary.minBonus += Math.min(...outcomes.map((outcome) => outcome.bonusAmount));
+    summary.maxBonus += Math.max(...outcomes.map((outcome) => outcome.bonusAmount));
+    summary.expectedBonus += outcomes.reduce(
+      (total, outcome) =>
+        total + outcome.bonusAmount * (outcome.weight / totalWeight),
+      0,
+    );
+  }
+
+  summary.fixedRewards = [...new Set(summary.fixedRewards)];
+  summary.unresolved = [...new Set(summary.unresolved)];
+
+  return summary;
+}
+
+function battlePassBonusRewardType(value: string | null | undefined) {
+  return [
+    "BONUS",
+    "BONUS_BALANCE",
+    "BONUS_POINTS",
+    "CASHBACK",
+    "CASH_BALANCE",
+    "LANGAME_BALANCE",
+    "LOYALTY_BONUS",
+  ].includes((value ?? "").trim().toUpperCase());
+}
+
+function bonusAmountFromRewardLabel(value: string | null | undefined) {
+  const match = (value ?? "").match(/(\d[\d\s]*(?:[.,]\d+)?)\s*(?:бонус|балл)/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1].replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function rewardLabelLooksLikeLootBox(value: string | null | undefined) {
+  return /(?:лутбокс|кейс|контейнер)/i.test(value ?? "");
+}
+
+function legacySeasonRewardForm(
+  rewardLabel: string | null,
+  details: Record<string, unknown>,
+) {
+  let type =
+    recordString(details, "type") ?? (rewardLabel?.trim() ? "ADMIN_OTHER" : "");
+  let amount = numberRule(details, "amount", "");
+
+  if (!type || type === "ADMIN_OTHER") {
+    const inferredBonusAmount = bonusAmountFromRewardLabel(rewardLabel);
+
+    if (inferredBonusAmount != null) {
+      type = "BONUS_BALANCE";
+      amount = String(inferredBonusAmount);
+    } else if (rewardLabelLooksLikeLootBox(rewardLabel)) {
+      type = "LOOT_BOX";
+    }
+  }
+
+  return {
+    type,
+    amount,
+    label: recordString(details, "label") ?? rewardLabel ?? "",
+    code: recordString(details, "code") ?? "",
+    lootBoxId:
+      recordString(asRecord(details.lootBox), "id") ??
+      recordString(details, "lootBoxId") ??
+      "",
+    lootBoxName:
+      recordString(asRecord(details.lootBox), "name") ??
+      (type === "LOOT_BOX" ? rewardLabel ?? "" : ""),
+    lootBoxRarity: lootBoxCaseRarity(asRecord(details.lootBox)) ?? "common",
+    delivery: recordString(details, "delivery") ?? "AUTO",
+  };
+}
+
+function formatRewardNumber(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
   const steps = arrayRule(value)
     .map((item, index) => {
@@ -15282,6 +15574,14 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
       const activationRules = asRecord(row.activationRules);
       const freeRewardDetails = asRecord(row.freeRewardDetails);
       const premiumRewardDetails = asRecord(row.premiumRewardDetails);
+      const freeRewardForm = legacySeasonRewardForm(
+        freeReward,
+        freeRewardDetails,
+      );
+      const premiumRewardForm = legacySeasonRewardForm(
+        premiumReward,
+        premiumRewardDetails,
+      );
       const title =
         recordString(row, "title") ??
         freeReward ??
@@ -15312,40 +15612,22 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
           activationRules,
           "blockedGuestLogTypes",
         ),
-        freeRewardType:
-          recordString(freeRewardDetails, "type") ??
-          (freeReward ? "ADMIN_OTHER" : ""),
-        freeRewardAmount: numberRule(freeRewardDetails, "amount", ""),
-        freeRewardLabel:
-          recordString(freeRewardDetails, "label") ?? freeReward ?? "",
-        freeRewardCode: recordString(freeRewardDetails, "code") ?? "",
-        freeRewardLootBoxId:
-          recordString(asRecord(freeRewardDetails.lootBox), "id") ??
-          recordString(freeRewardDetails, "lootBoxId") ??
-          "",
-        freeRewardLootBoxName:
-          recordString(asRecord(freeRewardDetails.lootBox), "name") ?? "",
-        freeRewardLootBoxRarity:
-          lootBoxCaseRarity(asRecord(freeRewardDetails.lootBox)) ?? "common",
-        freeRewardDelivery:
-          recordString(freeRewardDetails, "delivery") ?? "AUTO",
-        premiumRewardType:
-          recordString(premiumRewardDetails, "type") ??
-          (premiumReward ? "ADMIN_OTHER" : ""),
-        premiumRewardAmount: numberRule(premiumRewardDetails, "amount", ""),
-        premiumRewardLabel:
-          recordString(premiumRewardDetails, "label") ?? premiumReward ?? "",
-        premiumRewardCode: recordString(premiumRewardDetails, "code") ?? "",
-        premiumRewardLootBoxId:
-          recordString(asRecord(premiumRewardDetails.lootBox), "id") ??
-          recordString(premiumRewardDetails, "lootBoxId") ??
-          "",
-        premiumRewardLootBoxName:
-          recordString(asRecord(premiumRewardDetails.lootBox), "name") ?? "",
-        premiumRewardLootBoxRarity:
-          lootBoxCaseRarity(asRecord(premiumRewardDetails.lootBox)) ?? "common",
-        premiumRewardDelivery:
-          recordString(premiumRewardDetails, "delivery") ?? "AUTO",
+        freeRewardType: freeRewardForm.type,
+        freeRewardAmount: freeRewardForm.amount,
+        freeRewardLabel: freeRewardForm.label,
+        freeRewardCode: freeRewardForm.code,
+        freeRewardLootBoxId: freeRewardForm.lootBoxId,
+        freeRewardLootBoxName: freeRewardForm.lootBoxName,
+        freeRewardLootBoxRarity: freeRewardForm.lootBoxRarity,
+        freeRewardDelivery: freeRewardForm.delivery,
+        premiumRewardType: premiumRewardForm.type,
+        premiumRewardAmount: premiumRewardForm.amount,
+        premiumRewardLabel: premiumRewardForm.label,
+        premiumRewardCode: premiumRewardForm.code,
+        premiumRewardLootBoxId: premiumRewardForm.lootBoxId,
+        premiumRewardLootBoxName: premiumRewardForm.lootBoxName,
+        premiumRewardLootBoxRarity: premiumRewardForm.lootBoxRarity,
+        premiumRewardDelivery: premiumRewardForm.delivery,
       };
     })
     .filter((step) => step.title.trim().length > 0);
@@ -15362,9 +15644,9 @@ function recordString(record: Record<string, unknown>, key: string) {
 }
 
 function lootBoxCanBeRewardTemplate(
-  lootBox: Pick<GuestGameLootBox, "usageKind">,
+  lootBox: Pick<GuestGameLootBox, "status">,
 ) {
-  return lootBox.usageKind === "REWARD_TEMPLATE" || lootBox.usageKind === "BOTH";
+  return lootBox.status === "ACTIVE";
 }
 
 function nextSeasonStepId() {

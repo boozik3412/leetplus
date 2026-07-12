@@ -1,4 +1,4 @@
-﻿-- Repair Langame credential duplicates created by older settings saves.
+-- Repair Langame credential duplicates created by older settings saves.
 -- The application expects one tenant-level Langame API key named "Langame API key".
 -- Older data can contain an empty canonical credential plus a populated case-variant
 -- duplicate, while IntegrationSource rows point at the empty one.

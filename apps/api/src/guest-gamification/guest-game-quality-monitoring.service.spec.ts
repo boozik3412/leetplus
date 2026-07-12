@@ -2,6 +2,7 @@ import {
   buildQualityAlerts,
   decisionPairMetrics,
   detectEventMixShift,
+  isSyncStateInQualityWindow,
 } from './guest-game-quality-monitoring.service';
 
 describe('guest game quality monitoring', () => {
@@ -101,5 +102,34 @@ describe('guest game quality monitoring', () => {
         { GAME_SUMMARY: 4, LOOT_BOX_OPEN: 0 },
       ),
     ).toBeNull();
+  });
+
+  it('measures sync SLA only for the active quality window', () => {
+    const windowFrom = new Date('2026-07-11T12:00:00.000Z');
+
+    expect(
+      isSyncStateInQualityWindow(
+        {
+          status: 'SUCCESS',
+          lastStartedAt: new Date('2026-07-11T11:59:59.000Z'),
+        },
+        windowFrom,
+      ),
+    ).toBe(false);
+    expect(
+      isSyncStateInQualityWindow(
+        {
+          status: 'SUCCESS',
+          lastStartedAt: new Date('2026-07-11T12:00:00.000Z'),
+        },
+        windowFrom,
+      ),
+    ).toBe(true);
+    expect(
+      isSyncStateInQualityWindow(
+        { status: 'RUNNING', lastStartedAt: null },
+        windowFrom,
+      ),
+    ).toBe(true);
   });
 });

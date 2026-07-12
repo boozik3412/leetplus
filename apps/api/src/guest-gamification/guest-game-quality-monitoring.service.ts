@@ -100,7 +100,7 @@ export class GuestGameQualityMonitoringService {
       }),
       this.prisma.guestActivitySyncJob.groupBy({
         by: ['status'],
-        where: { tenantId },
+        where: { tenantId, updatedAt: { gte: windowFrom } },
         _count: { _all: true },
       }),
       this.prisma.guestActivityFact.groupBy({
@@ -147,7 +147,12 @@ export class GuestGameQualityMonitoringService {
       eventGroups.map((group) => [group.action, group._count._all]),
     );
     const activeSyncStates = syncStates.filter(
-      (state) => state.status !== 'STALE_BINDING',
+      (state) =>
+        state.status !== 'STALE_BINDING' &&
+        isSyncStateInQualityWindow(state, windowFrom),
+    );
+    const activeSyncStatusCounts = countValues(
+      activeSyncStates.map((state) => state.status),
     );
     const lags = activeSyncStates
       .map((state) =>
@@ -185,8 +190,8 @@ export class GuestGameQualityMonitoringService {
         measuredAt: now,
         syncLagSecondsMax,
         staleSyncCount,
-        failedSyncCount: syncStatusCounts.FAILED ?? 0,
-        partialSyncCount: syncStatusCounts.PARTIAL ?? 0,
+        failedSyncCount: activeSyncStatusCounts.FAILED ?? 0,
+        partialSyncCount: activeSyncStatusCounts.PARTIAL ?? 0,
         pendingJobCount: jobStatusCounts.PENDING ?? 0,
         retryJobCount: jobStatusCounts.RETRY ?? 0,
         failedJobCount: jobStatusCounts.FAILED ?? 0,
@@ -200,7 +205,7 @@ export class GuestGameQualityMonitoringService {
     const alerts = buildQualityAlerts({
       syncLagSecondsMax,
       staleSyncCount,
-      failedSyncCount: syncStatusCounts.FAILED ?? 0,
+      failedSyncCount: activeSyncStatusCounts.FAILED ?? 0,
       staleBindingCount: syncStatusCounts.STALE_BINDING ?? 0,
       longPartialCount,
       failedJobCount: jobStatusCounts.FAILED ?? 0,
@@ -479,6 +484,17 @@ function countValues(values: string[]) {
 
 function sumValues(value: Record<string, number>) {
   return Object.values(value).reduce((sum, count) => sum + count, 0);
+}
+
+export function isSyncStateInQualityWindow(
+  state: { status: string; lastStartedAt: Date | null },
+  windowFrom: Date,
+) {
+  if (state.status === 'RUNNING') return true;
+  return Boolean(
+    state.lastStartedAt &&
+    state.lastStartedAt.getTime() >= windowFrom.getTime(),
+  );
 }
 
 function positiveNumber(value: string | undefined, fallback: number) {

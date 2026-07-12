@@ -95,6 +95,7 @@ export class GuestGameQualityMonitoringService {
         select: {
           status: true,
           lastSuccessfulTo: true,
+          lastRequestedTo: true,
           lastStartedAt: true,
         },
       }),
@@ -155,25 +156,12 @@ export class GuestGameQualityMonitoringService {
       activeSyncStates.map((state) => state.status),
     );
     const lags = activeSyncStates
-      .map((state) =>
-        state.lastSuccessfulTo
-          ? Math.max(
-              0,
-              Math.floor(
-                (now.getTime() - state.lastSuccessfulTo.getTime()) / 1_000,
-              ),
-            )
-          : null,
-      )
+      .map((state) => syncStateLagSeconds(state, now))
       .filter((value): value is number => value !== null);
     const syncLagSecondsMax = lags.length ? Math.max(...lags) : null;
-    const staleSyncCount = activeSyncStates.filter((state) => {
-      if (!state.lastSuccessfulTo) return true;
-      return (
-        now.getTime() - state.lastSuccessfulTo.getTime() >
-        thresholds.syncLagSeconds * 1_000
-      );
-    }).length;
+    const staleSyncCount = lags.filter(
+      (lagSeconds) => lagSeconds > thresholds.syncLagSeconds,
+    ).length;
     const longPartialCount = syncStates.filter(
       (state) =>
         state.status === 'PARTIAL' &&
@@ -494,6 +482,41 @@ export function isSyncStateInQualityWindow(
   return Boolean(
     state.lastStartedAt &&
     state.lastStartedAt.getTime() >= windowFrom.getTime(),
+  );
+}
+
+export function syncStateLagSeconds(
+  state: {
+    status: string;
+    lastStartedAt: Date | null;
+    lastRequestedTo: Date | null;
+    lastSuccessfulTo: Date | null;
+  },
+  now: Date,
+) {
+  if (state.status === 'RUNNING') {
+    return state.lastStartedAt
+      ? Math.max(
+          0,
+          Math.floor((now.getTime() - state.lastStartedAt.getTime()) / 1_000),
+        )
+      : null;
+  }
+  if (!state.lastRequestedTo) return null;
+  if (!state.lastSuccessfulTo) {
+    return state.lastStartedAt
+      ? Math.max(
+          0,
+          Math.floor((now.getTime() - state.lastStartedAt.getTime()) / 1_000),
+        )
+      : null;
+  }
+  return Math.max(
+    0,
+    Math.floor(
+      (state.lastRequestedTo.getTime() - state.lastSuccessfulTo.getTime()) /
+        1_000,
+    ),
   );
 }
 

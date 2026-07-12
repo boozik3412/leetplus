@@ -3,6 +3,7 @@ import {
   decisionPairMetrics,
   detectEventMixShift,
   isSyncStateInQualityWindow,
+  syncStateLagSeconds,
 } from './guest-game-quality-monitoring.service';
 
 describe('guest game quality monitoring', () => {
@@ -131,5 +132,43 @@ describe('guest game quality monitoring', () => {
         windowFrom,
       ),
     ).toBe(true);
+  });
+
+  it('measures processing lag instead of time since the guest last visited', () => {
+    const now = new Date('2026-07-12T12:00:00.000Z');
+
+    expect(
+      syncStateLagSeconds(
+        {
+          status: 'SUCCESS',
+          lastStartedAt: new Date('2026-07-11T12:00:00.000Z'),
+          lastRequestedTo: new Date('2026-07-11T12:00:00.000Z'),
+          lastSuccessfulTo: new Date('2026-07-11T12:00:00.000Z'),
+        },
+        now,
+      ),
+    ).toBe(0);
+    expect(
+      syncStateLagSeconds(
+        {
+          status: 'PARTIAL',
+          lastStartedAt: new Date('2026-07-12T11:30:00.000Z'),
+          lastRequestedTo: new Date('2026-07-12T12:00:00.000Z'),
+          lastSuccessfulTo: new Date('2026-07-12T11:45:00.000Z'),
+        },
+        now,
+      ),
+    ).toBe(15 * 60);
+    expect(
+      syncStateLagSeconds(
+        {
+          status: 'RUNNING',
+          lastStartedAt: new Date('2026-07-12T11:58:30.000Z'),
+          lastRequestedTo: now,
+          lastSuccessfulTo: null,
+        },
+        now,
+      ),
+    ).toBe(90);
   });
 });

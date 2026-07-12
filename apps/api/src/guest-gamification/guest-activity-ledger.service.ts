@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { IntegrationProvider, Prisma } from '@prisma/client';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
 import { parseLangameDate } from '../integrations/langame-date';
@@ -18,8 +18,12 @@ const MAX_SYNC_PAGES_PER_SOURCE = 20;
 const DEFAULT_BASELINE_DAYS = 7;
 const SYNC_OVERLAP_DAYS = 1;
 const RUNNING_SYNC_STALE_MS = 5 * 60 * 1000;
+const SYNC_JOB_LOCK_STALE_MS = 10 * 60 * 1000;
+const SYNC_JOB_MAX_ATTEMPTS = 5;
+const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
 const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
 const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
+const GUEST_ACTIVITY_PARSER_VERSION = 'guest-activity-v2';
 
 const SOURCE_GUEST_LOG = 'LANGAME_GUEST_LOG';
 const SOURCE_GUEST_SESSION = 'LANGAME_GUEST_SESSION';
@@ -50,7 +54,7 @@ type GuestActivitySyncStatus =
   | 'FAILED'
   | 'SKIPPED';
 
-type LedgerSyncInput = {
+export type LedgerSyncInput = {
   tenantId: string;
   profileId: string;
   storeId?: string | null;
@@ -138,8 +142,25 @@ type SyncWindow = {
   earliestRuleAt: Date | null;
 };
 
+type SourceSyncWindow = SyncWindow & {
+  startPage: number;
+};
+
+type SourceFetchResult<T> = {
+  rows: T[];
+  partial: boolean;
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
+  pagesFetched: number;
+  rowsFetched: number;
+  nextPage: number | null;
+  window: SourceSyncWindow;
+  errorMessage: string | null;
+};
+
 export type GuestActivityLedgerDiagnostics = {
   syncState: unknown;
+  sourceSyncStates: unknown[];
+  syncJobs: unknown[];
   rawRecords: unknown[];
   facts: unknown[];
   activeRuleWindow: {
@@ -161,7 +182,6 @@ export type GuestActivityLedgerDiagnostics = {
 @Injectable()
 export class GuestActivityLedgerService {
   private readonly logger = new Logger(GuestActivityLedgerService.name);
-  private readonly inFlight = new Map<string, Promise<void>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -169,27 +189,254 @@ export class GuestActivityLedgerService {
     private readonly langameClient: LangameClient,
   ) {}
 
-  scheduleProfileSync(input: LedgerSyncInput) {
-    const key = `${input.tenantId}:${input.profileId}:${input.storeId ?? ''}`;
+  scheduleProfileSync(input: LedgerSyncInput): void {
+    void this.enqueueProfileSync(input).catch((error) => {
+      this.logger.warn(
+        `Guest activity ledger sync was not queued for profile ${input.profileId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+  }
 
-    if (this.inFlight.has(key)) {
-      return;
+  async enqueueProfileSync(input: LedgerSyncInput): Promise<unknown> {
+    const jobKey = this.syncJobKey(input);
+    const existing = await this.prisma.guestActivitySyncJob.findUnique({
+      where: { jobKey },
+      select: { id: true, status: true },
+    });
+
+    if (existing?.status === 'RUNNING') {
+      return this.prisma.guestActivitySyncJob.update({
+        where: { id: existing.id },
+        data: {
+          rerunRequested: true,
+          reason: input.reason ?? null,
+          payload: this.syncJobPayload(input),
+        },
+      });
     }
 
-    const promise = this.syncProfile(input)
-      .then(() => undefined)
-      .catch((error) => {
-        this.logger.warn(
-          `Guest activity ledger sync failed for profile ${input.profileId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      })
-      .finally(() => {
-        this.inFlight.delete(key);
-      });
+    const now = new Date();
 
-    this.inFlight.set(key, promise);
+    if (existing) {
+      const alreadyQueued = ['PENDING', 'RETRY'].includes(existing.status);
+
+      return this.prisma.guestActivitySyncJob.update({
+        where: { id: existing.id },
+        data: {
+          guestId: input.guestId ?? null,
+          storeId: input.storeId ?? null,
+          reason: input.reason ?? null,
+          payload: this.syncJobPayload(input),
+          ...(alreadyQueued
+            ? {}
+            : {
+                status: 'PENDING',
+                attempts: 0,
+                nextAttemptAt: now,
+                lockedAt: null,
+                lockedBy: null,
+                rerunRequested: false,
+                lastError: null,
+                lastFinishedAt: null,
+              }),
+        },
+      });
+    }
+
+    try {
+      return await this.prisma.guestActivitySyncJob.create({
+        data: {
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          guestId: input.guestId ?? null,
+          storeId: input.storeId ?? null,
+          jobKey,
+          reason: input.reason ?? null,
+          status: 'PENDING',
+          maxAttempts: SYNC_JOB_MAX_ATTEMPTS,
+          nextAttemptAt: now,
+          payload: this.syncJobPayload(input),
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        return this.enqueueProfileSync(input);
+      }
+      throw error;
+    }
+  }
+
+  async processQueuedSyncJobs(limit = 5, workerId = `api-${process.pid}`) {
+    const results: Array<{
+      jobId: string;
+      status: string;
+      errorMessage?: string;
+    }> = [];
+
+    for (let index = 0; index < limit; index += 1) {
+      const job = await this.claimNextSyncJob(workerId);
+
+      if (!job) {
+        break;
+      }
+
+      try {
+        await this.syncProfile({
+          tenantId: job.tenantId,
+          profileId: job.profileId,
+          guestId: job.guestId,
+          storeId: job.storeId,
+          reason: job.reason ?? 'QUEUED_SYNC',
+        });
+        const status = await this.completeSyncJob(job.id);
+        results.push({ jobId: job.id, status });
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        const status = await this.failSyncJob(job.id, errorMessage);
+        results.push({ jobId: job.id, status, errorMessage });
+      }
+    }
+
+    return {
+      processed: results.length,
+      success: results.filter((result) => result.status === 'SUCCESS').length,
+      retried: results.filter((result) => result.status === 'RETRY').length,
+      failed: results.filter((result) => result.status === 'FAILED').length,
+      rerun: results.filter((result) => result.status === 'PENDING').length,
+      results,
+    };
+  }
+
+  private async claimNextSyncJob(workerId: string) {
+    const now = new Date();
+    const staleAt = new Date(now.getTime() - SYNC_JOB_LOCK_STALE_MS);
+    const availableWhere = {
+      OR: [
+        {
+          status: { in: ['PENDING', 'RETRY'] },
+          nextAttemptAt: { lte: now },
+        },
+        { status: 'RUNNING', lockedAt: { lt: staleAt } },
+      ],
+    };
+    const candidate = await this.prisma.guestActivitySyncJob.findFirst({
+      where: availableWhere,
+      orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    if (!candidate) {
+      return null;
+    }
+
+    const claimed = await this.prisma.guestActivitySyncJob.updateMany({
+      where: {
+        id: candidate.id,
+        updatedAt: candidate.updatedAt,
+        ...availableWhere,
+      },
+      data: {
+        status: 'RUNNING',
+        attempts: { increment: 1 },
+        lockedAt: now,
+        lockedBy: workerId,
+        lastStartedAt: now,
+        lastError: null,
+      },
+    });
+
+    if (claimed.count !== 1) {
+      return null;
+    }
+
+    return this.prisma.guestActivitySyncJob.findUnique({
+      where: { id: candidate.id },
+    });
+  }
+
+  private async completeSyncJob(jobId: string) {
+    const job = await this.prisma.guestActivitySyncJob.findUnique({
+      where: { id: jobId },
+      select: { rerunRequested: true },
+    });
+    const now = new Date();
+
+    if (job?.rerunRequested) {
+      await this.prisma.guestActivitySyncJob.update({
+        where: { id: jobId },
+        data: {
+          status: 'PENDING',
+          attempts: 0,
+          nextAttemptAt: now,
+          lockedAt: null,
+          lockedBy: null,
+          rerunRequested: false,
+          lastFinishedAt: now,
+        },
+      });
+      return 'PENDING';
+    }
+
+    await this.prisma.guestActivitySyncJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'SUCCESS',
+        lockedAt: null,
+        lockedBy: null,
+        lastFinishedAt: now,
+      },
+    });
+    return 'SUCCESS';
+  }
+
+  private async failSyncJob(jobId: string, errorMessage: string) {
+    const job = await this.prisma.guestActivitySyncJob.findUnique({
+      where: { id: jobId },
+      select: { attempts: true, maxAttempts: true },
+    });
+    const attempts = job?.attempts ?? SYNC_JOB_MAX_ATTEMPTS;
+    const maxAttempts = job?.maxAttempts ?? SYNC_JOB_MAX_ATTEMPTS;
+    const exhausted = attempts >= maxAttempts;
+    const now = new Date();
+    const backoffMs = Math.min(
+      SYNC_JOB_BASE_BACKOFF_MS * 2 ** Math.max(0, attempts - 1),
+      30 * 60 * 1000,
+    );
+
+    await this.prisma.guestActivitySyncJob.update({
+      where: { id: jobId },
+      data: {
+        status: exhausted ? 'FAILED' : 'RETRY',
+        nextAttemptAt: exhausted ? now : new Date(now.getTime() + backoffMs),
+        lockedAt: null,
+        lockedBy: null,
+        lastError: errorMessage.slice(0, 2000),
+        lastFinishedAt: now,
+      },
+    });
+
+    return exhausted ? 'FAILED' : 'RETRY';
+  }
+
+  private syncJobKey(input: LedgerSyncInput) {
+    return [input.tenantId, input.profileId, input.storeId ?? 'any-store'].join(
+      ':',
+    );
+  }
+
+  private syncJobPayload(input: LedgerSyncInput): Prisma.InputJsonValue {
+    return {
+      tenantId: input.tenantId,
+      profileId: input.profileId,
+      guestId: input.guestId ?? null,
+      storeId: input.storeId ?? null,
+      reason: input.reason ?? null,
+    };
   }
 
   async syncProfile(input: LedgerSyncInput) {
@@ -241,6 +488,7 @@ export class GuestActivityLedgerService {
         diagnostics: {
           reason: input.reason ?? null,
           sourceCounts: result.sourceCounts,
+          sourceResults: result.sourceResults,
           partial: result.partial,
           earliestRuleAt: window.earliestRuleAt?.toISOString() ?? null,
         },
@@ -319,20 +567,40 @@ export class GuestActivityLedgerService {
       ...(externalDomain ? { externalDomain } : {}),
     };
 
-    const [syncState, rawRecords, facts, activeRuleWindow] = await Promise.all([
+    const [
+      syncState,
+      sourceSyncStates,
+      syncJobs,
+      rawRecords,
+      facts,
+      activeRuleWindow,
+    ] = await Promise.all([
       externalGuestId
         ? this.prisma.guestActivitySyncState.findFirst({
             where: baseWhere,
             orderBy: { updatedAt: 'desc' },
           })
         : null,
+      this.prisma.guestActivitySourceSyncState.findMany({
+        where: baseWhere,
+        orderBy: [{ sourceKind: 'asc' }, { updatedAt: 'desc' }],
+      }),
+      this.prisma.guestActivitySyncJob.findMany({
+        where: {
+          tenantId,
+          ...(profile?.id ? { profileId: profile.id } : {}),
+          ...(guest?.id ? { guestId: guest.id } : {}),
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 20,
+      }),
       this.prisma.guestActivityRawRecord.findMany({
         where: baseWhere,
         orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
         take: limit,
       }),
       this.prisma.guestActivityFact.findMany({
-        where: baseWhere,
+        where: { ...baseWhere, lifecycleStatus: 'ACTIVE' },
         orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
         take: limit,
       }),
@@ -341,6 +609,8 @@ export class GuestActivityLedgerService {
 
     return {
       syncState,
+      sourceSyncStates,
+      syncJobs,
       rawRecords,
       facts,
       activeRuleWindow: {
@@ -353,6 +623,82 @@ export class GuestActivityLedgerService {
         null,
         facts.map((fact) => fact.factType),
       ),
+    };
+  }
+
+  async rebuildProfileFacts(input: LedgerSyncInput) {
+    const context = await this.resolveContext(input);
+    if (!context) {
+      throw new BadRequestException(
+        'Профиль не связан с гостем Langame или для него не настроен источник.',
+      );
+    }
+
+    const normalizationRunId = randomUUID();
+    const rawRecords = await this.prisma.guestActivityRawRecord.findMany({
+      where: {
+        tenantId: context.tenantId,
+        profileId: context.profile.id,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: context.externalDomain,
+      },
+      orderBy: [{ happenedAt: 'asc' }, { createdAt: 'asc' }],
+    });
+    let factsCreated = 0;
+
+    for (const record of rawRecords) {
+      const row = jsonObjectRecord(record.rawPayload);
+      const raw: RawRecordDraft = {
+        sourceKind: record.sourceKind,
+        sourceKey: record.sourceKey,
+        sourceHash: record.sourceHash,
+        rawType: record.rawType,
+        rawText: record.rawText,
+        happenedAt: record.happenedAt,
+        sourceLocalDate: record.sourceLocalDate,
+        externalClubId: record.externalClubId,
+        storeId: record.storeId,
+        sessionExternalId: record.sessionExternalId,
+        amount: decimalValue(record.amount),
+        bonusAmount: decimalValue(record.bonusAmount),
+        rawPayload: sanitizePayload(record.rawPayload),
+      };
+
+      factsCreated += await this.persistNormalizedFacts(
+        context,
+        record.id,
+        record.sourceKind,
+        row,
+        raw,
+        normalizationRunId,
+      );
+    }
+
+    const happenedAtValues = rawRecords
+      .map((record) => record.happenedAt)
+      .filter((value): value is Date => Boolean(value));
+    if (happenedAtValues.length > 0) {
+      const from = new Date(
+        Math.min(...happenedAtValues.map((value) => value.getTime())),
+      );
+      const to = new Date(
+        Math.max(
+          Date.now(),
+          ...happenedAtValues.map((value) => value.getTime()),
+        ),
+      );
+      factsCreated += await this.inferPackageSubscriptionUsageFacts(
+        context,
+        { from, to, initial: false, earliestRuleAt: null },
+        normalizationRunId,
+      );
+    }
+
+    return {
+      normalizationRunId,
+      parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
+      rawRecordsProcessed: rawRecords.length,
+      factsCreated,
     };
   }
 
@@ -559,18 +905,18 @@ export class GuestActivityLedgerService {
     context: LedgerSyncContext,
     window: SyncWindow,
   ) {
+    const normalizationRunId = randomUUID();
     const sourceCounts = {
       guestLogs: 0,
       sessions: 0,
       transactions: 0,
       productExpenses: 0,
     };
-    let partial = false;
-    const dateFrom = formatDateParam(window.from);
-    const dateTo = formatDateParam(window.to);
-
-    const guestLogs = await this.fetchPaged(
-      (page) =>
+    const guestLogs = await this.fetchSourceRows(
+      context,
+      SOURCE_GUEST_LOG,
+      window,
+      (page, dateFrom, dateTo) =>
         this.langameClient.listGuestLogs(
           context.source.baseUrl,
           context.apiKey,
@@ -585,58 +931,48 @@ export class GuestActivityLedgerService {
       (row) => this.rowMatchesGuest(row, context.externalGuestId, true),
     );
     sourceCounts.guestLogs = guestLogs.rows.length;
-    partial ||= guestLogs.partial;
 
-    const sessions = await this.fetchPaged(
-      (page) =>
+    const sessions = await this.fetchSourceRows(
+      context,
+      SOURCE_GUEST_SESSION,
+      window,
+      (page, dateFrom, dateTo) =>
         this.langameClient.listGuestSessions(
           context.source.baseUrl,
           context.apiKey,
-          {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom,
-            dateTo,
-          },
+          { page, pageLimit: DEFAULT_PAGE_LIMIT, dateFrom, dateTo },
         ),
       (row) => this.rowMatchesGuest(row, context.externalGuestId),
     );
     sourceCounts.sessions = sessions.rows.length;
-    partial ||= sessions.partial;
 
-    const transactions = await this.fetchPaged(
-      (page) =>
+    const transactions = await this.fetchSourceRows(
+      context,
+      SOURCE_TRANSACTION,
+      window,
+      (page, dateFrom, dateTo) =>
         this.langameClient.listTransactions(
           context.source.baseUrl,
           context.apiKey,
-          {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom,
-            dateTo,
-          },
+          { page, pageLimit: DEFAULT_PAGE_LIMIT, dateFrom, dateTo },
         ),
       (row) => this.rowMatchesGuest(row, context.externalGuestId),
     );
     sourceCounts.transactions = transactions.rows.length;
-    partial ||= transactions.partial;
 
-    const productExpenses = await this.fetchPaged(
-      (page) =>
+    const productExpenses = await this.fetchSourceRows(
+      context,
+      SOURCE_PRODUCT_EXPENSE,
+      window,
+      (page, dateFrom, dateTo) =>
         this.langameClient.listProductExpenses(
           context.source.baseUrl,
           context.apiKey,
-          {
-            page,
-            pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom,
-            dateTo,
-          },
+          { page, pageLimit: DEFAULT_PAGE_LIMIT, dateFrom, dateTo },
         ),
       (row) => this.rowMatchesGuest(row, context.externalGuestId),
     );
     sourceCounts.productExpenses = productExpenses.rows.length;
-    partial ||= productExpenses.partial;
     const productNamesByClub = await this.fetchProductNamesByClub(
       context,
       productExpenses.rows,
@@ -651,6 +987,7 @@ export class GuestActivityLedgerService {
         SOURCE_GUEST_LOG,
         row,
         this.buildRawRecordFromGuestLog(context, row),
+        normalizationRunId,
       );
       rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
       factsCount += persisted.factsCreated;
@@ -662,6 +999,7 @@ export class GuestActivityLedgerService {
         SOURCE_GUEST_SESSION,
         row,
         this.buildRawRecordFromSession(context, row),
+        normalizationRunId,
       );
       rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
       factsCount += persisted.factsCreated;
@@ -673,6 +1011,7 @@ export class GuestActivityLedgerService {
         SOURCE_TRANSACTION,
         row,
         this.buildRawRecordFromTransaction(context, row),
+        normalizationRunId,
       );
       rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
       factsCount += persisted.factsCreated;
@@ -684,19 +1023,47 @@ export class GuestActivityLedgerService {
         SOURCE_PRODUCT_EXPENSE,
         row,
         this.buildRawRecordFromProductExpense(context, row, productNamesByClub),
+        normalizationRunId,
       );
       rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
       factsCount += persisted.factsCreated;
     }
 
     const inferredPackageUsageFacts =
-      await this.inferPackageSubscriptionUsageFacts(context, window);
+      await this.inferPackageSubscriptionUsageFacts(
+        context,
+        window,
+        normalizationRunId,
+      );
     factsCount += inferredPackageUsageFacts;
+
+    const sourceResults = {
+      guestLogs: sourceResultDiagnostics(guestLogs),
+      sessions: sourceResultDiagnostics(sessions),
+      transactions: sourceResultDiagnostics(transactions),
+      productExpenses: sourceResultDiagnostics(productExpenses),
+    };
+    const failedSources = Object.values(sourceResults).filter(
+      (result) => result.status === 'FAILED',
+    );
+    const partial = Object.values(sourceResults).some(
+      (result) => result.status !== 'SUCCESS',
+    );
+
+    if (failedSources.length === Object.keys(sourceResults).length) {
+      throw new Error(
+        `All Langame activity sources failed: ${failedSources
+          .map((source) => source.errorMessage)
+          .filter(Boolean)
+          .join('; ')}`,
+      );
+    }
 
     return {
       rawRecordsCount,
       factsCount,
       sourceCounts,
+      sourceResults,
       inferredPackageUsageFacts,
       partial,
     };
@@ -705,6 +1072,7 @@ export class GuestActivityLedgerService {
   private async inferPackageSubscriptionUsageFacts(
     context: LedgerSyncContext,
     window: SyncWindow,
+    normalizationRunId: string,
   ) {
     const sessionSignals = await this.prisma.guestActivityRawRecord.findMany({
       where: {
@@ -744,6 +1112,7 @@ export class GuestActivityLedgerService {
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: context.externalDomain,
         factType: 'PACKAGE_OR_SUBSCRIPTION_PURCHASED',
+        lifecycleStatus: 'ACTIVE',
         happenedAt: {
           gte: subtractDays(window.from, INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS),
           lte: window.to,
@@ -827,10 +1196,11 @@ export class GuestActivityLedgerService {
 
       const beforeFact = await this.prisma.guestActivityFact.findUnique({
         where: {
-          tenantId_factType_sourceHash: {
+          tenantId_factType_sourceHash_parserVersion: {
             tenantId: context.tenantId,
             factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
             sourceHash: signal.sourceHash,
+            parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
           },
         },
         select: { id: true },
@@ -838,10 +1208,11 @@ export class GuestActivityLedgerService {
 
       await this.prisma.guestActivityFact.upsert({
         where: {
-          tenantId_factType_sourceHash: {
+          tenantId_factType_sourceHash_parserVersion: {
             tenantId: context.tenantId,
             factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
             sourceHash: signal.sourceHash,
+            parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
           },
         },
         create: {
@@ -866,6 +1237,9 @@ export class GuestActivityLedgerService {
           bonusAmount: null,
           durationMinutes: null,
           confidence: 'INFERRED',
+          parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
+          normalizationRunId,
+          lifecycleStatus: 'ACTIVE',
           evidence: buildInferredPackageUsageEvidence(
             signal,
             purchase,
@@ -883,6 +1257,9 @@ export class GuestActivityLedgerService {
           tariffName: purchase?.tariffName ?? null,
           tariffType: 'package_or_subscription',
           confidence: 'INFERRED',
+          normalizationRunId,
+          lifecycleStatus: 'ACTIVE',
+          supersededAt: null,
           evidence: buildInferredPackageUsageEvidence(
             signal,
             purchase,
@@ -904,32 +1281,234 @@ export class GuestActivityLedgerService {
     return factsCreated;
   }
 
+  private async fetchSourceRows<T>(
+    context: LedgerSyncContext,
+    sourceKind: string,
+    fallbackWindow: SyncWindow,
+    loadPage: (page: number, dateFrom: string, dateTo: string) => Promise<T[]>,
+    filterRow: (row: T) => boolean,
+  ): Promise<SourceFetchResult<T>> {
+    const window = await this.resolveSourceSyncWindow(
+      context,
+      sourceKind,
+      fallbackWindow,
+    );
+
+    await this.upsertSourceSyncState(context, sourceKind, window, {
+      status: 'RUNNING',
+      pagesFetched: 0,
+      rowsFetched: 0,
+      rowsMatched: 0,
+      nextPage: window.startPage,
+      errorMessage: null,
+    });
+
+    try {
+      const result = await this.fetchPaged(
+        (page) =>
+          loadPage(
+            page,
+            formatDateParam(window.from),
+            formatDateParam(window.to),
+          ),
+        filterRow,
+        window.startPage,
+      );
+      const status = result.partial ? 'PARTIAL' : 'SUCCESS';
+
+      await this.upsertSourceSyncState(context, sourceKind, window, {
+        status,
+        pagesFetched: result.pagesFetched,
+        rowsFetched: result.rowsFetched,
+        rowsMatched: result.rows.length,
+        nextPage: result.nextPage,
+        errorMessage: null,
+      });
+
+      return {
+        ...result,
+        status,
+        window,
+        errorMessage: null,
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      await this.upsertSourceSyncState(context, sourceKind, window, {
+        status: 'FAILED',
+        pagesFetched: 0,
+        rowsFetched: 0,
+        rowsMatched: 0,
+        nextPage: null,
+        errorMessage,
+      });
+      this.logger.warn(
+        `Langame activity source ${sourceKind} failed for profile ${context.profile.id}: ${errorMessage}`,
+      );
+
+      return {
+        rows: [],
+        partial: true,
+        status: 'FAILED',
+        pagesFetched: 0,
+        rowsFetched: 0,
+        nextPage: null,
+        window,
+        errorMessage,
+      };
+    }
+  }
+
+  private async resolveSourceSyncWindow(
+    context: LedgerSyncContext,
+    sourceKind: string,
+    fallbackWindow: SyncWindow,
+  ): Promise<SourceSyncWindow> {
+    const state = await this.prisma.guestActivitySourceSyncState.findUnique({
+      where: {
+        tenantId_externalProvider_externalDomain_externalGuestId_sourceKind: {
+          tenantId: context.tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: context.externalDomain,
+          externalGuestId: context.externalGuestId,
+          sourceKind,
+        },
+      },
+    });
+
+    if (
+      state?.status === 'PARTIAL' &&
+      state.nextPage &&
+      state.lastRequestedFrom &&
+      state.lastRequestedTo
+    ) {
+      return {
+        from: state.lastRequestedFrom,
+        to: state.lastRequestedTo,
+        initial: !state.lastSuccessfulTo,
+        earliestRuleAt: state.syncFrom,
+        startPage: state.nextPage,
+      };
+    }
+
+    if (state?.lastSuccessfulTo) {
+      return {
+        from: subtractDays(state.lastSuccessfulTo, SYNC_OVERLAP_DAYS),
+        to: fallbackWindow.to,
+        initial: false,
+        earliestRuleAt: state.syncFrom,
+        startPage: 1,
+      };
+    }
+
+    return { ...fallbackWindow, startPage: 1 };
+  }
+
+  private async upsertSourceSyncState(
+    context: LedgerSyncContext,
+    sourceKind: string,
+    window: SourceSyncWindow,
+    params: {
+      status: 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED';
+      pagesFetched: number;
+      rowsFetched: number;
+      rowsMatched: number;
+      nextPage: number | null;
+      errorMessage: string | null;
+    },
+  ) {
+    const now = new Date();
+    const identity = {
+      tenantId: context.tenantId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: context.externalDomain,
+      externalGuestId: context.externalGuestId,
+      sourceKind,
+    };
+    const data = {
+      guestId: context.guest?.id ?? null,
+      profileId: context.profile.id,
+      storeId: context.store?.id ?? null,
+      integrationSourceId: context.source.id,
+      status: params.status,
+      syncFrom: window.earliestRuleAt ?? window.from,
+      lastRequestedFrom: window.from,
+      lastRequestedTo: window.to,
+      ...(params.status === 'SUCCESS' ? { lastSuccessfulTo: window.to } : {}),
+      ...(params.status === 'RUNNING' ? { lastStartedAt: now } : {}),
+      lastFinishedAt: params.status === 'RUNNING' ? null : now,
+      lastPage:
+        params.pagesFetched > 0
+          ? window.startPage + params.pagesFetched - 1
+          : null,
+      nextPage: params.nextPage,
+      rowsFetched: params.rowsFetched,
+      rowsMatched: params.rowsMatched,
+      diagnostics: {
+        startPage: window.startPage,
+        partial: params.status === 'PARTIAL',
+      },
+      errorMessage: params.errorMessage,
+    };
+
+    await this.prisma.guestActivitySourceSyncState.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalGuestId_sourceKind:
+          identity,
+      },
+      create: { ...identity, ...data },
+      update: data,
+    });
+  }
+
   private async fetchPaged<T>(
     loadPage: (page: number) => Promise<T[]>,
     filterRow: (row: T) => boolean,
+    startPage = 1,
   ) {
     const rows: T[] = [];
-    let partial = false;
+    let pagesFetched = 0;
+    let rowsFetched = 0;
 
-    for (let page = 1; page <= MAX_SYNC_PAGES_PER_SOURCE; page += 1) {
+    for (
+      let page = startPage;
+      page < startPage + MAX_SYNC_PAGES_PER_SOURCE;
+      page += 1
+    ) {
       const pageRows = await loadPage(page);
+      pagesFetched += 1;
+      rowsFetched += pageRows.length;
       rows.push(...pageRows.filter(filterRow));
 
       if (pageRows.length < DEFAULT_PAGE_LIMIT) {
-        return { rows, partial };
+        return {
+          rows,
+          partial: false,
+          pagesFetched,
+          rowsFetched,
+          nextPage: null,
+        };
       }
     }
 
-    partial = true;
-    return { rows, partial };
+    return {
+      rows,
+      partial: true,
+      pagesFetched,
+      rowsFetched,
+      nextPage: startPage + pagesFetched,
+    };
   }
 
   private buildRawRecordFromGuestLog(
     context: LedgerSyncContext,
     row: LangameGuestLog,
   ): RawRecordDraft {
-    const payload = sanitizePayload(row);
-    const text = extractText(row);
+    const hashPayload = sanitizePayload(row);
+    const payload = sanitizeGuestActivityRawPayload(row);
+    const sourceText = extractText(row);
+    const text = sanitizeGuestActivityText(sourceText);
     const happenedAt = parseLangameDate(
       firstString(row.date, row.date_normal, row.created_at, row.created),
       context.timeZone,
@@ -944,12 +1523,12 @@ export class GuestActivityLedgerService {
       externalDomain: context.externalDomain,
       externalGuestId: context.externalGuestId,
       rawType,
-      text,
+      text: sourceText,
       happenedAt: happenedAt?.toISOString() ?? null,
       externalClubId,
       amount,
       bonusAmount,
-      payload,
+      payload: hashPayload,
     });
 
     return {
@@ -976,7 +1555,8 @@ export class GuestActivityLedgerService {
     context: LedgerSyncContext,
     row: LangameGuestSession,
   ): RawRecordDraft {
-    const payload = sanitizePayload(row);
+    const hashPayload = sanitizePayload(row);
+    const payload = sanitizeGuestActivityRawPayload(row);
     const startedAt = parseLangameDate(row.date_start, context.timeZone);
     const stoppedAt = parseLangameDate(row.date_stop, context.timeZone);
     const happenedAt = startedAt ?? stoppedAt;
@@ -990,7 +1570,7 @@ export class GuestActivityLedgerService {
       startedAt: startedAt?.toISOString() ?? null,
       stoppedAt: stoppedAt?.toISOString() ?? null,
       externalClubId,
-      payload,
+      payload: hashPayload,
     });
 
     return {
@@ -1001,7 +1581,7 @@ export class GuestActivityLedgerService {
       )}`,
       sourceHash,
       rawType: nullableString(row.packet) ? 'SESSION' : null,
-      rawText: extractText(row),
+      rawText: sanitizeGuestActivityText(extractText(row)),
       happenedAt,
       sourceLocalDate: sourceLocalDate(happenedAt, context.timeZone),
       externalClubId,
@@ -1017,8 +1597,10 @@ export class GuestActivityLedgerService {
     context: LedgerSyncContext,
     row: LangameTransaction,
   ): RawRecordDraft {
-    const payload = sanitizePayload(row);
-    const text = extractText(row);
+    const hashPayload = sanitizePayload(row);
+    const payload = sanitizeGuestActivityRawPayload(row);
+    const sourceText = extractText(row);
+    const text = sanitizeGuestActivityText(sourceText);
     const happenedAt = parseLangameDate(
       firstString(
         row.date_normal,
@@ -1042,13 +1624,13 @@ export class GuestActivityLedgerService {
       externalGuestId: context.externalGuestId,
       transactionId: firstString(row.id),
       rawType: nullableString(row.type),
-      text,
+      text: sourceText,
       happenedAt: happenedAt?.toISOString() ?? null,
       externalClubId,
       sessionExternalId: firstString(row.session_id, row.UUID),
       amount,
       bonusAmount,
-      payload,
+      payload: hashPayload,
     });
 
     return {
@@ -1091,7 +1673,11 @@ export class GuestActivityLedgerService {
     const totalAmount =
       firstNumber(row.total, row.sum, row.amount) ??
       (quantity !== null && unitPrice !== null ? quantity * unitPrice : null);
-    const payload = sanitizePayload({
+    const hashPayload = sanitizePayload({
+      ...row,
+      product_name_resolved: productName,
+    });
+    const payload = sanitizeGuestActivityRawPayload({
       ...row,
       product_name_resolved: productName,
     });
@@ -1121,7 +1707,7 @@ export class GuestActivityLedgerService {
       unitPrice,
       totalAmount,
       canceled: isTruthyLangameFlag(row.cancel),
-      payload,
+      payload: hashPayload,
     });
 
     return {
@@ -1148,6 +1734,7 @@ export class GuestActivityLedgerService {
     sourceKind: string,
     row: Record<string, unknown>,
     raw: RawRecordDraft,
+    normalizationRunId: string,
   ) {
     const before = await this.prisma.guestActivityRawRecord.findUnique({
       where: {
@@ -1209,16 +1796,40 @@ export class GuestActivityLedgerService {
       },
       select: { id: true },
     });
+    const factsCreated = await this.persistNormalizedFacts(
+      context,
+      rawRecord.id,
+      sourceKind,
+      row,
+      raw,
+      normalizationRunId,
+    );
+
+    return {
+      rawRecordCreated: !before,
+      factsCreated,
+    };
+  }
+
+  private async persistNormalizedFacts(
+    context: LedgerSyncContext,
+    rawRecordId: string,
+    sourceKind: string,
+    row: Record<string, unknown>,
+    raw: RawRecordDraft,
+    normalizationRunId: string,
+  ) {
     const facts = this.normalizeFacts(sourceKind, row, raw, context.timeZone);
     let factsCreated = 0;
 
     for (const fact of facts) {
       const beforeFact = await this.prisma.guestActivityFact.findUnique({
         where: {
-          tenantId_factType_sourceHash: {
+          tenantId_factType_sourceHash_parserVersion: {
             tenantId: context.tenantId,
             factType: fact.factType,
             sourceHash: raw.sourceHash,
+            parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
           },
         },
         select: { id: true },
@@ -1226,15 +1837,16 @@ export class GuestActivityLedgerService {
 
       await this.prisma.guestActivityFact.upsert({
         where: {
-          tenantId_factType_sourceHash: {
+          tenantId_factType_sourceHash_parserVersion: {
             tenantId: context.tenantId,
             factType: fact.factType,
             sourceHash: raw.sourceHash,
+            parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
           },
         },
         create: {
           tenantId: context.tenantId,
-          rawRecordId: rawRecord.id,
+          rawRecordId,
           guestId: context.guest?.id ?? null,
           profileId: context.profile.id,
           storeId: fact.storeId,
@@ -1254,10 +1866,13 @@ export class GuestActivityLedgerService {
           bonusAmount: fact.bonusAmount,
           durationMinutes: fact.durationMinutes,
           confidence: fact.confidence,
+          parserVersion: GUEST_ACTIVITY_PARSER_VERSION,
+          normalizationRunId,
+          lifecycleStatus: 'ACTIVE',
           evidence: fact.evidence,
         },
         update: {
-          rawRecordId: rawRecord.id,
+          rawRecordId,
           guestId: context.guest?.id ?? null,
           profileId: context.profile.id,
           storeId: fact.storeId,
@@ -1270,6 +1885,9 @@ export class GuestActivityLedgerService {
           bonusAmount: fact.bonusAmount,
           durationMinutes: fact.durationMinutes,
           confidence: fact.confidence,
+          normalizationRunId,
+          lifecycleStatus: 'ACTIVE',
+          supersededAt: null,
           evidence: fact.evidence,
         },
       });
@@ -1279,15 +1897,31 @@ export class GuestActivityLedgerService {
       }
     }
 
+    const activeFactTypes = facts.map((fact) => fact.factType);
+    await this.prisma.guestActivityFact.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        rawRecordId,
+        lifecycleStatus: 'ACTIVE',
+        OR: [
+          { parserVersion: { not: GUEST_ACTIVITY_PARSER_VERSION } },
+          ...(activeFactTypes.length > 0
+            ? [{ factType: { notIn: activeFactTypes } }]
+            : [{}]),
+        ],
+      },
+      data: {
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: new Date(),
+      },
+    });
+
     await this.prisma.guestActivityRawRecord.update({
-      where: { id: rawRecord.id },
+      where: { id: rawRecordId },
       data: { parseStatus: facts.length > 0 ? 'FACTS_CREATED' : 'NO_FACTS' },
     });
 
-    return {
-      rawRecordCreated: !before,
-      factsCreated,
-    };
+    return factsCreated;
   }
 
   private normalizeFacts(
@@ -1429,7 +2063,7 @@ export class GuestActivityLedgerService {
         bonusAmount: null,
         durationMinutes: null,
         confidence: 'EXACT',
-        evidence: sanitizePayload({
+        evidence: sanitizeGuestActivityEvidencePayload({
           sourceKind: SOURCE_PRODUCT_EXPENSE,
           productId,
           productName,
@@ -1449,7 +2083,7 @@ export class GuestActivityLedgerService {
     const startedAt = parseLangameDate(firstString(row.date_start), timeZone);
     const stoppedAt = parseLangameDate(firstString(row.date_stop), timeZone);
     const sessionExternalId = firstString(row.id, row.UUID);
-    const isPackageSession = isTruthyLangameFlag(row.packet);
+    const packetFlag = parseLangameFlag(row.packet);
     const playedMinutes = playedDurationMinutes(startedAt, stoppedAt);
 
     if (startedAt) {
@@ -1468,7 +2102,7 @@ export class GuestActivityLedgerService {
         confidence: 'EXACT',
         evidence: { sourceKind: SOURCE_GUEST_SESSION },
       });
-      if (isPackageSession) {
+      if (packetFlag === true) {
         facts.push({
           factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
           happenedAt: startedAt,
@@ -1482,12 +2116,12 @@ export class GuestActivityLedgerService {
           bonusAmount: null,
           durationMinutes: null,
           confidence: 'EXACT',
-          evidence: sanitizePayload({
+          evidence: sanitizeGuestActivityEvidencePayload({
             sourceKind: SOURCE_GUEST_SESSION,
             packet: row.packet,
           }),
         });
-      } else {
+      } else if (packetFlag === false) {
         facts.push({
           factType: 'HOURLY_SESSION_STARTED',
           happenedAt: startedAt,
@@ -1500,11 +2134,11 @@ export class GuestActivityLedgerService {
           amount: null,
           bonusAmount: null,
           durationMinutes: null,
-          confidence: 'INFERRED',
-          evidence: {
+          confidence: 'EXACT',
+          evidence: sanitizeGuestActivityEvidencePayload({
             sourceKind: SOURCE_GUEST_SESSION,
-            note: 'Langame session row has no packet/subscription marker.',
-          },
+            packet: row.packet,
+          }),
         });
       }
     }
@@ -1527,13 +2161,11 @@ export class GuestActivityLedgerService {
       });
     }
 
-    if (playedMinutes !== null) {
-      const playTimeFactType: GuestActivityFactType = isPackageSession
+    if (playedMinutes !== null && packetFlag !== null) {
+      const playTimeFactType: GuestActivityFactType = packetFlag
         ? 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
         : 'HOURLY_PLAY_TIME_ACCUMULATED';
-      const tariffType = isPackageSession
-        ? 'package_or_subscription'
-        : 'hourly';
+      const tariffType = packetFlag ? 'package_or_subscription' : 'hourly';
 
       facts.push({
         factType: playTimeFactType,
@@ -1548,7 +2180,7 @@ export class GuestActivityLedgerService {
         bonusAmount: null,
         durationMinutes: playedMinutes,
         confidence: 'EXACT',
-        evidence: sanitizePayload({
+        evidence: sanitizeGuestActivityEvidencePayload({
           sourceKind: SOURCE_GUEST_SESSION,
           startedAt: startedAt?.toISOString() ?? null,
           stoppedAt: stoppedAt?.toISOString() ?? null,
@@ -1695,10 +2327,7 @@ export class GuestActivityLedgerService {
         syncFrom: params.window.earliestRuleAt ?? params.window.from,
         lastRequestedFrom: params.window.from,
         lastRequestedTo: params.window.to,
-        lastSuccessfulTo:
-          params.status === 'SUCCESS' || params.status === 'PARTIAL'
-            ? params.window.to
-            : null,
+        lastSuccessfulTo: params.status === 'SUCCESS' ? params.window.to : null,
         lastStartedAt: params.status === 'RUNNING' ? new Date() : null,
         lastFinishedAt: params.status === 'RUNNING' ? null : new Date(),
         rawRecordsCount: params.rawRecordsCount,
@@ -1716,9 +2345,7 @@ export class GuestActivityLedgerService {
         lastRequestedFrom: params.window.from,
         lastRequestedTo: params.window.to,
         lastSuccessfulTo:
-          params.status === 'SUCCESS' || params.status === 'PARTIAL'
-            ? params.window.to
-            : undefined,
+          params.status === 'SUCCESS' ? params.window.to : undefined,
         lastStartedAt: params.status === 'RUNNING' ? new Date() : undefined,
         lastFinishedAt: params.status === 'RUNNING' ? null : new Date(),
         rawRecordsCount: params.rawRecordsCount,
@@ -1920,6 +2547,18 @@ function resolveProductName(
   return productNamesByClub.get(externalClubId)?.get(productId) ?? null;
 }
 
+function jsonObjectRecord(value: Prisma.JsonValue): Record<string, unknown> {
+  if (!value || Array.isArray(value) || typeof value !== 'object') {
+    return {};
+  }
+
+  return value;
+}
+
+function decimalValue(value: Prisma.Decimal | null) {
+  return value === null ? null : value.toNumber();
+}
+
 function sanitizePayload(value: unknown): Prisma.InputJsonValue {
   return sanitizeJson(value) as Prisma.InputJsonValue;
 }
@@ -1955,6 +2594,97 @@ function maskPossiblePhone(value: string) {
   }
 
   return `***${digits.slice(-4)}`;
+}
+
+const RAW_PAYLOAD_ALLOWED_KEY =
+  /^(?:id|uuid|type|status|state|date(?:_normal|_insert|_update|_start|_stop)?|created(?:_at)?|updated(?:_at)?|time|datetime|start(?:ed)?_at|stop(?:ped)?_at|duration(?:_minutes)?|minutes|packet|tarif(?:f)?(?:_id|_name|_title|_type)?|session(?:_id|_type|_packet|_minutes)?|club_id|list_clubs_id|guest_id|real_guest_id|amount|sum|total|balance|bonus(?:_balance|es)?|product(?:_id|_name|_name_resolved)?|goods?(?:_id|_name)?|list_goods_id|category(?:_id|_name)?|supplier(?:_id|_name)?|quantity|count|qty|price(?:_sale)?|unit_price|cancel|operation|source|comment|text|message|title|description|data|items|rows|result)$/i;
+const RAW_PAYLOAD_SENSITIVE_KEY =
+  /(?:phone|тел|mobile|contact|email|mail|fio|full.?name|first.?name|last.?name|middle.?name|passport|document|address|birth|card.?number)/i;
+
+export function sanitizeGuestActivityRawPayload(
+  value: unknown,
+): Prisma.InputJsonValue {
+  return sanitizeGuestActivityRawJson(value) as Prisma.InputJsonValue;
+}
+
+export function sanitizeGuestActivityEvidencePayload(
+  value: unknown,
+): Prisma.InputJsonValue {
+  return sanitizeGuestActivityEvidenceJson(value) as Prisma.InputJsonValue;
+}
+
+export function sanitizeGuestActivityText(value: string | null) {
+  if (!value) {
+    return value;
+  }
+
+  return value
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[redacted-email]')
+    .replace(/(?:\+?\d[\s()-]*){7,}/g, (match) => maskPossiblePhone(match));
+}
+
+function sanitizeGuestActivityRawJson(value: unknown, key = ''): unknown {
+  if (RAW_PAYLOAD_SENSITIVE_KEY.test(key)) {
+    return typeof value === 'string'
+      ? sanitizeSensitiveValue(value, key)
+      : '[redacted]';
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 200)
+      .map((item) => sanitizeGuestActivityRawJson(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(
+          ([itemKey]) =>
+            RAW_PAYLOAD_ALLOWED_KEY.test(itemKey) ||
+            RAW_PAYLOAD_SENSITIVE_KEY.test(itemKey),
+        )
+        .map(([itemKey, item]) => [
+          itemKey,
+          sanitizeGuestActivityRawJson(item, itemKey),
+        ]),
+    );
+  }
+
+  return typeof value === 'string'
+    ? sanitizeGuestActivityText(value)
+    : (value ?? null);
+}
+
+function sanitizeGuestActivityEvidenceJson(value: unknown, key = ''): unknown {
+  if (RAW_PAYLOAD_SENSITIVE_KEY.test(key)) {
+    return typeof value === 'string'
+      ? sanitizeSensitiveValue(value, key)
+      : '[redacted]';
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeGuestActivityEvidenceJson(item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(
+        ([itemKey, item]) => [
+          itemKey,
+          sanitizeGuestActivityEvidenceJson(item, itemKey),
+        ],
+      ),
+    );
+  }
+  return typeof value === 'string'
+    ? sanitizeGuestActivityText(value)
+    : (value ?? null);
+}
+
+function sanitizeSensitiveValue(value: string, key: string) {
+  if (/(phone|тел|mobile|contact)/i.test(key)) {
+    return maskPossiblePhone(value);
+  }
+  return '[redacted]';
 }
 
 function extractText(row: Record<string, unknown>) {
@@ -2202,17 +2932,21 @@ function firstNumber(...values: unknown[]) {
 }
 
 function isTruthyLangameFlag(value: unknown) {
+  return parseLangameFlag(value) === true;
+}
+
+function parseLangameFlag(value: unknown): boolean | null {
   if (typeof value === 'boolean') {
     return value;
   }
 
   if (typeof value === 'number') {
-    return value > 0;
+    return Number.isFinite(value) ? value > 0 : null;
   }
 
   const normalized = primitiveString(value)?.trim().toLowerCase();
   if (!normalized) {
-    return false;
+    return null;
   }
 
   if (['1', 'true', 'yes', 'y', 'да'].includes(normalized)) {
@@ -2224,7 +2958,7 @@ function isTruthyLangameFlag(value: unknown) {
   }
 
   const numeric = Number(normalized.replace(',', '.'));
-  return Number.isFinite(numeric) ? numeric > 0 : false;
+  return Number.isFinite(numeric) ? numeric > 0 : null;
 }
 
 function playedDurationMinutes(startedAt: Date | null, stoppedAt: Date | null) {
@@ -2301,4 +3035,17 @@ function clampNumber(value: number, min: number, max: number) {
   }
 
   return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function sourceResultDiagnostics<T>(result: SourceFetchResult<T>) {
+  return {
+    status: result.status,
+    pagesFetched: result.pagesFetched,
+    rowsFetched: result.rowsFetched,
+    rowsMatched: result.rows.length,
+    nextPage: result.nextPage,
+    from: result.window.from.toISOString(),
+    to: result.window.to.toISOString(),
+    errorMessage: result.errorMessage,
+  };
 }

@@ -7,6 +7,16 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { GuestActivityLedgerService } from './guest-activity-ledger.service';
+import {
+  evaluateGuestGameLedgerRule,
+  guestGameRuleActivationAt,
+  guestGameSessionTypeFromConditions,
+  guestGameStringArray,
+} from './guest-game-rule-evaluator';
+import {
+  compareGuestGameRuleDecisionPair,
+  type GuestGameComparisonSourceFreshness,
+} from './guest-game-rule-comparison';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -18,6 +28,7 @@ type TimelineQuery = {
   storeId?: string;
   type?: string;
   status?: string;
+  correlation?: string;
   limit?: string;
 };
 
@@ -36,6 +47,10 @@ type TimelineItem = {
   entityName: string | null;
   reasonCode: string | null;
   reasonText: string | null;
+  traceId: string | null;
+  evaluationRunId: string | null;
+  sourceHash: string | null;
+  sessionExternalId: string | null;
   payload: unknown;
 };
 
@@ -143,40 +158,58 @@ export class GuestGamificationLogService {
     const storeId = nullableString(query.storeId);
     const typeFilter = nullableString(query.type);
     const statusFilter = nullableString(query.status);
+    const correlationFilter = nullableString(query.correlation);
 
-    const [syncState, gameTimeline, langameTimeline, comparison, stores] =
-      await Promise.all([
-        this.findSyncState(user.tenantId, profile),
-        this.buildGameTimeline(user.tenantId, profile, {
-          from,
-          to,
-          sort,
-          storeId,
-          typeFilter,
-          statusFilter,
-          limit,
-        }),
-        this.buildLangameTimeline(user.tenantId, profile, {
-          from,
-          to,
-          sort,
-          storeId,
-          typeFilter,
-          statusFilter,
-          limit,
-        }),
-        this.buildComparison(user.tenantId, profile, {
-          from,
-          to,
-          storeId,
-          limit,
-        }),
-        this.prisma.store.findMany({
-          where: { tenantId: user.tenantId },
-          select: { id: true, name: true },
-          orderBy: { name: 'asc' },
-        }),
-      ]);
+    const [
+      syncState,
+      gameTimeline,
+      langameTimeline,
+      comparison,
+      stores,
+      retentionPolicy,
+      retentionRun,
+    ] = await Promise.all([
+      this.findSyncState(user.tenantId, profile),
+      this.buildGameTimeline(user.tenantId, profile, {
+        from,
+        to,
+        sort,
+        storeId,
+        typeFilter,
+        statusFilter,
+        correlationFilter,
+        limit,
+      }),
+      this.buildLangameTimeline(user.tenantId, profile, {
+        from,
+        to,
+        sort,
+        storeId,
+        typeFilter,
+        statusFilter,
+        correlationFilter,
+        limit,
+      }),
+      this.buildComparison(user.tenantId, profile, {
+        from,
+        to,
+        storeId,
+        correlationFilter,
+        limit,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId: user.tenantId },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.guestGameDataRetentionPolicy.findUnique({
+        where: { tenantId: user.tenantId },
+      }),
+      this.prisma.guestGameDataRetentionRun.findFirst({
+        where: { tenantId: user.tenantId },
+        orderBy: { startedAt: 'desc' },
+      }),
+    ]);
 
     return {
       profile: {
@@ -207,6 +240,7 @@ export class GuestGamificationLogService {
         storeId,
         type: typeFilter,
         status: statusFilter,
+        correlation: correlationFilter,
         limit,
         stores,
       },
@@ -214,6 +248,20 @@ export class GuestGamificationLogService {
       gameTimeline,
       langameTimeline,
       comparison,
+      comparisonSummary: summarizeComparison(comparison),
+      retention: {
+        policy: retentionPolicy
+          ? mapPlain(retentionPolicy)
+          : {
+              rawRetentionDays: 365,
+              factRetentionDays: 1095,
+              decisionRetentionDays: 1095,
+              auditRetentionDays: 1095,
+              liveCleanupEnabled: false,
+              source: 'DEFAULT',
+            },
+        latestRun: retentionRun ? mapPlain(retentionRun) : null,
+      },
       notes: [
         'Неуспешные попытки до включения audit-log могли не сохраняться.',
         'Лог Langame используется для диагностики и пока не влияет на боевую выдачу наград.',
@@ -281,74 +329,90 @@ export class GuestGamificationLogService {
     };
     const dateWhere = dateRangeWhere(options.from, options.to);
     const orderBy = { happenedAt: options.sort };
+    const queryLimit = options.correlationFilter ? MAX_LIMIT : options.limit;
 
-    const [auditEvents, gameEvents, rewards, deliveries] = await Promise.all([
-      this.prisma.guestGameAuditEvent.findMany({
-        where: {
-          ...whereBase,
-          ...(dateWhere ? { happenedAt: dateWhere } : {}),
-          ...(options.typeFilter ? { action: options.typeFilter } : {}),
-          ...(options.statusFilter ? { status: options.statusFilter } : {}),
-        },
-        include: { store: { select: { id: true, name: true } } },
-        orderBy,
-        take: options.limit,
-      }),
-      this.prisma.guestGameEvent.findMany({
-        where: {
-          ...whereBase,
-          ...(dateWhere ? { occurredAt: dateWhere } : {}),
-          ...(options.typeFilter ? { eventType: options.typeFilter } : {}),
-        },
-        include: {
-          lootBox: { select: { id: true, name: true } },
-          mission: { select: { id: true, name: true } },
-          season: { select: { id: true, name: true } },
-        },
-        orderBy: { occurredAt: options.sort },
-        take: options.limit,
-      }),
-      this.prisma.guestGameReward.findMany({
-        where: {
-          ...whereBase,
-          ...(dateWhere ? { qualifiedAt: dateWhere } : {}),
-          ...(options.statusFilter ? { status: options.statusFilter } : {}),
-        },
-        include: {
-          store: { select: { id: true, name: true } },
-          lootBox: { select: { id: true, name: true } },
-          mission: { select: { id: true, name: true } },
-          season: { select: { id: true, name: true } },
-        },
-        orderBy: { qualifiedAt: options.sort },
-        take: options.limit,
-      }),
-      this.prisma.guestGameDelivery.findMany({
-        where: {
-          ...whereBase,
-          ...(dateWhere ? { preparedAt: dateWhere } : {}),
-          ...(options.statusFilter ? { status: options.statusFilter } : {}),
-        },
-        include: {
-          store: { select: { id: true, name: true } },
-          reward: {
-            select: {
-              id: true,
-              rewardLabel: true,
-              lootBox: { select: { id: true, name: true } },
-              mission: { select: { id: true, name: true } },
-              season: { select: { id: true, name: true } },
+    const [auditEvents, gameEvents, rewards, deliveries, decisions] =
+      await Promise.all([
+        this.prisma.guestGameAuditEvent.findMany({
+          where: {
+            ...whereBase,
+            ...(dateWhere ? { happenedAt: dateWhere } : {}),
+            ...(options.typeFilter ? { action: options.typeFilter } : {}),
+            ...(options.statusFilter ? { status: options.statusFilter } : {}),
+          },
+          include: { store: { select: { id: true, name: true } } },
+          orderBy,
+          take: queryLimit,
+        }),
+        this.prisma.guestGameEvent.findMany({
+          where: {
+            ...whereBase,
+            ...(dateWhere ? { occurredAt: dateWhere } : {}),
+            ...(options.typeFilter ? { eventType: options.typeFilter } : {}),
+          },
+          include: {
+            lootBox: { select: { id: true, name: true } },
+            mission: { select: { id: true, name: true } },
+            season: { select: { id: true, name: true } },
+          },
+          orderBy: { occurredAt: options.sort },
+          take: queryLimit,
+        }),
+        this.prisma.guestGameReward.findMany({
+          where: {
+            ...whereBase,
+            ...(dateWhere ? { qualifiedAt: dateWhere } : {}),
+            ...(options.statusFilter ? { status: options.statusFilter } : {}),
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            lootBox: { select: { id: true, name: true } },
+            mission: { select: { id: true, name: true } },
+            season: { select: { id: true, name: true } },
+          },
+          orderBy: { qualifiedAt: options.sort },
+          take: queryLimit,
+        }),
+        this.prisma.guestGameDelivery.findMany({
+          where: {
+            ...whereBase,
+            ...(dateWhere ? { preparedAt: dateWhere } : {}),
+            ...(options.statusFilter ? { status: options.statusFilter } : {}),
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            reward: {
+              select: {
+                id: true,
+                rewardLabel: true,
+                lootBox: { select: { id: true, name: true } },
+                mission: { select: { id: true, name: true } },
+                season: { select: { id: true, name: true } },
+              },
+            },
+            events: {
+              orderBy: { createdAt: options.sort },
+              take: 20,
             },
           },
-          events: {
-            orderBy: { createdAt: options.sort },
-            take: 20,
+          orderBy: { preparedAt: options.sort },
+          take: queryLimit,
+        }),
+        this.prisma.guestGameRuleDecision.findMany({
+          where: {
+            tenantId,
+            OR: [
+              { profileId: profile.id },
+              ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
+            ],
+            ...(options.storeId ? { storeId: options.storeId } : {}),
+            ...(dateWhere ? { evaluatedAt: dateWhere } : {}),
+            ...(options.statusFilter ? { status: options.statusFilter } : {}),
           },
-        },
-        orderBy: { preparedAt: options.sort },
-        take: options.limit,
-      }),
-    ]);
+          orderBy: [{ evaluatedAt: options.sort }, { createdAt: options.sort }],
+          take: queryLimit,
+        }),
+      ]);
 
     const items: TimelineItem[] = [
       ...auditEvents.map((event) => ({
@@ -366,6 +430,10 @@ export class GuestGamificationLogService {
         entityName: null,
         reasonCode: event.reasonCode,
         reasonText: event.reasonText,
+        traceId: event.traceId,
+        evaluationRunId: jsonString(event.payload, 'evaluationRunId'),
+        sourceHash: jsonString(event.payload, 'sourceHash'),
+        sessionExternalId: jsonString(event.payload, 'sessionExternalId'),
         payload: event.payload,
       })),
       ...gameEvents.map((event) => {
@@ -385,6 +453,10 @@ export class GuestGamificationLogService {
           entityName: entity.name,
           reasonCode: null,
           reasonText: null,
+          traceId: jsonString(event.payload, 'traceId'),
+          evaluationRunId: jsonString(event.payload, 'evaluationRunId'),
+          sourceHash: jsonString(event.payload, 'sourceHash'),
+          sessionExternalId: jsonString(event.payload, 'sessionExternalId'),
           payload: event.payload,
         };
       }),
@@ -405,6 +477,10 @@ export class GuestGamificationLogService {
           entityName: entity.name,
           reasonCode: null,
           reasonText: null,
+          traceId: jsonString(reward.evidence, 'traceId'),
+          evaluationRunId: jsonString(reward.evidence, 'evaluationRunId'),
+          sourceHash: jsonString(reward.evidence, 'sourceHash'),
+          sessionExternalId: jsonString(reward.evidence, 'sessionExternalId'),
           payload: {
             rewardType: reward.rewardType,
             rewardAmount: decimalToNumber(reward.rewardAmount),
@@ -429,6 +505,10 @@ export class GuestGamificationLogService {
           entityName: delivery.reward.rewardLabel,
           reasonCode: delivery.readinessStatus,
           reasonText: null,
+          traceId: jsonString(delivery.metadata, 'traceId'),
+          evaluationRunId: jsonString(delivery.metadata, 'evaluationRunId'),
+          sourceHash: jsonString(delivery.metadata, 'sourceHash'),
+          sessionExternalId: jsonString(delivery.metadata, 'sessionExternalId'),
           payload: {
             blockers: delivery.blockers,
             metadata: delivery.metadata,
@@ -449,12 +529,51 @@ export class GuestGamificationLogService {
           entityName: delivery.reward.rewardLabel,
           reasonCode: event.fromStatus,
           reasonText: event.channel,
+          traceId: jsonString(event.payload, 'traceId'),
+          evaluationRunId: jsonString(event.payload, 'evaluationRunId'),
+          sourceHash: jsonString(event.payload, 'sourceHash'),
+          sessionExternalId: jsonString(event.payload, 'sessionExternalId'),
           payload: event.payload,
         })),
       ]),
+      ...decisions.map((decision) => ({
+        id: decision.id,
+        source: 'RULE_DECISION',
+        kind: `${decision.evaluationMode}:${decision.ruleType}`,
+        title: `${decision.evaluationMode} проверка: ${decision.ruleName ?? decision.ruleId}`,
+        description: ruleDecisionReason(decision),
+        status: decision.status,
+        happenedAt: decision.evaluatedAt.toISOString(),
+        storeId: decision.storeId,
+        storeName: null,
+        entityType: decision.ruleType,
+        entityId: decision.ruleId,
+        entityName: decision.ruleName,
+        reasonCode: decision.sourceFactKind,
+        reasonText: ruleDecisionReason(decision),
+        traceId: decision.traceId,
+        evaluationRunId: decision.evaluationRunId,
+        sourceHash: null,
+        sessionExternalId: null,
+        payload: {
+          evaluationMode: decision.evaluationMode,
+          evaluatorVersion: decision.evaluatorVersion,
+          eventId: decision.eventId,
+          sourceEventType: decision.sourceEventType,
+          sourceFactId: decision.sourceFactId,
+          input: decision.input,
+          evidence: decision.evidence,
+          reasons: decision.reasons,
+          blockers: decision.blockers,
+        },
+      })),
     ];
 
-    return sortAndLimitTimeline(items, options.sort, options.limit);
+    return sortAndLimitTimeline(
+      filterTimelineByCorrelation(items, options.correlationFilter),
+      options.sort,
+      options.limit,
+    );
   }
 
   private async buildLangameTimeline(
@@ -481,6 +600,7 @@ export class GuestGamificationLogService {
       ...(options.storeId ? { storeId: options.storeId } : {}),
     };
     const dateWhere = dateRangeWhere(options.from, options.to);
+    const queryLimit = options.correlationFilter ? MAX_LIMIT : options.limit;
 
     const [rawRecords, facts] = await Promise.all([
       this.prisma.guestActivityRawRecord.findMany({
@@ -494,17 +614,18 @@ export class GuestGamificationLogService {
         },
         include: { store: { select: { id: true, name: true } } },
         orderBy: [{ happenedAt: options.sort }, { createdAt: options.sort }],
-        take: options.limit,
+        take: queryLimit,
       }),
       this.prisma.guestActivityFact.findMany({
         where: {
           ...baseWhere,
+          lifecycleStatus: 'ACTIVE',
           ...(dateWhere ? { happenedAt: dateWhere } : {}),
           ...(options.typeFilter ? { factType: options.typeFilter } : {}),
         },
         include: { store: { select: { id: true, name: true } } },
         orderBy: [{ happenedAt: options.sort }, { createdAt: options.sort }],
-        take: options.limit,
+        take: queryLimit,
       }),
     ]);
 
@@ -525,6 +646,10 @@ export class GuestGamificationLogService {
         entityName: record.rawType,
         reasonCode: record.externalClubId,
         reasonText: null,
+        traceId: null,
+        evaluationRunId: null,
+        sourceHash: record.sourceHash,
+        sessionExternalId: record.sessionExternalId,
         payload: record.rawPayload,
       })),
       ...facts.map((fact) => ({
@@ -543,16 +668,27 @@ export class GuestGamificationLogService {
         entityName: fact.tariffType,
         reasonCode: fact.sourceKind,
         reasonText: null,
+        traceId: null,
+        evaluationRunId: null,
+        sourceHash: fact.sourceHash,
+        sessionExternalId: fact.sessionExternalId,
         payload: {
           evidence: fact.evidence,
           amount: decimalToNumber(fact.amount),
           bonusAmount: decimalToNumber(fact.bonusAmount),
           durationMinutes: fact.durationMinutes,
+          parserVersion: fact.parserVersion,
+          normalizationRunId: fact.normalizationRunId,
+          lifecycleStatus: fact.lifecycleStatus,
         },
       })),
     ];
 
-    return sortAndLimitTimeline(items, options.sort, options.limit);
+    return sortAndLimitTimeline(
+      filterTimelineByCorrelation(items, options.correlationFilter),
+      options.sort,
+      options.limit,
+    );
   }
 
   private async buildComparison(
@@ -562,63 +698,101 @@ export class GuestGamificationLogService {
       from: Date | null;
       to: Date | null;
       storeId: string | null;
+      correlationFilter: string | null;
       limit: number;
     },
   ) {
     const dateWhere = dateRangeWhere(options.from, options.to);
-    const [lootBoxes, missions, seasons, rewards, facts, audits] =
-      await Promise.all([
-        this.prisma.guestGameLootBox.findMany({
-          where: { tenantId, status: 'ACTIVE' },
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        }),
-        this.prisma.guestGameMission.findMany({
-          where: { tenantId, status: 'ACTIVE' },
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        }),
-        this.prisma.guestGameSeason.findMany({
-          where: { tenantId, status: 'ACTIVE' },
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-        }),
-        this.prisma.guestGameReward.findMany({
-          where: {
-            tenantId,
-            OR: [
-              { profileId: profile.id },
-              ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
-            ],
-            ...(dateWhere ? { qualifiedAt: dateWhere } : {}),
-          },
-          orderBy: { qualifiedAt: 'desc' },
-        }),
-        this.prisma.guestActivityFact.findMany({
-          where: {
-            tenantId,
-            OR: [
-              { profileId: profile.id },
-              ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
-            ],
-            ...(dateWhere ? { happenedAt: dateWhere } : {}),
-          },
-          orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
-          take: 300,
-        }),
-        this.prisma.guestGameAuditEvent.findMany({
-          where: {
-            tenantId,
-            OR: [
-              { profileId: profile.id },
-              ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
-            ],
-            ...(dateWhere ? { happenedAt: dateWhere } : {}),
-          },
-          orderBy: { happenedAt: 'desc' },
-          take: 300,
-        }),
-      ]);
+    const [
+      lootBoxes,
+      missions,
+      seasons,
+      rewards,
+      facts,
+      audits,
+      decisions,
+      syncState,
+    ] = await Promise.all([
+      this.prisma.guestGameLootBox.findMany({
+        where: { tenantId, status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.prisma.guestGameMission.findMany({
+        where: { tenantId, status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.prisma.guestGameSeason.findMany({
+        where: { tenantId, status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.guestGameReward.findMany({
+        where: {
+          tenantId,
+          OR: [
+            { profileId: profile.id },
+            ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
+          ],
+          ...(dateWhere ? { qualifiedAt: dateWhere } : {}),
+        },
+        orderBy: { qualifiedAt: 'desc' },
+      }),
+      this.prisma.guestActivityFact.findMany({
+        where: {
+          tenantId,
+          lifecycleStatus: 'ACTIVE',
+          OR: [
+            { profileId: profile.id },
+            ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
+          ],
+          ...(dateWhere ? { happenedAt: dateWhere } : {}),
+        },
+        include: {
+          store: { select: { id: true, name: true, timeZone: true } },
+        },
+        orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 300,
+      }),
+      this.prisma.guestGameAuditEvent.findMany({
+        where: {
+          tenantId,
+          OR: [
+            { profileId: profile.id },
+            ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
+          ],
+          ...(dateWhere ? { happenedAt: dateWhere } : {}),
+        },
+        orderBy: { happenedAt: 'desc' },
+        take: 300,
+      }),
+      this.prisma.guestGameRuleDecision.findMany({
+        where: {
+          tenantId,
+          OR: [
+            { profileId: profile.id },
+            ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
+          ],
+          ...(dateWhere ? { evaluatedAt: dateWhere } : {}),
+        },
+        orderBy: [{ evaluatedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 500,
+      }),
+      this.prisma.guestActivitySyncState.findFirst({
+        where: {
+          tenantId,
+          OR: [
+            { profileId: profile.id },
+            ...(profile.guestId ? [{ guestId: profile.guestId }] : []),
+          ],
+          ...(options.storeId ? { storeId: options.storeId } : {}),
+        },
+        orderBy: [{ lastFinishedAt: 'desc' }, { updatedAt: 'desc' }],
+      }),
+    ]);
+
+    const sourceFreshness = guestActivitySourceFreshness(syncState);
 
     const ruleRows = [
       ...lootBoxes
@@ -630,6 +804,11 @@ export class GuestGamificationLogService {
           triggerKind: rule.triggerKind,
           sessionType: rule.sessionType,
           createdAt: rule.createdAt,
+          activatedAt: guestGameRuleActivationAt(rule.createdAt, rule.limits),
+          periodFrom: null,
+          periodTo: null,
+          periodRules: rule.periodRules,
+          storeIds: guestGameStringArray(rule.storeIds),
         })),
       ...missions
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -638,8 +817,16 @@ export class GuestGamificationLogService {
           id: rule.id,
           title: rule.name,
           triggerKind: rule.triggerKind,
-          sessionType: sessionTypeFromConditions(rule.conditions),
+          sessionType: guestGameSessionTypeFromConditions(rule.conditions),
           createdAt: rule.createdAt,
+          activatedAt: guestGameRuleActivationAt(
+            rule.createdAt,
+            rule.conditions,
+          ),
+          periodFrom: rule.periodFrom,
+          periodTo: rule.periodTo,
+          periodRules: rule.conditions,
+          storeIds: guestGameStringArray(rule.storeIds),
         })),
       ...seasons
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -650,10 +837,15 @@ export class GuestGamificationLogService {
           triggerKind: 'BATTLE_PASS',
           sessionType: null,
           createdAt: rule.createdAt,
+          activatedAt: rule.periodFrom ?? rule.createdAt,
+          periodFrom: rule.periodFrom,
+          periodTo: rule.periodTo,
+          periodRules: null,
+          storeIds: guestGameStringArray(rule.storeIds),
         })),
     ].slice(0, options.limit);
 
-    return ruleRows.map((rule) => {
+    const rows = ruleRows.map((rule) => {
       const ruleRewards = rewards.filter((reward) =>
         rewardMatchesRule(reward, rule),
       );
@@ -663,27 +855,50 @@ export class GuestGamificationLogService {
           JSON.stringify(audit.payload ?? {}).includes(rule.id),
       );
       const latestAudit = ruleAudits[0] ?? null;
-      const relevantFacts = relevantFactsForRule(
-        rule.triggerKind,
-        rule.sessionType,
+      const ruleDecisions = decisions.filter(
+        (decision) =>
+          decision.ruleType === rule.type && decision.ruleId === rule.id,
       );
-      const matchingFacts = facts.filter((fact) =>
-        relevantFacts.includes(fact.factType),
+      const liveDecisions = ruleDecisions.filter(
+        (decision) => decision.evaluationMode !== 'SHADOW',
       );
-      const currentStatus = ruleRewards.length
-        ? 'MATCHED'
-        : latestAudit?.status === 'BLOCKED' || latestAudit?.status === 'FAILED'
-          ? 'BLOCKED'
-          : latestAudit?.status === 'SUCCESS'
-            ? 'MATCHED'
-            : 'NO_DECISION';
-      const ledgerStatus = matchingFacts.length ? 'MATCHED' : 'NO_MATCH';
-      const verdict =
-        currentStatus === 'NO_DECISION' || ledgerStatus === 'NO_MATCH'
-          ? 'INSUFFICIENT_DATA'
-          : currentStatus === ledgerStatus
-            ? 'MATCH'
-            : 'MISMATCH';
+      const shadowDecisions = ruleDecisions.filter(
+        (decision) => decision.evaluationMode === 'SHADOW',
+      );
+      const latestDecision = liveDecisions[0] ?? null;
+      const pairedShadowDecision = latestDecision
+        ? (shadowDecisions.find(
+            (decision) =>
+              decision.evaluationRunId === latestDecision.evaluationRunId,
+          ) ?? null)
+        : (shadowDecisions[0] ?? null);
+      const legacyDecision = latestDecision
+        ? null
+        : legacyRuleDecisionFromAudits(ruleAudits, rule.id);
+      const latestShadowDecision = shadowDecisions[0] ?? null;
+      const ledgerEvaluation = evaluateGuestGameLedgerRule(
+        rule,
+        facts,
+        options.storeId,
+      );
+      const matchingFacts = ledgerEvaluation.facts;
+      const currentStatus = latestDecision
+        ? latestDecision.status
+        : legacyDecision
+          ? legacyDecision.status
+          : 'NOT_EVALUATED';
+      const ledgerStatus =
+        pairedShadowDecision?.status ??
+        latestShadowDecision?.status ??
+        ledgerEvaluation.status;
+      const comparison = compareGuestGameRuleDecisionPair({
+        live: latestDecision,
+        shadow: pairedShadowDecision,
+        sourceFreshness,
+      });
+      const shadowSourceFact = pairedShadowDecision?.sourceFactId
+        ? facts.find((fact) => fact.id === pairedShadowDecision.sourceFactId)
+        : null;
 
       return {
         ruleType: rule.type,
@@ -694,23 +909,56 @@ export class GuestGamificationLogService {
         current: {
           status: currentStatus,
           reason:
+            ruleDecisionReason(latestDecision) ??
+            legacyDecision?.reason ??
             ruleRewards[0]?.rewardLabel ??
             latestAudit?.reasonText ??
             'Боевая система не сохранила решение по этому правилу в выбранном периоде.',
-          evidenceCount: ruleRewards.length + ruleAudits.length,
+          evidenceCount:
+            liveDecisions.length || legacyDecision
+              ? liveDecisions.length + (legacyDecision ? 1 : 0)
+              : ruleRewards.length + ruleAudits.length,
           latestAt:
+            latestDecision?.evaluatedAt.toISOString() ??
+            legacyDecision?.happenedAt ??
             ruleRewards[0]?.qualifiedAt.toISOString() ??
             latestAudit?.happenedAt.toISOString() ??
             null,
+          evaluationRunId: latestDecision?.evaluationRunId ?? null,
+          evaluatorVersion: latestDecision?.evaluatorVersion ?? null,
+          traceId: latestDecision?.traceId ?? latestAudit?.traceId ?? null,
+          source: latestDecision
+            ? 'RULE_DECISION'
+            : legacyDecision
+              ? 'LEGACY_AUDIT'
+              : ruleRewards.length
+                ? 'REWARD_EVIDENCE'
+                : 'NONE',
+          storeId: latestDecision?.storeId ?? null,
         },
         ledger: {
           status: ledgerStatus,
-          reason: matchingFacts.length
-            ? `Найдены факты: ${[
-                ...new Set(matchingFacts.map((fact) => fact.factType)),
-              ].join(', ')}`
-            : `Не найдены факты: ${relevantFacts.join(', ')}`,
-          evidenceCount: matchingFacts.length,
+          reason:
+            ruleDecisionReason(pairedShadowDecision ?? latestShadowDecision) ??
+            ledgerEvaluation.reason,
+          evidenceCount:
+            pairedShadowDecision || latestShadowDecision
+              ? 1
+              : matchingFacts.length,
+          evaluationRunId: pairedShadowDecision?.evaluationRunId ?? null,
+          evaluatorVersion:
+            pairedShadowDecision?.evaluatorVersion ??
+            latestShadowDecision?.evaluatorVersion ??
+            null,
+          evaluatedAt: pairedShadowDecision?.evaluatedAt.toISOString() ?? null,
+          source: pairedShadowDecision
+            ? 'PAIRED_SHADOW_DECISION'
+            : latestShadowDecision
+              ? 'UNPAIRED_SHADOW_DECISION'
+              : 'DYNAMIC_FALLBACK',
+          sourceFreshness,
+          sourceFactKind: pairedShadowDecision?.sourceFactKind ?? null,
+          sourceConfidence: shadowSourceFact?.confidence ?? null,
           facts: matchingFacts.slice(0, 5).map((fact) => ({
             id: fact.id,
             factType: fact.factType,
@@ -720,9 +968,20 @@ export class GuestGamificationLogService {
             tariffType: fact.tariffType,
           })),
         },
-        verdict,
+        verdict: comparison.verdict,
+        differingConditions: comparison.differingConditions,
+        paired:
+          Boolean(latestDecision) &&
+          Boolean(pairedShadowDecision) &&
+          latestDecision?.evaluationRunId ===
+            pairedShadowDecision?.evaluationRunId,
       };
     });
+
+    const correlation = options.correlationFilter;
+    return correlation
+      ? rows.filter((row) => includesCorrelation(row, correlation))
+      : rows;
   }
 }
 
@@ -733,6 +992,7 @@ type TimelineOptions = {
   storeId: string | null;
   typeFilter: string | null;
   statusFilter: string | null;
+  correlationFilter: string | null;
   limit: number;
 };
 
@@ -798,6 +1058,34 @@ function sortAndLimitTimeline(
         direction,
     )
     .slice(0, limit);
+}
+
+function filterTimelineByCorrelation(
+  items: TimelineItem[],
+  correlation: string | null,
+) {
+  return correlation
+    ? items.filter((item) => includesCorrelation(item, correlation))
+    : items;
+}
+
+export function includesCorrelation(value: unknown, correlation: string) {
+  const needle = correlation.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+
+  try {
+    return JSON.stringify(value).toLowerCase().includes(needle);
+  } catch {
+    return String(value).toLowerCase().includes(needle);
+  }
+}
+
+function jsonString(value: unknown, key: string) {
+  const object = jsonObject(value);
+  const candidate = object?.[key];
+  return typeof candidate === 'string' ? candidate : null;
 }
 
 function auditEventTitle(action: string, status: string) {
@@ -884,19 +1172,6 @@ function matchesStore(storeIds: unknown, selectedStoreId: string | null) {
   return storeIds.includes(selectedStoreId);
 }
 
-function sessionTypeFromConditions(conditions: Prisma.JsonValue | null) {
-  if (
-    !conditions ||
-    typeof conditions !== 'object' ||
-    Array.isArray(conditions)
-  ) {
-    return null;
-  }
-
-  const value = (conditions as Record<string, unknown>).sessionType;
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
 function rewardMatchesRule(
   reward: {
     lootBoxId: string | null;
@@ -920,58 +1195,180 @@ function rewardMatchesRule(
   return false;
 }
 
-function relevantFactsForRule(
-  triggerKind: string | null,
-  sessionType: string | null,
+function ruleDecisionReason(
+  decision: {
+    status: string;
+    reasons: Prisma.JsonValue | null;
+    blockers: Prisma.JsonValue | null;
+  } | null,
 ) {
-  const trigger = (triggerKind ?? '').toUpperCase();
-  const session = (sessionType ?? '').toUpperCase();
+  if (!decision) {
+    return null;
+  }
 
-  if (
-    trigger.includes('PLAY_TIME') ||
-    trigger.includes('TIME_PLAYED') ||
-    trigger.includes('MINUTE') ||
-    trigger.includes('HOUR')
-  ) {
-    return [
-      'HOURLY_PLAY_TIME_ACCUMULATED',
-      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+  const blockers = jsonStringArray(decision.blockers);
+  const reasons = jsonStringArray(decision.reasons);
+
+  return decision.status === 'BLOCKED'
+    ? (blockers[0] ?? reasons[0] ?? null)
+    : (reasons[0] ?? blockers[0] ?? null);
+}
+
+function legacyRuleDecisionFromAudits(
+  audits: Array<{
+    payload: Prisma.JsonValue | null;
+    happenedAt: Date;
+  }>,
+  ruleId: string,
+) {
+  for (const audit of audits) {
+    const payload = jsonObject(audit.payload);
+    const liveSession = jsonObject(payload?.liveSession);
+    const result = jsonObject(payload?.result);
+    const candidates = [
+      liveSession?.lootBoxRules,
+      result?.lootBoxRules,
+      payload?.lootBoxRules,
     ];
-  }
 
-  if (trigger.includes('SESSION')) {
-    if (
-      session.includes('PACKET') ||
-      session.includes('PACKAGE') ||
-      session.includes('SUBSCRIPTION')
-    ) {
-      return ['PACKAGE_OR_SUBSCRIPTION_USED'];
+    for (const candidate of candidates) {
+      if (!Array.isArray(candidate)) {
+        continue;
+      }
+
+      const rule = candidate
+        .map(jsonObject)
+        .find((item) => item?.id === ruleId);
+
+      if (!rule || typeof rule.eligible !== 'boolean') {
+        continue;
+      }
+
+      const blockers = jsonStringArray(rule.blockers);
+      const reasons = jsonStringArray(rule.reasons);
+
+      return {
+        status: rule.eligible ? 'MATCHED' : 'BLOCKED',
+        reason: rule.eligible
+          ? (reasons[0] ?? null)
+          : (blockers[0] ?? reasons[0] ?? null),
+        happenedAt: audit.happenedAt.toISOString(),
+      };
     }
-
-    if (session.includes('HOURLY')) {
-      return ['HOURLY_SESSION_STARTED'];
-    }
-
-    return ['SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED'];
   }
 
-  if (
-    trigger.includes('PRODUCT') ||
-    trigger.includes('GOODS') ||
-    trigger.includes('PURCHASE') ||
-    trigger.includes('BAR') ||
-    trigger.includes('ASSORTMENT')
-  ) {
-    return ['PRODUCT_PURCHASED'];
+  return null;
+}
+
+function jsonObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
   }
 
-  if (trigger.includes('CHECK_IN')) {
-    return ['VISIT', 'SESSION_STARTED'];
+  return value as Record<string, unknown>;
+}
+
+function jsonStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function guestActivitySourceFreshness(
+  state: {
+    status: string;
+    lastSuccessfulTo: Date | null;
+  } | null,
+): GuestGameComparisonSourceFreshness {
+  if (!state?.lastSuccessfulTo) {
+    return 'MISSING';
   }
 
-  if (trigger.includes('APP_OPEN')) {
-    return ['VISIT'];
-  }
+  const staleAfterMs = 10 * 60 * 1000;
+  const staleByStatus = ['FAILED', 'PARTIAL'].includes(state.status);
+  const staleByTime =
+    Date.now() - state.lastSuccessfulTo.getTime() > staleAfterMs;
 
-  return ['SESSION_STARTED', 'VISIT', 'REWARD_TRACE'];
+  return staleByStatus || staleByTime ? 'STALE' : 'FRESH';
+}
+
+function summarizeComparison(
+  rows: Array<{
+    ruleType: string;
+    verdict: string;
+    paired: boolean;
+    current: {
+      source: string;
+      storeId: string | null;
+      evaluatorVersion: string | null;
+    };
+    ledger: {
+      sourceFactKind: string | null;
+      sourceConfidence: string | null;
+      evaluatorVersion: string | null;
+    };
+  }>,
+) {
+  const verdicts = [
+    'MATCH',
+    'MISMATCH',
+    'NOT_EVALUATED',
+    'INSUFFICIENT_SOURCE_DATA',
+    'STALE_SOURCE',
+    'ERROR',
+  ];
+  const counts = Object.fromEntries(
+    verdicts.map((verdict) => [
+      verdict,
+      rows.filter((row) => row.verdict === verdict).length,
+    ]),
+  );
+  const mismatches = rows.filter((row) => row.verdict === 'MISMATCH');
+
+  return {
+    total: rows.length,
+    paired: rows.filter((row) => row.paired).length,
+    decisionCoverage:
+      rows.length > 0
+        ? rows.filter((row) => row.current.source === 'RULE_DECISION').length /
+          rows.length
+        : 0,
+    pairCoverage:
+      rows.length > 0
+        ? rows.filter((row) => row.paired).length / rows.length
+        : 0,
+    counts,
+    mismatch: {
+      total: mismatches.length,
+      byStore: groupedComparisonCount(
+        mismatches.map((row) => row.current.storeId ?? 'UNKNOWN'),
+      ),
+      byRuleType: groupedComparisonCount(mismatches.map((row) => row.ruleType)),
+      bySource: groupedComparisonCount(
+        mismatches.map((row) => row.ledger.sourceFactKind ?? 'UNKNOWN'),
+      ),
+      byConfidence: groupedComparisonCount(
+        mismatches.map((row) => row.ledger.sourceConfidence ?? 'UNKNOWN'),
+      ),
+      byEvaluatorVersion: groupedComparisonCount(
+        mismatches.map(
+          (row) =>
+            row.ledger.evaluatorVersion ??
+            row.current.evaluatorVersion ??
+            'UNKNOWN',
+        ),
+      ),
+    },
+  };
+}
+
+function groupedComparisonCount(values: string[]) {
+  const counts = new Map<string, number>();
+  values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+  return [...counts.entries()]
+    .map(([key, count]) => ({ key, count }))
+    .sort(
+      (left, right) =>
+        right.count - left.count || left.key.localeCompare(right.key),
+    );
 }

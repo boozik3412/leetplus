@@ -47,6 +47,15 @@ function createPrismaMock() {
       findMany: jest.fn(),
       update: jest.fn(),
     },
+    guestGameRuleDecision: {
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    guestGameEntitlement: {
+      upsert: jest.fn().mockResolvedValue({}),
+    },
+    guestActivityFact: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     guestGameReward: {
       count: jest.fn(),
       create: jest.fn(),
@@ -492,6 +501,7 @@ function dryRunResult(
         kind: 'MISSION',
         name: 'Visit mission',
         status: 'ACTIVE',
+        triggerKind: 'SESSION_START',
         eligible: true,
         rewardType: 'BONUS',
         rewardAmount: 50,
@@ -5015,7 +5025,7 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('does not trust the Langame packet flag or old guest logs when live package balance is zero', async () => {
+    it('uses the explicit Langame packet flag even when the remaining package balance is zero', async () => {
       const { service, langameSettingsService, langameClient } =
         createService();
 
@@ -5090,14 +5100,14 @@ describe('GuestGamificationService', () => {
       });
 
       expect(langameClient.searchGuests).toHaveBeenCalled();
-      expect(langameClient.listTransactions).toHaveBeenCalled();
+      expect(langameClient.listTransactions).not.toHaveBeenCalled();
       expect(langameClient.listGuestLogs).not.toHaveBeenCalled();
       expect(processEventSpy).toHaveBeenCalledWith(
         user,
         expect.objectContaining({
           eventType: 'SESSION_START',
-          sessionType: 'regular_session',
-          sessionPacket: null,
+          sessionType: 'packet_hours',
+          sessionPacket: true,
           sourceFactId: 'session-hourly',
         }),
       );
@@ -5863,15 +5873,152 @@ describe('GuestGamificationService', () => {
         externalGuestId: 'lg-guest-1',
         externalClubId: 'club-external-1',
         externalUuid: 'uuid-1',
-        sessionType: 'regular_session',
-        sessionPacket: null,
+        sessionType: 'packet_hours',
+        sessionPacket: true,
       });
     });
   });
 
   describe('processEvent', () => {
+    it('persists paired live and ledger shadow decisions without changing rewards', async () => {
+      const { service, prisma, configService } = createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: 'mission-1',
+          name: 'Visit mission',
+          triggerKind: 'SESSION_START',
+          conditions: {},
+          storeIds: [],
+          periodFrom: null,
+          periodTo: null,
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ]);
+      prisma.guestActivityFact.findMany.mockResolvedValue([
+        {
+          id: 'ledger-fact-1',
+          factType: 'SESSION_STARTED',
+          confidence: 'EXACT',
+          happenedAt: now,
+          createdAt: now,
+          storeId: null,
+          tariffName: null,
+          tariffType: null,
+          store: null,
+        },
+      ]);
+
+      await service.recordRuleDecisions(user, dryRunResult(), {
+        eventId: 'event-1',
+        traceId: 'trace-1',
+      });
+
+      expect(prisma.guestGameRuleDecision.createMany).toHaveBeenCalledTimes(2);
+      const liveDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[0][0].data[0];
+      const shadowDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[1][0].data[0];
+
+      expect(liveDecision).toMatchObject({
+        evaluationMode: 'LIVE',
+        evaluatorVersion: 'legacy-v1',
+        status: 'MATCHED',
+      });
+      expect(shadowDecision).toMatchObject({
+        evaluationRunId: liveDecision.evaluationRunId,
+        evaluationMode: 'SHADOW',
+        evaluatorVersion: 'ledger-v1',
+        status: 'MATCHED',
+        traceId: 'trace-1',
+      });
+      expect(shadowDecision.evidence).toEqual(
+        expect.objectContaining({
+          facts: [expect.objectContaining({ id: 'ledger-fact-1' })],
+        }),
+      );
+      expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+    });
+
+    it('upserts one available entitlement for the same matched lootbox event', async () => {
+      const { service, prisma } = createService();
+      const baseRule = dryRunResult().rules[0];
+      const lootBoxRun = dryRunResult({
+        rules: [
+          {
+            ...baseRule,
+            id: 'loot-box-1',
+            kind: 'LOOT_BOX',
+            name: 'Morning case',
+            xpDelta: 0,
+          },
+        ],
+      });
+
+      await service.recordRuleDecisions(user, lootBoxRun, {
+        eventId: 'event-1',
+        traceId: 'trace-1',
+      });
+      await service.recordRuleDecisions(user, lootBoxRun, {
+        eventId: 'event-1',
+        traceId: 'trace-2',
+      });
+
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledTimes(2);
+      const first = prisma.guestGameEntitlement.upsert.mock.calls[0][0];
+      const second = prisma.guestGameEntitlement.upsert.mock.calls[1][0];
+      expect(first).toMatchObject({
+        where: {
+          tenantId_idempotencyKey: {
+            tenantId: user.tenantId,
+            idempotencyKey: 'loot-box:loot-box-1:event-1',
+          },
+        },
+        create: {
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          eventId: 'event-1',
+          ruleType: 'LOOT_BOX',
+          ruleId: 'loot-box-1',
+          status: 'AVAILABLE',
+          qualifiedAt: now,
+        },
+      });
+      expect(second.where).toEqual(first.where);
+      expect(second.update).not.toHaveProperty('status');
+      expect(second.update).not.toHaveProperty('consumedAt');
+    });
+
+    it('does not create a new entitlement from the lootbox opening event', async () => {
+      const { service, prisma } = createService();
+      const baseRule = dryRunResult().rules[0];
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          rules: [
+            {
+              ...baseRule,
+              id: 'loot-box-1',
+              kind: 'LOOT_BOX',
+              xpDelta: 0,
+            },
+          ],
+        }),
+        {
+          eventId: 'open-event-1',
+          sourceFactId: 'open-fact-1',
+          sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        },
+      );
+
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
+    });
+
     it('uses the generated idempotency key and keeps Langame writes disabled', async () => {
-      const { service } = createService();
+      const { service, prisma } = createService();
       const profile = profileFixture();
 
       jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
@@ -5917,6 +6064,23 @@ describe('GuestGamificationService', () => {
         queuedRewardAmount: 50,
         idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
         langameWrite: false,
+      });
+      expect(prisma.guestGameRuleDecision.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            tenantId: user.tenantId,
+            profileId: profile.id,
+            guestId: 'guest-1',
+            eventId: 'event-1',
+            ruleType: 'MISSION',
+            ruleId: 'mission-1',
+            triggerKind: 'SESSION_START',
+            sourceEventType: 'SESSION_START',
+            sourceFactId: 'fact-1',
+            sourceFactKind: 'GUEST_SESSION',
+            status: 'MATCHED',
+          }),
+        ],
       });
     });
 

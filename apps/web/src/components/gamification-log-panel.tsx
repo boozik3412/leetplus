@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type SearchProfile = {
   profileId: string;
@@ -26,7 +26,57 @@ type TimelineItem = {
   entityName: string | null;
   reasonCode: string | null;
   reasonText: string | null;
+  traceId: string | null;
+  evaluationRunId: string | null;
+  sourceHash: string | null;
+  sessionExternalId: string | null;
   payload: unknown;
+};
+
+type QualitySnapshot = {
+  id: string;
+  measuredAt: string;
+  syncLagSecondsMax: number | null;
+  staleSyncCount: number;
+  failedSyncCount: number;
+  partialSyncCount: number;
+  pendingJobCount: number;
+  retryJobCount: number;
+  failedJobCount: number;
+  decisionRunCount: number;
+  pairedDecisionCount: number;
+  missingDecisionCount: number;
+  mismatchedRunCount: number;
+  decisionCoverage: number;
+  shadowMismatchRate: number;
+  confidenceCounts: Record<string, number> | null;
+  syncStatusCounts: Record<string, number> | null;
+  jobStatusCounts: Record<string, number> | null;
+  eventMix: Record<string, number> | null;
+};
+
+type QualityAlert = {
+  id: string;
+  code: string;
+  severity: string;
+  status: string;
+  message: string;
+  details: unknown;
+  occurrences: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+};
+
+type MonitoringResponse = {
+  latest: QualitySnapshot | null;
+  history: QualitySnapshot[];
+  alerts: QualityAlert[];
+  thresholds: {
+    syncLagSeconds: number;
+    partialSeconds: number;
+    mismatchRate: number;
+  };
+  note: string | null;
 };
 
 type ComparisonRow = {
@@ -40,11 +90,23 @@ type ComparisonRow = {
     reason: string | null;
     evidenceCount: number;
     latestAt: string | null;
+    evaluationRunId: string | null;
+    evaluatorVersion: string | null;
+    traceId: string | null;
+    source: string;
+    storeId: string | null;
   };
   ledger: {
     status: string;
     reason: string | null;
     evidenceCount: number;
+    evaluationRunId: string | null;
+    evaluatorVersion: string | null;
+    evaluatedAt: string | null;
+    source: string;
+    sourceFreshness: string;
+    sourceFactKind: string | null;
+    sourceConfidence: string | null;
     facts: Array<{
       id: string;
       factType: string;
@@ -55,6 +117,24 @@ type ComparisonRow = {
     }>;
   };
   verdict: string;
+  paired: boolean;
+  differingConditions: string[];
+};
+
+type ComparisonSummary = {
+  total: number;
+  paired: number;
+  decisionCoverage: number;
+  pairCoverage: number;
+  counts: Record<string, number>;
+  mismatch: {
+    total: number;
+    byStore: Array<{ key: string; count: number }>;
+    byRuleType: Array<{ key: string; count: number }>;
+    bySource: Array<{ key: string; count: number }>;
+    byConfidence: Array<{ key: string; count: number }>;
+    byEvaluatorVersion: Array<{ key: string; count: number }>;
+  };
 };
 
 type StoreOption = {
@@ -85,6 +165,7 @@ type LogResponse = {
     storeId: string | null;
     type: string | null;
     status: string | null;
+    correlation: string | null;
     limit: number;
     stores: StoreOption[];
   };
@@ -92,6 +173,26 @@ type LogResponse = {
   gameTimeline: TimelineItem[];
   langameTimeline: TimelineItem[];
   comparison: ComparisonRow[];
+  comparisonSummary: ComparisonSummary;
+  retention: {
+    policy: {
+      rawRetentionDays: number;
+      factRetentionDays: number;
+      decisionRetentionDays: number;
+      auditRetentionDays: number;
+      liveCleanupEnabled: boolean;
+      source?: string;
+    };
+    latestRun: {
+      mode: string;
+      status: string;
+      candidates: unknown;
+      deleted: unknown;
+      startedAt: string;
+      finishedAt: string | null;
+      errorMessage: string | null;
+    } | null;
+  };
   notes: string[];
 };
 
@@ -134,15 +235,30 @@ function compactJson(value: unknown) {
 function statusClass(status: string | null | undefined) {
   const normalized = (status ?? "").toUpperCase();
 
-  if (["SUCCESS", "MATCHED", "SYNCED", "PAID", "APPROVED"].includes(normalized)) {
+  if (
+    ["SUCCESS", "MATCH", "MATCHED", "SYNCED", "PAID", "APPROVED"].includes(
+      normalized,
+    )
+  ) {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200";
   }
 
-  if (["BLOCKED", "FAILED", "MISMATCH", "NO_MATCH"].includes(normalized)) {
+  if (
+    ["BLOCKED", "ERROR", "FAILED", "MISMATCH", "NO_MATCH"].includes(normalized)
+  ) {
     return "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200";
   }
 
-  if (["STARTED", "PARTIAL", "INSUFFICIENT_DATA", "NO_DECISION"].includes(normalized)) {
+  if (
+    [
+      "STARTED",
+      "PARTIAL",
+      "INSUFFICIENT_DATA",
+      "INSUFFICIENT_SOURCE_DATA",
+      "NOT_EVALUATED",
+      "STALE_SOURCE",
+    ].includes(normalized)
+  ) {
     return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200";
   }
 
@@ -165,7 +281,9 @@ async function readClientError(response: Response) {
 export function GamificationLogPanel() {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<SearchProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
+    null,
+  );
   const [data, setData] = useState<LogResponse | null>(null);
   const [tab, setTab] = useState<TabId>("game");
   const [from, setFrom] = useState("");
@@ -174,13 +292,45 @@ export function GamificationLogPanel() {
   const [storeId, setStoreId] = useState("");
   const [type, setType] = useState("");
   const [status, setStatus] = useState("");
+  const [correlation, setCorrelation] = useState("");
   const [limit, setLimit] = useState("100");
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [monitoring, setMonitoring] = useState<MonitoringResponse | null>(null);
+  const [monitoringError, setMonitoringError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadMonitoring() {
+      try {
+        const response = await fetch(
+          "/api/guests/gamification/log/monitoring",
+          { cache: "no-store", signal: controller.signal },
+        );
+        if (!response.ok) {
+          throw new Error(await readClientError(response));
+        }
+        setMonitoring((await response.json()) as MonitoringResponse);
+      } catch (requestError) {
+        if (!controller.signal.aborted) {
+          setMonitoringError(
+            requestError instanceof Error
+              ? requestError.message
+              : "Не удалось загрузить мониторинг Игрового журнала",
+          );
+        }
+      }
+    }
+
+    void loadMonitoring();
+    return () => controller.abort();
+  }, []);
 
   const stores = data?.filters.stores ?? [];
-  const activeTimeline = tab === "game" ? data?.gameTimeline : data?.langameTimeline;
+  const activeTimeline =
+    tab === "game" ? data?.gameTimeline : data?.langameTimeline;
 
   const summary = useMemo(() => {
     if (!data) {
@@ -212,7 +362,9 @@ export function GamificationLogPanel() {
       const payload = (await response.json()) as { items: SearchProfile[] };
       setResults(payload.items);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Ошибка поиска");
+      setError(
+        requestError instanceof Error ? requestError.message : "Ошибка поиска",
+      );
     } finally {
       setLoading(false);
     }
@@ -231,6 +383,7 @@ export function GamificationLogPanel() {
       if (storeId) params.set("storeId", storeId);
       if (type) params.set("type", type);
       if (status) params.set("status", status);
+      if (correlation) params.set("correlation", correlation);
       if (limit) params.set("limit", limit);
 
       const response = await fetch(
@@ -244,7 +397,11 @@ export function GamificationLogPanel() {
 
       setData((await response.json()) as LogResponse);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Ошибка загрузки");
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Ошибка загрузки",
+      );
     } finally {
       setLoading(false);
     }
@@ -272,7 +429,11 @@ export function GamificationLogPanel() {
 
       await loadProfile(selectedProfileId);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Ошибка синхронизации");
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Ошибка синхронизации",
+      );
     } finally {
       setSyncing(false);
     }
@@ -280,8 +441,13 @@ export function GamificationLogPanel() {
 
   return (
     <section className="space-y-5">
+      <MonitoringPanel data={monitoring} error={monitoringError} />
+
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <form className="grid gap-3 lg:grid-cols-[1fr_auto]" onSubmit={runSearch}>
+        <form
+          className="grid gap-3 lg:grid-cols-[1fr_auto]"
+          onSubmit={runSearch}
+        >
           <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
             Поиск гостя по телефону
             <input
@@ -351,7 +517,9 @@ export function GamificationLogPanel() {
                   <span>profileId: {data.profile.id}</span>
                   <span>guestId: {data.profile.guestId ?? "нет"}</span>
                   <span>Langame: {data.profile.externalGuestId ?? "нет"}</span>
-                  <span>активность: {formatDate(data.profile.lastActivityAt)}</span>
+                  <span>
+                    активность: {formatDate(data.profile.lastActivityAt)}
+                  </span>
                 </div>
               </div>
               <button
@@ -430,7 +598,9 @@ export function GamificationLogPanel() {
                   <select
                     className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
                     value={sort}
-                    onChange={(event) => setSort(event.target.value as "desc" | "asc")}
+                    onChange={(event) =>
+                      setSort(event.target.value as "desc" | "asc")
+                    }
                   >
                     <option value="desc">Сначала новые</option>
                     <option value="asc">Сначала старые</option>
@@ -445,6 +615,15 @@ export function GamificationLogPanel() {
                   />
                 </label>
               </div>
+              <label className="text-xs font-semibold uppercase text-zinc-500 md:col-span-2 xl:col-span-6">
+                Корреляция
+                <input
+                  className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm normal-case dark:border-zinc-800 dark:bg-zinc-900"
+                  placeholder="traceId, evaluationRunId, sessionExternalId или sourceHash"
+                  value={correlation}
+                  onChange={(event) => setCorrelation(event.target.value)}
+                />
+              </label>
               <button
                 className="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white md:col-span-2 xl:col-span-6 dark:bg-cyan-300 dark:text-zinc-950"
                 disabled={loading}
@@ -473,17 +652,23 @@ export function GamificationLogPanel() {
               ))}
               {summary ? (
                 <div className="ml-auto text-sm text-zinc-500 dark:text-zinc-400">
-                  Игровой: {summary.game} · Langame: {summary.langame} · Проверки: {summary.comparison}
+                  Игровой: {summary.game} · Langame: {summary.langame} ·
+                  Проверки: {summary.comparison}
                 </div>
               ) : null}
             </div>
 
             {tab === "comparison" ? (
-              <ComparisonList rows={data.comparison} />
+              <ComparisonList
+                rows={data.comparison}
+                summary={data.comparisonSummary}
+              />
             ) : (
               <TimelineList items={activeTimeline ?? []} />
             )}
           </div>
+
+          <RetentionPanel retention={data.retention} />
 
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             {data.notes.map((note) => (
@@ -492,6 +677,279 @@ export function GamificationLogPanel() {
           </div>
         </>
       ) : null}
+    </section>
+  );
+}
+
+function MonitoringPanel({
+  data,
+  error,
+}: {
+  data: MonitoringResponse | null;
+  error: string | null;
+}) {
+  if (error) {
+    return (
+      <section className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+        Мониторинг Игрового журнала недоступен: {error}
+      </section>
+    );
+  }
+
+  if (!data) {
+    return (
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-500 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        Загружаем состояние Игрового журнала...
+      </section>
+    );
+  }
+
+  const snapshot = data.latest;
+  if (!snapshot) {
+    return (
+      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+        {data.note ?? "Первый снимок мониторинга еще не сформирован."}
+      </section>
+    );
+  }
+
+  const backlog =
+    snapshot.pendingJobCount + snapshot.retryJobCount + snapshot.failedJobCount;
+  const confidence = Object.entries(snapshot.confidenceCounts ?? {}).sort(
+    (left, right) => right[1] - left[1],
+  );
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase text-cyan-700 dark:text-cyan-300">
+            Качество Игрового журнала
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">
+            Синхронизация и решения за 24 часа
+          </h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            Снимок: {formatDate(snapshot.measuredAt)} · история:{" "}
+            {data.history.length}
+          </p>
+        </div>
+        <span
+          className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(
+            data.alerts.length ? "PARTIAL" : "SUCCESS",
+          )}`}
+        >
+          {data.alerts.length
+            ? `Открытых алертов: ${data.alerts.length}`
+            : "Отклонений не найдено"}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MonitoringMetric
+          label="Максимальный лаг sync"
+          value={formatDuration(snapshot.syncLagSecondsMax)}
+          detail={`порог ${formatDuration(data.thresholds.syncLagSeconds)}`}
+          status={snapshot.staleSyncCount ? "PARTIAL" : "SUCCESS"}
+        />
+        <MonitoringMetric
+          label="Очередь синхронизации"
+          value={String(backlog)}
+          detail={`${snapshot.pendingJobCount} pending · ${snapshot.retryJobCount} retry · ${snapshot.failedJobCount} failed`}
+          status={
+            snapshot.failedJobCount ? "FAILED" : backlog ? "PARTIAL" : "SUCCESS"
+          }
+        />
+        <MonitoringMetric
+          label="Покрытие решений"
+          value={`${Math.round(snapshot.decisionCoverage * 100)}%`}
+          detail={`${snapshot.pairedDecisionCount} пар из ${snapshot.decisionRunCount} запусков`}
+          status={snapshot.missingDecisionCount ? "PARTIAL" : "SUCCESS"}
+        />
+        <MonitoringMetric
+          label="Расхождение LIVE / SHADOW"
+          value={`${(snapshot.shadowMismatchRate * 100).toFixed(1)}%`}
+          detail={`${snapshot.mismatchedRunCount} запусков · порог ${(data.thresholds.mismatchRate * 100).toFixed(1)}%`}
+          status={
+            snapshot.shadowMismatchRate > data.thresholds.mismatchRate
+              ? "FAILED"
+              : "SUCCESS"
+          }
+        />
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+        <div>
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Открытые алерты
+          </p>
+          {data.alerts.length ? (
+            <div className="mt-2 divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+              {data.alerts.map((alert) => (
+                <details className="p-3" key={alert.id}>
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(
+                            alert.severity === "CRITICAL"
+                              ? "FAILED"
+                              : "PARTIAL",
+                          )}`}
+                        >
+                          {alert.severity}
+                        </span>
+                        <span className="text-sm font-semibold">
+                          {alert.code}
+                        </span>
+                      </div>
+                      <time className="text-xs text-zinc-500">
+                        {formatDate(alert.lastSeenAt)}
+                      </time>
+                    </div>
+                    <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+                      {alert.message}
+                    </p>
+                  </summary>
+                  <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300">
+                    {compactJson({
+                      occurrences: alert.occurrences,
+                      firstSeenAt: alert.firstSeenAt,
+                      details: alert.details,
+                    })}
+                  </pre>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-zinc-500">
+              Активных отклонений по заданным порогам нет.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Уверенность фактов
+          </p>
+          <div className="mt-2 space-y-2">
+            {confidence.length ? (
+              confidence.map(([key, value]) => (
+                <div
+                  className="flex items-center justify-between border-b border-zinc-200 pb-2 text-sm last:border-0 dark:border-zinc-800"
+                  key={key}
+                >
+                  <span className="text-zinc-600 dark:text-zinc-300">
+                    {key}
+                  </span>
+                  <strong>{value}</strong>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-zinc-500">Фактов за 24 часа нет.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MonitoringMetric({
+  label,
+  value,
+  detail,
+  status,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  status: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+        <span
+          className={`mt-0.5 size-2 shrink-0 rounded-full border ${statusClass(status)}`}
+          aria-label={status}
+        />
+      </div>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+      <p className="mt-1 text-xs text-zinc-500">{detail}</p>
+    </div>
+  );
+}
+
+function formatDuration(seconds: number | null) {
+  if (seconds == null) {
+    return "нет данных";
+  }
+
+  if (seconds < 60) {
+    return `${seconds} сек`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} мин`;
+  }
+
+  return `${Math.floor(minutes / 60)} ч ${minutes % 60} мин`;
+}
+
+function RetentionPanel({
+  retention,
+}: {
+  retention: LogResponse["retention"];
+}) {
+  const policy = retention.policy;
+  const run = retention.latestRun;
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Хранение Игрового журнала
+          </p>
+          <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+            Raw: {policy.rawRetentionDays} дней · факты:{" "}
+            {policy.factRetentionDays} · решения: {policy.decisionRetentionDays}{" "}
+            · audit: {policy.auditRetentionDays}
+          </p>
+        </div>
+        <span
+          className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(
+            policy.liveCleanupEnabled ? "SUCCESS" : "PARTIAL",
+          )}`}
+        >
+          {policy.liveCleanupEnabled
+            ? "LIVE разрешен tenant-политикой"
+            : "только dry-run"}
+        </span>
+      </div>
+      {run ? (
+        <details className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
+          <summary className="cursor-pointer text-sm font-semibold">
+            Последний запуск: {run.mode} · {run.status} ·{" "}
+            {formatDate(run.startedAt)}
+          </summary>
+          <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300">
+            {compactJson({
+              candidates: run.candidates,
+              deleted: run.deleted,
+              finishedAt: run.finishedAt,
+              errorMessage: run.errorMessage,
+            })}
+          </pre>
+        </details>
+      ) : (
+        <p className="mt-3 text-sm text-zinc-500">
+          Retention еще не запускался. После миграции scheduler создаст первый
+          безопасный dry-run отчет.
+        </p>
+      )}
     </section>
   );
 }
@@ -519,24 +977,40 @@ function TimelineList({ items }: { items: TimelineItem[] }) {
                   {item.source}
                 </span>
                 {item.status ? (
-                  <span className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(item.status)}`}>
+                  <span
+                    className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(item.status)}`}
+                  >
                     {item.status}
                   </span>
                 ) : null}
                 {item.storeName ? (
-                  <span className="text-xs text-zinc-500">{item.storeName}</span>
+                  <span className="text-xs text-zinc-500">
+                    {item.storeName}
+                  </span>
                 ) : null}
               </div>
               <h3 className="mt-2 text-base font-semibold text-zinc-950 dark:text-zinc-100">
                 {item.title}
               </h3>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                {item.description ?? item.reasonText ?? item.entityName ?? item.kind}
+                {item.description ??
+                  item.reasonText ??
+                  item.entityName ??
+                  item.kind}
               </p>
               {item.reasonCode ? (
                 <p className="mt-2 text-xs text-zinc-500">
                   reasonCode: {item.reasonCode}
                 </p>
+              ) : null}
+              {timelineCorrelationEntries(item).length ? (
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500">
+                  {timelineCorrelationEntries(item).map(([label, value]) => (
+                    <span key={label}>
+                      {label}: <code>{value}</code>
+                    </span>
+                  ))}
+                </div>
               ) : null}
             </div>
             <time className="text-sm font-medium text-zinc-500">
@@ -557,7 +1031,24 @@ function TimelineList({ items }: { items: TimelineItem[] }) {
   );
 }
 
-function ComparisonList({ rows }: { rows: ComparisonRow[] }) {
+function timelineCorrelationEntries(
+  item: TimelineItem,
+): Array<[string, string]> {
+  return [
+    ["traceId", item.traceId],
+    ["evaluationRunId", item.evaluationRunId],
+    ["sessionExternalId", item.sessionExternalId],
+    ["sourceHash", item.sourceHash],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+}
+
+function ComparisonList({
+  rows,
+  summary,
+}: {
+  rows: ComparisonRow[];
+  summary: ComparisonSummary;
+}) {
   if (rows.length === 0) {
     return (
       <div className="py-10 text-center text-sm text-zinc-500">
@@ -568,6 +1059,24 @@ function ComparisonList({ rows }: { rows: ComparisonRow[] }) {
 
   return (
     <div className="mt-4 space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <ComparisonMetric
+          label="Парные проверки"
+          value={`${summary.paired} / ${summary.total}`}
+        />
+        <ComparisonMetric
+          label="Покрытие LIVE"
+          value={`${Math.round(summary.decisionCoverage * 100)}%`}
+        />
+        <ComparisonMetric
+          label="Покрытие пар"
+          value={`${Math.round(summary.pairCoverage * 100)}%`}
+        />
+        <ComparisonMetric
+          label="Расхождения"
+          value={String(summary.mismatch.total)}
+        />
+      </div>
       {rows.map((row) => (
         <article
           className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/70"
@@ -579,13 +1088,16 @@ function ComparisonList({ rows }: { rows: ComparisonRow[] }) {
                 <span className="rounded bg-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
                   {row.ruleType}
                 </span>
-                <span className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(row.verdict)}`}>
+                <span
+                  className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(row.verdict)}`}
+                >
                   {row.verdict}
                 </span>
               </div>
               <h3 className="mt-2 text-base font-semibold">{row.title}</h3>
               <p className="mt-1 text-xs text-zinc-500">
-                {row.ruleId} · {row.triggerKind ?? "без события"} · {row.sessionType ?? "любой тип"}
+                {row.ruleId} · {row.triggerKind ?? "без события"} ·{" "}
+                {row.sessionType ?? "любой тип"}
               </p>
             </div>
           </div>
@@ -595,21 +1107,30 @@ function ComparisonList({ rows }: { rows: ComparisonRow[] }) {
               <p className="text-xs font-semibold uppercase text-zinc-500">
                 Боевая логика
               </p>
-              <div className={`mt-2 inline-flex rounded border px-2 py-1 text-xs font-semibold ${statusClass(row.current.status)}`}>
+              <div
+                className={`mt-2 inline-flex rounded border px-2 py-1 text-xs font-semibold ${statusClass(row.current.status)}`}
+              >
                 {row.current.status}
               </div>
               <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
                 {row.current.reason}
               </p>
               <p className="mt-2 text-xs text-zinc-500">
-                evidence: {row.current.evidenceCount} · latest: {formatDate(row.current.latestAt)}
+                evidence: {row.current.evidenceCount} · latest:{" "}
+                {formatDate(row.current.latestAt)}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {row.current.source} · run:{" "}
+                {row.current.evaluationRunId ?? "нет"}
               </p>
             </div>
             <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
               <p className="text-xs font-semibold uppercase text-zinc-500">
                 Ledger-слой Langame
               </p>
-              <div className={`mt-2 inline-flex rounded border px-2 py-1 text-xs font-semibold ${statusClass(row.ledger.status)}`}>
+              <div
+                className={`mt-2 inline-flex rounded border px-2 py-1 text-xs font-semibold ${statusClass(row.ledger.status)}`}
+              >
                 {row.ledger.status}
               </div>
               <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
@@ -623,10 +1144,28 @@ function ComparisonList({ rows }: { rows: ComparisonRow[] }) {
                   {compactJson(row.ledger.facts)}
                 </pre>
               </details>
+              <p className="mt-2 text-xs text-zinc-500">
+                {row.ledger.source} · freshness: {row.ledger.sourceFreshness} ·
+                run: {row.ledger.evaluationRunId ?? "нет"}
+              </p>
             </div>
           </div>
+          {row.differingConditions.length ? (
+            <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              Отличающиеся условия: {row.differingConditions.join("; ")}
+            </div>
+          ) : null}
         </article>
       ))}
+    </div>
+  );
+}
+
+function ComparisonMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
     </div>
   );
 }

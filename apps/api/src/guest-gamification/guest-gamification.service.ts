@@ -35,6 +35,13 @@ import {
 } from './guest-bonus-ledger-scheduler.service';
 import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import {
+  evaluateGuestGameLedgerRule,
+  guestGameRuleActivationAt,
+  guestGameSessionTypeFromConditions,
+  guestGameStringArray,
+  type GuestGameLedgerRule,
+} from './guest-game-rule-evaluator';
+import {
   evaluateGuestGameProgress,
   guestGameTriggerMatches,
   type GuestGameProgressEvent,
@@ -2258,6 +2265,7 @@ export type GuestGameEventDto = {
 };
 
 export type GuestGameDryRunDto = {
+  traceId?: string | null;
   profileId?: string | null;
   guestId?: string | null;
   lootBoxId?: string | null;
@@ -2316,6 +2324,7 @@ export type GuestGameDryRunRule = {
   kind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
   name: string;
   status: string;
+  triggerKind: string | null;
   manualApprovalRequired: boolean;
   eligible: boolean;
   rewardType: string | null;
@@ -8869,6 +8878,371 @@ export class GuestGamificationService {
     };
   }
 
+  async recordRuleDecisions(
+    user: AuthenticatedUser,
+    dryRun: GuestGameDryRunResult,
+    options: {
+      eventId?: string | null;
+      traceId?: string | null;
+      sourceFactId?: string | null;
+      sourceFactKind?: string | null;
+      evaluationRunId?: string;
+      evaluationMode?: string;
+      evaluatorVersion?: string;
+      evidence?: Prisma.InputJsonValue;
+    } = {},
+  ): Promise<void> {
+    if (!dryRun.rules.length) {
+      return;
+    }
+
+    const evaluationRunId =
+      options.evaluationRunId ?? randomBytes(16).toString('hex');
+    const evaluatedAt = new Date();
+    const evaluationMode = options.evaluationMode ?? 'LIVE';
+    let decisionsPersisted = false;
+
+    try {
+      await this.prisma.guestGameRuleDecision.createMany({
+        data: dryRun.rules.map((rule) => ({
+          tenantId: user.tenantId,
+          profileId: dryRun.profile?.id ?? null,
+          guestId: dryRun.guest?.id ?? null,
+          storeId: dryRun.store?.id ?? null,
+          eventId: nullableId(options.eventId),
+          evaluationRunId,
+          evaluationMode,
+          evaluatorVersion: options.evaluatorVersion ?? 'legacy-v1',
+          ruleType: rule.kind === 'SEASON' ? 'BATTLE_PASS' : rule.kind,
+          ruleId: rule.id,
+          ruleName: rule.name,
+          ruleStatus: rule.status,
+          triggerKind: rule.triggerKind,
+          sourceEventType: dryRun.eventType,
+          sourceFactId: nullableString(options.sourceFactId),
+          sourceFactKind: nullableString(options.sourceFactKind),
+          traceId: nullableString(options.traceId),
+          status: rule.eligible ? 'MATCHED' : 'BLOCKED',
+          reasons: rule.reasons,
+          blockers: rule.blockers,
+          input: {
+            occurredAt: dryRun.occurredAt,
+            storeId: dryRun.store?.id ?? null,
+            ...dryRun.input,
+          },
+          ...(options.evidence ? { evidence: options.evidence } : {}),
+          evaluatedAt,
+        })),
+      });
+      decisionsPersisted = true;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to persist guest game rule decisions for tenant ${user.tenantId}: ${this.checkInErrorMessage(error)}`,
+      );
+    }
+
+    if (evaluationMode === 'LIVE') {
+      if (decisionsPersisted) {
+        await this.recordMatchedEntitlements(user, dryRun, {
+          ...options,
+          evaluationRunId,
+        });
+      }
+      await this.recordLedgerShadowRuleDecisions(user, dryRun, {
+        ...options,
+        evaluationRunId,
+      });
+    }
+  }
+
+  private async recordMatchedEntitlements(
+    user: AuthenticatedUser,
+    dryRun: GuestGameDryRunResult,
+    options: {
+      eventId?: string | null;
+      traceId?: string | null;
+      sourceFactId?: string | null;
+      sourceFactKind?: string | null;
+      evaluationRunId: string;
+      evidence?: Prisma.InputJsonValue;
+    },
+  ): Promise<void> {
+    if (nullableString(options.sourceFactKind) === 'GUEST_LOOT_BOX_OPEN') {
+      return;
+    }
+
+    const rules = dryRun.rules.filter(
+      (rule) => rule.kind === 'LOOT_BOX' && rule.eligible,
+    );
+    if (!rules.length || !dryRun.profile?.id) {
+      return;
+    }
+
+    const occurredAt = new Date(dryRun.occurredAt);
+    const qualifiedAt = Number.isNaN(occurredAt.getTime())
+      ? new Date()
+      : occurredAt;
+    const sourceIdentity =
+      nullableId(options.eventId) ??
+      [
+        nullableString(options.sourceFactKind),
+        nullableString(options.sourceFactId),
+      ]
+        .filter(Boolean)
+        .join(':');
+
+    try {
+      await Promise.all(
+        rules.map((rule) => {
+          const idempotencyKey = [
+            'loot-box',
+            rule.id,
+            sourceIdentity || options.evaluationRunId,
+          ].join(':');
+          const evidence = {
+            evaluationMode: 'LIVE',
+            evaluatorVersion: 'legacy-v1',
+            reasons: rule.reasons,
+            blockers: rule.blockers,
+            input: dryRun.input,
+            sourceEvidence: options.evidence ?? null,
+          };
+
+          return this.prisma.guestGameEntitlement.upsert({
+            where: {
+              tenantId_idempotencyKey: {
+                tenantId: user.tenantId,
+                idempotencyKey,
+              },
+            },
+            create: {
+              tenantId: user.tenantId,
+              profileId: dryRun.profile?.id ?? null,
+              guestId: dryRun.guest?.id ?? null,
+              storeId: dryRun.store?.id ?? null,
+              eventId: nullableId(options.eventId),
+              evaluationRunId: options.evaluationRunId,
+              ruleType: 'LOOT_BOX',
+              ruleId: rule.id,
+              ruleName: rule.name,
+              sourceEventType: dryRun.eventType,
+              sourceFactId: nullableString(options.sourceFactId),
+              sourceFactKind: nullableString(options.sourceFactKind),
+              traceId: nullableString(options.traceId),
+              status: 'AVAILABLE',
+              idempotencyKey,
+              qualifiedAt,
+              evidence,
+            },
+            update: {
+              ruleName: rule.name,
+              evaluationRunId: options.evaluationRunId,
+              traceId: nullableString(options.traceId),
+              evidence,
+            },
+          });
+        }),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to persist guest game entitlements for tenant ${user.tenantId}: ${this.checkInErrorMessage(error)}`,
+      );
+    }
+  }
+
+  private guestGameLedgerEvaluatorMode(): 'OFF' | 'SHADOW' {
+    const configured = nullableString(
+      this.configService.get<string>('GUEST_GAME_LEDGER_EVALUATOR_MODE'),
+    )?.toUpperCase();
+
+    if (configured === 'OFF' || configured === 'SHADOW') {
+      return configured;
+    }
+
+    return process.env.NODE_ENV === 'test' ? 'OFF' : 'SHADOW';
+  }
+
+  private async recordLedgerShadowRuleDecisions(
+    user: AuthenticatedUser,
+    dryRun: GuestGameDryRunResult,
+    options: {
+      eventId?: string | null;
+      traceId?: string | null;
+      sourceFactId?: string | null;
+      sourceFactKind?: string | null;
+      evaluationRunId: string;
+      evidence?: Prisma.InputJsonValue;
+    },
+  ): Promise<void> {
+    if (
+      this.guestGameLedgerEvaluatorMode() !== 'SHADOW' ||
+      (!dryRun.profile?.id && !dryRun.guest?.id)
+    ) {
+      return;
+    }
+
+    try {
+      const dryRules = new Map(dryRun.rules.map((rule) => [rule.id, rule]));
+      const lootBoxIds = dryRun.rules
+        .filter((rule) => rule.kind === 'LOOT_BOX')
+        .map((rule) => rule.id);
+      const missionIds = dryRun.rules
+        .filter((rule) => rule.kind === 'MISSION')
+        .map((rule) => rule.id);
+      const seasonIds = dryRun.rules
+        .filter((rule) => rule.kind === 'SEASON')
+        .map((rule) => rule.id);
+      const lootBoxes = lootBoxIds.length
+        ? await this.prisma.guestGameLootBox.findMany({
+            where: { tenantId: user.tenantId, id: { in: lootBoxIds } },
+          })
+        : [];
+      const missions = missionIds.length
+        ? await this.prisma.guestGameMission.findMany({
+            where: { tenantId: user.tenantId, id: { in: missionIds } },
+          })
+        : [];
+      const seasons = seasonIds.length
+        ? await this.prisma.guestGameSeason.findMany({
+            where: { tenantId: user.tenantId, id: { in: seasonIds } },
+          })
+        : [];
+      const rules: GuestGameLedgerRule[] = [
+        ...lootBoxes.map((rule) => ({
+          type: 'LOOT_BOX',
+          id: rule.id,
+          title: rule.name,
+          triggerKind:
+            dryRules.get(rule.id)?.triggerKind ?? rule.triggerKind ?? null,
+          sessionType: rule.sessionType,
+          createdAt: rule.createdAt,
+          activatedAt: guestGameRuleActivationAt(rule.createdAt, rule.limits),
+          periodFrom: null,
+          periodTo: null,
+          periodRules: rule.periodRules,
+          storeIds: guestGameStringArray(rule.storeIds),
+        })),
+        ...missions.map((rule) => ({
+          type: 'MISSION',
+          id: rule.id,
+          title: rule.name,
+          triggerKind:
+            dryRules.get(rule.id)?.triggerKind ?? rule.triggerKind ?? null,
+          sessionType: guestGameSessionTypeFromConditions(rule.conditions),
+          createdAt: rule.createdAt,
+          activatedAt: guestGameRuleActivationAt(
+            rule.createdAt,
+            rule.conditions,
+          ),
+          periodFrom: rule.periodFrom,
+          periodTo: rule.periodTo,
+          periodRules: rule.conditions,
+          storeIds: guestGameStringArray(rule.storeIds),
+        })),
+        ...seasons.map((rule) => ({
+          type: 'BATTLE_PASS',
+          id: rule.id,
+          title: rule.name,
+          triggerKind:
+            dryRules.get(rule.id)?.triggerKind ?? dryRun.eventType ?? null,
+          sessionType: dryRun.input.sessionType,
+          createdAt: rule.createdAt,
+          activatedAt: rule.periodFrom ?? rule.createdAt,
+          periodFrom: rule.periodFrom,
+          periodTo: rule.periodTo,
+          periodRules: rule.xpRules,
+          storeIds: guestGameStringArray(rule.storeIds),
+        })),
+      ];
+
+      if (!rules.length) {
+        return;
+      }
+
+      const occurredAt = new Date(dryRun.occurredAt);
+      const evaluatedTo = Number.isNaN(occurredAt.getTime())
+        ? new Date()
+        : occurredAt;
+      const evaluatedFrom = rules.reduce(
+        (earliest, rule) =>
+          rule.activatedAt < earliest ? rule.activatedAt : earliest,
+        rules[0].activatedAt,
+      );
+      const facts = await this.prisma.guestActivityFact.findMany({
+        where: {
+          tenantId: user.tenantId,
+          lifecycleStatus: 'ACTIVE',
+          OR: [
+            ...(dryRun.profile?.id ? [{ profileId: dryRun.profile.id }] : []),
+            ...(dryRun.guest?.id ? [{ guestId: dryRun.guest.id }] : []),
+          ],
+          happenedAt: { gte: evaluatedFrom, lte: evaluatedTo },
+        },
+        include: {
+          store: { select: { id: true, timeZone: true } },
+        },
+        orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 500,
+      });
+      const evaluatedAt = new Date();
+
+      await this.prisma.guestGameRuleDecision.createMany({
+        data: rules.map((rule) => {
+          const evaluation = evaluateGuestGameLedgerRule(
+            rule,
+            facts,
+            dryRun.store?.id ?? null,
+          );
+
+          return {
+            tenantId: user.tenantId,
+            profileId: dryRun.profile?.id ?? null,
+            guestId: dryRun.guest?.id ?? null,
+            storeId: dryRun.store?.id ?? null,
+            eventId: nullableId(options.eventId),
+            evaluationRunId: options.evaluationRunId,
+            evaluationMode: 'SHADOW',
+            evaluatorVersion: 'ledger-v1',
+            ruleType: rule.type,
+            ruleId: rule.id,
+            ruleName: rule.title,
+            ruleStatus: dryRules.get(rule.id)?.status ?? null,
+            triggerKind: rule.triggerKind,
+            sourceEventType: dryRun.eventType,
+            sourceFactId: nullableString(options.sourceFactId),
+            sourceFactKind: nullableString(options.sourceFactKind),
+            traceId: nullableString(options.traceId),
+            status: evaluation.status,
+            reasons: evaluation.reasons,
+            blockers: evaluation.blockers,
+            input: {
+              occurredAt: dryRun.occurredAt,
+              storeId: dryRun.store?.id ?? null,
+              ...dryRun.input,
+            },
+            evidence: {
+              liveEvidence: options.evidence ?? null,
+              facts: evaluation.facts.slice(0, 20).map((fact) => ({
+                id: fact.id,
+                factType: fact.factType,
+                confidence: fact.confidence,
+                happenedAt: fact.happenedAt?.toISOString() ?? null,
+                storeId: fact.storeId,
+                tariffName: fact.tariffName,
+                tariffType: fact.tariffType,
+              })),
+            },
+            evaluatedAt,
+          };
+        }),
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to persist ledger shadow decisions for tenant ${user.tenantId}: ${this.checkInErrorMessage(error)}`,
+      );
+    }
+  }
+
   async processEvent(
     user: AuthenticatedUser,
     dto: GuestGameProcessEventDto,
@@ -8910,6 +9284,17 @@ export class GuestGamificationService {
         : [];
       const processRewards =
         repairedRewards.length > 0 ? repairedRewards : rewards;
+
+      await this.recordRuleDecisions(user, activeDryRun, {
+        eventId: existingEvent.id,
+        traceId: nullableString(dto.traceId),
+        sourceFactId: nullableString(dto.sourceFactId),
+        sourceFactKind: nullableString(dto.sourceFactKind),
+        evidence: {
+          idempotent: true,
+          externalId: eventReference.externalId,
+        },
+      });
 
       return {
         processed: true,
@@ -8981,6 +9366,18 @@ export class GuestGamificationService {
           const processRewards =
             repairedRewards.length > 0 ? repairedRewards : rewards;
 
+          await this.recordRuleDecisions(user, activeDryRun, {
+            eventId: duplicateEvent.id,
+            traceId: nullableString(dto.traceId),
+            sourceFactId: nullableString(dto.sourceFactId),
+            sourceFactKind: nullableString(dto.sourceFactKind),
+            evidence: {
+              idempotent: true,
+              conflictRecovered: true,
+              externalId: eventReference.externalId,
+            },
+          });
+
           return {
             processed: true,
             dryRun,
@@ -9015,6 +9412,17 @@ export class GuestGamificationService {
       eventReference,
     );
 
+    await this.recordRuleDecisions(user, activeDryRun, {
+      eventId: event.id,
+      traceId: nullableString(dto.traceId),
+      sourceFactId: nullableString(dto.sourceFactId),
+      sourceFactKind: nullableString(dto.sourceFactKind),
+      evidence: {
+        idempotent: false,
+        createdRewardIds: rewards.map((reward) => reward.id),
+      },
+    });
+
     return {
       processed: true,
       dryRun,
@@ -9037,7 +9445,7 @@ export class GuestGamificationService {
     user: AuthenticatedUser,
     dto: Pick<
       GuestGameProcessEventDto,
-      'profileId' | 'guestId' | 'storeId' | 'note'
+      'profileId' | 'guestId' | 'storeId' | 'note' | 'traceId'
     >,
   ): Promise<GuestGameProcessEventResult | null> {
     const guestId = nullableId(dto.guestId);
@@ -9131,7 +9539,7 @@ export class GuestGamificationService {
     user: AuthenticatedUser,
     dto: Pick<
       GuestGameProcessEventDto,
-      'profileId' | 'guestId' | 'storeId' | 'note'
+      'profileId' | 'guestId' | 'storeId' | 'note' | 'traceId'
     >,
     guest: {
       externalDomain: string | null;
@@ -9234,6 +9642,7 @@ export class GuestGamificationService {
 
     const occurredAt = liveSession.startedAt ?? new Date();
     const processDto: GuestGameProcessEventDto = {
+      traceId: nullableString(dto.traceId),
       profileId: nullableId(dto.profileId),
       guestId,
       storeId,
@@ -12513,7 +12922,11 @@ export class GuestGamificationService {
       this.checkInScalar(row.date_start),
       timeZone,
     );
-    const packet = this.checkInSessionLooksLikePacketHours(row) ? true : null;
+    const explicitPacket = nullableBooleanValue(row.packet);
+    const packet =
+      explicitPacket === true || this.checkInSessionLooksLikePacketHours(row)
+        ? true
+        : null;
 
     return {
       externalDomain,
@@ -17919,6 +18332,7 @@ function evaluateLootBoxDryRun(
     kind: 'LOOT_BOX',
     name: rule.name,
     status: rule.status,
+    triggerKind: rule.triggerKind,
     manualApprovalRequired: rule.manualApprovalRequired,
     rewardType,
     rewardAmount,
@@ -17979,6 +18393,7 @@ function evaluateMissionDryRun(
     kind: 'MISSION',
     name: rule.name,
     status: rule.status,
+    triggerKind: rule.triggerKind,
     manualApprovalRequired: rule.manualApprovalRequired,
     rewardType: rule.rewardType,
     rewardAmount: rule.rewardAmount,
@@ -18028,7 +18443,12 @@ function evaluateSeasonDryRun(
     reasons.push(
       `Текущий шаг Battle Pass: ${currentStep.sequence}/${levels.length}`,
     );
-    appendDryRunSeasonStepActivationCheck(currentStep, context, blockers, reasons);
+    appendDryRunSeasonStepActivationCheck(
+      currentStep,
+      context,
+      blockers,
+      reasons,
+    );
   }
 
   appendDryRunBudgetCheck(rule.budgetAmount, 0, ruleRewards, blockers, reasons);
@@ -18050,6 +18470,7 @@ function evaluateSeasonDryRun(
     kind: 'SEASON',
     name: rule.name,
     status: rule.status,
+    triggerKind: 'BATTLE_PASS',
     manualApprovalRequired: rule.manualApprovalRequired,
     rewardType: selectedRewardLabel ? 'BATTLE_PASS_REWARD' : null,
     rewardAmount: 0,
@@ -18799,7 +19220,12 @@ function appendDryRunSeasonStepActivationCheck(
     appendDryRunTriggerCheck(triggerKind, context.eventType, blockers);
   }
 
-  appendDryRunSessionConditionCheck(rules.sessionType, context, blockers, reasons);
+  appendDryRunSessionConditionCheck(
+    rules.sessionType,
+    context,
+    blockers,
+    reasons,
+  );
   appendDryRunTariffConditionCheck(rules, context, blockers, reasons);
   appendDryRunGuestLogTypeCheck(rules, context, blockers, reasons);
   appendDryRunPeriodRules(
@@ -18816,7 +19242,11 @@ function dryRunSeasonCompletedLevelCount(
   rewards: GuestGameReward[],
   context: DryRunContext,
 ) {
-  const reachedLevels = dryRunSeasonReachedLevelNumbers(levels, rewards, context);
+  const reachedLevels = dryRunSeasonReachedLevelNumbers(
+    levels,
+    rewards,
+    context,
+  );
   let completedLevelCount = 0;
 
   for (const level of levels) {
@@ -18840,12 +19270,18 @@ function dryRunSeasonReachedLevelNumbers(
     .filter((reward) => dryRunRewardMatchesGuest(reward, context))
     .filter(dryRunSeasonRewardCountsAsStep)
     .forEach((reward) => {
-      const evidenceLevel = dryRunSeasonRewardLevelFromEvidence(reward.evidence);
+      const evidenceLevel = dryRunSeasonRewardLevelFromEvidence(
+        reward.evidence,
+      );
       const level =
         (typeof evidenceLevel === 'number'
           ? levels.find((item) => item.level === evidenceLevel)
           : null) ??
-        dryRunSeasonLevelByRewardLabel(levels, reward.rewardLabel, reachedLevels);
+        dryRunSeasonLevelByRewardLabel(
+          levels,
+          reward.rewardLabel,
+          reachedLevels,
+        );
 
       if (level) {
         reachedLevels.add(level.level);

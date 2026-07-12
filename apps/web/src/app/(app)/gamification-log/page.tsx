@@ -15,7 +15,7 @@ export default async function GamificationLogPage() {
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Лог геймификации"
+          current="Игровой журнал"
           items={[{ href: "/dashboard", label: "Дашборд" }]}
         />
 
@@ -24,11 +24,11 @@ export default async function GamificationLogPage() {
             Управление
           </p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-            Лог геймификации
+            Игровой журнал
           </h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             Диагностика действий гостя в игровом модуле, логов Langame и
-            сравнения текущей боевой проверки с новым ledger-слоем.
+            сравнения текущей боевой проверки с новым слоем Игрового журнала.
           </p>
         </header>
 

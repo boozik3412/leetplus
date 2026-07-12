@@ -31,6 +31,7 @@ import {
   type GuestActivityLedgerDiagnostics,
 } from './guest-activity-ledger.service';
 import { GuestGamificationLogService } from './guest-gamification-log.service';
+import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
 import {
   GuestGamificationService,
   type GuestGameCheckInDto,
@@ -97,6 +98,7 @@ export class GuestGamificationController {
     private readonly gamificationService: GuestGamificationService,
     private readonly activityLedgerService: GuestActivityLedgerService,
     private readonly gamificationLogService: GuestGamificationLogService,
+    private readonly qualityMonitoringService: GuestGameQualityMonitoringService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
   ) {}
 
@@ -144,6 +146,11 @@ export class GuestGamificationController {
     @Query('q') query?: string,
   ) {
     return this.gamificationLogService.searchProfiles(user, query);
+  }
+
+  @Get('log/monitoring')
+  getGamificationLogMonitoring(@CurrentUser() user: AuthenticatedUser) {
+    return this.qualityMonitoringService.getDashboard(user);
   }
 
   @Get('log/profiles/:profileId')

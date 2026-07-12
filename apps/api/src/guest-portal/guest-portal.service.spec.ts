@@ -61,6 +61,7 @@ function createPrismaMock() {
     },
     guestGameReward: {
       count: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -94,6 +95,13 @@ function createPrismaMock() {
       findFirst: jest.fn(),
       findMany: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestGameAuditEvent: {
+      create: jest.fn().mockResolvedValue({}),
+    },
+    guestGameEntitlement: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     guestSession: {
       aggregate: jest.fn(),
@@ -1722,6 +1730,246 @@ describe('GuestPortalService', () => {
         idempotent: false,
         createdRewards: 1,
         queuedRewardAmount: 200,
+      });
+    });
+
+    it('opens a lootbox from an available entitlement in primary read mode', async () => {
+      const { guestGamificationService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+        GUEST_GAME_ENTITLEMENT_READ_MODE: 'PRIMARY',
+      });
+      const portal = portalPayloadFixture();
+      mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-entitled',
+        tenantId: 'tenant-1',
+        name: 'Entitled session lootbox',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'SESSION_START',
+        sessionType: 'packet_hours',
+        limits: { perGuestPerWeek: 2 },
+        periodRules: {},
+      });
+      prisma.guestGameEvent.findMany.mockResolvedValue([]);
+      prisma.guestGameEntitlement.findFirst.mockResolvedValue({
+        id: 'entitlement-1',
+        tenantId: 'tenant-1',
+        profileId: portal.profile.id,
+        guestId: 'guest-1',
+        storeId: portal.store.id,
+        eventId: 'unlock-event-1',
+        evaluationRunId: 'run-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-entitled',
+        ruleName: 'Entitled session lootbox',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: 'session-1',
+        sourceFactKind: 'GUEST_SESSION',
+        traceId: 'trace-1',
+        status: 'AVAILABLE',
+        idempotencyKey: 'loot-box:loot-entitled:unlock-event-1',
+        qualifiedAt: new Date('2026-07-05T01:49:00.000Z'),
+        validUntil: null,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: {
+          input: {
+            sessionType: 'packet_hours',
+            sessionPacket: true,
+            sessionMinutes: 180,
+          },
+        },
+        createdAt: new Date('2026-07-05T01:49:00.000Z'),
+        updatedAt: new Date('2026-07-05T01:49:00.000Z'),
+      });
+      prisma.guestGameReward.findFirst.mockResolvedValue({ id: 'reward-1' });
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 1 });
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-entitled',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 200,
+        },
+        rewards: [
+          { id: 'reward-1', rewardLabel: '200 bonuses', rewardType: 'BONUS' },
+        ],
+      });
+
+      const result = await service.openLootBox(
+        'Bearer guest-token',
+        'loot-entitled',
+      );
+
+      expect(guestGamificationService.dryRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          lootBoxId: 'loot-entitled',
+          occurredAt: '2026-07-05T01:49:00.000Z',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sessionMinutes: 180,
+        }),
+      );
+      expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          sourceFactId: 'guest-game-entitlement:entitlement-1',
+        }),
+      );
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'entitlement-1',
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          ruleType: 'LOOT_BOX',
+          ruleId: 'loot-entitled',
+          status: 'AVAILABLE',
+        },
+        data: {
+          status: 'CONSUMED',
+          consumedAt: expect.any(Date),
+          rewardId: 'reward-1',
+        },
+      });
+      expect(prisma.guestGameAuditEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'LOOT_BOX_OPEN',
+            payload: expect.objectContaining({
+              entitlementId: 'entitlement-1',
+              entitlementRollout: expect.objectContaining({
+                configuredMode: 'PRIMARY',
+                effectiveMode: 'PRIMARY',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(result).toMatchObject({ processed: true, createdRewards: 1 });
+    });
+
+    it('does not consume an entitlement when the persisted reward is missing', async () => {
+      const { prisma, service } = createService();
+      prisma.guestGameReward.findFirst.mockResolvedValue(null);
+
+      await expect(
+        (service as any).bindPortalLootBoxEntitlementToReward({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+          entitlementId: 'entitlement-1',
+          rewardId: 'reward-missing',
+          consumedAt: new Date('2026-07-11T10:00:00.000Z'),
+        }),
+      ).rejects.toThrow('Награда по праву открытия не найдена в базе');
+      expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('accepts a repeated entitlement binding to the same reward', async () => {
+      const { prisma, service } = createService();
+      prisma.guestGameReward.findFirst.mockResolvedValue({ id: 'reward-1' });
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 0 });
+      prisma.guestGameEntitlement.findFirst.mockResolvedValue({
+        status: 'CONSUMED',
+        rewardId: 'reward-1',
+      });
+
+      await expect(
+        (service as any).bindPortalLootBoxEntitlementToReward({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+          entitlementId: 'entitlement-1',
+          rewardId: 'reward-1',
+          consumedAt: new Date('2026-07-11T10:00:00.000Z'),
+        }),
+      ).resolves.toBeUndefined();
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('enables entitlement primary mode only inside the configured canary scope', () => {
+      const { service } = createService({
+        GUEST_GAME_ENTITLEMENT_READ_MODE: 'CANARY',
+        GUEST_GAME_ENTITLEMENT_CANARY_TENANT_IDS: 'tenant-1',
+        GUEST_GAME_ENTITLEMENT_CANARY_STORE_IDS: 'store-1, store-2',
+        GUEST_GAME_ENTITLEMENT_CANARY_PROFILE_IDS: 'profile-1',
+        GUEST_GAME_ENTITLEMENT_CANARY_LOOT_BOX_IDS: 'loot-entitled',
+      });
+
+      expect(
+        (service as any).gameEntitlementRollout({
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          profileId: 'profile-1',
+          lootBoxId: 'loot-entitled',
+        }),
+      ).toEqual({
+        configuredMode: 'CANARY',
+        effectiveMode: 'PRIMARY',
+        canaryScopeConfigured: true,
+        canaryScopeMatched: true,
+      });
+    });
+
+    it('keeps unmatched or unscoped entitlement canaries in shadow mode', () => {
+      const scoped = createService({
+        GUEST_GAME_ENTITLEMENT_READ_MODE: 'CANARY',
+        GUEST_GAME_ENTITLEMENT_CANARY_TENANT_IDS: 'tenant-1',
+        GUEST_GAME_ENTITLEMENT_CANARY_STORE_IDS: 'store-1',
+      }).service;
+      const unscoped = createService({
+        GUEST_GAME_ENTITLEMENT_READ_MODE: 'CANARY',
+      }).service;
+      const scope = {
+        tenantId: 'tenant-1',
+        storeId: 'store-other',
+        profileId: 'profile-1',
+        lootBoxId: 'loot-entitled',
+      };
+
+      expect((scoped as any).gameEntitlementRollout(scope)).toMatchObject({
+        configuredMode: 'CANARY',
+        effectiveMode: 'SHADOW',
+        canaryScopeConfigured: true,
+        canaryScopeMatched: false,
+      });
+      expect((unscoped as any).gameEntitlementRollout(scope)).toMatchObject({
+        configuredMode: 'CANARY',
+        effectiveMode: 'SHADOW',
+        canaryScopeConfigured: false,
+        canaryScopeMatched: false,
       });
     });
 

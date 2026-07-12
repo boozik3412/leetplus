@@ -82,11 +82,7 @@ const LOOTBOX_CASE_RARITY_LABELS = {
 type GuestPortalLootBoxCaseRarity = keyof typeof LOOTBOX_CASE_RARITY_LABELS;
 type GuestPortalLootBoxPeriodicLimitPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 type GuestPortalLootBoxTimeWindowMode = 'ANY' | 'QUIET_HOURS' | 'CUSTOM';
-type GuestPortalLootBoxWeekdayMode =
-  | 'ANY'
-  | 'WEEKDAYS'
-  | 'WEEKENDS'
-  | 'CUSTOM';
+type GuestPortalLootBoxWeekdayMode = 'ANY' | 'WEEKDAYS' | 'WEEKENDS' | 'CUSTOM';
 const DEFAULT_GUEST_GAME_TIME_ZONE = 'Asia/Yekaterinburg';
 const USER_CALL_PROVIDER_SMS_RU_CALLCHECK = 'SMS_RU_CALLCHECK';
 const SMS_RU_CALLCHECK_BASE_URL = 'https://sms.ru';
@@ -3952,6 +3948,7 @@ export class GuestPortalService {
     const result = await this.guestGamificationService.processLiveSessionStart(
       actor,
       {
+        traceId,
         profileId: profile.id,
         guestId,
         storeId: context.store.id,
@@ -4168,6 +4165,13 @@ export class GuestPortalService {
 
     const openedAt = new Date();
     const ownerGuestId = guest?.id ?? profile.guestId ?? null;
+    const entitlementRollout = this.gameEntitlementRollout({
+      tenantId: context.tenant.id,
+      storeId: context.store.id,
+      profileId: profile.id,
+      lootBoxId: lootBox.id,
+    });
+    const entitlementReadMode = entitlementRollout.effectiveMode;
     this.recordGameAuditEvent({
       tenantId: context.tenant.id,
       profileId: profile.id,
@@ -4182,6 +4186,7 @@ export class GuestPortalService {
       payload: {
         lootBox: guestGameDebugLootBoxRule(lootBox),
         liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+        entitlementRollout,
       },
     });
     const [currentRewards, unlockEvents, audienceMemberIds] = await Promise.all(
@@ -4200,13 +4205,31 @@ export class GuestPortalService {
         this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
       ],
     );
+    const entitlement =
+      entitlementReadMode === 'OFF'
+        ? null
+        : await this.findPortalLootBoxEntitlement(
+            context.tenant.id,
+            ownerGuestId,
+            profile.id,
+            context.store.id,
+            lootBox.id,
+            openedAt,
+          );
+    const entitlementUnlockEvent =
+      entitlementReadMode === 'PRIMARY' && entitlement
+        ? guestGameEntitlementToUnlockEvent(entitlement)
+        : null;
+    const effectiveUnlockEvents = entitlementUnlockEvent
+      ? [entitlementUnlockEvent, ...unlockEvents]
+      : unlockEvents;
     const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
       liveSessionStartResult,
     );
     const openState = buildLootBoxOpenState(
       lootBox,
       currentRewards,
-      unlockEvents,
+      effectiveUnlockEvents,
       context.store.id,
       context.store.timeZone,
       liveSessionStartUnlockEvent,
@@ -4214,7 +4237,7 @@ export class GuestPortalService {
     );
     const unlockEvent = findLootBoxUnlockEvent(
       lootBox,
-      unlockEvents,
+      effectiveUnlockEvents,
       context.store.id,
       context.store.timeZone,
       liveSessionStartUnlockEvent,
@@ -4244,6 +4267,16 @@ export class GuestPortalService {
       lootBox: guestGameDebugLootBoxRule(lootBox),
       liveSession: guestGameDebugProcessResult(liveSessionStartResult),
       liveUnlockEvent: guestGameDebugUnlockEvent(liveSessionStartUnlockEvent),
+      entitlementReadMode,
+      entitlementRollout,
+      entitlement: entitlement
+        ? {
+            id: entitlement.id,
+            status: entitlement.status,
+            qualifiedAt: entitlement.qualifiedAt.toISOString(),
+            validUntil: entitlement.validUntil?.toISOString() ?? null,
+          }
+        : null,
       unlockEvent: guestGameDebugUnlockEvent(unlockEvent),
       unlockInput: guestGameDebugProgressInput(unlockInput),
       rewardCounts: {
@@ -4282,6 +4315,7 @@ export class GuestPortalService {
           openState,
           unlockEvent: guestGameDebugUnlockEvent(unlockEvent),
           liveSession: guestGameDebugProcessResult(liveSessionStartResult),
+          entitlementRollout,
         },
       });
       this.logGuestGameDebug(
@@ -4303,16 +4337,19 @@ export class GuestPortalService {
       );
     }
 
-    const sourceFactId = await this.buildLootBoxOpenSourceFactId(
-      context.tenant.id,
-      profile.id,
-      ownerGuestId,
-      context.store.id,
-      lootBox.id,
-      lootBox.triggerKind,
-      lootBox.limits,
-      openedAt,
-    );
+    const sourceFactId =
+      entitlementReadMode === 'PRIMARY' && entitlement
+        ? `guest-game-entitlement:${entitlement.id}`
+        : await this.buildLootBoxOpenSourceFactId(
+            context.tenant.id,
+            profile.id,
+            ownerGuestId,
+            context.store.id,
+            lootBox.id,
+            lootBox.triggerKind,
+            lootBox.limits,
+            openedAt,
+          );
     const actor: AuthenticatedUser = {
       id: `guest-portal:${payload.sub}`,
       email: 'guest-portal@leetplus.local',
@@ -4324,6 +4361,7 @@ export class GuestPortalService {
       tenantStatus: TenantLifecycleStatus.ACTIVE,
     };
     const processDto = {
+      traceId,
       profileId: profile.id,
       guestId: ownerGuestId,
       lootBoxId: lootBox.id,
@@ -4395,6 +4433,17 @@ export class GuestPortalService {
     );
 
     if (!rule?.eligible) {
+      await this.guestGamificationService.recordRuleDecisions(actor, dryRun, {
+        traceId,
+        sourceFactId,
+        sourceFactKind: GAME_LOOT_BOX_OPEN_SOURCE_KIND,
+        evaluationMode: 'LIVE_OPEN_ATTEMPT',
+        evidence: {
+          action: 'LOOT_BOX_OPEN',
+          lootBoxId: lootBox.id,
+          openState,
+        },
+      });
       this.recordGameAuditEvent({
         tenantId: context.tenant.id,
         profileId: profile.id,
@@ -4422,6 +4471,7 @@ export class GuestPortalService {
             guestLogType: processDto.guestLogType ?? null,
           },
           targetRule: guestGameDebugDryRunRule(rule),
+          entitlementRollout,
         },
       });
       throw new BadRequestException(
@@ -4433,6 +4483,24 @@ export class GuestPortalService {
       actor,
       processDto,
     );
+    if (entitlementReadMode === 'PRIMARY' && entitlement) {
+      const rewardId = processResult.rewards[0]?.id;
+
+      if (!rewardId) {
+        throw new ServiceUnavailableException(
+          'Награда по праву открытия не была сохранена. Повторите попытку: право не погашено.',
+        );
+      }
+
+      await this.bindPortalLootBoxEntitlementToReward({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        lootBoxId: lootBox.id,
+        entitlementId: entitlement.id,
+        rewardId,
+        consumedAt: openedAt,
+      });
+    }
     const nextPayload: GuestPortalTokenPayload = {
       ...payload,
       guestId: ownerGuestId,
@@ -4482,6 +4550,8 @@ export class GuestPortalService {
       traceId,
       payload: {
         lootBox: guestGameDebugLootBoxRule(lootBox),
+        entitlementRollout,
+        entitlementId: entitlement?.id ?? null,
         processSummary: processResult.summary,
         rewards: processResult.rewards.map((reward) => ({
           id: reward.id,
@@ -7810,6 +7880,179 @@ export class GuestPortalService {
       },
       orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
       take: 100,
+    });
+  }
+
+  private gameEntitlementRollout(scope: {
+    tenantId: string;
+    storeId: string;
+    profileId: string;
+    lootBoxId: string;
+  }): {
+    configuredMode: 'OFF' | 'SHADOW' | 'CANARY' | 'PRIMARY';
+    effectiveMode: 'OFF' | 'SHADOW' | 'PRIMARY';
+    canaryScopeConfigured: boolean;
+    canaryScopeMatched: boolean;
+  } {
+    const configured = this.configService
+      .get<string>('GUEST_GAME_ENTITLEMENT_READ_MODE')
+      ?.trim()
+      .toUpperCase();
+    const configuredMode =
+      configured === 'SHADOW' ||
+      configured === 'CANARY' ||
+      configured === 'PRIMARY'
+        ? configured
+        : 'OFF';
+
+    if (configuredMode !== 'CANARY') {
+      return {
+        configuredMode,
+        effectiveMode: configuredMode,
+        canaryScopeConfigured: false,
+        canaryScopeMatched: false,
+      };
+    }
+
+    const scopes = [
+      {
+        values: this.gameEntitlementCanaryIds(
+          'GUEST_GAME_ENTITLEMENT_CANARY_TENANT_IDS',
+        ),
+        current: scope.tenantId,
+      },
+      {
+        values: this.gameEntitlementCanaryIds(
+          'GUEST_GAME_ENTITLEMENT_CANARY_STORE_IDS',
+        ),
+        current: scope.storeId,
+      },
+      {
+        values: this.gameEntitlementCanaryIds(
+          'GUEST_GAME_ENTITLEMENT_CANARY_PROFILE_IDS',
+        ),
+        current: scope.profileId,
+      },
+      {
+        values: this.gameEntitlementCanaryIds(
+          'GUEST_GAME_ENTITLEMENT_CANARY_LOOT_BOX_IDS',
+        ),
+        current: scope.lootBoxId,
+      },
+    ];
+    const configuredScopes = scopes.filter(({ values }) => values.size > 0);
+    const canaryScopeConfigured = configuredScopes.length > 0;
+    const canaryScopeMatched =
+      canaryScopeConfigured &&
+      configuredScopes.every(({ values, current }) => values.has(current));
+
+    return {
+      configuredMode,
+      effectiveMode: canaryScopeMatched ? 'PRIMARY' : 'SHADOW',
+      canaryScopeConfigured,
+      canaryScopeMatched,
+    };
+  }
+
+  private gameEntitlementCanaryIds(key: string): Set<string> {
+    return new Set(
+      (this.configService.get<string>(key) ?? '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+  }
+
+  private async findPortalLootBoxEntitlement(
+    tenantId: string,
+    guestId: string | null,
+    profileId: string,
+    storeId: string,
+    lootBoxId: string,
+    now: Date,
+  ) {
+    const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
+      { profileId },
+      ...(guestId ? [{ guestId }] : []),
+    ];
+
+    return this.prisma.guestGameEntitlement.findFirst({
+      where: {
+        tenantId,
+        ruleType: 'LOOT_BOX',
+        ruleId: lootBoxId,
+        status: 'AVAILABLE',
+        qualifiedAt: { lte: now },
+        OR: ownerFilters,
+        AND: [
+          { OR: [{ storeId: null }, { storeId }] },
+          { OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+        ],
+      },
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  private async bindPortalLootBoxEntitlementToReward(input: {
+    tenantId: string;
+    profileId: string;
+    lootBoxId: string;
+    entitlementId: string;
+    rewardId: string;
+    consumedAt: Date;
+  }): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const reward = await tx.guestGameReward.findFirst({
+        where: {
+          id: input.rewardId,
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          lootBoxId: input.lootBoxId,
+        },
+        select: { id: true },
+      });
+
+      if (!reward) {
+        throw new ServiceUnavailableException(
+          'Награда по праву открытия не найдена в базе. Право осталось доступным.',
+        );
+      }
+
+      const consumed = await tx.guestGameEntitlement.updateMany({
+        where: {
+          id: input.entitlementId,
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          ruleType: 'LOOT_BOX',
+          ruleId: input.lootBoxId,
+          status: 'AVAILABLE',
+        },
+        data: {
+          status: 'CONSUMED',
+          consumedAt: input.consumedAt,
+          rewardId: reward.id,
+        },
+      });
+
+      if (consumed.count === 1) {
+        return;
+      }
+
+      const current = await tx.guestGameEntitlement.findFirst({
+        where: {
+          id: input.entitlementId,
+          tenantId: input.tenantId,
+        },
+        select: { status: true, rewardId: true },
+      });
+
+      if (current?.status === 'CONSUMED' && current.rewardId === reward.id) {
+        return;
+      }
+
+      throw new BadRequestException(
+        'Право на открытие уже погашено или больше недоступно. Обновите состояние кейса.',
+      );
     });
   }
 
@@ -13146,6 +13389,35 @@ function liveSessionStartResultToUnlockEvent(
   };
 }
 
+function guestGameEntitlementToUnlockEvent(entitlement: {
+  ruleId: string;
+  sourceEventType: string | null;
+  storeId: string | null;
+  qualifiedAt: Date;
+  evidence: Prisma.JsonValue | null;
+}): GuestPortalLootBoxUnlockEventRow {
+  const evidence = jsonRecord(entitlement.evidence);
+  const input = (evidence.input ?? {}) as Prisma.JsonValue;
+
+  return {
+    eventType: entitlement.sourceEventType ?? 'SESSION_START',
+    occurredAt: entitlement.qualifiedAt,
+    payload: {
+      sourceFactKind: 'GUEST_GAME_ENTITLEMENT',
+      store: { id: entitlement.storeId },
+      input,
+      rules: [
+        {
+          id: entitlement.ruleId,
+          kind: 'LOOT_BOX',
+          eligible: true,
+          blockers: [],
+        },
+      ],
+    },
+  };
+}
+
 function mapLootBox(
   row: {
     id: string;
@@ -13230,7 +13502,8 @@ function lootBoxScheduleTimeWindowMode(
   hours: string[],
   quietHoursEnabled: boolean,
 ): GuestPortalLootBoxTimeWindowMode {
-  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  const normalized =
+    typeof value === 'string' ? value.trim().toUpperCase() : '';
 
   if (
     normalized === 'ANY' ||
@@ -13252,7 +13525,8 @@ function lootBoxScheduleWeekdayMode(
   weekdays: number[],
   weekdaysOnly: boolean,
 ): GuestPortalLootBoxWeekdayMode {
-  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  const normalized =
+    typeof value === 'string' ? value.trim().toUpperCase() : '';
 
   if (
     normalized === 'ANY' ||
@@ -15856,7 +16130,6 @@ function buildSeasonProgress(
     ? Math.max(0, levels.length - 1)
     : reachedLevelCount;
   const current = levels[currentIndex] ?? null;
-  const previous = currentIndex > 0 ? levels[currentIndex - 1] : null;
   const next = allLevelsReached ? null : (levels[currentIndex + 1] ?? null);
   const currentLevelXp = reachedLevelCount;
   const nextLevelXp = allLevelsReached ? null : reachedLevelCount + 1;

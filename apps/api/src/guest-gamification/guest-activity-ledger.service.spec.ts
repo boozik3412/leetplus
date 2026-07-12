@@ -1,8 +1,14 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { IntegrationProvider } from '@prisma/client';
 import type { LangameClient } from '../integrations/langame.client';
 import type { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { PrismaService } from '../prisma/prisma.service';
-import { GuestActivityLedgerService } from './guest-activity-ledger.service';
+import {
+  GuestActivityLedgerService,
+  sanitizeGuestActivityEvidencePayload,
+  sanitizeGuestActivityRawPayload,
+  sanitizeGuestActivityText,
+} from './guest-activity-ledger.service';
 
 describe('GuestActivityLedgerService', () => {
   const tenantId = 'tenant-1';
@@ -35,6 +41,7 @@ describe('GuestActivityLedgerService', () => {
     rawType?: string | null;
     rawText?: string | null;
     factType?: string;
+    rawRecordId?: string | null;
     sourceHash?: string;
     happenedAt?: Date | null;
     storeId?: string | null;
@@ -43,6 +50,10 @@ describe('GuestActivityLedgerService', () => {
     evidence?: unknown;
     tariffType?: string | null;
     durationMinutes?: number | null;
+    parserVersion?: string;
+    normalizationRunId?: string | null;
+    lifecycleStatus?: string;
+    supersededAt?: Date | null;
   };
   type NewLedgerRow = Omit<LedgerRow, 'id'> & Partial<Pick<LedgerRow, 'id'>>;
   type RawWhere = {
@@ -57,6 +68,7 @@ describe('GuestActivityLedgerService', () => {
     profileId?: string;
     externalDomain?: string;
     factType?: string;
+    lifecycleStatus?: string;
     happenedAt?: DateRange;
   };
   type RawUniqueWhere = {
@@ -65,9 +77,10 @@ describe('GuestActivityLedgerService', () => {
     };
   };
   type FactUniqueWhere = {
-    tenantId_factType_sourceHash: {
+    tenantId_factType_sourceHash_parserVersion: {
       factType: string;
       sourceHash: string;
+      parserVersion: string;
     };
   };
   type SyncState = {
@@ -122,6 +135,8 @@ describe('GuestActivityLedgerService', () => {
   let rawRecords: Map<string, LedgerRow>;
   let facts: Map<string, LedgerRow>;
   let syncState: SyncState | null;
+  let sourceSyncStates: Map<string, Record<string, unknown>>;
+  let syncJobs: Map<string, Record<string, any>>;
   let prisma: PrismaService;
   let langameClient: MockLangameClient;
   let service: GuestActivityLedgerService;
@@ -202,6 +217,13 @@ describe('GuestActivityLedgerService', () => {
       return false;
     }
 
+    if (
+      where.lifecycleStatus &&
+      row.lifecycleStatus !== where.lifecycleStatus
+    ) {
+      return false;
+    }
+
     return inDateRange(row.happenedAt, where.happenedAt);
   };
 
@@ -209,6 +231,8 @@ describe('GuestActivityLedgerService', () => {
     rawRecords = new Map();
     facts = new Map();
     syncState = null;
+    sourceSyncStates = new Map();
+    syncJobs = new Map();
     prisma = {
       guestGameProfile: {
         findFirst: jest.fn().mockResolvedValue({
@@ -272,6 +296,103 @@ describe('GuestActivityLedgerService', () => {
           }),
         findFirst: jest.fn(),
       },
+      guestActivitySourceSyncState: {
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          const sourceKind =
+            where
+              .tenantId_externalProvider_externalDomain_externalGuestId_sourceKind
+              .sourceKind;
+          return Promise.resolve(sourceSyncStates.get(sourceKind) ?? null);
+        }),
+        upsert: jest.fn().mockImplementation(({ where, create, update }) => {
+          const sourceKind =
+            where
+              .tenantId_externalProvider_externalDomain_externalGuestId_sourceKind
+              .sourceKind;
+          const row = {
+            ...(sourceSyncStates.get(sourceKind) ?? create),
+            ...update,
+          };
+          sourceSyncStates.set(sourceKind, row);
+          return Promise.resolve(row);
+        }),
+      },
+      guestActivitySyncJob: {
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          if (where.jobKey) {
+            return Promise.resolve(syncJobs.get(where.jobKey) ?? null);
+          }
+          return Promise.resolve(
+            Array.from(syncJobs.values()).find((row) => row.id === where.id) ??
+              null,
+          );
+        }),
+        findFirst: jest
+          .fn()
+          .mockImplementation(() =>
+            Promise.resolve(
+              Array.from(syncJobs.values()).find((row) =>
+                ['PENDING', 'RETRY'].includes(row.status),
+              ) ?? null,
+            ),
+          ),
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockImplementation(({ data }) => {
+          const row = {
+            ...data,
+            id: `sync-job-${syncJobs.size + 1}`,
+            attempts: data.attempts ?? 0,
+            rerunRequested: data.rerunRequested ?? false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          syncJobs.set(data.jobKey, row);
+          return Promise.resolve(row);
+        }),
+        upsert: jest.fn().mockImplementation(({ where, create, update }) => {
+          const existing = syncJobs.get(where.jobKey);
+          const row = existing
+            ? { ...existing, ...update, updatedAt: new Date() }
+            : {
+                ...create,
+                id: `sync-job-${syncJobs.size + 1}`,
+                attempts: create.attempts ?? 0,
+                rerunRequested: create.rerunRequested ?? false,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              };
+          syncJobs.set(where.jobKey, row);
+          return Promise.resolve(row);
+        }),
+        update: jest.fn().mockImplementation(({ where, data }) => {
+          const entry = Array.from(syncJobs.entries()).find(
+            ([, row]) => row.id === where.id,
+          );
+          if (!entry) {
+            return Promise.resolve(null);
+          }
+          const [key, existing] = entry;
+          const row = { ...existing, ...data, updatedAt: new Date() };
+          syncJobs.set(key, row);
+          return Promise.resolve(row);
+        }),
+        updateMany: jest.fn().mockImplementation(({ where, data }) => {
+          const entry = Array.from(syncJobs.entries()).find(
+            ([, row]) => row.id === where.id,
+          );
+          if (!entry) {
+            return Promise.resolve({ count: 0 });
+          }
+          const [key, existing] = entry;
+          syncJobs.set(key, {
+            ...existing,
+            ...data,
+            attempts: existing.attempts + (data.attempts?.increment ?? 0),
+            updatedAt: new Date(),
+          });
+          return Promise.resolve({ count: 1 });
+        }),
+      },
       guestActivityRawRecord: {
         findUnique: jest
           .fn()
@@ -324,16 +445,18 @@ describe('GuestActivityLedgerService', () => {
         findUnique: jest
           .fn()
           .mockImplementation(({ where }: { where: FactUniqueWhere }) => {
-            const unique = where.tenantId_factType_sourceHash;
+            const unique = where.tenantId_factType_sourceHash_parserVersion;
             return Promise.resolve(
-              facts.get(`${unique.factType}:${unique.sourceHash}`) ?? null,
+              facts.get(
+                `${unique.factType}:${unique.sourceHash}:${unique.parserVersion}`,
+              ) ?? null,
             );
           }),
         upsert: jest
           .fn()
           .mockImplementation(({ where, create, update }: FactUpsertArgs) => {
-            const unique = where.tenantId_factType_sourceHash;
-            const key = `${unique.factType}:${unique.sourceHash}`;
+            const unique = where.tenantId_factType_sourceHash_parserVersion;
+            const key = `${unique.factType}:${unique.sourceHash}:${unique.parserVersion}`;
             const existing = facts.get(key);
             if (existing) {
               Object.assign(existing, update);
@@ -343,6 +466,42 @@ describe('GuestActivityLedgerService', () => {
             facts.set(key, fact);
             return Promise.resolve(fact);
           }),
+        updateMany: jest.fn().mockImplementation(({ where, data }) => {
+          let count = 0;
+          for (const fact of facts.values()) {
+            if (where.rawRecordId && fact.rawRecordId !== where.rawRecordId) {
+              continue;
+            }
+            if (
+              where.lifecycleStatus &&
+              fact.lifecycleStatus !== where.lifecycleStatus
+            ) {
+              continue;
+            }
+
+            const matchesOr = !where.OR?.length
+              ? true
+              : where.OR.some((clause: Record<string, any>) => {
+                  if (Object.keys(clause).length === 0) {
+                    return true;
+                  }
+                  if (clause.parserVersion?.not) {
+                    return fact.parserVersion !== clause.parserVersion.not;
+                  }
+                  if (clause.factType?.notIn) {
+                    return !clause.factType.notIn.includes(fact.factType);
+                  }
+                  return false;
+                });
+            if (!matchesOr) {
+              continue;
+            }
+
+            Object.assign(fact, data);
+            count += 1;
+          }
+          return Promise.resolve({ count });
+        }),
         findMany: jest
           .fn()
           .mockImplementation(({ where, select }: FactFindManyArgs) => {
@@ -559,6 +718,45 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('does not classify a session as hourly when Langame omits the packet marker', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 'session-unknown-payment-1',
+        guest_id: externalGuestId,
+        club_id: '15',
+        date_start: '07.07.2026 10:00',
+        date_stop: '07.07.2026 11:00',
+      },
+    ]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'UNKNOWN_SESSION_PAYMENT',
+    });
+
+    const sessionFacts = Array.from(facts.values()).filter(
+      (fact) => fact.sessionExternalId === 'session-unknown-payment-1',
+    );
+    expect(sessionFacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ factType: 'SESSION_STARTED' }),
+        expect.objectContaining({ factType: 'SESSION_ENDED' }),
+      ]),
+    );
+    expect(
+      sessionFacts.some((fact) =>
+        [
+          'HOURLY_SESSION_STARTED',
+          'HOURLY_PLAY_TIME_ACCUMULATED',
+          'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+        ].includes(String(fact.factType)),
+      ),
+    ).toBe(false);
+  });
+
   it('normalizes Langame product expenses into product purchase facts', async () => {
     langameClient.listGuestLogs.mockResolvedValue([]);
     langameClient.listProductExpenses.mockResolvedValue([
@@ -650,5 +848,270 @@ describe('GuestActivityLedgerService', () => {
 
     expect(rawRecords.size).toBe(rawCount);
     expect(facts.size).toBe(factCount);
+  });
+
+  it('versions normalized facts and supersedes facts no longer confirmed by the parser', async () => {
+    langameClient.listGuestLogs.mockResolvedValueOnce([
+      {
+        id: 501,
+        guest_id: externalGuestId,
+        club_id: '15',
+        date: '10.07.2026 12:00',
+        type: 'Старт сессии',
+      },
+    ]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'VERSIONED_NORMALIZATION',
+    });
+
+    const rawRecord = Array.from(rawRecords.values()).find((record) =>
+      String(record.rawText).includes('Старт сессии'),
+    );
+    expect(rawRecord).toBeDefined();
+    const createdFacts = Array.from(facts.values()).filter(
+      (fact) => fact.rawRecordId === rawRecord!.id,
+    );
+    expect(createdFacts.length).toBeGreaterThan(0);
+    expect(createdFacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          parserVersion: 'guest-activity-v2',
+          lifecycleStatus: 'ACTIVE',
+          normalizationRunId: expect.any(String),
+        }),
+      ]),
+    );
+
+    Object.assign(rawRecord!, {
+      rawType: 'unclassified',
+      rawText: 'Техническая запись без игрового события',
+      rawPayload: { type: 'unclassified' },
+    });
+
+    const rebuilt = await service.rebuildProfileFacts({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PARSER_REBUILD',
+    });
+
+    expect(rebuilt).toEqual(
+      expect.objectContaining({
+        parserVersion: 'guest-activity-v2',
+        rawRecordsProcessed: rawRecords.size,
+      }),
+    );
+    expect(
+      createdFacts.every(
+        (fact) =>
+          fact.lifecycleStatus === 'SUPERSEDED' &&
+          fact.supersededAt instanceof Date,
+      ),
+    ).toBe(true);
+  });
+
+  it('continues a partial source from the saved next page without advancing its watermark', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({
+      id: index + 1,
+      guest_id: externalGuestId,
+      club_id: '15',
+      date: '06.07.2026 17:00',
+      type: `log-${index}`,
+    }));
+    langameClient.listGuestLogs.mockImplementation((_url, _key, query) =>
+      (query?.page ?? 1) <= 20 ? fullPage : [],
+    );
+
+    const first = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PARTIAL_FIRST',
+    });
+    const partialState = sourceSyncStates.get('LANGAME_GUEST_LOG');
+
+    expect(first.status).toBe('PARTIAL');
+    expect(partialState).toEqual(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        nextPage: 21,
+      }),
+    );
+    expect(partialState).not.toHaveProperty('lastSuccessfulTo');
+
+    langameClient.listGuestLogs.mockClear();
+    const second = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PARTIAL_CONTINUE',
+    });
+
+    expect(second.status).toBe('SUCCESS');
+    expect(langameClient.listGuestLogs).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ page: 21 }),
+    );
+    expect(sourceSyncStates.get('LANGAME_GUEST_LOG')).toEqual(
+      expect.objectContaining({
+        status: 'SUCCESS',
+        nextPage: null,
+        lastSuccessfulTo: expect.any(Date),
+      }),
+    );
+  });
+
+  it('keeps successful sources when one Langame endpoint fails', async () => {
+    langameClient.listTransactions.mockRejectedValue(
+      new Error('transactions unavailable'),
+    );
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'ONE_SOURCE_FAILED',
+    });
+
+    expect(result.status).toBe('PARTIAL');
+    expect(sourceSyncStates.get('LANGAME_TRANSACTION')).toEqual(
+      expect.objectContaining({
+        status: 'FAILED',
+        errorMessage: 'transactions unavailable',
+      }),
+    );
+    expect(sourceSyncStates.get('LANGAME_TRANSACTION')).not.toHaveProperty(
+      'lastSuccessfulTo',
+    );
+    expect(sourceSyncStates.get('LANGAME_GUEST_LOG')).toEqual(
+      expect.objectContaining({ status: 'SUCCESS' }),
+    );
+  });
+
+  it('persists queued sync work and marks a claimed job successful', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'GAME_SUMMARY',
+    });
+    jest.spyOn(service, 'syncProfile').mockResolvedValue({
+      status: 'SUCCESS',
+    } as any);
+
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+    const job = Array.from(syncJobs.values())[0];
+
+    expect(result).toMatchObject({ processed: 1, success: 1 });
+    expect(job).toEqual(
+      expect.objectContaining({
+        status: 'SUCCESS',
+        attempts: 1,
+        lockedAt: null,
+        lockedBy: null,
+      }),
+    );
+  });
+
+  it('requests a rerun without releasing an already running sync job', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'FIRST',
+    });
+    const job = Array.from(syncJobs.values())[0];
+    job.status = 'RUNNING';
+
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'SECOND',
+    });
+
+    expect(Array.from(syncJobs.values())[0]).toEqual(
+      expect.objectContaining({
+        status: 'RUNNING',
+        rerunRequested: true,
+        reason: 'SECOND',
+      }),
+    );
+  });
+
+  it('retries a failed queued sync with backoff', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'GAME_SUMMARY',
+    });
+    jest
+      .spyOn(service, 'syncProfile')
+      .mockRejectedValue(new Error('temporary Langame error'));
+
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+    const job = Array.from(syncJobs.values())[0];
+
+    expect(result).toMatchObject({ processed: 1, retried: 1 });
+    expect(job).toEqual(
+      expect.objectContaining({
+        status: 'RETRY',
+        attempts: 1,
+        lastError: 'temporary Langame error',
+        nextAttemptAt: expect.any(Date),
+      }),
+    );
+  });
+});
+
+describe('guest activity payload sanitization', () => {
+  it('stores only whitelisted business fields and masks PII', () => {
+    expect(
+      sanitizeGuestActivityRawPayload({
+        id: 42,
+        type: 'purchase',
+        phone: '+7 922 130-63-30',
+        email: 'guest@example.com',
+        full_name: 'Иван Иванов',
+        product_name: 'Сэндвич',
+        secret_internal_note: 'do not persist',
+      }),
+    ).toEqual({
+      id: 42,
+      type: 'purchase',
+      phone: '***6330',
+      email: '[redacted]',
+      full_name: '[redacted]',
+      product_name: 'Сэндвич',
+    });
+  });
+
+  it('masks embedded phones and emails in free text and evidence', () => {
+    expect(
+      sanitizeGuestActivityText(
+        'Контакт +7 (922) 130-63-30, почта guest@example.com',
+      ),
+    ).toBe('Контакт ***6330, почта [redacted-email]');
+    expect(
+      sanitizeGuestActivityEvidencePayload({
+        sourceKind: 'guest_logs',
+        comment: 'Позвонить 89221306330',
+        email: 'guest@example.com',
+      }),
+    ).toEqual({
+      sourceKind: 'guest_logs',
+      comment: 'Позвонить ***6330',
+      email: '[redacted]',
+    });
   });
 });

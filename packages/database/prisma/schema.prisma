@@ -182,10 +182,18 @@ model Tenant {
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
   guestGameEvents                      GuestGameEvent[]
   guestGameAuditEvents                 GuestGameAuditEvent[]
+  guestGameRuleDecisions               GuestGameRuleDecision[]
+  guestGameEntitlements                GuestGameEntitlement[]
   guestGameLogTypeMappings             GuestGameLogTypeMapping[]
   guestActivityRawRecords              GuestActivityRawRecord[]
   guestActivityFacts                   GuestActivityFact[]
   guestActivitySyncStates              GuestActivitySyncState[]
+  guestActivitySourceSyncStates        GuestActivitySourceSyncState[]
+  guestActivitySyncJobs                GuestActivitySyncJob[]
+  guestGameDataRetentionPolicy         GuestGameDataRetentionPolicy?
+  guestGameDataRetentionRuns           GuestGameDataRetentionRun[]
+  guestGameQualitySnapshots            GuestGameQualitySnapshot[]
+  guestGameQualityAlerts               GuestGameQualityAlert[]
   guestGameTelegramLinkChallenges      GuestGameTelegramLinkChallenge[]
   guestGamePromoCards                  GuestGamePromoCard[]
   guestGameVisualDrafts                GuestGameVisualDraft[]
@@ -200,7 +208,7 @@ model Tenant {
   reportDigestScheduleRuns             ReportDigestScheduleRun[]
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
-  langameStaffUsers                     LangameStaffUser[]
+  langameStaffUsers                    LangameStaffUser[]
   staffMembers                         StaffMember[]
   staffTasks                           StaffTask[]
   staffTaskTemplates                   StaffTaskTemplate[]
@@ -289,10 +297,10 @@ model User {
   createdGuestGameEvents               GuestGameEvent[]                      @relation("GuestGameEventCreatedBy")
   createdGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingCreatedBy")
   updatedGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingUpdatedBy")
-  createdGuestGamePromoCards           GuestGamePromoCard[]                   @relation("GuestGamePromoCardCreatedBy")
-  createdGuestGameVisualDrafts         GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftCreatedBy")
-  updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftUpdatedBy")
-  publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                 @relation("GuestGameVisualDraftPublishedBy")
+  createdGuestGamePromoCards           GuestGamePromoCard[]                  @relation("GuestGamePromoCardCreatedBy")
+  createdGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftCreatedBy")
+  updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftUpdatedBy")
+  publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                @relation("GuestGameVisualDraftPublishedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
   staffMember                          StaffMember?                          @relation("StaffMemberUser")
@@ -306,7 +314,7 @@ model User {
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]              @relation("StaffKnowledgeSettingsUpdatedBy")
-  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]          @relation("StaffKnowledgeSettingsEventActor")
+  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]         @relation("StaffKnowledgeSettingsEventActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
   createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]        @relation("StaffKnowledgeArticleVersionCreatedBy")
@@ -508,47 +516,51 @@ model Store {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  tenant                       Tenant                        @relation(fields: [tenantId], references: [id])
-  integrationSource            IntegrationSource?            @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
-  salesFacts                   SalesFact[]
-  guestSessions                GuestSession[]
-  guestTransactions            GuestTransaction[]
-  guestActivityRawRecords      GuestActivityRawRecord[]
-  guestActivityFacts           GuestActivityFact[]
-  guestActivitySyncStates      GuestActivitySyncState[]
-  guestOperationLogs           GuestOperationLog[]
-  guestWorkingShifts           GuestWorkingShift[]
-  clubRevenueFacts             ClubRevenueFact[]
-  inventorySnapshots           InventorySnapshot[]
-  stockMovements               StockMovement[]
-  marketingPromoBundleUsages   MarketingPromoBundleUsage[]
-  marketingMissionRewards      MarketingMissionReward[]
-  guestGameRewards             GuestGameReward[]
-  guestGameDeliveries          GuestGameDelivery[]
-  guestGameAuditEvents         GuestGameAuditEvent[]
-  guestBonusLedgerEntries      GuestBonusLedgerEntry[]
+  tenant                          Tenant                           @relation(fields: [tenantId], references: [id])
+  integrationSource               IntegrationSource?               @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  salesFacts                      SalesFact[]
+  guestSessions                   GuestSession[]
+  guestTransactions               GuestTransaction[]
+  guestActivityRawRecords         GuestActivityRawRecord[]
+  guestActivityFacts              GuestActivityFact[]
+  guestActivitySyncStates         GuestActivitySyncState[]
+  guestActivitySourceSyncStates   GuestActivitySourceSyncState[]
+  guestActivitySyncJobs           GuestActivitySyncJob[]
+  guestOperationLogs              GuestOperationLog[]
+  guestWorkingShifts              GuestWorkingShift[]
+  clubRevenueFacts                ClubRevenueFact[]
+  inventorySnapshots              InventorySnapshot[]
+  stockMovements                  StockMovement[]
+  marketingPromoBundleUsages      MarketingPromoBundleUsage[]
+  marketingMissionRewards         MarketingMissionReward[]
+  guestGameRewards                GuestGameReward[]
+  guestGameDeliveries             GuestGameDelivery[]
+  guestGameAuditEvents            GuestGameAuditEvent[]
+  guestGameRuleDecisions          GuestGameRuleDecision[]
+  guestGameEntitlements           GuestGameEntitlement[]
+  guestBonusLedgerEntries         GuestBonusLedgerEntry[]
   guestGameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
-  guestGameVisualDrafts        GuestGameVisualDraft[]
-  guestPortalOtpChallenges     GuestPortalOtpChallenge[]
-  staffTasks                   StaffTask[]
-  staffTaskTemplates           StaffTaskTemplate[]
-  staffTaskRecurringRules      StaffTaskRecurringRule[]
-  staffKnowledgeArticles       StaffKnowledgeArticle[]
-  staffTrainingCourses         StaffTrainingCourse[]
-  staffOnboardingPlans         StaffOnboardingPlan[]
-  staffAssessments             StaffAssessment[]
-  staffShiftRegulations        StaffShiftRegulation[]
-  staffShiftRegulationVersions StaffShiftRegulationVersion[]
-  staffChecklistTemplates      StaffChecklistTemplate[]
-  staffChecklistRuns           StaffChecklistRun[]
-  staffDisciplinePolicies      StaffDisciplinePolicy[]
-  staffDisciplineRecords       StaffDisciplineRecord[]
-  staffSalarySchemes           StaffSalaryScheme[]
-  staffChatChannels            StaffChatChannel[]
-  staffChatMessages            StaffChatMessage[]
-  staffNotifications           StaffNotification[]
-  staffMembers                 StaffMember[]
-  userAccesses                 UserStoreAccess[]
+  guestGameVisualDrafts           GuestGameVisualDraft[]
+  guestPortalOtpChallenges        GuestPortalOtpChallenge[]
+  staffTasks                      StaffTask[]
+  staffTaskTemplates              StaffTaskTemplate[]
+  staffTaskRecurringRules         StaffTaskRecurringRule[]
+  staffKnowledgeArticles          StaffKnowledgeArticle[]
+  staffTrainingCourses            StaffTrainingCourse[]
+  staffOnboardingPlans            StaffOnboardingPlan[]
+  staffAssessments                StaffAssessment[]
+  staffShiftRegulations           StaffShiftRegulation[]
+  staffShiftRegulationVersions    StaffShiftRegulationVersion[]
+  staffChecklistTemplates         StaffChecklistTemplate[]
+  staffChecklistRuns              StaffChecklistRun[]
+  staffDisciplinePolicies         StaffDisciplinePolicy[]
+  staffDisciplineRecords          StaffDisciplineRecord[]
+  staffSalarySchemes              StaffSalaryScheme[]
+  staffChatChannels               StaffChatChannel[]
+  staffChatMessages               StaffChatMessage[]
+  staffNotifications              StaffNotification[]
+  staffMembers                    StaffMember[]
+  userAccesses                    UserStoreAccess[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@unique([tenantId, publicSlug], map: "store_tenant_public_slug_uidx")
@@ -871,16 +883,17 @@ model IntegrationSource {
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
 
-  tenant               Tenant                @relation(fields: [tenantId], references: [id])
-  credential           IntegrationCredential @relation(fields: [credentialId], references: [id])
-  stores               Store[]
-  syncJobs             IntegrationSyncJob[]
-  guestDataProfileRuns GuestDataProfileRun[]
-  endpointProfileRuns  LangameEndpointProfileRun[]
-  endpointSnapshotRuns LangameEndpointSnapshotRun[]
-  tariffSnapshotItems  LangameTariffSnapshotItem[]
-  guestActivityRawRecords GuestActivityRawRecord[]
-  guestActivitySyncStates GuestActivitySyncState[]
+  tenant                        Tenant                         @relation(fields: [tenantId], references: [id])
+  credential                    IntegrationCredential          @relation(fields: [credentialId], references: [id])
+  stores                        Store[]
+  syncJobs                      IntegrationSyncJob[]
+  guestDataProfileRuns          GuestDataProfileRun[]
+  endpointProfileRuns           LangameEndpointProfileRun[]
+  endpointSnapshotRuns          LangameEndpointSnapshotRun[]
+  tariffSnapshotItems           LangameTariffSnapshotItem[]
+  guestActivityRawRecords       GuestActivityRawRecord[]
+  guestActivitySyncStates       GuestActivitySyncState[]
+  guestActivitySourceSyncStates GuestActivitySourceSyncState[]
 
   @@unique([tenantId, provider, domain])
   @@index([tenantId])
@@ -916,21 +929,21 @@ model IntegrationSyncJob {
 }
 
 model BusinessSnapshotRun {
-  id             String   @id @default(uuid())
-  tenantId       String
-  type           String
-  status         String
-  startedAt      DateTime @default(now())
-  finishedAt     DateTime?
-  periodFrom     DateTime?
-  periodTo       DateTime?
-  staleAfterHours Int     @default(24)
-  rowCount       Int      @default(0)
-  sourceCounts   Json?
-  summary        Json?
-  freshness      Json?
-  errorMessage   String?
-  createdAt      DateTime @default(now())
+  id              String    @id @default(uuid())
+  tenantId        String
+  type            String
+  status          String
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  periodFrom      DateTime?
+  periodTo        DateTime?
+  staleAfterHours Int       @default(24)
+  rowCount        Int       @default(0)
+  sourceCounts    Json?
+  summary         Json?
+  freshness       Json?
+  errorMessage    String?
+  createdAt       DateTime  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
@@ -1012,8 +1025,8 @@ model LangameEndpointSnapshotRun {
   errorMessage        String?
   createdAt           DateTime            @default(now())
 
-  tenant            Tenant             @relation(fields: [tenantId], references: [id])
-  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  tenant            Tenant                      @relation(fields: [tenantId], references: [id])
+  integrationSource IntegrationSource?          @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
   tariffItems       LangameTariffSnapshotItem[]
 
   @@index([tenantId, endpointKey, startedAt])
@@ -1118,33 +1131,37 @@ model Guest {
   createdAt               DateTime                        @default(now())
   updatedAt               DateTime                        @updatedAt
 
-  tenant                Tenant                      @relation(fields: [tenantId], references: [id])
-  salesFacts            SalesFact[]
-  balanceSnapshots      GuestBalanceSnapshot[]
-  bonusBalanceSnapshots GuestBonusBalanceSnapshot[]
-  bonusBalanceCurrent   GuestBonusBalanceCurrent?
-  bonusLedgerEntries    GuestBonusLedgerEntry[]
-  sessions              GuestSession[]
-  logs                  GuestLog[]
-  transactions          GuestTransaction[]
-  activityRawRecords    GuestActivityRawRecord[]
-  activityFacts         GuestActivityFact[]
-  activitySyncStates    GuestActivitySyncState[]
-  workingShifts         GuestWorkingShift[]
-  crmEvents             GuestCrmEvent[]
-  crmLeads              GuestCrmLead[]
-  crmTasks              GuestCrmTask[]
-  crmContactEvents      GuestCrmContactEvent[]
-  staffIdentityMappings GuestStaffIdentityMapping[]
-  audienceMembers       GuestAudienceMember[]
-  marketingMissionRewards MarketingMissionReward[]
-  gameProfiles          GuestGameProfile[]
-  gameRewards           GuestGameReward[]
-  gameDeliveries        GuestGameDelivery[]
-  gameEvents            GuestGameEvent[]
-  gameAuditEvents       GuestGameAuditEvent[]
+  tenant                     Tenant                           @relation(fields: [tenantId], references: [id])
+  salesFacts                 SalesFact[]
+  balanceSnapshots           GuestBalanceSnapshot[]
+  bonusBalanceSnapshots      GuestBonusBalanceSnapshot[]
+  bonusBalanceCurrent        GuestBonusBalanceCurrent?
+  bonusLedgerEntries         GuestBonusLedgerEntry[]
+  sessions                   GuestSession[]
+  logs                       GuestLog[]
+  transactions               GuestTransaction[]
+  activityRawRecords         GuestActivityRawRecord[]
+  activityFacts              GuestActivityFact[]
+  activitySyncStates         GuestActivitySyncState[]
+  activitySourceSyncStates   GuestActivitySourceSyncState[]
+  activitySyncJobs           GuestActivitySyncJob[]
+  workingShifts              GuestWorkingShift[]
+  crmEvents                  GuestCrmEvent[]
+  crmLeads                   GuestCrmLead[]
+  crmTasks                   GuestCrmTask[]
+  crmContactEvents           GuestCrmContactEvent[]
+  staffIdentityMappings      GuestStaffIdentityMapping[]
+  audienceMembers            GuestAudienceMember[]
+  marketingMissionRewards    MarketingMissionReward[]
+  gameProfiles               GuestGameProfile[]
+  gameRewards                GuestGameReward[]
+  gameDeliveries             GuestGameDelivery[]
+  gameEvents                 GuestGameEvent[]
+  gameAuditEvents            GuestGameAuditEvent[]
+  gameRuleDecisions          GuestGameRuleDecision[]
+  gameEntitlements           GuestGameEntitlement[]
   gameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
-  guestPortalOtpChallenges GuestPortalOtpChallenge[]
+  guestPortalOtpChallenges   GuestPortalOtpChallenge[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
   @@index([tenantId])
@@ -1479,45 +1496,49 @@ model MarketingMissionReward {
 }
 
 model GuestGameProfile {
-  id              String    @id @default(uuid())
-  tenantId        String
-  guestId         String?
-  leadId          String?
-  createdByUserId String?
-  displayName     String?
-  contactMasked   String?
-  phoneHash       String?
-  phoneEncrypted  String?
-  telegramIdentity String?
-  maxIdentity     String?
+  id                 String                          @id @default(uuid())
+  tenantId           String
+  guestId            String?
+  leadId             String?
+  createdByUserId    String?
+  displayName        String?
+  contactMasked      String?
+  phoneHash          String?
+  phoneEncrypted     String?
+  telegramIdentity   String?
+  maxIdentity        String?
   phoneConsentStatus GuestCommunicationConsentStatus @default(UNKNOWN)
   phoneConsentSource String?
-  phoneConsentAt DateTime?
-  unsubscribedAt DateTime?
-  xp              Int       @default(0)
-  level           Int       @default(1)
-  status          String    @default("ACTIVE")
-  isStaffTest        Boolean   @default(false)
+  phoneConsentAt     DateTime?
+  unsubscribedAt     DateTime?
+  xp                 Int                             @default(0)
+  level              Int                             @default(1)
+  status             String                          @default("ACTIVE")
+  isStaffTest        Boolean                         @default(false)
   staffTestReason    String?
   staffTestMatchedAt DateTime?
-  lastActivityAt  DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  lastActivityAt     DateTime?
+  createdAt          DateTime                        @default(now())
+  updatedAt          DateTime                        @updatedAt
 
-  tenant        Tenant           @relation(fields: [tenantId], references: [id])
-  guest         Guest?           @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lead          GuestCrmLead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  createdByUser User?           @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  rewards       GuestGameReward[]
-  bonusLedgerEntries GuestBonusLedgerEntry[]
-  deliveries    GuestGameDelivery[]
-  events        GuestGameEvent[]
-  auditEvents   GuestGameAuditEvent[]
-  activityRawRecords GuestActivityRawRecord[]
-  activityFacts      GuestActivityFact[]
-  activitySyncStates GuestActivitySyncState[]
-  telegramLinkChallenges GuestGameTelegramLinkChallenge[]
-  portalOtpChallenges GuestPortalOtpChallenge[]
+  tenant                   Tenant                           @relation(fields: [tenantId], references: [id])
+  guest                    Guest?                           @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lead                     GuestCrmLead?                    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdByUser            User?                            @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  rewards                  GuestGameReward[]
+  bonusLedgerEntries       GuestBonusLedgerEntry[]
+  deliveries               GuestGameDelivery[]
+  events                   GuestGameEvent[]
+  auditEvents              GuestGameAuditEvent[]
+  ruleDecisions            GuestGameRuleDecision[]
+  entitlements             GuestGameEntitlement[]
+  activityRawRecords       GuestActivityRawRecord[]
+  activityFacts            GuestActivityFact[]
+  activitySyncStates       GuestActivitySyncState[]
+  activitySourceSyncStates GuestActivitySourceSyncState[]
+  activitySyncJobs         GuestActivitySyncJob[]
+  telegramLinkChallenges   GuestGameTelegramLinkChallenge[]
+  portalOtpChallenges      GuestPortalOtpChallenge[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
@@ -1529,16 +1550,16 @@ model GuestGameProfile {
 }
 
 model GuestGameLootBox {
-  id                     String    @id @default(uuid())
+  id                     String   @id @default(uuid())
   tenantId               String
   audienceId             String?
   createdByUserId        String?
   name                   String
-  status                 String    @default("DRAFT")
-  usageKind              String    @default("STANDALONE")
+  status                 String   @default("DRAFT")
+  usageKind              String   @default("STANDALONE")
   triggerKind            String
   rewardType             String
-  rewardAmount           Decimal?  @db.Decimal(12, 2)
+  rewardAmount           Decimal? @db.Decimal(12, 2)
   rewardLabel            String?
   segment                String?
   sessionType            String?
@@ -1546,16 +1567,16 @@ model GuestGameLootBox {
   periodRules            Json?
   limits                 Json?
   probabilityRules       Json
-  budgetAmount           Decimal?  @db.Decimal(12, 2)
+  budgetAmount           Decimal? @db.Decimal(12, 2)
   antiFraudRules         Json?
-  manualApprovalRequired Boolean   @default(true)
+  manualApprovalRequired Boolean  @default(true)
   note                   String?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)
-  createdByUser User?            @relation("GuestGameLootBoxCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser User?             @relation("GuestGameLootBoxCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards       GuestGameReward[]
   events        GuestGameEvent[]
 
@@ -1596,7 +1617,7 @@ model GuestGameMission {
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)
-  createdByUser User?            @relation("GuestGameMissionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser User?             @relation("GuestGameMissionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards       GuestGameReward[]
   events        GuestGameEvent[]
 
@@ -1631,7 +1652,7 @@ model GuestGameSeason {
 
   tenant        Tenant            @relation(fields: [tenantId], references: [id])
   audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)
-  createdByUser User?            @relation("GuestGameSeasonCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser User?             @relation("GuestGameSeasonCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards       GuestGameReward[]
   events        GuestGameEvent[]
 
@@ -1665,6 +1686,7 @@ model GuestGamePromoCard {
   @@index([tenantId, status, updatedAt], map: "guest_game_promo_card_status_idx")
   @@index([createdByUserId], map: "guest_game_promo_card_created_by_idx")
 }
+
 model GuestGameVisualDraft {
   id                String    @id @default(uuid())
   tenantId          String
@@ -1690,50 +1712,52 @@ model GuestGameVisualDraft {
   @@index([updatedByUserId], map: "guest_game_visual_draft_updated_by_idx")
   @@index([publishedByUserId], map: "guest_game_visual_draft_published_by_idx")
 }
-model GuestGameReward {
-  id               String               @id @default(uuid())
-  tenantId         String
-  profileId        String?
-  guestId          String?
-  lootBoxId        String?
-  missionId        String?
-  seasonId         String?
-  storeId          String?
-  createdByUserId  String?
-  approvedByUserId String?
-  status           String               @default("PENDING")
-  source           String               @default("MANUAL")
-  externalProvider IntegrationProvider?
-  externalDomain   String?
-  externalId       String?
-  guestExternalId  String?
-  rewardType       String
-  rewardAmount     Decimal              @default(0) @db.Decimal(12, 2)
-  rewardLabel      String
-  rewardRarity     String?
-  rewardRarityLabel String?
-  rewardDropChance Decimal?             @db.Decimal(8, 4)
-  rewardCode       String?
-  qualifiedAt      DateTime             @default(now())
-  expiresAt        DateTime?
-  paidAt           DateTime?
-  note             String?
-  evidence         Json?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
 
-  tenant         Tenant            @relation(fields: [tenantId], references: [id])
-  profile        GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest          Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lootBox        GuestGameLootBox? @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
-  mission        GuestGameMission? @relation(fields: [missionId], references: [id], onDelete: SetNull)
-  season         GuestGameSeason?  @relation(fields: [seasonId], references: [id], onDelete: SetNull)
-  store          Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser  User?             @relation("GuestGameRewardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  approvedByUser User?             @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  deliveries     GuestGameDelivery[]
-  deliveryEvents GuestGameDeliveryEvent[]
+model GuestGameReward {
+  id                String               @id @default(uuid())
+  tenantId          String
+  profileId         String?
+  guestId           String?
+  lootBoxId         String?
+  missionId         String?
+  seasonId          String?
+  storeId           String?
+  createdByUserId   String?
+  approvedByUserId  String?
+  status            String               @default("PENDING")
+  source            String               @default("MANUAL")
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalId        String?
+  guestExternalId   String?
+  rewardType        String
+  rewardAmount      Decimal              @default(0) @db.Decimal(12, 2)
+  rewardLabel       String
+  rewardRarity      String?
+  rewardRarityLabel String?
+  rewardDropChance  Decimal?             @db.Decimal(8, 4)
+  rewardCode        String?
+  qualifiedAt       DateTime             @default(now())
+  expiresAt         DateTime?
+  paidAt            DateTime?
+  note              String?
+  evidence          Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant             Tenant                   @relation(fields: [tenantId], references: [id])
+  profile            GuestGameProfile?        @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest              Guest?                   @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lootBox            GuestGameLootBox?        @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
+  mission            GuestGameMission?        @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  season             GuestGameSeason?         @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  store              Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser      User?                    @relation("GuestGameRewardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser     User?                    @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  deliveries         GuestGameDelivery[]
+  deliveryEvents     GuestGameDeliveryEvent[]
   bonusLedgerEntries GuestBonusLedgerEntry[]
+  entitlements       GuestGameEntitlement[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
@@ -1777,7 +1801,7 @@ model GuestGameDelivery {
   profile       GuestGameProfile?        @relation(fields: [profileId], references: [id], onDelete: SetNull)
   guest         Guest?                   @relation(fields: [guestId], references: [id], onDelete: SetNull)
   store         Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?                   @relation("GuestGameDeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser User?                    @relation("GuestGameDeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   events        GuestGameDeliveryEvent[]
 
   @@unique([tenantId, rewardId, channel], map: "guest_game_delivery_reward_channel_uidx")
@@ -1816,32 +1840,34 @@ model GuestGameDeliveryEvent {
 }
 
 model GuestGameEvent {
-  id              String               @id @default(uuid())
-  tenantId        String
-  profileId       String?
-  guestId         String?
-  lootBoxId       String?
-  missionId       String?
-  seasonId        String?
-  createdByUserId String?
-  eventType       String
-  source          String               @default("MANUAL")
+  id               String               @id @default(uuid())
+  tenantId         String
+  profileId        String?
+  guestId          String?
+  lootBoxId        String?
+  missionId        String?
+  seasonId         String?
+  createdByUserId  String?
+  eventType        String
+  source           String               @default("MANUAL")
   externalProvider IntegrationProvider?
-  externalDomain  String?
-  externalId      String?
-  xpDelta         Int                  @default(0)
-  occurredAt      DateTime             @default(now())
-  payload         Json?
-  note            String?
-  createdAt       DateTime             @default(now())
+  externalDomain   String?
+  externalId       String?
+  xpDelta          Int                  @default(0)
+  occurredAt       DateTime             @default(now())
+  payload          Json?
+  note             String?
+  createdAt        DateTime             @default(now())
 
-  tenant        Tenant            @relation(fields: [tenantId], references: [id])
-  profile       GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest         Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lootBox       GuestGameLootBox? @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
-  mission       GuestGameMission? @relation(fields: [missionId], references: [id], onDelete: SetNull)
-  season        GuestGameSeason?  @relation(fields: [seasonId], references: [id], onDelete: SetNull)
-  createdByUser User?             @relation("GuestGameEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id])
+  profile       GuestGameProfile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest         Guest?                  @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lootBox       GuestGameLootBox?       @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
+  mission       GuestGameMission?       @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  season        GuestGameSeason?        @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  createdByUser User?                   @relation("GuestGameEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  ruleDecisions GuestGameRuleDecision[]
+  entitlements  GuestGameEntitlement[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_event_external_uidx")
   @@index([tenantId, eventType, occurredAt], map: "guest_game_event_type_idx")
@@ -1854,21 +1880,21 @@ model GuestGameEvent {
 }
 
 model GuestGameAuditEvent {
-  id          String   @id @default(uuid())
-  tenantId    String
-  profileId   String?
-  guestId     String?
-  storeId     String?
-  entityType  String
-  entityId    String?
-  action      String
-  status      String
-  reasonCode  String?
-  reasonText  String?
-  traceId     String?
-  happenedAt  DateTime @default(now())
-  payload     Json?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  tenantId   String
+  profileId  String?
+  guestId    String?
+  storeId    String?
+  entityType String
+  entityId   String?
+  action     String
+  status     String
+  reasonCode String?
+  reasonText String?
+  traceId    String?
+  happenedAt DateTime @default(now())
+  payload    Json?
+  createdAt  DateTime @default(now())
 
   tenant  Tenant            @relation(fields: [tenantId], references: [id])
   profile GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
@@ -1881,6 +1907,92 @@ model GuestGameAuditEvent {
   @@index([guestId, happenedAt], map: "guest_game_audit_event_guest_idx")
   @@index([storeId, happenedAt], map: "guest_game_audit_event_store_idx")
   @@index([entityType, entityId, happenedAt], map: "guest_game_audit_event_entity_idx")
+}
+
+model GuestGameRuleDecision {
+  id               String   @id @default(uuid())
+  tenantId         String
+  profileId        String?
+  guestId          String?
+  storeId          String?
+  eventId          String?
+  evaluationRunId  String
+  evaluationMode   String   @default("LIVE")
+  evaluatorVersion String   @default("legacy-v1")
+  ruleType         String
+  ruleId           String
+  ruleName         String?
+  ruleStatus       String?
+  triggerKind      String?
+  sourceEventType  String?
+  sourceFactId     String?
+  sourceFactKind   String?
+  traceId          String?
+  status           String
+  reasons          Json?
+  blockers         Json?
+  input            Json?
+  evidence         Json?
+  evaluatedAt      DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id])
+  profile GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest   Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store   Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  event   GuestGameEvent?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, evaluatedAt], map: "guest_game_rule_decision_tenant_time_idx")
+  @@index([profileId, evaluatedAt], map: "guest_game_rule_decision_profile_time_idx")
+  @@index([guestId, evaluatedAt], map: "guest_game_rule_decision_guest_time_idx")
+  @@index([storeId, evaluatedAt], map: "guest_game_rule_decision_store_time_idx")
+  @@index([tenantId, ruleType, ruleId, evaluatedAt], map: "guest_game_rule_decision_rule_time_idx")
+  @@index([evaluationRunId], map: "guest_game_rule_decision_run_idx")
+  @@index([eventId], map: "guest_game_rule_decision_event_idx")
+  @@index([tenantId, status, evaluatedAt], map: "guest_game_rule_decision_status_idx")
+}
+
+model GuestGameEntitlement {
+  id              String    @id @default(uuid())
+  tenantId        String
+  profileId       String?
+  guestId         String?
+  storeId         String?
+  eventId         String?
+  evaluationRunId String?
+  ruleType        String
+  ruleId          String
+  ruleName        String?
+  sourceEventType String?
+  sourceFactId    String?
+  sourceFactKind  String?
+  traceId         String?
+  status          String    @default("AVAILABLE")
+  idempotencyKey  String
+  qualifiedAt     DateTime
+  validUntil      DateTime?
+  consumedAt      DateTime?
+  canceledAt      DateTime?
+  rewardId        String?   @unique(map: "guest_game_entitlement_reward_uidx")
+  evidence        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id])
+  profile GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest   Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store   Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  event   GuestGameEvent?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  reward  GuestGameReward?  @relation(fields: [rewardId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, idempotencyKey], map: "guest_game_entitlement_idempotency_uidx")
+  @@index([tenantId, status, qualifiedAt], map: "guest_game_entitlement_status_idx")
+  @@index([profileId, status, qualifiedAt], map: "guest_game_entitlement_profile_idx")
+  @@index([guestId, status, qualifiedAt], map: "guest_game_entitlement_guest_idx")
+  @@index([storeId, status, qualifiedAt], map: "guest_game_entitlement_store_idx")
+  @@index([tenantId, ruleType, ruleId, qualifiedAt], map: "guest_game_entitlement_rule_idx")
+  @@index([eventId], map: "guest_game_entitlement_event_idx")
+  @@index([evaluationRunId], map: "guest_game_entitlement_run_idx")
 }
 
 model GuestGameLogTypeMapping {
@@ -1936,27 +2048,27 @@ model GuestGameTelegramLinkChallenge {
 }
 
 model GuestPortalOtpChallenge {
-  id              String    @id @default(uuid())
-  tenantId        String
-  storeId         String
-  phoneHash       String
-  phoneMasked     String?
-  phoneEncrypted  String?
-  guestId         String?
-  profileId       String?
-  codeHash        String
-  status          String    @default("PENDING")
-  deliveryChannel String    @default("DEV")
-  providerName    String?
-  providerChallengeId String?
-  attempts        Int       @default(0)
-  expiresAt       DateTime
-  deliveredAt     DateTime?
-  verifiedAt      DateTime?
+  id                    String    @id @default(uuid())
+  tenantId              String
+  storeId               String
+  phoneHash             String
+  phoneMasked           String?
+  phoneEncrypted        String?
+  guestId               String?
+  profileId             String?
+  codeHash              String
+  status                String    @default("PENDING")
+  deliveryChannel       String    @default("DEV")
+  providerName          String?
+  providerChallengeId   String?
+  attempts              Int       @default(0)
+  expiresAt             DateTime
+  deliveredAt           DateTime?
+  verifiedAt            DateTime?
   gameConsentAcceptedAt DateTime?
   gameConsentVersion    String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   tenant  Tenant            @relation(fields: [tenantId], references: [id])
   store   Store             @relation(fields: [storeId], references: [id])
@@ -2228,11 +2340,11 @@ model GuestActivityRawRecord {
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
 
-  tenant            Tenant             @relation(fields: [tenantId], references: [id])
-  guest             Guest?             @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  profile           GuestGameProfile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  store             Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  tenant            Tenant              @relation(fields: [tenantId], references: [id])
+  guest             Guest?              @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  profile           GuestGameProfile?   @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  store             Store?              @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  integrationSource IntegrationSource?  @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
   facts             GuestActivityFact[]
 
   @@unique([tenantId, sourceKind, externalProvider, externalDomain, sourceHash], map: "guest_activity_raw_source_hash_uidx")
@@ -2247,42 +2359,49 @@ model GuestActivityRawRecord {
 }
 
 model GuestActivityFact {
-  id                String              @id @default(uuid())
-  tenantId          String
-  rawRecordId       String?
-  guestId           String?
-  profileId         String?
-  storeId           String?
-  externalProvider  IntegrationProvider @default(LANGAME)
-  externalDomain    String
-  externalGuestId   String
-  externalClubId    String?
-  sourceKind        String
-  sourceHash        String
-  factType          String
-  happenedAt        DateTime?
-  sourceLocalDate   String?
-  sessionExternalId String?
-  tariffName        String?
-  tariffType        String?
-  amount            Decimal?            @db.Decimal(12, 2)
-  bonusAmount       Decimal?            @db.Decimal(12, 2)
-  durationMinutes   Int?
-  confidence        String              @default("UNKNOWN")
-  evidence          Json?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  id                 String              @id @default(uuid())
+  tenantId           String
+  rawRecordId        String?
+  guestId            String?
+  profileId          String?
+  storeId            String?
+  externalProvider   IntegrationProvider @default(LANGAME)
+  externalDomain     String
+  externalGuestId    String
+  externalClubId     String?
+  sourceKind         String
+  sourceHash         String
+  factType           String
+  happenedAt         DateTime?
+  sourceLocalDate    String?
+  sessionExternalId  String?
+  tariffName         String?
+  tariffType         String?
+  amount             Decimal?            @db.Decimal(12, 2)
+  bonusAmount        Decimal?            @db.Decimal(12, 2)
+  durationMinutes    Int?
+  confidence         String              @default("UNKNOWN")
+  evidence           Json?
+  parserVersion      String              @default("legacy-v1")
+  normalizationRunId String?
+  lifecycleStatus    String              @default("ACTIVE")
+  validFrom          DateTime            @default(now())
+  supersededAt       DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   tenant    Tenant                  @relation(fields: [tenantId], references: [id])
-  rawRecord GuestActivityRawRecord? @relation(fields: [rawRecordId], references: [id], onDelete: Cascade)
+  rawRecord GuestActivityRawRecord? @relation(fields: [rawRecordId], references: [id], onDelete: SetNull)
   guest     Guest?                  @relation(fields: [guestId], references: [id], onDelete: SetNull)
   profile   GuestGameProfile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
   store     Store?                  @relation(fields: [storeId], references: [id], onDelete: SetNull)
 
-  @@unique([tenantId, factType, sourceHash], map: "guest_activity_fact_hash_uidx")
+  @@unique([tenantId, factType, sourceHash, parserVersion], map: "guest_activity_fact_hash_parser_uidx")
   @@index([tenantId, happenedAt], map: "guest_activity_fact_happened_idx")
   @@index([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_activity_fact_external_guest_idx")
   @@index([tenantId, factType, happenedAt], map: "guest_activity_fact_type_idx")
+  @@index([tenantId, lifecycleStatus, factType, happenedAt], map: "guest_activity_fact_lifecycle_idx")
+  @@index([tenantId, parserVersion, normalizationRunId], map: "guest_activity_fact_parser_run_idx")
   @@index([tenantId, tariffType], map: "guest_activity_fact_tariff_type_idx")
   @@index([rawRecordId], map: "guest_activity_fact_raw_idx")
   @@index([guestId], map: "guest_activity_fact_guest_idx")
@@ -2327,6 +2446,173 @@ model GuestActivitySyncState {
   @@index([profileId], map: "guest_activity_sync_profile_idx")
   @@index([storeId], map: "guest_activity_sync_store_idx")
   @@index([integrationSourceId], map: "guest_activity_sync_source_idx")
+}
+
+model GuestActivitySourceSyncState {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  guestId             String?
+  profileId           String?
+  storeId             String?
+  integrationSourceId String?
+  externalProvider    IntegrationProvider @default(LANGAME)
+  externalDomain      String
+  externalGuestId     String
+  sourceKind          String
+  status              String              @default("IDLE")
+  syncFrom            DateTime?
+  lastRequestedFrom   DateTime?
+  lastRequestedTo     DateTime?
+  lastSuccessfulTo    DateTime?
+  lastStartedAt       DateTime?
+  lastFinishedAt      DateTime?
+  lastPage            Int?
+  nextPage            Int?
+  rowsFetched         Int                 @default(0)
+  rowsMatched         Int                 @default(0)
+  diagnostics         Json?
+  errorMessage        String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  guest             Guest?             @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  profile           GuestGameProfile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  store             Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalGuestId, sourceKind], map: "guest_activity_source_sync_uidx")
+  @@index([tenantId, status, lastStartedAt], map: "guest_activity_source_sync_status_idx")
+  @@index([tenantId, sourceKind, lastSuccessfulTo], map: "guest_activity_source_sync_success_idx")
+  @@index([guestId], map: "guest_activity_source_sync_guest_idx")
+  @@index([profileId], map: "guest_activity_source_sync_profile_idx")
+  @@index([storeId], map: "guest_activity_source_sync_store_idx")
+  @@index([integrationSourceId], map: "guest_activity_source_sync_source_idx")
+}
+
+model GuestActivitySyncJob {
+  id             String    @id @default(uuid())
+  tenantId       String
+  profileId      String
+  guestId        String?
+  storeId        String?
+  jobKey         String    @unique(map: "guest_activity_sync_job_key_uidx")
+  reason         String?
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  nextAttemptAt  DateTime  @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  rerunRequested Boolean   @default(false)
+  payload        Json?
+  lastError      String?
+  lastStartedAt  DateTime?
+  lastFinishedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id])
+  profile GuestGameProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  guest   Guest?           @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store   Store?           @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt], map: "guest_activity_sync_job_queue_idx")
+  @@index([tenantId, status, nextAttemptAt], map: "guest_activity_sync_job_tenant_queue_idx")
+  @@index([profileId, updatedAt], map: "guest_activity_sync_job_profile_idx")
+  @@index([guestId], map: "guest_activity_sync_job_guest_idx")
+  @@index([storeId], map: "guest_activity_sync_job_store_idx")
+}
+
+model GuestGameDataRetentionPolicy {
+  id                    String   @id @default(uuid())
+  tenantId              String   @unique
+  rawRetentionDays      Int      @default(365)
+  factRetentionDays     Int      @default(1095)
+  decisionRetentionDays Int      @default(1095)
+  auditRetentionDays    Int      @default(1095)
+  liveCleanupEnabled    Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, liveCleanupEnabled], map: "guest_game_retention_policy_live_idx")
+}
+
+model GuestGameDataRetentionRun {
+  id             String    @id @default(uuid())
+  tenantId       String
+  runKey         String    @unique
+  mode           String
+  status         String    @default("STARTED")
+  rawCutoff      DateTime
+  factCutoff     DateTime
+  decisionCutoff DateTime
+  auditCutoff    DateTime
+  candidates     Json?
+  deleted        Json?
+  errorMessage   String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startedAt], map: "guest_game_retention_run_tenant_idx")
+  @@index([status, startedAt], map: "guest_game_retention_run_status_idx")
+}
+
+model GuestGameQualitySnapshot {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  measuredAt           DateTime @default(now())
+  syncLagSecondsMax    Int?
+  staleSyncCount       Int      @default(0)
+  failedSyncCount      Int      @default(0)
+  partialSyncCount     Int      @default(0)
+  pendingJobCount      Int      @default(0)
+  retryJobCount        Int      @default(0)
+  failedJobCount       Int      @default(0)
+  decisionRunCount     Int      @default(0)
+  pairedDecisionCount  Int      @default(0)
+  missingDecisionCount Int      @default(0)
+  mismatchedRunCount   Int      @default(0)
+  decisionCoverage     Float    @default(0)
+  shadowMismatchRate   Float    @default(0)
+  confidenceCounts     Json?
+  syncStatusCounts     Json?
+  jobStatusCounts      Json?
+  eventMix             Json?
+  createdAt            DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, measuredAt], map: "guest_game_quality_snapshot_tenant_idx")
+  @@index([measuredAt], map: "guest_game_quality_snapshot_time_idx")
+}
+
+model GuestGameQualityAlert {
+  id          String    @id @default(uuid())
+  tenantId    String
+  code        String
+  scopeKey    String    @default("TENANT")
+  severity    String
+  status      String    @default("OPEN")
+  message     String
+  details     Json?
+  occurrences Int       @default(1)
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code, scopeKey], map: "guest_game_quality_alert_scope_uidx")
+  @@index([tenantId, status, severity, lastSeenAt], map: "guest_game_quality_alert_status_idx")
+  @@index([code, status, lastSeenAt], map: "guest_game_quality_alert_code_idx")
 }
 
 model GuestOperationLog {
@@ -2421,19 +2707,19 @@ model GuestStaffIdentityMapping {
 }
 
 model GuestStaffIdentityMappingEvent {
-  id                String               @id @default(uuid())
-  tenantId          String
-  mappingId         String?
-  action            String
-  externalProvider  IntegrationProvider?
-  externalDomain    String
-  externalUserId    String
-  previousGuestId   String?
-  nextGuestId       String?
-  note              String?
-  updatedShifts     Int                  @default(0)
-  createdByUserId   String?
-  createdAt         DateTime             @default(now())
+  id               String               @id @default(uuid())
+  tenantId         String
+  mappingId        String?
+  action           String
+  externalProvider IntegrationProvider?
+  externalDomain   String
+  externalUserId   String
+  previousGuestId  String?
+  nextGuestId      String?
+  note             String?
+  updatedShifts    Int                  @default(0)
+  createdByUserId  String?
+  createdAt        DateTime             @default(now())
 
   tenant        Tenant @relation(fields: [tenantId], references: [id])
   createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
@@ -2476,28 +2762,28 @@ model LangameStaffUser {
 }
 
 model StaffMember {
-  id               String               @id @default(uuid())
-  tenantId         String
-  userId           String?              @unique(map: "staff_member_user_id_unique")
-  storeId          String?
-  createdByUserId  String?
-  displayName      String
-  role             UserRole             @default(CLUB_ADMINISTRATOR)
-  status           String               @default("ACTIVE")
-  position         String?
-  employmentType   String?
-  compensationType String?
+  id                 String               @id @default(uuid())
+  tenantId           String
+  userId             String?              @unique(map: "staff_member_user_id_unique")
+  storeId            String?
+  createdByUserId    String?
+  displayName        String
+  role               UserRole             @default(CLUB_ADMINISTRATOR)
+  status             String               @default("ACTIVE")
+  position           String?
+  employmentType     String?
+  compensationType   String?
   compensationAmount Int?
-  email            String?
-  phone            String?
-  hiredAt          DateTime?
-  dismissedAt      DateTime?
-  externalProvider IntegrationProvider?
-  externalDomain   String?
-  externalUserId   String?
-  note             String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  email              String?
+  phone              String?
+  hiredAt            DateTime?
+  dismissedAt        DateTime?
+  externalProvider   IntegrationProvider?
+  externalDomain     String?
+  externalUserId     String?
+  note               String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
   tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user          User?  @relation("StaffMemberUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -2715,8 +3001,8 @@ model StaffAttachment {
   data             Bytes
   createdAt        DateTime @default(now())
 
-  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  uploadedByUser User?  @relation("StaffAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  tenant         Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  uploadedByUser User?                        @relation("StaffAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   chatMessages   StaffChatMessageAttachment[]
 
   @@index([tenantId, createdAt], map: "staff_attachment_tenant_created_idx")
@@ -2731,8 +3017,8 @@ model StaffKnowledgeSettings {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  updatedByUser User?  @relation("StaffKnowledgeSettingsUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedByUser User?                         @relation("StaffKnowledgeSettingsUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
   historyEvents StaffKnowledgeSettingsEvent[]
 
   @@index([updatedByUserId], map: "staff_knowledge_settings_updated_by_idx")
@@ -3364,10 +3650,10 @@ model StaffChatMessage {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  channel      StaffChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  authorUser   User?                  @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
-  store        Store?                 @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  tenant       Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel      StaffChatChannel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorUser   User?                        @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  store        Store?                       @relation(fields: [storeId], references: [id], onDelete: SetNull)
   attachments  StaffChatMessageAttachment[]
   mentions     StaffChatMention[]
   readReceipts StaffChatReadReceipt[]
@@ -3497,17 +3783,17 @@ model GuestAudience {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  tenant             Tenant                 @relation(fields: [tenantId], references: [id])
-  createdByUser      User?                  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
-  members            GuestAudienceMember[]
-  crmTasks           GuestCrmTask[]
-  crmContactEvents   GuestCrmContactEvent[]
-  marketingCampaigns MarketingCampaign[]
+  tenant              Tenant                       @relation(fields: [tenantId], references: [id])
+  createdByUser       User?                        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  members             GuestAudienceMember[]
+  crmTasks            GuestCrmTask[]
+  crmContactEvents    GuestCrmContactEvent[]
+  marketingCampaigns  MarketingCampaign[]
   promoBundleLaunches MarketingPromoBundleLaunch[]
-  marketingMissions  MarketingMission[]
-  gameLootBoxes      GuestGameLootBox[]
-  gameMissions       GuestGameMission[]
-  gameSeasons        GuestGameSeason[]
+  marketingMissions   MarketingMission[]
+  gameLootBoxes       GuestGameLootBox[]
+  gameMissions        GuestGameMission[]
+  gameSeasons         GuestGameSeason[]
 
   @@index([tenantId, createdAt], map: "guest_audience_tenant_created_idx")
   @@index([createdByUserId], map: "guest_audience_user_idx")

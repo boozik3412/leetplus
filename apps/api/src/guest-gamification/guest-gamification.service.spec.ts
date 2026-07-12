@@ -5942,6 +5942,56 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
     });
 
+    it('pairs a blocked live open attempt with shadow without granting entitlement', async () => {
+      const { service, prisma, configService } = createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: 'mission-1',
+          name: 'Visit mission',
+          triggerKind: 'SESSION_START',
+          conditions: {},
+          storeIds: [],
+          periodFrom: null,
+          periodTo: null,
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ]);
+      prisma.guestActivityFact.findMany.mockResolvedValue([]);
+      const blockedRun = dryRunResult({
+        rules: dryRunResult().rules.map((rule) => ({
+          ...rule,
+          eligible: false,
+          reasons: [],
+          blockers: ['session_type'],
+        })),
+      });
+
+      await service.recordRuleDecisions(user, blockedRun, {
+        traceId: 'open-trace-1',
+        evaluationMode: 'LIVE_OPEN_ATTEMPT',
+        sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+      });
+
+      expect(prisma.guestGameRuleDecision.createMany).toHaveBeenCalledTimes(2);
+      const liveDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[0][0].data[0];
+      const shadowDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[1][0].data[0];
+      expect(liveDecision).toMatchObject({
+        evaluationMode: 'LIVE_OPEN_ATTEMPT',
+        status: 'BLOCKED',
+      });
+      expect(shadowDecision).toMatchObject({
+        evaluationRunId: liveDecision.evaluationRunId,
+        evaluationMode: 'SHADOW',
+      });
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
+      expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+    });
+
     it('upserts one available entitlement for the same matched lootbox event', async () => {
       const { service, prisma } = createService();
       const baseRule = dryRunResult().rules[0];

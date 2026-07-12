@@ -8941,8 +8941,12 @@ export class GuestGamificationService {
       );
     }
 
-    if (evaluationMode === 'LIVE') {
-      if (decisionsPersisted) {
+    const isLiveDecision = evaluationMode === 'LIVE';
+    const isLiveObservation =
+      isLiveDecision || evaluationMode.startsWith('LIVE_');
+
+    if (isLiveObservation) {
+      if (isLiveDecision && decisionsPersisted) {
         await this.recordMatchedEntitlements(user, dryRun, {
           ...options,
           evaluationRunId,

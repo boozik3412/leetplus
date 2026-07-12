@@ -8,6 +8,7 @@ const DEFAULT_SYNC_LAG_SECONDS = 10 * 60;
 const DEFAULT_PARTIAL_SECONDS = 60 * 60;
 const DEFAULT_MISMATCH_RATE = 0.01;
 const QUALITY_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const SHADOW_TARGET_MS = 14 * 24 * 60 * 60 * 1_000;
 
 type QualityAlertDraft = {
   code: string;
@@ -27,31 +28,81 @@ export class GuestGameQualityMonitoringService {
   ) {}
 
   async getDashboard(user: AuthenticatedUser) {
-    const [latest, history, alerts] = await Promise.all([
-      this.prisma.guestGameQualitySnapshot.findFirst({
-        where: { tenantId: user.tenantId },
-        orderBy: { measuredAt: 'desc' },
-      }),
-      this.prisma.guestGameQualitySnapshot.findMany({
-        where: {
-          tenantId: user.tenantId,
-          measuredAt: { gte: new Date(Date.now() - QUALITY_WINDOW_MS) },
-        },
-        orderBy: { measuredAt: 'asc' },
-        take: 288,
-      }),
-      this.prisma.guestGameQualityAlert.findMany({
-        where: { tenantId: user.tenantId, status: 'OPEN' },
-        orderBy: [{ severity: 'desc' }, { lastSeenAt: 'desc' }],
-        take: 50,
-      }),
-    ]);
+    const now = new Date();
+    const [latest, history, rolloutHistory, alerts, staleBindings] =
+      await Promise.all([
+        this.prisma.guestGameQualitySnapshot.findFirst({
+          where: { tenantId: user.tenantId },
+          orderBy: { measuredAt: 'desc' },
+        }),
+        this.prisma.guestGameQualitySnapshot.findMany({
+          where: {
+            tenantId: user.tenantId,
+            measuredAt: { gte: new Date(now.getTime() - QUALITY_WINDOW_MS) },
+          },
+          orderBy: { measuredAt: 'asc' },
+          take: 288,
+        }),
+        this.prisma.guestGameQualitySnapshot.findMany({
+          where: {
+            tenantId: user.tenantId,
+            measuredAt: { gte: new Date(now.getTime() - SHADOW_TARGET_MS) },
+          },
+          orderBy: { measuredAt: 'asc' },
+          take: 5_000,
+        }),
+        this.prisma.guestGameQualityAlert.findMany({
+          where: { tenantId: user.tenantId, status: 'OPEN' },
+          orderBy: [{ severity: 'desc' }, { lastSeenAt: 'desc' }],
+          take: 50,
+        }),
+        this.prisma.guestActivitySyncState.findMany({
+          where: {
+            tenantId: user.tenantId,
+            status: 'STALE_BINDING',
+            profileId: { not: null },
+          },
+          select: {
+            id: true,
+            profileId: true,
+            externalDomain: true,
+            externalGuestId: true,
+            errorMessage: true,
+            lastFinishedAt: true,
+            profile: {
+              select: {
+                displayName: true,
+                contactMasked: true,
+              },
+            },
+          },
+          orderBy: { lastFinishedAt: 'desc' },
+          take: 50,
+        }),
+      ]);
+    const thresholds = this.thresholds();
 
     return {
       latest: latest ? mapPlain(latest) : null,
       history: history.map(mapPlain),
       alerts: alerts.map(mapPlain),
-      thresholds: this.thresholds(),
+      staleBindings: staleBindings.map((state) => ({
+        id: state.id,
+        profileId: state.profileId,
+        displayName: state.profile?.displayName ?? null,
+        contactMasked: state.profile?.contactMasked ?? null,
+        externalDomain: state.externalDomain,
+        externalGuestId: state.externalGuestId,
+        errorMessage: state.errorMessage,
+        lastFinishedAt: state.lastFinishedAt?.toISOString() ?? null,
+      })),
+      rollout: buildShadowRolloutReadiness(
+        rolloutHistory,
+        now,
+        thresholds.mismatchRate,
+        staleBindings.length,
+      ),
+      thresholds,
       note: latest
         ? null
         : 'Мониторинг еще не сформировал первый снимок после применения миграции.',
@@ -518,6 +569,90 @@ export function syncStateLagSeconds(
         1_000,
     ),
   );
+}
+
+export function buildShadowRolloutReadiness(
+  snapshots: Array<{
+    measuredAt: Date;
+    staleSyncCount: number;
+    failedSyncCount: number;
+    partialSyncCount: number;
+    failedJobCount: number;
+    decisionRunCount: number;
+    decisionCoverage: number;
+    missingDecisionCount: number;
+    shadowMismatchRate: number;
+  }>,
+  now: Date,
+  mismatchThreshold: number,
+  staleBindingCount: number,
+) {
+  const syncCleanSince = consecutivePassingSince(snapshots, (snapshot) =>
+    [
+      snapshot.staleSyncCount,
+      snapshot.failedSyncCount,
+      snapshot.partialSyncCount,
+      snapshot.failedJobCount,
+    ].every((value) => value === 0),
+  );
+  const shadowQualifiedSince = consecutivePassingSince(
+    snapshots,
+    (snapshot) =>
+      snapshot.decisionRunCount > 0 &&
+      snapshot.missingDecisionCount === 0 &&
+      snapshot.decisionCoverage >= 0.999 &&
+      snapshot.shadowMismatchRate <= mismatchThreshold,
+  );
+  const syncCleanSeconds = elapsedSeconds(syncCleanSince, now);
+  const shadowQualifiedSeconds = elapsedSeconds(shadowQualifiedSince, now);
+  const targetSeconds = Math.floor(SHADOW_TARGET_MS / 1_000);
+  const blockers: string[] = [];
+  const latest = snapshots.at(-1) ?? null;
+
+  if (syncCleanSeconds < targetSeconds) blockers.push('SYNC_CLEAN_WINDOW');
+  if (!latest?.decisionRunCount) blockers.push('NO_SHADOW_DECISIONS');
+  else {
+    if (latest.decisionCoverage < 0.999 || latest.missingDecisionCount > 0) {
+      blockers.push('DECISION_COVERAGE');
+    }
+    if (latest.shadowMismatchRate > mismatchThreshold) {
+      blockers.push('SHADOW_MISMATCH');
+    }
+  }
+  if (shadowQualifiedSeconds < targetSeconds) {
+    blockers.push('SHADOW_QUALIFIED_WINDOW');
+  }
+  if (staleBindingCount > 0) blockers.push('STALE_BINDINGS');
+
+  return {
+    targetSeconds,
+    syncCleanSince: syncCleanSince?.toISOString() ?? null,
+    syncCleanSeconds,
+    shadowQualifiedSince: shadowQualifiedSince?.toISOString() ?? null,
+    shadowQualifiedSeconds,
+    staleBindingCount,
+    canaryReady: blockers.length === 0,
+    blockers,
+  };
+}
+
+function consecutivePassingSince<T extends { measuredAt: Date }>(
+  snapshots: T[],
+  predicate: (snapshot: T) => boolean,
+) {
+  let since: Date | null = null;
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    const snapshot = snapshots[index];
+    if (!snapshot || !predicate(snapshot)) break;
+    since = snapshot.measuredAt;
+  }
+  return since;
+}
+
+function elapsedSeconds(from: Date | null, to: Date) {
+  return from
+    ? Math.max(0, Math.floor((to.getTime() - from.getTime()) / 1_000))
+    : 0;
 }
 
 function positiveNumber(value: string | undefined, fallback: number) {

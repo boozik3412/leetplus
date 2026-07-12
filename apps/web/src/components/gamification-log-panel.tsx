@@ -76,6 +76,26 @@ type MonitoringResponse = {
     partialSeconds: number;
     mismatchRate: number;
   };
+  staleBindings: Array<{
+    id: string;
+    profileId: string | null;
+    displayName: string | null;
+    contactMasked: string | null;
+    externalDomain: string;
+    externalGuestId: string;
+    errorMessage: string | null;
+    lastFinishedAt: string | null;
+  }>;
+  rollout: {
+    targetSeconds: number;
+    syncCleanSince: string | null;
+    syncCleanSeconds: number;
+    shadowQualifiedSince: string | null;
+    shadowQualifiedSeconds: number;
+    staleBindingCount: number;
+    canaryReady: boolean;
+    blockers: string[];
+  };
   note: string | null;
 };
 
@@ -170,6 +190,19 @@ type LogResponse = {
     stores: StoreOption[];
   };
   syncState: Record<string, unknown> | null;
+  bindingRecovery: {
+    status: string;
+    candidates: Array<{
+      guestId: string;
+      externalDomain: string | null;
+      externalGuestId: string | null;
+      phoneMasked: string | null;
+      lastActivityAt: string | null;
+      lastSyncedAt: string | null;
+      disabled: boolean | null;
+      linkedProfileId: string | null;
+    }>;
+  } | null;
   gameTimeline: TimelineItem[];
   langameTimeline: TimelineItem[];
   comparison: ComparisonRow[];
@@ -257,6 +290,7 @@ function statusClass(status: string | null | undefined) {
       "INSUFFICIENT_SOURCE_DATA",
       "NOT_EVALUATED",
       "STALE_SOURCE",
+      "STALE_BINDING",
     ].includes(normalized)
   ) {
     return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200";
@@ -296,9 +330,11 @@ export function GamificationLogPanel() {
   const [limit, setLimit] = useState("100");
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [relinkingGuestId, setRelinkingGuestId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [monitoring, setMonitoring] = useState<MonitoringResponse | null>(null);
   const [monitoringError, setMonitoringError] = useState<string | null>(null);
+  const [monitoringRefreshKey, setMonitoringRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -326,7 +362,7 @@ export function GamificationLogPanel() {
 
     void loadMonitoring();
     return () => controller.abort();
-  }, []);
+  }, [monitoringRefreshKey]);
 
   const stores = data?.filters.stores ?? [];
   const activeTimeline =
@@ -439,9 +475,43 @@ export function GamificationLogPanel() {
     }
   }
 
+  async function relinkProfile(candidateGuestId: string) {
+    if (!selectedProfileId) return;
+    setRelinkingGuestId(candidateGuestId);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `/api/guests/gamification/log/profiles/${encodeURIComponent(selectedProfileId)}/relink`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateGuestId }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(await readClientError(response));
+      }
+      setMonitoringRefreshKey((value) => value + 1);
+      await loadProfile(selectedProfileId);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Ошибка перепривязки Langame",
+      );
+    } finally {
+      setRelinkingGuestId(null);
+    }
+  }
+
   return (
     <section className="space-y-5">
-      <MonitoringPanel data={monitoring} error={monitoringError} />
+      <MonitoringPanel
+        data={monitoring}
+        error={monitoringError}
+        onOpenProfile={(profileId) => void loadProfile(profileId)}
+      />
 
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <form
@@ -531,6 +601,14 @@ export function GamificationLogPanel() {
                 {syncing ? "Синхронизируем..." : "Обновить лог Langame"}
               </button>
             </div>
+
+            {data.bindingRecovery ? (
+              <BindingRecoveryPanel
+                recovery={data.bindingRecovery}
+                relinkingGuestId={relinkingGuestId}
+                onRelink={(guestId) => void relinkProfile(guestId)}
+              />
+            ) : null}
 
             <form
               className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6"
@@ -681,12 +759,90 @@ export function GamificationLogPanel() {
   );
 }
 
+function BindingRecoveryPanel({
+  recovery,
+  relinkingGuestId,
+  onRelink,
+}: {
+  recovery: NonNullable<LogResponse["bindingRecovery"]>;
+  relinkingGuestId: string | null;
+  onRelink: (guestId: string) => void;
+}) {
+  return (
+    <div className="mt-4 border-t border-amber-200 pt-4 dark:border-amber-900">
+      <p className="text-xs font-semibold uppercase text-amber-700 dark:text-amber-300">
+        Требуется перепривязка Langame
+      </p>
+      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+        Старый внешний ID больше не существует. Выберите актуального гостя,
+        найденного по тому же защищенному номеру телефона.
+      </p>
+      {recovery.candidates.length ? (
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {recovery.candidates.map((candidate) => {
+            const unavailable = Boolean(
+              candidate.disabled || candidate.linkedProfileId,
+            );
+            return (
+              <div
+                className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+                key={candidate.guestId}
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">
+                    {candidate.phoneMasked ?? "телефон скрыт"} · ID{" "}
+                    {candidate.externalGuestId ?? "нет"}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-zinc-500">
+                    {candidate.externalDomain ?? "домен не указан"} · активность{" "}
+                    {formatDate(candidate.lastActivityAt)}
+                  </p>
+                  {candidate.linkedProfileId ? (
+                    <p className="mt-1 text-xs text-rose-600">
+                      Уже связан с профилем {candidate.linkedProfileId}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  className="shrink-0 rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 dark:bg-cyan-300 dark:text-zinc-950"
+                  disabled={unavailable || relinkingGuestId !== null}
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Перепривязать профиль к Langame ID ${candidate.externalGuestId ?? candidate.guestId}? Старые события сохранятся в журнале.`,
+                      )
+                    ) {
+                      onRelink(candidate.guestId);
+                    }
+                  }}
+                >
+                  {relinkingGuestId === candidate.guestId
+                    ? "Привязываем..."
+                    : "Выбрать"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          Кандидаты пока не найдены. Сначала обновите справочник гостей Langame,
+          затем повторите поиск.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function MonitoringPanel({
   data,
   error,
+  onOpenProfile,
 }: {
   data: MonitoringResponse | null;
   error: string | null;
+  onOpenProfile: (profileId: string) => void;
 }) {
   if (error) {
     return (
@@ -745,7 +901,7 @@ function MonitoringPanel({
         </span>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <MonitoringMetric
           label="Максимальный лаг sync"
           value={formatDuration(snapshot.syncLagSecondsMax)}
@@ -776,7 +932,27 @@ function MonitoringPanel({
               : "SUCCESS"
           }
         />
+        <MonitoringMetric
+          label="Чистый shadow-период"
+          value={formatDuration(data.rollout.shadowQualifiedSeconds)}
+          detail={`цель ${formatDuration(data.rollout.targetSeconds)}`}
+          status={data.rollout.canaryReady ? "SUCCESS" : "PARTIAL"}
+        />
       </div>
+
+      {!data.rollout.canaryReady ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          <span className="font-semibold uppercase">Блокеры canary</span>
+          {data.rollout.blockers.map((blocker) => (
+            <span
+              className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+              key={blocker}
+            >
+              {rolloutBlockerLabel(blocker)}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
         <div>
@@ -851,8 +1027,55 @@ function MonitoringPanel({
           </div>
         </div>
       </div>
+
+      {data.staleBindings.length ? (
+        <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Устаревшие привязки Langame
+          </p>
+          <div className="mt-2 grid gap-2 lg:grid-cols-2">
+            {data.staleBindings.map((binding) => (
+              <div
+                className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30"
+                key={binding.id}
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">
+                    {binding.displayName ?? "Гость клуба"} ·{" "}
+                    {binding.contactMasked ?? "телефон скрыт"}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-zinc-500">
+                    {binding.externalDomain} · ID {binding.externalGuestId}
+                  </p>
+                </div>
+                {binding.profileId ? (
+                  <button
+                    className="shrink-0 rounded-lg border border-amber-400 px-3 py-2 text-xs font-semibold text-amber-900 dark:text-amber-100"
+                    type="button"
+                    onClick={() => onOpenProfile(binding.profileId!)}
+                  >
+                    Исправить
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function rolloutBlockerLabel(value: string) {
+  const labels: Record<string, string> = {
+    SYNC_CLEAN_WINDOW: "14 дней без ошибок sync",
+    NO_SHADOW_DECISIONS: "нет парных shadow-решений",
+    DECISION_COVERAGE: "покрытие решений ниже 99.9%",
+    SHADOW_MISMATCH: "расхождения выше порога",
+    SHADOW_QUALIFIED_WINDOW: "shadow-окно короче 14 дней",
+    STALE_BINDINGS: "есть устаревшие привязки",
+  };
+  return labels[value] ?? value;
 }
 
 function MonitoringMetric({

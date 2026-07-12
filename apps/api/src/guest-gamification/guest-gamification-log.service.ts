@@ -1,9 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, UserRole } from '@prisma/client';
+import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { GuestActivityLedgerService } from './guest-activity-ledger.service';
@@ -210,6 +211,11 @@ export class GuestGamificationLogService {
         orderBy: { startedAt: 'desc' },
       }),
     ]);
+    const bindingRecovery = await this.buildBindingRecovery(
+      user.tenantId,
+      profile,
+      syncState,
+    );
 
     return {
       profile: {
@@ -245,6 +251,7 @@ export class GuestGamificationLogService {
         stores,
       },
       syncState: syncState ? mapPlain(syncState) : null,
+      bindingRecovery,
       gameTimeline,
       langameTimeline,
       comparison,
@@ -289,6 +296,180 @@ export class GuestGamificationLogService {
       storeId: nullableString(query.storeId),
       reason: 'GAMIFICATION_LOG_MANUAL_SYNC',
     });
+  }
+
+  async relinkProfile(
+    user: AuthenticatedUser,
+    profileId: string,
+    candidateGuestId: string,
+  ) {
+    const profile = await this.prisma.guestGameProfile.findFirst({
+      where: { id: profileId, tenantId: user.tenantId },
+      select: {
+        id: true,
+        guestId: true,
+        phoneHash: true,
+        contactMasked: true,
+      },
+    });
+    if (!profile) {
+      throw new NotFoundException('Игровой профиль гостя не найден.');
+    }
+    const staleState = await this.prisma.guestActivitySyncState.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        profileId,
+        status: 'STALE_BINDING',
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (!staleState) {
+      throw new ConflictException(
+        'Перепривязка доступна только для профиля со статусом STALE_BINDING.',
+      );
+    }
+    if (!profile.phoneHash) {
+      throw new ConflictException(
+        'У профиля нет защищенного идентификатора телефона для проверки кандидата.',
+      );
+    }
+    const candidate = await this.prisma.guest.findFirst({
+      where: {
+        id: candidateGuestId,
+        tenantId: user.tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        phoneHash: profile.phoneHash,
+      },
+      select: {
+        id: true,
+        externalDomain: true,
+        externalGuestId: true,
+        phoneMasked: true,
+        gameProfiles: { select: { id: true } },
+      },
+    });
+    if (!candidate?.externalDomain || !candidate.externalGuestId) {
+      throw new BadRequestException(
+        'Выбранный Langame-гость не совпадает с профилем по телефону.',
+      );
+    }
+    if (
+      candidate.gameProfiles.some(
+        (linkedProfile) => linkedProfile.id !== profile.id,
+      )
+    ) {
+      throw new ConflictException(
+        'Выбранный Langame-гость уже связан с другим игровым профилем.',
+      );
+    }
+    if (candidate.id === profile.guestId) {
+      throw new ConflictException('Профиль уже связан с выбранным гостем.');
+    }
+
+    const happenedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.guestGameProfile.update({
+        where: { id: profile.id },
+        data: {
+          guestId: candidate.id,
+          contactMasked: candidate.phoneMasked ?? profile.contactMasked,
+        },
+      }),
+      this.prisma.guestGameAuditEvent.create({
+        data: {
+          tenantId: user.tenantId,
+          profileId: profile.id,
+          guestId: candidate.id,
+          entityType: 'GUEST_GAME_PROFILE',
+          entityId: profile.id,
+          action: 'LANGAME_BINDING_RELINKED',
+          status: 'SUCCESS',
+          reasonCode: 'STALE_EXTERNAL_GUEST_REPLACED',
+          reasonText: 'Устаревшая привязка Langame заменена оператором.',
+          happenedAt,
+          payload: {
+            actorUserId: user.id,
+            previousGuestId: profile.guestId,
+            previousExternalDomain: staleState.externalDomain,
+            previousExternalGuestId: staleState.externalGuestId,
+            candidateGuestId: candidate.id,
+            candidateExternalDomain: candidate.externalDomain,
+            candidateExternalGuestId: candidate.externalGuestId,
+          },
+        },
+      }),
+    ]);
+    this.activityLedgerService.scheduleProfileSync({
+      tenantId: user.tenantId,
+      profileId: profile.id,
+      guestId: candidate.id,
+      storeId: staleState.storeId,
+      reason: 'STALE_BINDING_RELINKED',
+    });
+
+    return {
+      relinked: true,
+      profileId: profile.id,
+      guestId: candidate.id,
+      externalDomain: candidate.externalDomain,
+      externalGuestId: candidate.externalGuestId,
+      syncQueued: true,
+    };
+  }
+
+  private async buildBindingRecovery(
+    tenantId: string,
+    profile: {
+      id: string;
+      guestId: string | null;
+      phoneHash: string | null;
+    },
+    syncState: { status: string } | null,
+  ) {
+    if (syncState?.status !== 'STALE_BINDING') return null;
+    if (!profile.phoneHash) {
+      return {
+        status: 'PHONE_IDENTITY_MISSING',
+        candidates: [],
+      };
+    }
+
+    const candidates = await this.prisma.guest.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        phoneHash: profile.phoneHash,
+        ...(profile.guestId ? { id: { not: profile.guestId } } : {}),
+      },
+      select: {
+        id: true,
+        externalDomain: true,
+        externalGuestId: true,
+        phoneMasked: true,
+        lastActivityAt: true,
+        lastSyncedAt: true,
+        isDisabled: true,
+        gameProfiles: { select: { id: true } },
+      },
+      orderBy: [{ lastActivityAt: 'desc' }, { lastSyncedAt: 'desc' }],
+      take: 20,
+    });
+
+    return {
+      status: candidates.length ? 'CANDIDATES_FOUND' : 'NO_CANDIDATES',
+      candidates: candidates.map((candidate) => ({
+        guestId: candidate.id,
+        externalDomain: candidate.externalDomain,
+        externalGuestId: candidate.externalGuestId,
+        phoneMasked: candidate.phoneMasked,
+        lastActivityAt: candidate.lastActivityAt?.toISOString() ?? null,
+        lastSyncedAt: candidate.lastSyncedAt?.toISOString() ?? null,
+        disabled: candidate.isDisabled,
+        linkedProfileId:
+          candidate.gameProfiles.find((item) => item.id !== profile.id)?.id ??
+          null,
+      })),
+    };
   }
 
   private async findSyncState(

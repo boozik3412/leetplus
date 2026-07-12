@@ -173,6 +173,20 @@ export class GuestGamificationController {
     });
   }
 
+  @Post('log/profiles/:profileId/relink')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  relinkGamificationLogProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('profileId') profileId: string,
+    @Body() body: { candidateGuestId?: string },
+  ) {
+    return this.gamificationLogService.relinkProfile(
+      user,
+      profileId,
+      body.candidateGuestId?.trim() ?? '',
+    );
+  }
+
   @Post('process-event')
   processEvent(
     @CurrentUser() user: AuthenticatedUser,

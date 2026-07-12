@@ -1,4 +1,5 @@
 import {
+  buildShadowRolloutReadiness,
   buildQualityAlerts,
   decisionPairMetrics,
   detectEventMixShift,
@@ -170,5 +171,50 @@ describe('guest game quality monitoring', () => {
         now,
       ),
     ).toBe(90);
+  });
+
+  it('requires a continuous 14-day clean and paired shadow window', () => {
+    const now = new Date('2026-07-15T00:00:00.000Z');
+    const cleanSnapshot = (measuredAt: string) => ({
+      measuredAt: new Date(measuredAt),
+      staleSyncCount: 0,
+      failedSyncCount: 0,
+      partialSyncCount: 0,
+      failedJobCount: 0,
+      decisionRunCount: 100,
+      decisionCoverage: 1,
+      missingDecisionCount: 0,
+      shadowMismatchRate: 0,
+    });
+    const ready = buildShadowRolloutReadiness(
+      [
+        cleanSnapshot('2026-07-01T00:00:00.000Z'),
+        cleanSnapshot('2026-07-15T00:00:00.000Z'),
+      ],
+      now,
+      0.01,
+      0,
+    );
+    const blocked = buildShadowRolloutReadiness(
+      [cleanSnapshot('2026-07-14T00:00:00.000Z')],
+      now,
+      0.01,
+      1,
+    );
+
+    expect(ready).toMatchObject({
+      canaryReady: true,
+      syncCleanSeconds: 14 * 24 * 60 * 60,
+      shadowQualifiedSeconds: 14 * 24 * 60 * 60,
+      blockers: [],
+    });
+    expect(blocked.canaryReady).toBe(false);
+    expect(blocked.blockers).toEqual(
+      expect.arrayContaining([
+        'SYNC_CLEAN_WINDOW',
+        'SHADOW_QUALIFIED_WINDOW',
+        'STALE_BINDINGS',
+      ]),
+    );
   });
 });

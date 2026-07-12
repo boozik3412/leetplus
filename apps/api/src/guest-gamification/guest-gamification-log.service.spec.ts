@@ -1,5 +1,9 @@
+import { UserRole } from '@prisma/client';
 import { evaluateGuestGameLedgerRule } from './guest-game-rule-evaluator';
-import { includesCorrelation } from './guest-gamification-log.service';
+import {
+  GuestGamificationLogService,
+  includesCorrelation,
+} from './guest-gamification-log.service';
 
 describe('includesCorrelation', () => {
   it('finds explicit and nested correlation identifiers case-insensitively', () => {
@@ -84,5 +88,106 @@ describe('evaluateLedgerRule', () => {
 
     expect(result.status).toBe('BLOCKED');
     expect(result.reason).toContain('до активации');
+  });
+});
+
+describe('GuestGamificationLogService binding recovery', () => {
+  const user = {
+    id: 'user-1',
+    email: 'owner@example.com',
+    fullName: 'Owner',
+    role: UserRole.OWNER,
+    isPlatformAdmin: false,
+    tenantId: 'tenant-1',
+    tenantSlug: 'tenant',
+  };
+
+  function createService(linkedProfileId: string | null = null) {
+    const profileUpdate = jest.fn().mockResolvedValue({});
+    const auditCreate = jest.fn().mockResolvedValue({});
+    const prisma = {
+      guestGameProfile: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'profile-1',
+          guestId: 'guest-stale',
+          phoneHash: 'phone-hash',
+          contactMasked: '***6330',
+        }),
+        update: profileUpdate,
+      },
+      guestActivitySyncState: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'state-1',
+          status: 'STALE_BINDING',
+          storeId: 'store-1',
+          externalDomain: 'old.langame',
+          externalGuestId: 'old-guest',
+        }),
+      },
+      guest: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'guest-current',
+          externalDomain: 'current.langame',
+          externalGuestId: 'current-guest',
+          phoneMasked: '***6330',
+          gameProfiles: linkedProfileId ? [{ id: linkedProfileId }] : [],
+        }),
+      },
+      guestGameAuditEvent: { create: auditCreate },
+      $transaction: jest
+        .fn()
+        .mockImplementation((operations: Array<Promise<unknown>>) =>
+          Promise.all(operations),
+        ),
+    };
+    const ledger = { scheduleProfileSync: jest.fn() };
+    return {
+      service: new GuestGamificationLogService(
+        prisma as never,
+        ledger as never,
+      ),
+      prisma,
+      ledger,
+      profileUpdate,
+      auditCreate,
+    };
+  }
+
+  it('relinks an explicitly selected same-phone Langame guest and audits it', async () => {
+    const { service, ledger, profileUpdate, auditCreate } = createService();
+
+    const result = await service.relinkProfile(
+      user,
+      'profile-1',
+      'guest-current',
+    );
+
+    expect(result).toMatchObject({ relinked: true, syncQueued: true });
+    expect(profileUpdate).toHaveBeenCalledWith({
+      where: { id: 'profile-1' },
+      data: { guestId: 'guest-current', contactMasked: '***6330' },
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      data: expect.objectContaining({
+        action: 'LANGAME_BINDING_RELINKED',
+        status: 'SUCCESS',
+      }),
+    });
+    expect(ledger.scheduleProfileSync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: 'profile-1',
+        guestId: 'guest-current',
+        reason: 'STALE_BINDING_RELINKED',
+      }),
+    );
+  });
+
+  it('rejects a candidate already linked to another game profile', async () => {
+    const { service } = createService('profile-2');
+
+    await expect(
+      service.relinkProfile(user, 'profile-1', 'guest-current'),
+    ).rejects.toThrow('уже связан с другим игровым профилем');
   });
 });

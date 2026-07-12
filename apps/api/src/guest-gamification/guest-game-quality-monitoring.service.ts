@@ -146,7 +146,10 @@ export class GuestGameQualityMonitoringService {
     const eventMix = Object.fromEntries(
       eventGroups.map((group) => [group.action, group._count._all]),
     );
-    const lags = syncStates
+    const activeSyncStates = syncStates.filter(
+      (state) => state.status !== 'STALE_BINDING',
+    );
+    const lags = activeSyncStates
       .map((state) =>
         state.lastSuccessfulTo
           ? Math.max(
@@ -159,7 +162,7 @@ export class GuestGameQualityMonitoringService {
       )
       .filter((value): value is number => value !== null);
     const syncLagSecondsMax = lags.length ? Math.max(...lags) : null;
-    const staleSyncCount = syncStates.filter((state) => {
+    const staleSyncCount = activeSyncStates.filter((state) => {
       if (!state.lastSuccessfulTo) return true;
       return (
         now.getTime() - state.lastSuccessfulTo.getTime() >
@@ -198,6 +201,7 @@ export class GuestGameQualityMonitoringService {
       syncLagSecondsMax,
       staleSyncCount,
       failedSyncCount: syncStatusCounts.FAILED ?? 0,
+      staleBindingCount: syncStatusCounts.STALE_BINDING ?? 0,
       longPartialCount,
       failedJobCount: jobStatusCounts.FAILED ?? 0,
       missingDecisionCount: decisionMetrics.missingDecisionCount,
@@ -343,6 +347,7 @@ export function buildQualityAlerts(input: {
   syncLagSecondsMax: number | null;
   staleSyncCount: number;
   failedSyncCount: number;
+  staleBindingCount: number;
   longPartialCount: number;
   failedJobCount: number;
   missingDecisionCount: number;
@@ -379,6 +384,15 @@ export function buildQualityAlerts(input: {
         failedSyncCount: input.failedSyncCount,
         failedJobCount: input.failedJobCount,
       },
+    });
+  }
+  if (input.staleBindingCount) {
+    alerts.push({
+      code: 'STALE_GUEST_BINDING',
+      severity: 'WARNING',
+      message:
+        'Langame не находит внешнего гостя. Требуется обновить или удалить устаревшую привязку профиля.',
+      details: { staleBindingCount: input.staleBindingCount },
     });
   }
   if (input.longPartialCount) {

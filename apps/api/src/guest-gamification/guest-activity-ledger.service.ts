@@ -52,7 +52,15 @@ type GuestActivitySyncStatus =
   | 'SUCCESS'
   | 'PARTIAL'
   | 'FAILED'
+  | 'STALE_BINDING'
   | 'SKIPPED';
+
+export type GuestActivitySyncFailureClass =
+  | 'STALE_EXTERNAL_GUEST'
+  | 'AUTH_CONFIGURATION'
+  | 'RATE_LIMITED'
+  | 'TRANSIENT_UPSTREAM'
+  | 'UNKNOWN';
 
 export type LedgerSyncInput = {
   tenantId: string;
@@ -286,14 +294,17 @@ export class GuestActivityLedgerService {
       }
 
       try {
-        await this.syncProfile({
+        const syncResult = await this.syncProfile({
           tenantId: job.tenantId,
           profileId: job.profileId,
           guestId: job.guestId,
           storeId: job.storeId,
           reason: job.reason ?? 'QUEUED_SYNC',
         });
-        const status = await this.completeSyncJob(job.id);
+        const status = await this.completeSyncJob(
+          job.id,
+          syncResult.status === 'STALE_BINDING' ? 'SKIPPED' : 'SUCCESS',
+        );
         results.push({ jobId: job.id, status });
       } catch (error) {
         const errorMessage =
@@ -308,9 +319,64 @@ export class GuestActivityLedgerService {
       success: results.filter((result) => result.status === 'SUCCESS').length,
       retried: results.filter((result) => result.status === 'RETRY').length,
       failed: results.filter((result) => result.status === 'FAILED').length,
+      skipped: results.filter((result) => result.status === 'SKIPPED').length,
       rerun: results.filter((result) => result.status === 'PENDING').length,
       results,
     };
+  }
+
+  async enqueueDueRecoverySyncs(limit = 20, now = new Date()) {
+    const retryBefore = new Date(now.getTime() - 5 * 60 * 1_000);
+    const states = await this.prisma.guestActivitySyncState.findMany({
+      where: {
+        status: { in: ['PARTIAL', 'FAILED'] },
+        profileId: { not: null },
+        OR: [
+          { lastFinishedAt: { lte: retryBefore } },
+          { lastFinishedAt: null, updatedAt: { lte: retryBefore } },
+        ],
+      },
+      select: {
+        id: true,
+        profileId: true,
+        guestId: true,
+        storeId: true,
+        tenantId: true,
+        status: true,
+        errorMessage: true,
+        diagnostics: true,
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: Math.max(limit * 3, limit),
+    });
+    let queued = 0;
+    let skipped = 0;
+
+    for (const state of states) {
+      if (queued >= limit) break;
+      if (syncStateHasStaleExternalGuest(state)) {
+        await this.prisma.guestActivitySyncState.update({
+          where: { id: state.id },
+          data: { status: 'STALE_BINDING' },
+        });
+        skipped += 1;
+        continue;
+      }
+      if (!state.profileId || !isRecoverableSyncState(state)) {
+        skipped += 1;
+        continue;
+      }
+      await this.enqueueProfileSync({
+        tenantId: state.tenantId,
+        profileId: state.profileId,
+        guestId: state.guestId,
+        storeId: state.storeId,
+        reason: `AUTOMATIC_RECOVERY_${state.status}`,
+      });
+      queued += 1;
+    }
+
+    return { scanned: states.length, queued, skipped };
   }
 
   private async claimNextSyncJob(workerId: string) {
@@ -359,7 +425,10 @@ export class GuestActivityLedgerService {
     });
   }
 
-  private async completeSyncJob(jobId: string) {
+  private async completeSyncJob(
+    jobId: string,
+    completedStatus: 'SUCCESS' | 'SKIPPED' = 'SUCCESS',
+  ) {
     const job = await this.prisma.guestActivitySyncJob.findUnique({
       where: { id: jobId },
       select: { rerunRequested: true },
@@ -385,13 +454,13 @@ export class GuestActivityLedgerService {
     await this.prisma.guestActivitySyncJob.update({
       where: { id: jobId },
       data: {
-        status: 'SUCCESS',
+        status: completedStatus,
         lockedAt: null,
         lockedBy: null,
         lastFinishedAt: now,
       },
     });
-    return 'SUCCESS';
+    return completedStatus;
   }
 
   private async failSyncJob(jobId: string, errorMessage: string) {
@@ -476,9 +545,11 @@ export class GuestActivityLedgerService {
 
     try {
       const result = await this.fetchAndPersist(context, window);
-      const status: GuestActivitySyncStatus = result.partial
-        ? 'PARTIAL'
-        : 'SUCCESS';
+      const status: GuestActivitySyncStatus = result.staleBinding
+        ? 'STALE_BINDING'
+        : result.partial
+          ? 'PARTIAL'
+          : 'SUCCESS';
 
       await this.upsertSyncState(context, {
         status,
@@ -490,23 +561,39 @@ export class GuestActivityLedgerService {
           sourceCounts: result.sourceCounts,
           sourceResults: result.sourceResults,
           partial: result.partial,
+          staleBinding: result.staleBinding,
+          failureClass: result.failureClass,
           earliestRuleAt: window.earliestRuleAt?.toISOString() ?? null,
         },
+        errorMessage: result.errorMessage ?? undefined,
       });
 
       return { status, ...result };
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const failureClass = classifyGuestActivitySyncFailure(errorMessage);
+      const staleBinding = failureClass === 'STALE_EXTERNAL_GUEST';
       await this.upsertSyncState(context, {
-        status: 'FAILED',
+        status: staleBinding ? 'STALE_BINDING' : 'FAILED',
         window,
         rawRecordsCount: state?.rawRecordsCount ?? 0,
         factsCount: state?.factsCount ?? 0,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage,
         diagnostics: {
           reason: input.reason ?? null,
           failedAt: new Date().toISOString(),
+          failureClass,
+          recoverable: isRecoverableFailureClass(failureClass),
         },
       });
+      if (staleBinding) {
+        return {
+          status: 'STALE_BINDING' as GuestActivitySyncStatus,
+          errorMessage,
+          failureClass,
+        };
+      }
       throw error;
     }
   }
@@ -1046,11 +1133,20 @@ export class GuestActivityLedgerService {
     const failedSources = Object.values(sourceResults).filter(
       (result) => result.status === 'FAILED',
     );
+    const failureClasses = failedSources
+      .map((source) =>
+        classifyGuestActivitySyncFailure(source.errorMessage ?? ''),
+      )
+      .filter((value, index, values) => values.indexOf(value) === index);
+    const staleBinding = failureClasses.includes('STALE_EXTERNAL_GUEST');
     const partial = Object.values(sourceResults).some(
       (result) => result.status !== 'SUCCESS',
     );
 
-    if (failedSources.length === Object.keys(sourceResults).length) {
+    if (
+      failedSources.length === Object.keys(sourceResults).length &&
+      !staleBinding
+    ) {
       throw new Error(
         `All Langame activity sources failed: ${failedSources
           .map((source) => source.errorMessage)
@@ -1066,6 +1162,14 @@ export class GuestActivityLedgerService {
       sourceResults,
       inferredPackageUsageFacts,
       partial,
+      staleBinding,
+      failureClass: staleBinding
+        ? ('STALE_EXTERNAL_GUEST' as const)
+        : (failureClasses[0] ?? null),
+      errorMessage:
+        failedSources
+          .map((source) => source.errorMessage)
+          .find((message): message is string => Boolean(message)) ?? null,
     };
   }
 
@@ -3048,4 +3152,103 @@ function sourceResultDiagnostics<T>(result: SourceFetchResult<T>) {
     to: result.window.to.toISOString(),
     errorMessage: result.errorMessage,
   };
+}
+
+export function classifyGuestActivitySyncFailure(
+  errorMessage: string,
+): GuestActivitySyncFailureClass {
+  const message = errorMessage.trim().toLowerCase();
+
+  if (
+    message.includes('guest not found') ||
+    (message.includes('guest_id') && message.includes('not found'))
+  ) {
+    return 'STALE_EXTERNAL_GUEST';
+  }
+  if (
+    message.includes('401') ||
+    message.includes('403') ||
+    message.includes('unauthorized') ||
+    message.includes('forbidden') ||
+    message.includes('invalid api key') ||
+    message.includes('invalid credential')
+  ) {
+    return 'AUTH_CONFIGURATION';
+  }
+  if (message.includes('429') || message.includes('rate limit')) {
+    return 'RATE_LIMITED';
+  }
+  if (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('econnreset') ||
+    message.includes('econnrefused') ||
+    message.includes('network') ||
+    message.includes('502') ||
+    message.includes('503') ||
+    message.includes('504') ||
+    message.includes('service unavailable')
+  ) {
+    return 'TRANSIENT_UPSTREAM';
+  }
+  return 'UNKNOWN';
+}
+
+export function isRecoverableFailureClass(
+  failureClass: GuestActivitySyncFailureClass,
+) {
+  return !['STALE_EXTERNAL_GUEST', 'AUTH_CONFIGURATION'].includes(failureClass);
+}
+
+export function isRecoverableSyncState(state: {
+  status: string;
+  errorMessage: string | null;
+  diagnostics: unknown;
+}) {
+  const messages = [
+    ...(state.errorMessage ? [state.errorMessage] : []),
+    ...collectDiagnosticErrors(state.diagnostics),
+  ];
+
+  if (state.status === 'PARTIAL' && messages.length === 0) {
+    return true;
+  }
+  if (!['PARTIAL', 'FAILED'].includes(state.status) || messages.length === 0) {
+    return false;
+  }
+  return messages.every((message) =>
+    isRecoverableFailureClass(classifyGuestActivitySyncFailure(message)),
+  );
+}
+
+function syncStateHasStaleExternalGuest(state: {
+  errorMessage: string | null;
+  diagnostics: unknown;
+}) {
+  return [
+    ...(state.errorMessage ? [state.errorMessage] : []),
+    ...collectDiagnosticErrors(state.diagnostics),
+  ].some(
+    (message) =>
+      classifyGuestActivitySyncFailure(message) === 'STALE_EXTERNAL_GUEST',
+  );
+}
+
+function collectDiagnosticErrors(value: unknown): string[] {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectDiagnosticErrors(item));
+  }
+
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([key, item]) => {
+      if (
+        typeof item === 'string' &&
+        ['error', 'errormessage', 'lasterror'].includes(key.toLowerCase())
+      ) {
+        return item.trim() ? [item] : [];
+      }
+      return collectDiagnosticErrors(item);
+    },
+  );
 }

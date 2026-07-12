@@ -37,6 +37,7 @@ describe('guest game quality monitoring', () => {
       syncLagSecondsMax: 901,
       staleSyncCount: 2,
       failedSyncCount: 1,
+      staleBindingCount: 0,
       longPartialCount: 1,
       failedJobCount: 0,
       missingDecisionCount: 3,
@@ -56,6 +57,34 @@ describe('guest game quality monitoring', () => {
       'PARTIAL_TOO_LONG',
       'MISSING_DECISION',
       'SHADOW_MISMATCH_RATE',
+    ]);
+  });
+
+  it('reports stale Langame identities separately from retryable failures', () => {
+    const alerts = buildQualityAlerts({
+      syncLagSecondsMax: null,
+      staleSyncCount: 0,
+      failedSyncCount: 0,
+      staleBindingCount: 2,
+      longPartialCount: 0,
+      failedJobCount: 0,
+      missingDecisionCount: 0,
+      mismatchedRunCount: 0,
+      shadowMismatchRate: 0,
+      eventMixShift: null,
+      thresholds: {
+        syncLagSeconds: 600,
+        partialSeconds: 3600,
+        mismatchRate: 0.01,
+      },
+    });
+
+    expect(alerts).toEqual([
+      expect.objectContaining({
+        code: 'STALE_GUEST_BINDING',
+        severity: 'WARNING',
+        details: { staleBindingCount: 2 },
+      }),
     ]);
   });
 

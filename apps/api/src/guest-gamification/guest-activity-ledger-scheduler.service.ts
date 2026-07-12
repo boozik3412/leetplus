@@ -9,6 +9,8 @@ import { GuestActivityLedgerService } from './guest-activity-ledger.service';
 
 const DEFAULT_INTERVAL_MS = 5_000;
 const DEFAULT_BATCH_SIZE = 5;
+const DEFAULT_RECOVERY_SWEEP_INTERVAL_MS = 5 * 60 * 1_000;
+const DEFAULT_RECOVERY_BATCH_SIZE = 20;
 
 @Injectable()
 export class GuestActivityLedgerSchedulerService
@@ -19,6 +21,7 @@ export class GuestActivityLedgerSchedulerService
   );
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private lastRecoverySweepAt = 0;
 
   constructor(
     private readonly config: ConfigService,
@@ -54,13 +57,26 @@ export class GuestActivityLedgerSchedulerService
 
     this.running = true;
     try {
+      const now = Date.now();
+      if (now - this.lastRecoverySweepAt >= this.recoverySweepIntervalMs()) {
+        const recovery = await this.ledgerService.enqueueDueRecoverySyncs(
+          this.recoveryBatchSize(),
+          new Date(now),
+        );
+        this.lastRecoverySweepAt = now;
+        if (recovery.scanned > 0) {
+          this.logger.log(
+            `Guest activity ledger recovery scanned=${recovery.scanned}, queued=${recovery.queued}, skipped=${recovery.skipped}.`,
+          );
+        }
+      }
       const result = await this.ledgerService.processQueuedSyncJobs(
         this.batchSize(),
       );
 
       if (result.processed > 0) {
         this.logger.log(
-          `Guest activity ledger queue processed=${result.processed}, success=${result.success}, retry=${result.retried}, failed=${result.failed}, rerun=${result.rerun}.`,
+          `Guest activity ledger queue processed=${result.processed}, success=${result.success}, retry=${result.retried}, failed=${result.failed}, skipped=${result.skipped}, rerun=${result.rerun}.`,
         );
       }
     } catch (error) {
@@ -98,6 +114,26 @@ export class GuestActivityLedgerSchedulerService
       DEFAULT_BATCH_SIZE,
       1,
       50,
+    );
+  }
+
+  private recoverySweepIntervalMs() {
+    return positiveInteger(
+      this.config.get<string>(
+        'GUEST_ACTIVITY_LEDGER_RECOVERY_SWEEP_INTERVAL_MS',
+      ),
+      DEFAULT_RECOVERY_SWEEP_INTERVAL_MS,
+      60_000,
+      24 * 60 * 60 * 1_000,
+    );
+  }
+
+  private recoveryBatchSize() {
+    return positiveInteger(
+      this.config.get<string>('GUEST_ACTIVITY_LEDGER_RECOVERY_BATCH_SIZE'),
+      DEFAULT_RECOVERY_BATCH_SIZE,
+      1,
+      100,
     );
   }
 }

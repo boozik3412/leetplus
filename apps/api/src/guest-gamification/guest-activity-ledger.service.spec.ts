@@ -4,7 +4,9 @@ import type { LangameClient } from '../integrations/langame.client';
 import type { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
+  classifyGuestActivitySyncFailure,
   GuestActivityLedgerService,
+  isRecoverableSyncState,
   sanitizeGuestActivityEvidencePayload,
   sanitizeGuestActivityRawPayload,
   sanitizeGuestActivityText,
@@ -135,6 +137,7 @@ describe('GuestActivityLedgerService', () => {
   let rawRecords: Map<string, LedgerRow>;
   let facts: Map<string, LedgerRow>;
   let syncState: SyncState | null;
+  let syncStateUpdate: jest.Mock;
   let sourceSyncStates: Map<string, Record<string, unknown>>;
   let syncJobs: Map<string, Record<string, any>>;
   let prisma: PrismaService;
@@ -231,6 +234,7 @@ describe('GuestActivityLedgerService', () => {
     rawRecords = new Map();
     facts = new Map();
     syncState = null;
+    syncStateUpdate = jest.fn().mockResolvedValue({});
     sourceSyncStates = new Map();
     syncJobs = new Map();
     prisma = {
@@ -278,6 +282,8 @@ describe('GuestActivityLedgerService', () => {
       },
       guestActivitySyncState: {
         findUnique: jest.fn().mockImplementation(() => syncState),
+        findMany: jest.fn().mockResolvedValue([]),
+        update: syncStateUpdate,
         upsert: jest
           .fn()
           .mockImplementation(({ create, update }: SyncStateUpsertArgs) => {
@@ -1019,6 +1025,66 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('marks a queued stale external guest sync as skipped', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'STALE_BINDING_TEST',
+    });
+    jest.spyOn(service, 'syncProfile').mockResolvedValue({
+      status: 'STALE_BINDING',
+      errorMessage: 'Guest not found',
+    } as any);
+
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+    const job = Array.from(syncJobs.values())[0];
+
+    expect(result).toMatchObject({ processed: 1, skipped: 1, failed: 0 });
+    expect(job.status).toBe('SKIPPED');
+  });
+
+  it('queues recoverable partial states and skips stale guest bindings', async () => {
+    (prisma.guestActivitySyncState.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'sync-partial',
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        status: 'PARTIAL',
+        errorMessage: 'upstream timeout',
+        diagnostics: null,
+      },
+      {
+        id: 'sync-stale',
+        tenantId,
+        profileId: 'profile-stale',
+        guestId: 'guest-stale',
+        storeId,
+        status: 'FAILED',
+        errorMessage: 'Guest not found',
+        diagnostics: null,
+      },
+    ]);
+
+    const result = await service.enqueueDueRecoverySyncs(10);
+
+    expect(result).toEqual({ scanned: 2, queued: 1, skipped: 1 });
+    expect(Array.from(syncJobs.values())).toEqual([
+      expect.objectContaining({
+        profileId,
+        status: 'PENDING',
+        reason: 'AUTOMATIC_RECOVERY_PARTIAL',
+      }),
+    ]);
+    expect(syncStateUpdate).toHaveBeenCalledWith({
+      where: { id: 'sync-stale' },
+      data: { status: 'STALE_BINDING' },
+    });
+  });
+
   it('requests a rerun without releasing an already running sync job', async () => {
     await service.enqueueProfileSync({
       tenantId,
@@ -1071,6 +1137,50 @@ describe('GuestActivityLedgerService', () => {
         nextAttemptAt: expect.any(Date),
       }),
     );
+  });
+});
+
+describe('guest activity sync failure classification', () => {
+  it('separates stale identities, configuration errors and transient failures', () => {
+    expect(
+      classifyGuestActivitySyncFailure(
+        '400 Bad Request: guest_id validation failed, Guest not found',
+      ),
+    ).toBe('STALE_EXTERNAL_GUEST');
+    expect(classifyGuestActivitySyncFailure('401 Unauthorized')).toBe(
+      'AUTH_CONFIGURATION',
+    );
+    expect(classifyGuestActivitySyncFailure('504 upstream timeout')).toBe(
+      'TRANSIENT_UPSTREAM',
+    );
+  });
+
+  it('retries cursor partials and transient errors but not stale bindings', () => {
+    expect(
+      isRecoverableSyncState({
+        status: 'PARTIAL',
+        errorMessage: null,
+        diagnostics: { sourceResults: { logs: { nextPage: 21 } } },
+      }),
+    ).toBe(true);
+    expect(
+      isRecoverableSyncState({
+        status: 'PARTIAL',
+        errorMessage: null,
+        diagnostics: {
+          sourceResults: {
+            logs: { errorMessage: '503 service unavailable' },
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isRecoverableSyncState({
+        status: 'FAILED',
+        errorMessage: 'Guest not found',
+        diagnostics: null,
+      }),
+    ).toBe(false);
   });
 });
 

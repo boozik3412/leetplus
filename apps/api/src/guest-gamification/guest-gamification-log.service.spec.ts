@@ -1,6 +1,7 @@
 import { UserRole } from '@prisma/client';
 import { evaluateGuestGameLedgerRule } from './guest-game-rule-evaluator';
 import {
+  buildGuestGameComparisonTimeline,
   GuestGamificationLogService,
   includesCorrelation,
 } from './guest-gamification-log.service';
@@ -23,6 +24,69 @@ describe('includesCorrelation', () => {
       ),
     ).toBe(true);
     expect(includesCorrelation({ traceId: 'trace-1' }, 'missing')).toBe(false);
+  });
+});
+
+describe('buildGuestGameComparisonTimeline', () => {
+  it('orders rule lifecycle, Langame facts and both evaluations by time', () => {
+    const timeline = buildGuestGameComparisonTimeline({
+      ruleCreatedAt: new Date('2026-07-10T09:00:00.000Z'),
+      ruleActivatedAt: new Date('2026-07-10T10:00:00.000Z'),
+      current: {
+        happenedAt: '2026-07-10T10:15:00.000Z',
+        status: 'BLOCKED',
+        source: 'RULE_DECISION',
+      },
+      ledger: {
+        happenedAt: '2026-07-10T10:20:00.000Z',
+        status: 'MATCHED',
+        source: 'DYNAMIC_FALLBACK',
+      },
+      facts: [
+        {
+          id: 'fact-1',
+          factType: 'HOURLY_SESSION_STARTED',
+          happenedAt: new Date('2026-07-10T09:30:00.000Z'),
+          confidence: 'INFERRED',
+        },
+      ],
+    });
+
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'RULE_CREATED',
+      'LANGAME_FACT',
+      'RULE_ACTIVATED',
+      'LIVE_EVALUATION',
+      'LEDGER_EVALUATION',
+    ]);
+    expect(timeline.at(-1)).toMatchObject({
+      status: 'MATCHED',
+      source: 'DYNAMIC_FALLBACK',
+    });
+  });
+
+  it('does not duplicate creation when a rule was activated immediately', () => {
+    const activatedAt = new Date('2026-07-10T10:00:00.000Z');
+    const timeline = buildGuestGameComparisonTimeline({
+      ruleCreatedAt: activatedAt,
+      ruleActivatedAt: activatedAt,
+      current: {
+        happenedAt: null,
+        status: 'NOT_EVALUATED',
+        source: 'NONE',
+      },
+      ledger: {
+        happenedAt: '2026-07-10T10:20:00.000Z',
+        status: 'BLOCKED',
+        source: 'DYNAMIC_FALLBACK',
+      },
+      facts: [],
+    });
+
+    expect(timeline.map((item) => item.kind)).toEqual([
+      'RULE_ACTIVATED',
+      'LEDGER_EVALUATION',
+    ]);
   });
 });
 

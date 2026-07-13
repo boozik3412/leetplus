@@ -1873,8 +1873,8 @@ export function GuestGamificationPanel({
         seasonType: "CLUB_SEASON",
         audienceId: nullable(seasonForm.audienceId),
         storeIds: seasonForm.storeIds,
-        periodFrom: nullable(seasonForm.periodFrom),
-        periodTo: nullable(seasonForm.periodTo),
+        periodFrom: dateInputIsoValue(seasonForm.periodFrom),
+        periodTo: dateInputIsoValue(seasonForm.periodTo),
         xpRules: buildSeasonXpRules(seasonForm),
         levels: buildSeasonLevels(seasonForm),
         freeRewards: buildSeasonRewards(seasonForm, "free"),
@@ -16273,6 +16273,18 @@ function dateInputValue(value: string | null) {
   const local = new Date(date.getTime() - offset * 60_000);
 
   return local.toISOString().slice(0, 16);
+}
+
+function dateInputIsoValue(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function formatMoney(value: number) {

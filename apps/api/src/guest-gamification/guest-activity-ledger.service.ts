@@ -4,6 +4,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
 import { parseLangameDate } from '../integrations/langame-date';
+import {
+  buildLangameTariffTypeGroupIndex,
+  resolveLangameSessionTariff,
+  type LangameTariffTypeGroupIndex,
+} from '../integrations/langame-session-tariff';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestLog,
@@ -23,7 +28,7 @@ const SYNC_JOB_MAX_ATTEMPTS = 5;
 const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
 const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
 const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
-const GUEST_ACTIVITY_PARSER_VERSION = 'guest-activity-v2';
+const GUEST_ACTIVITY_PARSER_VERSION = 'guest-activity-v3';
 
 const SOURCE_GUEST_LOG = 'LANGAME_GUEST_LOG';
 const SOURCE_GUEST_SESSION = 'LANGAME_GUEST_SESSION';
@@ -107,6 +112,7 @@ type LedgerSyncContext = {
   externalGuestId: string;
   externalDomain: string;
   timeZone: string;
+  tariffTypeGroups: LangameTariffTypeGroupIndex;
 };
 
 type RawRecordDraft = {
@@ -874,6 +880,19 @@ export class GuestActivityLedgerService {
         timeZone: true,
       },
     });
+    let tariffTypeGroups: LangameTariffTypeGroupIndex = new Map();
+
+    try {
+      tariffTypeGroups = buildLangameTariffTypeGroupIndex(
+        await this.langameClient.listTariffTypeGroups(source.baseUrl, apiKey),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Langame tariff type groups are unavailable for ${source.domain}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
 
     return {
       tenantId: input.tenantId,
@@ -894,6 +913,7 @@ export class GuestActivityLedgerService {
       externalGuestId,
       externalDomain: source.domain,
       timeZone: store?.timeZone ?? 'Asia/Yekaterinburg',
+      tariffTypeGroups,
     };
   }
 
@@ -1923,7 +1943,13 @@ export class GuestActivityLedgerService {
     raw: RawRecordDraft,
     normalizationRunId: string,
   ) {
-    const facts = this.normalizeFacts(sourceKind, row, raw, context.timeZone);
+    const facts = this.normalizeFacts(
+      sourceKind,
+      row,
+      raw,
+      context.timeZone,
+      context.tariffTypeGroups,
+    );
     let factsCreated = 0;
 
     for (const fact of facts) {
@@ -2033,9 +2059,15 @@ export class GuestActivityLedgerService {
     row: Record<string, unknown>,
     raw: RawRecordDraft,
     timeZone: string,
+    tariffTypeGroups: LangameTariffTypeGroupIndex,
   ): FactDraft[] {
     if (sourceKind === SOURCE_GUEST_SESSION) {
-      return this.normalizeSessionFacts(row, raw, timeZone);
+      return this.normalizeSessionFacts(
+        row,
+        raw,
+        timeZone,
+        tariffTypeGroups,
+      );
     }
 
     if (sourceKind === SOURCE_PRODUCT_EXPENSE) {
@@ -2182,12 +2214,16 @@ export class GuestActivityLedgerService {
     row: Record<string, unknown>,
     raw: RawRecordDraft,
     timeZone: string,
+    tariffTypeGroups: LangameTariffTypeGroupIndex,
   ): FactDraft[] {
     const facts: FactDraft[] = [];
     const startedAt = parseLangameDate(firstString(row.date_start), timeZone);
     const stoppedAt = parseLangameDate(firstString(row.date_stop), timeZone);
     const sessionExternalId = firstString(row.id, row.UUID);
-    const packetFlag = parseLangameFlag(row.packet);
+    const tariff = resolveLangameSessionTariff(
+      row.packet,
+      tariffTypeGroups,
+    );
     const playedMinutes = playedDurationMinutes(startedAt, stoppedAt);
 
     if (startedAt) {
@@ -2206,7 +2242,7 @@ export class GuestActivityLedgerService {
         confidence: 'EXACT',
         evidence: { sourceKind: SOURCE_GUEST_SESSION },
       });
-      if (packetFlag === true) {
+      if (tariff.kind === 'package_or_subscription') {
         facts.push({
           factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
           happenedAt: startedAt,
@@ -2223,9 +2259,12 @@ export class GuestActivityLedgerService {
           evidence: sanitizeGuestActivityEvidencePayload({
             sourceKind: SOURCE_GUEST_SESSION,
             packet: row.packet,
+            tariffGroupId: tariff.tariffGroupId,
+            tariffType: tariff.tariffType,
+            tariffName: tariff.tariffName,
           }),
         });
-      } else if (packetFlag === false) {
+      } else if (tariff.kind === 'hourly') {
         facts.push({
           factType: 'HOURLY_SESSION_STARTED',
           happenedAt: startedAt,
@@ -2242,6 +2281,9 @@ export class GuestActivityLedgerService {
           evidence: sanitizeGuestActivityEvidencePayload({
             sourceKind: SOURCE_GUEST_SESSION,
             packet: row.packet,
+            tariffGroupId: tariff.tariffGroupId,
+            tariffType: tariff.tariffType,
+            tariffName: tariff.tariffName,
           }),
         });
       }
@@ -2265,11 +2307,15 @@ export class GuestActivityLedgerService {
       });
     }
 
-    if (playedMinutes !== null && packetFlag !== null) {
-      const playTimeFactType: GuestActivityFactType = packetFlag
+    if (playedMinutes !== null && tariff.kind !== 'unknown') {
+      const packageOrSubscription =
+        tariff.kind === 'package_or_subscription';
+      const playTimeFactType: GuestActivityFactType = packageOrSubscription
         ? 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
         : 'HOURLY_PLAY_TIME_ACCUMULATED';
-      const tariffType = packetFlag ? 'package_or_subscription' : 'hourly';
+      const tariffType = packageOrSubscription
+        ? 'package_or_subscription'
+        : 'hourly';
 
       facts.push({
         factType: playTimeFactType,
@@ -2289,6 +2335,9 @@ export class GuestActivityLedgerService {
           startedAt: startedAt?.toISOString() ?? null,
           stoppedAt: stoppedAt?.toISOString() ?? null,
           packet: row.packet,
+          tariffGroupId: tariff.tariffGroupId,
+          tariffTypeGroup: tariff.tariffType,
+          tariffName: tariff.tariffName,
           calculation: 'date_stop - date_start',
         }),
       });

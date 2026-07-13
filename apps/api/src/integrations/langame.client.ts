@@ -14,6 +14,7 @@ import type {
   LangamePcTypeLink,
   LangameProduct,
   LangameProductExpense,
+  LangameTariffTypeGroup,
   LangameTransaction,
   LangameUser,
   LangameWorkingShift,
@@ -92,6 +93,14 @@ export class LangameClient {
 
   async listGuestGroups(baseUrl: string, apiKey: string) {
     return this.getList<LangameGuestGroup>(baseUrl, '/guests/groups', apiKey);
+  }
+
+  async listTariffTypeGroups(baseUrl: string, apiKey: string) {
+    return this.getList<LangameTariffTypeGroup>(
+      baseUrl,
+      '/tariffs/types_groups/list',
+      apiKey,
+    );
   }
 
   async listGuestBalances(

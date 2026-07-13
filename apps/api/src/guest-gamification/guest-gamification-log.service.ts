@@ -883,6 +883,7 @@ export class GuestGamificationLogService {
       limit: number;
     },
   ) {
+    const comparisonCalculatedAt = new Date();
     const dateWhere = dateRangeWhere(options.from, options.to);
     const [
       lootBoxes,
@@ -1086,6 +1087,22 @@ export class GuestGamificationLogService {
       const shadowSourceFact = pairedShadowDecision?.sourceFactId
         ? facts.find((fact) => fact.id === pairedShadowDecision.sourceFactId)
         : null;
+      const currentLatestAt =
+        latestDecision?.evaluatedAt.toISOString() ??
+        legacyDecision?.happenedAt ??
+        ruleRewards[0]?.qualifiedAt.toISOString() ??
+        latestAudit?.happenedAt.toISOString() ??
+        null;
+      const ledgerDecision =
+        pairedShadowDecision ?? latestShadowDecision ?? null;
+      const ledgerEvaluatedAt =
+        ledgerDecision?.evaluatedAt.toISOString() ??
+        comparisonCalculatedAt.toISOString();
+      const ledgerSource = pairedShadowDecision
+        ? 'PAIRED_SHADOW_DECISION'
+        : latestShadowDecision
+          ? 'UNPAIRED_SHADOW_DECISION'
+          : 'DYNAMIC_FALLBACK';
 
       return {
         ruleType: rule.type,
@@ -1105,12 +1122,7 @@ export class GuestGamificationLogService {
             liveDecisions.length || legacyDecision
               ? liveDecisions.length + (legacyDecision ? 1 : 0)
               : ruleRewards.length + ruleAudits.length,
-          latestAt:
-            latestDecision?.evaluatedAt.toISOString() ??
-            legacyDecision?.happenedAt ??
-            ruleRewards[0]?.qualifiedAt.toISOString() ??
-            latestAudit?.happenedAt.toISOString() ??
-            null,
+          latestAt: currentLatestAt,
           evaluationRunId: latestDecision?.evaluationRunId ?? null,
           evaluatorVersion: latestDecision?.evaluatorVersion ?? null,
           traceId: latestDecision?.traceId ?? latestAudit?.traceId ?? null,
@@ -1137,12 +1149,8 @@ export class GuestGamificationLogService {
             pairedShadowDecision?.evaluatorVersion ??
             latestShadowDecision?.evaluatorVersion ??
             null,
-          evaluatedAt: pairedShadowDecision?.evaluatedAt.toISOString() ?? null,
-          source: pairedShadowDecision
-            ? 'PAIRED_SHADOW_DECISION'
-            : latestShadowDecision
-              ? 'UNPAIRED_SHADOW_DECISION'
-              : 'DYNAMIC_FALLBACK',
+          evaluatedAt: ledgerEvaluatedAt,
+          source: ledgerSource,
           sourceFreshness,
           sourceFactKind: pairedShadowDecision?.sourceFactKind ?? null,
           sourceConfidence: shadowSourceFact?.confidence ?? null,
@@ -1161,6 +1169,29 @@ export class GuestGamificationLogService {
         },
         verdict: comparison.verdict,
         differingConditions: comparison.differingConditions,
+        timeline: buildGuestGameComparisonTimeline({
+          ruleCreatedAt: rule.createdAt,
+          ruleActivatedAt: rule.activatedAt,
+          current: {
+            happenedAt: currentLatestAt,
+            status: currentStatus,
+            source: latestDecision
+              ? 'RULE_DECISION'
+              : legacyDecision
+                ? 'LEGACY_AUDIT'
+                : ruleRewards.length
+                  ? 'REWARD_EVIDENCE'
+                  : latestAudit
+                    ? 'AUDIT_EVENT'
+                    : 'NONE',
+          },
+          ledger: {
+            happenedAt: ledgerEvaluatedAt,
+            status: ledgerStatus,
+            source: ledgerSource,
+          },
+          facts: matchingFacts,
+        }),
         paired:
           Boolean(latestDecision) &&
           Boolean(pairedShadowDecision) &&
@@ -1174,6 +1205,115 @@ export class GuestGamificationLogService {
       ? rows.filter((row) => includesCorrelation(row, correlation))
       : rows;
   }
+}
+
+export type GuestGameComparisonTimelineItem = {
+  id: string;
+  kind:
+    | 'RULE_CREATED'
+    | 'RULE_ACTIVATED'
+    | 'LANGAME_FACT'
+    | 'LIVE_EVALUATION'
+    | 'LEDGER_EVALUATION';
+  happenedAt: string;
+  status: string | null;
+  source: string;
+  factType: string | null;
+  confidence: string | null;
+};
+
+export function buildGuestGameComparisonTimeline(input: {
+  ruleCreatedAt: Date;
+  ruleActivatedAt: Date;
+  current: {
+    happenedAt: string | null;
+    status: string;
+    source: string;
+  };
+  ledger: {
+    happenedAt: string;
+    status: string;
+    source: string;
+  };
+  facts: Array<{
+    id: string;
+    factType: string;
+    happenedAt: Date | null;
+    confidence: string | null;
+  }>;
+}): GuestGameComparisonTimelineItem[] {
+  const rows: GuestGameComparisonTimelineItem[] = [];
+  const createdAt = input.ruleCreatedAt.toISOString();
+  const activatedAt = input.ruleActivatedAt.toISOString();
+
+  if (createdAt !== activatedAt) {
+    rows.push({
+      id: `rule-created:${createdAt}`,
+      kind: 'RULE_CREATED',
+      happenedAt: createdAt,
+      status: null,
+      source: 'RULE',
+      factType: null,
+      confidence: null,
+    });
+  }
+
+  rows.push({
+    id: `rule-activated:${activatedAt}`,
+    kind: 'RULE_ACTIVATED',
+    happenedAt: activatedAt,
+    status: 'ACTIVE',
+    source: 'RULE',
+    factType: null,
+    confidence: null,
+  });
+
+  for (const fact of input.facts
+    .filter((item) => item.happenedAt)
+    .sort(
+      (left, right) =>
+        (left.happenedAt?.getTime() ?? 0) -
+        (right.happenedAt?.getTime() ?? 0),
+    )
+    .slice(-8)) {
+    rows.push({
+      id: `fact:${fact.id}`,
+      kind: 'LANGAME_FACT',
+      happenedAt: fact.happenedAt!.toISOString(),
+      status: null,
+      source: 'LANGAME_LEDGER',
+      factType: fact.factType,
+      confidence: fact.confidence,
+    });
+  }
+
+  if (input.current.happenedAt) {
+    rows.push({
+      id: `live:${input.current.happenedAt}:${input.current.source}`,
+      kind: 'LIVE_EVALUATION',
+      happenedAt: input.current.happenedAt,
+      status: input.current.status,
+      source: input.current.source,
+      factType: null,
+      confidence: null,
+    });
+  }
+
+  rows.push({
+    id: `ledger:${input.ledger.happenedAt}:${input.ledger.source}`,
+    kind: 'LEDGER_EVALUATION',
+    happenedAt: input.ledger.happenedAt,
+    status: input.ledger.status,
+    source: input.ledger.source,
+    factType: null,
+    confidence: null,
+  });
+
+  return rows.sort(
+    (left, right) =>
+      new Date(left.happenedAt).getTime() -
+      new Date(right.happenedAt).getTime(),
+  );
 }
 
 type TimelineOptions = {

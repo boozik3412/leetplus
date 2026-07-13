@@ -149,6 +149,20 @@ type ComparisonRow = {
   verdict: string;
   paired: boolean;
   differingConditions: string[];
+  timeline: Array<{
+    id: string;
+    kind:
+      | "RULE_CREATED"
+      | "RULE_ACTIVATED"
+      | "LANGAME_FACT"
+      | "LIVE_EVALUATION"
+      | "LEDGER_EVALUATION";
+    happenedAt: string;
+    status: string | null;
+    source: string;
+    factType: string | null;
+    confidence: string | null;
+  }>;
 };
 
 type ComparisonSummary = {
@@ -1394,6 +1408,7 @@ function ComparisonList({
               </p>
             </div>
           </div>
+          <ComparisonTimeline items={row.timeline} />
           {row.differingConditions.length ? (
             <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
               Отличающиеся условия: {row.differingConditions.join("; ")}
@@ -1403,6 +1418,108 @@ function ComparisonList({
       ))}
     </div>
   );
+}
+
+function ComparisonTimeline({ items }: { items: ComparisonRow["timeline"] }) {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <section className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase text-zinc-500">
+          Временной таймлайн
+        </p>
+        <p className="text-xs text-zinc-500">
+          Сначала ранние события · локальное время интерфейса
+        </p>
+      </div>
+      <ol className="mt-3 space-y-0">
+        {items.map((item, index) => (
+          <li
+            className="relative grid grid-cols-[20px_minmax(0,1fr)] gap-3 pb-4 last:pb-0"
+            key={item.id}
+          >
+            <div className="relative flex justify-center">
+              {index < items.length - 1 ? (
+                <span className="absolute bottom-[-4px] top-3 w-px bg-zinc-300 dark:bg-zinc-700" />
+              ) : null}
+              <span className="relative mt-1.5 size-2.5 rounded-full border-2 border-white bg-cyan-500 ring-1 ring-cyan-500 dark:border-zinc-900" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <time className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+                  {formatComparisonTimelineDate(item.happenedAt)}
+                </time>
+                <span className="text-sm font-semibold">
+                  {comparisonTimelineLabel(item)}
+                </span>
+                {item.status ? (
+                  <span
+                    className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${statusClass(item.status)}`}
+                  >
+                    {item.status}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                {comparisonTimelineDescription(item)}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function formatComparisonTimelineDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function comparisonTimelineLabel(item: ComparisonRow["timeline"][number]) {
+  if (item.kind === "RULE_CREATED") {
+    return "Правило создано";
+  }
+  if (item.kind === "RULE_ACTIVATED") {
+    return "Правило активировано";
+  }
+  if (item.kind === "LANGAME_FACT") {
+    return `Событие Langame: ${item.factType ?? "неизвестный факт"}`;
+  }
+  if (item.kind === "LIVE_EVALUATION") {
+    return "Боевая проверка";
+  }
+  return item.source === "DYNAMIC_FALLBACK"
+    ? "Расчет Игрового журнала при просмотре"
+    : "Сохраненная проверка Игрового журнала";
+}
+
+function comparisonTimelineDescription(
+  item: ComparisonRow["timeline"][number],
+) {
+  const details = [`источник: ${item.source}`];
+  if (item.confidence) {
+    details.push(`уверенность: ${item.confidence}`);
+  }
+  if (item.kind === "LEDGER_EVALUATION" && item.source === "DYNAMIC_FALLBACK") {
+    details.push("это время расчета, а не действие гостя");
+  }
+  return details.join(" · ");
 }
 
 function ComparisonMetric({ label, value }: { label: string; value: string }) {

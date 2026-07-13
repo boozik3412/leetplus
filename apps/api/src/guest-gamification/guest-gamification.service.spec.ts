@@ -193,6 +193,9 @@ function createService(
   const langameClient = {
     postEndpoint: jest.fn(),
     listGuestSessions: jest.fn(),
+    listTariffTypeGroups: jest
+      .fn()
+      .mockResolvedValue([{ id: 1, type: 'packet' }]),
     searchGuests: jest.fn(),
     listTransactions: jest.fn().mockResolvedValue([]),
     listGuestLogs: jest.fn().mockResolvedValue([]),
@@ -360,6 +363,35 @@ function visualEditorStore(overrides: Record<string, unknown> = {}) {
     gamificationEnabled: true,
     externalDomain: 'club-1',
     externalClubId: 'club-1',
+    ...overrides,
+  };
+}
+
+function seasonRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'season-1',
+    tenantId: user.tenantId,
+    audienceId: null,
+    createdByUserId: user.id,
+    name: 'Club season',
+    status: 'ACTIVE',
+    seasonType: 'CLUB_SEASON',
+    periodFrom: null,
+    periodTo: null,
+    xpRules: {},
+    levels: [],
+    freeRewards: [],
+    premiumRewards: [],
+    premiumEnabled: false,
+    premiumUpgradeMode: null,
+    storeIds: ['store-1'],
+    budgetAmount: null,
+    manualApprovalRequired: true,
+    note: null,
+    createdAt: now,
+    updatedAt: now,
+    audience: null,
+    createdByUser: null,
     ...overrides,
   };
 }
@@ -3504,6 +3536,69 @@ describe('GuestGamificationService', () => {
     });
   });
 
+  describe('Battle Pass activation', () => {
+    it('detaches the previous active season only from overlapping clubs', async () => {
+      const { service, prisma } = createService();
+      const active = seasonRow({ id: 'season-new', storeIds: ['store-1'] });
+
+      prisma.guestGameSeason.create.mockResolvedValue(active);
+      prisma.store.findMany.mockResolvedValue([
+        visualEditorStore({ id: 'store-1' }),
+        visualEditorStore({ id: 'store-2', name: 'Second club' }),
+      ]);
+      prisma.guestGameSeason.findMany.mockResolvedValue([
+        {
+          id: 'season-global',
+          storeIds: [],
+          periodFrom: null,
+          periodTo: null,
+        },
+        {
+          id: 'season-other-club',
+          storeIds: ['store-2'],
+          periodFrom: null,
+          periodTo: null,
+        },
+      ]);
+      prisma.guestGameSeason.update.mockResolvedValue({});
+
+      await service.createSeason(user, {
+        name: 'New season',
+        status: 'ACTIVE',
+        storeIds: ['store-1'],
+      });
+
+      expect(prisma.guestGameSeason.update).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameSeason.update).toHaveBeenCalledWith({
+        where: { id: 'season-global' },
+        data: { storeIds: ['store-2'] },
+      });
+    });
+
+    it('keeps the current season when the replacement starts in the future', async () => {
+      const { service, prisma } = createService();
+      const future = new Date(Date.now() + 60 * 60 * 1000);
+
+      prisma.guestGameSeason.create.mockResolvedValue(
+        seasonRow({
+          id: 'season-future',
+          periodFrom: future,
+        }),
+      );
+
+      await service.createSeason(user, {
+        name: 'Future season',
+        status: 'ACTIVE',
+        storeIds: ['store-1'],
+        periodFrom: future.toISOString(),
+      });
+
+      expect(prisma.store.findMany).not.toHaveBeenCalled();
+      expect(prisma.guestGameSeason.findMany).not.toHaveBeenCalled();
+      expect(prisma.guestGameSeason.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('restartLootBox', () => {
     it('resets lootbox limits from now and closes unfinished rewards', async () => {
       const { service, prisma } = createService();
@@ -5025,6 +5120,80 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('keeps tariff group 1 basic hourly even when the guest has remaining hours', async () => {
+      const { service, langameSettingsService, langameClient } =
+        createService();
+
+      jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
+        id: 'guest-1',
+        externalDomain: 'club-1',
+        externalGuestId: 'lg-guest-1',
+        currentCountHours: 600,
+      });
+      jest
+        .spyOn(service as any, 'hasActiveSessionStartRules')
+        .mockResolvedValue(true);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337-Pushkinskaya',
+        externalDomain: 'club-1',
+        externalClubId: 'club-external-1',
+        integrationSourceId: 'source-1',
+        timeZone: 'Europe/Samara',
+      });
+      langameSettingsService.resolveTenantAccess.mockResolvedValue({
+        apiKey: 'api-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: 'club-1',
+            baseUrl: 'https://langame.example',
+          },
+        ],
+      });
+      langameClient.listTariffTypeGroups.mockResolvedValue([
+        { id: 1, type: 'basic', name: 'Hourly' },
+      ]);
+      langameClient.listGuestSessions.mockResolvedValue([
+        {
+          id: 'session-532296',
+          guest_id: 'lg-guest-1',
+          list_clubs_id: 'club-external-1',
+          date_start: '2026-07-13 14:23:00',
+          date_stop: null,
+          packet: 1,
+        },
+      ]);
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue({
+          processed: true,
+          summary: {
+            idempotencyKey:
+              'guest-game:GUEST_SESSION:SESSION_START:session-532296',
+          },
+        } as GuestGameProcessEventResult);
+
+      await service.processLiveSessionStart(user, {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+      });
+
+      expect(langameClient.searchGuests).not.toHaveBeenCalled();
+      expect(langameClient.listTransactions).not.toHaveBeenCalled();
+      expect(langameClient.listGuestLogs).not.toHaveBeenCalled();
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          sessionType: 'regular_session',
+          sessionPacket: false,
+          sourceFactId: 'session-532296',
+        }),
+      );
+    });
+
     it('uses the explicit Langame packet flag even when the remaining package balance is zero', async () => {
       const { service, langameSettingsService, langameClient } =
         createService();
@@ -5099,7 +5268,7 @@ describe('GuestGamificationService', () => {
         storeId: 'store-1',
       });
 
-      expect(langameClient.searchGuests).toHaveBeenCalled();
+      expect(langameClient.searchGuests).not.toHaveBeenCalled();
       expect(langameClient.listTransactions).not.toHaveBeenCalled();
       expect(langameClient.listGuestLogs).not.toHaveBeenCalled();
       expect(processEventSpy).toHaveBeenCalledWith(
@@ -5554,7 +5723,7 @@ describe('GuestGamificationService', () => {
         expect.objectContaining({
           eventType: 'SESSION_START',
           sessionType: 'regular_session',
-          sessionPacket: null,
+          sessionPacket: false,
           sourceFactId: 'session-hourly',
         }),
       );
@@ -5930,7 +6099,7 @@ describe('GuestGamificationService', () => {
       expect(shadowDecision).toMatchObject({
         evaluationRunId: liveDecision.evaluationRunId,
         evaluationMode: 'SHADOW',
-        evaluatorVersion: 'ledger-v1',
+        evaluatorVersion: 'ledger-v2',
         status: 'MATCHED',
         traceId: 'trace-1',
       });

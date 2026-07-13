@@ -19,6 +19,11 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
 import { parseLangameDate } from '../integrations/langame-date';
+import {
+  buildLangameTariffTypeGroupIndex,
+  resolveLangameSessionTariff,
+  type LangameTariffTypeGroupIndex,
+} from '../integrations/langame-session-tariff';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestLog,
@@ -98,6 +103,7 @@ const deliveryStatuses = [
 ] as const;
 const staffTestRewardAccrualEnabledEnv =
   'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED';
+const LANGAME_TARIFF_TYPE_GROUP_CACHE_MS = 10 * 60 * 1000;
 const liveSessionStartCacheDefaultTtlMs = 30_000;
 const liveSessionStartLookupDefaultTimeoutMs = 4_000;
 const liveSessionStartCacheMaxEntries = 1_000;
@@ -2517,6 +2523,11 @@ type CheckInLiveSession = {
   durationMinutes: number | null;
   sessionType: string;
   sessionPacket: boolean | null;
+  sessionBillingResolvedBy:
+    | 'tariff_type_group'
+    | 'session_marker'
+    | 'session_text'
+    | 'unknown';
   store: { id: string; name: string; timeZone?: string | null } | null;
   raw: LangameGuestSession;
 };
@@ -3403,6 +3414,10 @@ export class GuestGamificationService {
     string,
     Promise<GuestGameProcessEventResult | null>
   >();
+  private readonly tariffTypeGroupCache = new Map<
+    string,
+    { expiresAt: number; index: LangameTariffTypeGroupIndex }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -3474,6 +3489,7 @@ export class GuestGamificationService {
       durationMinutes: session.durationMinutes,
       sessionType: session.sessionType,
       sessionPacket: session.sessionPacket,
+      sessionBillingResolvedBy: session.sessionBillingResolvedBy,
       store: session.store
         ? {
             id: session.store.id,
@@ -6389,8 +6405,11 @@ export class GuestGamificationService {
       data,
       include: seasonInclude,
     });
+    const season = mapSeason(row);
 
-    return mapSeason(row);
+    await this.reconcileActiveSeasonStores(user, season);
+
+    return season;
   }
 
   async updateSeason(
@@ -6405,8 +6424,67 @@ export class GuestGamificationService {
       data,
       include: seasonInclude,
     });
+    const season = mapSeason(row);
 
-    return mapSeason(row);
+    await this.reconcileActiveSeasonStores(user, season);
+
+    return season;
+  }
+
+  private async reconcileActiveSeasonStores(
+    user: AuthenticatedUser,
+    activeSeason: GuestGameSeason,
+  ) {
+    if (
+      activeSeason.status !== 'ACTIVE' ||
+      !isoPeriodIsActive(activeSeason.periodFrom, activeSeason.periodTo)
+    ) {
+      return;
+    }
+
+    const [stores, competingSeasons] = await Promise.all([
+      this.getPilotStores(user),
+      this.prisma.guestGameSeason.findMany({
+        where: {
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+          id: { not: activeSeason.id },
+        },
+        select: {
+          id: true,
+          storeIds: true,
+          periodFrom: true,
+          periodTo: true,
+        },
+      }),
+    ]);
+    const allStoreIds = stores.map((store) => store.id);
+    const targetStoreIds = activeSeason.storeIds.length
+      ? activeSeason.storeIds
+      : allStoreIds;
+
+    await Promise.all(
+      (competingSeasons ?? [])
+        .filter(
+          (season) =>
+            databasePeriodIsActive(season.periodFrom, season.periodTo) &&
+            ruleStoreSetsOverlap(
+              stringArray(season.storeIds),
+              targetStoreIds,
+              allStoreIds,
+            ),
+        )
+        .map((season) =>
+          this.prisma.guestGameSeason.update({
+            where: { id: season.id },
+            data: visualStoreDetachManyData(
+              stringArray(season.storeIds),
+              targetStoreIds,
+              allStoreIds,
+            ),
+          }),
+        ),
+    );
   }
 
   async deleteSeason(
@@ -12194,6 +12272,20 @@ export class GuestGamificationService {
       timeoutMs?: number;
     },
   ): Promise<CheckInLiveSession> {
+    // The tariff type-group dictionary is the strongest source Langame gives
+    // us. In particular, packet=1 is the `basic` hourly group on current
+    // installations and must not be promoted to a package by stale balances
+    // or historical guest-log entries.
+    if (session.sessionBillingResolvedBy === 'tariff_type_group') {
+      this.logGuestGameDebug('live-session-type-detected', {
+        source: 'tariff_type_group',
+        apiSource: this.guestGameDebugSource(params.source),
+        externalGuestId: params.externalGuestId,
+        session: this.guestGameDebugSession(session),
+      });
+      return session;
+    }
+
     const currentCountHours = await this.findLiveGuestCurrentCountHours(params);
     const sessionWithLiveBalance =
       this.resolveCheckInSessionTypeFromGuestBalance(session, {
@@ -12847,6 +12939,10 @@ export class GuestGamificationService {
     const pageLimit = 200;
     const maxPages = 5;
     const candidates: CheckInLiveSession[] = [];
+    const tariffTypeGroups = await this.resolveLangameTariffTypeGroups(
+      params.source.baseUrl,
+      params.apiKey,
+    );
 
     for (let page = 1; page <= maxPages; page += 1) {
       const rows = await this.langameClient.listGuestSessions(
@@ -12898,6 +12994,7 @@ export class GuestGamificationService {
             params.source.domain,
             row,
             store?.timeZone ?? null,
+            tariffTypeGroups,
           );
 
           if (session.externalSessionId) {
@@ -12932,16 +13029,31 @@ export class GuestGamificationService {
     externalDomain: string,
     row: LangameGuestSession,
     timeZone?: string | null,
+    tariffTypeGroups: LangameTariffTypeGroupIndex = new Map(),
   ): CheckInLiveSession {
     const startedAt = this.parseCheckInLangameDate(
       this.checkInScalar(row.date_start),
       timeZone,
     );
-    const explicitPacket = nullableBooleanValue(row.packet);
+    const tariff = resolveLangameSessionTariff(row.packet, tariffTypeGroups);
+    const billingKind =
+      tariff.kind === 'unknown' && this.checkInSessionLooksLikePacketHours(row)
+        ? 'package_or_subscription'
+        : tariff.kind;
+    const sessionBillingResolvedBy =
+      tariff.kind !== 'unknown' && tariff.tariffType
+        ? 'tariff_type_group'
+        : tariff.kind !== 'unknown'
+          ? 'session_marker'
+          : billingKind === 'package_or_subscription'
+            ? 'session_text'
+            : 'unknown';
     const packet =
-      explicitPacket === true || this.checkInSessionLooksLikePacketHours(row)
+      billingKind === 'package_or_subscription'
         ? true
-        : null;
+        : billingKind === 'hourly'
+          ? false
+          : null;
 
     return {
       externalDomain,
@@ -12951,11 +13063,52 @@ export class GuestGamificationService {
       externalUuid: this.checkInScalar(row.UUID),
       startedAt,
       durationMinutes: this.checkInDurationMinutes(startedAt),
-      sessionType: packet ? 'packet_hours' : 'regular_session',
+      sessionType:
+        billingKind === 'package_or_subscription'
+          ? 'packet_hours'
+          : billingKind === 'hourly'
+            ? 'regular_session'
+            : 'unknown_session',
       sessionPacket: packet,
+      sessionBillingResolvedBy,
       store: null,
       raw: row,
     };
+  }
+
+  private async resolveLangameTariffTypeGroups(
+    baseUrl: string,
+    apiKey: string,
+  ): Promise<LangameTariffTypeGroupIndex> {
+    const key = baseUrl.trim().toLowerCase();
+    const cached = this.tariffTypeGroupCache.get(key);
+
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.index;
+    }
+
+    try {
+      const rows = await this.langameClient.listTariffTypeGroups(
+        baseUrl,
+        apiKey,
+      );
+      const index = buildLangameTariffTypeGroupIndex(rows);
+      this.tariffTypeGroupCache.set(key, {
+        index,
+        expiresAt: Date.now() + LANGAME_TARIFF_TYPE_GROUP_CACHE_MS,
+      });
+      return index;
+    } catch (error) {
+      this.logger.warn(
+        `[guest-game-debug:tariff-type-groups-unavailable] ${guestGamificationDebugJson(
+          {
+            source: this.guestGameDebugSource({ baseUrl }),
+            error: error instanceof Error ? error.message : String(error),
+          },
+        )}`,
+      );
+      return new Map();
+    }
   }
 
   private checkInSessionMatchesExpectedStore(
@@ -13093,6 +13246,7 @@ export class GuestGamificationService {
       durationMinutes: row.durationMinutes,
       sessionType: sessionPacket ? 'packet_hours' : 'regular_session',
       sessionPacket,
+      sessionBillingResolvedBy: 'unknown',
       store,
       raw: { ...rawSession, packet: sessionPacket },
     };
@@ -13103,6 +13257,7 @@ export class GuestGamificationService {
     guest: { currentCountHours?: Prisma.Decimal | number | string | null },
   ): CheckInLiveSession {
     if (
+      session.sessionBillingResolvedBy === 'tariff_type_group' ||
       session.sessionPacket === true ||
       !this.guestHasCurrentPacketHours(guest)
     ) {
@@ -13119,6 +13274,10 @@ export class GuestGamificationService {
       ...session,
       sessionType: 'packet_hours',
       sessionPacket: true,
+      sessionBillingResolvedBy:
+        session.sessionBillingResolvedBy === 'unknown'
+          ? 'session_text'
+          : session.sessionBillingResolvedBy,
       raw: {
         ...session.raw,
         packet: true,
@@ -21436,6 +21595,53 @@ function visualStoreDetachData(
   }
 
   return { storeIds: [], status: 'PAUSED' };
+}
+
+function visualStoreDetachManyData(
+  currentStoreIds: string[],
+  removedStoreIds: string[],
+  allStoreIds: string[],
+): { storeIds: string[]; status?: StatusValue } {
+  const removed = new Set(removedStoreIds);
+  const expandedStoreIds = currentStoreIds.length
+    ? currentStoreIds
+    : allStoreIds;
+  const nextStoreIds = expandedStoreIds.filter((id) => !removed.has(id));
+
+  if (nextStoreIds.length) {
+    return { storeIds: uniqueStrings(nextStoreIds) };
+  }
+
+  return { storeIds: [], status: 'PAUSED' };
+}
+
+function ruleStoreSetsOverlap(
+  currentStoreIds: string[],
+  targetStoreIds: string[],
+  allStoreIds: string[],
+) {
+  const current = new Set(
+    currentStoreIds.length ? currentStoreIds : allStoreIds,
+  );
+
+  return targetStoreIds.some((id) => current.has(id));
+}
+
+function isoPeriodIsActive(from: string | null, to: string | null) {
+  const now = Date.now();
+  const fromTime = from ? new Date(from).getTime() : null;
+  const toTime = to ? new Date(to).getTime() : null;
+
+  return (
+    (fromTime === null || fromTime <= now) &&
+    (toTime === null || toTime >= now)
+  );
+}
+
+function databasePeriodIsActive(from: Date | null, to: Date | null) {
+  const now = Date.now();
+
+  return (!from || from.getTime() <= now) && (!to || to.getTime() >= now);
 }
 
 function visualRecord(value: unknown): Record<string, unknown> {

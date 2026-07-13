@@ -17,6 +17,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
 import { parseLangameDate as parseLangameDateValue } from './langame-date';
+import {
+  buildLangameTariffTypeGroupIndex,
+  resolveLangameSessionTariff,
+  type LangameTariffTypeGroupIndex,
+} from './langame-session-tariff';
 import { LangameSettingsService } from './langame-settings.service';
 import type {
   LangameCashTransaction,
@@ -845,6 +850,13 @@ export class GuestDataFoundationService {
       pcTypeLinks,
       now,
     );
+    const tariffTypeGroups = buildLangameTariffTypeGroupIndex(
+      await this.captureEndpoint(
+        profile,
+        'tariffs/types_groups/list',
+        () => this.langameClient.listTariffTypeGroups(baseUrl, apiKey),
+      ),
+    );
 
     const groups = await this.captureEndpoint(profile, 'guests/groups', () =>
       this.langameClient.listGuestGroups(baseUrl, apiKey),
@@ -952,6 +964,7 @@ export class GuestDataFoundationService {
       guestsByExternalId,
       storesByExternalClubId,
       profile,
+      tariffTypeGroups,
     );
 
     const transactions = await this.captureEndpoint(
@@ -1790,6 +1803,7 @@ export class GuestDataFoundationService {
     guestsByExternalId: Map<string, GuestRef>,
     storesByExternalClubId: Map<string, StoreRef>,
     profile: SourceProfile,
+    tariffTypeGroups: LangameTariffTypeGroupIndex,
   ) {
     for (const row of rows) {
       const externalSessionId = this.toNullableString(row.id);
@@ -1811,6 +1825,16 @@ export class GuestDataFoundationService {
         this.toNullableString(row.date_stop),
         storeRef?.timeZone,
       );
+      const tariff = resolveLangameSessionTariff(
+        row.packet,
+        tariffTypeGroups,
+      );
+      const packet =
+        tariff.kind === 'package_or_subscription'
+          ? true
+          : tariff.kind === 'hourly'
+            ? false
+            : null;
 
       profile.sessions.total += 1;
       profile.sessions.withoutGuestId += externalGuestId ? 0 : 1;
@@ -1844,7 +1868,7 @@ export class GuestDataFoundationService {
           normalStop: this.toOptionalBoolean(row.normal_stop),
           expand: this.toOptionalBoolean(row.expand),
           createByRezerv: this.toOptionalBoolean(row.create_by_rezerv),
-          packet: this.toOptionalBoolean(row.packet),
+          packet,
           sourcePayloadHash: this.payloadHash(row),
         },
         update: {
@@ -1861,7 +1885,7 @@ export class GuestDataFoundationService {
           normalStop: this.toOptionalBoolean(row.normal_stop),
           expand: this.toOptionalBoolean(row.expand),
           createByRezerv: this.toOptionalBoolean(row.create_by_rezerv),
-          packet: this.toOptionalBoolean(row.packet),
+          packet,
           sourcePayloadHash: this.payloadHash(row),
         },
       });

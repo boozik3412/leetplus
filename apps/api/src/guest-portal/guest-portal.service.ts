@@ -4971,11 +4971,30 @@ export class GuestPortalService {
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
     };
-    const checkIn = await this.guestGamificationService.checkIn(actor, {
-      guestId: guest.id,
-      storeId: context.store.id,
-      note: stringField(dto.note) ?? 'Чекин гостя из публичного кабинета.',
-    });
+    let checkIn: Awaited<
+      ReturnType<GuestGamificationService['checkIn']>
+    >;
+
+    try {
+      checkIn = await this.guestGamificationService.checkIn(actor, {
+        guestId: guest.id,
+        storeId: context.store.id,
+        note: stringField(dto.note) ?? 'Чекин гостя из публичного кабинета.',
+      });
+    } catch (error) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: payload.profileId ?? null,
+        guestId: guest.id,
+        storeId: context.store.id,
+        entityType: 'CHECK_IN',
+        action: 'CHECK_IN',
+        status: 'BLOCKED',
+        reasonCode: 'check_in_rejected',
+        reasonText: safeCheckInError(error),
+      });
+      throw error;
+    }
 
     this.recordGameAuditEvent({
       tenantId: context.tenant.id,
@@ -6425,7 +6444,7 @@ export class GuestPortalService {
           input.telegramIdentityMasked,
           telegramBotCheckInFailedText(
             input.portal,
-            telegramBotSafeCheckInError(error),
+            safeCheckInError(error),
           ),
           undefined,
           {
@@ -8638,7 +8657,7 @@ export class GuestPortalService {
     const portalSeasons = seasons
       .filter((item) => matchesStore(item.storeIds, context.store.id))
       .filter((item) => activePeriod(item.periodFrom, item.periodTo))
-      .slice(0, 2)
+      .slice(0, 1)
       .map((item) => mapSeason(item, xp, rewards, lootBoxes));
     const portalPromoCards = promoCards
       .filter((item) => matchesStore(item.storeIds, context.store.id))
@@ -10817,7 +10836,7 @@ function telegramBotCheckInFailedText(
   ]);
 }
 
-function telegramBotSafeCheckInError(error: unknown) {
+function safeCheckInError(error: unknown) {
   if (error instanceof HttpException) {
     const response = error.getResponse();
 

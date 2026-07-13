@@ -469,6 +469,60 @@ export function GameSummaryClient() {
     };
   }, []);
 
+  useEffect(() => {
+    if (loadState !== "ready") {
+      return;
+    }
+
+    let isActive = true;
+    let refreshRunning = false;
+
+    async function refreshVisibleSummary() {
+      if (
+        !isActive ||
+        refreshRunning ||
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+
+      refreshRunning = true;
+
+      try {
+        const nextSummary = await loadGameSummary();
+
+        if (isActive) {
+          setSummary(nextSummary);
+        }
+      } catch {
+        // Keep the last usable screen; manual refresh still reports errors.
+      } finally {
+        refreshRunning = false;
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void refreshVisibleSummary();
+      }
+    }
+
+    const intervalId = window.setInterval(
+      () => void refreshVisibleSummary(),
+      120_000,
+    );
+
+    window.addEventListener("focus", refreshVisibleSummary);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshVisibleSummary);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [loadState]);
+
   if (loadState === "loading") {
     return <GameShell body={<LoadingView />} />;
   }

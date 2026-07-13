@@ -81,9 +81,18 @@ export type LangameGuestSession = {
   normal_stop?: number | boolean | null;
   expand?: number | boolean | null;
   create_by_rezerv?: number | boolean | null;
-  packet?: number | boolean | null;
+  packet?: number | string | boolean | null;
   club_id?: number | string | null;
   list_clubs_id?: number | string | null;
+} & Record<string, unknown>;
+
+export type LangameTariffTypeGroup = {
+  id: number | string;
+  type?: string | null;
+  name?: string | null;
+  comment?: string | null;
+  duration?: number | string | null;
+  subs_duration?: number | string | null;
 } & Record<string, unknown>;
 
 export type LangameGuestLog = {

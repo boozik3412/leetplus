@@ -64,6 +64,25 @@ describe('LangameClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('loads tariff type groups used by session billing classification', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        responseWithRows([{ id: 1, type: 'basic', name: 'Hourly' }]),
+      );
+    global.fetch = fetchMock as typeof fetch;
+
+    const rows = await client.listTariffTypeGroups(
+      'https://443.langame.ru/public_api',
+      'test-key',
+    );
+
+    expect(rows).toEqual([{ id: 1, type: 'basic', name: 'Hourly' }]);
+    expect(new URL(fetchMock.mock.calls[0][0]).pathname).toBe(
+      '/public_api/tariffs/types_groups/list',
+    );
+  });
+
   it('passes an abort signal when guest session requests are bounded by timeout', async () => {
     const fetchMock = jest
       .fn()

@@ -127,6 +127,9 @@ describe('GuestActivityLedgerService', () => {
   type MockLangameClient = {
     listGuestLogs: jest.MockedFunction<LangameClient['listGuestLogs']>;
     listGuestSessions: jest.MockedFunction<LangameClient['listGuestSessions']>;
+    listTariffTypeGroups: jest.MockedFunction<
+      LangameClient['listTariffTypeGroups']
+    >;
     listTransactions: jest.MockedFunction<LangameClient['listTransactions']>;
     listProductExpenses: jest.MockedFunction<
       LangameClient['listProductExpenses']
@@ -540,6 +543,12 @@ describe('GuestActivityLedgerService', () => {
       listGuestSessions: jest
         .fn<LangameClient['listGuestSessions']>()
         .mockResolvedValue([]),
+      listTariffTypeGroups: jest
+        .fn<LangameClient['listTariffTypeGroups']>()
+        .mockResolvedValue([
+          { id: 1, type: 'basic', name: 'Почасовой тариф' },
+          { id: 9, type: 'subscription', name: 'Абонемент' },
+        ]),
       listTransactions: jest
         .fn<LangameClient['listTransactions']>()
         .mockResolvedValue([]),
@@ -651,7 +660,7 @@ describe('GuestActivityLedgerService', () => {
         club_id: '15',
         date_start: '07.07.2026 10:00',
         date_stop: '07.07.2026 11:35',
-        packet: 0,
+        packet: 1,
       },
     ]);
 
@@ -691,7 +700,7 @@ describe('GuestActivityLedgerService', () => {
         club_id: '15',
         date_start: '07.07.2026 10:00',
         date_stop: '07.07.2026 12:00',
-        packet: 1,
+        packet: 9,
       },
     ]);
 
@@ -885,7 +894,7 @@ describe('GuestActivityLedgerService', () => {
     expect(createdFacts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          parserVersion: 'guest-activity-v2',
+          parserVersion: 'guest-activity-v3',
           lifecycleStatus: 'ACTIVE',
           normalizationRunId: expect.any(String),
         }),
@@ -907,7 +916,7 @@ describe('GuestActivityLedgerService', () => {
 
     expect(rebuilt).toEqual(
       expect.objectContaining({
-        parserVersion: 'guest-activity-v2',
+        parserVersion: 'guest-activity-v3',
         rawRecordsProcessed: rawRecords.size,
       }),
     );

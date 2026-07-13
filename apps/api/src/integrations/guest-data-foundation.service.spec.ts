@@ -229,6 +229,7 @@ describe('GuestDataFoundationService', () => {
     listGuestBalances: jest.fn(),
     listGuestBonusBalances: jest.fn(),
     listGuestSessions: jest.fn(),
+    listTariffTypeGroups: jest.fn(),
     listTransactions: jest.fn(),
     listGuestLogs: jest.fn(),
     listAllOperationsLog: jest.fn(),
@@ -248,6 +249,7 @@ describe('GuestDataFoundationService', () => {
   let service: GuestDataFoundationService;
 
   beforeEach(() => {
+    langameClient.listTariffTypeGroups.mockResolvedValue([]);
     jest.clearAllMocks();
 
     tenantContextService.resolve.mockResolvedValue({

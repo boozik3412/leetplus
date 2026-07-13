@@ -211,6 +211,7 @@ export function PlayRegistrationClient({
       initialDirectory.clubs,
       initialClubId,
       initialStoreId,
+      isGameAuth,
     ),
   );
   const [requestedVerificationChannel, setActiveVerificationChannel] =
@@ -321,7 +322,7 @@ export function PlayRegistrationClient({
 
   const selectedClub =
     directory.clubs.find((club) => club.id === selectedClubId) ??
-    directory.clubs[0] ??
+    (!isGameAuth ? directory.clubs[0] : null) ??
     null;
   const visibleVerification = useMemo(
     () => getVisibleVerificationPlan(directory.verification, surface),
@@ -746,7 +747,9 @@ export function PlayRegistrationClient({
       setSelectedClubId((currentId) =>
         data.clubs.some((club) => club.id === currentId)
           ? currentId
-          : (data.clubs[0]?.id ?? ""),
+          : isGameAuth && data.clubs.length !== 1
+            ? ""
+            : (data.clubs[0]?.id ?? ""),
       );
       setLocationMessage(
         data.search.radiusApplied
@@ -1780,7 +1783,7 @@ function ClubMap({
   ];
   const viewport = buildMapViewport(points);
   const selectedClub =
-    clubs.find((club) => club.id === selectedClubId) ?? clubs[0];
+    clubs.find((club) => club.id === selectedClubId) ?? null;
 
   return (
     <div className="rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/20">
@@ -2848,6 +2851,7 @@ function resolveInitialClubId(
   clubs: GuestPortalGamificationClub[],
   initialClubId: string | null,
   initialStoreId: string | null,
+  requireExplicitSelection = false,
 ) {
   const clubId = normalizedIdParam(initialClubId);
   const storeId = normalizedIdParam(initialStoreId);
@@ -2871,6 +2875,10 @@ function resolveInitialClubId(
     if (storeClub) {
       return storeClub.id;
     }
+  }
+
+  if (requireExplicitSelection && clubs.length !== 1) {
+    return "";
   }
 
   return clubs[0]?.id ?? "";

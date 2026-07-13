@@ -387,6 +387,30 @@ type BattlePassLevelCompletionDialog = {
   nextTitle: string | null;
   nextCondition: string | null;
 };
+type CheckInCompletionDialog = {
+  id: string;
+  rewardLabel: string | null;
+  receivedAt: string;
+};
+type CompletionDialogQueueItem =
+  | {
+      key: string;
+      kind: "CHECK_IN";
+      occurredAt: string;
+      completion: CheckInCompletionDialog;
+    }
+  | {
+      key: string;
+      kind: "QUEST";
+      occurredAt: string;
+      completion: QuestCompletionDialog;
+    }
+  | {
+      key: string;
+      kind: "BATTLE_PASS";
+      occurredAt: string;
+      completion: BattlePassLevelCompletionDialog;
+    };
 type UnavailableLootboxMessage = string | null;
 type QuestBoardStyle = CSSProperties &
   Partial<
@@ -657,6 +681,8 @@ function ReadyGameView({
   );
   const lootboxRewardRef = useRef<HTMLButtonElement | null>(null);
   const lootboxOpenRunRef = useRef(0);
+  const latestSummaryRef = useRef(summary);
+  const seenCompletionDialogKeysRef = useRef(new Set<string>());
   const shellRef = useRef<HTMLDivElement | null>(null);
   const lootBoxesRef = useRef<HTMLElement | null>(null);
   const battlePassRef = useRef<HTMLElement | null>(null);
@@ -672,12 +698,9 @@ function ReadyGameView({
   const [questsExpanded, setQuestsExpanded] = useState(false);
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
-  const [questCompletionDialog, setQuestCompletionDialog] =
-    useState<QuestCompletionDialog | null>(null);
-  const [queuedQuestCompletionDialog, setQueuedQuestCompletionDialog] =
-    useState<QuestCompletionDialog | null>(null);
-  const [battlePassCompletionDialog, setBattlePassCompletionDialog] =
-    useState<BattlePassLevelCompletionDialog | null>(null);
+  const [completionDialogQueue, setCompletionDialogQueue] = useState<
+    CompletionDialogQueueItem[]
+  >([]);
   const homeBanners = buildHomeBanners(
     summary,
     primaryAction,
@@ -706,6 +729,7 @@ function ReadyGameView({
   const brandLogoTitle = summary.store.gameLogoUrl
     ? summary.store.name
     : summary.tenant.name;
+  const activeCompletionDialog = completionDialogQueue[0] ?? null;
 
   const syncQuestBoardBounds = useCallback(() => {
     const shell = shellRef.current;
@@ -732,6 +756,10 @@ function ReadyGameView({
       "--quest-board-bottom": `${Math.max(0, Math.round(bottom))}px`,
     });
   }, [setQuestBoardStyle]);
+
+  useEffect(() => {
+    latestSummaryRef.current = summary;
+  }, [summary]);
 
   useEffect(() => {
     if (!toastMessage) {
@@ -849,33 +877,41 @@ function ReadyGameView({
     setToastMessage(message);
   }
 
-  function applySummaryWithQuestDialog(nextSummary: GuestPortalGameSummary) {
-    const completion = findNewQuestCompletion(summary, nextSummary);
-    const battlePassCompletion = findNewBattlePassLevelCompletion(
-      summary,
-      nextSummary,
+  function enqueueCompletionDialogs(items: CompletionDialogQueueItem[]) {
+    const newItems = items.filter(
+      (item) => !seenCompletionDialogKeysRef.current.has(item.key),
     );
 
-    onSummaryChange(nextSummary);
+    newItems.forEach((item) => {
+      seenCompletionDialogKeysRef.current.add(item.key);
+    });
 
-    if (battlePassCompletion) {
-      setBattlePassCompletionDialog(battlePassCompletion);
-      setQueuedQuestCompletionDialog(completion);
-      return;
-    }
-
-    if (completion) {
-      setQuestCompletionDialog(completion);
+    if (newItems.length > 0) {
+      setCompletionDialogQueue((currentQueue) => [
+        ...currentQueue,
+        ...newItems,
+      ]);
     }
   }
 
-  function closeBattlePassCompletionDialog() {
-    setBattlePassCompletionDialog(null);
+  function applySummaryWithCompletionDialogs(
+    nextSummary: GuestPortalGameSummary,
+    additionalCompletions: CompletionDialogQueueItem[] = [],
+  ) {
+    const previousSummary = latestSummaryRef.current;
+    const completions = sortCompletionDialogs([
+      ...additionalCompletions,
+      ...findNewCompletionDialogs(previousSummary, nextSummary),
+    ]);
 
-    if (queuedQuestCompletionDialog) {
-      setQuestCompletionDialog(queuedQuestCompletionDialog);
-      setQueuedQuestCompletionDialog(null);
-    }
+    latestSummaryRef.current = nextSummary;
+    onSummaryChange(nextSummary);
+
+    enqueueCompletionDialogs(completions);
+  }
+
+  function closeActiveCompletionDialog() {
+    setCompletionDialogQueue((currentQueue) => currentQueue.slice(1));
   }
 
   async function refreshGameSummary({
@@ -909,7 +945,7 @@ function ReadyGameView({
     try {
       const nextSummary = await loadGameSummary();
 
-      applySummaryWithQuestDialog(nextSummary);
+      applySummaryWithCompletionDialogs(nextSummary);
       debugGuestGame("summary-refresh-success", {
         nextSummary: debugSummarySnapshot(nextSummary),
       });
@@ -981,7 +1017,11 @@ function ReadyGameView({
         createdRewards > 0 ? `${formatNumber(createdRewards)} наград` : null,
       ].filter(Boolean);
 
-      applySummaryWithQuestDialog(nextSummary);
+      const checkInCompletion = buildCheckInCompletionDialog(result);
+      applySummaryWithCompletionDialogs(
+        nextSummary,
+        checkInCompletion ? [checkInCompletion] : [],
+      );
       showToast(
         details.length
           ? `Чекин засчитан: ${details.join(", ")}.`
@@ -1233,7 +1273,7 @@ function ReadyGameView({
         runId,
       });
 
-      applySummaryWithQuestDialog(result.summary);
+      applySummaryWithCompletionDialogs(result.summary);
       setLootboxOverlayCard(nextCard);
       setLootboxRoulette(roulette);
       setLootboxOverlayPhase("rolling");
@@ -1581,17 +1621,24 @@ function ReadyGameView({
         />
       ) : null}
 
-      {battlePassCompletionDialog ? (
+      {activeCompletionDialog?.kind === "BATTLE_PASS" ? (
         <BattlePassLevelCompletionModal
-          completion={battlePassCompletionDialog}
-          onClose={closeBattlePassCompletionDialog}
+          completion={activeCompletionDialog.completion}
+          onClose={closeActiveCompletionDialog}
         />
       ) : null}
 
-      {questCompletionDialog && !battlePassCompletionDialog ? (
+      {activeCompletionDialog?.kind === "CHECK_IN" ? (
+        <CheckInCompletionModal
+          completion={activeCompletionDialog.completion}
+          onClose={closeActiveCompletionDialog}
+        />
+      ) : null}
+
+      {activeCompletionDialog?.kind === "QUEST" ? (
         <QuestCompletionModal
-          completion={questCompletionDialog}
-          onClose={() => setQuestCompletionDialog(null)}
+          completion={activeCompletionDialog.completion}
+          onClose={closeActiveCompletionDialog}
         />
       ) : null}
     </div>
@@ -2625,6 +2672,56 @@ function HomeBattlePass({
         />
       ) : null}
     </section>
+  );
+}
+
+function CheckInCompletionModal({
+  completion,
+  onClose,
+}: {
+  completion: CheckInCompletionDialog;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="lp-quest-complete-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="checkInCompleteTitle"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) {
+          onClose();
+        }
+      }}
+    >
+      <div className="lp-quest-complete-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть поздравление"
+          onClick={onClose}
+        >
+          ×
+        </button>
+        <span className="lp-quest-complete-kicker">Чекин успешен</span>
+        <h3 id="checkInCompleteTitle">Поздравляем!</h3>
+        <div className="lp-quest-complete-reward">
+          <span>{completion.rewardLabel ? "Вы получили" : "Результат"}</span>
+          <strong>{completion.rewardLabel ?? "Чекин засчитан"}</strong>
+        </div>
+        <div className="lp-quest-complete-meta">
+          <span>Присутствие в клубе засчитано</span>
+          <span>{formatDate(completion.receivedAt)}</span>
+        </div>
+        <button
+          type="button"
+          className="lp-quest-complete-action"
+          onClick={onClose}
+        >
+          Отлично
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -4760,10 +4857,115 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
     });
 }
 
-function findNewQuestCompletion(
+function buildCheckInCompletionDialog(
+  result: GuestPortalCheckInResponse,
+): CompletionDialogQueueItem | null {
+  const processResult = result.checkIn.processResult;
+
+  if (processResult.summary.idempotent) {
+    return null;
+  }
+
+  const rewardLabels = processResult.rewards
+    .map((reward) => reward.rewardLabel.trim())
+    .filter(Boolean);
+
+  if (processResult.summary.appliedXpDelta > 0) {
+    rewardLabels.push(
+      `${formatNumber(processResult.summary.appliedXpDelta)} XP`,
+    );
+  }
+
+  const uniqueRewardLabels = [...new Set(rewardLabels)];
+  const occurredAt =
+    processResult.event.occurredAt || result.checkIn.checkedAt;
+
+  return {
+    key: `check-in:${processResult.event.id}`,
+    kind: "CHECK_IN",
+    occurredAt,
+    completion: {
+      id: processResult.event.id,
+      rewardLabel:
+        uniqueRewardLabels.length > 0
+          ? uniqueRewardLabels.join(" + ")
+          : null,
+      receivedAt: occurredAt,
+    },
+  };
+}
+
+function findNewCompletionDialogs(
   previousSummary: GuestPortalGameSummary,
   nextSummary: GuestPortalGameSummary,
-): QuestCompletionDialog | null {
+): CompletionDialogQueueItem[] {
+  const questCompletions = findNewQuestCompletions(
+    previousSummary,
+    nextSummary,
+  ).map(
+    (completion): CompletionDialogQueueItem => ({
+      key: `quest:${completion.id}:${completion.receivedAt}`,
+      kind: "QUEST",
+      occurredAt: completion.receivedAt,
+      completion,
+    }),
+  );
+  const battlePassCompletions = findNewBattlePassLevelCompletions(
+    previousSummary,
+    nextSummary,
+  ).map(
+    (completion): CompletionDialogQueueItem => ({
+      key: `battle-pass:${completion.seasonId}:${completion.completedLevel}`,
+      kind: "BATTLE_PASS",
+      occurredAt: nextSummary.generatedAt,
+      completion,
+    }),
+  );
+
+  return sortCompletionDialogs([
+    ...questCompletions,
+    ...battlePassCompletions,
+  ]);
+}
+
+function sortCompletionDialogs(items: CompletionDialogQueueItem[]) {
+  return [...items].sort((left, right) => {
+    const timeDifference =
+      completionDialogTimestamp(left.occurredAt) -
+      completionDialogTimestamp(right.occurredAt);
+
+    if (timeDifference !== 0) {
+      return timeDifference;
+    }
+
+    if (left.kind !== right.kind) {
+      const kindOrder: Record<CompletionDialogQueueItem["kind"], number> = {
+        CHECK_IN: 0,
+        QUEST: 1,
+        BATTLE_PASS: 2,
+      };
+
+      return kindOrder[left.kind] - kindOrder[right.kind];
+    }
+
+    if (left.kind === "BATTLE_PASS" && right.kind === "BATTLE_PASS") {
+      return left.completion.completedLevel - right.completion.completedLevel;
+    }
+
+    return left.key.localeCompare(right.key);
+  });
+}
+
+function completionDialogTimestamp(value: string) {
+  const timestamp = Date.parse(value);
+
+  return Number.isNaN(timestamp) ? Number.MAX_SAFE_INTEGER : timestamp;
+}
+
+function findNewQuestCompletions(
+  previousSummary: GuestPortalGameSummary,
+  nextSummary: GuestPortalGameSummary,
+): QuestCompletionDialog[] {
   const previousMissions = new Map(
     [...previousSummary.missions.featured, ...previousSummary.missions.history].map(
       (mission) => [mission.id, mission],
@@ -4774,6 +4976,7 @@ function findNewQuestCompletion(
     ...nextSummary.missions.featured,
     ...nextSummary.missions.history,
   ];
+  const completions: QuestCompletionDialog[] = [];
 
   for (const mission of nextMissions) {
     if (seen.has(mission.id)) {
@@ -4790,27 +4993,27 @@ function findNewQuestCompletion(
       continue;
     }
 
-    return {
+    completions.push({
       id: mission.id,
       title: mission.name,
       rewardLabel: missionCompletionRewardLabel(mission),
       statusLabel: mission.rewardStatus.label,
       receivedAt: mission.rewardStatus.occurredAt ?? nextSummary.generatedAt,
-    };
+    });
   }
 
-  return null;
+  return completions;
 }
 
-function findNewBattlePassLevelCompletion(
+function findNewBattlePassLevelCompletions(
   previousSummary: GuestPortalGameSummary,
   nextSummary: GuestPortalGameSummary,
-): BattlePassLevelCompletionDialog | null {
+): BattlePassLevelCompletionDialog[] {
   const previousSeason = previousSummary.battlePass.active;
   const nextSeason = nextSummary.battlePass.active;
 
   if (!previousSeason || !nextSeason || previousSeason.id !== nextSeason.id) {
-    return null;
+    return [];
   }
 
   const previouslyReachedLevels = new Set(
@@ -4821,44 +5024,38 @@ function findNewBattlePassLevelCompletion(
   const orderedLevels = [...nextSeason.levels].sort(
     (left, right) => left.level - right.level,
   );
-  const completedLevel = orderedLevels
-    .filter(
-      (level) => level.reached && !previouslyReachedLevels.has(level.level),
-    )
-    .at(-1);
+  const completedLevels = orderedLevels.filter(
+    (level) => level.reached && !previouslyReachedLevels.has(level.level),
+  );
 
-  if (!completedLevel) {
-    return null;
-  }
+  return completedLevels.map((completedLevel) => {
+    const nextLevel =
+      orderedLevels.find((level) => level.level > completedLevel.level) ?? null;
 
-  const nextLevel =
-    orderedLevels.find(
-      (level) => level.level > completedLevel.level && !level.reached,
-    ) ?? null;
-
-  return {
-    seasonId: nextSeason.id,
-    seasonName: nextSeason.name,
-    completedLevel: completedLevel.level,
-    completedTitle: completedLevel.title?.trim() ?? "",
-    rewardLabel:
-      completedLevel.freeReward?.trim() ||
-      completedLevel.premiumReward?.trim() ||
-      completedLevel.title?.trim() ||
-      "Награда уровня",
-    nextLevel: nextLevel?.level ?? null,
-    nextTitle: nextLevel
-      ? nextLevel.title?.trim() || `Уровень ${nextLevel.level}`
-      : null,
-    nextCondition: nextLevel
-      ? stripBattlePassDetailPrefix(
-          nextLevel.condition?.trim() ||
-            nextLevel.description?.trim() ||
-            "продолжить участие в активностях клуба",
-          "Условие",
-        )
-      : null,
-  };
+    return {
+      seasonId: nextSeason.id,
+      seasonName: nextSeason.name,
+      completedLevel: completedLevel.level,
+      completedTitle: completedLevel.title?.trim() ?? "",
+      rewardLabel:
+        completedLevel.freeReward?.trim() ||
+        completedLevel.premiumReward?.trim() ||
+        completedLevel.title?.trim() ||
+        "Награда уровня",
+      nextLevel: nextLevel?.level ?? null,
+      nextTitle: nextLevel
+        ? nextLevel.title?.trim() || `Уровень ${nextLevel.level}`
+        : null,
+      nextCondition: nextLevel
+        ? stripBattlePassDetailPrefix(
+            nextLevel.condition?.trim() ||
+              nextLevel.description?.trim() ||
+              "продолжить участие в активностях клуба",
+            "Условие",
+          )
+        : null,
+    };
+  });
 }
 
 function isMissionCompletedForDialog(mission: GameMission | GameMissionHistoryItem) {

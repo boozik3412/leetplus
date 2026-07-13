@@ -894,10 +894,21 @@ export type GuestPortalCheckInResponse = {
       store: { id: string; name: string } | null;
     };
     processResult: {
+      event: {
+        id: string;
+        occurredAt: string;
+      };
+      rewards: Array<{
+        id: string;
+        rewardType: string;
+        rewardAmount: number;
+        rewardLabel: string;
+      }>;
       summary: {
         appliedXpDelta: number;
         createdRewards: number;
         queuedRewardAmount: number;
+        idempotent: boolean;
       };
     };
     note: string;

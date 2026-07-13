@@ -1,10 +1,17 @@
 import {
+  createTelegramBotApiFetch,
+  loadTelegramBotApiProxyUrl,
+  maskTelegramBotApiProxyUrl,
+} from '../guest-portal/telegram-bot-api-fetch';
+import {
   loadBotConsumerConfig,
   runBotConsumerOnce,
 } from './guest-game-delivery-bot-consumer';
 
 async function main() {
   const config = loadBotConsumerConfig(process.env);
+  const telegramProxyUrl = loadTelegramBotApiProxyUrl(process.env);
+  const telegramFetch = createTelegramBotApiFetch(process.env);
   const intervalMs = parseOptionalInt(
     process.env.GUEST_GAME_BOT_CONSUMER_INTERVAL_MS,
   );
@@ -13,9 +20,20 @@ async function main() {
   );
   let ticks = 0;
 
+  if (telegramProxyUrl) {
+    console.log(
+      `Guest game bot consumer Bot API proxy=${maskTelegramBotApiProxyUrl(
+        telegramProxyUrl,
+      )}`,
+    );
+  }
+
   while (!maxTicks || ticks < maxTicks) {
     ticks += 1;
-    const result = await runBotConsumerOnce(config, { logger: console });
+    const result = await runBotConsumerOnce(config, {
+      logger: console,
+      telegramFetch,
+    });
 
     console.log(
       [

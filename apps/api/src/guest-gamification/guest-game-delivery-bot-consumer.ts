@@ -85,6 +85,7 @@ export type BotConsumerRunResult = {
 
 type BotConsumerDeps = {
   fetch?: BotConsumerFetch;
+  telegramFetch?: BotConsumerFetch;
   logger?: BotConsumerLogger;
 };
 
@@ -202,6 +203,7 @@ export async function runBotConsumerOnce(
   validateBotConsumerConfig(config);
 
   const fetchImpl = deps.fetch ?? fetch;
+  const telegramFetchImpl = deps.telegramFetch ?? fetchImpl;
   const pull = await pullBotDeliveries(config, fetchImpl);
   const items: BotConsumerRunItem[] = [];
   let sent = 0;
@@ -227,7 +229,7 @@ export async function runBotConsumerOnce(
     try {
       const providerResult =
         delivery.channel === 'TELEGRAM'
-          ? await sendTelegramDelivery(config, fetchImpl, delivery)
+          ? await sendTelegramDelivery(config, telegramFetchImpl, delivery)
           : await sendMaxDelivery(config, fetchImpl, delivery);
       const note =
         delivery.channel === 'TELEGRAM'

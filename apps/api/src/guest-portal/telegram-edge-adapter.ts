@@ -25,6 +25,7 @@ export type TelegramEdgeServerHandle = {
 
 type TelegramEdgeDeps = {
   fetch?: TelegramEdgeFetch;
+  telegramFetch?: TelegramEdgeFetch;
   logger?: TelegramEdgeLogger;
 };
 
@@ -159,6 +160,7 @@ export async function handleTelegramEdgeWebhook(
   validateTelegramEdgeConfig(config);
 
   const fetchImpl = deps.fetch ?? fetch;
+  const telegramFetchImpl = deps.telegramFetch ?? fetchImpl;
   const logger = deps.logger ?? console;
   const typedUpdate = telegramUpdate(update);
   const chatId = telegramChatId(typedUpdate);
@@ -186,7 +188,7 @@ export async function handleTelegramEdgeWebhook(
       ? false
       : await answerTelegramCallbackQueryIfNeeded(
           config,
-          fetchImpl,
+          telegramFetchImpl,
           logger,
           callbackQueryId,
         );
@@ -212,7 +214,7 @@ export async function handleTelegramEdgeWebhook(
       ? false
       : await answerTelegramCallbackQueryIfNeeded(
           config,
-          fetchImpl,
+          telegramFetchImpl,
           logger,
           callbackQueryId,
         );
@@ -271,13 +273,13 @@ export async function handleTelegramEdgeWebhook(
 
   const callbackAnswered = await answerTelegramCallbackQueryIfNeeded(
     config,
-    fetchImpl,
+    telegramFetchImpl,
     logger,
     callbackQueryId,
   );
   const telegramResult = await sendTelegramReply(
     config,
-    fetchImpl,
+    telegramFetchImpl,
     chatId,
     replyText,
     reply.replyMarkup,

@@ -49,6 +49,9 @@ importers:
       rxjs:
         specifier: ^7.8.1
         version: 7.8.2
+      undici:
+        specifier: 6.25.0
+        version: 6.25.0
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.2.0
@@ -11961,8 +11964,7 @@ snapshots:
 
   undici-types@7.16.0: {}
 
-  undici@6.25.0:
-    optional: true
+  undici@6.25.0: {}
 
   universalify@2.0.1: {}
 

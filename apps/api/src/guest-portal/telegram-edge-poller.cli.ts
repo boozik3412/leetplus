@@ -8,6 +8,11 @@ import {
   type TelegramEdgeFetch,
   type TelegramEdgeLogger,
 } from './telegram-edge-adapter';
+import {
+  createTelegramBotApiFetch,
+  loadTelegramBotApiProxyUrl,
+  maskTelegramBotApiProxyUrl,
+} from './telegram-bot-api-fetch';
 
 export type TelegramPollingConfig = {
   allowedUpdates: string[];
@@ -38,10 +43,15 @@ export type TelegramEdgeWebhookResult = {
 
 export type TelegramPollingDeps = {
   fetch?: TelegramEdgeFetch;
+  leetPlusFetch?: TelegramEdgeFetch;
   handleUpdate?: (
     config: TelegramEdgeConfig,
     update: TelegramUpdateItem,
-    deps: { fetch?: TelegramEdgeFetch; logger?: TelegramEdgeLogger },
+    deps: {
+      fetch?: TelegramEdgeFetch;
+      logger?: TelegramEdgeLogger;
+      telegramFetch?: TelegramEdgeFetch;
+    },
   ) => Promise<TelegramEdgeWebhookResult>;
   logger?: TelegramEdgeLogger;
   shouldStop?: () => boolean;
@@ -62,7 +72,8 @@ const defaultPollingTimeoutSeconds = 50;
 async function main() {
   const edgeConfig = loadTelegramEdgeConfig(process.env);
   const pollingConfig = loadTelegramPollingConfig(process.env);
-  const fetchImpl = fetch;
+  const telegramFetchImpl = createTelegramBotApiFetch(process.env);
+  const telegramProxyUrl = loadTelegramBotApiProxyUrl(process.env);
   const logger = console;
   let stopRequested = false;
 
@@ -80,7 +91,12 @@ async function main() {
   validatePollingConfig(edgeConfig, pollingConfig);
 
   if (pollingConfig.deleteWebhookOnStart) {
-    await deleteTelegramWebhook(edgeConfig, pollingConfig, fetchImpl, logger);
+    await deleteTelegramWebhook(
+      edgeConfig,
+      pollingConfig,
+      telegramFetchImpl,
+      logger,
+    );
   }
 
   let offset = await readPollingOffset(pollingConfig.statePath);
@@ -88,6 +104,13 @@ async function main() {
   logger.log(
     `Telegram poller started timeout=${pollingConfig.timeoutSeconds}s limit=${pollingConfig.limit} offset=${offset ?? '-'}`,
   );
+  if (telegramProxyUrl) {
+    logger.log(
+      `Telegram poller Bot API proxy=${maskTelegramBotApiProxyUrl(
+        telegramProxyUrl,
+      )}`,
+    );
+  }
 
   while (!stopRequested) {
     try {
@@ -96,7 +119,8 @@ async function main() {
         pollingConfig,
         offset,
         {
-          fetch: fetchImpl,
+          fetch: telegramFetchImpl,
+          leetPlusFetch: fetch,
           logger,
           shouldStop: () => stopRequested,
         },
@@ -173,6 +197,7 @@ export async function runTelegramPollingTick(
   deps: TelegramPollingDeps = {},
 ): Promise<TelegramPollingTickResult> {
   const fetchImpl = deps.fetch ?? fetch;
+  const leetPlusFetchImpl = deps.leetPlusFetch ?? fetchImpl;
   const logger = deps.logger ?? console;
   const handleUpdate: NonNullable<TelegramPollingDeps['handleUpdate']> =
     deps.handleUpdate ??
@@ -200,8 +225,9 @@ export async function runTelegramPollingTick(
 
     const updateId = telegramUpdateId(update);
     const result = await handleUpdate(edgeConfig, update, {
-      fetch: fetchImpl,
+      fetch: leetPlusFetchImpl,
       logger,
+      telegramFetch: fetchImpl,
     });
 
     if (updateId !== null) {

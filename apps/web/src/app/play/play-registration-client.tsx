@@ -207,11 +207,13 @@ export function PlayRegistrationClient({
   );
   const [radiusKm, setRadiusKm] = useState<RadiusOption>(null);
   const [selectedClubId, setSelectedClubId] = useState(() =>
-    resolveInitialClubId(
-      initialDirectory.clubs,
-      initialClubId,
-      initialStoreId,
-    ),
+    isGameAuth
+      ? ""
+      : resolveInitialClubId(
+          initialDirectory.clubs,
+          initialClubId,
+          initialStoreId,
+        ),
   );
   const [requestedVerificationChannel, setActiveVerificationChannel] =
     useState<GuestPortalVerificationChannel>(() =>
@@ -263,8 +265,8 @@ export function PlayRegistrationClient({
     () => normalizeReferralCode(initialReferralCode),
     [initialReferralCode],
   );
-  const openGameAfterAuth = useCallback(() => {
-    router.replace("/game");
+  const openClubSelectionAfterAuth = useCallback(() => {
+    router.replace("/game/clubs");
   }, [router]);
 
   useEffect(() => {
@@ -320,9 +322,12 @@ export function PlayRegistrationClient({
   }, [directory.clubs, query]);
 
   const selectedClub =
-    directory.clubs.find((club) => club.id === selectedClubId) ??
-    directory.clubs[0] ??
-    null;
+    directory.clubs.find((club) => club.id === selectedClubId) ?? null;
+  // Guest auth endpoints are currently tenant/store scoped. This context only
+  // confirms the guest identity; the gameplay club is selected explicitly next.
+  const authenticationContextClub = isGameAuth
+    ? directory.clubs[0] ?? null
+    : selectedClub;
   const visibleVerification = useMemo(
     () => getVisibleVerificationPlan(directory.verification, surface),
     [directory.verification, surface],
@@ -385,7 +390,7 @@ export function PlayRegistrationClient({
         }
 
         if (isGameAuth) {
-          openGameAfterAuth();
+          openClubSelectionAfterAuth();
           return;
         }
 
@@ -421,10 +426,14 @@ export function PlayRegistrationClient({
     return () => {
       isActive = false;
     };
-  }, [isGameAuth, openGameAfterAuth]);
+  }, [isGameAuth, openClubSelectionAfterAuth]);
 
   function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
+    resetClubBoundAuthState();
+  }
+
+  function resetClubBoundAuthState() {
     setChallenge(null);
     setTelegramAuth(null);
     setTelegramAuthStatus(null);
@@ -440,7 +449,7 @@ export function PlayRegistrationClient({
   }
 
   useEffect(() => {
-    if (!selectedClub || !telegramAuth || portal) {
+    if (!authenticationContextClub || !telegramAuth || portal) {
       return;
     }
 
@@ -448,7 +457,7 @@ export function PlayRegistrationClient({
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     async function pollTelegramAuth() {
-      if (!selectedClub || !telegramAuth) {
+      if (!authenticationContextClub || !telegramAuth) {
         return;
       }
 
@@ -456,7 +465,7 @@ export function PlayRegistrationClient({
 
       try {
         const response = await fetch(
-          `${clubApiPath(selectedClub)}/telegram-auth/status`,
+          `${clubApiPath(authenticationContextClub)}/telegram-auth/status`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -485,7 +494,7 @@ export function PlayRegistrationClient({
           setLocalGameMatch(data.match ?? null);
           setTelegramAuth(null);
           setLangameMatch(null);
-          openGameAfterAuth();
+          openClubSelectionAfterAuth();
         }
 
         if (data.status === "EXPIRED" || data.status === "FAILED") {
@@ -519,10 +528,10 @@ export function PlayRegistrationClient({
       }
     };
   }, [
-    openGameAfterAuth,
+    authenticationContextClub,
+    openClubSelectionAfterAuth,
     portal,
     referralCode,
-    selectedClub,
     telegramAuth,
   ]);
 
@@ -624,7 +633,7 @@ export function PlayRegistrationClient({
   }, [ensurePhoneForSubmit]);
 
   useEffect(() => {
-    if (!selectedClub || !userCallAuth || portal) {
+    if (!authenticationContextClub || !userCallAuth || portal) {
       return;
     }
 
@@ -632,7 +641,7 @@ export function PlayRegistrationClient({
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     async function pollUserCallAuth() {
-      if (!selectedClub || !userCallAuth) {
+      if (!authenticationContextClub || !userCallAuth) {
         return;
       }
 
@@ -640,7 +649,7 @@ export function PlayRegistrationClient({
 
       try {
         const response = await fetch(
-          `${clubApiPath(selectedClub)}/user-call-auth/status`,
+          `${clubApiPath(authenticationContextClub)}/user-call-auth/status`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -670,7 +679,7 @@ export function PlayRegistrationClient({
           setUserCallAuth(null);
           setLangameMatch(null);
           await checkLangameMatch();
-          openGameAfterAuth();
+          openClubSelectionAfterAuth();
         }
 
         if (data.status === "EXPIRED" || data.status === "FAILED") {
@@ -705,10 +714,10 @@ export function PlayRegistrationClient({
     };
   }, [
     checkLangameMatch,
-    openGameAfterAuth,
+    authenticationContextClub,
+    openClubSelectionAfterAuth,
     portal,
     referralCode,
-    selectedClub,
     userCallAuth,
   ]);
 
@@ -746,7 +755,7 @@ export function PlayRegistrationClient({
       setSelectedClubId((currentId) =>
         data.clubs.some((club) => club.id === currentId)
           ? currentId
-          : (data.clubs[0]?.id ?? ""),
+          : "",
       );
       setLocationMessage(
         data.search.radiusApplied
@@ -769,8 +778,8 @@ export function PlayRegistrationClient({
   async function submitPhone(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedClub) {
-      setMessage("Выберите клуб для участия.");
+    if (!authenticationContextClub) {
+      setMessage("Сейчас нет клубов с активной геймификацией.");
       return;
     }
 
@@ -795,11 +804,14 @@ export function PlayRegistrationClient({
     setLocalGameMatch(null);
 
     try {
-      const response = await fetch(`${clubApiPath(selectedClub)}/otp/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phoneValue, gameConsentAccepted }),
-      });
+      const response = await fetch(
+        `${clubApiPath(authenticationContextClub)}/otp/start`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: phoneValue, gameConsentAccepted }),
+        },
+      );
 
       if (!response.ok) {
         throw new Error(await readMessage(response));
@@ -829,8 +841,8 @@ export function PlayRegistrationClient({
   }
 
   async function startTelegramAuth() {
-    if (!selectedClub) {
-      setMessage("Выберите клуб для участия.");
+    if (!authenticationContextClub) {
+      setMessage("Сейчас нет клубов с активной геймификацией.");
       return;
     }
 
@@ -850,7 +862,7 @@ export function PlayRegistrationClient({
 
     try {
       const response = await fetch(
-        `${clubApiPath(selectedClub)}/telegram-auth/start`,
+        `${clubApiPath(authenticationContextClub)}/telegram-auth/start`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -884,8 +896,8 @@ export function PlayRegistrationClient({
   }
 
   async function startUserCallAuth() {
-    if (!selectedClub) {
-      setMessage("Выберите клуб для участия.");
+    if (!authenticationContextClub) {
+      setMessage("Сейчас нет клубов с активной геймификацией.");
       return;
     }
 
@@ -911,7 +923,7 @@ export function PlayRegistrationClient({
 
     try {
       const response = await fetch(
-        `${clubApiPath(selectedClub)}/user-call-auth/start`,
+        `${clubApiPath(authenticationContextClub)}/user-call-auth/start`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -946,8 +958,8 @@ export function PlayRegistrationClient({
   }
 
   async function startIncomingCallLast4Auth() {
-    if (!selectedClub) {
-      setMessage("Выберите клуб для участия.");
+    if (!authenticationContextClub) {
+      setMessage("Сейчас нет клубов с активной геймификацией.");
       return;
     }
 
@@ -973,7 +985,7 @@ export function PlayRegistrationClient({
 
     try {
       const response = await fetch(
-        `${clubApiPath(selectedClub)}/incoming-call-last4/start`,
+        `${clubApiPath(authenticationContextClub)}/incoming-call-last4/start`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1003,7 +1015,7 @@ export function PlayRegistrationClient({
   async function verifyIncomingCallLast4Auth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedClub || !incomingCallLast4) {
+    if (!authenticationContextClub || !incomingCallLast4) {
       return;
     }
 
@@ -1012,7 +1024,7 @@ export function PlayRegistrationClient({
 
     try {
       const response = await fetch(
-        `${clubApiPath(selectedClub)}/incoming-call-last4/verify`,
+        `${clubApiPath(authenticationContextClub)}/incoming-call-last4/verify`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1036,7 +1048,7 @@ export function PlayRegistrationClient({
       setLangameMatch(null);
       setMessage("Телефон подтвержден входящим звонком. Гостевой профиль готов.");
       await checkLangameMatch();
-      openGameAfterAuth();
+      openClubSelectionAfterAuth();
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1051,7 +1063,7 @@ export function PlayRegistrationClient({
   async function submitCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedClub || !challenge) {
+    if (!authenticationContextClub || !challenge) {
       return;
     }
 
@@ -1059,15 +1071,18 @@ export function PlayRegistrationClient({
     setMessage(null);
 
     try {
-      const response = await fetch(`${clubApiPath(selectedClub)}/otp/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          challengeId: challenge.challengeId,
-          code,
-          ...(referralCode ? { referralCode } : {}),
-        }),
-      });
+      const response = await fetch(
+        `${clubApiPath(authenticationContextClub)}/otp/verify`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            challengeId: challenge.challengeId,
+            code,
+            ...(referralCode ? { referralCode } : {}),
+          }),
+        },
+      );
 
       if (!response.ok) {
         throw new Error(await readMessage(response));
@@ -1078,7 +1093,7 @@ export function PlayRegistrationClient({
       setLocalGameMatch(data.match ?? null);
       setMessage("Телефон подтвержден. Гостевой профиль готов.");
       await checkLangameMatch();
-      openGameAfterAuth();
+      openClubSelectionAfterAuth();
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1098,7 +1113,11 @@ export function PlayRegistrationClient({
     ? "Авторизация игрока"
     : "Регистрация участника";
   const asideTitle = isGameAuth ? "Способ входа" : "Телефон и клуб";
-  const gameAuthPanelSummary = gameAuthMethodSummary(activeVerificationChannel);
+  const gameAuthPanelSummary = isGameAuth
+    ? "Подтвердите вход. После этого выберите клуб, в котором будете играть."
+    : selectedClub
+      ? gameAuthMethodSummary(activeVerificationChannel)
+      : "Выберите клуб, чтобы продолжить.";
 
   return (
     <main
@@ -1370,20 +1389,22 @@ export function PlayRegistrationClient({
               </div>
             )}
 
-            {selectedClub ? (
+            {authenticationContextClub ? (
               <div
                 className={`space-y-5 ${
                   isGameAuth ? "lp-game-auth-panel-stack" : ""
                 }`}
               >
-                {isGameAuth ? null : <SelectedClubSummary club={selectedClub} />}
+                {isGameAuth ? null : selectedClub ? (
+                  <SelectedClubSummary club={selectedClub} />
+                ) : null}
 
                 {isRedirectingGameAuth ? (
                   <GameAuthRedirectSummary />
                 ) : portal ? (
                     <VerifiedSummary
                       canCheckLangameMatch={canUsePhoneAuth}
-                      continueHref="/game"
+                      continueHref="/game/clubs"
                       isCheckingLangame={isCheckingLangame}
                       langameMatch={langameMatch}
                       localGameMatch={localGameMatch}
@@ -1614,6 +1635,10 @@ export function PlayRegistrationClient({
                   </p>
                 ) : null}
               </div>
+            ) : !isGameAuth && directory.clubs.length > 0 ? (
+              <div className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-4 text-sm leading-6 text-cyan-50">
+                Выберите клуб, чтобы продолжить вход в игровой модуль.
+              </div>
             ) : (
               <div className="rounded-lg border border-amber-300/25 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-100">
                 Сейчас нет клубов с активной геймификацией.
@@ -1779,8 +1804,7 @@ function ClubMap({
     ...(userLocation ? [userLocation] : []),
   ];
   const viewport = buildMapViewport(points);
-  const selectedClub =
-    clubs.find((club) => club.id === selectedClubId) ?? clubs[0];
+  const selectedClub = clubs.find((club) => club.id === selectedClubId) ?? null;
 
   return (
     <div className="rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/20">
@@ -2873,7 +2897,7 @@ function resolveInitialClubId(
     }
   }
 
-  return clubs[0]?.id ?? "";
+  return "";
 }
 
 function resolveInitialVerificationChannel(

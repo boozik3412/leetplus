@@ -72,6 +72,8 @@ export function GameClubSelectClient({
   const [mapExpanded, setMapExpanded] = useState(false);
   const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
   const [currentClubId, setCurrentClubId] = useState<string | null>(null);
+  const [hasExplicitClubSelection, setHasExplicitClubSelection] =
+    useState(false);
   const [submittingClubId, setSubmittingClubId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -111,11 +113,10 @@ export function GameClubSelectClient({
         }
 
         const data = (await response.json()) as GuestPortalGameSummary;
-        const clubId = clubIdFromSummary(data);
-
         setSummary(data);
-        setSelectedClubId(clubId);
-        setCurrentClubId(clubId);
+        setSelectedClubId(null);
+        setCurrentClubId(null);
+        setHasExplicitClubSelection(false);
         setSessionState("ready");
         setMessage(loadError);
       } catch (error) {
@@ -157,21 +158,18 @@ export function GameClubSelectClient({
     });
   }, [cityFilter, directory.clubs, query]);
   const selectedClub =
-    directory.clubs.find((club) => club.id === selectedClubId) ??
-    (summary ? directory.clubs.find((club) => clubMatchesSummary(club, summary)) : null) ??
-    visibleClubs[0] ??
-    directory.clubs[0] ??
-    null;
-  const currentSessionClubId =
-    currentClubId ?? (summary ? clubIdFromSummary(summary) : null);
+    directory.clubs.find((club) => club.id === selectedClubId) ?? null;
+  const currentSessionClubId = hasExplicitClubSelection
+    ? currentClubId
+    : null;
   const activeFilterLabel = cityFilter || query.trim() || "Все города";
 
   async function selectClub(club: GuestPortalGamificationClub) {
     const previousCurrentClubId = currentSessionClubId;
     const previousSelectedClubId = selectedClubId;
+    const previousHasExplicitClubSelection = hasExplicitClubSelection;
 
     setSelectedClubId(club.id);
-    setCurrentClubId(club.id);
     setSubmittingClubId(club.id);
     setMessage(null);
 
@@ -196,12 +194,14 @@ export function GameClubSelectClient({
       setSummary(data.summary);
       setSelectedClubId(club.id);
       setCurrentClubId(club.id);
+      setHasExplicitClubSelection(true);
       setSessionState("ready");
       showToast(data.message);
       router.replace("/game");
     } catch (error) {
       setSelectedClubId(previousSelectedClubId ?? previousCurrentClubId);
       setCurrentClubId(previousCurrentClubId);
+      setHasExplicitClubSelection(previousHasExplicitClubSelection);
       const nextMessage =
         error instanceof Error ? error.message : "Не удалось выбрать клуб.";
       setMessage(nextMessage);
@@ -402,11 +402,18 @@ export function GameClubSelectClient({
               </strong>
             </SideBlock>
             <div className="lp-club-actions">
-              <Link className="lp-club-primary" href="/game">
-                Открыть игру
-                <ArrowRightIcon />
-              </Link>
-              {selectedClub ? (
+              {hasExplicitClubSelection && selectedClub ? (
+                <Link className="lp-club-primary" href="/game">
+                  Открыть игру
+                  <ArrowRightIcon />
+                </Link>
+              ) : (
+                <button className="lp-club-primary" disabled type="button">
+                  Выберите клуб
+                  <ArrowRightIcon />
+                </button>
+              )}
+              {hasExplicitClubSelection && selectedClub ? (
                 <Link className="lp-club-secondary" href={selectedClub.links.guestPortalPath}>
                   Кабинет клуба
                 </Link>
@@ -744,20 +751,6 @@ function Toast({ message }: { message: string | null }) {
     >
       {message}
     </div>
-  );
-}
-
-function clubIdFromSummary(summary: GuestPortalGameSummary) {
-  return `${summary.tenant.slug}:${summary.store.publicSlug ?? summary.store.id}`;
-}
-
-function clubMatchesSummary(
-  club: GuestPortalGamificationClub,
-  summary: GuestPortalGameSummary,
-) {
-  return (
-    club.tenant.slug === summary.tenant.slug &&
-    club.store.id === summary.store.id
   );
 }
 
@@ -1672,6 +1665,10 @@ function ClubSelectStyles() {
 .lp-club-primary {
   background: linear-gradient(90deg, rgba(131, 228, 236, .96), rgba(84, 191, 198, .82));
   color: #041012;
+}
+.lp-club-primary:disabled {
+  cursor: not-allowed;
+  opacity: .48;
 }
 .lp-club-secondary {
   border: 1px solid rgba(196, 224, 225, .16);

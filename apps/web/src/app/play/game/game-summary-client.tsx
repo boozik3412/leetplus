@@ -390,6 +390,7 @@ type BattlePassLevelCompletionDialog = {
 type CheckInCompletionDialog = {
   id: string;
   alreadyCounted: boolean;
+  error: boolean;
   rewardLabel: string | null;
   receivedAt: string;
   note: string | null;
@@ -1095,7 +1096,9 @@ function ReadyGameView({
           ),
         ]);
       } else {
-        showToast(message);
+        enqueueCompletionDialogs([
+          buildCheckInErrorDialog(message, latestSummaryRef.current.generatedAt),
+        ]);
       }
     } finally {
       setCheckInPending(false);
@@ -2750,10 +2753,14 @@ function CheckInCompletionModal({
   completion: CheckInCompletionDialog;
   onClose: () => void;
 }) {
-  const titleId = completion.alreadyCounted
+  const titleId = completion.error
+    ? "checkInErrorTitle"
+    : completion.alreadyCounted
     ? "checkInAlreadyCountedTitle"
     : "checkInCompleteTitle";
-  const rewardCaption = completion.alreadyCounted
+  const rewardCaption = completion.error
+    ? "Причина"
+    : completion.alreadyCounted
     ? completion.rewardLabel
       ? "Ранее получено"
       : "Результат"
@@ -2761,8 +2768,10 @@ function CheckInCompletionModal({
       ? "Вы получили"
       : "Результат";
   const rewardValue =
-    completion.rewardLabel ??
-    (completion.alreadyCounted
+    (completion.error ? completion.note : completion.rewardLabel) ??
+    (completion.error
+      ? "Проверьте условия чек-ина и попробуйте еще раз."
+      : completion.alreadyCounted
       ? "Повторная награда не начисляется"
       : "Чекин засчитан");
 
@@ -2778,7 +2787,9 @@ function CheckInCompletionModal({
         }
       }}
     >
-      <div className="lp-quest-complete-dialog">
+      <div
+        className={`lp-quest-complete-dialog${completion.error ? " is-error" : ""}`}
+      >
         <button
           type="button"
           className="lp-quest-complete-close"
@@ -2788,10 +2799,18 @@ function CheckInCompletionModal({
           ×
         </button>
         <span className="lp-quest-complete-kicker">
-          {completion.alreadyCounted ? "Чекин уже засчитан" : "Чекин успешен"}
+          {completion.error
+            ? "Чекин недоступен"
+            : completion.alreadyCounted
+              ? "Чекин уже засчитан"
+              : "Чекин успешен"}
         </span>
         <h3 id={titleId}>
-          {completion.alreadyCounted ? "Сегодня уже отмечались" : "Поздравляем!"}
+          {completion.error
+            ? "Не удалось сделать чекин"
+            : completion.alreadyCounted
+              ? "Сегодня уже отмечались"
+              : "Поздравляем!"}
         </h3>
         <div className="lp-quest-complete-reward">
           <span>{rewardCaption}</span>
@@ -2799,13 +2818,15 @@ function CheckInCompletionModal({
         </div>
         <div className="lp-quest-complete-meta">
           <span>
-            {completion.alreadyCounted
+            {completion.error
+              ? "Проверка чек-ина"
+              : completion.alreadyCounted
               ? "Последний засчитанный чекин"
               : "Присутствие в клубе засчитано"}
           </span>
           <span>{formatDate(completion.receivedAt)}</span>
         </div>
-        {completion.note ? (
+        {completion.note && !completion.error ? (
           <p className="lp-checkin-complete-note">{completion.note}</p>
         ) : null}
         <button
@@ -2813,7 +2834,11 @@ function CheckInCompletionModal({
           className="lp-quest-complete-action"
           onClick={onClose}
         >
-          {completion.alreadyCounted ? "Понятно" : "Отлично"}
+          {completion.error
+            ? "Понятно"
+            : completion.alreadyCounted
+              ? "Понятно"
+              : "Отлично"}
         </button>
       </div>
     </div>
@@ -4986,6 +5011,7 @@ function buildCheckInCompletionDialog(
           ? uniqueRewardLabels.join(" + ")
           : null,
       receivedAt: occurredAt,
+      error: false,
       note: null,
     },
   };
@@ -5006,7 +5032,29 @@ function buildAlreadyCountedCheckInDialog(
     completion: {
       id: "check-in-repeat-blocked",
       alreadyCounted: true,
+      error: false,
       rewardLabel,
+      receivedAt: generatedAt || now,
+      note: message,
+    },
+  };
+}
+
+function buildCheckInErrorDialog(
+  message: string,
+  generatedAt: string,
+): CompletionDialogQueueItem {
+  const now = new Date().toISOString();
+
+  return {
+    key: `check-in-error:${now}`,
+    kind: "CHECK_IN",
+    occurredAt: generatedAt || now,
+    completion: {
+      id: "check-in-error",
+      alreadyCounted: false,
+      error: true,
+      rewardLabel: null,
       receivedAt: generatedAt || now,
       note: message,
     },
@@ -9511,6 +9559,21 @@ const clubHomeCss = `
   font-size: 13px;
   line-height: 1.45;
   background: rgba(208, 170, 108, 0.08);
+}
+
+.lp-quest-complete-dialog.is-error .lp-quest-complete-kicker {
+  border-color: rgba(255, 122, 122, 0.28);
+  color: #ffb4b4;
+  background: rgba(255, 122, 122, 0.1);
+}
+
+.lp-quest-complete-dialog.is-error .lp-quest-complete-reward {
+  border-color: rgba(255, 122, 122, 0.24);
+  background: rgba(255, 122, 122, 0.08);
+}
+
+.lp-quest-complete-dialog.is-error .lp-quest-complete-reward strong {
+  color: #ffd2d2;
 }
 
 .lp-quest-complete-action {

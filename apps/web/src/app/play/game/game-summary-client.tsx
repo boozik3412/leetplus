@@ -2327,6 +2327,7 @@ function HomeBattlePass({
   const [activeRewardId, setActiveRewardId] = useState<string | null>(null);
   const [detailRewardId, setDetailRewardId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [seasonRewardsOpen, setSeasonRewardsOpen] = useState(false);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const lastScrollEventRef = useRef(0);
   const selectedRewardId =
@@ -2385,7 +2386,7 @@ function HomeBattlePass({
   } as CSSProperties & Record<"--battlepass-line-scale" | "--battlepass-rail-edge", string>;
 
   useEffect(() => {
-    if (!detailReward && !helpOpen) {
+    if (!detailReward && !helpOpen && !seasonRewardsOpen) {
       return;
     }
 
@@ -2393,13 +2394,14 @@ function HomeBattlePass({
       if (event.key === "Escape") {
         setDetailRewardId(null);
         setHelpOpen(false);
+        setSeasonRewardsOpen(false);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [detailReward, helpOpen]);
+  }, [detailReward, helpOpen, seasonRewardsOpen]);
 
   const handleHelpClick = () => {
     emitBattlePassEvent("help_click", {
@@ -2473,7 +2475,12 @@ function HomeBattlePass({
       </div>
 
       <div className="lp-club-battlepass-top">
-        <div className="lp-club-battlepass-season">
+        <button
+          type="button"
+          className="lp-club-battlepass-season lp-club-battlepass-season-button"
+          aria-haspopup="dialog"
+          onClick={() => setSeasonRewardsOpen(true)}
+        >
           <span className="lp-club-battlepass-emblem">
             <picture>
               <source
@@ -2492,8 +2499,9 @@ function HomeBattlePass({
               <b>{formatNumber(progress)}%</b>
               {battlePassSeasonTimeLabel(battlePass?.periodTo)}
             </span>
+            <small>Все награды сезона</small>
           </span>
-        </div>
+        </button>
 
         <div className="lp-club-battlepass-main-reward">
           <span className="lp-club-battlepass-main-copy">
@@ -2608,8 +2616,163 @@ function HomeBattlePass({
           onClose={() => setHelpOpen(false)}
         />
       ) : null}
+
+      {seasonRewardsOpen ? (
+        <BattlePassSeasonRewardsModal
+          seasonName={seasonName}
+          overview={battlePass?.rewardOverview ?? null}
+          onClose={() => setSeasonRewardsOpen(false)}
+        />
+      ) : null}
     </section>
   );
+}
+
+function BattlePassSeasonRewardsModal({
+  seasonName,
+  overview,
+  onClose,
+}: {
+  seasonName: string;
+  overview: NonNullable<
+    GuestPortalGameSummary["battlePass"]["active"]
+  >["rewardOverview"] | null;
+  onClose: () => void;
+}) {
+  const hasRewards = Boolean(
+    overview &&
+      (overview.ranges.length ||
+        overview.guaranteed.length ||
+        overview.possible.length),
+  );
+
+  return (
+    <div
+      className="lp-quest-complete-overlay lp-battlepass-detail-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="battlePassSeasonRewardsTitle"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) {
+          onClose();
+        }
+      }}
+    >
+      <div className="lp-quest-complete-dialog lp-battlepass-detail-dialog lp-battlepass-season-rewards-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть награды сезона"
+          onClick={onClose}
+        >
+          ×
+        </button>
+
+        <span className="lp-quest-complete-kicker">Награды сезона</span>
+        <h3 id="battlePassSeasonRewardsTitle">Что можно заработать</h3>
+        <p className="lp-battlepass-season-rewards-lead">
+          Полный путь в сезоне {seasonName} открывает все награды ниже.
+          Итог зависит от содержимого сезонных лутбоксов.
+        </p>
+
+        {hasRewards ? (
+          <div className="lp-battlepass-season-rewards-content">
+            {overview?.ranges.length ? (
+              <div className="lp-battlepass-season-reward-group">
+                <span className="lp-battlepass-season-reward-heading">
+                  Итог за сезон
+                </span>
+                <div className="lp-battlepass-season-range-list">
+                  {overview.ranges.map((reward) => (
+                    <div
+                      key={reward.type}
+                      className="lp-battlepass-season-range-row"
+                    >
+                      <strong>{reward.label}</strong>
+                      <span
+                        className={
+                          reward.min === reward.max ? "is-fixed" : undefined
+                        }
+                      >
+                        <b>{formatSeasonRewardValue(reward.min, reward.unit)}</b>
+                        {reward.min !== reward.max ? (
+                          <>
+                            <i aria-hidden="true">→</i>
+                            <b>{formatSeasonRewardValue(reward.max, reward.unit)}</b>
+                          </>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {overview?.guaranteed.length ? (
+              <div className="lp-battlepass-season-reward-group">
+                <span className="lp-battlepass-season-reward-heading">
+                  Гарантированные награды
+                </span>
+                <div className="lp-battlepass-season-fixed-list">
+                  {overview.guaranteed.map((reward) => (
+                    <div
+                      key={`${reward.type}:${reward.label}`}
+                      className="lp-battlepass-season-fixed-row"
+                    >
+                      <span aria-hidden="true">✓</span>
+                      <strong>{reward.label}</strong>
+                      {reward.quantity > 1 ? (
+                        <b>×{formatNumber(reward.quantity)}</b>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {overview?.possible.length ? (
+              <div className="lp-battlepass-season-reward-group">
+                <span className="lp-battlepass-season-reward-heading">
+                  Возможные призы из лутбоксов
+                </span>
+                <div className="lp-battlepass-season-possible-list">
+                  {overview.possible.map((reward) => (
+                    <div key={reward.type}>
+                      <strong>{reward.label}</strong>
+                      <span>{reward.items.join(" · ")}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="lp-battlepass-season-rewards-empty">
+            Состав наград этого сезона пока уточняется.
+          </p>
+        )}
+
+        {overview?.unresolved.length ? (
+          <p className="lp-battlepass-season-rewards-note">
+            Некоторые сезонные контейнеры еще не раскрывают состав призов.
+            Диапазон обновится автоматически после их настройки.
+          </p>
+        ) : null}
+
+        <button
+          type="button"
+          className="lp-quest-complete-action"
+          onClick={onClose}
+        >
+          Понятно
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatSeasonRewardValue(value: number, unit: string) {
+  return `${formatNumber(value)} ${unit}`.trim();
 }
 
 function BattlePassLevelCompletionModal({
@@ -9171,6 +9334,152 @@ const clubHomeCss = `
   background: rgba(131, 228, 236, 0.045);
 }
 
+.lp-battlepass-season-rewards-dialog {
+  width: min(620px, 100%);
+  gap: 15px;
+}
+
+.lp-battlepass-season-rewards-lead {
+  max-width: 54ch;
+  margin: -4px 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.lp-battlepass-season-rewards-content,
+.lp-battlepass-season-reward-group {
+  display: grid;
+  gap: 10px;
+}
+
+.lp-battlepass-season-rewards-content {
+  gap: 18px;
+  padding: 4px 0;
+}
+
+.lp-battlepass-season-reward-heading {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 840;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-battlepass-season-range-list {
+  display: grid;
+  border-top: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-battlepass-season-range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
+  align-items: center;
+  gap: 18px;
+  min-height: 56px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-battlepass-season-range-row > strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.lp-battlepass-season-range-row > span {
+  display: grid;
+  grid-template-columns: minmax(68px, 1fr) 24px minmax(68px, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: var(--cyan);
+  text-align: right;
+}
+
+.lp-battlepass-season-range-row > span.is-fixed {
+  display: block;
+}
+
+.lp-battlepass-season-range-row b {
+  font-size: 16px;
+  font-weight: 880;
+  white-space: nowrap;
+}
+
+.lp-battlepass-season-range-row i {
+  color: var(--amber);
+  font-size: 16px;
+  font-style: normal;
+  text-align: center;
+}
+
+.lp-battlepass-season-fixed-list,
+.lp-battlepass-season-possible-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lp-battlepass-season-fixed-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  color: var(--text);
+}
+
+.lp-battlepass-season-fixed-row > span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(131, 228, 236, 0.3);
+  border-radius: 50%;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.07);
+  font-size: 11px;
+}
+
+.lp-battlepass-season-fixed-row strong,
+.lp-battlepass-season-fixed-row b {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.lp-battlepass-season-fixed-row b {
+  color: var(--amber);
+}
+
+.lp-battlepass-season-possible-list > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.45fr) minmax(0, 1fr);
+  gap: 16px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.1);
+  padding: 10px 0;
+}
+
+.lp-battlepass-season-possible-list strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.lp-battlepass-season-possible-list span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.lp-battlepass-season-rewards-note,
+.lp-battlepass-season-rewards-empty {
+  margin: 0;
+  border-left: 2px solid rgba(208, 170, 108, 0.62);
+  padding: 9px 12px;
+  color: var(--amber);
+  background: rgba(208, 170, 108, 0.055);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .lp-battlepass-level-complete-dialog {
   width: min(520px, 100%);
   justify-items: start;
@@ -10542,10 +10851,42 @@ const clubHomeCss = `
   padding: 22px;
 }
 
+.lp-club-battlepass-season-button {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-battlepass-season-button:hover,
+.lp-club-battlepass-season-button:focus-visible {
+  border-color: rgba(131, 228, 236, 0.5);
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.09), transparent 48%),
+    rgba(2, 11, 14, 0.82);
+  box-shadow:
+    0 18px 54px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(131, 228, 236, 0.06);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.lp-club-battlepass-season-button:hover .lp-club-battlepass-emblem,
+.lp-club-battlepass-season-button:focus-visible .lp-club-battlepass-emblem {
+  transform: scale(1.035);
+}
+
 .lp-club-battlepass-emblem {
   display: grid;
   place-items: center;
   min-height: 116px;
+  transition: transform 180ms ease;
 }
 
 .lp-club-battlepass-emblem img {
@@ -10588,6 +10929,15 @@ const clubHomeCss = `
 .lp-club-battlepass-season-copy b {
   color: var(--amber);
   font-size: 18px;
+}
+
+.lp-club-battlepass-season-copy > small {
+  margin-top: 12px;
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0;
+  opacity: 0.78;
 }
 
 .lp-club-battlepass-main-reward {
@@ -13124,6 +13474,22 @@ const clubHomeCss = `
 
   .lp-lootbox-unavailable-actions {
     grid-template-columns: 1fr;
+  }
+
+  .lp-battlepass-season-range-row,
+  .lp-battlepass-season-possible-list > div {
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 12px 0;
+  }
+
+  .lp-battlepass-season-range-row > span {
+    width: min(250px, 100%);
+    text-align: left;
+  }
+
+  .lp-battlepass-season-range-row > span.is-fixed {
+    width: auto;
   }
 }
 `;

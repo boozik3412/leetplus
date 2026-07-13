@@ -401,6 +401,7 @@ export type GuestPortalPayload = {
       redeemedRewards: number;
       nextRewardLabel: string | null;
       nextPremiumRewardLabel: string | null;
+      rewardOverview: GuestPortalSeasonRewardOverview;
       levels: Array<{
         level: number;
         xp: number;
@@ -744,6 +745,7 @@ export type GuestPortalGameSummary = {
       | "nextRewardLabel"
       | "readyRewards"
       | "waitingApprovalRewards"
+      | "rewardOverview"
     > & {
       levels: Array<
         Pick<
@@ -810,6 +812,27 @@ export type GuestPortalGameSummary = {
       "connected" | "readyForRewards" | "status"
     >;
   };
+};
+
+export type GuestPortalSeasonRewardOverview = {
+  ranges: Array<{
+    type: string;
+    label: string;
+    unit: string;
+    min: number;
+    max: number;
+  }>;
+  guaranteed: Array<{
+    type: string;
+    label: string;
+    quantity: number;
+  }>;
+  possible: Array<{
+    type: string;
+    label: string;
+    items: string[];
+  }>;
+  unresolved: string[];
 };
 
 export type GuestPortalClubSelectResponse = {

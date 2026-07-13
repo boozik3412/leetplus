@@ -21324,6 +21324,12 @@ function buildVisualPreviewBattlePass(
     nextRewardLabel: next?.freeReward ?? battlePass.mainPrize,
     readyRewards: 0,
     waitingApprovalRewards: 0,
+    rewardOverview: {
+      ranges: [],
+      guaranteed: [],
+      possible: [],
+      unresolved: [],
+    },
     levels,
   };
 }

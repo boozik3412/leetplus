@@ -996,6 +996,7 @@ export type GuestPortalGameSummary = {
           | 'nextRewardLabel'
           | 'readyRewards'
           | 'waitingApprovalRewards'
+          | 'rewardOverview'
         > & {
           levels: Array<
             Pick<
@@ -1352,6 +1353,7 @@ export type GuestPortalSeason = {
   redeemedRewards: number;
   nextRewardLabel: string | null;
   nextPremiumRewardLabel: string | null;
+  rewardOverview: GuestPortalSeasonRewardOverview;
   levels: Array<{
     level: number;
     xp: number;
@@ -1364,6 +1366,27 @@ export type GuestPortalSeason = {
     current: boolean;
     next: boolean;
   }>;
+};
+
+export type GuestPortalSeasonRewardOverview = {
+  ranges: Array<{
+    type: string;
+    label: string;
+    unit: string;
+    min: number;
+    max: number;
+  }>;
+  guaranteed: Array<{
+    type: string;
+    label: string;
+    quantity: number;
+  }>;
+  possible: Array<{
+    type: string;
+    label: string;
+    items: string[];
+  }>;
+  unresolved: string[];
 };
 
 export type GuestPortalReward = {
@@ -8616,7 +8639,7 @@ export class GuestPortalService {
       .filter((item) => matchesStore(item.storeIds, context.store.id))
       .filter((item) => activePeriod(item.periodFrom, item.periodTo))
       .slice(0, 2)
-      .map((item) => mapSeason(item, xp, rewards));
+      .map((item) => mapSeason(item, xp, rewards, lootBoxes));
     const portalPromoCards = promoCards
       .filter((item) => matchesStore(item.storeIds, context.store.id))
       .filter((item) => activePeriod(item.periodFrom, item.periodTo))
@@ -11330,6 +11353,7 @@ function buildGameSummaryFromPortal(
             nextRewardLabel: activeSeason.nextRewardLabel,
             readyRewards: activeSeason.readyRewards,
             waitingApprovalRewards: activeSeason.waitingApprovalRewards,
+            rewardOverview: activeSeason.rewardOverview,
             levels: activeSeason.levels,
           }
         : null,
@@ -14521,6 +14545,14 @@ function mapSeason(
     qualifiedAt: Date;
     evidence?: Prisma.JsonValue | null;
   }>,
+  lootBoxes: Array<{
+    id: string;
+    name: string;
+    rewardType: string;
+    rewardAmount: Prisma.Decimal | null;
+    rewardLabel: string | null;
+    probabilityRules: Prisma.JsonValue;
+  }>,
 ): GuestPortalSeason {
   const levels = seasonLevels(row.levels);
   const progress = buildSeasonProgress(levels, xp, rewards, row);
@@ -14531,6 +14563,11 @@ function mapSeason(
     seasonType: row.seasonType,
     periodTo: iso(row.periodTo),
     premiumEnabled: row.premiumEnabled,
+    rewardOverview: buildSeasonRewardOverview(
+      row.levels,
+      row.premiumEnabled,
+      lootBoxes,
+    ),
     ...progress,
     levels,
   };
@@ -16049,6 +16086,332 @@ function buildRewardClaimPayload(rewardId: string, rewardCode: string) {
 
 type GuestPortalSeasonLevel = GuestPortalSeason['levels'][number];
 
+type SeasonRewardRangeAccumulator = {
+  type: string;
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+};
+
+function buildSeasonRewardOverview(
+  value: Prisma.JsonValue,
+  premiumEnabled: boolean,
+  lootBoxes: Array<{
+    id: string;
+    name: string;
+    rewardType: string;
+    rewardAmount: Prisma.Decimal | null;
+    rewardLabel: string | null;
+    probabilityRules: Prisma.JsonValue;
+  }>,
+): GuestPortalSeasonRewardOverview {
+  const ranges = new Map<string, SeasonRewardRangeAccumulator>();
+  const guaranteed = new Map<
+    string,
+    GuestPortalSeasonRewardOverview['guaranteed'][number]
+  >();
+  const possible = new Map<
+    string,
+    { type: string; label: string; items: Set<string> }
+  >();
+  const unresolved = new Set<string>();
+  const lootBoxesById = new Map(
+    lootBoxes.map((lootBox) => [lootBox.id, lootBox]),
+  );
+  const levels = Array.isArray(value) ? value : [];
+
+  const addRange = (
+    type: string,
+    label: string,
+    unit: string,
+    min: number,
+    max: number,
+  ) => {
+    const current = ranges.get(type);
+
+    if (current) {
+      current.min += min;
+      current.max += max;
+      return;
+    }
+
+    ranges.set(type, { type, label, unit, min, max });
+  };
+  const addGuaranteed = (type: string, label: string) => {
+    const key = `${type}:${label.toLocaleLowerCase('ru-RU')}`;
+    const current = guaranteed.get(key);
+
+    if (current) {
+      current.quantity += 1;
+      return;
+    }
+
+    guaranteed.set(key, { type, label, quantity: 1 });
+  };
+  const addPossible = (type: string, label: string, items: string[]) => {
+    const key = `${type}:${label}`;
+    const current = possible.get(key) ?? {
+      type,
+      label,
+      items: new Set<string>(),
+    };
+
+    items.forEach((item) => current.items.add(item));
+    possible.set(key, current);
+  };
+
+  const addLootBox = (
+    fallbackLabel: string,
+    details: Record<string, unknown>,
+  ) => {
+    const lootBoxDetails = jsonRecord(details.lootBox);
+    const lootBoxId =
+      stringField(lootBoxDetails.id) ?? stringField(details.lootBoxId);
+    const lootBox = lootBoxId ? lootBoxesById.get(lootBoxId) : null;
+
+    if (!lootBox) {
+      unresolved.add(`${fallbackLabel}: не выбран конкретный лутбокс`);
+      return;
+    }
+
+    const rules = jsonRecord(lootBox.probabilityRules);
+    const sourcePrizes = Array.isArray(rules.prizes)
+      ? rules.prizes
+      : Array.isArray(rules.items)
+        ? rules.items
+        : [];
+    const prizes = sourcePrizes
+      .map((item) => {
+        const prize = jsonRecord(item);
+        const weight =
+          numberField(prize.chancePercent) ??
+          numberField(prize.weight) ??
+          numberField(prize.probability) ??
+          0;
+
+        return {
+          type: normalizeSeasonRewardType(
+            stringField(prize.rewardType) ?? lootBox.rewardType,
+          ),
+          amount:
+            numberField(prize.rewardAmount) ??
+            numberField(prize.amount) ??
+            decimalNumber(lootBox.rewardAmount),
+          label:
+            stringField(prize.rewardLabel) ??
+            stringField(prize.label) ??
+            lootBox.rewardLabel ??
+            lootBox.name,
+          weight,
+        };
+      })
+      .filter((prize) => prize.weight > 0);
+    const resolvedPrizes = prizes.length
+      ? prizes
+      : [
+          {
+            type: normalizeSeasonRewardType(lootBox.rewardType),
+            amount: decimalNumber(lootBox.rewardAmount),
+            label: lootBox.rewardLabel ?? lootBox.name,
+            weight: 1,
+          },
+        ];
+    const numericTypes = new Set(
+      resolvedPrizes
+        .filter((prize) => seasonRewardRangeMeta(prize.type) !== null)
+        .map((prize) => prize.type),
+    );
+
+    numericTypes.forEach((type) => {
+      const meta = seasonRewardRangeMeta(type);
+      if (!meta) {
+        return;
+      }
+
+      const matchingPrizes = resolvedPrizes.filter(
+        (prize) => prize.type === type,
+      );
+      if (matchingPrizes.some((prize) => prize.amount == null)) {
+        unresolved.add(
+          `${lootBox.name}: у приза «${meta.label}» не указано количество`,
+        );
+        return;
+      }
+
+      const values = resolvedPrizes.map((prize) =>
+        prize.type === type ? (prize.amount ?? 0) : 0,
+      );
+      addRange(
+        type,
+        meta.label,
+        meta.unit,
+        Math.min(...values),
+        Math.max(...values),
+      );
+    });
+
+    const nonNumericPrizes = resolvedPrizes.filter(
+      (prize) => seasonRewardRangeMeta(prize.type) === null,
+    );
+    const nonNumericTypes = new Set(nonNumericPrizes.map((prize) => prize.type));
+    nonNumericTypes.forEach((type) => {
+      const labels = nonNumericPrizes
+        .filter((prize) => prize.type === type)
+        .map((prize) => prize.label);
+      addPossible(type, seasonRewardTypeLabel(type), labels);
+    });
+  };
+
+  const addReward = (
+    fallbackLabel: string | null,
+    detailsValue: unknown,
+  ) => {
+    if (!fallbackLabel) {
+      return;
+    }
+
+    const details = jsonRecord(detailsValue);
+    const label = stringField(details.label) ?? fallbackLabel;
+    let type = normalizeSeasonRewardType(stringField(details.type));
+    let amount = numberField(details.amount);
+
+    if (!type || type === 'ADMIN_OTHER') {
+      const inferred = inferSeasonRewardFromLabel(label);
+      type = inferred.type ?? type ?? 'ADMIN_OTHER';
+      amount = amount ?? inferred.amount;
+    }
+
+    if (type === 'LOOT_BOX' || seasonRewardLabelLooksLikeLootBox(label)) {
+      addLootBox(label, details);
+      return;
+    }
+
+    const rangeMeta = seasonRewardRangeMeta(type);
+    if (rangeMeta) {
+      const resolvedAmount = amount ?? inferSeasonRewardFromLabel(label).amount;
+
+      if (resolvedAmount == null) {
+        unresolved.add(`${label}: не указано количество`);
+        return;
+      }
+
+      addRange(
+        type,
+        rangeMeta.label,
+        rangeMeta.unit,
+        resolvedAmount,
+        resolvedAmount,
+      );
+      return;
+    }
+
+    addGuaranteed(type || 'ADMIN_OTHER', label);
+  };
+
+  levels.forEach((item) => {
+    const level = jsonRecord(item);
+    addReward(stringField(level.freeReward), level.freeRewardDetails);
+    if (premiumEnabled) {
+      addReward(stringField(level.premiumReward), level.premiumRewardDetails);
+    }
+  });
+
+  return {
+    ranges: [...ranges.values()],
+    guaranteed: [...guaranteed.values()],
+    possible: [...possible.values()].map((item) => ({
+      type: item.type,
+      label: item.label,
+      items: [...item.items],
+    })),
+    unresolved: [...unresolved],
+  };
+}
+
+function normalizeSeasonRewardType(value: string | null | undefined) {
+  const normalized = value?.trim().toUpperCase() ?? '';
+
+  if (
+    [
+      'BONUS',
+      'BONUS_BALANCE',
+      'BONUS_POINTS',
+      'CASHBACK',
+      'CASH_BALANCE',
+      'LANGAME_BALANCE',
+      'LOYALTY_BONUS',
+    ].includes(normalized)
+  ) {
+    return 'BONUS_BALANCE';
+  }
+  if (
+    ['BALANCE', 'DEPOSIT', 'MONEY_BALANCE', 'WALLET_BALANCE'].includes(
+      normalized,
+    )
+  ) {
+    return 'BALANCE';
+  }
+
+  return normalized;
+}
+
+function seasonRewardRangeMeta(type: string) {
+  switch (type) {
+    case 'BONUS_BALANCE':
+      return { label: 'Бонусы', unit: 'бонусов' };
+    case 'XP':
+      return { label: 'Опыт аккаунта', unit: 'XP' };
+    case 'FREE_HOURS':
+      return { label: 'Бесплатное игровое время', unit: 'ч' };
+    case 'BALANCE':
+      return { label: 'Баланс Langame', unit: '₽' };
+    default:
+      return null;
+  }
+}
+
+function seasonRewardTypeLabel(type: string) {
+  switch (type) {
+    case 'PROMOCODE':
+      return 'Промокоды';
+    case 'MERCH':
+      return 'Физические призы';
+    case 'CASHIER_CODE':
+      return 'Коды кассиру';
+    case 'ADMIN_OTHER':
+      return 'Другие призы';
+    default:
+      return 'Возможные призы';
+  }
+}
+
+function inferSeasonRewardFromLabel(value: string) {
+  const amountMatch = value.match(/(\d[\d\s]*(?:[.,]\d+)?)/);
+  const amount = amountMatch
+    ? numberField(amountMatch[1].replace(/\s/g, '').replace(',', '.'))
+    : null;
+
+  if (/(?:бонус|балл)/i.test(value)) {
+    return { type: 'BONUS_BALANCE', amount };
+  }
+  if (/\bXP\b|опыт/i.test(value)) {
+    return { type: 'XP', amount };
+  }
+  if (/(?:час|часа|часов)/i.test(value)) {
+    return { type: 'FREE_HOURS', amount };
+  }
+  if (seasonRewardLabelLooksLikeLootBox(value)) {
+    return { type: 'LOOT_BOX', amount: null };
+  }
+
+  return { type: null, amount: null };
+}
+
+function seasonRewardLabelLooksLikeLootBox(value: string) {
+  return /(?:лутбокс|кейс|контейнер|loot\s*box|case|container)/i.test(value);
+}
+
 function seasonLevels(value: Prisma.JsonValue) {
   if (!Array.isArray(value)) {
     return [];
@@ -16100,7 +16463,13 @@ function buildSeasonProgress(
   season: { id: string; periodFrom: Date | null; periodTo: Date | null },
 ): Omit<
   GuestPortalSeason,
-  'id' | 'name' | 'seasonType' | 'premiumEnabled' | 'periodTo' | 'levels'
+  | 'id'
+  | 'name'
+  | 'seasonType'
+  | 'premiumEnabled'
+  | 'periodTo'
+  | 'rewardOverview'
+  | 'levels'
 > {
   const seasonRewards = rewards.filter(
     (reward) =>

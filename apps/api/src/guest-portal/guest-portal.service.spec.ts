@@ -727,6 +727,20 @@ function portalPayloadFixture() {
           redeemedRewards: 2,
           nextRewardLabel: '50 бонусов',
           nextPremiumRewardLabel: null,
+          rewardOverview: {
+            ranges: [
+              {
+                type: 'BONUS_BALANCE',
+                label: 'Бонусы',
+                unit: 'бонусов',
+                min: 430,
+                max: 430,
+              },
+            ],
+            guaranteed: [],
+            possible: [],
+            unresolved: [],
+          },
           levels: [
             {
               level: 1,
@@ -1194,6 +1208,15 @@ describe('GuestPortalService', () => {
             id: 'season-1',
             currentLevel: 3,
             nextLevel: 4,
+            rewardOverview: expect.objectContaining({
+              ranges: [
+                expect.objectContaining({
+                  type: 'BONUS_BALANCE',
+                  min: 430,
+                  max: 430,
+                }),
+              ],
+            }),
             levels: expect.arrayContaining([
               expect.objectContaining({ level: 1, reached: true }),
               expect.objectContaining({ level: 2, reached: true }),
@@ -6809,6 +6832,22 @@ describe('GuestPortalService', () => {
         currentLevel: 1,
         progressPercent: 0,
         reachedLevels: 0,
+        rewardOverview: {
+          ranges: [
+            expect.objectContaining({
+              type: 'XP',
+              min: 0,
+              max: 0,
+            }),
+          ],
+          guaranteed: [
+            expect.objectContaining({
+              label: 'Promo',
+              quantity: 1,
+            }),
+          ],
+          unresolved: ['Lootbox: не выбран конкретный лутбокс'],
+        },
       });
       expect(portal.gamification.seasons[0].levels[0]).toMatchObject({
         level: 1,

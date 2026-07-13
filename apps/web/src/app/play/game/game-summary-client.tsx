@@ -392,6 +392,7 @@ type CheckInCompletionDialog = {
   alreadyCounted: boolean;
   rewardLabel: string | null;
   receivedAt: string;
+  note: string | null;
 };
 type CompletionDialogQueueItem =
   | {
@@ -1083,7 +1084,19 @@ function ReadyGameView({
           : "Чекин засчитан.",
       );
     } catch (error) {
-      showToast(getErrorMessage(error, "Не удалось сделать чекин."));
+      const message = getErrorMessage(error, "Не удалось сделать чекин.");
+
+      if (isAlreadyCountedCheckInMessage(message)) {
+        enqueueCompletionDialogs([
+          buildAlreadyCountedCheckInDialog(
+            checkInSummary,
+            message,
+            latestSummaryRef.current.generatedAt,
+          ),
+        ]);
+      } else {
+        showToast(message);
+      }
     } finally {
       setCheckInPending(false);
     }
@@ -2792,6 +2805,9 @@ function CheckInCompletionModal({
           </span>
           <span>{formatDate(completion.receivedAt)}</span>
         </div>
+        {completion.note ? (
+          <p className="lp-checkin-complete-note">{completion.note}</p>
+        ) : null}
         <button
           type="button"
           className="lp-quest-complete-action"
@@ -4970,8 +4986,54 @@ function buildCheckInCompletionDialog(
           ? uniqueRewardLabels.join(" + ")
           : null,
       receivedAt: occurredAt,
+      note: null,
     },
   };
+}
+
+function buildAlreadyCountedCheckInDialog(
+  checkInSummary: GuestPortalGameSummary["checkIn"] | null,
+  message: string,
+  generatedAt: string,
+): CompletionDialogQueueItem {
+  const now = new Date().toISOString();
+  const rewardLabel = checkInRewardLabel(checkInSummary);
+
+  return {
+    key: `check-in-repeat-blocked:${now}`,
+    kind: "CHECK_IN",
+    occurredAt: generatedAt || now,
+    completion: {
+      id: "check-in-repeat-blocked",
+      alreadyCounted: true,
+      rewardLabel,
+      receivedAt: generatedAt || now,
+      note: message,
+    },
+  };
+}
+
+function checkInRewardLabel(
+  checkInSummary: GuestPortalGameSummary["checkIn"] | null,
+) {
+  const configuredReward = checkInSummary?.rewardLabel?.trim();
+
+  if (configuredReward) {
+    return configuredReward;
+  }
+
+  const xpReward = checkInSummary?.xpReward ?? 0;
+
+  return xpReward > 0 ? `${formatNumber(xpReward)} XP` : null;
+}
+
+function isAlreadyCountedCheckInMessage(message: string) {
+  const normalizedMessage = message.toLocaleLowerCase("ru-RU");
+
+  return (
+    normalizedMessage.includes("чекин") &&
+    normalizedMessage.includes("уже был сделан сегодня")
+  );
 }
 
 function findNewCompletionDialogs(
@@ -9439,6 +9501,16 @@ const clubHomeCss = `
   line-height: 1.2;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.lp-checkin-complete-note {
+  border: 1px solid rgba(208, 170, 108, 0.2);
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  background: rgba(208, 170, 108, 0.08);
 }
 
 .lp-quest-complete-action {

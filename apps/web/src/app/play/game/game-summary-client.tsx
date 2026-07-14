@@ -362,6 +362,7 @@ type PlayerQuest = {
   id: string;
   title: string;
   description: string;
+  condition: string;
   status: QuestStatus;
   label: string;
   progress?: {
@@ -765,7 +766,7 @@ function ReadyGameView({
     useState<UnavailableLootboxMessage>(null);
   const [nicknamePending, setNicknamePending] = useState(false);
   const [questsExpanded, setQuestsExpanded] = useState(false);
-  const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);
+  const [questDetails, setQuestDetails] = useState<PlayerQuest | null>(null);
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
   const [completionDialogQueue, setCompletionDialogQueue] = useState<
     CompletionDialogQueueItem[]
@@ -1068,8 +1069,11 @@ function ReadyGameView({
   }
 
   function handleQuestClick(quest: PlayerQuest) {
-    setSelectedQuestId(quest.id);
-    showToast(`${quest.title}: ${quest.description}`);
+    setQuestDetails(quest);
+  }
+
+  function closeQuestDetails() {
+    setQuestDetails(null);
   }
 
   function focusPlayerProfile() {
@@ -1657,7 +1661,6 @@ function ReadyGameView({
           checkInAvailable={checkInAvailable}
           checkInPending={checkInPending}
           questsExpanded={questsExpanded}
-          selectedQuestId={selectedQuestId}
           promoCode={promoCode}
           nicknamePending={nicknamePending}
           onPromoCodeChange={setPromoCode}
@@ -1671,7 +1674,6 @@ function ReadyGameView({
         <QuestBoard
           quests={playerQuests}
           expanded={questsExpanded}
-          selectedQuestId={selectedQuestId}
           style={questBoardStyle}
           onClose={closeQuestBoard}
           onQuestClick={handleQuestClick}
@@ -1711,6 +1713,13 @@ function ReadyGameView({
           message={unavailableLootboxMessage}
           onClose={closeUnavailableLootboxModal}
           onRefresh={refreshUnavailableLootboxConditions}
+        />
+      ) : null}
+
+      {questDetails ? (
+        <QuestDetailsModal
+          quest={questDetails}
+          onClose={closeQuestDetails}
         />
       ) : null}
 
@@ -1861,6 +1870,82 @@ function QuestCompletionModal({
           onClick={onClose}
         >
           Отлично
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QuestDetailsModal({
+  quest,
+  onClose,
+}: {
+  quest: PlayerQuest;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="lp-quest-complete-overlay lp-lootbox-unavailable-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="questDetailsTitle"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) {
+          onClose();
+        }
+      }}
+    >
+      <div className="lp-quest-complete-dialog lp-quest-details-dialog">
+        <button
+          type="button"
+          className="lp-quest-complete-close"
+          aria-label="Закрыть подробности задания"
+          onClick={onClose}
+        >
+          ×
+        </button>
+        <span className="lp-quest-complete-kicker lp-lootbox-unavailable-kicker">
+          {quest.label}
+        </span>
+        <h3 id="questDetailsTitle">{quest.title}</h3>
+
+        <div className="lp-quest-details-block">
+          <span>Условие</span>
+          <strong>{quest.condition}</strong>
+        </div>
+
+        {quest.progress ? (
+          <div className="lp-quest-details-progress">
+            <div>
+              <span>Прогресс</span>
+              <strong>{quest.progress.label}</strong>
+            </div>
+            <span className="lp-quest-details-meter" aria-hidden="true">
+              <i style={{ width: `${quest.progress.percent}%` }} />
+            </span>
+          </div>
+        ) : null}
+
+        {quest.reward ? (
+          <div className="lp-quest-details-block is-reward">
+            <span>Награда</span>
+            <strong>{quest.reward.value}</strong>
+          </div>
+        ) : null}
+
+        {quest.status === "done" ? (
+          <div className="lp-lootbox-unavailable-note">
+            <span>Статус</span>
+            <strong>{quest.description}</strong>
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          className="lp-lootbox-unavailable-primary"
+          onClick={onClose}
+        >
+          Понятно
         </button>
       </div>
     </div>
@@ -4025,7 +4110,6 @@ function PlayerProfilePanel({
   checkInAvailable,
   checkInPending,
   questsExpanded,
-  selectedQuestId,
   promoCode,
   nicknamePending,
   onPromoCodeChange,
@@ -4046,7 +4130,6 @@ function PlayerProfilePanel({
   checkInAvailable: boolean;
   checkInPending: boolean;
   questsExpanded: boolean;
-  selectedQuestId: string | null;
   promoCode: string;
   nicknamePending: boolean;
   onPromoCodeChange: (value: string) => void;
@@ -4275,78 +4358,44 @@ function PlayerProfilePanel({
 
         <div className="lp-club-side-quest-list">
           {compactQuests.length ? (
-            compactQuests.map((quest) => {
-              const isExpanded = selectedQuestId === quest.id;
-
-              return (
-                <button
-                  key={quest.id}
-                  type="button"
-                  className={[
-                    "lp-club-side-quest",
-                    quest.status === "done" ? "is-done" : "",
-                    quest.status === "live" ? "is-current" : "",
-                    isExpanded ? "is-selected is-expanded" : "",
-                  ].join(" ")}
-                  aria-expanded={isExpanded}
-                  aria-controls={`side-quest-details-${quest.id}`}
-                  onClick={() => onQuestClick(quest)}
-                >
-                  <span className="lp-club-side-quest-icon" aria-hidden="true">
-                    {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
-                  </span>
-                  <span className="lp-club-side-quest-copy">
-                    <strong>{quest.title}</strong>
-                    <span>{quest.progress?.label ?? quest.description}</span>
-                    {quest.progress ? (
-                      <span
-                        className="lp-club-side-quest-progress"
-                        aria-hidden="true"
-                      >
-                        <i
-                          style={
-                            {
-                              "--value": `${quest.progress.percent}%`,
-                            } as CSSProperties
-                          }
-                        />
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="lp-club-side-quest-state">
-                    {quest.label}
-                  </span>
-                  {isExpanded ? (
+            compactQuests.map((quest) => (
+              <button
+                key={quest.id}
+                type="button"
+                className={[
+                  "lp-club-side-quest",
+                  quest.status === "done" ? "is-done" : "",
+                  quest.status === "live" ? "is-current" : "",
+                ].join(" ")}
+                aria-haspopup="dialog"
+                onClick={() => onQuestClick(quest)}
+              >
+                <span className="lp-club-side-quest-icon" aria-hidden="true">
+                  {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
+                </span>
+                <span className="lp-club-side-quest-copy">
+                  <strong>{quest.title}</strong>
+                  <span>{quest.progress?.label ?? quest.description}</span>
+                  {quest.progress ? (
                     <span
-                      id={`side-quest-details-${quest.id}`}
-                      className="lp-club-side-quest-details"
+                      className="lp-club-side-quest-progress"
+                      aria-hidden="true"
                     >
-                      <span>{quest.description}</span>
-                      {quest.progress ? (
-                        <span className="lp-club-side-quest-detail-progress">
-                          <span
-                            className="lp-club-side-quest-progress"
-                            aria-hidden="true"
-                          >
-                            <i
-                              style={
-                                {
-                                  "--value": `${quest.progress.percent}%`,
-                                } as CSSProperties
-                              }
-                            />
-                          </span>
-                          <span>{quest.progress.label}</span>
-                        </span>
-                      ) : null}
-                      {quest.reward ? (
-                        <span>Награда: {quest.reward.value}</span>
-                      ) : null}
+                      <i
+                        style={
+                          {
+                            "--value": `${quest.progress.percent}%`,
+                          } as CSSProperties
+                        }
+                      />
                     </span>
                   ) : null}
-                </button>
-              );
-            })
+                </span>
+                <span className="lp-club-side-quest-state">
+                  {quest.label}
+                </span>
+              </button>
+            ))
           ) : (
             <p className="lp-club-quest-empty">Пока нет доступных заданий.</p>
           )}
@@ -4359,14 +4408,12 @@ function PlayerProfilePanel({
 function QuestBoard({
   quests,
   expanded,
-  selectedQuestId,
   style,
   onClose,
   onQuestClick,
 }: {
   quests: PlayerQuest[];
   expanded: boolean;
-  selectedQuestId: string | null;
   style: QuestBoardStyle;
   onClose: () => void;
   onQuestClick: (quest: PlayerQuest) => void;
@@ -4425,9 +4472,9 @@ function QuestBoard({
                     "lp-club-quest-full-card",
                     quest.status === "done" ? "is-done" : "",
                     quest.status === "live" ? "is-current" : "",
-                    selectedQuestId === quest.id ? "is-selected" : "",
                   ].join(" ")}
                   disabled={!expanded}
+                  aria-haspopup="dialog"
                   onClick={() => onQuestClick(quest)}
                 >
                   <span className="lp-club-quest-full-icon" aria-hidden="true">
@@ -5107,6 +5154,10 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
         id: mission.id,
         title: mission.name,
         description: playerQuestDescription(mission, reward),
+        condition: gameRuleConditionLabel(
+          mission.triggerKind,
+          mission.sessionType,
+        ),
         status,
         label: playerQuestStatusLabel(status),
         progress,
@@ -9827,7 +9878,8 @@ const clubHomeCss = `
   cursor: pointer;
 }
 
-.lp-lootbox-unavailable-dialog {
+.lp-lootbox-unavailable-dialog,
+.lp-quest-details-dialog {
   width: min(500px, 100%);
   border-color: rgba(131, 228, 236, 0.34);
   background:
@@ -9846,6 +9898,66 @@ const clubHomeCss = `
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.lp-quest-details-block,
+.lp-quest-details-progress {
+  display: grid;
+  gap: 9px;
+  border: 1px solid rgba(196, 224, 225, 0.1);
+  border-radius: 8px;
+  padding: 13px;
+  background: rgba(196, 224, 225, 0.035);
+}
+
+.lp-quest-details-block > span,
+.lp-quest-details-progress span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.lp-quest-details-block strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 620;
+}
+
+.lp-quest-details-block.is-reward strong {
+  color: var(--cyan);
+  font-size: 16px;
+  font-weight: 880;
+}
+
+.lp-quest-details-progress > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lp-quest-details-progress strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.lp-quest-details-meter {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.09);
+}
+
+.lp-quest-details-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--teal));
+  box-shadow: 0 0 14px rgba(131, 228, 236, 0.4);
 }
 
 .lp-lootbox-unavailable-block,
@@ -12512,8 +12624,7 @@ const clubHomeCss = `
 }
 
 .lp-club-side-quest:hover,
-.lp-club-side-quest.is-current,
-.lp-club-side-quest.is-selected {
+.lp-club-side-quest.is-current {
   border-color: rgba(131, 228, 236, 0.58);
   background:
     linear-gradient(90deg, rgba(131, 228, 236, 0.1), transparent),
@@ -12585,37 +12696,6 @@ const clubHomeCss = `
   font-weight: 860;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-}
-
-.lp-club-side-quest.is-expanded {
-  align-items: start;
-}
-
-.lp-club-side-quest-details {
-  display: grid;
-  grid-column: 2 / -1;
-  gap: 8px;
-  margin-top: 2px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(196, 224, 225, 0.1);
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
-  white-space: normal;
-}
-
-.lp-club-side-quest-details > span {
-  display: block;
-  white-space: normal;
-}
-
-.lp-club-side-quest-detail-progress {
-  display: grid;
-  gap: 5px;
-}
-
-.lp-club-side-quest-detail-progress .lp-club-side-quest-progress {
-  margin-top: 0;
 }
 
 .lp-club-side-quest.is-current .lp-club-side-quest-state,

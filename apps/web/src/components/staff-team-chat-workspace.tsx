@@ -1564,12 +1564,31 @@ function MessageCard({
   const [reportEditBody, setReportEditBody] = useState(visibleMessageBody);
   const [reportEditError, setReportEditError] = useState<string | null>(null);
   const [isReportEditSaving, setIsReportEditSaving] = useState(false);
+  const [addedReportAttachments, setAddedReportAttachments] = useState<
+    StaffChatAttachment[]
+  >([]);
   const isTaskDraftOpen = taskDraft?.messageId === message.id && !compact;
   const isTaskPending = taskPendingMessageId === message.id;
   const authorName =
     message.authorUser?.fullName ?? message.authorUser?.email ?? "LeetPlus";
   const authorInitial = authorName.trim().slice(0, 1).toUpperCase() || "L";
   const messageContent = parseMessageAction(visibleMessageBody);
+  const showReportAttachmentUpload =
+    isReportEditing && message.canEditBody && !compact;
+  const reportAttachments = useMemo(() => {
+    const seenAttachmentIds = new Set<string>();
+
+    return [...message.attachments, ...addedReportAttachments].filter(
+      (attachment) => {
+        if (seenAttachmentIds.has(attachment.id)) {
+          return false;
+        }
+
+        seenAttachmentIds.add(attachment.id);
+        return true;
+      },
+    );
+  }, [addedReportAttachments, message.attachments]);
 
   function startReportEdit() {
     setReportEditBody(visibleMessageBody);
@@ -1617,6 +1636,40 @@ function MessageCard({
 
     setIsReportEditing(false);
     router.refresh();
+  }
+
+  async function addReportAttachment(attachment: StaffAttachmentUploadResult) {
+    setIsReportEditSaving(true);
+    setReportEditError(null);
+
+    const response = await fetch(
+      `/api/staff/team-chat/messages/${encodeURIComponent(message.id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ attachmentIds: [attachment.id] }),
+      },
+    );
+
+    setIsReportEditSaving(false);
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as
+        | { message?: string }
+        | null;
+      setReportEditError(
+        payload?.message ?? "Не удалось добавить материал к отчету.",
+      );
+      return;
+    }
+
+    setAddedReportAttachments((current) => {
+      if (current.some((item) => item.id === attachment.id)) {
+        return current;
+      }
+
+      return [...current, { ...attachment, uploadedByUser: null }];
+    });
   }
 
   return (
@@ -1812,19 +1865,31 @@ function MessageCard({
         </div>
       ) : null}
 
-      {message.attachments.length > 0 ? (
+      {reportAttachments.length > 0 || showReportAttachmentUpload ? (
         <div
           className={[
             "flex flex-wrap gap-2",
             compact ? "mt-2" : "mt-3 sm:ml-12",
           ].join(" ")}
         >
-          {message.attachments.map((attachment) => (
+          {reportAttachments.map((attachment) => (
             <MessageAttachmentCard
               key={attachment.id}
               attachment={attachment}
             />
           ))}
+          {showReportAttachmentUpload ? (
+            <StaffAttachmentUpload
+              label="Добавить материалы к отчету"
+              buttonLabel="+"
+              multiple
+              accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+              compressImages
+              onUploaded={addReportAttachment}
+              className="w-[148px]"
+              buttonClassName="flex aspect-[4/3] w-[148px] flex-col items-center justify-center rounded-lg border border-dashed border-emerald-300 bg-emerald-50/70 text-3xl font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-500 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+            />
+          ) : null}
         </div>
       ) : null}
 

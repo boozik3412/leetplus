@@ -19,6 +19,7 @@ type StaffAttachmentUploadProps = {
   label?: string;
   buttonLabel?: string;
   className?: string;
+  buttonClassName?: string;
   multiple?: boolean;
   accept?: string;
   compressImages?: boolean;
@@ -145,6 +146,7 @@ export function StaffAttachmentUpload({
   label = "Файл",
   buttonLabel = "Загрузить",
   className = "",
+  buttonClassName,
   multiple = false,
   accept,
   compressImages = false,
@@ -217,7 +219,10 @@ export function StaffAttachmentUpload({
         type="button"
         disabled={isUploading}
         onClick={() => inputRef.current?.click()}
-        className="h-10 rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200"
+        className={
+          buttonClassName ??
+          "h-10 rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200"
+        }
         title={label}
       >
         {isUploading ? "Загрузка..." : buttonLabel}

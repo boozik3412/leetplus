@@ -128,6 +128,7 @@ export type StaffChatReadDto = {
 
 export type StaffChatMessageUpdateDto = {
   body?: string | null;
+  attachmentIds?: string[] | null;
   isPinned?: boolean;
 };
 
@@ -753,6 +754,12 @@ export class StaffTeamChatService {
     );
     const updateData: Prisma.StaffChatMessageUncheckedUpdateInput = {};
     const hasBodyUpdate = 'body' in dto;
+    const attachmentIds = await this.resolveMessageAttachmentIds(
+      tenantId,
+      user.id,
+      dto.attachmentIds,
+    );
+    const hasAttachmentUpdate = attachmentIds.length > 0;
     let bodyChanged = false;
 
     if (typeof dto.isPinned === 'boolean') {
@@ -773,7 +780,13 @@ export class StaffTeamChatService {
       }
     }
 
-    const hasUpdates = Object.keys(updateData).length > 0;
+    if (hasAttachmentUpdate) {
+      this.assertCanEditShiftReportMessage(user, channel, message);
+      updateData.updatedAt = new Date();
+    }
+
+    const hasUpdates =
+      Object.keys(updateData).length > 0 || hasAttachmentUpdate;
 
     if (!hasUpdates) {
       const current = await this.prisma.staffChatMessage.findUniqueOrThrow({
@@ -797,11 +810,28 @@ export class StaffTeamChatService {
         });
       }
 
-      const result = await tx.staffChatMessage.update({
-        where: { id: message.id },
-        data: updateData,
-        include: messageInclude,
-      });
+      if (hasAttachmentUpdate) {
+        await tx.staffChatMessageAttachment.createMany({
+          data: attachmentIds.map((attachmentId) => ({
+            tenantId,
+            messageId: message.id,
+            attachmentId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      const result =
+        Object.keys(updateData).length > 0
+          ? await tx.staffChatMessage.update({
+              where: { id: message.id },
+              data: updateData,
+              include: messageInclude,
+            })
+          : await tx.staffChatMessage.findUniqueOrThrow({
+              where: { id: message.id },
+              include: messageInclude,
+            });
 
       await tx.staffChatChannel.updateMany({
         where: { id: channel.id, tenantId },
@@ -1765,16 +1795,7 @@ export class StaffTeamChatService {
     message: { authorUserId: string | null; body: string },
     value: string | null | undefined,
   ) {
-    if (!this.isShiftReportMessage(channel, message.body)) {
-      throw new BadRequestException('Only shift reports can be edited');
-    }
-
-    if (
-      message.authorUserId !== user.id &&
-      !this.canManageChannels(user.role)
-    ) {
-      throw new BadRequestException('Only the report author can edit it');
-    }
+    this.assertCanEditShiftReportMessage(user, channel, message);
 
     const rawBody = this.normalizeRequiredString(
       value,
@@ -1792,6 +1813,23 @@ export class StaffTeamChatService {
           STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
         )
       : stripShiftReportMessageMetadata(rawBody);
+  }
+
+  private assertCanEditShiftReportMessage(
+    user: AuthenticatedUser,
+    channel: { name: string },
+    message: { authorUserId: string | null; body: string },
+  ) {
+    if (!this.isShiftReportMessage(channel, message.body)) {
+      throw new BadRequestException('Only shift reports can be edited');
+    }
+
+    if (
+      message.authorUserId !== user.id &&
+      !this.canManageChannels(user.role)
+    ) {
+      throw new BadRequestException('Only the report author can edit it');
+    }
   }
 
   private isShiftReportMessage(channel: { name: string }, body: string) {

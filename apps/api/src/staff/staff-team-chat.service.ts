@@ -127,6 +127,7 @@ export type StaffChatReadDto = {
 };
 
 export type StaffChatMessageUpdateDto = {
+  body?: string | null;
   isPinned?: boolean;
 };
 
@@ -207,6 +208,14 @@ export type StaffChatMessageAttachmentResponse = {
   uploadedByUser: { id: string; email: string; fullName: string | null } | null;
 };
 
+export type StaffChatMessageEditResponse = {
+  id: string;
+  previousBody: string;
+  nextBody: string;
+  createdAt: string;
+  actorUser: { id: string; email: string; fullName: string | null } | null;
+};
+
 export type StaffChatMessageResponse = {
   id: string;
   channelId: string;
@@ -214,6 +223,10 @@ export type StaffChatMessageResponse = {
   kind: StaffChatMessageKind;
   priority: StaffChatMessagePriority;
   isPinned: boolean;
+  isShiftReport: boolean;
+  canEditBody: boolean;
+  editCount: number;
+  editedAt: string | null;
   isReadByMe: boolean;
   mentionedMe: boolean;
   createdAt: string;
@@ -221,6 +234,7 @@ export type StaffChatMessageResponse = {
   authorUser: { id: string; email: string; fullName: string | null } | null;
   store: { id: string; name: string; isActive: boolean } | null;
   attachments: StaffChatMessageAttachmentResponse[];
+  editHistory: StaffChatMessageEditResponse[];
   mentions: StaffChatUserResponse[];
 };
 
@@ -236,6 +250,7 @@ const channelInclude = {
 } satisfies Prisma.StaffChatChannelInclude;
 
 const messageInclude = {
+  channel: { select: { name: true } },
   authorUser: { select: { id: true, email: true, fullName: true } },
   store: { select: { id: true, name: true, isActive: true } },
   readReceipts: { select: { userId: true } },
@@ -256,6 +271,13 @@ const messageInclude = {
     },
     orderBy: { createdAt: 'asc' },
   },
+  editHistory: {
+    include: {
+      actorUser: { select: { id: true, email: true, fullName: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+  },
   mentions: {
     include: {
       mentionedUser: {
@@ -264,6 +286,7 @@ const messageInclude = {
     },
     orderBy: { createdAt: 'asc' },
   },
+  _count: { select: { editHistory: true } },
 } satisfies Prisma.StaffChatMessageInclude;
 
 type StaffChatChannelRow = Prisma.StaffChatChannelGetPayload<{
@@ -374,7 +397,7 @@ export class StaffTeamChatService {
         this.toChannelResponse(channel, stats.get(channel.id)),
       ),
       messages: messages.map((message) =>
-        this.toMessageResponse(message, user.id),
+        this.toMessageResponse(message, user),
       ),
       stores,
       users,
@@ -630,7 +653,7 @@ export class StaffTeamChatService {
 
     await this.markMessagesRead(user.id, tenantId, channel.id, [message.id]);
 
-    return this.toMessageResponse(message, user.id);
+    return this.toMessageResponse(message, user);
   }
 
   async createSystemNotification(
@@ -716,22 +739,79 @@ export class StaffTeamChatService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const message = await this.prisma.staffChatMessage.findFirst({
       where: { id, tenantId },
-      select: { id: true, channelId: true },
+      select: { id: true, channelId: true, authorUserId: true, body: true },
     });
 
     if (!message) {
       throw new NotFoundException('Chat message not found');
     }
 
-    await this.resolveAccessibleChannel(user, tenantId, message.channelId);
+    const channel = await this.resolveAccessibleChannel(
+      user,
+      tenantId,
+      message.channelId,
+    );
+    const updateData: Prisma.StaffChatMessageUncheckedUpdateInput = {};
+    const hasBodyUpdate = 'body' in dto;
+    let bodyChanged = false;
 
-    const updated = await this.prisma.staffChatMessage.update({
-      where: { id: message.id },
-      data: { isPinned: Boolean(dto.isPinned) },
-      include: messageInclude,
+    if (typeof dto.isPinned === 'boolean') {
+      updateData.isPinned = dto.isPinned;
+    }
+
+    if (hasBodyUpdate) {
+      const nextBody = this.normalizeShiftReportEditBody(
+        user,
+        channel,
+        message,
+        dto.body,
+      );
+
+      if (nextBody !== message.body) {
+        updateData.body = nextBody;
+        bodyChanged = true;
+      }
+    }
+
+    const hasUpdates = Object.keys(updateData).length > 0;
+
+    if (!hasUpdates) {
+      const current = await this.prisma.staffChatMessage.findUniqueOrThrow({
+        where: { id: message.id },
+        include: messageInclude,
+      });
+
+      return this.toMessageResponse(current, user);
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (bodyChanged && typeof updateData.body === 'string') {
+        await tx.staffChatMessageEdit.create({
+          data: {
+            tenantId,
+            messageId: message.id,
+            actorUserId: user.id,
+            previousBody: message.body,
+            nextBody: updateData.body,
+          },
+        });
+      }
+
+      const result = await tx.staffChatMessage.update({
+        where: { id: message.id },
+        data: updateData,
+        include: messageInclude,
+      });
+
+      await tx.staffChatChannel.updateMany({
+        where: { id: channel.id, tenantId },
+        data: { updatedAt: new Date() },
+      });
+
+      return result;
     });
 
-    return this.toMessageResponse(updated, user.id);
+    return this.toMessageResponse(updated, user);
   }
 
   async markRead(user: AuthenticatedUser, dto: StaffChatReadDto) {
@@ -1679,6 +1759,48 @@ export class StaffTeamChatService {
     return channel;
   }
 
+  private normalizeShiftReportEditBody(
+    user: AuthenticatedUser,
+    channel: { id: string; name: string },
+    message: { authorUserId: string | null; body: string },
+    value: string | null | undefined,
+  ) {
+    if (!this.isShiftReportMessage(channel, message.body)) {
+      throw new BadRequestException('Only shift reports can be edited');
+    }
+
+    if (
+      message.authorUserId !== user.id &&
+      !this.canManageChannels(user.role)
+    ) {
+      throw new BadRequestException('Only the report author can edit it');
+    }
+
+    const rawBody = this.normalizeRequiredString(
+      value,
+      'Report body',
+      STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+    );
+    const shiftId =
+      readShiftReportMessageShiftId(message.body) ??
+      readShiftReportMessageShiftId(rawBody);
+
+    return shiftId
+      ? appendShiftReportMessageMetadata(
+          rawBody,
+          shiftId,
+          STAFF_SHIFT_REPORT_MESSAGE_MAX_LENGTH,
+        )
+      : stripShiftReportMessageMetadata(rawBody);
+  }
+
+  private isShiftReportMessage(channel: { name: string }, body: string) {
+    return (
+      channel.name === STAFF_CHAT_REPORTING_CHANNEL_NAME ||
+      Boolean(readShiftReportMessageShiftId(body))
+    );
+  }
+
   private async normalizeChannelData(
     tenantId: string,
     user: AuthenticatedUser,
@@ -2032,8 +2154,13 @@ export class StaffTeamChatService {
 
   private toMessageResponse(
     message: StaffChatMessageRow,
-    userId: string,
+    user: AuthenticatedUser,
   ): StaffChatMessageResponse {
+    const isShiftReport = this.isShiftReportMessage(
+      message.channel,
+      message.body,
+    );
+
     return {
       id: message.id,
       channelId: message.channelId,
@@ -2041,11 +2168,18 @@ export class StaffTeamChatService {
       kind: message.kind as StaffChatMessageKind,
       priority: message.priority as StaffChatMessagePriority,
       isPinned: message.isPinned,
+      isShiftReport,
+      canEditBody:
+        isShiftReport &&
+        (message.authorUser?.id === user.id ||
+          this.canManageChannels(user.role)),
+      editCount: message._count.editHistory,
+      editedAt: message.editHistory[0]?.createdAt.toISOString() ?? null,
       isReadByMe:
-        message.authorUser?.id === userId ||
-        message.readReceipts.some((receipt) => receipt.userId === userId),
+        message.authorUser?.id === user.id ||
+        message.readReceipts.some((receipt) => receipt.userId === user.id),
       mentionedMe: message.mentions.some(
-        (mention) => mention.mentionedUser.id === userId,
+        (mention) => mention.mentionedUser.id === user.id,
       ),
       createdAt: message.createdAt.toISOString(),
       updatedAt: message.updatedAt.toISOString(),
@@ -2059,6 +2193,13 @@ export class StaffTeamChatService {
         url: `/staff/attachments/${attachment.id}`,
         createdAt: attachment.createdAt.toISOString(),
         uploadedByUser: attachment.uploadedByUser,
+      })),
+      editHistory: message.editHistory.map((event) => ({
+        id: event.id,
+        previousBody: event.previousBody,
+        nextBody: event.nextBody,
+        createdAt: event.createdAt.toISOString(),
+        actorUser: event.actorUser,
       })),
       mentions: message.mentions.map((mention) => mention.mentionedUser),
     };

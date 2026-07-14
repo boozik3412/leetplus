@@ -1558,14 +1558,66 @@ function MessageCard({
   allowTaskDraft?: boolean;
   forceRead?: boolean;
 }) {
+  const router = useRouter();
+  const visibleMessageBody = stripShiftReportMetadata(message.body);
+  const [isReportEditing, setIsReportEditing] = useState(false);
+  const [reportEditBody, setReportEditBody] = useState(visibleMessageBody);
+  const [reportEditError, setReportEditError] = useState<string | null>(null);
+  const [isReportEditSaving, setIsReportEditSaving] = useState(false);
   const isTaskDraftOpen = taskDraft?.messageId === message.id && !compact;
   const isTaskPending = taskPendingMessageId === message.id;
   const authorName =
     message.authorUser?.fullName ?? message.authorUser?.email ?? "LeetPlus";
   const authorInitial = authorName.trim().slice(0, 1).toUpperCase() || "L";
-  const messageContent = parseMessageAction(
-    stripShiftReportMetadata(message.body),
-  );
+  const messageContent = parseMessageAction(visibleMessageBody);
+
+  function startReportEdit() {
+    setReportEditBody(visibleMessageBody);
+    setReportEditError(null);
+    setIsReportEditing(true);
+  }
+
+  function cancelReportEdit() {
+    setReportEditBody(visibleMessageBody);
+    setReportEditError(null);
+    setIsReportEditing(false);
+  }
+
+  async function saveReportEdit() {
+    const nextBody = reportEditBody.trim();
+
+    if (!nextBody) {
+      setReportEditError("Заполните текст отчета перед сохранением.");
+      return;
+    }
+
+    setIsReportEditSaving(true);
+    setReportEditError(null);
+
+    const response = await fetch(
+      `/api/staff/team-chat/messages/${encodeURIComponent(message.id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: reportEditBody }),
+      },
+    );
+
+    setIsReportEditSaving(false);
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as
+        | { message?: string }
+        | null;
+      setReportEditError(
+        payload?.message ?? "Не удалось сохранить корректировку отчета.",
+      );
+      return;
+    }
+
+    setIsReportEditing(false);
+    router.refresh();
+  }
 
   return (
     <article
@@ -1609,9 +1661,26 @@ function MessageCard({
             {formatDateTime(message.createdAt)}
             {message.store ? ` · ${message.store.name}` : ""}
           </p>
+          {message.isShiftReport ? (
+            <p className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <span>Создан: {formatDateTime(message.createdAt)}</span>
+              {message.editedAt ? (
+                <span>Скорректирован: {formatDateTime(message.editedAt)}</span>
+              ) : null}
+            </p>
+          ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {!compact && message.canEditBody ? (
+            <button
+              type="button"
+              onClick={isReportEditing ? cancelReportEdit : startReportEdit}
+              className="rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:bg-emerald-50 hover:text-emerald-700 focus-visible:bg-emerald-50 focus-visible:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/25 dark:text-zinc-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200 dark:focus-visible:bg-emerald-500/10 dark:focus-visible:text-emerald-100"
+            >
+              {isReportEditing ? "Отменить правку" : "Редактировать отчет"}
+            </button>
+          ) : null}
           {!compact && allowTaskDraft ? (
             <button
               type="button"
@@ -1630,14 +1699,91 @@ function MessageCard({
           </button>
         </div>
       </div>
-      <p
-        className={[
-          "whitespace-pre-wrap text-sm leading-6 text-zinc-800 dark:text-zinc-100",
-          compact ? "mt-2 line-clamp-3" : "mt-3 sm:ml-12",
-        ].join(" ")}
-      >
-        {renderMessageBody(messageContent.body, message.mentions)}
-      </p>
+      {isReportEditing ? (
+        <div className={compact ? "mt-2" : "mt-3 sm:ml-12"}>
+          <textarea
+            value={reportEditBody}
+            onChange={(event) => setReportEditBody(event.target.value)}
+            rows={16}
+            className="w-full rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-3 font-mono text-sm leading-6 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-emerald-500/25 dark:bg-emerald-500/10"
+          />
+          {reportEditError ? (
+            <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+              {reportEditError}
+            </p>
+          ) : null}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={saveReportEdit}
+              disabled={isReportEditSaving}
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isReportEditSaving ? "Сохраняем..." : "Сохранить корректировку"}
+            </button>
+            <button
+              type="button"
+              onClick={cancelReportEdit}
+              disabled={isReportEditSaving}
+              className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:text-zinc-100"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p
+          className={[
+            "whitespace-pre-wrap text-sm leading-6 text-zinc-800 dark:text-zinc-100",
+            compact ? "mt-2 line-clamp-3" : "mt-3 sm:ml-12",
+          ].join(" ")}
+        >
+          {renderMessageBody(messageContent.body, message.mentions)}
+        </p>
+      )}
+
+      {!compact && message.isShiftReport && message.editCount > 0 ? (
+        <details className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40 sm:ml-12">
+          <summary className="cursor-pointer list-none font-semibold text-zinc-700 hover:text-emerald-700 dark:text-zinc-200 dark:hover:text-emerald-200">
+            Изменения отчета: {formatNumber(message.editCount)}
+          </summary>
+          <div className="mt-3 space-y-3">
+            {message.editHistory.map((event) => (
+              <div
+                key={event.id}
+                className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+                  {formatDateTime(event.createdAt)} ·{" "}
+                  {event.actorUser?.fullName ??
+                    event.actorUser?.email ??
+                    "пользователь удален"}
+                </p>
+                <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+                      Было
+                    </p>
+                    <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-100 p-3 text-xs leading-5 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">{stripShiftReportMetadata(event.previousBody)}</pre>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+                      Стало
+                    </p>
+                    <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-emerald-50 p-3 text-xs leading-5 text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-100">{stripShiftReportMetadata(event.nextBody)}</pre>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {message.editHistory.length < message.editCount ? (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Показаны последние {formatNumber(message.editHistory.length)} из{" "}
+                {formatNumber(message.editCount)} изменений.
+              </p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
       {message.mentions.length > 0 ? (
         <div

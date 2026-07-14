@@ -54,6 +54,10 @@ export type StaffChatMessage = {
   kind: StaffChatMessageKind;
   priority: StaffChatMessagePriority;
   isPinned: boolean;
+  isShiftReport: boolean;
+  canEditBody: boolean;
+  editCount: number;
+  editedAt: string | null;
   isReadByMe: boolean;
   mentionedMe: boolean;
   createdAt: string;
@@ -61,6 +65,13 @@ export type StaffChatMessage = {
   authorUser: StaffChatUser | null;
   store: StaffChatStore | null;
   attachments: StaffChatAttachment[];
+  editHistory: Array<{
+    id: string;
+    previousBody: string;
+    nextBody: string;
+    createdAt: string;
+    actorUser: StaffChatUser | null;
+  }>;
   mentions: StaffChatUser[];
 };
 

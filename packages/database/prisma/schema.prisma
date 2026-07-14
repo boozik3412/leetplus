@@ -241,6 +241,7 @@ model Tenant {
   staffChatChannelMembers              StaffChatChannelMember[]
   staffChatMessages                    StaffChatMessage[]
   staffChatMessageAttachments          StaffChatMessageAttachment[]
+  staffChatMessageEdits                StaffChatMessageEdit[]
   staffChatMentions                    StaffChatMention[]
   staffChatReadReceipts                StaffChatReadReceipt[]
   staffNotifications                   StaffNotification[]
@@ -347,6 +348,7 @@ model User {
   staffChatChannelMemberships          StaffChatChannelMember[]              @relation("StaffChatChannelMemberUser")
   addedStaffChatChannelMembers         StaffChatChannelMember[]              @relation("StaffChatChannelMemberAddedBy")
   authoredStaffChatMessages            StaffChatMessage[]                    @relation("StaffChatMessageAuthor")
+  staffChatMessageEdits                StaffChatMessageEdit[]                @relation("StaffChatMessageEditActor")
   staffChatMentions                    StaffChatMention[]                    @relation("StaffChatMentionUser")
   staffChatReadReceipts                StaffChatReadReceipt[]
   uploadedStaffAttachments             StaffAttachment[]                     @relation("StaffAttachmentUploadedBy")
@@ -3655,6 +3657,7 @@ model StaffChatMessage {
   authorUser   User?                        @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
   store        Store?                       @relation(fields: [storeId], references: [id], onDelete: SetNull)
   attachments  StaffChatMessageAttachment[]
+  editHistory  StaffChatMessageEdit[]
   mentions     StaffChatMention[]
   readReceipts StaffChatReadReceipt[]
 
@@ -3663,6 +3666,23 @@ model StaffChatMessage {
   @@index([channelId, createdAt], map: "staff_chat_message_channel_created_idx")
   @@index([authorUserId], map: "staff_chat_message_author_idx")
   @@index([storeId], map: "staff_chat_message_store_idx")
+}
+
+model StaffChatMessageEdit {
+  id          String   @id @default(uuid())
+  tenantId    String
+  messageId   String
+  actorUserId String?
+  previousBody String
+  nextBody     String
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  message   StaffChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  actorUser User?            @relation("StaffChatMessageEditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, messageId, createdAt], map: "staff_chat_message_edit_message_idx")
+  @@index([actorUserId], map: "staff_chat_message_edit_actor_idx")
 }
 
 model StaffChatMessageAttachment {

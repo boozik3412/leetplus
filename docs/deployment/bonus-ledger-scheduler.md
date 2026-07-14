@@ -1,5 +1,7 @@
 # Bonus ledger scheduler для геймификации
 
+> Актуальное дополнение от 14.07.2026: этот scheduler отвечает за доставку уже одобренных ledger-наград. Выполнение игровых правил и автоматическое создание наград Battle Pass/заданий выполняет отдельный `GuestGamificationPipelineSchedulerService`, описанный в `guest-gamification-live-rewards.md`.
+
 Этот runbook включает API-side scheduler `GuestBonusLedgerSchedulerService`, который без админского клика вызывает защищенный контур `POST /guests/gamification/scheduled/bonus-ledger/dispatch`. Scheduler работает внутри `leetplus-api.service`, поэтому отдельный systemd unit не нужен.
 
 ## Что делает scheduler
@@ -28,6 +30,25 @@ GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS="true"
 GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG="<tenant-slug>"
 GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES="BONUS,BONUS_POINTS,BONUS_BALANCE,LOYALTY_BONUS"
 ```
+
+## Связь с игровым pipeline
+
+Для автоматического выполнения активных Battle Pass и заданий дополнительно используется API-side scheduler внутри `leetplus-api.service`:
+
+```env
+# Пустое значение: в production scheduler включается автоматически при заданном SYNC_SERVICE_TOKEN.
+GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=""
+GUEST_GAME_PIPELINE_SCHEDULER_INTERVAL_MS="15000"
+GUEST_GAME_PIPELINE_SCHEDULER_LIMIT="30"
+GUEST_GAME_PIPELINE_SCHEDULER_TENANT_ID=""
+GUEST_GAME_PIPELINE_SCHEDULER_TENANT_SLUG=""
+```
+
+- `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED=true|false` явно переопределяет production default.
+- Scheduler запускает `runSnapshotPipelineScheduled`, принимает только подготовленные факты и не допускает параллельных tick-ов.
+- При обработке используются только активные правила. Черновик с совпадающими условиями не должен подавлять активное правило.
+- Для scheduler и `APP_OPEN` включен `suppressLootBoxRewards`: лутбокс может стать доступным, но приз выбирается и выдается только после ручного открытия гостем.
+- После создания одобренной автоматической награды `queueAndDispatchApprovedReward` передает ее в существующий ledger dispatcher. Безопасность доставки по-прежнему регулируют `LANGAME_BONUS_ACCRUAL_*` и этот runbook.
 
 `LANGAME_BONUS_ACCRUAL_ENABLED=false` оставляет Langame write выключенным даже при запущенном scheduler. Для денежного баланса (`type=balance`) reward types включаются отдельно после тестов и согласования экономики.
 

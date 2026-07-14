@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-26
+Last updated: 2026-07-14
 
 ## Current Workflow
 
@@ -26,10 +26,16 @@ Last updated: 2026-06-26
 
 ## Latest Gamification State
 
-- Guest Game Hub pilot readiness no longer treats a checked-empty `guests/logs` endpoint as a pilot stop-blocker after a successful foundation sync returned 0 rows. It remains a visible diagnostic warning for rules that depend on `guests/logs`, while the first-bonus path should use rules without that dependency until Langame payload is confirmed.
-- Guest Game Hub now gives the VDS `bot-consumer` a concrete tenant-scope hint based on the current tenant slug, and the static tariff snapshot block links directly to the matching `/sync` endpoint profile/snapshot workflow.
-- The technical Langame bonus ledger warning in `/guests/gamification` is platform-admin only; club roles should work with the business controls without seeing backend-mode details.
-- Guest Game staff/test separation is active in code: OTP/call/Telegram game login marks profiles whose phone matches tenant staff or Langame staff. Automatic bonus accrual is now allowed for every person by default, including staff/test profiles; the marker remains audit-only and reward evidence, ledger metadata, and Langame audit payload preserve `staffTestReason` plus the override flag. Setting `GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED=false` temporarily restores the old staff/test cancellation guard.
+- Current authoritative guide: `docs/deployment/guest-gamification-live-rewards.md`. It describes the live event pipeline, automatic rewards, UI refresh and production diagnostics.
+- The public guest game uses `/game` (compatibility alias `/play/game`), authorization `/game/auth`, club selection `/game/clubs`, reward history `/game/rewards`, and the common summary `GET /guest-portal/session/game-summary`.
+- `POST /guest-portal/session/app-open` evaluates active `APP_OPEN` rules, returns `previousSummary`, and suppresses lootbox rewards. This makes Battle Pass/task completion visible without silently opening a lootbox.
+- Battle Pass and задания are automatic: a completed eligible rule creates and dispatches its approved reward without an extra guest action. The API-side `GuestGamificationPipelineSchedulerService` checks fresh snapshot facts every 15 seconds by default. It is enabled in production when `SYNC_SERVICE_TOKEN` is present unless `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED` explicitly overrides it.
+- Lootboxes remain intentional guest actions: the pipeline may create eligibility/entitlement, but the prize is selected and issued only through the guest's `open` action. A fulfilled time, day or session condition must not be re-evaluated as a reason to remove an already granted entitlement.
+- `/game` polls game summary every 15 seconds and compares it with the previous state. New check-in, task and Battle Pass completions are shown as a sequential modal queue so several rewards from one refresh are not lost.
+- Check-in is separate from задания and limited to one check-in per club per local calendar day. Successful, already-counted and error outcomes use modal dialogs, not transient tooltips.
+- Session payment conditions are intentionally coarse while Langame does not expose a stable structured tariff discriminator: `HOURLY` versus `PACKAGE_OR_SUBSCRIPTION` ("пакет или абонемент"). Langame guest-log text and activity-ledger facts are used as a second source for diagnosing package/subscription usage.
+- The extended editor controls rule conditions and activation. Activating an item for clubs puts it into the current guest configuration immediately; the visual editor keeps its own publish step only for layout and appearance. Deleting an item used by clubs requires an explicit warning and removes the active placement everywhere after confirmation.
+- Guest game diagnostics are available in `/guests/gamification`: rule decisions, activity ledger facts, source freshness and reward history. Never put raw phones, tokens, Langame credentials or VDS credentials in project documentation.
 
 ## Product Context
 

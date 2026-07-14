@@ -2934,7 +2934,18 @@ function BattlePassSeasonRewardsModal({
                       className="lp-battlepass-season-range-row is-guaranteed"
                     >
                       <strong>{reward.label}</strong>
-                      <b>{formatGuaranteedSeasonRewardValue(reward.quantity)}</b>
+                      <span
+                        className="lp-battlepass-season-guaranteed-mark"
+                        aria-label={
+                          reward.quantity > 1
+                            ? `Гарантированная награда в количестве ${formatNumber(reward.quantity)}`
+                            : "Гарантированная награда"
+                        }
+                      >
+                        {reward.quantity > 1
+                          ? `+ ×${formatNumber(reward.quantity)}`
+                          : "+"}
+                      </span>
                       <i aria-hidden="true" />
                       <b className="is-empty">—</b>
                     </div>
@@ -2986,12 +2997,6 @@ function BattlePassSeasonRewardsModal({
 
 function formatSeasonRewardValue(value: number, unit: string) {
   return `${formatNumber(value)} ${unit}`.trim();
-}
-
-function formatGuaranteedSeasonRewardValue(quantity: number) {
-  return quantity > 1
-    ? `Гарантировано ×${formatNumber(quantity)}`
-    : "Гарантировано";
 }
 
 function BattlePassLevelCompletionModal({
@@ -9781,7 +9786,6 @@ const clubHomeCss = `
 
 .lp-battlepass-season-range-list {
   display: grid;
-  border-top: 1px solid rgba(196, 224, 225, 0.12);
 }
 
 .lp-battlepass-season-range-header,
@@ -9794,12 +9798,8 @@ const clubHomeCss = `
 
 .lp-battlepass-season-range-header {
   color: var(--muted);
-  border-top: 1px solid rgba(196, 224, 225, 0.12);
-  padding: 0 0 10px;
-}
-
-.lp-battlepass-season-range-header + .lp-battlepass-season-range-list {
-  border-top: 0;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
+  padding: 0 0 12px;
 }
 
 .lp-battlepass-season-range-header > span:not(:first-child) {
@@ -9807,7 +9807,7 @@ const clubHomeCss = `
   font-weight: 840;
   letter-spacing: 0;
   line-height: 1;
-  text-align: right;
+  text-align: center;
   text-transform: uppercase;
 }
 
@@ -9830,7 +9830,7 @@ const clubHomeCss = `
   color: var(--cyan);
   font-size: 16px;
   font-weight: 880;
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -9843,6 +9843,25 @@ const clubHomeCss = `
   font-size: 16px;
   font-style: normal;
   text-align: center;
+}
+
+.lp-battlepass-season-guaranteed-mark {
+  display: inline-flex;
+  min-width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  border: 1px solid rgba(131, 228, 236, 0.38);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+  box-shadow: 0 0 18px rgba(131, 228, 236, 0.1);
+  font-size: 16px;
+  font-weight: 880;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .lp-battlepass-season-fixed-list,
@@ -13924,6 +13943,10 @@ const clubHomeCss = `
   .lp-battlepass-season-range-header > span:not(:first-child),
   .lp-battlepass-season-range-row > b {
     text-align: left;
+  }
+
+  .lp-battlepass-season-guaranteed-mark {
+    justify-self: start;
   }
 
   .lp-battlepass-season-range-row i {

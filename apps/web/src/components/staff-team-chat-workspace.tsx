@@ -1887,7 +1887,7 @@ function MessageCard({
               compressImages
               onUploaded={addReportAttachment}
               className="w-[148px]"
-              buttonClassName="flex aspect-[4/3] w-[148px] flex-col items-center justify-center rounded-lg border border-dashed border-emerald-300 bg-emerald-50/70 text-3xl font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-500 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+              buttonClassName="flex h-[154px] w-[148px] flex-col items-center justify-center rounded-lg border border-dashed border-emerald-300 bg-emerald-50/70 text-3xl font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-500 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
             />
           ) : null}
         </div>

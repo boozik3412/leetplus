@@ -299,7 +299,7 @@ export class StaffChecklistTemplatesService {
         status: this.resolveOne(dto.status, templateStatuses, 'DRAFT'),
         version: 1,
         sections: sections,
-        ...summary,
+        ...this.persistedSummaryData(summary),
       },
       include: templateInclude,
     });
@@ -379,7 +379,10 @@ export class StaffChecklistTemplatesService {
         dto.sections ?? sourceRegulation?.sections ?? this.defaultSections(),
       );
       data.sections = sections;
-      Object.assign(data, this.summarizeSections(sections));
+      Object.assign(
+        data,
+        this.persistedSummaryData(this.summarizeSections(sections)),
+      );
       shouldIncrementVersion = true;
     }
 
@@ -777,6 +780,16 @@ export class StaffChecklistTemplatesService {
       timedItemsCount: items.filter((item) => item.timing.mode !== 'NONE')
         .length,
       scoreTotal: items.reduce((sum, item) => sum + item.score, 0),
+    };
+  }
+
+  private persistedSummaryData(summary: SectionSummary) {
+    return {
+      sectionsCount: summary.sectionsCount,
+      itemsCount: summary.itemsCount,
+      requiredItemsCount: summary.requiredItemsCount,
+      evidenceItemsCount: summary.evidenceItemsCount,
+      scoreTotal: summary.scoreTotal,
     };
   }
 

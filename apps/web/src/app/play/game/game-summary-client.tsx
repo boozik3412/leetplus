@@ -33,11 +33,16 @@ type GameRewardHistoryItem =
 type GameBonusHistoryItem =
   GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
 type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
-type GameMissionHistoryItem = GuestPortalGameSummary["missions"]["history"][number];
+type GameMissionHistoryItem =
+  GuestPortalGameSummary["missions"]["history"][number];
 type GameProgressTimelineItem =
   GuestPortalGameSummary["progress"]["timeline"][number];
 type GameJourneyStep = GuestPortalGameSummary["journey"]["steps"][number];
-type MissionBoardFilter = "AVAILABLE" | "ALMOST_DONE" | "REWARD_PENDING" | "ALL";
+type MissionBoardFilter =
+  | "AVAILABLE"
+  | "ALMOST_DONE"
+  | "REWARD_PENDING"
+  | "ALL";
 type HomeBanner = {
   id: string;
   label: string;
@@ -430,6 +435,8 @@ class EmptySessionError extends Error {}
 
 export function GameSummaryClient() {
   const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
+  const [completionBaseline, setCompletionBaseline] =
+    useState<GuestPortalGameSummary | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState<string | null>(null);
 
@@ -438,13 +445,14 @@ export function GameSummaryClient() {
 
     async function loadInitialSummary() {
       try {
-        const nextSummary = await recordGameAppOpen("WEB");
+        const appOpen = await recordGameAppOpen("WEB");
 
         if (!isActive) {
           return;
         }
 
-        setSummary(nextSummary);
+        setCompletionBaseline(appOpen.previousSummary);
+        setSummary(appOpen.summary);
         setLoadState("ready");
         setMessage(null);
       } catch (error) {
@@ -460,7 +468,9 @@ export function GameSummaryClient() {
         }
 
         setLoadState("error");
-        setMessage(getErrorMessage(error, "Не удалось загрузить игровой экран."));
+        setMessage(
+          getErrorMessage(error, "Не удалось загрузить игровой экран."),
+        );
       }
     }
 
@@ -511,7 +521,7 @@ export function GameSummaryClient() {
 
     const intervalId = window.setInterval(
       () => void refreshVisibleSummary(),
-      120_000,
+      15_000,
     );
 
     window.addEventListener("focus", refreshVisibleSummary);
@@ -558,7 +568,11 @@ export function GameSummaryClient() {
   return (
     <GameShell
       body={
-        <ReadyGameView summary={summary} onSummaryChange={setSummary} />
+        <ReadyGameView
+          summary={summary}
+          completionBaseline={completionBaseline}
+          onSummaryChange={setSummary}
+        />
       }
     />
   );
@@ -574,13 +588,13 @@ export function GameRewardsClient() {
 
     async function loadRewardsSummary() {
       try {
-        const nextSummary = await recordGameAppOpen("WEB");
+        const appOpen = await recordGameAppOpen("WEB");
 
         if (!isActive) {
           return;
         }
 
-        setSummary(nextSummary);
+        setSummary(appOpen.summary);
         setLoadState("ready");
         setMessage(null);
       } catch (error) {
@@ -619,7 +633,9 @@ export function GameRewardsClient() {
         body={
           <EmptySessionView
             title="Журнал наград пока недоступен"
-            message={message ?? "Подтвердите телефон, чтобы увидеть историю наград."}
+            message={
+              message ?? "Подтвердите телефон, чтобы увидеть историю наград."
+            }
           />
         }
       />
@@ -689,22 +705,14 @@ function EmptySessionView({
   return (
     <section className="lp-club-home-static">
       <div className="lp-club-static-card">
-        <p className="lp-club-small-label">
-          Игровой вход
-        </p>
+        <p className="lp-club-small-label">Игровой вход</p>
         <h1 className="lp-club-static-title">{title}</h1>
         <p className="lp-club-static-copy">{message}</p>
         <div className="lp-club-static-actions">
-          <Link
-            href="/play"
-            className="lp-club-primary-link"
-          >
+          <Link href="/play" className="lp-club-primary-link">
             Зарегистрироваться
           </Link>
-          <Link
-            href="/"
-            className="lp-club-ghost-link"
-          >
+          <Link href="/" className="lp-club-ghost-link">
             На главную
           </Link>
         </div>
@@ -715,16 +723,20 @@ function EmptySessionView({
 
 function ReadyGameView({
   summary,
+  completionBaseline,
   onSummaryChange,
 }: {
   summary: GuestPortalGameSummary;
+  completionBaseline: GuestPortalGameSummary | null;
   onSummaryChange: (summary: GuestPortalGameSummary) => void;
 }) {
   const router = useRouter();
   const primaryAction =
     summary.nextActions.find((action) => !isGuestInternalNextAction(action)) ??
     null;
-  const primaryActionHref = primaryAction ? gameActionHref(primaryAction) : null;
+  const primaryActionHref = primaryAction
+    ? gameActionHref(primaryAction)
+    : null;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedLootId, setSelectedLootId] = useState<string | null>(null);
   const [lootboxOverlayCard, setLootboxOverlayCard] =
@@ -738,7 +750,7 @@ function ReadyGameView({
   );
   const lootboxRewardRef = useRef<HTMLButtonElement | null>(null);
   const lootboxOpenRunRef = useRef(0);
-  const latestSummaryRef = useRef(summary);
+  const latestSummaryRef = useRef(completionBaseline ?? summary);
   const seenCompletionDialogKeysRef = useRef(new Set<string>());
   const shellRef = useRef<HTMLDivElement | null>(null);
   const lootBoxesRef = useRef<HTMLElement | null>(null);
@@ -775,7 +787,8 @@ function ReadyGameView({
   ).length;
   const questTotalCount = playerQuests.length;
   const battlePassProgress = clampPercent(
-    summary.battlePass.active?.progressPercent ?? summary.journey.summary.readyPercent,
+    summary.battlePass.active?.progressPercent ??
+      summary.journey.summary.readyPercent,
   );
   const mainRewardLabel =
     summary.battlePass.active?.nextRewardLabel ??
@@ -802,8 +815,7 @@ function ReadyGameView({
     const battleRect = battlePass.getBoundingClientRect();
     const left = Math.min(lootRect.left, battleRect.left) - shellRect.left;
     const top = lootRect.top - shellRect.top;
-    const right =
-      shellRect.right - Math.max(lootRect.right, battleRect.right);
+    const right = shellRect.right - Math.max(lootRect.right, battleRect.right);
     const bottom = shellRect.bottom - battleRect.bottom;
 
     setQuestBoardStyle({
@@ -813,10 +825,6 @@ function ReadyGameView({
       "--quest-board-bottom": `${Math.max(0, Math.round(bottom))}px`,
     });
   }, [setQuestBoardStyle]);
-
-  useEffect(() => {
-    latestSummaryRef.current = summary;
-  }, [summary]);
 
   useEffect(() => {
     if (!toastMessage) {
@@ -934,22 +942,38 @@ function ReadyGameView({
     setToastMessage(message);
   }
 
-  function enqueueCompletionDialogs(items: CompletionDialogQueueItem[]) {
-    const newItems = items.filter(
-      (item) => !seenCompletionDialogKeysRef.current.has(item.key),
-    );
+  const enqueueCompletionDialogs = useCallback(
+    (items: CompletionDialogQueueItem[]) => {
+      const newItems = items.filter(
+        (item) => !seenCompletionDialogKeysRef.current.has(item.key),
+      );
 
-    newItems.forEach((item) => {
-      seenCompletionDialogKeysRef.current.add(item.key);
-    });
+      newItems.forEach((item) => {
+        seenCompletionDialogKeysRef.current.add(item.key);
+      });
 
-    if (newItems.length > 0) {
-      setCompletionDialogQueue((currentQueue) => [
-        ...currentQueue,
-        ...newItems,
-      ]);
+      if (newItems.length > 0) {
+        setCompletionDialogQueue((currentQueue) => [
+          ...currentQueue,
+          ...newItems,
+        ]);
+      }
+    },
+    [setCompletionDialogQueue],
+  );
+
+  useEffect(() => {
+    const previousSummary = latestSummaryRef.current;
+
+    if (previousSummary === summary) {
+      return;
     }
-  }
+
+    const completions = findNewCompletionDialogs(previousSummary, summary);
+
+    latestSummaryRef.current = summary;
+    enqueueCompletionDialogs(completions);
+  }, [enqueueCompletionDialogs, summary]);
 
   function applySummaryWithCompletionDialogs(
     nextSummary: GuestPortalGameSummary,
@@ -1068,7 +1092,8 @@ function ReadyGameView({
       const result = await checkInGameSession();
       const nextSummary = await loadGameSummary();
       const xpDelta = result.checkIn.processResult.summary.appliedXpDelta;
-      const createdRewards = result.checkIn.processResult.summary.createdRewards;
+      const createdRewards =
+        result.checkIn.processResult.summary.createdRewards;
       const details = [
         xpDelta > 0 ? `${formatNumber(xpDelta)} XP` : null,
         createdRewards > 0 ? `${formatNumber(createdRewards)} наград` : null,
@@ -1097,7 +1122,10 @@ function ReadyGameView({
         ]);
       } else {
         enqueueCompletionDialogs([
-          buildCheckInErrorDialog(message, latestSummaryRef.current.generatedAt),
+          buildCheckInErrorDialog(
+            message,
+            latestSummaryRef.current.generatedAt,
+          ),
         ]);
       }
     } finally {
@@ -1257,8 +1285,7 @@ function ReadyGameView({
       ).find((item) => item.id === currentCard.id);
 
       if (!refreshedCard) {
-        const message =
-          "Лутбокс больше не найден в игровом модуле.";
+        const message = "Лутбокс больше не найден в игровом модуле.";
 
         setLootboxOverlayPhase("ready");
         setLootboxOverlayError(message);
@@ -1360,10 +1387,7 @@ function ReadyGameView({
         return;
       }
 
-      const message = getErrorMessage(
-        error,
-        "Лутбокс сейчас недоступен.",
-      );
+      const message = getErrorMessage(error, "Лутбокс сейчас недоступен.");
       setLootboxRoulette(null);
       setLootboxOverlayPhase("ready");
       setLootboxOverlayError(message);
@@ -1490,7 +1514,10 @@ function ReadyGameView({
       "reward-collected",
       roulette
         ? lootboxRouletteEventDetail(roulette, roulette.skipped)
-        : { lootBoxId: lootboxOverlayCard.id, reward: lootboxOverlayCard.description },
+        : {
+            lootBoxId: lootboxOverlayCard.id,
+            reward: lootboxOverlayCard.description,
+          },
     );
     showToast(`Награда отмечена: ${lootboxOverlayCard.description}.`);
   }
@@ -1547,10 +1574,9 @@ function ReadyGameView({
 
           <nav
             id="gameModuleMenu"
-            className={[
-              "lp-club-menu-panel",
-              menuOpen ? "is-open" : "",
-            ].join(" ")}
+            className={["lp-club-menu-panel", menuOpen ? "is-open" : ""].join(
+              " ",
+            )}
             aria-label="Меню игрового модуля"
             hidden={!menuOpen}
           >
@@ -1597,10 +1623,7 @@ function ReadyGameView({
       >
         <div className="lp-club-main-flow">
           <section className="lp-club-stage" aria-label="Главный блок клуба">
-            <HomeBannerGrid
-              banners={homeBanners}
-              onToast={showToast}
-            />
+            <HomeBannerGrid banners={homeBanners} onToast={showToast} />
           </section>
 
           <HomeLootBoxes
@@ -1656,10 +1679,9 @@ function ReadyGameView({
       </div>
 
       <div
-        className={[
-          "lp-club-toast",
-          toastMessage ? "is-visible" : "",
-        ].join(" ")}
+        className={["lp-club-toast", toastMessage ? "is-visible" : ""].join(
+          " ",
+        )}
         role="status"
         aria-live="polite"
       >
@@ -1878,7 +1900,9 @@ function HomeBannerGrid({
               <span>
                 <span className="lp-club-banner-kicker">{banner.label}</span>
                 <span className="lp-club-banner-title">{banner.title}</span>
-                <span className="lp-club-banner-copy">{banner.description}</span>
+                <span className="lp-club-banner-copy">
+                  {banner.description}
+                </span>
               </span>
               <span className="lp-club-banner-tag">{banner.tag}</span>
             </span>
@@ -1951,7 +1975,9 @@ function HomeLootBoxes({
           className="lp-club-icon-badge lp-club-refresh-button"
           onClick={onRefresh}
           disabled={refreshPending}
-          aria-label={refreshPending ? "Обновляем лутбоксы" : "Обновить лутбоксы"}
+          aria-label={
+            refreshPending ? "Обновляем лутбоксы" : "Обновить лутбоксы"
+          }
         >
           <RefreshIcon />
         </button>
@@ -1963,52 +1989,54 @@ function HomeLootBoxes({
             const blockedReason = lootboxCardBlockedTooltip(card);
 
             return (
-          <button
-            key={card.id}
-            type="button"
-            className={[
-              "lootbox-entry",
-              "lp-lootbox-entry",
-              card.active ? "is-active" : "",
-              !card.openable ? "is-disabled" : "",
-            ].join(" ")}
-            aria-haspopup="dialog"
-            aria-controls={card.openable ? "lootboxOverlay" : "lootboxUnavailable"}
-            onClick={() => onSelect(card)}
-          >
-            <span className="lp-lootbox-entry-top">
-              <span>
-                <span className="lp-lootbox-entry-label">
-                  {index === 0 ? "Лутбокс дня" : "Клубный контейнер"}
-                </span>
-                <strong>{card.title}</strong>
-              </span>
-              <span className="lp-lootbox-entry-state-wrap">
-                <span className="lp-lootbox-entry-state">{card.status}</span>
-                {blockedReason ? (
-                  <span className="lp-lootbox-blocker-chip">
-                    почему?
+              <button
+                key={card.id}
+                type="button"
+                className={[
+                  "lootbox-entry",
+                  "lp-lootbox-entry",
+                  card.active ? "is-active" : "",
+                  !card.openable ? "is-disabled" : "",
+                ].join(" ")}
+                aria-haspopup="dialog"
+                aria-controls={
+                  card.openable ? "lootboxOverlay" : "lootboxUnavailable"
+                }
+                onClick={() => onSelect(card)}
+              >
+                <span className="lp-lootbox-entry-top">
+                  <span>
+                    <span className="lp-lootbox-entry-label">
+                      {index === 0 ? "Лутбокс дня" : "Клубный контейнер"}
+                    </span>
+                    <strong>{card.title}</strong>
                   </span>
-                ) : null}
-              </span>
-            </span>
-            <span className="lp-lootbox-entry-art" aria-hidden="true">
-              <Image
-                src={lootboxSkinForRarity(card.caseRarity)}
-                alt=""
-                width={1024}
-                height={1024}
-                sizes="230px"
-                draggable={false}
-              />
-            </span>
-            <span className="lp-lootbox-entry-bottom">
-              <span>{lootboxCardHint(card)}</span>
-              <span className="lp-lootbox-mini-lock" aria-hidden="true">
-                <LockIcon />
-              </span>
-            </span>
-          </button>
+                  <span className="lp-lootbox-entry-state-wrap">
+                    <span className="lp-lootbox-entry-state">
+                      {card.status}
+                    </span>
+                    {blockedReason ? (
+                      <span className="lp-lootbox-blocker-chip">почему?</span>
+                    ) : null}
+                  </span>
+                </span>
+                <span className="lp-lootbox-entry-art" aria-hidden="true">
+                  <Image
+                    src={lootboxSkinForRarity(card.caseRarity)}
+                    alt=""
+                    width={1024}
+                    height={1024}
+                    sizes="230px"
+                    draggable={false}
+                  />
+                </span>
+                <span className="lp-lootbox-entry-bottom">
+                  <span>{lootboxCardHint(card)}</span>
+                  <span className="lp-lootbox-mini-lock" aria-hidden="true">
+                    <LockIcon />
+                  </span>
+                </span>
+              </button>
             );
           })
         ) : (
@@ -2059,7 +2087,9 @@ function LootboxOpeningOverlay({
   const rewardRarity =
     normalizeLootboxRarity(roulette?.rarity ?? card.rewardRarity) ?? "common";
   const rewardRarityLabel =
-    roulette?.rarityLabel ?? card.rewardRarityLabel ?? LOOTBOX_RARITY_LABELS[rewardRarity];
+    roulette?.rarityLabel ??
+    card.rewardRarityLabel ??
+    LOOTBOX_RARITY_LABELS[rewardRarity];
   const caseRarity = normalizeLootboxRarity(card.caseRarity) ?? "common";
   const rarityRevealed = isOpening || isOpen || isCollected;
   const visibleLootboxSkin = lootboxSkinForRarity(caseRarity);
@@ -2079,8 +2109,8 @@ function LootboxOpeningOverlay({
         : isRolling
           ? "Идет рулетка наград"
           : isCharging
-          ? "Контейнер активируется"
-          : "Нажмите на контейнер, чтобы открыть";
+            ? "Контейнер активируется"
+            : "Нажмите на контейнер, чтобы открыть";
   const primaryActionLabel = isCollected
     ? "Готово"
     : isOpen
@@ -2089,7 +2119,7 @@ function LootboxOpeningOverlay({
         ? "Открывается"
         : errorMessage
           ? "Попробовать еще раз"
-        : "Открыть контейнер";
+          : "Открыть контейнер";
   const handlePrimaryAction = isCollected
     ? onClose
     : isOpen
@@ -2130,8 +2160,9 @@ function LootboxOpeningOverlay({
     rouletteTrack.style.transform = `translate3d(${startX}px, 0, 0)`;
 
     animationFrameId = window.requestAnimationFrame(() => {
-      const winningCard =
-        rouletteTrack.querySelector<HTMLElement>('[data-winning="true"]');
+      const winningCard = rouletteTrack.querySelector<HTMLElement>(
+        '[data-winning="true"]',
+      );
 
       if (!winningCard) {
         onRouletteFinishRef.current(false);
@@ -2322,7 +2353,9 @@ function LootboxOpeningOverlay({
                       disabled={!canCollect}
                       tabIndex={canCollect ? 0 : -1}
                       aria-label={
-                        canCollect ? `Забрать награду ${item.reward}` : undefined
+                        canCollect
+                          ? `Забрать награду ${item.reward}`
+                          : undefined
                       }
                       onClick={(event) => {
                         event.stopPropagation();
@@ -2399,13 +2432,19 @@ function LootboxOpeningOverlay({
         </div>
 
         <div className="lp-lootbox-dialog-actions">
-          <button type="button" className="lp-club-ghost-link" onClick={onClose}>
+          <button
+            type="button"
+            className="lp-club-ghost-link"
+            onClick={onClose}
+          >
             Закрыть
           </button>
           <button
             type="button"
             className="lp-club-primary-link"
-            disabled={isOpening || isCharging || isRolling || checkingConditions}
+            disabled={
+              isOpening || isCharging || isRolling || checkingConditions
+            }
             onClick={handlePrimaryAction}
           >
             {primaryActionLabel}
@@ -2463,17 +2502,28 @@ function HomeBattlePass({
     rewards.find((reward) => reward.status === "current") ??
     rewards.find((reward) => reward.status === "ready") ??
     activeReward;
-  const detailReward =
-    detailRewardId
-      ? rewards.find((reward) => reward.id === detailRewardId) ?? null
-      : null;
-  const totalLevels = Math.max(rewards.length, battlePass?.levels.length ?? 0, 1);
+  const detailReward = detailRewardId
+    ? (rewards.find((reward) => reward.id === detailRewardId) ?? null)
+    : null;
+  const totalLevels = Math.max(
+    rewards.length,
+    battlePass?.levels.length ?? 0,
+    1,
+  );
   const currentLevel = Math.min(
     totalLevels,
-    Math.max(0, battlePass?.currentLevel ?? currentReward?.level ?? activeReward?.level ?? 0),
+    Math.max(
+      0,
+      battlePass?.currentLevel ??
+        currentReward?.level ??
+        activeReward?.level ??
+        0,
+    ),
   );
   const levelLineScale =
-    totalLevels > 1 ? clampPercent(((currentLevel - 1) / (totalLevels - 1)) * 100) / 100 : 1;
+    totalLevels > 1
+      ? clampPercent(((currentLevel - 1) / (totalLevels - 1)) * 100) / 100
+      : 1;
   const progressCountLabel = `${formatNumber(currentLevel)} / ${formatNumber(totalLevels)}`;
   const progressQuestLabel = currentReward?.quest
     ? `Сейчас: ${currentReward.quest.title}`
@@ -2501,7 +2551,8 @@ function HomeBattlePass({
     ...trackGridStyle,
     "--battlepass-line-scale": String(levelLineScale),
     "--battlepass-rail-edge": railEdgeOffset,
-  } as CSSProperties & Record<"--battlepass-line-scale" | "--battlepass-rail-edge", string>;
+  } as CSSProperties &
+    Record<"--battlepass-line-scale" | "--battlepass-rail-edge", string>;
 
   useEffect(() => {
     if (!detailReward && !helpOpen && !seasonRewardsOpen) {
@@ -2548,23 +2599,29 @@ function HomeBattlePass({
 
   const focusReward = (reward: BattlePassRewardCard) => {
     setActiveRewardId(reward.id);
-    emitBattlePassEvent("level_focus", battlePassRewardEventDetail(reward, battlePass));
+    emitBattlePassEvent(
+      "level_focus",
+      battlePassRewardEventDetail(reward, battlePass),
+    );
   };
 
-  const clickReward = (
-    reward: BattlePassRewardCard,
-    element: HTMLElement,
-  ) => {
+  const clickReward = (reward: BattlePassRewardCard, element: HTMLElement) => {
     focusReward(reward);
     element.scrollIntoView({
       behavior: "smooth",
       block: "nearest",
       inline: "center",
     });
-    emitBattlePassEvent("reward_click", battlePassRewardEventDetail(reward, battlePass));
+    emitBattlePassEvent(
+      "reward_click",
+      battlePassRewardEventDetail(reward, battlePass),
+    );
 
     if (reward.status === "ready") {
-      emitBattlePassEvent("reward_claim", battlePassRewardEventDetail(reward, battlePass));
+      emitBattlePassEvent(
+        "reward_claim",
+        battlePassRewardEventDetail(reward, battlePass),
+      );
     }
 
     setDetailRewardId(reward.id);
@@ -2640,7 +2697,10 @@ function HomeBattlePass({
         </div>
       </div>
 
-      <div className="lp-club-battlepass-track" aria-label="Очередь наград Battle Pass">
+      <div
+        className="lp-club-battlepass-track"
+        aria-label="Очередь наград Battle Pass"
+      >
         <div
           ref={trackRef}
           className="lp-club-battlepass-track-scroll"
@@ -2666,7 +2726,10 @@ function HomeBattlePass({
               ))}
             </div>
 
-            <div className="lp-club-battlepass-reward-grid" style={trackGridStyle}>
+            <div
+              className="lp-club-battlepass-reward-grid"
+              style={trackGridStyle}
+            >
               {rewards.map((reward) => {
                 const isActive = reward.id === activeReward?.id;
 
@@ -2685,7 +2748,9 @@ function HomeBattlePass({
                     data-rank={reward.rarity}
                     data-status={battlePassRewardStatusLabel(reward.status)}
                     data-reward-id={reward.id}
-                    onClick={(event) => clickReward(reward, event.currentTarget)}
+                    onClick={(event) =>
+                      clickReward(reward, event.currentTarget)
+                    }
                     onFocus={() => focusReward(reward)}
                   >
                     <span className="lp-club-battlepass-reward-media">
@@ -2706,7 +2771,9 @@ function HomeBattlePass({
               </span>
               <span className="lp-club-battlepass-progress-copy">
                 <strong>{progressCountLabel}</strong>
-                {progressQuestLabel ? <small>{progressQuestLabel}</small> : null}
+                {progressQuestLabel ? (
+                  <small>{progressQuestLabel}</small>
+                ) : null}
               </span>
             </div>
           </div>
@@ -2756,24 +2823,24 @@ function CheckInCompletionModal({
   const titleId = completion.error
     ? "checkInErrorTitle"
     : completion.alreadyCounted
-    ? "checkInAlreadyCountedTitle"
-    : "checkInCompleteTitle";
+      ? "checkInAlreadyCountedTitle"
+      : "checkInCompleteTitle";
   const rewardCaption = completion.error
     ? "Причина"
     : completion.alreadyCounted
-    ? completion.rewardLabel
-      ? "Ранее получено"
-      : "Результат"
-    : completion.rewardLabel
-      ? "Вы получили"
-      : "Результат";
+      ? completion.rewardLabel
+        ? "Ранее получено"
+        : "Результат"
+      : completion.rewardLabel
+        ? "Вы получили"
+        : "Результат";
   const rewardValue =
     (completion.error ? completion.note : completion.rewardLabel) ??
     (completion.error
       ? "Проверьте условия чек-ина и попробуйте еще раз."
       : completion.alreadyCounted
-      ? "Повторная награда не начисляется"
-      : "Чекин засчитан");
+        ? "Повторная награда не начисляется"
+        : "Чекин засчитан");
 
   return (
     <div
@@ -2821,8 +2888,8 @@ function CheckInCompletionModal({
             {completion.error
               ? "Проверка чек-ина"
               : completion.alreadyCounted
-              ? "Последний засчитанный чекин"
-              : "Присутствие в клубе засчитано"}
+                ? "Последний засчитанный чекин"
+                : "Присутствие в клубе засчитано"}
           </span>
           <span>{formatDate(completion.receivedAt)}</span>
         </div>
@@ -2851,16 +2918,18 @@ function BattlePassSeasonRewardsModal({
   onClose,
 }: {
   seasonName: string;
-  overview: NonNullable<
-    GuestPortalGameSummary["battlePass"]["active"]
-  >["rewardOverview"] | null;
+  overview:
+    | NonNullable<
+        GuestPortalGameSummary["battlePass"]["active"]
+      >["rewardOverview"]
+    | null;
   onClose: () => void;
 }) {
   const hasRewards = Boolean(
     overview &&
-      (overview.ranges.length ||
-        overview.guaranteed.length ||
-        overview.possible.length),
+    (overview.ranges.length ||
+      overview.guaranteed.length ||
+      overview.possible.length),
   );
   const hasSeasonTotalRows = Boolean(
     overview && (overview.ranges.length || overview.guaranteed.length),
@@ -2891,8 +2960,8 @@ function BattlePassSeasonRewardsModal({
         <span className="lp-quest-complete-kicker">Награды сезона</span>
         <h3 id="battlePassSeasonRewardsTitle">Что можно заработать</h3>
         <p className="lp-battlepass-season-rewards-lead">
-          Полный путь в сезоне {seasonName} открывает все награды ниже.
-          Итог зависит от содержимого сезонных лутбоксов.
+          Полный путь в сезоне {seasonName} открывает все награды ниже. Итог
+          зависит от содержимого сезонных лутбоксов.
         </p>
 
         {hasRewards ? (
@@ -3049,9 +3118,7 @@ function BattlePassLevelCompletionModal({
         <h3 id="battlePassLevelCompleteTitle">Поздравляем!</h3>
         <p className="lp-battlepass-level-complete-lead">
           Вы прошли уровень {formatNumber(completion.completedLevel)} баттлпасса
-          {completion.completedTitle
-            ? ` — «${completion.completedTitle}»`
-            : ""}
+          {completion.completedTitle ? ` — «${completion.completedTitle}»` : ""}
           .
         </p>
 
@@ -3065,16 +3132,20 @@ function BattlePassLevelCompletionModal({
             <div className="lp-battlepass-detail-line is-current">
               <span>Следующий уровень</span>
               <strong>
-                {formatNumber(completion.nextLevel ?? 0)}. {completion.nextTitle}
+                {formatNumber(completion.nextLevel ?? 0)}.{" "}
+                {completion.nextTitle}
               </strong>
               <p>
-                Для прохождения следующего уровня вам необходимо: {completion.nextCondition}
+                Для прохождения следующего уровня вам необходимо:{" "}
+                {completion.nextCondition}
               </p>
             </div>
           ) : (
             <div className="lp-battlepass-detail-line is-current">
               <span>Сезон завершен</span>
-              <strong>Вы прошли весь баттлпасс «{completion.seasonName}».</strong>
+              <strong>
+                Вы прошли весь баттлпасс «{completion.seasonName}».
+              </strong>
               <p>Все доступные уровни этого сезона выполнены.</p>
             </div>
           )}
@@ -3139,7 +3210,8 @@ function BattlePassHelpModal({
         <span className="lp-quest-complete-kicker">Как работает</span>
         <h3 id="battlePassHelpTitle">Баттлпасс клуба</h3>
         <p className="lp-battlepass-detail-season">
-          {seasonName} · шаг {formatNumber(currentLevel)} из {formatNumber(totalLevels)}
+          {seasonName} · шаг {formatNumber(currentLevel)} из{" "}
+          {formatNumber(totalLevels)}
         </p>
 
         <div className="lp-battlepass-detail-progress">
@@ -3165,16 +3237,19 @@ function BattlePassHelpModal({
           <ul className="lp-battlepass-help-list">
             <li>Смотрите карточку с пометкой “Сейчас”.</li>
             <li>Нажмите на этап, чтобы увидеть подробное условие и награду.</li>
-            <li>Когда условие выполнено, прогресс сезона перейдет к следующему этапу.</li>
+            <li>
+              Когда условие выполнено, прогресс сезона перейдет к следующему
+              этапу.
+            </li>
           </ul>
         </div>
 
         <div className="lp-battlepass-detail-block is-current">
           <span>Награды</span>
           <p>
-            Следующая награда: {nextRewardLabel}. Главная награда сезона:
-            {" "}
-            {mainRewardLabel}, открывается на шаге {formatNumber(mainRewardLevel)}.
+            Следующая награда: {nextRewardLabel}. Главная награда сезона:{" "}
+            {mainRewardLabel}, открывается на шаге{" "}
+            {formatNumber(mainRewardLevel)}.
           </p>
         </div>
 
@@ -3185,7 +3260,11 @@ function BattlePassHelpModal({
           </p>
         ) : null}
 
-        <button type="button" className="lp-quest-complete-action" onClick={onClose}>
+        <button
+          type="button"
+          className="lp-quest-complete-action"
+          onClick={onClose}
+        >
           Понятно
         </button>
       </div>
@@ -3215,9 +3294,13 @@ function BattlePassQuestModal({
     mission?.questSteps.find((step) => step.current) ??
     mission?.questSteps.find((step) => !step.completed) ??
     null;
-  const statusLabel = quest?.status ?? battlePassRewardStatusLabel(reward.status);
+  const statusLabel =
+    quest?.status ?? battlePassRewardStatusLabel(reward.status);
   const condition = stripBattlePassDetailPrefix(
-    quest?.condition ?? reward.condition ?? reward.description ?? reward.subtitle,
+    quest?.condition ??
+      reward.condition ??
+      reward.description ??
+      reward.subtitle,
     "Условие",
   );
   const plannedReward = stripBattlePassDetailPrefix(
@@ -3315,7 +3398,10 @@ function BattlePassQuestModal({
         ) : reward.status === "claimed" ? (
           <div className="lp-battlepass-received-card">
             <span>Полученная награда</span>
-            <p>Награда уже засчитана, но детальный результат не найден в текущем кошельке.</p>
+            <p>
+              Награда уже засчитана, но детальный результат не найден в текущем
+              кошельке.
+            </p>
           </div>
         ) : null}
 
@@ -3354,7 +3440,9 @@ function BattlePassReceivedRewardCard({
 }) {
   const rarityLabel = lootboxRewardRarityLabel(reward);
   const readyCode =
-    reward.walletState === "READY" ? reward.rewardCode ?? reward.claimPayload : null;
+    reward.walletState === "READY"
+      ? (reward.rewardCode ?? reward.claimPayload)
+      : null;
 
   return (
     <div className="lp-battlepass-received-card">
@@ -3365,7 +3453,9 @@ function BattlePassReceivedRewardCard({
       </p>
       {rarityLabel ? <small>{rarityLabel}</small> : null}
       {reward.rewardDropChance !== null ? (
-        <small>Шанс выпадения: {formatRewardChance(reward.rewardDropChance)}</small>
+        <small>
+          Шанс выпадения: {formatRewardChance(reward.rewardDropChance)}
+        </small>
       ) : null}
       {readyCode ? <em>Код кассиру: {readyCode}</em> : null}
       <small>{walletStateHint(reward.walletState)}</small>
@@ -3446,7 +3536,11 @@ function findBattlePassQuestReward(
   const quest = reward.quest;
 
   if (!quest) {
-    return findLatestRewardBySource(summary.rewards.recent, "BATTLE_PASS", reward.id);
+    return findLatestRewardBySource(
+      summary.rewards.recent,
+      "BATTLE_PASS",
+      reward.id,
+    );
   }
 
   if (quest.sourceKind !== "mission") {
@@ -3481,7 +3575,9 @@ function findLatestRewardBySource(
 ) {
   return (
     rewards
-      .filter((item) => item.sourceKind === sourceKind && item.sourceId === sourceId)
+      .filter(
+        (item) => item.sourceKind === sourceKind && item.sourceId === sourceId,
+      )
       .sort(compareRewardsByQualifiedAtDesc)[0] ?? null
   );
 }
@@ -3559,9 +3655,17 @@ function battlePassRewardLooksLikeLootBox(
   reward: BattlePassRewardCard,
   actualReward: GameRewardHistoryItem | null,
 ) {
-  return [reward.type, reward.title, reward.rewardValue, reward.quest?.reward, actualReward?.rewardLabel]
+  return [
+    reward.type,
+    reward.title,
+    reward.rewardValue,
+    reward.quest?.reward,
+    actualReward?.rewardLabel,
+  ]
     .filter(Boolean)
-    .some((value) => /lootbox|case|кейс|лутбокс|контейнер/i.test(String(value)));
+    .some((value) =>
+      /lootbox|case|кейс|лутбокс|контейнер/i.test(String(value)),
+    );
 }
 
 function normalizeRewardLookupText(value: string | null | undefined) {
@@ -3605,7 +3709,8 @@ function BattlePassRewardMedia({ reward }: { reward: BattlePassRewardCard }) {
     );
   }
 
-  const tokenLabel = reward.rewardValue ?? battlePassRewardTypeLabel(reward.type);
+  const tokenLabel =
+    reward.rewardValue ?? battlePassRewardTypeLabel(reward.type);
   const tokenDensity = battlePassTokenDensity(tokenLabel);
 
   return (
@@ -3641,7 +3746,9 @@ function battlePassRewardFromLevel(
   const orderedLevels = [...battlePass.levels].sort(
     (left, right) => left.level - right.level,
   );
-  const levelIndex = orderedLevels.findIndex((item) => item.level === level.level);
+  const levelIndex = orderedLevels.findIndex(
+    (item) => item.level === level.level,
+  );
   const previousLevel = levelIndex > 0 ? orderedLevels[levelIndex - 1] : null;
   const rewardLabel =
     level.freeReward ??
@@ -3656,7 +3763,10 @@ function battlePassRewardFromLevel(
     id: `${battlePass.id}:${level.level}`,
     level: level.level,
     title: battlePassRewardTitle(title, type),
-    subtitle: level.condition ?? level.description ?? battlePassRewardSubtitle(level, type),
+    subtitle:
+      level.condition ??
+      level.description ??
+      battlePassRewardSubtitle(level, type),
     condition: level.condition,
     description: level.description,
     plannedReward: rewardLabel,
@@ -3699,7 +3809,9 @@ function battlePassRewardFromQuest(
   };
 }
 
-function battlePassRewardStatus(level: HomeBattlePassLevel): BattlePassRewardStatus {
+function battlePassRewardStatus(
+  level: HomeBattlePassLevel,
+): BattlePassRewardStatus {
   if (level.reached) {
     return "claimed";
   }
@@ -3950,7 +4062,9 @@ function PlayerProfilePanel({
     checkInSummary?.description ??
     "Зафиксируйте присутствие в выбранном клубе.";
   const [nicknameEditing, setNicknameEditing] = useState(false);
-  const [nicknameDraft, setNicknameDraft] = useState(summary.profile.displayName);
+  const [nicknameDraft, setNicknameDraft] = useState(
+    summary.profile.displayName,
+  );
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const levelProgress = buildPlayerLevelProgress(summary.profile);
   const phoneMasked = formatPlayerPhoneMasked(summary.profile.contactMasked);
@@ -4014,14 +4128,25 @@ function PlayerProfilePanel({
   }
 
   return (
-    <aside id="profile" className="lp-club-profile-panel" aria-label="Профиль игрока">
+    <aside
+      id="profile"
+      className="lp-club-profile-panel"
+      aria-label="Профиль игрока"
+    >
       <div className="lp-club-profile-logo">
         <div
-          className={["lp-club-avatar", profileLogoUrl ? "is-custom-logo" : ""].join(" ")}
+          className={[
+            "lp-club-avatar",
+            profileLogoUrl ? "is-custom-logo" : "",
+          ].join(" ")}
           title={profileLogoUrl ? profileLogoTitle : undefined}
           aria-hidden="true"
         >
-          {profileLogoUrl ? <img src={profileLogoUrl} alt="" /> : <ProfileIcon />}
+          {profileLogoUrl ? (
+            <img src={profileLogoUrl} alt="" />
+          ) : (
+            <ProfileIcon />
+          )}
         </div>
         <div className="lp-club-profile-copy">
           {nicknameEditing ? (
@@ -4081,9 +4206,7 @@ function PlayerProfilePanel({
             {formatNumber(levelProgress.current)} /{" "}
             {formatNumber(levelProgress.required)} XP
           </span>
-          <span>
-            до следующего {formatNumber(levelProgress.remaining)} XP
-          </span>
+          <span>до следующего {formatNumber(levelProgress.remaining)} XP</span>
         </div>
       </div>
 
@@ -4134,7 +4257,8 @@ function PlayerProfilePanel({
           </span>
           <span className="lp-club-quest-widget-actions">
             <span className="lp-club-quest-count">
-              {formatNumber(completedQuestCount)} / {formatNumber(questTotalCount)}
+              {formatNumber(completedQuestCount)} /{" "}
+              {formatNumber(questTotalCount)}
             </span>
             <button
               id="questToggle"
@@ -4189,7 +4313,9 @@ function PlayerProfilePanel({
                       </span>
                     ) : null}
                   </span>
-                  <span className="lp-club-side-quest-state">{quest.label}</span>
+                  <span className="lp-club-side-quest-state">
+                    {quest.label}
+                  </span>
                   {isExpanded ? (
                     <span
                       id={`side-quest-details-${quest.id}`}
@@ -4222,9 +4348,7 @@ function PlayerProfilePanel({
               );
             })
           ) : (
-            <p className="lp-club-quest-empty">
-              Пока нет доступных заданий.
-            </p>
+            <p className="lp-club-quest-empty">Пока нет доступных заданий.</p>
           )}
         </div>
       </section>
@@ -4265,7 +4389,8 @@ function QuestBoard({
           <span className="lp-club-small-label">Квесты</span>
           <h2>Экран задач</h2>
           <p>
-            {formatNumber(quests.length)} задач клуба, сгруппированных по состоянию.
+            {formatNumber(quests.length)} задач клуба, сгруппированных по
+            состоянию.
           </p>
         </div>
         <button
@@ -4329,7 +4454,9 @@ function QuestBoard({
                       </span>
                     ) : null}
                   </span>
-                  <span className="lp-club-quest-full-state">{quest.label}</span>
+                  <span className="lp-club-quest-full-state">
+                    {quest.label}
+                  </span>
                 </button>
               ))
             ) : (
@@ -4414,7 +4541,9 @@ function buildHomeBanners(
       description:
         featuredMission?.rewardLabel ??
         "Соберите стак и получите очки ранга за участие.",
-      tag: featuredMission ? `${formatNumber(featuredMission.xpReward)} XP` : "регистрация",
+      tag: featuredMission
+        ? `${formatNumber(featuredMission.xpReward)} XP`
+        : "регистрация",
       href: "#missions",
     },
     {
@@ -4607,7 +4736,9 @@ function lootBoxUnlockHint(
 }
 
 function lootBoxGuestRequirementLines(card: HomeLootCard) {
-  const lines = [guestActionRequirementLabel(card.triggerKind, card.sessionType)];
+  const lines = [
+    guestActionRequirementLabel(card.triggerKind, card.sessionType),
+  ];
   const scheduleRequirement = lootBoxScheduleRequirement(card.schedule);
 
   if (scheduleRequirement) {
@@ -5001,8 +5132,7 @@ function buildCheckInCompletionDialog(
   }
 
   const uniqueRewardLabels = [...new Set(rewardLabels)];
-  const occurredAt =
-    processResult.event.occurredAt || result.checkIn.checkedAt;
+  const occurredAt = processResult.event.occurredAt || result.checkIn.checkedAt;
 
   return {
     key: alreadyCounted
@@ -5014,9 +5144,7 @@ function buildCheckInCompletionDialog(
       id: processResult.event.id,
       alreadyCounted,
       rewardLabel:
-        uniqueRewardLabels.length > 0
-          ? uniqueRewardLabels.join(" + ")
-          : null,
+        uniqueRewardLabels.length > 0 ? uniqueRewardLabels.join(" + ") : null,
       receivedAt: occurredAt,
       error: false,
       note: null,
@@ -5118,10 +5246,7 @@ function findNewCompletionDialogs(
     }),
   );
 
-  return sortCompletionDialogs([
-    ...questCompletions,
-    ...battlePassCompletions,
-  ]);
+  return sortCompletionDialogs([...questCompletions, ...battlePassCompletions]);
 }
 
 function sortCompletionDialogs(items: CompletionDialogQueueItem[]) {
@@ -5163,9 +5288,10 @@ function findNewQuestCompletions(
   nextSummary: GuestPortalGameSummary,
 ): QuestCompletionDialog[] {
   const previousMissions = new Map(
-    [...previousSummary.missions.featured, ...previousSummary.missions.history].map(
-      (mission) => [mission.id, mission],
-    ),
+    [
+      ...previousSummary.missions.featured,
+      ...previousSummary.missions.history,
+    ].map((mission) => [mission.id, mission]),
   );
   const seen = new Set<string>();
   const nextMissions = [
@@ -5254,7 +5380,9 @@ function findNewBattlePassLevelCompletions(
   });
 }
 
-function isMissionCompletedForDialog(mission: GameMission | GameMissionHistoryItem) {
+function isMissionCompletedForDialog(
+  mission: GameMission | GameMissionHistoryItem,
+) {
   return (
     mission.progressPercent >= 100 ||
     mission.rewardStatus.state === "COMPLETED" ||
@@ -5347,9 +5475,7 @@ function playerQuestStatusLabel(status: QuestStatus) {
   return labels[status];
 }
 
-function playerQuestProgress(
-  mission: GameMission,
-): PlayerQuest["progress"] {
+function playerQuestProgress(mission: GameMission): PlayerQuest["progress"] {
   const lastStep = mission.questSteps[mission.questSteps.length - 1] ?? null;
   const total = Math.max(1, mission.progressTarget ?? lastStep?.target ?? 1);
   const current = Math.min(total, Math.max(0, mission.progressCurrent));
@@ -5463,7 +5589,9 @@ function missionBattlePassReward(mission: GameMission) {
   return "Награда: прогресс сезона.";
 }
 
-function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest[] {
+function buildHomeBattleQuests(
+  summary: GuestPortalGameSummary,
+): HomeBattleQuest[] {
   const journeyQuests = summary.journey.steps
     .filter((step) => !isGuestInternalJourneyStep(step))
     .map((step) => ({
@@ -5518,9 +5646,12 @@ function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest
   ];
 
   const quests = [...journeyQuests, ...missionQuests, ...fallback].slice(0, 6);
-  const firstOpenIndex = quests.findIndex((quest) => quest.state !== "complete");
+  const firstOpenIndex = quests.findIndex(
+    (quest) => quest.state !== "complete",
+  );
   const currentIndex = quests.findIndex((quest) => quest.state === "current");
-  const resolvedCurrentIndex = currentIndex >= 0 ? currentIndex : Math.max(0, firstOpenIndex);
+  const resolvedCurrentIndex =
+    currentIndex >= 0 ? currentIndex : Math.max(0, firstOpenIndex);
 
   return quests.map((quest, index) => {
     const state =
@@ -5541,7 +5672,12 @@ function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest
     return {
       ...quest,
       state,
-      label: state === "current" ? "текущая задача" : state === "complete" ? "готово" : quest.label,
+      label:
+        state === "current"
+          ? "текущая задача"
+          : state === "complete"
+            ? "готово"
+            : quest.label,
       step: String(index + 1).padStart(2, "0"),
       status,
       condition,
@@ -5587,7 +5723,10 @@ function homeBattlePassStatusLabel(state: HomeBattleQuest["state"]) {
 }
 
 function homeBattlePassPreview(condition: string) {
-  return condition.replace(/^Условие:\s*/i, "").replace(/\s+/g, " ").slice(0, 118);
+  return condition
+    .replace(/^Условие:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 118);
 }
 function isGuestInternalJourneyStep(step: GameJourneyStep) {
   return step.id === "LANGAME" || step.id === "BONUS";
@@ -5681,7 +5820,12 @@ function BrandMark({
 
 function MenuIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M4 7h16" />
       <path d="M4 12h16" />
       <path d="M4 17h16" />
@@ -5691,7 +5835,12 @@ function MenuIcon() {
 
 function ClubIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M4 9h16" />
       <path d="M6 9v10h12V9" />
       <path d="M8 9V6a4 4 0 0 1 8 0v3" />
@@ -5701,7 +5850,12 @@ function ClubIcon() {
 
 function RefreshIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M20 11a8 8 0 0 0-14.4-4.8L4 8" />
       <path d="M4 4v4h4" />
       <path d="M4 13a8 8 0 0 0 14.4 4.8L20 16" />
@@ -5712,7 +5866,12 @@ function RefreshIcon() {
 
 function LockIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M7 10V8a5 5 0 0 1 10 0v2" />
       <path d="M6 10h12v10H6z" />
       <path d="M12 14v2" />
@@ -5722,7 +5881,12 @@ function LockIcon() {
 
 function ProfileIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M12 3 4.5 7.4v8.8L12 21l7.5-4.8V7.4L12 3Z" />
       <path d="M9 12.2 11.2 14 15.4 9.6" />
     </svg>
@@ -5748,7 +5912,12 @@ function PencilIcon() {
 
 function CheckIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="m5 12 4 4L19 6" />
     </svg>
   );
@@ -5756,7 +5925,12 @@ function CheckIcon() {
 
 function QuestIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M4 7h16v10H4z" />
       <path d="M8 7v10" />
       <path d="M16 7v10" />
@@ -5766,7 +5940,12 @@ function QuestIcon() {
 
 function ExitIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M10 6H6v12h4" />
       <path d="M13 8l4 4-4 4" />
       <path d="M8 12h9" />
@@ -5817,7 +5996,9 @@ function ReferralPanel({
     }
   }
 
-  const telegramShareText = referral.shareText.replace(referral.link, "").trim();
+  const telegramShareText = referral.shareText
+    .replace(referral.link, "")
+    .trim();
   const telegramShareHref = `https://t.me/share/url?url=${encodeURIComponent(
     referral.link,
   )}&text=${encodeURIComponent(telegramShareText || referral.shareText)}`;
@@ -5936,7 +6117,10 @@ function JourneyPanel({
   const nextStepLabel = journey.summary.nextStepLabel ?? "маршрут пройден";
 
   return (
-    <section id="journey" className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section
+      id="journey"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
@@ -5966,10 +6150,7 @@ function JourneyPanel({
 
       <ol className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         {journey.steps.map((step, index) => (
-          <li
-            key={step.id}
-            className="min-h-32 border-l border-white/10 pl-3"
-          >
+          <li key={step.id} className="min-h-32 border-l border-white/10 pl-3">
             <div className="flex items-center gap-2">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-950 text-xs font-black text-zinc-300">
                 {index + 1}
@@ -6165,7 +6346,9 @@ function progressTimelineKindLabel(kind: GameProgressTimelineItem["kind"]) {
   return labels[kind];
 }
 
-function progressTimelineStatusLabel(status: GameProgressTimelineItem["status"]) {
+function progressTimelineStatusLabel(
+  status: GameProgressTimelineItem["status"],
+) {
   const labels = {
     DONE: "засчитано",
     READY: "готово",
@@ -6176,7 +6359,9 @@ function progressTimelineStatusLabel(status: GameProgressTimelineItem["status"])
   return labels[status];
 }
 
-function progressTimelineStatusClass(status: GameProgressTimelineItem["status"]) {
+function progressTimelineStatusClass(
+  status: GameProgressTimelineItem["status"],
+) {
   const base = "rounded-full px-2 py-1 text-xs font-black";
 
   switch (status) {
@@ -6216,7 +6401,10 @@ function NextActionsPanel({
 }) {
   if (actions.length === 0) {
     return (
-      <section id="next-actions" className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+      <section
+        id="next-actions"
+        className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+      >
         <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
           План игры
         </p>
@@ -6230,7 +6418,10 @@ function NextActionsPanel({
   }
 
   return (
-    <section id="next-actions" className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section
+      id="next-actions"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
@@ -6281,7 +6472,9 @@ function NextActionsPanel({
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
                     <div
                       className="h-full rounded-full bg-emerald-300"
-                      style={{ width: `${clampPercent(action.progressPercent)}%` }}
+                      style={{
+                        width: `${clampPercent(action.progressPercent)}%`,
+                      }}
                     />
                   </div>
                 </div>
@@ -6335,7 +6528,11 @@ function RewardJournalPanel({
     : summary.store.name;
   const clubOptions = useMemo(
     () => [
-      { id: "all", label: "Итого по всем клубам", scope: "Итого по всем клубам" },
+      {
+        id: "all",
+        label: "Итого по всем клубам",
+        scope: "Итого по всем клубам",
+      },
       { id: currentClubId, label: summary.store.name, scope: currentClubScope },
     ],
     [currentClubId, currentClubScope, summary.store.name],
@@ -6385,7 +6582,9 @@ function RewardJournalPanel({
     clubOptions.find((option) => option.id === activeClub)?.scope ??
     "Итого по всем клубам";
   const collectionTarget = Math.max(12, collection.length);
-  const collectionPercent = clampPercent((collection.length / collectionTarget) * 100);
+  const collectionPercent = clampPercent(
+    (collection.length / collectionTarget) * 100,
+  );
   const activeFilterLabel = rewardHistoryActiveFilterLabel({
     activeClub,
     clubName: summary.store.name,
@@ -6517,18 +6716,27 @@ function RewardJournalPanel({
         )}
       </section>
 
-      <div className="lp-reward-command" aria-label="Управление журналом наград">
+      <div
+        className="lp-reward-command"
+        aria-label="Управление журналом наград"
+      >
         <div className="lp-reward-group-switch">
-          {(["source", "rarity", "date"] as RewardHistoryGroup[]).map((group) => (
-            <button
-              key={group}
-              type="button"
-              className={activeGroup === group ? "is-active" : ""}
-              onClick={() => setActiveGroup(group)}
-            >
-              {group === "source" ? "Блоки" : group === "rarity" ? "Редкость" : "Дата"}
-            </button>
-          ))}
+          {(["source", "rarity", "date"] as RewardHistoryGroup[]).map(
+            (group) => (
+              <button
+                key={group}
+                type="button"
+                className={activeGroup === group ? "is-active" : ""}
+                onClick={() => setActiveGroup(group)}
+              >
+                {group === "source"
+                  ? "Блоки"
+                  : group === "rarity"
+                    ? "Редкость"
+                    : "Дата"}
+              </button>
+            ),
+          )}
         </div>
         <label className="lp-reward-search">
           <span className="sr-only">Поиск по наградам</span>
@@ -6680,9 +6888,7 @@ function RewardCollectionCard({ item }: { item: RewardCollectionItem }) {
         <span>{item.value}</span>
       </div>
       <em>
-        {item.count === 1
-          ? "Новая"
-          : `Повтор x${formatNumber(item.count - 1)}`}
+        {item.count === 1 ? "Новая" : `Повтор x${formatNumber(item.count - 1)}`}
       </em>
     </article>
   );
@@ -6707,11 +6913,13 @@ function RewardAchievementCard({
       </span>
       <span className="lp-reward-achievement-main">
         <small>
-          {clubName} / {item.sourceLabel ?? REWARD_HISTORY_SOURCE_LABELS[source]}
+          {clubName} /{" "}
+          {item.sourceLabel ?? REWARD_HISTORY_SOURCE_LABELS[source]}
         </small>
         <strong>{item.rewardLabel}</strong>
         <span>
-          {rewardHistoryDescription(item)} · {walletStateLabel(item.walletState)}
+          {rewardHistoryDescription(item)} ·{" "}
+          {walletStateLabel(item.walletState)}
         </span>
       </span>
       <span className="lp-reward-achievement-meta">
@@ -6737,7 +6945,12 @@ function RewardAchievementCard({
 function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
   if (source === "battlepass") {
     return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        aria-hidden="true"
+      >
         <path d="M6 5h12v14H6z" />
         <path d="M9 9h6" />
         <path d="M9 13h4" />
@@ -6747,7 +6960,12 @@ function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
 
   if (source === "quest") {
     return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        aria-hidden="true"
+      >
         <path d="M5 5h14v14H5z" />
         <path d="m8 12 2.5 2.5L16 9" />
       </svg>
@@ -6756,7 +6974,12 @@ function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
 
   if (source === "promo") {
     return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        aria-hidden="true"
+      >
         <path d="M4 8h16v8H4z" />
         <path d="M8 8v8" />
         <path d="M16 8v8" />
@@ -6765,7 +6988,12 @@ function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
   }
 
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
       <path d="M5 8h14v10H5z" />
       <path d="m7 6 10 0 2 2H5z" />
       <path d="M12 8v10" />
@@ -6827,9 +7055,7 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                   </p>
                   <p className="mt-1 text-sm text-zinc-300">
                     {latestBonus.sourceLabel ?? latestBonus.sourceKind}
-                    {latestBonus.storeName
-                      ? ` · ${latestBonus.storeName}`
-                      : ""}
+                    {latestBonus.storeName ? ` · ${latestBonus.storeName}` : ""}
                   </p>
                 </div>
                 <span
@@ -6850,7 +7076,9 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                     {latestBonus.statusLabel}
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {formatDate(latestBonus.confirmedAt ?? latestBonus.occurredAt)}
+                    {formatDate(
+                      latestBonus.confirmedAt ?? latestBonus.occurredAt,
+                    )}
                   </p>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
@@ -6903,7 +7131,9 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
           <div className="mt-4 rounded-lg border border-white/10 bg-zinc-950/60 p-4">
             <p className="text-xs text-zinc-400">Бонусный баланс</p>
             <p className="mt-1 text-2xl font-black">
-              {bonusBalance !== null ? formatNumber(bonusBalance) : "нет данных"}
+              {bonusBalance !== null
+                ? formatNumber(bonusBalance)
+                : "нет данных"}
             </p>
             <p className="mt-1 text-xs text-zinc-500">
               {summary.loyalty.bonusBalanceSource ?? "ожидаем первый snapshot"}
@@ -6933,7 +7163,7 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                 {recentRewards.map((item) => {
                   const readyCode =
                     item.walletState === "READY"
-                      ? item.rewardCode ?? item.claimPayload
+                      ? (item.rewardCode ?? item.claimPayload)
                       : null;
                   const rarityLabel = lootboxRewardRarityLabel(item);
 
@@ -6948,7 +7178,8 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                             {item.rewardLabel}
                           </p>
                           <p className="mt-1 text-xs text-zinc-500">
-                            {item.sourceLabel ?? rewardSourceKindLabel(item.sourceKind)}
+                            {item.sourceLabel ??
+                              rewardSourceKindLabel(item.sourceKind)}
                             {" · "}
                             {formatDate(item.qualifiedAt)}
                           </p>
@@ -6968,7 +7199,9 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                         </span>
                       </div>
                       <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
-                        <span>{formatNumber(item.rewardAmount)} · {item.rewardType}</span>
+                        <span>
+                          {formatNumber(item.rewardAmount)} · {item.rewardType}
+                        </span>
                         {readyCode ? (
                           <span className="font-black text-emerald-200">
                             код: {readyCode}
@@ -7151,7 +7384,10 @@ function LootBoxesPanel({
                     </p>
                   </div>
                   <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black text-zinc-200">
-                    {gameRuleBadgeLabel(lootBox.triggerKind, lootBox.sessionType)}
+                    {gameRuleBadgeLabel(
+                      lootBox.triggerKind,
+                      lootBox.sessionType,
+                    )}
                   </span>
                 </div>
 
@@ -7323,10 +7559,7 @@ function MissionsPanel({
                     )}/${formatNumber(progressTarget)}${progressUnit}`;
 
               return (
-                <article
-                  key={mission.id}
-                  className={missionCardClass(mission)}
-                >
+                <article key={mission.id} className={missionCardClass(mission)}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h3 className="truncate text-sm font-black">
@@ -7485,11 +7718,7 @@ function MissionHistoryPanel({
   );
 }
 
-function MissionHistoryRow({
-  mission,
-}: {
-  mission: GameMissionHistoryItem;
-}) {
+function MissionHistoryRow({ mission }: { mission: GameMissionHistoryItem }) {
   const progressTarget = mission.progressTarget ?? 1;
   const progressUnit = mission.progressUnit ? ` ${mission.progressUnit}` : "";
   const rewardLabel =
@@ -7512,7 +7741,9 @@ function MissionHistoryRow({
     <div className="grid gap-3 rounded-lg border border-white/10 bg-zinc-950/45 px-3 py-3 lg:grid-cols-[1fr_auto] lg:items-center">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={missionHistoryBadgeClass(mission.rewardStatus.state)}>
+          <span
+            className={missionHistoryBadgeClass(mission.rewardStatus.state)}
+          >
             {mission.rewardStatus.label}
           </span>
           <p className="min-w-0 truncate text-sm font-black text-white">
@@ -7740,7 +7971,9 @@ function MissionRewardStatusCard({
       ? `${formatSignedNumber(status.rewardAmount)} бонусов`
       : null);
   const meta = [
-    status.rewardWalletState ? walletStateLabel(status.rewardWalletState) : null,
+    status.rewardWalletState
+      ? walletStateLabel(status.rewardWalletState)
+      : null,
     status.occurredAt ? formatDate(status.occurredAt) : null,
     status.balanceAfter !== null
       ? `баланс ${formatNumber(status.balanceAfter)}`
@@ -7824,9 +8057,7 @@ function missionRewardStatusTitleClass(
   }
 }
 
-function missionStepStateLabel(
-  step: GameMission["questSteps"][number],
-) {
+function missionStepStateLabel(step: GameMission["questSteps"][number]) {
   if (step.completed) {
     return "готово";
   }
@@ -7834,9 +8065,7 @@ function missionStepStateLabel(
   return step.current ? "сейчас" : "далее";
 }
 
-function formatMissionStepProgress(
-  step: GameMission["questSteps"][number],
-) {
+function formatMissionStepProgress(step: GameMission["questSteps"][number]) {
   return `${formatNumber(step.progressCurrent)} / ${formatNumber(step.target)}`;
 }
 
@@ -7885,9 +8114,7 @@ function BattlePassPanel({
             <Metric
               label="Наград"
               value={formatNumber(battlePass.readyRewards)}
-              note={`${formatNumber(
-                battlePass.waitingApprovalRewards,
-              )} ждут`}
+              note={`${formatNumber(battlePass.waitingApprovalRewards)} ждут`}
             />
           </div>
           {battlePass.levels.length ? (
@@ -7947,7 +8174,11 @@ function BattlePassPanel({
                         </span>
                       </div>
                       <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500">
-                        <span>{level.condition ?? level.description ?? "Условие шага"}</span>
+                        <span>
+                          {level.condition ??
+                            level.description ??
+                            "Условие шага"}
+                        </span>
                         {level.freeReward && level.premiumReward ? (
                           <span>premium: {level.premiumReward}</span>
                         ) : null}
@@ -8116,8 +8347,8 @@ function rewardHistoryCollectionKey(item: GameRewardHistoryItem) {
   const source = rewardHistorySource(item);
   const sourceId =
     source === "lootbox"
-      ? item.sourceId ?? item.sourceLabel ?? item.sourceKind
-      : item.sourceId ?? item.sourceKind;
+      ? (item.sourceId ?? item.sourceLabel ?? item.sourceKind)
+      : (item.sourceId ?? item.sourceKind);
 
   return [item.rewardLabel, rarity, sourceId].join("::");
 }
@@ -8183,7 +8414,9 @@ function buildRewardHistoryTotals(items: GameRewardHistoryItem[]) {
   };
 }
 
-function buildRewardCollection(items: GameRewardHistoryItem[]): RewardCollectionItem[] {
+function buildRewardCollection(
+  items: GameRewardHistoryItem[],
+): RewardCollectionItem[] {
   const collection = new Map<string, RewardCollectionItem>();
 
   for (const item of items) {
@@ -8225,7 +8458,8 @@ function buildRewardCollectionIndex(items: GameRewardHistoryItem[]) {
   const firstByKey = new Map<string, string>();
   const seenByKey = new Map<string, number>();
   const sortedAsc = [...items].sort(
-    (left, right) => Date.parse(left.qualifiedAt) - Date.parse(right.qualifiedAt),
+    (left, right) =>
+      Date.parse(left.qualifiedAt) - Date.parse(right.qualifiedAt),
   );
 
   for (const item of sortedAsc) {
@@ -8402,9 +8636,11 @@ function pluralRewards(count: number) {
 }
 
 function formatRewardChance(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 2,
-  }).format(value) + "%";
+  return (
+    new Intl.NumberFormat("ru-RU", {
+      maximumFractionDigits: 2,
+    }).format(value) + "%"
+  );
 }
 
 function formatRewardHistoryDay(value: string) {
@@ -8436,10 +8672,12 @@ function bonusStatusBadgeClass(status: GameBonusHistoryItem["status"]) {
 
 function bonusStatusHint(status: GameBonusHistoryItem["status"]) {
   const hints = {
-    PENDING: "Начисление уже поставлено в очередь и уйдет в Langame автоматически.",
+    PENDING:
+      "Начисление уже поставлено в очередь и уйдет в Langame автоматически.",
     PROCESSING: "Начисление сейчас отправляется в Langame.",
     CONFIRMED: "Бонус подтвержден Langame и учтен в игровом балансе.",
-    FAILED: "Начисление не потеряно: LeetPlus проверит его повторно или покажет в админке.",
+    FAILED:
+      "Начисление не потеряно: LeetPlus проверит его повторно или покажет в админке.",
     CANCELED: "Начисление отменено до подтверждения в Langame.",
     UNKNOWN: "Статус проверяется, начисление остается в журнале LeetPlus.",
   } satisfies Record<GameBonusHistoryItem["status"], string>;
@@ -8507,11 +8745,7 @@ function walletStateHint(state: GameRewardWalletState) {
   return hints[state];
 }
 
-function ChannelsPanel({
-  summary,
-}: {
-  summary: GuestPortalGameSummary;
-}) {
+function ChannelsPanel({ summary }: { summary: GuestPortalGameSummary }) {
   const communicationsHref = "#communications";
   const hasRewardChannel =
     summary.communications.telegram.readyForRewards ||
@@ -8578,9 +8812,7 @@ function ChannelRow({
       <span
         className={[
           "rounded-full px-2 py-1 text-xs font-black",
-          ready
-            ? "bg-emerald-300 text-zinc-950"
-            : "bg-white/10 text-zinc-300",
+          ready ? "bg-emerald-300 text-zinc-950" : "bg-white/10 text-zinc-300",
         ].join(" ")}
       >
         {ready ? "готов" : "нужно связать"}
@@ -14043,11 +14275,17 @@ async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
 
   if (!response.ok) {
     throw new Error(
-      await readResponseMessage(response, "Не удалось загрузить игровой экран."),
+      await readResponseMessage(
+        response,
+        "Не удалось загрузить игровой экран.",
+      ),
     );
   }
 
-  return ((await response.json()) as { summary: GuestPortalGameSummary }).summary;
+  return (await response.json()) as {
+    previousSummary: GuestPortalGameSummary;
+    summary: GuestPortalGameSummary;
+  };
 }
 
 async function updateGameProfileNickname(displayName: string) {
@@ -14209,10 +14447,12 @@ function buildLootboxRouletteState({
     nextCard,
     `winner-${runId}`,
   );
-  const fallbackRewards = LOOTBOX_ROULETTE_FALLBACK_REWARDS.map((item, index) => ({
-    ...item,
-    id: `fallback-${index}`,
-  }));
+  const fallbackRewards = LOOTBOX_ROULETTE_FALLBACK_REWARDS.map(
+    (item, index) => ({
+      ...item,
+      id: `fallback-${index}`,
+    }),
+  );
   const resultRewards = result.rewards.map((item, index) =>
     lootboxRouletteRewardFromOpenReward(item, nextCard, `result-${index}`),
   );
@@ -14222,7 +14462,9 @@ function buildLootboxRouletteState({
   ]
     .filter((item) => item.sourceKind === "LOOT_BOX")
     .slice(0, 14)
-    .map((item, index) => lootboxRouletteRewardFromHistory(item, `recent-${index}`));
+    .map((item, index) =>
+      lootboxRouletteRewardFromHistory(item, `recent-${index}`),
+    );
   const lootBoxRewards = result.summary.lootBoxes.featured.map((item, index) =>
     lootboxRouletteRewardFromCard(
       {
@@ -14269,7 +14511,11 @@ function buildLootboxRouletteState({
   const fallbackPool = fallbackRewards.filter(
     (item) => !sameLootboxRouletteReward(item, winningReward),
   );
-  const spinPool = pool.length ? pool : fallbackPool.length ? fallbackPool : fallbackRewards;
+  const spinPool = pool.length
+    ? pool
+    : fallbackPool.length
+      ? fallbackPool
+      : fallbackRewards;
   const items: LootboxRouletteReward[] = [];
   const cycleCount = Math.max(7, Math.ceil(44 / Math.max(1, spinPool.length)));
 
@@ -14375,7 +14621,11 @@ function lootboxRouletteRewardFromCard(
   return {
     id,
     reward: card.rewardLabel ?? card.description,
-    caption: lootboxRouletteCaption(rarityLabel, card.rewardDropChance ?? null, card.title),
+    caption: lootboxRouletteCaption(
+      rarityLabel,
+      card.rewardDropChance ?? null,
+      card.title,
+    ),
     rarity,
     rarityLabel,
     dropChance: card.rewardDropChance ?? null,
@@ -14440,7 +14690,9 @@ function lootboxRewardRarityLabel(value: {
 }) {
   const rarity = normalizeLootboxRarity(value.rewardRarity);
 
-  return value.rewardRarityLabel ?? (rarity ? LOOTBOX_RARITY_LABELS[rarity] : null);
+  return (
+    value.rewardRarityLabel ?? (rarity ? LOOTBOX_RARITY_LABELS[rarity] : null)
+  );
 }
 
 function revealLootboxRarity({

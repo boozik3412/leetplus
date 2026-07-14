@@ -1463,7 +1463,7 @@ describe('GuestPortalService', () => {
       );
     });
 
-    it('records app-open without granting lootbox rewards before returning game summary', async () => {
+    it('processes app-open rules without granting lootbox rewards before returning game summary', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-06-21T10:00:00.000Z'));
       const { guestGamificationService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
@@ -1487,7 +1487,21 @@ describe('GuestPortalService', () => {
         id: portal.profile.id,
         guestId: null,
       });
-      guestGamificationService.createEvent.mockResolvedValue({});
+      guestGamificationService.processEvent.mockResolvedValue({
+        processed: true,
+        event: {
+          id: 'event-app-open-1',
+          eventType: 'APP_OPEN',
+          occurredAt: '2026-06-21T10:00:00.000Z',
+        },
+        rewards: [{ id: 'reward-1' }],
+        summary: {
+          appliedXpDelta: 10,
+          createdRewards: 1,
+          queuedRewardAmount: 100,
+          idempotent: false,
+        },
+      });
       prisma.guestGameEvent.count
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
@@ -1498,7 +1512,7 @@ describe('GuestPortalService', () => {
           surface: 'telegram-mini-app',
         });
 
-        expect(guestGamificationService.createEvent).toHaveBeenCalledWith(
+        expect(guestGamificationService.processEvent).toHaveBeenCalledWith(
           expect.objectContaining({
             tenantId: tokenPayload.tenantId,
             tenantSlug: 'leet',
@@ -1506,25 +1520,33 @@ describe('GuestPortalService', () => {
           expect.objectContaining({
             profileId: portal.profile.id,
             guestId: null,
+            storeId: portal.store.id,
             eventType: 'APP_OPEN',
             externalDomain: 'leetplus-guest-portal',
             externalId:
-              'guest-game:GUEST_APP_OPEN:APP_OPEN:profile-1:store-1:2026-06-21',
+              'guest-game:GUEST_APP_OPEN_RULES_V2:APP_OPEN:profile-1:store-1:2026-06-21',
+            activeRulesOnly: true,
+            suppressLootBoxRewards: true,
             note: expect.stringContaining('Telegram Mini App'),
             payload: expect.objectContaining({
               sourceFactId: 'profile-1:store-1:2026-06-21',
-              sourceFactKind: 'GUEST_APP_OPEN',
+              sourceFactKind: 'GUEST_APP_OPEN_RULES_V2',
               storeId: portal.store.id,
             }),
           }),
         );
-        expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
+        expect(guestGamificationService.createEvent).not.toHaveBeenCalled();
         expect(result).toMatchObject({
           processed: true,
           idempotent: false,
-          appliedXpDelta: 0,
-          createdRewards: 0,
-          queuedRewardAmount: 0,
+          appliedXpDelta: 10,
+          createdRewards: 1,
+          queuedRewardAmount: 100,
+          previousSummary: {
+            tenant: portal.tenant,
+            store: portal.store,
+            profile: portal.profile,
+          },
           summary: {
             tenant: portal.tenant,
             store: portal.store,

@@ -114,7 +114,7 @@ const GAME_REFERRAL_EVENT_SOURCE = 'GUEST_PORTAL_REFERRAL';
 const GUEST_GAME_REFERRAL_LOOKUP_LIMIT = 5000;
 const GUEST_GAME_REFERRAL_CODE_PATTERN = /^lp_ref_[A-Za-z0-9_-]{16,64}$/;
 const GAME_APP_OPEN_EVENT_TYPE = 'APP_OPEN';
-const GAME_APP_OPEN_SOURCE_KIND = 'GUEST_APP_OPEN';
+const GAME_APP_OPEN_SOURCE_KIND = 'GUEST_APP_OPEN_RULES_V2';
 const GAME_APP_OPEN_EXTERNAL_DOMAIN = 'leetplus-guest-portal';
 const GAME_LOOT_BOX_OPEN_SOURCE_KIND = 'GUEST_LOOT_BOX_OPEN';
 const GAME_PROFILE_STAFF_TEST_REASON_STAFF_PHONE = 'STAFF_PHONE_MATCH';
@@ -1497,6 +1497,7 @@ export type GuestPortalAppOpenResponse = {
   appliedXpDelta: number;
   createdRewards: number;
   queuedRewardAmount: number;
+  previousSummary: GuestPortalGameSummary;
   portal: GuestPortalPayload;
   summary: GuestPortalGameSummary;
   message: string;
@@ -3782,22 +3783,24 @@ export class GuestPortalService {
       );
     }
 
-    const liveSessionStartResult = await this.processLiveSessionStartForPayload(
-      {
-        ...payload,
-        guestId: guest?.id ?? profile.guestId ?? null,
-        profileId: profile.id,
-      },
-    );
-    this.scheduleGuestActivityLedgerSync(
-      {
-        ...payload,
-        guestId: guest?.id ?? profile.guestId ?? null,
-        profileId: profile.id,
-      },
-      profile.id,
-      'APP_OPEN',
-    );
+    const nextPayload: GuestPortalTokenPayload = {
+      ...payload,
+      guestId: guest?.id ?? profile.guestId ?? null,
+      profileId: profile.id,
+    };
+    const [previousPortal, referralStats] = await Promise.all([
+      this.buildPortalPayload(nextPayload),
+      this.getGameReferralStats(nextPayload.tenantId, profile.id),
+    ]);
+    const previousSummary = buildGameSummaryFromPortal(previousPortal, {
+      referralSecret: this.referralSecret(),
+      webUrl: this.publicWebUrl(),
+      referralStats,
+    });
+
+    const liveSessionStartResult =
+      await this.processLiveSessionStartForPayload(nextPayload);
+    this.scheduleGuestActivityLedgerSync(nextPayload, profile.id, 'APP_OPEN');
 
     const openedAt = new Date();
     const openedDate = openedAt.toISOString().slice(0, 10);
@@ -3818,19 +3821,21 @@ export class GuestPortalService {
       GAME_APP_OPEN_EVENT_TYPE,
       sourceFactId,
     );
-    let idempotent = false;
-
-    try {
-      await this.guestGamificationService.createEvent(actor, {
+    const processResult = await this.guestGamificationService.processEvent(
+      actor,
+      {
         profileId: profile.id,
         guestId: guest?.id ?? profile.guestId ?? null,
+        storeId: context.store.id,
         eventType: GAME_APP_OPEN_EVENT_TYPE,
-        source: 'API_IMPORT',
+        occurredAt: openedAt.toISOString(),
+        sourceFactId,
+        sourceFactKind: GAME_APP_OPEN_SOURCE_KIND,
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: GAME_APP_OPEN_EXTERNAL_DOMAIN,
         externalId: eventExternalId,
-        xpDelta: 0,
-        occurredAt: openedAt.toISOString(),
+        activeRulesOnly: true,
+        suppressLootBoxRewards: true,
         payload: {
           source: 'guest_portal_app_open',
           sourceFactId,
@@ -3842,26 +3847,12 @@ export class GuestPortalService {
           surface === 'TG_MINI_APP'
             ? 'Гость открыл Telegram Mini App LeetPlus Game.'
             : 'Гость открыл игровой модуль LeetPlus.',
-      });
-    } catch (error) {
-      if (!isPrismaUniqueConstraintError(error)) {
-        throw error;
-      }
-
-      idempotent = true;
-    }
-    const nextPayload: GuestPortalTokenPayload = {
-      ...payload,
-      guestId: guest?.id ?? profile.guestId ?? null,
-      profileId: profile.id,
-    };
+      },
+    );
+    const idempotent = processResult.summary.idempotent;
     const portal = await this.buildPortalPayload(nextPayload, {
       liveSessionStartResult,
     });
-    const referralStats = await this.getGameReferralStats(
-      nextPayload.tenantId,
-      portal.profile.id,
-    );
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
@@ -3881,6 +3872,7 @@ export class GuestPortalService {
         surface,
         sourceFactId,
         eventExternalId,
+        appOpen: guestGameDebugProcessResult(processResult),
         liveSession: guestGameDebugProcessResult(liveSessionStartResult),
       },
     });
@@ -3888,9 +3880,10 @@ export class GuestPortalService {
     return {
       processed: true,
       idempotent,
-      appliedXpDelta: 0,
-      createdRewards: 0,
-      queuedRewardAmount: 0,
+      appliedXpDelta: processResult.summary.appliedXpDelta,
+      createdRewards: processResult.summary.createdRewards,
+      queuedRewardAmount: processResult.summary.queuedRewardAmount,
+      previousSummary,
       portal,
       summary,
       message: idempotent
@@ -4974,9 +4967,7 @@ export class GuestPortalService {
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
     };
-    let checkIn: Awaited<
-      ReturnType<GuestGamificationService['checkIn']>
-    >;
+    let checkIn: Awaited<ReturnType<GuestGamificationService['checkIn']>>;
 
     try {
       checkIn = await this.guestGamificationService.checkIn(actor, {
@@ -6445,10 +6436,7 @@ export class GuestPortalService {
         message: 'Telegram bot check-in failed safely.',
         reply: this.telegramWebhookBotMenuReply(
           input.telegramIdentityMasked,
-          telegramBotCheckInFailedText(
-            input.portal,
-            safeCheckInError(error),
-          ),
+          telegramBotCheckInFailedText(input.portal, safeCheckInError(error)),
           undefined,
           {
             clubCallbackToken: input.club.callbackToken ?? null,
@@ -8025,7 +8013,9 @@ export class GuestPortalService {
     const isDaily =
       lootBoxPeriodicLimitPeriod(jsonRecord(limits).periodicLimit) === 'DAILY';
     const timeZone = guestGameTimeZone(storeTimeZone);
-    const localDayStart = isDaily ? guestGameLocalDayStart(now, timeZone) : null;
+    const localDayStart = isDaily
+      ? guestGameLocalDayStart(now, timeZone)
+      : null;
 
     if (isDaily && localDayStart) {
       await this.prisma.guestGameEntitlement.updateMany({
@@ -13884,7 +13874,8 @@ function findLootBoxUnlockEvent(
   const restartedAt = lootBoxRestartedAt(jsonRecord(row.limits));
   const timeZone = guestGameTimeZone(storeTimeZone);
   const isDaily =
-    lootBoxPeriodicLimitPeriod(jsonRecord(row.limits).periodicLimit) === 'DAILY';
+    lootBoxPeriodicLimitPeriod(jsonRecord(row.limits).periodicLimit) ===
+    'DAILY';
   const now = new Date();
   const isInCurrentDailyPeriod = (event: GuestPortalLootBoxUnlockEventRow) =>
     !isDaily || guestGameSameLocalDay(event.occurredAt, now, timeZone);
@@ -16315,7 +16306,9 @@ function buildSeasonRewardOverview(
     const nonNumericPrizes = resolvedPrizes.filter(
       (prize) => seasonRewardRangeMeta(prize.type) === null,
     );
-    const nonNumericTypes = new Set(nonNumericPrizes.map((prize) => prize.type));
+    const nonNumericTypes = new Set(
+      nonNumericPrizes.map((prize) => prize.type),
+    );
     nonNumericTypes.forEach((type) => {
       const labels = nonNumericPrizes
         .filter((prize) => prize.type === type)
@@ -16324,10 +16317,7 @@ function buildSeasonRewardOverview(
     });
   };
 
-  const addReward = (
-    fallbackLabel: string | null,
-    detailsValue: unknown,
-  ) => {
+  const addReward = (fallbackLabel: string | null, detailsValue: unknown) => {
     if (!fallbackLabel) {
       return;
     }
@@ -17139,13 +17129,6 @@ function buildGuestPortalGameExternalId(
   sourceFactId: string,
 ) {
   return ['guest-game', sourceKind, eventType, sourceFactId].join(':');
-}
-
-function isPrismaUniqueConstraintError(error: unknown) {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
-  );
 }
 
 function guestGameTriggerLabel(value: string) {

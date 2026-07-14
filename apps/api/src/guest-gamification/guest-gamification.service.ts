@@ -5716,7 +5716,10 @@ export class GuestGamificationService {
           continue;
         }
 
-        if (nonActiveEligibleRules.length) {
+        if (
+          nonActiveEligibleRules.length &&
+          activeEligibleRules.length === 0
+        ) {
           facts.push({
             ...pipelineFactBase(fact),
             status: 'SKIPPED',
@@ -5730,6 +5733,8 @@ export class GuestGamificationService {
 
         const process = await this.processEvent(user, {
           ...processDto,
+          activeRulesOnly: true,
+          suppressLootBoxRewards: true,
           note: 'Автоматический batch pipeline обработал сохраненный LeetPlus/Langame факт внутри LeetPlus. Запись в Langame не выполнялась.',
         });
 

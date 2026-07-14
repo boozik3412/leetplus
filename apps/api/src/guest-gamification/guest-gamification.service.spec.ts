@@ -7281,6 +7281,58 @@ describe('GuestGamificationService', () => {
         'DUPLICATE',
       ]);
       expect(service.processEvent).toHaveBeenCalledTimes(2);
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          activeRulesOnly: true,
+          suppressLootBoxRewards: true,
+        }),
+      );
+    });
+
+    it('processes active rules when a matching draft rule exists', async () => {
+      const { service } = createService();
+      const activeDryRun = dryRunResult();
+      const mixedDryRun = dryRunResult({
+        rules: [
+          activeDryRun.rules[0],
+          {
+            ...activeDryRun.rules[0],
+            id: 'mission-draft',
+            status: 'DRAFT',
+          },
+        ],
+      });
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: [snapshotFact('fact-active-and-draft')],
+        summary: {
+          sessions: 1,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(mixedDryRun);
+      jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(result.processedFacts).toBe(1);
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'fact-active-and-draft',
+          activeRulesOnly: true,
+          suppressLootBoxRewards: true,
+        }),
+      );
     });
 
     it('processes referral facts that are linked only to a game profile', async () => {

@@ -7,6 +7,7 @@ import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import { GuestActivityLedgerService } from './guest-activity-ledger.service';
 import { GuestActivityLedgerSchedulerService } from './guest-activity-ledger-scheduler.service';
 import { GuestGamificationLogService } from './guest-gamification-log.service';
+import { GuestGamificationPipelineSchedulerService } from './guest-gamification-pipeline-scheduler.service';
 import { GuestGameDataRetentionSchedulerService } from './guest-game-data-retention-scheduler.service';
 import { GuestGameDataRetentionService } from './guest-game-data-retention.service';
 import { GuestGameQualityMonitoringSchedulerService } from './guest-game-quality-monitoring-scheduler.service';
@@ -23,6 +24,7 @@ import { GuestGamificationService } from './guest-gamification.service';
   ],
   providers: [
     GuestGamificationService,
+    GuestGamificationPipelineSchedulerService,
     GuestGamificationLogService,
     GuestActivityLedgerService,
     GuestActivityLedgerSchedulerService,

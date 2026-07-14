@@ -10078,18 +10078,9 @@ const clubHomeCss = `
 }
 
 .lp-battlepass-season-guaranteed-mark {
-  display: inline-flex;
-  min-width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
+  display: block;
   justify-self: center;
-  border: 1px solid rgba(131, 228, 236, 0.38);
-  border-radius: 999px;
-  padding: 0 8px;
   color: var(--cyan);
-  background: rgba(131, 228, 236, 0.08);
-  box-shadow: 0 0 18px rgba(131, 228, 236, 0.1);
   font-size: 16px;
   font-weight: 880;
   line-height: 1;

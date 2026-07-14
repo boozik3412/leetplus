@@ -2344,6 +2344,7 @@ export type GuestGameDryRunRule = {
   battlePassLevel?: number | null;
   battlePassStep?: number | null;
   battlePassStepTitle?: string | null;
+  periodicLimitPeriod?: LootBoxPeriodicLimitPeriod | null;
   reasons: string[];
   blockers: string[];
 };
@@ -2357,7 +2358,7 @@ export type GuestGameDryRunResult = {
     'id' | 'displayName' | 'contactMasked' | 'xp' | 'level' | 'status'
   > | null;
   guest: GuestGameProfile['guest'];
-  store: { id: string; name: string } | null;
+  store: { id: string; name: string; timeZone?: string | null } | null;
   input: {
     sessionType: string | null;
     sessionPacket: boolean | null;
@@ -8924,7 +8925,9 @@ export class GuestGamificationService {
           }
         : null,
       guest,
-      store: store ? { id: store.id, name: store.name } : null,
+      store: store
+        ? { id: store.id, name: store.name, timeZone: store.timeZone }
+        : null,
       input: {
         sessionType,
         sessionPacket,
@@ -9064,6 +9067,7 @@ export class GuestGamificationService {
     const qualifiedAt = Number.isNaN(occurredAt.getTime())
       ? new Date()
       : occurredAt;
+    const timeZone = guestGameTimeZone(dryRun.store?.timeZone ?? null);
     const sourceIdentity =
       nullableId(options.eventId) ??
       [
@@ -9076,11 +9080,27 @@ export class GuestGamificationService {
     try {
       await Promise.all(
         rules.map((rule) => {
-          const idempotencyKey = [
-            'loot-box',
-            rule.id,
-            sourceIdentity || options.evaluationRunId,
-          ].join(':');
+          const periodicLimitPeriod = rule.periodicLimitPeriod ?? null;
+          const isDaily = periodicLimitPeriod === 'DAILY';
+          const entitlementPeriodKey = isDaily
+            ? dryRunLocalDateKey(qualifiedAt, timeZone)
+            : null;
+          const idempotencyKey = isDaily
+            ? [
+                'loot-box',
+                rule.id,
+                'daily',
+                dryRun.profile!.id,
+                entitlementPeriodKey,
+              ].join(':')
+            : [
+                'loot-box',
+                rule.id,
+                sourceIdentity || options.evaluationRunId,
+              ].join(':');
+          const validUntil = isDaily
+            ? dryRunNextLocalDayStart(qualifiedAt, timeZone)
+            : null;
           const evidence = {
             evaluationMode: 'LIVE',
             evaluatorVersion: 'legacy-v1',
@@ -9088,6 +9108,14 @@ export class GuestGamificationService {
             blockers: rule.blockers,
             input: dryRun.input,
             sourceEvidence: options.evidence ?? null,
+            entitlementPeriod: isDaily
+              ? {
+                  kind: 'DAILY',
+                  key: entitlementPeriodKey,
+                  timeZone,
+                  validUntil: validUntil?.toISOString() ?? null,
+                }
+              : null,
           };
 
           return this.prisma.guestGameEntitlement.upsert({
@@ -9114,12 +9142,14 @@ export class GuestGamificationService {
               status: 'AVAILABLE',
               idempotencyKey,
               qualifiedAt,
+              validUntil,
               evidence,
             },
             update: {
               ruleName: rule.name,
               evaluationRunId: options.evaluationRunId,
               traceId: nullableString(options.traceId),
+              validUntil,
               evidence,
             },
           });
@@ -18516,6 +18546,9 @@ function evaluateLootBoxDryRun(
     xpDelta: 0,
     budgetAmount: rule.budgetAmount,
     progress: null,
+    periodicLimitPeriod: lootBoxPeriodicLimitPeriod(
+      dryRunRecord(rule.limits).periodicLimit,
+    ),
     reasons,
     blockers,
   });
@@ -19263,7 +19296,11 @@ function appendDryRunLootBoxLimits(
 
   if (totalPerDay != null) {
     const dayCount = limitRewards.filter((reward) =>
-      dryRunIsSameDay(reward.qualifiedAt, context.occurredAt, context.timeZone),
+      dryRunIsSameDay(
+        reward.qualifiedAt,
+        context.limitOccurredAt,
+        context.timeZone,
+      ),
     ).length;
 
     if (dayCount >= totalPerDay) {
@@ -19283,10 +19320,38 @@ function appendDryRunMissionLimits(
   blockers: string[],
   reasons: string[],
 ) {
+  const antiFraudRules = dryRunRecord(rule.antiFraudRules);
+  const denySameDayRepeat = antiFraudRules.denySameDayRepeat === true;
+  const guestRewards = rewards.filter((reward) =>
+    dryRunRewardMatchesGuest(reward, context),
+  );
+
+  if (denySameDayRepeat) {
+    if (!context.profile && !context.guest) {
+      blockers.push(
+        'Для проверки повтора задания в календарный день выберите профиль или гостя',
+      );
+    } else {
+      const dailyCount = guestRewards.filter((reward) =>
+        dryRunIsSameDay(
+          reward.qualifiedAt,
+          context.limitOccurredAt,
+          context.timeZone,
+        ),
+      ).length;
+
+      if (dailyCount >= 1) {
+        blockers.push(
+          'Задание уже выполнено сегодня. Следующее выполнение будет доступно с начала нового календарного дня клуба.',
+        );
+      } else {
+        reasons.push('Повтор задания в текущий календарный день еще не использован');
+      }
+    }
+  }
+
   if (rule.perGuestLimit != null) {
-    const guestCount = rewards.filter((reward) =>
-      dryRunRewardMatchesGuest(reward, context),
-    ).length;
+    const guestCount = guestRewards.length;
 
     if (!context.profile && !context.guest) {
       blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
@@ -19934,6 +19999,21 @@ function dryRunLocalDateParts(value: Date, timeZone: string) {
   }
 }
 
+function dryRunNextLocalDayStart(value: Date, timeZone: string) {
+  const parts = dryRunLocalDateParts(value, timeZone);
+  const nextDay = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day + 1),
+  );
+  const nextDayLabel = `${nextDay.getUTCFullYear()}-${String(
+    nextDay.getUTCMonth() + 1,
+  ).padStart(2, '0')}-${String(nextDay.getUTCDate()).padStart(2, '0')}`;
+
+  return (
+    parseLangameDate(`${nextDayLabel} 00:00:00`, timeZone) ??
+    new Date(nextDay.getTime())
+  );
+}
+
 function dryRunWeekdayNumber(value: string | undefined) {
   switch (value) {
     case 'Sun':
@@ -20017,7 +20097,7 @@ function dryRunIsWithinLootBoxPeriod(
   timeZone: string,
 ) {
   if (period === 'DAILY') {
-    return dryRunIsWithinLastDays(value, reference, 1);
+    return dryRunIsSameDay(value, reference, timeZone);
   }
 
   if (period === 'MONTHLY') {
@@ -20055,7 +20135,7 @@ function lootBoxPeriodicLimitBlocker(
   timeZone: string,
 ) {
   if (period === 'DAILY') {
-    return `Этот лутбокс можно открывать не чаще одного раза в сутки. Последнее открытие было ${formatDryRunLocalDateTime(
+    return `Этот лутбокс можно открывать не чаще одного раза за календарный день клуба. Последнее открытие было ${formatDryRunLocalDateTime(
       latestRewardAt,
       timeZone,
     )}.`;

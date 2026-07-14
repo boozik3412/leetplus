@@ -42,6 +42,7 @@ import {
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
+import { parseLangameDate } from '../integrations/langame-date';
 import type {
   LangameGuestBalancesPortalResult,
   LangameGuestDetailsPortalResult,
@@ -4237,6 +4238,8 @@ export class GuestPortalService {
             profile.id,
             context.store.id,
             lootBox.id,
+            lootBox.limits,
+            context.store.timeZone,
             openedAt,
           );
     const entitlementUnlockEvent =
@@ -8011,12 +8014,42 @@ export class GuestPortalService {
     profileId: string,
     storeId: string,
     lootBoxId: string,
+    limits: Prisma.JsonValue | null,
+    storeTimeZone: string | null,
     now: Date,
   ) {
     const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
       { profileId },
       ...(guestId ? [{ guestId }] : []),
     ];
+    const isDaily =
+      lootBoxPeriodicLimitPeriod(jsonRecord(limits).periodicLimit) === 'DAILY';
+    const timeZone = guestGameTimeZone(storeTimeZone);
+    const localDayStart = isDaily ? guestGameLocalDayStart(now, timeZone) : null;
+
+    if (isDaily && localDayStart) {
+      await this.prisma.guestGameEntitlement.updateMany({
+        where: {
+          tenantId,
+          ruleType: 'LOOT_BOX',
+          ruleId: lootBoxId,
+          status: 'AVAILABLE',
+          AND: [
+            { OR: ownerFilters },
+            { OR: [{ storeId: null }, { storeId }] },
+            {
+              OR: [
+                { validUntil: { lte: now } },
+                { validUntil: null, qualifiedAt: { lt: localDayStart } },
+              ],
+            },
+          ],
+        },
+        data: {
+          status: 'EXPIRED',
+        },
+      });
+    }
 
     return this.prisma.guestGameEntitlement.findFirst({
       where: {
@@ -8029,6 +8062,7 @@ export class GuestPortalService {
         AND: [
           { OR: [{ storeId: null }, { storeId }] },
           { OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+          ...(localDayStart ? [{ qualifiedAt: { gte: localDayStart } }] : []),
         ],
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
@@ -13848,6 +13882,12 @@ function findLootBoxUnlockEvent(
   }
 
   const restartedAt = lootBoxRestartedAt(jsonRecord(row.limits));
+  const timeZone = guestGameTimeZone(storeTimeZone);
+  const isDaily =
+    lootBoxPeriodicLimitPeriod(jsonRecord(row.limits).periodicLimit) === 'DAILY';
+  const now = new Date();
+  const isInCurrentDailyPeriod = (event: GuestPortalLootBoxUnlockEventRow) =>
+    !isDaily || guestGameSameLocalDay(event.occurredAt, now, timeZone);
 
   if (guestGameTriggerMatches(row.triggerKind, 'SESSION_START')) {
     const candidates = [
@@ -13863,15 +13903,15 @@ function findLootBoxUnlockEvent(
       ...unlockEvents.filter((event) =>
         lootBoxUnlockEventMatches(row, event, storeId, restartedAt, true),
       ),
-    ].filter((event): event is GuestPortalLootBoxUnlockEventRow =>
-      Boolean(event),
+    ].filter(
+      (event): event is GuestPortalLootBoxUnlockEventRow =>
+        event !== null && isInCurrentDailyPeriod(event),
     );
 
     if (!candidates.length) {
       return null;
     }
 
-    const timeZone = guestGameTimeZone(storeTimeZone);
     const scheduledCandidate = candidates.find(
       (event) =>
         !lootBoxScheduleBlocker(
@@ -13889,8 +13929,10 @@ function findLootBoxUnlockEvent(
   }
 
   return (
-    unlockEvents.find((event) =>
-      lootBoxUnlockEventMatches(row, event, storeId, restartedAt),
+    unlockEvents.find(
+      (event) =>
+        isInCurrentDailyPeriod(event) &&
+        lootBoxUnlockEventMatches(row, event, storeId, restartedAt),
     ) ?? null
   );
 }
@@ -16799,7 +16841,7 @@ function lootBoxPeriodicLimitBlocker(
   timeZone: string = DEFAULT_GUEST_GAME_TIME_ZONE,
 ) {
   if (period === 'DAILY' && latestRewardAt) {
-    return `Этот лутбокс можно открывать не чаще одного раза в сутки. Последнее открытие было ${formatGuestGameLocalDateTime(
+    return `Этот лутбокс можно открывать не чаще одного раза за календарный день клуба. Последнее открытие было ${formatGuestGameLocalDateTime(
       latestRewardAt,
       timeZone,
     )}.`;
@@ -16807,7 +16849,7 @@ function lootBoxPeriodicLimitBlocker(
 
   const label =
     period === 'DAILY'
-      ? 'за последние сутки'
+      ? 'сегодня'
       : period === 'WEEKLY'
         ? 'на этой неделе'
         : 'в этом месяце';
@@ -16961,6 +17003,15 @@ function guestGameLocalDateParts(value: Date, timeZone: string) {
   }
 }
 
+function guestGameLocalDayStart(value: Date, timeZone: string) {
+  const dateKey = guestGameLocalDateKey(value, timeZone);
+
+  return (
+    parseLangameDate(`${dateKey} 00:00:00`, timeZone) ??
+    new Date(`${dateKey}T00:00:00.000Z`)
+  );
+}
+
 function weekdayNumber(value: string | undefined) {
   switch (value) {
     case 'Sun':
@@ -17024,7 +17075,7 @@ function lootBoxRewardWithinPeriod(
   }
 
   if (period === 'DAILY') {
-    return lootBoxRewardWithinLastHours(value, reference, 24);
+    return guestGameSameLocalDay(value, reference, timeZone);
   }
 
   if (period === 'MONTHLY') {

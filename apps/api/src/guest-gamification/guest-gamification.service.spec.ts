@@ -6210,6 +6210,73 @@ describe('GuestGamificationService', () => {
       expect(second.update).not.toHaveProperty('consumedAt');
     });
 
+    it('scopes daily lootbox entitlements to the local calendar day of the club', async () => {
+      const { service, prisma } = createService();
+      const baseRule = dryRunResult().rules[0];
+      const dailyRule = {
+        ...baseRule,
+        id: 'loot-box-daily',
+        kind: 'LOOT_BOX' as const,
+        name: 'Daily case',
+        xpDelta: 0,
+        periodicLimitPeriod: 'DAILY' as const,
+      };
+      const lateEveningRun = dryRunResult({
+        occurredAt: '2026-06-10T18:55:00.000Z',
+        store: {
+          id: 'store-1',
+          name: 'Club',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+        rules: [dailyRule],
+      });
+
+      await service.recordRuleDecisions(user, lateEveningRun, {
+        eventId: 'event-before-midnight',
+      });
+      await service.recordRuleDecisions(user, lateEveningRun, {
+        eventId: 'event-before-midnight-repeat',
+      });
+
+      const first = prisma.guestGameEntitlement.upsert.mock.calls[0][0];
+      const repeated = prisma.guestGameEntitlement.upsert.mock.calls[1][0];
+      expect(first).toMatchObject({
+        where: {
+          tenantId_idempotencyKey: {
+            tenantId: user.tenantId,
+            idempotencyKey: 'loot-box:loot-box-daily:daily:profile-1:2026-06-10',
+          },
+        },
+        create: {
+          qualifiedAt: new Date('2026-06-10T18:55:00.000Z'),
+          validUntil: new Date('2026-06-10T19:00:00.000Z'),
+        },
+      });
+      expect(repeated.where).toEqual(first.where);
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          occurredAt: '2026-06-10T19:01:00.000Z',
+          store: lateEveningRun.store,
+          rules: [dailyRule],
+        }),
+        { eventId: 'event-after-midnight' },
+      );
+
+      expect(prisma.guestGameEntitlement.upsert.mock.calls[2][0]).toMatchObject({
+        where: {
+          tenantId_idempotencyKey: {
+            tenantId: user.tenantId,
+            idempotencyKey: 'loot-box:loot-box-daily:daily:profile-1:2026-06-11',
+          },
+        },
+        create: {
+          validUntil: new Date('2026-06-11T19:00:00.000Z'),
+        },
+      });
+    });
+
     it('does not create a new entitlement from the lootbox opening event', async () => {
       const { service, prisma } = createService();
       const baseRule = dryRunResult().rules[0];

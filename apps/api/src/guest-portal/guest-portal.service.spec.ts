@@ -1903,6 +1903,55 @@ describe('GuestPortalService', () => {
       expect(result).toMatchObject({ processed: true, createdRewards: 1 });
     });
 
+    it('expires an unused daily entitlement when the club calendar day changes', async () => {
+      const { prisma, service } = createService();
+      const now = new Date('2026-06-10T19:01:00.000Z');
+
+      await (service as any).findPortalLootBoxEntitlement(
+        'tenant-1',
+        'guest-1',
+        'profile-1',
+        'store-1',
+        'loot-daily',
+        { periodicLimit: 'DAILY' },
+        'Asia/Yekaterinburg',
+        now,
+      );
+
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            ruleId: 'loot-daily',
+            status: 'AVAILABLE',
+            AND: expect.arrayContaining([
+              expect.objectContaining({
+                OR: expect.arrayContaining([
+                  expect.objectContaining({ validUntil: { lte: now } }),
+                  expect.objectContaining({
+                    validUntil: null,
+                    qualifiedAt: {
+                      lt: new Date('2026-06-10T19:00:00.000Z'),
+                    },
+                  }),
+                ]),
+              }),
+            ]),
+          }),
+          data: { status: 'EXPIRED' },
+        }),
+      );
+      expect(prisma.guestGameEntitlement.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: expect.arrayContaining([
+              { qualifiedAt: { gte: new Date('2026-06-10T19:00:00.000Z') } },
+            ]),
+          }),
+        }),
+      );
+    });
+
     it('does not consume an entitlement when the persisted reward is missing', async () => {
       const { prisma, service } = createService();
       prisma.guestGameReward.findFirst.mockResolvedValue(null);
@@ -2772,7 +2821,7 @@ describe('GuestPortalService', () => {
       try {
         await expect(
           service.openLootBox('Bearer guest-token', 'loot-app'),
-        ).rejects.toThrow('не чаще одного раза в сутки');
+        ).rejects.toThrow('не чаще одного раза за календарный день клуба');
       } finally {
         jest.useRealTimers();
       }
@@ -2781,7 +2830,7 @@ describe('GuestPortalService', () => {
       expect(guestGamificationService.processEvent).not.toHaveBeenCalled();
     });
 
-    it('uses actual opening time for daily periodic lootbox limits', async () => {
+    it('uses the current local-day unlock and actual opening time for daily lootbox limits', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-06-22T10:00:00.000Z'));
       const { guestGamificationService, prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
@@ -2822,7 +2871,7 @@ describe('GuestPortalService', () => {
       prisma.guestGameEvent.findMany.mockResolvedValue([
         {
           eventType: 'SESSION_START',
-          occurredAt: new Date('2026-06-21T08:00:00.000Z'),
+          occurredAt: new Date('2026-06-22T08:00:00.000Z'),
           payload: {
             sourceFactKind: 'GUEST_SESSION',
             store: { id: portal.store.id, name: portal.store.name },
@@ -2895,6 +2944,13 @@ describe('GuestPortalService', () => {
 
       try {
         await service.openLootBox('Bearer guest-token', 'loot-daily-session');
+
+        // The same session-start event belongs to the previous club calendar day
+        // after 00:00 local time, so it cannot unlock tomorrow's daily case.
+        jest.setSystemTime(new Date('2026-06-22T19:01:00.000Z'));
+        await expect(
+          service.openLootBox('Bearer guest-token', 'loot-daily-session'),
+        ).rejects.toThrow();
       } finally {
         jest.useRealTimers();
       }
@@ -2903,7 +2959,7 @@ describe('GuestPortalService', () => {
         expect.any(Object),
         expect.objectContaining({
           lootBoxId: 'loot-daily-session',
-          occurredAt: '2026-06-21T08:00:00.000Z',
+          occurredAt: '2026-06-22T08:00:00.000Z',
           limitOccurredAt: '2026-06-22T10:00:00.000Z',
         }),
       );
@@ -2914,6 +2970,7 @@ describe('GuestPortalService', () => {
           limitOccurredAt: '2026-06-22T10:00:00.000Z',
         }),
       );
+      expect(guestGamificationService.processEvent).toHaveBeenCalledTimes(1);
     });
 
     it('ignores lootbox openings made before the rule was restarted', async () => {

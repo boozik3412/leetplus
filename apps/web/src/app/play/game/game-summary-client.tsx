@@ -2911,11 +2911,17 @@ function BattlePassSeasonRewardsModal({
                           reward.min === reward.max ? "is-fixed" : undefined
                         }
                       >
-                        <b>{formatSeasonRewardValue(reward.min, reward.unit)}</b>
+                        <span className="lp-battlepass-season-range-value">
+                          <em>Гарантированно</em>
+                          <b>{formatSeasonRewardValue(reward.min, reward.unit)}</b>
+                        </span>
                         {reward.min !== reward.max ? (
                           <>
                             <i aria-hidden="true">→</i>
-                            <b>{formatSeasonRewardValue(reward.max, reward.unit)}</b>
+                            <span className="lp-battlepass-season-range-value">
+                              <em>Максимум</em>
+                              <b>{formatSeasonRewardValue(reward.max, reward.unit)}</b>
+                            </span>
                           </>
                         ) : null}
                       </span>
@@ -9799,18 +9805,35 @@ const clubHomeCss = `
 
 .lp-battlepass-season-range-row > span {
   display: grid;
-  grid-template-columns: minmax(68px, 1fr) 24px minmax(68px, 1fr);
-  align-items: center;
-  gap: 7px;
+  grid-template-columns: minmax(86px, 1fr) 24px minmax(86px, 1fr);
+  align-items: end;
+  gap: 8px;
   color: var(--cyan);
   text-align: right;
 }
 
 .lp-battlepass-season-range-row > span.is-fixed {
-  display: block;
+  grid-template-columns: minmax(86px, 1fr);
 }
 
-.lp-battlepass-season-range-row b {
+.lp-battlepass-season-range-value {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  min-width: 0;
+}
+
+.lp-battlepass-season-range-value em {
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 840;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.lp-battlepass-season-range-value b {
   font-size: 16px;
   font-weight: 880;
   white-space: nowrap;

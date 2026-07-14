@@ -2862,6 +2862,9 @@ function BattlePassSeasonRewardsModal({
         overview.guaranteed.length ||
         overview.possible.length),
   );
+  const hasSeasonTotalRows = Boolean(
+    overview && (overview.ranges.length || overview.guaranteed.length),
+  );
 
   return (
     <div
@@ -2894,59 +2897,46 @@ function BattlePassSeasonRewardsModal({
 
         {hasRewards ? (
           <div className="lp-battlepass-season-rewards-content">
-            {overview?.ranges.length ? (
+            {hasSeasonTotalRows ? (
               <div className="lp-battlepass-season-reward-group">
-                <span className="lp-battlepass-season-reward-heading">
-                  Итог за сезон
-                </span>
+                <div className="lp-battlepass-season-range-header">
+                  <span className="lp-battlepass-season-reward-heading">
+                    Итог за сезон
+                  </span>
+                  <span>Гарантированно</span>
+                  <span>Максимум</span>
+                </div>
                 <div className="lp-battlepass-season-range-list">
-                  {overview.ranges.map((reward) => (
+                  {overview?.ranges.map((reward) => (
                     <div
                       key={reward.type}
                       className="lp-battlepass-season-range-row"
                     >
                       <strong>{reward.label}</strong>
-                      <span
+                      <b>{formatSeasonRewardValue(reward.min, reward.unit)}</b>
+                      <i aria-hidden="true">
+                        {reward.min === reward.max ? "" : "→"}
+                      </i>
+                      <b
                         className={
-                          reward.min === reward.max ? "is-fixed" : undefined
+                          reward.min === reward.max ? "is-empty" : undefined
                         }
                       >
-                        <span className="lp-battlepass-season-range-value">
-                          <em>Гарантированно</em>
-                          <b>{formatSeasonRewardValue(reward.min, reward.unit)}</b>
-                        </span>
-                        {reward.min !== reward.max ? (
-                          <>
-                            <i aria-hidden="true">→</i>
-                            <span className="lp-battlepass-season-range-value">
-                              <em>Максимум</em>
-                              <b>{formatSeasonRewardValue(reward.max, reward.unit)}</b>
-                            </span>
-                          </>
-                        ) : null}
-                      </span>
+                        {reward.min === reward.max
+                          ? "—"
+                          : formatSeasonRewardValue(reward.max, reward.unit)}
+                      </b>
                     </div>
                   ))}
-                </div>
-              </div>
-            ) : null}
-
-            {overview?.guaranteed.length ? (
-              <div className="lp-battlepass-season-reward-group">
-                <span className="lp-battlepass-season-reward-heading">
-                  Гарантированные награды
-                </span>
-                <div className="lp-battlepass-season-fixed-list">
-                  {overview.guaranteed.map((reward) => (
+                  {overview?.guaranteed.map((reward) => (
                     <div
-                      key={`${reward.type}:${reward.label}`}
-                      className="lp-battlepass-season-fixed-row"
+                      key={`guaranteed:${reward.type}:${reward.label}`}
+                      className="lp-battlepass-season-range-row is-guaranteed"
                     >
-                      <span aria-hidden="true">✓</span>
                       <strong>{reward.label}</strong>
-                      {reward.quantity > 1 ? (
-                        <b>×{formatNumber(reward.quantity)}</b>
-                      ) : null}
+                      <b>{formatGuaranteedSeasonRewardValue(reward.quantity)}</b>
+                      <i aria-hidden="true" />
+                      <b className="is-empty">—</b>
                     </div>
                   ))}
                 </div>
@@ -2996,6 +2986,12 @@ function BattlePassSeasonRewardsModal({
 
 function formatSeasonRewardValue(value: number, unit: string) {
   return `${formatNumber(value)} ${unit}`.trim();
+}
+
+function formatGuaranteedSeasonRewardValue(quantity: number) {
+  return quantity > 1
+    ? `Гарантировано ×${formatNumber(quantity)}`
+    : "Гарантировано";
 }
 
 function BattlePassLevelCompletionModal({
@@ -9788,11 +9784,38 @@ const clubHomeCss = `
   border-top: 1px solid rgba(196, 224, 225, 0.12);
 }
 
+.lp-battlepass-season-range-header,
 .lp-battlepass-season-range-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(118px, auto) 24px minmax(118px, auto);
   align-items: center;
-  gap: 18px;
+  gap: 8px;
+}
+
+.lp-battlepass-season-range-header {
+  color: var(--muted);
+  border-top: 1px solid rgba(196, 224, 225, 0.12);
+  padding: 0 0 10px;
+}
+
+.lp-battlepass-season-range-header + .lp-battlepass-season-range-list {
+  border-top: 0;
+}
+
+.lp-battlepass-season-range-header > span:not(:first-child) {
+  font-size: 10px;
+  font-weight: 840;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.lp-battlepass-season-range-header > span:last-child {
+  grid-column: 4;
+}
+
+.lp-battlepass-season-range-row {
   min-height: 56px;
   border-bottom: 1px solid rgba(196, 224, 225, 0.12);
 }
@@ -9803,40 +9826,16 @@ const clubHomeCss = `
   line-height: 1.3;
 }
 
-.lp-battlepass-season-range-row > span {
-  display: grid;
-  grid-template-columns: minmax(86px, 1fr) 24px minmax(86px, 1fr);
-  align-items: end;
-  gap: 8px;
+.lp-battlepass-season-range-row > b {
   color: var(--cyan);
-  text-align: right;
-}
-
-.lp-battlepass-season-range-row > span.is-fixed {
-  grid-template-columns: minmax(86px, 1fr);
-}
-
-.lp-battlepass-season-range-value {
-  display: grid;
-  gap: 4px;
-  justify-items: end;
-  min-width: 0;
-}
-
-.lp-battlepass-season-range-value em {
-  color: var(--muted);
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 840;
-  letter-spacing: 0;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.lp-battlepass-season-range-value b {
   font-size: 16px;
   font-weight: 880;
+  text-align: right;
   white-space: nowrap;
+}
+
+.lp-battlepass-season-range-row > b.is-empty {
+  color: var(--muted);
 }
 
 .lp-battlepass-season-range-row i {
@@ -13910,6 +13909,7 @@ const clubHomeCss = `
     grid-template-columns: 1fr;
   }
 
+  .lp-battlepass-season-range-header,
   .lp-battlepass-season-range-row,
   .lp-battlepass-season-possible-list > div {
     grid-template-columns: 1fr;
@@ -13917,13 +13917,17 @@ const clubHomeCss = `
     padding: 12px 0;
   }
 
-  .lp-battlepass-season-range-row > span {
-    width: min(250px, 100%);
+  .lp-battlepass-season-range-header > span:last-child {
+    grid-column: auto;
+  }
+
+  .lp-battlepass-season-range-header > span:not(:first-child),
+  .lp-battlepass-season-range-row > b {
     text-align: left;
   }
 
-  .lp-battlepass-season-range-row > span.is-fixed {
-    width: auto;
+  .lp-battlepass-season-range-row i {
+    display: none;
   }
 }
 `;

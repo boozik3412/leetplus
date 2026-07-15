@@ -1929,13 +1929,6 @@ function QuestDetailsModal({
           </div>
         ) : null}
 
-        {quest.status === "done" ? (
-          <div className="lp-lootbox-unavailable-note">
-            <span>Статус</span>
-            <strong>{quest.description}</strong>
-          </div>
-        ) : null}
-
         <button
           type="button"
           className="lp-lootbox-unavailable-primary"

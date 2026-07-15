@@ -42,6 +42,7 @@ import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import {
   evaluateGuestGameLedgerRule,
   guestGameRuleActivationAt,
+  guestGameRuleExternalDomains,
   guestGameSessionTypeFromConditions,
   guestGameStringArray,
   type GuestGameLedgerRule,
@@ -5716,10 +5717,7 @@ export class GuestGamificationService {
           continue;
         }
 
-        if (
-          nonActiveEligibleRules.length &&
-          activeEligibleRules.length === 0
-        ) {
+        if (nonActiveEligibleRules.length && activeEligibleRules.length === 0) {
           facts.push({
             ...pipelineFactBase(fact),
             status: 'SKIPPED',
@@ -9224,6 +9222,11 @@ export class GuestGamificationService {
             where: { tenantId: user.tenantId, id: { in: seasonIds } },
           })
         : [];
+      const ruleStores =
+        (await this.prisma.store.findMany({
+          where: { tenantId: user.tenantId, isActive: true },
+          select: { id: true, externalDomain: true },
+        })) ?? [];
       const rules: GuestGameLedgerRule[] = [
         ...lootBoxes.map((rule) => ({
           type: 'LOOT_BOX',
@@ -9238,6 +9241,10 @@ export class GuestGamificationService {
           periodTo: null,
           periodRules: rule.periodRules,
           storeIds: guestGameStringArray(rule.storeIds),
+          externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
           progressTarget: null,
           progressUnit: null,
         })),
@@ -9257,6 +9264,10 @@ export class GuestGamificationService {
           periodTo: rule.periodTo,
           periodRules: rule.conditions,
           storeIds: guestGameStringArray(rule.storeIds),
+          externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
           progressTarget: rule.progressTarget,
           progressUnit: rule.progressUnit,
         })),
@@ -9273,6 +9284,10 @@ export class GuestGamificationService {
           periodTo: rule.periodTo,
           periodRules: rule.xpRules,
           storeIds: guestGameStringArray(rule.storeIds),
+          externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
           progressTarget: null,
           progressUnit: null,
         })),
@@ -19350,7 +19365,9 @@ function appendDryRunMissionLimits(
           'Задание уже выполнено сегодня. Следующее выполнение будет доступно с начала нового календарного дня клуба.',
         );
       } else {
-        reasons.push('Повтор задания в текущий календарный день еще не использован');
+        reasons.push(
+          'Повтор задания в текущий календарный день еще не использован',
+        );
       }
     }
   }
@@ -21718,8 +21735,7 @@ function isoPeriodIsActive(from: string | null, to: string | null) {
   const toTime = to ? new Date(to).getTime() : null;
 
   return (
-    (fromTime === null || fromTime <= now) &&
-    (toTime === null || toTime >= now)
+    (fromTime === null || fromTime <= now) && (toTime === null || toTime >= now)
   );
 }
 

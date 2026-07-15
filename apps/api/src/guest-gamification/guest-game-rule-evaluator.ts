@@ -12,6 +12,7 @@ export type GuestGameLedgerRule = {
   periodTo: Date | null;
   periodRules: Prisma.JsonValue | null;
   storeIds: string[];
+  externalDomains?: string[];
   progressTarget: number | null;
   progressUnit: string | null;
 };
@@ -23,6 +24,7 @@ export type GuestGameLedgerFact = {
   happenedAt: Date | null;
   createdAt: Date;
   storeId: string | null;
+  externalDomain?: string | null;
   tariffName: string | null;
   tariffType: string | null;
   amount: Prisma.Decimal | number | null;
@@ -83,6 +85,7 @@ export function evaluateGuestGameLedgerRule(
     const factInsufficient: string[] = [];
     const domainScopedFact =
       fact.factType === 'BALANCE_TOPUP' && fact.storeId === null;
+    const ruleExternalDomains = rule.externalDomains ?? [];
 
     if (happenedAt < rule.activatedAt) {
       factBlockers.push('факт произошел до активации правила');
@@ -101,6 +104,17 @@ export function evaluateGuestGameLedgerRule(
         factInsufficient.push('у факта не определен клуб');
       } else if (!rule.storeIds.includes(fact.storeId)) {
         factBlockers.push('клуб факта не входит в область правила');
+      }
+    }
+    if (domainScopedFact && rule.storeIds.length > 0) {
+      if (ruleExternalDomains.length === 0) {
+        factInsufficient.push('у выбранных клубов не определён домен Langame');
+      } else if (!fact.externalDomain) {
+        factInsufficient.push('у доменного факта не определён домен Langame');
+      } else if (!ruleExternalDomains.includes(fact.externalDomain)) {
+        factBlockers.push(
+          'домен факта не входит в область выбранных клубов правила',
+        );
       }
     }
 
@@ -585,6 +599,25 @@ export function guestGameStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+export function guestGameRuleExternalDomains(
+  storeIds: string[],
+  stores: Array<{ id: string; externalDomain: string | null }>,
+) {
+  if (storeIds.length === 0) {
+    return [];
+  }
+
+  const selectedStoreIds = new Set(storeIds);
+  return [
+    ...new Set(
+      stores
+        .filter((store) => selectedStoreIds.has(store.id))
+        .map((store) => nullableString(store.externalDomain))
+        .filter((domain): domain is string => Boolean(domain)),
+    ),
+  ];
 }
 
 export function guestGameSessionTypeFromConditions(

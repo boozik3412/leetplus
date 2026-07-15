@@ -5,6 +5,7 @@ import {
 } from './guest-game-rule-evaluator';
 
 const STORE_ID = 'store-pushkinskaya';
+const EXTERNAL_DOMAIN = 'network.langame.example';
 const TIME_ZONE = 'Asia/Yekaterinburg';
 
 function rule(
@@ -22,6 +23,7 @@ function rule(
     periodTo: null,
     periodRules: null,
     storeIds: [STORE_ID],
+    externalDomains: [EXTERNAL_DOMAIN],
     progressTarget: null,
     progressUnit: null,
     ...overrides,
@@ -40,6 +42,7 @@ function fact(
     happenedAt: new Date(happenedAt),
     createdAt: new Date(happenedAt),
     storeId: STORE_ID,
+    externalDomain: EXTERNAL_DOMAIN,
     tariffName: null,
     tariffType: null,
     amount: null,
@@ -380,6 +383,33 @@ describe('Игровой журнал: обезличенный replay-набо�
     );
 
     expect(result.status).toBe('INSUFFICIENT_DATA');
+  });
+
+  it('does not match a balance topup from another Langame domain', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'BALANCE_TOPUP',
+        sessionType: null,
+        progressTarget: 1,
+        progressUnit: 'topup',
+        periodRules: {
+          metric: { aggregation: 'count', target: 1 },
+        },
+      }),
+      [
+        fact('BALANCE_TOPUP', '2026-07-10T11:11:00.000Z', {
+          storeId: null,
+          externalDomain: 'another.langame.example',
+          store: null,
+          amount: 500,
+        }),
+      ],
+      STORE_ID,
+    );
+
+    expect(result.status).toBe('BLOCKED');
+    expect(result.blockers.join(' ')).toContain('домен');
   });
 
   it('counts repeated balance topups independently', () => {

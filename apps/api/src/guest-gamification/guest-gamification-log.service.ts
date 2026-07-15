@@ -11,6 +11,7 @@ import { GuestActivityLedgerService } from './guest-activity-ledger.service';
 import {
   evaluateGuestGameLedgerRule,
   guestGameRuleActivationAt,
+  guestGameRuleExternalDomains,
   guestGameSessionTypeFromConditions,
   guestGameStringArray,
 } from './guest-game-rule-evaluator';
@@ -889,6 +890,7 @@ export class GuestGamificationLogService {
       lootBoxes,
       missions,
       seasons,
+      ruleStores,
       rewards,
       facts,
       audits,
@@ -909,6 +911,10 @@ export class GuestGamificationLogService {
         where: { tenantId, status: 'ACTIVE' },
         orderBy: { createdAt: 'desc' },
         take: 50,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, externalDomain: true },
       }),
       this.prisma.guestGameReward.findMany({
         where: {
@@ -991,6 +997,10 @@ export class GuestGamificationLogService {
           periodTo: null,
           periodRules: rule.periodRules,
           storeIds: guestGameStringArray(rule.storeIds),
+          externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
           progressTarget: null,
           progressUnit: null,
         })),
@@ -1011,6 +1021,10 @@ export class GuestGamificationLogService {
           periodTo: rule.periodTo,
           periodRules: rule.conditions,
           storeIds: guestGameStringArray(rule.storeIds),
+          externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
           progressTarget: rule.progressTarget,
           progressUnit: rule.progressUnit,
         })),
@@ -1028,6 +1042,10 @@ export class GuestGamificationLogService {
           periodTo: rule.periodTo,
           periodRules: null,
           storeIds: guestGameStringArray(rule.storeIds),
+          externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
           progressTarget: null,
           progressUnit: null,
         })),

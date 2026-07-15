@@ -5515,9 +5515,9 @@ function playerQuestStatus(mission: GameMission): QuestStatus {
 
 function playerQuestStatusLabel(status: QuestStatus) {
   const labels = {
-    done: "done",
-    live: "live",
-    next: "next",
+    done: "Выполнено",
+    live: "В процессе",
+    next: "Не начато",
   } satisfies Record<QuestStatus, string>;
 
   return labels[status];

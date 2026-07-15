@@ -364,7 +364,6 @@ type PlayerQuest = {
   description: string;
   condition: string;
   status: QuestStatus;
-  label: string;
   progress?: {
     current: number;
     total: number;
@@ -1904,9 +1903,6 @@ function QuestDetailsModal({
         >
           ×
         </button>
-        <span className="lp-quest-complete-kicker lp-lootbox-unavailable-kicker">
-          {quest.label}
-        </span>
         <h3 id="questDetailsTitle">{quest.title}</h3>
 
         <div className="lp-quest-details-block">
@@ -4391,9 +4387,6 @@ function PlayerProfilePanel({
                     </span>
                   ) : null}
                 </span>
-                <span className="lp-club-side-quest-state">
-                  {quest.label}
-                </span>
               </button>
             ))
           ) : (
@@ -4500,9 +4493,6 @@ function QuestBoard({
                         <span>{quest.progress.label}</span>
                       </span>
                     ) : null}
-                  </span>
-                  <span className="lp-club-quest-full-state">
-                    {quest.label}
                   </span>
                 </button>
               ))
@@ -5156,7 +5146,6 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
         description: playerQuestDescription(mission, reward),
         condition: playerQuestCondition(mission, progress),
         status,
-        label: playerQuestStatusLabel(status),
         progress,
         reward,
       };
@@ -5511,16 +5500,6 @@ function playerQuestStatus(mission: GameMission): QuestStatus {
   }
 
   return "next";
-}
-
-function playerQuestStatusLabel(status: QuestStatus) {
-  const labels = {
-    done: "Выполнено",
-    live: "В процессе",
-    next: "Не начато",
-  } satisfies Record<QuestStatus, string>;
-
-  return labels[status];
 }
 
 function playerQuestProgress(mission: GameMission): PlayerQuest["progress"] {
@@ -12644,7 +12623,7 @@ const clubHomeCss = `
 
 .lp-club-side-quest {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -12729,19 +12708,6 @@ const clubHomeCss = `
   border-radius: inherit;
   background: linear-gradient(90deg, var(--cyan), var(--teal));
   box-shadow: 0 0 14px rgba(131, 228, 236, 0.4);
-}
-
-.lp-club-side-quest-state {
-  color: var(--quiet);
-  font-size: 9px;
-  font-weight: 860;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.lp-club-side-quest.is-current .lp-club-side-quest-state,
-.lp-club-side-quest.is-done .lp-club-side-quest-state {
-  color: var(--cyan);
 }
 
 .lp-club-quest-widget-actions {
@@ -12939,7 +12905,7 @@ const clubHomeCss = `
 
 .lp-club-quest-full-card {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   min-height: 68px;
@@ -12958,8 +12924,7 @@ const clubHomeCss = `
 }
 
 .lp-club-quest-full-card:hover,
-.lp-club-quest-full-card.is-current,
-.lp-club-quest-full-card.is-selected {
+.lp-club-quest-full-card.is-current {
   border-color: rgba(131, 228, 236, 0.6);
   background:
     linear-gradient(90deg, rgba(131, 228, 236, 0.1), transparent),
@@ -13029,18 +12994,13 @@ const clubHomeCss = `
   box-shadow: 0 0 18px rgba(131, 228, 236, 0.38);
 }
 
-.lp-club-quest-progress > span:not(.lp-club-quest-progress-bar),
-.lp-club-quest-full-state {
+.lp-club-quest-progress > span:not(.lp-club-quest-progress-bar) {
   color: var(--quiet);
   font-size: 9px;
   font-weight: 860;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
-}
-
-.lp-club-quest-full-state {
-  color: var(--cyan);
 }
 
 .sr-only {
@@ -14141,11 +14101,6 @@ const clubHomeCss = `
 
   .lp-club-quest-full-card {
     grid-template-columns: 42px minmax(0, 1fr);
-  }
-
-  .lp-club-quest-full-state {
-    grid-column: 2;
-    justify-self: start;
   }
 
   .lp-club-detail-head {

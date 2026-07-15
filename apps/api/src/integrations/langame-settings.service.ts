@@ -89,11 +89,11 @@ const PROFILE_DIAGNOSTIC_ENDPOINTS: LangameEndpointProfileDefinition[] = [
   },
   {
     key: 'balances',
-    title: 'Состояние балансов',
+    title: 'История пополнений баланса',
     path: '/balances/list',
     group: 'dashboard',
-    paramMode: 'page',
-    requiredParams: [],
+    paramMode: 'date_page',
+    requiredParams: ['dateFrom', 'dateTo'],
   },
   {
     key: 'cashTransactions',

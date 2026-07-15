@@ -71,6 +71,15 @@ export type LangameGuestBonusBalance = {
   bonus_balance: number | string | null;
 };
 
+export type LangameBalanceTopup = {
+  id: number | string;
+  guest_id: number | string;
+  guest_name?: string | null;
+  phone?: string | null;
+  amount: number | string;
+  date: string;
+} & Record<string, unknown>;
+
 export type LangameGuestSession = {
   id: number | string;
   guest_id?: number | string | null;

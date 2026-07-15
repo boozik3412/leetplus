@@ -288,4 +288,105 @@ describe('Игровой журнал: обезличенный replay-набо�
     expect(result.status).toBe('INSUFFICIENT_DATA');
     expect(result.blockers.join(' ')).toContain('categoryIds');
   });
+
+  it('matches one balance topup that reaches the configured minimum amount', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'BALANCE_TOPUP',
+        sessionType: null,
+        storeIds: [],
+        progressTarget: 1,
+        progressUnit: 'topup',
+        periodRules: {
+          metric: {
+            aggregation: 'count',
+            target: 1,
+            minSpendAmount: 500,
+          },
+        },
+      }),
+      [
+        fact('BALANCE_TOPUP', '2026-07-10T11:11:00.000Z', {
+          amount: 500,
+          storeId: null,
+          store: null,
+        }),
+      ],
+      null,
+    );
+
+    expect(result.status).toBe('MATCHED');
+    expect(result.progress).toMatchObject({ current: 1, target: 1 });
+  });
+
+  it('counts repeated balance topups independently', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'ACCOUNT_TOPUP',
+        sessionType: null,
+        storeIds: [],
+        progressTarget: 3,
+        progressUnit: 'topup',
+        periodRules: {
+          metric: { aggregation: 'count', target: 3 },
+        },
+      }),
+      [
+        fact('BALANCE_TOPUP', '2026-07-10T11:00:00.000Z', {
+          amount: 100,
+          storeId: null,
+          store: null,
+        }),
+        fact('BALANCE_TOPUP', '2026-07-11T11:00:00.000Z', {
+          amount: 200,
+          storeId: null,
+          store: null,
+        }),
+        fact('BALANCE_TOPUP', '2026-07-12T11:00:00.000Z', {
+          amount: 300,
+          storeId: null,
+          store: null,
+        }),
+      ],
+      null,
+    );
+
+    expect(result.status).toBe('MATCHED');
+    expect(result.progress).toMatchObject({ current: 3, target: 3 });
+  });
+
+  it('sums balance topups over the configured period', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'DEPOSIT',
+        sessionType: null,
+        storeIds: [],
+        progressTarget: 1000,
+        progressUnit: 'rub',
+        periodRules: {
+          metric: { aggregation: 'sum', target: 1000, windowDays: 30 },
+        },
+      }),
+      [
+        fact('BALANCE_TOPUP', '2026-07-10T11:00:00.000Z', {
+          amount: 400,
+          storeId: null,
+          store: null,
+        }),
+        fact('BALANCE_TOPUP', '2026-07-12T11:00:00.000Z', {
+          amount: 600,
+          storeId: null,
+          store: null,
+        }),
+      ],
+      null,
+      new Date('2026-07-15T00:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('MATCHED');
+    expect(result.progress).toMatchObject({ current: 1000, target: 1000 });
+  });
 });

@@ -604,6 +604,16 @@ export function relevantGuestGameFacts(
   }
 
   if (
+    trigger.includes('BALANCE_TOPUP') ||
+    trigger.includes('BALANCE_TOP_UP') ||
+    trigger.includes('ACCOUNT_TOPUP') ||
+    trigger.includes('TOPUP') ||
+    trigger.includes('DEPOSIT')
+  ) {
+    return ['BALANCE_TOPUP'];
+  }
+
+  if (
     trigger.includes('PRODUCT') ||
     trigger.includes('GOODS') ||
     trigger.includes('PURCHASE') ||

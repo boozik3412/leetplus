@@ -134,6 +134,7 @@ describe('GuestActivityLedgerService', () => {
     listProductExpenses: jest.MockedFunction<
       LangameClient['listProductExpenses']
     >;
+    listBalanceTopups: jest.MockedFunction<LangameClient['listBalanceTopups']>;
     listGoods: jest.MockedFunction<LangameClient['listGoods']>;
   };
 
@@ -555,6 +556,9 @@ describe('GuestActivityLedgerService', () => {
       listProductExpenses: jest
         .fn<LangameClient['listProductExpenses']>()
         .mockResolvedValue([]),
+      listBalanceTopups: jest
+        .fn<LangameClient['listBalanceTopups']>()
+        .mockResolvedValue([]),
       listGoods: jest.fn<LangameClient['listGoods']>().mockResolvedValue([]),
     };
     const langameSettingsService: MockLangameSettingsService = {
@@ -842,6 +846,78 @@ describe('GuestActivityLedgerService', () => {
         totalAmount: 250,
       }),
     );
+  });
+
+  it('normalizes guest-linked balance history rows into exact topup facts', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listBalanceTopups.mockResolvedValue([
+      {
+        id: 901,
+        guest_id: externalGuestId,
+        guest_name: 'Sensitive guest name',
+        phone: 'sensitive-value',
+        amount: '500.00',
+        date: '14.07.2026 12:30:00',
+      },
+      {
+        id: 902,
+        guest_id: 'another-guest',
+        amount: '1000.00',
+        date: '14.07.2026 12:31:00',
+      },
+    ]);
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'BALANCE_TOPUPS',
+    });
+
+    const topupRaw = Array.from(rawRecords.values()).find(
+      (row) => row.sourceKind === 'LANGAME_BALANCE_TOPUP',
+    );
+    const topupFact = Array.from(facts.values()).find(
+      (fact) => fact.factType === 'BALANCE_TOPUP',
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(langameClient.listBalanceTopups).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ dateFrom: '2026-06-30' }),
+    );
+    expect(
+      Array.from(rawRecords.values()).filter(
+        (row) => row.sourceKind === 'LANGAME_BALANCE_TOPUP',
+      ),
+    ).toHaveLength(1);
+    expect(topupRaw).toEqual(
+      expect.objectContaining({
+        rawType: 'BALANCE_TOPUP',
+        amount: 500,
+        storeId: null,
+      }),
+    );
+    expect(topupRaw?.rawPayload).toEqual({
+      id: 901,
+      guest_id: externalGuestId,
+      amount: '500.00',
+      date: '14.07.2026 12:30:00',
+    });
+    expect(topupFact).toEqual(
+      expect.objectContaining({
+        confidence: 'EXACT',
+        amount: 500,
+        storeId: null,
+      }),
+    );
+    expect(topupFact?.evidence).toEqual({
+      sourceKind: 'LANGAME_BALANCE_TOPUP',
+      operationId: '901',
+      amount: 500,
+      scope: 'LANGAME_DOMAIN',
+    });
   });
 
   it('keeps repeated sync idempotent with the same source hashes', async () => {

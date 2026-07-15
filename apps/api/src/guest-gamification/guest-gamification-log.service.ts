@@ -1272,8 +1272,7 @@ export function buildGuestGameComparisonTimeline(input: {
     .filter((item) => item.happenedAt)
     .sort(
       (left, right) =>
-        (left.happenedAt?.getTime() ?? 0) -
-        (right.happenedAt?.getTime() ?? 0),
+        (left.happenedAt?.getTime() ?? 0) - (right.happenedAt?.getTime() ?? 0),
     )
     .slice(-8)) {
     rows.push({
@@ -1450,6 +1449,7 @@ function factTitle(factType: string) {
     PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED:
       'Наиграно по пакету или абонементу',
     PRODUCT_PURCHASED: 'Покупка товара',
+    BALANCE_TOPUP: 'Пополнение баланса',
     BALANCE_WRITE_OFF: 'Списание баланса',
     BONUS_TOPUP: 'Начисление бонусов',
     VISIT: 'Визит',

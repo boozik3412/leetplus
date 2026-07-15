@@ -64,6 +64,48 @@ describe('LangameClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('loads guest balance topups with the required date window and pagination', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      responseWithRows([
+        {
+          id: 42,
+          guest_id: 6330,
+          amount: '500.00',
+          date: '2026-07-14 12:00:00',
+        },
+      ]),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const rows = await client.listBalanceTopups(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      {
+        page: 2,
+        pageLimit: 200,
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-15',
+      },
+    );
+
+    expect(rows).toEqual([
+      {
+        id: 42,
+        guest_id: 6330,
+        amount: '500.00',
+        date: '2026-07-14 12:00:00',
+      },
+    ]);
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit?]>;
+    const url = new URL(calls[0][0]);
+    expect(url.pathname).toBe('/public_api/balances/list');
+    expect(url.searchParams.get('page')).toBe('2');
+    expect(url.searchParams.get('page_limit')).toBe('200');
+    expect(url.searchParams.get('date_from')).toBe('2026-07-01');
+    expect(url.searchParams.get('date_to')).toBe('2026-07-15');
+  });
+
   it('loads tariff type groups used by session billing classification', async () => {
     const fetchMock = jest
       .fn()
@@ -78,7 +120,8 @@ describe('LangameClient', () => {
     );
 
     expect(rows).toEqual([{ id: 1, type: 'basic', name: 'Hourly' }]);
-    expect(new URL(fetchMock.mock.calls[0][0]).pathname).toBe(
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit?]>;
+    expect(new URL(calls[0][0]).pathname).toBe(
       '/public_api/tariffs/types_groups/list',
     );
   });

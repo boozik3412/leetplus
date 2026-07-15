@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type {
+  LangameBalanceTopup,
   LangameCashTransaction,
   LangameClub,
   LangameGood,
@@ -202,6 +203,29 @@ export class LangameClient {
     return this.getListWithDateFallback<LangameTransaction>(
       baseUrl,
       '/transactions/list',
+      apiKey,
+      {
+        page: String(params.page),
+        page_limit: String(params.pageLimit),
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+      },
+    );
+  }
+
+  async listBalanceTopups(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      page: number;
+      pageLimit: number;
+      dateFrom: string;
+      dateTo: string;
+    },
+  ) {
+    return this.getListWithDateFallback<LangameBalanceTopup>(
+      baseUrl,
+      '/balances/list',
       apiKey,
       {
         page: String(params.page),

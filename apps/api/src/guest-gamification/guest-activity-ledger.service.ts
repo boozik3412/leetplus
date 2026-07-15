@@ -11,6 +11,7 @@ import {
 } from '../integrations/langame-session-tariff';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
+  LangameBalanceTopup,
   LangameGuestLog,
   LangameGuestSession,
   LangameProductExpense,
@@ -34,6 +35,7 @@ const SOURCE_GUEST_LOG = 'LANGAME_GUEST_LOG';
 const SOURCE_GUEST_SESSION = 'LANGAME_GUEST_SESSION';
 const SOURCE_TRANSACTION = 'LANGAME_TRANSACTION';
 const SOURCE_PRODUCT_EXPENSE = 'LANGAME_PRODUCT_EXPENSE';
+const SOURCE_BALANCE_TOPUP = 'LANGAME_BALANCE_TOPUP';
 
 type GuestActivityFactType =
   | 'SESSION_STARTED'
@@ -44,6 +46,7 @@ type GuestActivityFactType =
   | 'HOURLY_PLAY_TIME_ACCUMULATED'
   | 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
   | 'PRODUCT_PURCHASED'
+  | 'BALANCE_TOPUP'
   | 'BALANCE_WRITE_OFF'
   | 'BONUS_TOPUP'
   | 'VISIT'
@@ -1018,6 +1021,7 @@ export class GuestActivityLedgerService {
       sessions: 0,
       transactions: 0,
       productExpenses: 0,
+      balanceTopups: 0,
     };
     const guestLogs = await this.fetchSourceRows(
       context,
@@ -1085,6 +1089,20 @@ export class GuestActivityLedgerService {
       productExpenses.rows,
     );
 
+    const balanceTopups = await this.fetchSourceRows(
+      context,
+      SOURCE_BALANCE_TOPUP,
+      window,
+      (page, dateFrom, dateTo) =>
+        this.langameClient.listBalanceTopups(
+          context.source.baseUrl,
+          context.apiKey,
+          { page, pageLimit: DEFAULT_PAGE_LIMIT, dateFrom, dateTo },
+        ),
+      (row) => this.rowMatchesGuest(row, context.externalGuestId),
+    );
+    sourceCounts.balanceTopups = balanceTopups.rows.length;
+
     let rawRecordsCount = 0;
     let factsCount = 0;
 
@@ -1136,6 +1154,18 @@ export class GuestActivityLedgerService {
       factsCount += persisted.factsCreated;
     }
 
+    for (const row of balanceTopups.rows) {
+      const persisted = await this.persistRow(
+        context,
+        SOURCE_BALANCE_TOPUP,
+        row,
+        this.buildRawRecordFromBalanceTopup(context, row),
+        normalizationRunId,
+      );
+      rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
+      factsCount += persisted.factsCreated;
+    }
+
     const inferredPackageUsageFacts =
       await this.inferPackageSubscriptionUsageFacts(
         context,
@@ -1149,6 +1179,7 @@ export class GuestActivityLedgerService {
       sessions: sourceResultDiagnostics(sessions),
       transactions: sourceResultDiagnostics(transactions),
       productExpenses: sourceResultDiagnostics(productExpenses),
+      balanceTopups: sourceResultDiagnostics(balanceTopups),
     };
     const failedSources = Object.values(sourceResults).filter(
       (result) => result.status === 'FAILED',
@@ -1853,6 +1884,54 @@ export class GuestActivityLedgerService {
     };
   }
 
+  private buildRawRecordFromBalanceTopup(
+    context: LedgerSyncContext,
+    row: LangameBalanceTopup,
+  ): RawRecordDraft {
+    const operationId = firstString(row.id);
+    const amount = firstNumber(row.amount);
+    const happenedAt = parseLangameDate(
+      firstString(row.date),
+      context.timeZone,
+    );
+    const safePayload = {
+      id: row.id,
+      guest_id: row.guest_id,
+      amount: row.amount,
+      date: row.date,
+    };
+    const sourceHash = buildSourceHash({
+      sourceKind: SOURCE_BALANCE_TOPUP,
+      externalDomain: context.externalDomain,
+      externalGuestId: context.externalGuestId,
+      operationId,
+      amount,
+      happenedAt: happenedAt?.toISOString() ?? null,
+      payload: safePayload,
+    });
+
+    return {
+      sourceKind: SOURCE_BALANCE_TOPUP,
+      sourceKey: `${SOURCE_BALANCE_TOPUP}:${
+        operationId ?? context.externalGuestId
+      }:${sourceHash.slice(0, 16)}`,
+      sourceHash,
+      rawType: 'BALANCE_TOPUP',
+      rawText:
+        amount === null
+          ? 'Пополнение баланса'
+          : `Пополнение баланса на ${amount} ₽`,
+      happenedAt,
+      sourceLocalDate: sourceLocalDate(happenedAt, context.timeZone),
+      externalClubId: null,
+      storeId: null,
+      sessionExternalId: null,
+      amount,
+      bonusAmount: null,
+      rawPayload: sanitizeGuestActivityRawPayload(safePayload),
+    };
+  }
+
   private async persistRow(
     context: LedgerSyncContext,
     sourceKind: string,
@@ -2062,16 +2141,15 @@ export class GuestActivityLedgerService {
     tariffTypeGroups: LangameTariffTypeGroupIndex,
   ): FactDraft[] {
     if (sourceKind === SOURCE_GUEST_SESSION) {
-      return this.normalizeSessionFacts(
-        row,
-        raw,
-        timeZone,
-        tariffTypeGroups,
-      );
+      return this.normalizeSessionFacts(row, raw, timeZone, tariffTypeGroups);
     }
 
     if (sourceKind === SOURCE_PRODUCT_EXPENSE) {
       return this.normalizeProductExpenseFacts(row, raw);
+    }
+
+    if (sourceKind === SOURCE_BALANCE_TOPUP) {
+      return this.normalizeBalanceTopupFacts(row, raw);
     }
 
     const text = normalizeSearchText(raw.rawText);
@@ -2210,6 +2288,44 @@ export class GuestActivityLedgerService {
       },
     ];
   }
+
+  private normalizeBalanceTopupFacts(
+    row: Record<string, unknown>,
+    raw: RawRecordDraft,
+  ): FactDraft[] {
+    const operationId = firstString(row.id);
+    if (
+      !operationId ||
+      !raw.happenedAt ||
+      raw.amount === null ||
+      raw.amount <= 0
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        factType: 'BALANCE_TOPUP',
+        happenedAt: raw.happenedAt,
+        sourceLocalDate: raw.sourceLocalDate,
+        externalClubId: null,
+        storeId: null,
+        sessionExternalId: null,
+        tariffName: null,
+        tariffType: null,
+        amount: raw.amount,
+        bonusAmount: null,
+        durationMinutes: null,
+        confidence: 'EXACT',
+        evidence: sanitizeGuestActivityEvidencePayload({
+          sourceKind: SOURCE_BALANCE_TOPUP,
+          operationId,
+          amount: raw.amount,
+          scope: 'LANGAME_DOMAIN',
+        }),
+      },
+    ];
+  }
   private normalizeSessionFacts(
     row: Record<string, unknown>,
     raw: RawRecordDraft,
@@ -2220,10 +2336,7 @@ export class GuestActivityLedgerService {
     const startedAt = parseLangameDate(firstString(row.date_start), timeZone);
     const stoppedAt = parseLangameDate(firstString(row.date_stop), timeZone);
     const sessionExternalId = firstString(row.id, row.UUID);
-    const tariff = resolveLangameSessionTariff(
-      row.packet,
-      tariffTypeGroups,
-    );
+    const tariff = resolveLangameSessionTariff(row.packet, tariffTypeGroups);
     const playedMinutes = playedDurationMinutes(startedAt, stoppedAt);
 
     if (startedAt) {
@@ -2308,8 +2421,7 @@ export class GuestActivityLedgerService {
     }
 
     if (playedMinutes !== null && tariff.kind !== 'unknown') {
-      const packageOrSubscription =
-        tariff.kind === 'package_or_subscription';
+      const packageOrSubscription = tariff.kind === 'package_or_subscription';
       const playTimeFactType: GuestActivityFactType = packageOrSubscription
         ? 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
         : 'HOURLY_PLAY_TIME_ACCUMULATED';
@@ -2665,6 +2777,15 @@ function relevantFactsForRule(
       session.includes('abonement')
       ? ['SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED']
       : ['SESSION_STARTED', 'HOURLY_SESSION_STARTED'];
+  }
+
+  if (
+    trigger.includes('balance_topup') ||
+    trigger.includes('balance_top_up') ||
+    trigger.includes('topup') ||
+    trigger.includes('deposit')
+  ) {
+    return ['BALANCE_TOPUP'];
   }
 
   if (

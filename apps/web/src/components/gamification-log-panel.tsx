@@ -186,6 +186,25 @@ type StoreOption = {
   name: string;
 };
 
+type SyncSourceDiagnostic = {
+  key: string;
+  label: string;
+  status: string;
+  pagesFetched: number;
+  rowsFetched: number;
+  rowsMatched: number;
+  from: string | null;
+  to: string | null;
+};
+
+const syncSourceLabels: Record<string, string> = {
+  guestLogs: "Игровой журнал Langame",
+  sessions: "Игровые сессии",
+  transactions: "Транзакции",
+  productExpenses: "Покупки товаров",
+  balanceTopups: "Пополнения баланса",
+};
+
 type LogResponse = {
   profile: {
     id: string;
@@ -323,6 +342,51 @@ function statusClass(status: string | null | undefined) {
   return "border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300";
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function asNullableString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function syncSourceDiagnostics(
+  syncState: Record<string, unknown> | null,
+): SyncSourceDiagnostic[] {
+  const diagnostics = asRecord(syncState?.diagnostics);
+  const sourceResults = asRecord(diagnostics?.sourceResults);
+
+  if (!sourceResults) {
+    return [];
+  }
+
+  return Object.entries(syncSourceLabels).flatMap(([key, label]) => {
+    const source = asRecord(sourceResults[key]);
+    if (!source) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        label,
+        status: asNullableString(source.status) ?? "UNKNOWN",
+        pagesFetched: asFiniteNumber(source.pagesFetched),
+        rowsFetched: asFiniteNumber(source.rowsFetched),
+        rowsMatched: asFiniteNumber(source.rowsMatched),
+        from: asNullableString(source.from),
+        to: asNullableString(source.to),
+      },
+    ];
+  });
+}
+
 async function readClientError(response: Response) {
   try {
     const data = (await response.json()) as { message?: string | string[] };
@@ -391,6 +455,8 @@ export function GamificationLogPanel() {
   const stores = data?.filters.stores ?? [];
   const activeTimeline =
     tab === "game" ? data?.gameTimeline : data?.langameTimeline;
+  const syncSources = syncSourceDiagnostics(data?.syncState ?? null);
+  const syncStatus = asNullableString(data?.syncState?.status);
 
   const summary = useMemo(() => {
     if (!data) {
@@ -633,6 +699,60 @@ export function GamificationLogPanel() {
                 onRelink={(guestId) => void relinkProfile(guestId)}
               />
             ) : null}
+
+            <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">Источники игрового журнала</p>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Статус последнего чтения Langame для выбранного гостя.
+                  </p>
+                </div>
+                <span
+                  className={`rounded border px-2 py-1 text-xs font-semibold ${statusClass(
+                    syncStatus,
+                  )}`}
+                >
+                  {syncStatus ?? "Ещё не синхронизировано"}
+                </span>
+              </div>
+
+              {syncSources.length > 0 ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                  {syncSources.map((source) => (
+                    <div
+                      className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                      key={source.key}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <strong className="text-xs">{source.label}</strong>
+                        <span
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${statusClass(
+                            source.status,
+                          )}`}
+                        >
+                          {source.status}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+                        Получено: {source.rowsFetched} · гостя: {source.rowsMatched}
+                      </p>
+                      <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        Страниц: {source.pagesFetched}
+                        {source.from && source.to
+                          ? ` · ${formatDate(source.from)} — ${formatDate(source.to)}`
+                          : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+                  Нажмите «Обновить лог Langame», чтобы проверить доступность
+                  источников.
+                </p>
+              )}
+            </div>
 
             <form
               className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6"

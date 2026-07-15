@@ -246,6 +246,7 @@ type MissionForm = {
   budgetAmount: string;
   budgetUnlimited: boolean;
   perGuestLimit: string;
+  perGuestLimitUnlimited: boolean;
   totalRewardLimit: string;
   sessionType: string;
   tariffGroupId: string;
@@ -1096,6 +1097,7 @@ const defaultMissionForm: MissionForm = {
   budgetAmount: "7000",
   budgetUnlimited: false,
   perGuestLimit: "1",
+  perGuestLimitUnlimited: false,
   totalRewardLimit: "100",
   sessionType: "",
   tariffGroupId: "",
@@ -1149,6 +1151,7 @@ const defaultCheckInMissionForm: MissionForm = {
   budgetAmount: "0",
   budgetUnlimited: false,
   perGuestLimit: "",
+  perGuestLimitUnlimited: true,
   totalRewardLimit: "",
   sessionType: "",
   tariffGroupId: "",
@@ -1814,7 +1817,9 @@ export function GuestGamificationPanel({
         periodFrom: nullable(missionForm.periodFrom),
         periodTo: nullable(missionForm.periodTo),
         budgetAmount: missionForm.budgetUnlimited ? null : missionForm.budgetAmount,
-        perGuestLimit: missionForm.perGuestLimit,
+        perGuestLimit: missionForm.perGuestLimitUnlimited
+          ? null
+          : missionForm.perGuestLimit,
         totalRewardLimit: missionForm.totalRewardLimit,
         conditions: buildMissionConditions(missionForm),
         antiFraudRules: buildMissionAntiFraudRules(missionForm),
@@ -7648,6 +7653,10 @@ function MissionsTab({
                   setForm({ ...form, xpReward: event.target.value })
                 }
               />
+              <OptionHelp>
+                Опыт, который игровой профиль гостя получит после выполнения
+                задания. XP повышает уровень и не влияет на цель задания.
+              </OptionHelp>
             </Field>
             <Field label="Цель">
               <input
@@ -7706,14 +7715,34 @@ function MissionsTab({
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Лимит на гостя">
-              <input
-                className={fieldClass}
-                type="number"
-                value={form.perGuestLimit}
-                onChange={(event) =>
-                  setForm({ ...form, perGuestLimit: event.target.value })
-                }
-              />
+              <div className="space-y-2">
+                <input
+                  className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
+                  type="number"
+                  min="1"
+                  value={form.perGuestLimitUnlimited ? "" : form.perGuestLimit}
+                  disabled={form.perGuestLimitUnlimited}
+                  placeholder={
+                    form.perGuestLimitUnlimited ? "Без ограничений" : undefined
+                  }
+                  onChange={(event) =>
+                    setForm({ ...form, perGuestLimit: event.target.value })
+                  }
+                />
+                <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+                  <span>Безлимит</span>
+                  <input
+                    type="checkbox"
+                    checked={form.perGuestLimitUnlimited}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        perGuestLimitUnlimited: event.target.checked,
+                      })
+                    }
+                  />
+                </label>
+              </div>
             </Field>
             <Field label="Общий лимит">
               <input
@@ -14162,6 +14191,7 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     budgetAmount: moneyFormValue(mission.budgetAmount),
     budgetUnlimited: mission.budgetAmount == null,
     perGuestLimit: mission.perGuestLimit ? String(mission.perGuestLimit) : "",
+    perGuestLimitUnlimited: mission.perGuestLimit == null,
     totalRewardLimit: mission.totalRewardLimit
       ? String(mission.totalRewardLimit)
       : "",
@@ -15161,7 +15191,9 @@ function buildMissionAntiFraudRules(form: MissionForm) {
     denySameDayRepeat: form.denySameDayRepeat,
     requiresCashierConfirmation: form.requireCashierConfirmation,
     blockedGuestLogTypes: csvList(form.blockedGuestLogTypes),
-    perGuestLimit: optionalNumber(form.perGuestLimit),
+    perGuestLimit: form.perGuestLimitUnlimited
+      ? null
+      : optionalNumber(form.perGuestLimit),
     totalRewardLimit: optionalNumber(form.totalRewardLimit),
   };
 }

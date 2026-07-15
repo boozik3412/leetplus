@@ -12,7 +12,11 @@ import {
 } from "react";
 import { GuestGamificationVisualEditor } from "@/components/guest-gamification-visual-editor";
 import { normalizeExternalActionUrl } from "@/lib/external-links";
-import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guests";
+import type {
+  GuestAudience,
+  GuestCrmLead,
+  GuestDashboardRow,
+} from "@/lib/guests";
 import type {
   GuestGameBonusLedgerDispatchItem,
   GuestGameBonusLedgerDispatchResult,
@@ -653,8 +657,7 @@ const triggerHelpText: Record<string, string> = {
     "Правило проверится, когда приглашенный гость успешно зарегистрируется по реферальной ссылке.",
   REPEAT_VISIT:
     "Правило проверит повторное посещение гостя в заданном окне времени.",
-  MISSION_COMPLETED:
-    "Правило проверится после выполнения другого задания.",
+  MISSION_COMPLETED: "Правило проверится после выполнения другого задания.",
 };
 
 const missionTypeOptions = [
@@ -682,8 +685,7 @@ const missionTypeHelpText: Record<string, string> = {
     "Задание считает накопленное игровое время или длительность сессии.",
   BAR_PURCHASE:
     "Задание считает покупки бара по сохраненным продажам или списаниям.",
-  PRODUCT_PURCHASE:
-    "Задание считает покупку выбранных товаров или категорий.",
+  PRODUCT_PURCHASE: "Задание считает покупку выбранных товаров или категорий.",
   BALANCE_TOPUP:
     "Задание считает пополнение баланса гостя по сохраненным фактам Langame.",
   REFERRAL_ACCEPTED:
@@ -692,8 +694,7 @@ const missionTypeHelpText: Record<string, string> = {
     "Задание срабатывает при открытии сайта, игрового модуля или Mini App.",
   GUEST_LOG:
     "Задание работает от выбранных событий Langame из подготовленного каталога.",
-  CUSTOM:
-    "Свободный сценарий: событие и условия задаются ниже вручную.",
+  CUSTOM: "Свободный сценарий: событие и условия задаются ниже вручную.",
 };
 
 const progressUnitOptions = [
@@ -832,13 +833,14 @@ const rewardStatusLabels: Record<GuestGameRewardStatus, string> = {
   EXPIRED: "сгорело",
 };
 
-const rewardWalletStateLabels: Record<GuestGameReward["walletState"], string> = {
-  WAITING_APPROVAL: "ожидает подтверждения",
-  READY: "можно выдать",
-  REDEEMED: "погашено",
-  CANCELED: "отменено",
-  EXPIRED: "срок истек",
-};
+const rewardWalletStateLabels: Record<GuestGameReward["walletState"], string> =
+  {
+    WAITING_APPROVAL: "ожидает подтверждения",
+    READY: "можно выдать",
+    REDEEMED: "погашено",
+    CANCELED: "отменено",
+    EXPIRED: "срок истек",
+  };
 
 const rewardRarityLabels: Record<
   NonNullable<GuestGameReward["rewardRarity"]>,
@@ -1404,14 +1406,15 @@ export function GuestGamificationPanel({
   const [missionForm, setMissionForm] =
     useState<MissionForm>(defaultMissionForm);
   const [seasonForm, setSeasonForm] = useState<SeasonForm>(defaultSeasonForm);
-  const [promoBannerForm, setPromoBannerForm] =
-    useState<PromoBannerForm>(defaultPromoBannerForm);
+  const [promoBannerForm, setPromoBannerForm] = useState<PromoBannerForm>(
+    defaultPromoBannerForm,
+  );
   const [rewardForm, setRewardForm] = useState<RewardForm>(defaultRewardForm);
-  const [rewardRedeemForm, setRewardRedeemForm] =
-    useState<RewardRedeemForm>(defaultRewardRedeemForm);
+  const [rewardRedeemForm, setRewardRedeemForm] = useState<RewardRedeemForm>(
+    defaultRewardRedeemForm,
+  );
   const [eventForm, setEventForm] = useState<EventForm>(defaultEventForm);
-  const [dryRunForm, setDryRunForm] =
-    useState<DryRunForm>(defaultDryRunForm);
+  const [dryRunForm, setDryRunForm] = useState<DryRunForm>(defaultDryRunForm);
   const [dryRunResult, setDryRunResult] =
     useState<GuestGameDryRunResult | null>(null);
   const [processEventResult, setProcessEventResult] =
@@ -1424,8 +1427,9 @@ export function GuestGamificationPanel({
     useState<GuestGameDeliveryDispatchResult | null>(null);
   const [bonusLedgerResult, setBonusLedgerResult] =
     useState<BonusLedgerActionResult | null>(null);
-  const [redeemedReward, setRedeemedReward] =
-    useState<GuestGameReward | null>(null);
+  const [redeemedReward, setRedeemedReward] = useState<GuestGameReward | null>(
+    null,
+  );
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
   const [isLootBoxFormOpen, setIsLootBoxFormOpen] = useState(false);
@@ -1433,7 +1437,9 @@ export function GuestGamificationPanel({
   const [isMissionFormOpen, setIsMissionFormOpen] = useState(false);
   const [editingSeasonId, setEditingSeasonId] = useState<string | null>(null);
   const [isSeasonFormOpen, setIsSeasonFormOpen] = useState(false);
-  const [editingPromoBannerId, setEditingPromoBannerId] = useState<string | null>(null);
+  const [editingPromoBannerId, setEditingPromoBannerId] = useState<
+    string | null
+  >(null);
   const [isPromoBannerFormOpen, setIsPromoBannerFormOpen] = useState(false);
   const [promoBannerNotice, setPromoBannerNotice] =
     useState<PromoBannerNotice | null>(null);
@@ -1703,12 +1709,10 @@ export function GuestGamificationPanel({
     return nextStatus === "ACTIVE" && currentStatus !== "ACTIVE" && !confirmed;
   }
 
-  async function saveLootBox(
-    options: { confirmedActivation?: boolean } = {},
-  ) {
+  async function saveLootBox(options: { confirmedActivation?: boolean } = {}) {
     const currentStatus =
-      workspace.lootBoxes.find((item) => item.id === editingLootBoxId)?.status ??
-      null;
+      workspace.lootBoxes.find((item) => item.id === editingLootBoxId)
+        ?.status ?? null;
 
     if (
       needsActivationConfirmation(
@@ -1750,7 +1754,9 @@ export function GuestGamificationPanel({
         periodRules: buildLootBoxPeriodRules(lootBoxForm),
         limits: buildLootBoxLimits(lootBoxForm),
         probabilityRules: buildLootBoxProbabilityRules(lootBoxForm),
-        budgetAmount: lootBoxForm.budgetUnlimited ? null : lootBoxForm.budgetAmount,
+        budgetAmount: lootBoxForm.budgetUnlimited
+          ? null
+          : lootBoxForm.budgetAmount,
         antiFraudRules: buildLootBoxAntiFraudRules(),
         manualApprovalRequired: lootBoxForm.manualApprovalRequired,
         note: nullable(lootBoxForm.note),
@@ -1770,9 +1776,7 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function saveMission(
-    options: { confirmedActivation?: boolean } = {},
-  ) {
+  async function saveMission(options: { confirmedActivation?: boolean } = {}) {
     const currentStatus =
       workspace.missions.find((item) => item.id === editingMissionId)?.status ??
       null;
@@ -1816,7 +1820,9 @@ export function GuestGamificationPanel({
         storeIds: missionForm.storeIds,
         periodFrom: nullable(missionForm.periodFrom),
         periodTo: nullable(missionForm.periodTo),
-        budgetAmount: missionForm.budgetUnlimited ? null : missionForm.budgetAmount,
+        budgetAmount: missionForm.budgetUnlimited
+          ? null
+          : missionForm.budgetAmount,
         perGuestLimit: missionForm.perGuestLimitUnlimited
           ? null
           : missionForm.perGuestLimit,
@@ -1841,9 +1847,7 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function saveSeason(
-    options: { confirmedActivation?: boolean } = {},
-  ) {
+  async function saveSeason(options: { confirmedActivation?: boolean } = {}) {
     const currentStatus =
       workspace.seasons.find((item) => item.id === editingSeasonId)?.status ??
       null;
@@ -1886,7 +1890,9 @@ export function GuestGamificationPanel({
         premiumRewards: buildSeasonRewards(seasonForm, "premium"),
         premiumEnabled: seasonForm.premiumEnabled,
         premiumUpgradeMode: nullable(seasonForm.premiumUpgradeMode),
-        budgetAmount: seasonForm.budgetUnlimited ? null : seasonForm.budgetAmount,
+        budgetAmount: seasonForm.budgetUnlimited
+          ? null
+          : seasonForm.budgetAmount,
         manualApprovalRequired: seasonForm.manualApprovalRequired,
         note: nullable(seasonForm.note),
       };
@@ -2135,29 +2141,32 @@ export function GuestGamificationPanel({
   }
 
   async function runSnapshotPipeline(dryRunOnly: boolean) {
-    await saveAction(dryRunOnly ? "pipelinePreview" : "pipelineRun", async () => {
-      if (!dryRunOnly) {
-        assertCan(
-          access.canManageRules,
-          "Для batch-обработки snapshot-фактов нужно право `Геймификация: правила`.",
+    await saveAction(
+      dryRunOnly ? "pipelinePreview" : "pipelineRun",
+      async () => {
+        if (!dryRunOnly) {
+          assertCan(
+            access.canManageRules,
+            "Для batch-обработки snapshot-фактов нужно право `Геймификация: правила`.",
+          );
+        }
+
+        const result = await postJson<GuestGamePipelineRunResult>(
+          "/api/guests/gamification/pipeline/run",
+          {
+            limit: 20,
+            dryRunOnly,
+          },
         );
-      }
 
-      const result = await postJson<GuestGamePipelineRunResult>(
-        "/api/guests/gamification/pipeline/run",
-        {
-          limit: 20,
-          dryRunOnly,
-        },
-      );
+        setPipelineResult(result);
+        setProcessEventResult(null);
 
-      setPipelineResult(result);
-      setProcessEventResult(null);
-
-      if (!dryRunOnly) {
-        await reloadWorkspace();
-      }
-    });
+        if (!dryRunOnly) {
+          await reloadWorkspace();
+        }
+      },
+    );
   }
 
   async function saveGuestLogTypeMapping(payload: GuestLogMappingPayload) {
@@ -2181,7 +2190,9 @@ export function GuestGamificationPanel({
         "Для настройки типов guests/logs нужно право `Геймификация: правила`.",
       );
 
-      await deleteJson(`/api/guests/gamification/guest-log-mappings/${mapping.id}`);
+      await deleteJson(
+        `/api/guests/gamification/guest-log-mappings/${mapping.id}`,
+      );
       await reloadWorkspace();
     });
   }
@@ -2196,7 +2207,9 @@ export function GuestGamificationPanel({
       occurredAt: dateInputValue(fact.occurredAt),
       sessionType: fact.sessionType ?? current.sessionType,
       sessionPacket:
-        fact.sessionPacket == null ? current.sessionPacket : String(fact.sessionPacket),
+        fact.sessionPacket == null
+          ? current.sessionPacket
+          : String(fact.sessionPacket),
       tariffGroupId: fact.tariffGroupId ?? current.tariffGroupId,
       tariffPeriodId: fact.tariffPeriodId ?? current.tariffPeriodId,
       tariffTypeId: fact.tariffTypeId ?? current.tariffTypeId,
@@ -2206,7 +2219,9 @@ export function GuestGamificationPanel({
           ? current.sessionMinutes
           : String(fact.sessionMinutes),
       spendAmount:
-        fact.spendAmount == null ? current.spendAmount : String(fact.spendAmount),
+        fact.spendAmount == null
+          ? current.spendAmount
+          : String(fact.spendAmount),
       sourceFactId: fact.id,
       sourceFactKind: fact.source,
       externalProvider: fact.externalProvider ?? "",
@@ -2704,8 +2719,8 @@ export function GuestGamificationPanel({
               Промо-сценарии кампаний
             </h2>
             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Тихие часы, повторный визит, бар, события, аудитории, бюджеты
-              и ручная очередь выдачи для измеримого промо-эффекта.
+              Тихие часы, повторный визит, бар, события, аудитории, бюджеты и
+              ручная очередь выдачи для измеримого промо-эффекта.
             </p>
           </Link>
         </div>
@@ -2719,7 +2734,10 @@ export function GuestGamificationPanel({
             }
           />
           <StatCard label="XP в системе" value={workspace.summary.totalXp} />
-          <StatCard label="Награды к выдаче" value={workspace.summary.pendingRewards} />
+          <StatCard
+            label="Награды к выдаче"
+            value={workspace.summary.pendingRewards}
+          />
           <StatCard
             label="Плановый бюджет"
             value={formatMoney(workspace.summary.plannedBudget)}
@@ -2766,230 +2784,230 @@ export function GuestGamificationPanel({
       {editorMode === "advanced" ? (
         <>
           <div className="flex gap-2 overflow-x-auto border-b border-zinc-200 pb-2 dark:border-zinc-800">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={[
-              "whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition",
-              activeTab === tab.id
-                ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
-                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white",
-            ].join(" ")}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={[
+                  "whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition",
+                  activeTab === tab.id
+                    ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
+                    : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white",
+                ].join(" ")}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-      {activeTab === "overview" ? (
-        <OverviewTab
-          workspace={workspace}
-          pendingRewards={pendingRewards}
-          onRewardStatus={updateRewardStatus}
-          onEditReward={editReward}
-          onOpenTab={setActiveTab}
-          saving={saving}
-          tenantSlug={tenantSlug}
-          stores={stores}
-          canApproveRewards={access.canApproveRewards}
-          canManageRules={access.canManageRules}
-          canViewIntegrationReadiness={access.isPlatformAdmin}
-          onPrepareOutbox={prepareDeliveryOutbox}
-          onDispatchOutbox={dispatchDeliveryOutbox}
-          deliveryDispatchResult={deliveryDispatchResult}
-          onUpdateDeliveryStatus={updateDeliveryStatus}
-          onSaveGuestLogMapping={saveGuestLogTypeMapping}
-          onDeleteGuestLogMapping={deleteGuestLogTypeMapping}
-          onQueueBonusLedger={queueBonusLedger}
-          onDryRunBonusLedger={dryRunBonusLedgerDispatch}
-          onDispatchBonusLedger={dispatchBonusLedger}
-          onDispatchBonusLedgerCanary={dispatchBonusLedgerCanary}
-          onCancelBonusLedgerEntry={cancelBonusLedgerEntry}
-          bonusLedgerResult={bonusLedgerResult}
-        />
-      ) : null}
+          {activeTab === "overview" ? (
+            <OverviewTab
+              workspace={workspace}
+              pendingRewards={pendingRewards}
+              onRewardStatus={updateRewardStatus}
+              onEditReward={editReward}
+              onOpenTab={setActiveTab}
+              saving={saving}
+              tenantSlug={tenantSlug}
+              stores={stores}
+              canApproveRewards={access.canApproveRewards}
+              canManageRules={access.canManageRules}
+              canViewIntegrationReadiness={access.isPlatformAdmin}
+              onPrepareOutbox={prepareDeliveryOutbox}
+              onDispatchOutbox={dispatchDeliveryOutbox}
+              deliveryDispatchResult={deliveryDispatchResult}
+              onUpdateDeliveryStatus={updateDeliveryStatus}
+              onSaveGuestLogMapping={saveGuestLogTypeMapping}
+              onDeleteGuestLogMapping={deleteGuestLogTypeMapping}
+              onQueueBonusLedger={queueBonusLedger}
+              onDryRunBonusLedger={dryRunBonusLedgerDispatch}
+              onDispatchBonusLedger={dispatchBonusLedger}
+              onDispatchBonusLedgerCanary={dispatchBonusLedgerCanary}
+              onCancelBonusLedgerEntry={cancelBonusLedgerEntry}
+              bonusLedgerResult={bonusLedgerResult}
+            />
+          ) : null}
 
-      {activeTab === "profiles" ? (
-        <ProfilesTab
-          form={profileForm}
-          setForm={setProfileForm}
-          guests={guests}
-          leads={leads}
-          profiles={filteredProfiles}
-          query={query}
-          setQuery={setQuery}
-          eventForm={eventForm}
-          setEventForm={setEventForm}
-          editingProfileId={editingProfileId}
-          onSaveProfile={saveProfile}
-          onEditProfile={editProfile}
-          onResetProfile={resetProfileForm}
-          onSaveEvent={saveEvent}
-          onProfileStatus={updateProfileStatus}
-          saving={saving}
-          canManage={access.canManageRules}
-          canViewTechnicalPayload={access.isPlatformAdmin}
-        />
-      ) : null}
+          {activeTab === "profiles" ? (
+            <ProfilesTab
+              form={profileForm}
+              setForm={setProfileForm}
+              guests={guests}
+              leads={leads}
+              profiles={filteredProfiles}
+              query={query}
+              setQuery={setQuery}
+              eventForm={eventForm}
+              setEventForm={setEventForm}
+              editingProfileId={editingProfileId}
+              onSaveProfile={saveProfile}
+              onEditProfile={editProfile}
+              onResetProfile={resetProfileForm}
+              onSaveEvent={saveEvent}
+              onProfileStatus={updateProfileStatus}
+              saving={saving}
+              canManage={access.canManageRules}
+              canViewTechnicalPayload={access.isPlatformAdmin}
+            />
+          ) : null}
 
-      {activeTab === "lootBoxes" ? (
-        <LootBoxesTab
-          form={lootBoxForm}
-          setForm={setLootBoxForm}
-          lootBoxes={workspace.lootBoxes}
-          audiences={audiences}
-          stores={stores}
-          tariffSnapshots={workspace.tariffSnapshots}
-          guestLogCatalog={workspace.guestLogCatalog}
-          editingId={editingLootBoxId}
-          isFormOpen={isLootBoxFormOpen}
-          onSave={saveLootBox}
-          onEdit={editLootBox}
-          onCreateNew={createLootBox}
-          onReset={resetLootBoxForm}
-          onStatus={updateRuleStatus}
-          onDelete={deleteRuleTemplate}
-          onRestart={restartLootBox}
-          saving={saving}
-          canManage={access.canManageRules}
-        />
-      ) : null}
+          {activeTab === "lootBoxes" ? (
+            <LootBoxesTab
+              form={lootBoxForm}
+              setForm={setLootBoxForm}
+              lootBoxes={workspace.lootBoxes}
+              audiences={audiences}
+              stores={stores}
+              tariffSnapshots={workspace.tariffSnapshots}
+              guestLogCatalog={workspace.guestLogCatalog}
+              editingId={editingLootBoxId}
+              isFormOpen={isLootBoxFormOpen}
+              onSave={saveLootBox}
+              onEdit={editLootBox}
+              onCreateNew={createLootBox}
+              onReset={resetLootBoxForm}
+              onStatus={updateRuleStatus}
+              onDelete={deleteRuleTemplate}
+              onRestart={restartLootBox}
+              saving={saving}
+              canManage={access.canManageRules}
+            />
+          ) : null}
 
-      {activeTab === "missions" ? (
-        <MissionsTab
-          form={missionForm}
-          setForm={setMissionForm}
-          missions={regularMissions}
-          audiences={audiences}
-          stores={stores}
-          products={products}
-          tariffSnapshots={workspace.tariffSnapshots}
-          guestLogCatalog={workspace.guestLogCatalog}
-          editingId={editingMissionId}
-          isFormOpen={isMissionFormOpen}
-          onSave={saveMission}
-          onEdit={editMission}
-          onCreateNew={createMission}
-          onReset={resetMissionForm}
-          onStatus={updateRuleStatus}
-          onDelete={deleteRuleTemplate}
-          saving={saving}
-          canManage={access.canManageRules}
-        />
-      ) : null}
+          {activeTab === "missions" ? (
+            <MissionsTab
+              form={missionForm}
+              setForm={setMissionForm}
+              missions={regularMissions}
+              audiences={audiences}
+              stores={stores}
+              products={products}
+              tariffSnapshots={workspace.tariffSnapshots}
+              guestLogCatalog={workspace.guestLogCatalog}
+              editingId={editingMissionId}
+              isFormOpen={isMissionFormOpen}
+              onSave={saveMission}
+              onEdit={editMission}
+              onCreateNew={createMission}
+              onReset={resetMissionForm}
+              onStatus={updateRuleStatus}
+              onDelete={deleteRuleTemplate}
+              saving={saving}
+              canManage={access.canManageRules}
+            />
+          ) : null}
 
-      {activeTab === "checkIn" ? (
-        <CheckInTab
-          form={missionForm}
-          setForm={setMissionForm}
-          missions={checkInMissions}
-          audiences={audiences}
-          stores={stores}
-          tariffSnapshots={workspace.tariffSnapshots}
-          editingId={editingMissionId}
-          isFormOpen={isMissionFormOpen}
-          onSave={saveMission}
-          onEdit={editCheckInMission}
-          onCreateNew={createCheckInMission}
-          onReset={resetCheckInMissionForm}
-          onStatus={updateRuleStatus}
-          onDelete={deleteRuleTemplate}
-          saving={saving}
-          canManage={access.canManageRules}
-        />
-      ) : null}
+          {activeTab === "checkIn" ? (
+            <CheckInTab
+              form={missionForm}
+              setForm={setMissionForm}
+              missions={checkInMissions}
+              audiences={audiences}
+              stores={stores}
+              tariffSnapshots={workspace.tariffSnapshots}
+              editingId={editingMissionId}
+              isFormOpen={isMissionFormOpen}
+              onSave={saveMission}
+              onEdit={editCheckInMission}
+              onCreateNew={createCheckInMission}
+              onReset={resetCheckInMissionForm}
+              onStatus={updateRuleStatus}
+              onDelete={deleteRuleTemplate}
+              saving={saving}
+              canManage={access.canManageRules}
+            />
+          ) : null}
 
-      {activeTab === "seasons" ? (
-        <SeasonsTab
-          form={seasonForm}
-          setForm={setSeasonForm}
-          seasons={workspace.seasons}
-          audiences={audiences}
-          stores={stores}
-          tariffSnapshots={workspace.tariffSnapshots}
-          lootBoxes={workspace.lootBoxes}
-          editingId={editingSeasonId}
-          isFormOpen={isSeasonFormOpen}
-          onSave={saveSeason}
-          onEdit={editSeason}
-          onCreateNew={createSeason}
-          onReset={resetSeasonForm}
-          onStatus={updateRuleStatus}
-          onDelete={deleteRuleTemplate}
-          saving={saving}
-          canManage={access.canManageRules}
-        />
-      ) : null}
+          {activeTab === "seasons" ? (
+            <SeasonsTab
+              form={seasonForm}
+              setForm={setSeasonForm}
+              seasons={workspace.seasons}
+              audiences={audiences}
+              stores={stores}
+              tariffSnapshots={workspace.tariffSnapshots}
+              lootBoxes={workspace.lootBoxes}
+              editingId={editingSeasonId}
+              isFormOpen={isSeasonFormOpen}
+              onSave={saveSeason}
+              onEdit={editSeason}
+              onCreateNew={createSeason}
+              onReset={resetSeasonForm}
+              onStatus={updateRuleStatus}
+              onDelete={deleteRuleTemplate}
+              saving={saving}
+              canManage={access.canManageRules}
+            />
+          ) : null}
 
-      {activeTab === "promoCards" ? (
-        <PromoBannersTab
-          form={promoBannerForm}
-          setForm={setPromoBannerForm}
-          promoCards={workspace.promoCards}
-          stores={stores}
-          editingId={editingPromoBannerId}
-          notice={promoBannerNotice}
-          isFormOpen={isPromoBannerFormOpen}
-          onSave={savePromoBanner}
-          onEdit={editPromoBanner}
-          onCreateNew={createPromoBanner}
-          onReset={resetPromoBannerForm}
-          onStatus={updateRuleStatus}
-          onDelete={deleteRuleTemplate}
-          saving={saving}
-          canManage={access.canManageRules}
-        />
-      ) : null}
+          {activeTab === "promoCards" ? (
+            <PromoBannersTab
+              form={promoBannerForm}
+              setForm={setPromoBannerForm}
+              promoCards={workspace.promoCards}
+              stores={stores}
+              editingId={editingPromoBannerId}
+              notice={promoBannerNotice}
+              isFormOpen={isPromoBannerFormOpen}
+              onSave={savePromoBanner}
+              onEdit={editPromoBanner}
+              onCreateNew={createPromoBanner}
+              onReset={resetPromoBannerForm}
+              onStatus={updateRuleStatus}
+              onDelete={deleteRuleTemplate}
+              saving={saving}
+              canManage={access.canManageRules}
+            />
+          ) : null}
 
-      {activeTab === "rewards" ? (
-        <RewardsTab
-          form={rewardForm}
-          setForm={setRewardForm}
-          redeemForm={rewardRedeemForm}
-          setRedeemForm={setRewardRedeemForm}
-          redeemedReward={redeemedReward}
-          rewards={workspace.rewards}
-          profiles={workspace.profiles}
-          guests={guests}
-          stores={stores}
-          lootBoxes={workspace.lootBoxes}
-          missions={workspace.missions}
-          seasons={workspace.seasons}
-          editingId={editingRewardId}
-          onSave={saveReward}
-          onEdit={editReward}
-          onReset={resetRewardForm}
-          onStatus={updateRewardStatus}
-          onRedeem={redeemReward}
-          saving={saving}
-          canApprove={access.canApproveRewards}
-        />
-      ) : null}
+          {activeTab === "rewards" ? (
+            <RewardsTab
+              form={rewardForm}
+              setForm={setRewardForm}
+              redeemForm={rewardRedeemForm}
+              setRedeemForm={setRewardRedeemForm}
+              redeemedReward={redeemedReward}
+              rewards={workspace.rewards}
+              profiles={workspace.profiles}
+              guests={guests}
+              stores={stores}
+              lootBoxes={workspace.lootBoxes}
+              missions={workspace.missions}
+              seasons={workspace.seasons}
+              editingId={editingRewardId}
+              onSave={saveReward}
+              onEdit={editReward}
+              onReset={resetRewardForm}
+              onStatus={updateRewardStatus}
+              onRedeem={redeemReward}
+              saving={saving}
+              canApprove={access.canApproveRewards}
+            />
+          ) : null}
 
-      {activeTab === "testRun" ? (
-        <DryRunTab
-          form={dryRunForm}
-          setForm={setDryRunForm}
-          result={dryRunResult}
-          processResult={processEventResult}
-          profiles={workspace.profiles}
-          guests={guests}
-          stores={stores}
-          tariffSnapshots={workspace.tariffSnapshots}
-          guestLogCatalog={workspace.guestLogCatalog}
-          snapshotFacts={snapshotFacts}
-          pipelineResult={pipelineResult}
-          onRun={runDryRun}
-          onProcess={processDryRunEvent}
-          onLoadFacts={loadSnapshotFacts}
-          onApplyFact={applySnapshotFact}
-          onPipelineRun={runSnapshotPipeline}
-          saving={saving}
-          canManage={access.canManageRules}
-        />
-      ) : null}
+          {activeTab === "testRun" ? (
+            <DryRunTab
+              form={dryRunForm}
+              setForm={setDryRunForm}
+              result={dryRunResult}
+              processResult={processEventResult}
+              profiles={workspace.profiles}
+              guests={guests}
+              stores={stores}
+              tariffSnapshots={workspace.tariffSnapshots}
+              guestLogCatalog={workspace.guestLogCatalog}
+              snapshotFacts={snapshotFacts}
+              pipelineResult={pipelineResult}
+              onRun={runDryRun}
+              onProcess={processDryRunEvent}
+              onLoadFacts={loadSnapshotFacts}
+              onApplyFact={applySnapshotFact}
+              onPipelineRun={runSnapshotPipeline}
+              saving={saving}
+              canManage={access.canManageRules}
+            />
+          ) : null}
         </>
       ) : null}
 
@@ -2998,7 +3016,10 @@ export function GuestGamificationPanel({
           modal={deleteRequestModal}
           onClose={() => setDeleteRequestModal(null)}
           onConfirm={() => confirmDeleteRuleTemplate(deleteRequestModal)}
-          saving={saving === `${deleteRequestModal.type}-delete-${deleteRequestModal.id}`}
+          saving={
+            saving ===
+            `${deleteRequestModal.type}-delete-${deleteRequestModal.id}`
+          }
         />
       ) : null}
 
@@ -3076,7 +3097,8 @@ function DeleteConfirmModal({
         <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
           История событий и наград сохранится, но шаблон исчезнет из редактора.
           Если он сейчас активен или используется в опубликованной визуализации
-          клуба, LeetPlus покажет список клубов и попросит отдельное подтверждение.
+          клуба, LeetPlus покажет список клубов и попросит отдельное
+          подтверждение.
         </p>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
@@ -3207,8 +3229,8 @@ function DeleteActivityModal({
         ) : null}
         <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
           Если подтвердить, LeetPlus уберет элемент из активности этих клубов,
-          опубликованных и сохраненных конфигураций визуального редактора, а затем
-          удалит сам шаблон из системы.
+          опубликованных и сохраненных конфигураций визуального редактора, а
+          затем удалит сам шаблон из системы.
         </p>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
@@ -3281,7 +3303,11 @@ function DeleteBlockedModal({
           </div>
         ) : null}
         <div className="mt-5 flex justify-end">
-          <button type="button" className={primaryButtonClass} onClick={onClose}>
+          <button
+            type="button"
+            className={primaryButtonClass}
+            onClick={onClose}
+          >
             Понятно
           </button>
         </div>
@@ -3336,7 +3362,9 @@ function DryRunTab({
   const isPipelineRunning = saving === "pipelineRun";
   const canProcess =
     Boolean(result) &&
-    Boolean(form.profileId || form.guestId || result?.profile || result?.guest) &&
+    Boolean(
+      form.profileId || form.guestId || result?.profile || result?.guest,
+    ) &&
     ((result?.summary.eligibleRules ?? 0) > 0 ||
       (result?.summary.projectedXpDelta ?? 0) > 0);
 
@@ -3372,7 +3400,9 @@ function DryRunTab({
                 Факты Langame snapshot
               </p>
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Загрузите последние сохраненные сессии, покупки, товарные продажи, логи, балансы и группы лояльности, затем выберите факт как основу проверки правил.
+                Загрузите последние сохраненные сессии, покупки, товарные
+                продажи, логи, балансы и группы лояльности, затем выберите факт
+                как основу проверки правил.
               </p>
             </div>
             <button
@@ -3391,9 +3421,9 @@ function DryRunTab({
                 Batch pipeline snapshot-фактов
               </p>
               <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                Обрабатывает до 20 последних сохраненных фактов: сначала проверяет правила,
-                пропускает дубли и факты без гостя, затем пишет только события, XP и очередь
-                наград внутри LeetPlus.
+                Обрабатывает до 20 последних сохраненных фактов: сначала
+                проверяет правила, пропускает дубли и факты без гостя, затем
+                пишет только события, XP и очередь наград внутри LeetPlus.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -3418,7 +3448,9 @@ function DryRunTab({
             </div>
           </div>
 
-          {pipelineResult ? <PipelineResultPanel result={pipelineResult} /> : null}
+          {pipelineResult ? (
+            <PipelineResultPanel result={pipelineResult} />
+          ) : null}
 
           {snapshotFacts ? (
             <div className="mt-3 space-y-3">
@@ -3597,7 +3629,9 @@ function DryRunTab({
               <select
                 className={fieldClass}
                 value={form.sessionPacket}
-                onChange={(event) => update("sessionPacket", event.target.value)}
+                onChange={(event) =>
+                  update("sessionPacket", event.target.value)
+                }
               >
                 {dryRunPacketOptions.map((option) => (
                   <option key={option.value || "unknown"} value={option.value}>
@@ -3632,7 +3666,9 @@ function DryRunTab({
                 type="number"
                 min="0"
                 value={form.sessionMinutes}
-                onChange={(event) => update("sessionMinutes", event.target.value)}
+                onChange={(event) =>
+                  update("sessionMinutes", event.target.value)
+                }
               />
             </label>
             <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
@@ -3733,9 +3769,7 @@ function DryRunTab({
               disabled={!canProcess || isProcessing}
               onClick={onProcess}
             >
-              {isProcessing
-                ? "Записываем..."
-                : "Создать событие и награды"}
+              {isProcessing ? "Записываем..." : "Создать событие и награды"}
             </button>
           ) : null}
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -3803,33 +3837,33 @@ function DryRunTab({
           </div>
 
           {canManage ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">
-                  Подтвержденный запуск в LeetPlus
-                </p>
-                <p className="mt-1 text-sm text-emerald-800/80 dark:text-emerald-100/80">
-                  API заново пересчитает сценарий, создаст событие, начислит XP
-                  и положит награды в очередь. Записи в Langame нет.
-                </p>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">
+                    Подтвержденный запуск в LeetPlus
+                  </p>
+                  <p className="mt-1 text-sm text-emerald-800/80 dark:text-emerald-100/80">
+                    API заново пересчитает сценарий, создаст событие, начислит
+                    XP и положит награды в очередь. Записи в Langame нет.
+                  </p>
+                </div>
+                <button
+                  className={primaryButtonClass}
+                  type="button"
+                  disabled={!canProcess || isProcessing}
+                  onClick={onProcess}
+                >
+                  {isProcessing ? "Запускаем..." : "Записать в LeetPlus"}
+                </button>
               </div>
-              <button
-                className={primaryButtonClass}
-                type="button"
-                disabled={!canProcess || isProcessing}
-                onClick={onProcess}
-              >
-                {isProcessing ? "Запускаем..." : "Записать в LeetPlus"}
-              </button>
+              {!canProcess ? (
+                <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-200">
+                  Для записи нужен гость и хотя бы одно сработавшее правило или
+                  XP.
+                </p>
+              ) : null}
             </div>
-            {!canProcess ? (
-              <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-200">
-                Для записи нужен гость и хотя бы одно сработавшее правило или
-                XP.
-              </p>
-            ) : null}
-          </div>
           ) : (
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
               У вас read-only доступ: сценарий можно проверять и разбирать, но
@@ -3864,8 +3898,8 @@ function DryRunTab({
                     processResult.summary.idempotent
                       ? "без повторного XP"
                       : processResult.summary.profileCreated
-                      ? "профиль создан"
-                      : "профиль обновлен"
+                        ? "профиль создан"
+                        : "профиль обновлен"
                   }
                 />
                 <StatusMetric
@@ -3914,7 +3948,11 @@ function DryRunTab({
   );
 }
 
-function PipelineResultPanel({ result }: { result: GuestGamePipelineRunResult }) {
+function PipelineResultPanel({
+  result,
+}: {
+  result: GuestGamePipelineRunResult;
+}) {
   const modeLabel = result.dryRunOnly ? "предпросмотр" : "запуск";
   const statusLabel: Record<string, string> = {
     DRY_RUN: "проверено",
@@ -3924,12 +3962,10 @@ function PipelineResultPanel({ result }: { result: GuestGamePipelineRunResult })
     ERROR: "ошибка",
   };
   const statusClass: Record<string, string> = {
-    DRY_RUN:
-      "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200",
+    DRY_RUN: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200",
     PROCESSED:
       "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
-    SKIPPED:
-      "bg-zinc-100 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
+    SKIPPED: "bg-zinc-100 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
     DUPLICATE:
       "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     ERROR: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
@@ -4097,7 +4133,11 @@ function SnapshotFactRow({
   );
 }
 
-function DryRunRuleCard({ rule }: { rule: GuestGameDryRunResult["rules"][number] }) {
+function DryRunRuleCard({
+  rule,
+}: {
+  rule: GuestGameDryRunResult["rules"][number];
+}) {
   const kindLabel =
     rule.kind === "LOOT_BOX"
       ? "Лутбокс"
@@ -4279,7 +4319,8 @@ function OverviewTab({
   const activeRegularMissions = workspace.missions.filter(
     (mission) => mission.status === "ACTIVE" && !isCheckInMission(mission),
   ).length;
-  const checkInMissionCount = workspace.missions.filter(isCheckInMission).length;
+  const checkInMissionCount =
+    workspace.missions.filter(isCheckInMission).length;
   const regularMissionCount = workspace.missions.length - checkInMissionCount;
 
   return (
@@ -4289,8 +4330,9 @@ function OverviewTab({
           <div>
             <SectionTitle title="Старт игрового контура" />
             <p className="mt-2 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
-              Соберите экономику от профиля гостя до ручной выдачи награды. Каждый
-              блок можно настроить отдельно, а затем связать в единый сценарий.
+              Соберите экономику от профиля гостя до ручной выдачи награды.
+              Каждый блок можно настроить отдельно, а затем связать в единый
+              сценарий.
             </p>
           </div>
           <div
@@ -4472,9 +4514,9 @@ function OverviewTab({
           <SectionTitle title="Последние события" />
           <div className="space-y-2">
             {workspace.events.length ? (
-              workspace.events.slice(0, 8).map((event) => (
-                <EventRow key={event.id} event={event} />
-              ))
+              workspace.events
+                .slice(0, 8)
+                .map((event) => <EventRow key={event.id} event={event} />)
             ) : (
               <EmptyState text="Событий пока нет" />
             )}
@@ -4485,16 +4527,18 @@ function OverviewTab({
           <SectionTitle title="Очередь выдач" />
           <div className="space-y-2">
             {pendingRewards.length ? (
-              pendingRewards.slice(0, 8).map((reward) => (
-                <RewardRow
-                  key={reward.id}
-                  reward={reward}
-                  onStatus={onRewardStatus}
-                  onEdit={onEditReward}
-                  saving={saving}
-                  canApprove={canApproveRewards}
-                />
-              ))
+              pendingRewards
+                .slice(0, 8)
+                .map((reward) => (
+                  <RewardRow
+                    key={reward.id}
+                    reward={reward}
+                    onStatus={onRewardStatus}
+                    onEdit={onEditReward}
+                    saving={saving}
+                    canApprove={canApproveRewards}
+                  />
+                ))
             ) : (
               <EmptyState text="Нет наград к выдаче" />
             )}
@@ -4700,10 +4744,10 @@ function PilotReadinessCard({
             Готовность клуба к первому бонусу
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            Чек-лист собирает путь от входа в игровой модуль до /game,
-            события, кошелька наград, bonus ledger и последующей сверки баланса
-            Langame. Проверка строится по сохраненным данным LeetPlus и не
-            делает live-запросов.
+            Чек-лист собирает путь от входа в игровой модуль до /game, события,
+            кошелька наград, bonus ledger и последующей сверки баланса Langame.
+            Проверка строится по сохраненным данным LeetPlus и не делает
+            live-запросов.
           </p>
         </div>
 
@@ -4754,18 +4798,9 @@ function PilotReadinessCard({
 
       <div className="mt-4 grid gap-2 text-center text-xs sm:grid-cols-4">
         <MiniMetric label="Готово" value={readiness.summary.ready} />
-        <MiniMetric
-          label="Частично"
-          value={readiness.summary.partial}
-        />
-        <MiniMetric
-          label="Блокеры"
-          value={readiness.summary.blocked}
-        />
-        <MiniMetric
-          label="Ручной режим"
-          value={readiness.summary.manualOnly}
-        />
+        <MiniMetric label="Частично" value={readiness.summary.partial} />
+        <MiniMetric label="Блокеры" value={readiness.summary.blocked} />
+        <MiniMetric label="Ручной режим" value={readiness.summary.manualOnly} />
       </div>
 
       {nextIssue ? (
@@ -4854,7 +4889,8 @@ function PilotReadinessCard({
                     "FAILED",
                     "PROCESSING",
                   ].includes(item.status);
-                  const cancelSaving = saving === `bonus-ledger-cancel-${item.id}`;
+                  const cancelSaving =
+                    saving === `bonus-ledger-cancel-${item.id}`;
                   const cancelDisabled =
                     !canCancelPreview || !canApproveRewards || saving !== null;
                   const cancelTitle = !canCancelPreview
@@ -4991,7 +5027,8 @@ function PilotReadinessCard({
                   requiresRewardAccess && !canApproveRewards;
                 const disabledBySaving =
                   requiresRewardAccess && saving !== null;
-                const disabledByPilotStore = requiresRewardAccess && !target?.id;
+                const disabledByPilotStore =
+                  requiresRewardAccess && !target?.id;
                 const disabled =
                   !action.enabled ||
                   disabledByAccess ||
@@ -5005,7 +5042,7 @@ function PilotReadinessCard({
                       ? "Дождитесь завершения текущего действия."
                       : disabledByPilotStore
                         ? "Пилотный клуб не найден."
-                      : null;
+                        : null;
 
                 return (
                   <button
@@ -5191,13 +5228,9 @@ function BonusLedgerAuditCard({
   const visibleItems = audit.items.slice(0, 8);
   const actionDisabled = saving !== null || !canApproveRewards;
   const nextIssue =
-    audit.items.find(
-      (item) => item.reconciliation.state === "MISMATCH",
-    ) ??
+    audit.items.find((item) => item.reconciliation.state === "MISMATCH") ??
     audit.items.find((item) => item.status === "FAILED") ??
-    audit.items.find(
-      (item) => item.reconciliation.state === "WAITING_SYNC",
-    ) ??
+    audit.items.find((item) => item.reconciliation.state === "WAITING_SYNC") ??
     null;
 
   return (
@@ -5227,8 +5260,8 @@ function BonusLedgerAuditCard({
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm leading-6 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100">
-          <span className="font-bold">Управление начислениями:</span>{" "}
-          approved bonus-награды сначала попадают в ledger, затем dry-run проверяет
+          <span className="font-bold">Управление начислениями:</span> approved
+          bonus-награды сначала попадают в ledger, затем dry-run проверяет
           очередь без claim, а dispatch начисляет бонусы в Langame только когда
           backend-режим готов к реальной записи.
         </div>
@@ -5410,7 +5443,9 @@ function BonusBalanceCurrentReconciliationCard({
     number
   >;
   const visibleItems = [...reconciliation.items]
-    .sort((left, right) => statePriority[left.state] - statePriority[right.state])
+    .sort(
+      (left, right) => statePriority[left.state] - statePriority[right.state],
+    )
     .slice(0, 8);
   const nextIssue =
     visibleItems.find((item) => item.state === "MISMATCH") ??
@@ -5820,9 +5855,9 @@ function EffectControlCard({
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             LeetPlus смотрит {effect.windowDays} дней после XP, лутбокса,
-            задания или Battle Pass: вернулся ли гость, были ли сессии,
-            продажи бара/товаров и пополнения баланса. Расчет идет только по
-            сохраненным snapshot-фактам.
+            задания или Battle Pass: вернулся ли гость, были ли сессии, продажи
+            бара/товаров и пополнения баланса. Расчет идет только по сохраненным
+            snapshot-фактам.
           </p>
         </div>
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
@@ -5966,7 +6001,11 @@ function CommunicationQueueCard({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className={smallButtonClass} type="button" onClick={onOpenRewards}>
+          <button
+            className={smallButtonClass}
+            type="button"
+            onClick={onOpenRewards}
+          >
             Открыть кошелек
           </button>
           <button
@@ -5989,16 +6028,15 @@ function CommunicationQueueCard({
             disabled={!canApproveRewards || saving === "deliveries-prepare"}
             onClick={onPrepareOutbox}
           >
-            {saving === "deliveries-prepare" ? "Готовим..." : "Подготовить outbox"}
+            {saving === "deliveries-prepare"
+              ? "Готовим..."
+              : "Подготовить outbox"}
           </button>
         </div>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <MiniMetric
-          label="готово к боту"
-          value={queue.summary.readyForBot}
-        />
+        <MiniMetric label="готово к боту" value={queue.summary.readyForBot} />
         <MiniMetric
           label="готово кассиру"
           value={queue.summary.readyForCashier}
@@ -6027,7 +6065,10 @@ function CommunicationQueueCard({
               {outbox.note}
             </p>
           </div>
-          <Link className={smallButtonClass} href="/api/guests/gamification/deliveries/export">
+          <Link
+            className={smallButtonClass}
+            href="/api/guests/gamification/deliveries/export"
+          >
             CSV
           </Link>
         </div>
@@ -6035,13 +6076,21 @@ function CommunicationQueueCard({
           <MiniMetric label="готово" value={outbox.summary.ready} />
           <MiniMetric label="нужно действие" value={outbox.summary.blocked} />
           <MiniMetric label="выдано" value={outbox.summary.sent} />
-          <MiniMetric label="Telegram/MAX" value={outbox.summary.telegram + outbox.summary.max} />
-          <MiniMetric label="кассир/ручной" value={outbox.summary.cashier + outbox.summary.manual} />
+          <MiniMetric
+            label="Telegram/MAX"
+            value={outbox.summary.telegram + outbox.summary.max}
+          />
+          <MiniMetric
+            label="кассир/ручной"
+            value={outbox.summary.cashier + outbox.summary.manual}
+          />
         </div>
         <div className="mt-3 grid gap-2 lg:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg border border-cyan-200 bg-cyan-100/60 p-3 text-xs leading-5 text-cyan-950 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-100">
             <p className="font-bold uppercase tracking-wide">Dispatcher</p>
-            <p className="mt-1 text-sm font-semibold">{outbox.dispatcher.modeLabel}</p>
+            <p className="mt-1 text-sm font-semibold">
+              {outbox.dispatcher.modeLabel}
+            </p>
             <p className="mt-1">{outbox.dispatcher.note}</p>
           </div>
           <div className="rounded-lg border border-cyan-200 bg-white p-3 text-xs leading-5 text-zinc-600 dark:border-cyan-900/60 dark:bg-zinc-950 dark:text-zinc-300">
@@ -6054,13 +6103,15 @@ function CommunicationQueueCard({
               </span>
             </div>
             <p className="mt-1">
-              Готово: {botConsumer.pendingReady} · Telegram {botConsumer.pendingTelegram} · MAX{" "}
-              {botConsumer.pendingMax}
+              Готово: {botConsumer.pendingReady} · Telegram{" "}
+              {botConsumer.pendingTelegram} · MAX {botConsumer.pendingMax}
             </p>
             <p className="mt-1">
               Ack: {botConsumer.sentAck} sent / {botConsumer.failedAck} failed /{" "}
               {botConsumer.blockedAck} blocked
-              {botConsumer.lastAckAt ? ` · ${formatDate(botConsumer.lastAckAt)}` : ""}
+              {botConsumer.lastAckAt
+                ? ` · ${formatDate(botConsumer.lastAckAt)}`
+                : ""}
             </p>
             <p className="mt-1">{botConsumer.nextAction}</p>
             {botConsumer.requiredEnv.length ? (
@@ -6146,11 +6197,26 @@ function CommunicationQueueCard({
               </span>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-5">
-              <MiniMetric label="проверено" value={deliveryDispatchResult.checked} />
-              <MiniMetric label="dry/skip" value={deliveryDispatchResult.skipped} />
-              <MiniMetric label="отправлено" value={deliveryDispatchResult.sent} />
-              <MiniMetric label="заблокировано" value={deliveryDispatchResult.blocked} />
-              <MiniMetric label="ошибки" value={deliveryDispatchResult.failed} />
+              <MiniMetric
+                label="проверено"
+                value={deliveryDispatchResult.checked}
+              />
+              <MiniMetric
+                label="dry/skip"
+                value={deliveryDispatchResult.skipped}
+              />
+              <MiniMetric
+                label="отправлено"
+                value={deliveryDispatchResult.sent}
+              />
+              <MiniMetric
+                label="заблокировано"
+                value={deliveryDispatchResult.blocked}
+              />
+              <MiniMetric
+                label="ошибки"
+                value={deliveryDispatchResult.failed}
+              />
             </div>
           </div>
         ) : null}
@@ -6297,7 +6363,10 @@ function CommunicationQueueCard({
                   </p>
                 </div>
                 <div className="grid min-w-0 gap-2 text-xs sm:grid-cols-2 lg:min-w-[520px] lg:grid-cols-4">
-                  <MiniMetric label="сумма" value={formatMoney(item.rewardAmount)} />
+                  <MiniMetric
+                    label="сумма"
+                    value={formatMoney(item.rewardAmount)}
+                  />
                   <MiniMetric
                     label="контакт"
                     value={item.contactMasked ?? "нет"}
@@ -6365,7 +6434,11 @@ function ScenarioStepCard({
       <p className="mt-1 flex-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
         {text}
       </p>
-      <button type="button" className={`${smallButtonClass} mt-3 w-full justify-center px-2 py-1.5`} onClick={onClick}>
+      <button
+        type="button"
+        className={`${smallButtonClass} mt-3 w-full justify-center px-2 py-1.5`}
+        onClick={onClick}
+      >
         {action}
       </button>
     </div>
@@ -6403,8 +6476,9 @@ function TariffSnapshotReadinessCard({
   snapshots: GuestGameTariffSnapshotEndpoint[];
   onOpenRules?: () => void;
 }) {
-  const readyCount = snapshots.filter((snapshot) => snapshot.status === "READY")
-    .length;
+  const readyCount = snapshots.filter(
+    (snapshot) => snapshot.status === "READY",
+  ).length;
   const latestAt = snapshots.reduce<string | null>((latest, snapshot) => {
     if (!snapshot.latestAt) {
       return latest;
@@ -6489,7 +6563,8 @@ function TariffSnapshotReadinessCard({
               <div className="rounded-md bg-white px-2 py-1.5 dark:bg-zinc-950">
                 <span className="block text-zinc-400">Источники</span>
                 <span className="font-semibold text-zinc-900 dark:text-white">
-                  {snapshot.readySources}/{snapshot.totalSources || snapshot.sources.length}
+                  {snapshot.readySources}/
+                  {snapshot.totalSources || snapshot.sources.length}
                 </span>
               </div>
               <div className="rounded-md bg-white px-2 py-1.5 dark:bg-zinc-950">
@@ -6531,7 +6606,10 @@ function TariffSnapshotReadinessCard({
                       className="flex items-center justify-between gap-2 text-xs"
                     >
                       <span className="truncate font-semibold text-zinc-800 dark:text-zinc-100">
-                        {item.label ?? item.name ?? item.externalId ?? "Строка тарифа"}
+                        {item.label ??
+                          item.name ??
+                          item.externalId ??
+                          "Строка тарифа"}
                       </span>
                       <span className="shrink-0 text-[11px] text-zinc-400">
                         {item.domain}
@@ -6904,9 +6982,9 @@ function PortalLinksCard({
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             По этим ссылкам гости проходят OTP-вход и видят свой уровень
             лояльности Langame, XP, задания, лутбоксы, battle pass и кошелек
-            наград без доступа к внутренним разделам LeetPlus. Ссылки
-            используют публичный slug клуба, старые URL с внутренним ID
-            продолжают работать.
+            наград без доступа к внутренним разделам LeetPlus. Ссылки используют
+            публичный slug клуба, старые URL с внутренним ID продолжают
+            работать.
           </p>
         </div>
         <span className="rounded-full border border-cyan-300 px-3 py-1 text-xs font-bold text-cyan-800 dark:border-cyan-800 dark:text-cyan-200">
@@ -7005,241 +7083,247 @@ function ProfilesTab({
       }
     >
       {canManage ? (
-      <section className="space-y-4">
-        <Panel
-          title={
-            editingProfileId
-              ? "Редактирование игрового профиля"
-              : "Новый игровой профиль"
-          }
-        >
-          <div className="space-y-3">
-            <Field label="Гость из Langame">
-              <select
-                className={fieldClass}
-                value={form.guestId}
-                onChange={(event) =>
-                  setForm({ ...form, guestId: event.target.value })
-                }
-              >
-                <option value="">Не выбран</option>
-                {guests.map((guest) => (
-                  <option key={guest.id} value={guest.id}>
-                    {guest.displayName} · {guest.contact}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="CRM-лид">
-              <select
-                className={fieldClass}
-                value={form.leadId}
-                onChange={(event) =>
-                  setForm({ ...form, leadId: event.target.value })
-                }
-              >
-                <option value="">Не выбран</option>
-                {leads.map((lead) => (
-                  <option key={lead.id} value={lead.id}>
-                    {lead.displayName} · {lead.phone}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Имя на витрине">
-                <input
-                  className={fieldClass}
-                  value={form.displayName}
-                  onChange={(event) =>
-                    setForm({ ...form, displayName: event.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Контакт">
-                <input
-                  className={fieldClass}
-                  value={form.contactMasked}
-                  onChange={(event) =>
-                    setForm({ ...form, contactMasked: event.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Telegram ID">
-                <input
-                  className={fieldClass}
-                  value={form.telegramIdentity}
-                  onChange={(event) =>
-                    setForm({ ...form, telegramIdentity: event.target.value })
-                  }
-                />
-              </Field>
-              <Field label="MAX ID">
-                <input
-                  className={fieldClass}
-                  value={form.maxIdentity}
-                  onChange={(event) =>
-                    setForm({ ...form, maxIdentity: event.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="XP">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  value={form.xp}
-                  onChange={(event) =>
-                    setForm({ ...form, xp: event.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Уровень">
-                <input
-                  className={fieldClass}
-                  type="number"
-                  value={form.level}
-                  onChange={(event) =>
-                    setForm({ ...form, level: event.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Статус">
+        <section className="space-y-4">
+          <Panel
+            title={
+              editingProfileId
+                ? "Редактирование игрового профиля"
+                : "Новый игровой профиль"
+            }
+          >
+            <div className="space-y-3">
+              <Field label="Гость из Langame">
                 <select
                   className={fieldClass}
-                  value={form.status}
+                  value={form.guestId}
                   onChange={(event) =>
-                    setForm({
-                      ...form,
-                      status: event.target.value as GuestGameProfileStatus,
-                    })
+                    setForm({ ...form, guestId: event.target.value })
                   }
                 >
-                  {profileStatusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {profileStatusLabels[status]}
+                  <option value="">Не выбран</option>
+                  {guests.map((guest) => (
+                    <option key={guest.id} value={guest.id}>
+                      {guest.displayName} · {guest.contact}
                     </option>
                   ))}
                 </select>
               </Field>
-            </div>
-            <button
-              type="button"
-              className={primaryButtonClass}
-              disabled={saving === "profile"}
-              onClick={onSaveProfile}
-            >
-              {editingProfileId ? "Изменить профиль" : "Создать профиль"}
-            </button>
-            {editingProfileId ? (
+              <Field label="CRM-лид">
+                <select
+                  className={fieldClass}
+                  value={form.leadId}
+                  onChange={(event) =>
+                    setForm({ ...form, leadId: event.target.value })
+                  }
+                >
+                  <option value="">Не выбран</option>
+                  {leads.map((lead) => (
+                    <option key={lead.id} value={lead.id}>
+                      {lead.displayName} · {lead.phone}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Имя на витрине">
+                  <input
+                    className={fieldClass}
+                    value={form.displayName}
+                    onChange={(event) =>
+                      setForm({ ...form, displayName: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Контакт">
+                  <input
+                    className={fieldClass}
+                    value={form.contactMasked}
+                    onChange={(event) =>
+                      setForm({ ...form, contactMasked: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Telegram ID">
+                  <input
+                    className={fieldClass}
+                    value={form.telegramIdentity}
+                    onChange={(event) =>
+                      setForm({ ...form, telegramIdentity: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="MAX ID">
+                  <input
+                    className={fieldClass}
+                    value={form.maxIdentity}
+                    onChange={(event) =>
+                      setForm({ ...form, maxIdentity: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Field label="XP">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={form.xp}
+                    onChange={(event) =>
+                      setForm({ ...form, xp: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Уровень">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={form.level}
+                    onChange={(event) =>
+                      setForm({ ...form, level: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Статус">
+                  <select
+                    className={fieldClass}
+                    value={form.status}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        status: event.target.value as GuestGameProfileStatus,
+                      })
+                    }
+                  >
+                    {profileStatusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {profileStatusLabels[status]}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
               <button
                 type="button"
-                className={smallButtonClass}
-                onClick={onResetProfile}
+                className={primaryButtonClass}
+                disabled={saving === "profile"}
+                onClick={onSaveProfile}
               >
-                Сбросить выбор
+                {editingProfileId ? "Изменить профиль" : "Создать профиль"}
               </button>
-            ) : null}
-          </div>
-        </Panel>
+              {editingProfileId ? (
+                <button
+                  type="button"
+                  className={smallButtonClass}
+                  onClick={onResetProfile}
+                >
+                  Сбросить выбор
+                </button>
+              ) : null}
+            </div>
+          </Panel>
 
-        <Panel title="Ручное XP-событие">
-          <div className="space-y-3">
-            <Field label="Профиль">
-              <select
-                className={fieldClass}
-                value={eventForm.profileId}
-                onChange={(event) =>
-                  setEventForm({ ...eventForm, profileId: event.target.value })
-                }
-              >
-                <option value="">Не выбран</option>
-                {profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.displayName} · L{profile.level} · {profile.xp} XP
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Событие">
+          <Panel title="Ручное XP-событие">
+            <div className="space-y-3">
+              <Field label="Профиль">
                 <select
                   className={fieldClass}
-                  value={eventForm.eventType}
-                  onChange={(event) => {
-                    const option = manualXpEventOption(event.target.value);
-
+                  value={eventForm.profileId}
+                  onChange={(event) =>
                     setEventForm({
                       ...eventForm,
-                      eventType: option.value,
-                      xpDelta: option.defaultXpDelta,
-                      payloadText: manualXpPayloadText(option.value),
-                    });
-                  }}
+                      profileId: event.target.value,
+                    })
+                  }
                 >
-                  {manualXpEventOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
+                  <option value="">Не выбран</option>
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.displayName} · L{profile.level} · {profile.xp} XP
                     </option>
                   ))}
                 </select>
-                <OptionHelp>{selectedManualEvent.description}</OptionHelp>
               </Field>
-              <Field label="Изменение XP">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Событие">
+                  <select
+                    className={fieldClass}
+                    value={eventForm.eventType}
+                    onChange={(event) => {
+                      const option = manualXpEventOption(event.target.value);
+
+                      setEventForm({
+                        ...eventForm,
+                        eventType: option.value,
+                        xpDelta: option.defaultXpDelta,
+                        payloadText: manualXpPayloadText(option.value),
+                      });
+                    }}
+                  >
+                    {manualXpEventOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <OptionHelp>{selectedManualEvent.description}</OptionHelp>
+                </Field>
+                <Field label="Изменение XP">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={eventForm.xpDelta}
+                    onChange={(event) =>
+                      setEventForm({
+                        ...eventForm,
+                        xpDelta: event.target.value,
+                      })
+                    }
+                  />
+                  <OptionHelp>
+                    Можно указать положительное или отрицательное значение.
+                  </OptionHelp>
+                </Field>
+              </div>
+              <Field label="Комментарий">
                 <input
                   className={fieldClass}
-                  type="number"
-                  value={eventForm.xpDelta}
+                  value={eventForm.note}
                   onChange={(event) =>
-                    setEventForm({ ...eventForm, xpDelta: event.target.value })
+                    setEventForm({ ...eventForm, note: event.target.value })
                   }
                 />
-                <OptionHelp>
-                  Можно указать положительное или отрицательное значение.
-                </OptionHelp>
               </Field>
+              {canViewTechnicalPayload ? (
+                <Field label="Технический payload JSON">
+                  <textarea
+                    className={`${fieldClass} min-h-28 font-mono text-xs`}
+                    value={eventForm.payloadText}
+                    onChange={(event) =>
+                      setEventForm({
+                        ...eventForm,
+                        payloadText: event.target.value,
+                      })
+                    }
+                  />
+                  <OptionHelp>
+                    Видно только платформенным администраторам. Для сотрудников
+                    клубов payload формируется автоматически.
+                  </OptionHelp>
+                </Field>
+              ) : null}
+              <button
+                type="button"
+                className={primaryButtonClass}
+                disabled={saving === "event"}
+                onClick={onSaveEvent}
+              >
+                Записать событие
+              </button>
             </div>
-            <Field label="Комментарий">
-              <input
-                className={fieldClass}
-                value={eventForm.note}
-                onChange={(event) =>
-                  setEventForm({ ...eventForm, note: event.target.value })
-                }
-              />
-            </Field>
-            {canViewTechnicalPayload ? (
-              <Field label="Технический payload JSON">
-                <textarea
-                  className={`${fieldClass} min-h-28 font-mono text-xs`}
-                  value={eventForm.payloadText}
-                  onChange={(event) =>
-                    setEventForm({
-                      ...eventForm,
-                      payloadText: event.target.value,
-                    })
-                  }
-                />
-                <OptionHelp>
-                  Видно только платформенным администраторам. Для сотрудников
-                  клубов payload формируется автоматически.
-                </OptionHelp>
-              </Field>
-            ) : null}
-            <button
-              type="button"
-              className={primaryButtonClass}
-              disabled={saving === "event"}
-              onClick={onSaveEvent}
-            >
-              Записать событие
-            </button>
-          </div>
-        </Panel>
-      </section>
+          </Panel>
+        </section>
       ) : null}
 
       <section className="space-y-3">
@@ -7397,9 +7481,7 @@ function LootBoxesTab({
                 </Field>
               </div>
             </FormSection>
-            <FormSection
-              title="Кому и когда открывать"
-            >
+            <FormSection title="Кому и когда открывать">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Событие для появления">
                   <OptionSelect
@@ -7470,7 +7552,11 @@ function LootBoxesTab({
                 {editingId ? "Сохранить" : "Создать лутбокс"}
               </button>
               {editingId ? (
-                <button type="button" className={smallButtonClass} onClick={onReset}>
+                <button
+                  type="button"
+                  className={smallButtonClass}
+                  onClick={onReset}
+                >
                   Сбросить выбор
                 </button>
               ) : null}
@@ -7576,7 +7662,9 @@ function MissionsTab({
   saving: string | null;
   canManage: boolean;
 }) {
-  const missionTemplates = missions.filter((mission) => mission.id !== editingId);
+  const missionTemplates = missions.filter(
+    (mission) => mission.id !== editingId,
+  );
   const missionTitle = form.name.trim();
   const formTitle =
     editingId && missionTitle
@@ -7591,192 +7679,209 @@ function MissionsTab({
       formTitle={formTitle}
       formAction={
         !isFormOpen ? (
-          <button
-            type="button"
-            className={`${primaryButtonClass} sm:min-w-52`}
-            onClick={onCreateNew}
-          >
-            Создать новое задание
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/gamification/missions/wizard"
+              className={`${primaryButtonClass} sm:min-w-64`}
+            >
+              Создать задание с помощью мастера
+            </Link>
+            <button
+              type="button"
+              className={`${smallButtonClass} text-sm sm:min-w-52`}
+              onClick={onCreateNew}
+            >
+              Открыть старый редактор
+            </button>
+          </div>
         ) : undefined
       }
       form={
         isFormOpen ? (
-        <div className="space-y-3">
-          <RuleCommonFields
-            status={form.status}
-            name={form.name}
-            rewardType={form.rewardType}
-            rewardAmount={form.rewardAmount}
-            rewardLabel={form.rewardLabel}
-            audienceId={form.audienceId}
-            budgetAmount={form.budgetAmount}
-            budgetUnlimited={form.budgetUnlimited}
-            manualApprovalRequired={form.manualApprovalRequired}
-            note={form.note}
-            audiences={audiences}
-            onChange={(patch) => setForm({ ...form, ...patch })}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Тип задания">
-              <OptionSelect
-                options={missionTypeOptions}
-                value={form.missionType}
-                preservedLabel="Сохраненный тип"
-                onChange={(missionType) => setForm({ ...form, missionType })}
-              />
-              <OptionHelp>
-                {missionTypeHelpText[form.missionType] ??
-                  "Тип помогает сотруднику понять сценарий задания. Условия выполнения задаются ниже."}
-              </OptionHelp>
-            </Field>
-            <Field label="Видимость задания">
-              <OptionSelect
-                options={missionVisibilityOptions}
-                value={form.visibility}
-                preservedLabel="Сохраненная видимость"
-                onChange={(visibility) => setForm({ ...form, visibility })}
-              />
-              <OptionHelp>
-                {missionVisibilityHelpText[missionVisibilityValue(form.visibility)] ??
-                  missionVisibilityHelpText.VISIBLE}
-              </OptionHelp>
-            </Field>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="XP">
-              <input
-                className={fieldClass}
-                type="number"
-                value={form.xpReward}
-                onChange={(event) =>
-                  setForm({ ...form, xpReward: event.target.value })
-                }
-              />
-              <OptionHelp>
-                Опыт, который игровой профиль гостя получит после выполнения
-                задания. XP повышает уровень и не влияет на цель задания.
-              </OptionHelp>
-            </Field>
-            <Field label="Цель">
-              <input
-                className={fieldClass}
-                type="number"
-                value={form.progressTarget}
-                onChange={(event) =>
-                  setForm({ ...form, progressTarget: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Что считаем">
-              <OptionSelect
-                options={progressUnitOptions}
-                value={form.progressUnit}
-                preservedLabel="Сохраненная единица"
-                onChange={(progressUnit) =>
-                  setForm({
-                    ...form,
-                    ...missionProgressUnitPatch(form, progressUnit),
-                  })
-                }
-              />
-              <OptionHelp>
-                Показывается гостю как единица прогресса: визиты, минуты,
-                покупки или шаги.
-              </OptionHelp>
-            </Field>
-          </div>
-          <StoreSelect
-            stores={stores}
-            value={form.storeIds}
-            onChange={(storeIds) => setForm({ ...form, storeIds })}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Начало">
-              <input
-                className={fieldClass}
-                type="datetime-local"
-                value={form.periodFrom}
-                onChange={(event) =>
-                  setForm({ ...form, periodFrom: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Окончание">
-              <input
-                className={fieldClass}
-                type="datetime-local"
-                value={form.periodTo}
-                onChange={(event) =>
-                  setForm({ ...form, periodTo: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Лимит на гостя">
-              <div className="space-y-2">
+          <div className="space-y-3">
+            <RuleCommonFields
+              status={form.status}
+              name={form.name}
+              rewardType={form.rewardType}
+              rewardAmount={form.rewardAmount}
+              rewardLabel={form.rewardLabel}
+              audienceId={form.audienceId}
+              budgetAmount={form.budgetAmount}
+              budgetUnlimited={form.budgetUnlimited}
+              manualApprovalRequired={form.manualApprovalRequired}
+              note={form.note}
+              audiences={audiences}
+              onChange={(patch) => setForm({ ...form, ...patch })}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Тип задания">
+                <OptionSelect
+                  options={missionTypeOptions}
+                  value={form.missionType}
+                  preservedLabel="Сохраненный тип"
+                  onChange={(missionType) => setForm({ ...form, missionType })}
+                />
+                <OptionHelp>
+                  {missionTypeHelpText[form.missionType] ??
+                    "Тип помогает сотруднику понять сценарий задания. Условия выполнения задаются ниже."}
+                </OptionHelp>
+              </Field>
+              <Field label="Видимость задания">
+                <OptionSelect
+                  options={missionVisibilityOptions}
+                  value={form.visibility}
+                  preservedLabel="Сохраненная видимость"
+                  onChange={(visibility) => setForm({ ...form, visibility })}
+                />
+                <OptionHelp>
+                  {missionVisibilityHelpText[
+                    missionVisibilityValue(form.visibility)
+                  ] ?? missionVisibilityHelpText.VISIBLE}
+                </OptionHelp>
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="XP">
                 <input
-                  className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
+                  className={fieldClass}
                   type="number"
-                  min="1"
-                  value={form.perGuestLimitUnlimited ? "" : form.perGuestLimit}
-                  disabled={form.perGuestLimitUnlimited}
-                  placeholder={
-                    form.perGuestLimitUnlimited ? "Без ограничений" : undefined
-                  }
+                  value={form.xpReward}
                   onChange={(event) =>
-                    setForm({ ...form, perGuestLimit: event.target.value })
+                    setForm({ ...form, xpReward: event.target.value })
                   }
                 />
-                <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
-                  <span>Безлимит</span>
+                <OptionHelp>
+                  Опыт, который игровой профиль гостя получит после выполнения
+                  задания. XP повышает уровень и не влияет на цель задания.
+                </OptionHelp>
+              </Field>
+              <Field label="Цель">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  value={form.progressTarget}
+                  onChange={(event) =>
+                    setForm({ ...form, progressTarget: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Что считаем">
+                <OptionSelect
+                  options={progressUnitOptions}
+                  value={form.progressUnit}
+                  preservedLabel="Сохраненная единица"
+                  onChange={(progressUnit) =>
+                    setForm({
+                      ...form,
+                      ...missionProgressUnitPatch(form, progressUnit),
+                    })
+                  }
+                />
+                <OptionHelp>
+                  Показывается гостю как единица прогресса: визиты, минуты,
+                  покупки или шаги.
+                </OptionHelp>
+              </Field>
+            </div>
+            <StoreSelect
+              stores={stores}
+              value={form.storeIds}
+              onChange={(storeIds) => setForm({ ...form, storeIds })}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Начало">
+                <input
+                  className={fieldClass}
+                  type="datetime-local"
+                  value={form.periodFrom}
+                  onChange={(event) =>
+                    setForm({ ...form, periodFrom: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Окончание">
+                <input
+                  className={fieldClass}
+                  type="datetime-local"
+                  value={form.periodTo}
+                  onChange={(event) =>
+                    setForm({ ...form, periodTo: event.target.value })
+                  }
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Лимит на гостя">
+                <div className="space-y-2">
                   <input
-                    type="checkbox"
-                    checked={form.perGuestLimitUnlimited}
+                    className={`${fieldClass} disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-900`}
+                    type="number"
+                    min="1"
+                    value={
+                      form.perGuestLimitUnlimited ? "" : form.perGuestLimit
+                    }
+                    disabled={form.perGuestLimitUnlimited}
+                    placeholder={
+                      form.perGuestLimitUnlimited
+                        ? "Без ограничений"
+                        : undefined
+                    }
                     onChange={(event) =>
-                      setForm({
-                        ...form,
-                        perGuestLimitUnlimited: event.target.checked,
-                      })
+                      setForm({ ...form, perGuestLimit: event.target.value })
                     }
                   />
-                </label>
-              </div>
-            </Field>
-            <Field label="Общий лимит">
-              <input
-                className={fieldClass}
-                type="number"
-                value={form.totalRewardLimit}
-                onChange={(event) =>
-                  setForm({ ...form, totalRewardLimit: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-          <MissionBusinessRules
-            form={form}
-            missionTemplates={missionTemplates}
-            tariffSnapshots={tariffSnapshots}
-            guestLogCatalog={guestLogCatalog}
-            products={products}
-            onChange={(patch) => setForm({ ...form, ...patch })}
-          />
-          <button
-            type="button"
-            className={primaryButtonClass}
-            disabled={saving === "mission"}
-            onClick={onSave}
-          >
-            {editingId ? "Сохранить" : "Создать задание"}
-          </button>
-          {editingId ? (
-            <button type="button" className={smallButtonClass} onClick={onReset}>
-              Сбросить выбор
+                  <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+                    <span>Безлимит</span>
+                    <input
+                      type="checkbox"
+                      checked={form.perGuestLimitUnlimited}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          perGuestLimitUnlimited: event.target.checked,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              </Field>
+              <Field label="Общий лимит">
+                <input
+                  className={fieldClass}
+                  type="number"
+                  value={form.totalRewardLimit}
+                  onChange={(event) =>
+                    setForm({ ...form, totalRewardLimit: event.target.value })
+                  }
+                />
+              </Field>
+            </div>
+            <MissionBusinessRules
+              form={form}
+              missionTemplates={missionTemplates}
+              tariffSnapshots={tariffSnapshots}
+              guestLogCatalog={guestLogCatalog}
+              products={products}
+              onChange={(patch) => setForm({ ...form, ...patch })}
+            />
+            <button
+              type="button"
+              className={primaryButtonClass}
+              disabled={saving === "mission"}
+              onClick={onSave}
+            >
+              {editingId ? "Сохранить" : "Создать задание"}
             </button>
-          ) : null}
-        </div>
+            {editingId ? (
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={onReset}
+              >
+                Сбросить выбор
+              </button>
+            ) : null}
+          </div>
         ) : null
       }
       listTitle="Созданные правила заданий"
@@ -7888,7 +7993,9 @@ function CheckInTab({
           : "20"
         : form.xpReward,
       rewardLabel:
-        currentLabel && currentLabel !== "XP за чекин" && currentLabel !== "Бонусы за чекин"
+        currentLabel &&
+        currentLabel !== "XP за чекин" &&
+        currentLabel !== "Бонусы за чекин"
           ? currentLabel
           : nextIsXp
             ? "XP за чекин"
@@ -8004,9 +8111,9 @@ function CheckInTab({
             <FormSection title="Кнопка и клубы">
               <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-sm leading-6 text-cyan-900 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-100">
                 Кнопка чек-ина появится в игровом модуле выбранных клубов, когда
-                правило активно. Backend дополнительно проверяет активную
-                сессию гостя в Langame и не дает сделать повторный чек-ин в том
-                же клубе до следующего календарного дня по времени клуба.
+                правило активно. Backend дополнительно проверяет активную сессию
+                гостя в Langame и не дает сделать повторный чек-ин в том же
+                клубе до следующего календарного дня по времени клуба.
               </div>
               <StoreSelect
                 stores={stores}
@@ -8045,8 +8152,8 @@ function CheckInTab({
                   </select>
                   <OptionHelp>
                     Оставьте любой тип, если чек-ин доступен при любой активной
-                    сессии. Выберите пакет/абонемент или почасовую сессию
-                    для дополнительного ограничения.
+                    сессии. Выберите пакет/абонемент или почасовую сессию для
+                    дополнительного ограничения.
                   </OptionHelp>
                 </Field>
               </div>
@@ -8106,7 +8213,11 @@ function CheckInTab({
               {editingId ? "Сохранить" : "Создать правило чек-ина"}
             </button>
             {editingId ? (
-              <button type="button" className={smallButtonClass} onClick={onReset}>
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={onReset}
+              >
                 Сбросить выбор
               </button>
             ) : null}
@@ -8224,131 +8335,135 @@ function SeasonsTab({
       }
       form={
         isFormOpen ? (
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Название">
-              <input
-                className={fieldClass}
-                value={form.name}
-                onChange={(event) =>
-                  setForm({ ...form, name: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Статус">
-              <StatusSelect
-                value={form.status}
-                onChange={(status) => setForm({ ...form, status })}
-              />
-            </Field>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Тип сезона">
-              <input
-                className={fieldClass}
-                value="Клубный сезон"
-                disabled
-                readOnly
-              />
-            </Field>
-            <AudienceSelect
-              audiences={audiences}
-              value={form.audienceId}
-              onChange={(audienceId) => setForm({ ...form, audienceId })}
-            />
-          </div>
-          <StoreSelect
-            stores={stores}
-            value={form.storeIds}
-            onChange={(storeIds) => setForm({ ...form, storeIds })}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Начало">
-              <input
-                className={fieldClass}
-                type="datetime-local"
-                value={form.periodFrom}
-                onChange={(event) =>
-                  setForm({ ...form, periodFrom: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Окончание">
-              <input
-                className={fieldClass}
-                type="datetime-local"
-                value={form.periodTo}
-                onChange={(event) =>
-                  setForm({ ...form, periodTo: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-          <SeasonBusinessRules
-            form={form}
-            tariffSnapshots={tariffSnapshots}
-            lootBoxes={lootBoxes}
-            onChange={(patch) => setForm({ ...form, ...patch })}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Premium">
-              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm dark:border-zinc-800">
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Название">
                 <input
-                  type="checkbox"
-                  checked={form.premiumEnabled}
+                  className={fieldClass}
+                  value={form.name}
                   onChange={(event) =>
-                    setForm({ ...form, premiumEnabled: event.target.checked })
+                    setForm({ ...form, name: event.target.value })
                   }
                 />
-                Включен
-              </label>
-            </Field>
-            <Field label="Upgrade mode">
-              <input
-                className={fieldClass}
-                value={form.premiumUpgradeMode}
+              </Field>
+              <Field label="Статус">
+                <StatusSelect
+                  value={form.status}
+                  onChange={(status) => setForm({ ...form, status })}
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Тип сезона">
+                <input
+                  className={fieldClass}
+                  value="Клубный сезон"
+                  disabled
+                  readOnly
+                />
+              </Field>
+              <AudienceSelect
+                audiences={audiences}
+                value={form.audienceId}
+                onChange={(audienceId) => setForm({ ...form, audienceId })}
+              />
+            </div>
+            <StoreSelect
+              stores={stores}
+              value={form.storeIds}
+              onChange={(storeIds) => setForm({ ...form, storeIds })}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Начало">
+                <input
+                  className={fieldClass}
+                  type="datetime-local"
+                  value={form.periodFrom}
+                  onChange={(event) =>
+                    setForm({ ...form, periodFrom: event.target.value })
+                  }
+                />
+              </Field>
+              <Field label="Окончание">
+                <input
+                  className={fieldClass}
+                  type="datetime-local"
+                  value={form.periodTo}
+                  onChange={(event) =>
+                    setForm({ ...form, periodTo: event.target.value })
+                  }
+                />
+              </Field>
+            </div>
+            <SeasonBusinessRules
+              form={form}
+              tariffSnapshots={tariffSnapshots}
+              lootBoxes={lootBoxes}
+              onChange={(patch) => setForm({ ...form, ...patch })}
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Premium">
+                <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm dark:border-zinc-800">
+                  <input
+                    type="checkbox"
+                    checked={form.premiumEnabled}
+                    onChange={(event) =>
+                      setForm({ ...form, premiumEnabled: event.target.checked })
+                    }
+                  />
+                  Включен
+                </label>
+              </Field>
+              <Field label="Upgrade mode">
+                <input
+                  className={fieldClass}
+                  value={form.premiumUpgradeMode}
+                  onChange={(event) =>
+                    setForm({ ...form, premiumUpgradeMode: event.target.value })
+                  }
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <BudgetField
+                value={form.budgetAmount}
+                unlimited={form.budgetUnlimited}
+                onChange={(patch) => setForm({ ...form, ...patch })}
+              />
+              <RewardApprovalSelect
+                manualApprovalRequired={form.manualApprovalRequired}
+                onChange={(manualApprovalRequired) =>
+                  setForm({ ...form, manualApprovalRequired })
+                }
+              />
+            </div>
+            <Field label="Заметка">
+              <textarea
+                className={`${fieldClass} min-h-20`}
+                value={form.note}
                 onChange={(event) =>
-                  setForm({ ...form, premiumUpgradeMode: event.target.value })
+                  setForm({ ...form, note: event.target.value })
                 }
               />
             </Field>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <BudgetField
-              value={form.budgetAmount}
-              unlimited={form.budgetUnlimited}
-              onChange={(patch) => setForm({ ...form, ...patch })}
-            />
-            <RewardApprovalSelect
-              manualApprovalRequired={form.manualApprovalRequired}
-              onChange={(manualApprovalRequired) =>
-                setForm({ ...form, manualApprovalRequired })
-              }
-            />
-          </div>
-          <Field label="Заметка">
-            <textarea
-              className={`${fieldClass} min-h-20`}
-              value={form.note}
-              onChange={(event) =>
-                setForm({ ...form, note: event.target.value })
-              }
-            />
-          </Field>
-          <button
-            type="button"
-            className={primaryButtonClass}
-            disabled={saving === "season"}
-            onClick={onSave}
-          >
-            {editingId ? "Сохранить" : "Создать Battle Pass"}
-          </button>
-          {editingId ? (
-            <button type="button" className={smallButtonClass} onClick={onReset}>
-              Сбросить выбор
+            <button
+              type="button"
+              className={primaryButtonClass}
+              disabled={saving === "season"}
+              onClick={onSave}
+            >
+              {editingId ? "Сохранить" : "Создать Battle Pass"}
             </button>
-          ) : null}
-        </div>
+            {editingId ? (
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={onReset}
+              >
+                Сбросить выбор
+              </button>
+            ) : null}
+          </div>
         ) : null
       }
       listTitle="Созданные правила Battle Pass"
@@ -8596,7 +8711,11 @@ function PromoBannersTab({
                 {editingId ? "Сохранить" : "Создать промо баннер"}
               </button>
               {editingId ? (
-                <button type="button" className={smallButtonClass} onClick={onReset}>
+                <button
+                  type="button"
+                  className={smallButtonClass}
+                  onClick={onReset}
+                >
                   Сбросить выбор
                 </button>
               ) : null}
@@ -8607,7 +8726,9 @@ function PromoBannersTab({
       listTitle="Созданные промо баннеры"
       listSummary={
         <div className="space-y-3">
-          {!isFormOpen && notice ? <PromoBannerNoticeBox notice={notice} /> : null}
+          {!isFormOpen && notice ? (
+            <PromoBannerNoticeBox notice={notice} />
+          ) : null}
           <PromoBannerLimitSummary
             activeCount={activePromoCards}
             totalCount={promoCards.length}
@@ -8642,11 +8763,16 @@ function PromoBannersTab({
             details={
               <div className="space-y-3">
                 <div className="grid gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
-                  <PromoBannerThumbnail imageUrl={imageUrl} title={item.title} />
+                  <PromoBannerThumbnail
+                    imageUrl={imageUrl}
+                    title={item.title}
+                  />
                   <div className="min-w-0 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                     <p>
                       Формат: 9:16
-                      {imageUrl ? " · изображение загружено" : " · без изображения"}
+                      {imageUrl
+                        ? " · изображение загружено"
+                        : " · без изображения"}
                     </p>
                     <p>
                       Действие:{" "}
@@ -8745,8 +8871,8 @@ function PromoBannerVisibilityDetails({
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-      Не показывается для {compactStoreNames(usageInfo.overflowStoreNames)}:{" "}
-      в игровом модуле уже заняты {PROMO_BANNER_DISPLAY_LIMIT} слота более
+      Не показывается для {compactStoreNames(usageInfo.overflowStoreNames)}: в
+      игровом модуле уже заняты {PROMO_BANNER_DISPLAY_LIMIT} слота более
       приоритетными или более новыми баннерами.
     </div>
   );
@@ -8776,7 +8902,8 @@ function PromoBannerImageEditor({
 
     const reader = new FileReader();
     reader.onload = () => {
-      const imageSource = typeof reader.result === "string" ? reader.result : "";
+      const imageSource =
+        typeof reader.result === "string" ? reader.result : "";
       setForm({
         ...form,
         imageSource,
@@ -8870,10 +8997,12 @@ function PromoBannerImageEditor({
 
     const rect = event.currentTarget.getBoundingClientRect();
     const nextOffsetX = clampPromoBannerOffset(
-      dragState.offsetX + ((event.clientX - dragState.startX) / rect.width) * 100,
+      dragState.offsetX +
+        ((event.clientX - dragState.startX) / rect.width) * 100,
     );
     const nextOffsetY = clampPromoBannerOffset(
-      dragState.offsetY + ((event.clientY - dragState.startY) / rect.height) * 100,
+      dragState.offsetY +
+        ((event.clientY - dragState.startY) / rect.height) * 100,
     );
 
     setForm({
@@ -8993,7 +9122,9 @@ function PromoBannerImageEditor({
                       step="0.01"
                       type="range"
                       value={form.imageScale}
-                      onChange={(event) => updateScale(Number(event.target.value))}
+                      onChange={(event) =>
+                        updateScale(Number(event.target.value))
+                      }
                     />
                     <button
                       type="button"
@@ -9183,7 +9314,11 @@ function PromoBannerThumbnail({
     <div className="aspect-[9/16] w-[72px] overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900">
       {imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img alt={title} className="h-full w-full object-cover" src={imageUrl} />
+        <img
+          alt={title}
+          className="h-full w-full object-cover"
+          src={imageUrl}
+        />
       ) : (
         <div className="flex h-full items-center justify-center text-[11px] font-bold text-zinc-400">
           9:16
@@ -9255,7 +9390,8 @@ function RewardsTab({
         const storeId = reward.store?.id ?? "";
         const matchesStore = storeSet.size === 0 || storeSet.has(storeId);
         const matchesSearch =
-          !query || rewardSearchTokens(reward).some((token) => token.includes(query));
+          !query ||
+          rewardSearchTokens(reward).some((token) => token.includes(query));
 
         return matchesType && matchesStore && matchesSearch;
       })
@@ -9267,13 +9403,21 @@ function RewardsTab({
           ? rightTime - leftTime
           : leftTime - rightTime;
       });
-  }, [rewardSearch, rewardSort, rewards, selectedRewardTypes, selectedStoreIds]);
+  }, [
+    rewardSearch,
+    rewardSort,
+    rewards,
+    selectedRewardTypes,
+    selectedStoreIds,
+  ]);
 
   const rewardStoreOptions = useMemo(() => {
     const rewardStoreIds = new Set(
       rewards.map((reward) => reward.store?.id).filter(Boolean),
     );
-    const storesWithRewards = stores.filter((store) => rewardStoreIds.has(store.id));
+    const storesWithRewards = stores.filter((store) =>
+      rewardStoreIds.has(store.id),
+    );
 
     return storesWithRewards.length ? storesWithRewards : stores;
   }, [rewards, stores]);
@@ -9281,319 +9425,325 @@ function RewardsTab({
   return (
     <div className="space-y-5">
       {canApprove ? (
-      <details
-        className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-        open={editingId ? true : undefined}
-      >
-        <summary className="flex cursor-pointer list-none flex-col gap-3 p-4 text-left outline-none transition hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-400 sm:flex-row sm:items-center sm:justify-between dark:hover:bg-zinc-900/60 [&::-webkit-details-marker]:hidden">
-          <div className="min-w-0">
-            <p className="text-base font-bold text-zinc-950 dark:text-white">
-              {editingId ? "Редактирование награды" : "Ручная награда"}
-            </p>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Создать приз вручную или поправить выбранную награду из кошелька.
-            </p>
-          </div>
-          <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs font-bold text-zinc-600 transition group-open:border-emerald-300 group-open:bg-emerald-50 group-open:text-emerald-800 dark:border-zinc-800 dark:text-zinc-300 dark:group-open:border-emerald-800 dark:group-open:bg-emerald-950/40 dark:group-open:text-emerald-100">
-            <span className="group-open:hidden">Развернуть</span>
-            <span className="hidden group-open:inline">Свернуть</span>
-          </span>
-        </summary>
-        <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="space-y-3">
-          <Field label="Профиль">
-            <select
-              className={fieldClass}
-              value={form.profileId}
-              onChange={(event) =>
-                setForm({ ...form, profileId: event.target.value })
-              }
-            >
-              <option value="">Не выбран</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.displayName} · L{profile.level}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Гость без профиля">
-            <select
-              className={fieldClass}
-              value={form.guestId}
-              onChange={(event) =>
-                setForm({ ...form, guestId: event.target.value })
-              }
-            >
-              <option value="">Не выбран</option>
-              {guests.map((guest) => (
-                <option key={guest.id} value={guest.id}>
-                  {guest.displayName} · {guest.contact}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Источник">
-              <select
-                className={fieldClass}
-                value={form.source}
-                onChange={(event) =>
-                  setForm({ ...form, source: event.target.value })
-                }
+        <details
+          className="group rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+          open={editingId ? true : undefined}
+        >
+          <summary className="flex cursor-pointer list-none flex-col gap-3 p-4 text-left outline-none transition hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-emerald-400 sm:flex-row sm:items-center sm:justify-between dark:hover:bg-zinc-900/60 [&::-webkit-details-marker]:hidden">
+            <div className="min-w-0">
+              <p className="text-base font-bold text-zinc-950 dark:text-white">
+                {editingId ? "Редактирование награды" : "Ручная награда"}
+              </p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Создать приз вручную или поправить выбранную награду из
+                кошелька.
+              </p>
+            </div>
+            <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs font-bold text-zinc-600 transition group-open:border-emerald-300 group-open:bg-emerald-50 group-open:text-emerald-800 dark:border-zinc-800 dark:text-zinc-300 dark:group-open:border-emerald-800 dark:group-open:bg-emerald-950/40 dark:group-open:text-emerald-100">
+              <span className="group-open:hidden">Развернуть</span>
+              <span className="hidden group-open:inline">Свернуть</span>
+            </span>
+          </summary>
+          <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+            <div className="space-y-3">
+              <Field label="Профиль">
+                <select
+                  className={fieldClass}
+                  value={form.profileId}
+                  onChange={(event) =>
+                    setForm({ ...form, profileId: event.target.value })
+                  }
+                >
+                  <option value="">Не выбран</option>
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.displayName} · L{profile.level}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Гость без профиля">
+                <select
+                  className={fieldClass}
+                  value={form.guestId}
+                  onChange={(event) =>
+                    setForm({ ...form, guestId: event.target.value })
+                  }
+                >
+                  <option value="">Не выбран</option>
+                  {guests.map((guest) => (
+                    <option key={guest.id} value={guest.id}>
+                      {guest.displayName} · {guest.contact}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Источник">
+                  <select
+                    className={fieldClass}
+                    value={form.source}
+                    onChange={(event) =>
+                      setForm({ ...form, source: event.target.value })
+                    }
+                  >
+                    <option value="MANUAL">ручной</option>
+                    <option value="CASHIER">кассир</option>
+                    <option value="API_IMPORT">импорт</option>
+                    <option value="LANGAME">Langame</option>
+                  </select>
+                </Field>
+                <Field label="Статус">
+                  <select
+                    className={fieldClass}
+                    value={form.status}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        status: event.target.value as GuestGameRewardStatus,
+                      })
+                    }
+                  >
+                    {rewardStatusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {rewardStatusLabels[status]}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Тип">
+                  <OptionSelect
+                    options={rewardTypeOptions}
+                    value={form.rewardType}
+                    preservedLabel="Сохраненный тип награды"
+                    onChange={(rewardType) => setForm({ ...form, rewardType })}
+                  />
+                </Field>
+                <Field label="Сумма">
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    value={form.rewardAmount}
+                    onChange={(event) =>
+                      setForm({ ...form, rewardAmount: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Название">
+                <input
+                  className={fieldClass}
+                  value={form.rewardLabel}
+                  onChange={(event) =>
+                    setForm({ ...form, rewardLabel: event.target.value })
+                  }
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Код">
+                  <input
+                    className={fieldClass}
+                    value={form.rewardCode}
+                    onChange={(event) =>
+                      setForm({ ...form, rewardCode: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Сгорает">
+                  <input
+                    className={fieldClass}
+                    type="datetime-local"
+                    value={form.expiresAt}
+                    onChange={(event) =>
+                      setForm({ ...form, expiresAt: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Клуб">
+                <select
+                  className={fieldClass}
+                  value={form.storeId}
+                  onChange={(event) =>
+                    setForm({ ...form, storeId: event.target.value })
+                  }
+                >
+                  <option value="">Любой</option>
+                  {stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <LinkSelect
+                label="Лутбокс"
+                value={form.lootBoxId}
+                items={lootBoxes}
+                onChange={(lootBoxId) => setForm({ ...form, lootBoxId })}
+              />
+              <LinkSelect
+                label="Задание"
+                value={form.missionId}
+                items={missions}
+                onChange={(missionId) => setForm({ ...form, missionId })}
+              />
+              <LinkSelect
+                label="Сезон"
+                value={form.seasonId}
+                items={seasons}
+                onChange={(seasonId) => setForm({ ...form, seasonId })}
+              />
+              <Field label="Заметка">
+                <textarea
+                  className={`${fieldClass} min-h-20`}
+                  value={form.note}
+                  onChange={(event) =>
+                    setForm({ ...form, note: event.target.value })
+                  }
+                />
+              </Field>
+              <JsonField
+                label="Evidence"
+                value={form.evidenceText}
+                onChange={(evidenceText) => setForm({ ...form, evidenceText })}
+              />
+              <button
+                type="button"
+                className={primaryButtonClass}
+                disabled={saving === "reward"}
+                onClick={onSave}
               >
-                <option value="MANUAL">ручной</option>
-                <option value="CASHIER">кассир</option>
-                <option value="API_IMPORT">импорт</option>
-                <option value="LANGAME">Langame</option>
-              </select>
-            </Field>
-            <Field label="Статус">
-              <select
-                className={fieldClass}
-                value={form.status}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    status: event.target.value as GuestGameRewardStatus,
-                  })
-                }
-              >
-                {rewardStatusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {rewardStatusLabels[status]}
-                  </option>
-                ))}
-              </select>
-            </Field>
+                {editingId ? "Изменить награду" : "Поставить в кошелек"}
+              </button>
+              {editingId ? (
+                <button
+                  type="button"
+                  className={smallButtonClass}
+                  onClick={onReset}
+                >
+                  Сбросить выбор
+                </button>
+              ) : null}
+            </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Тип">
-              <OptionSelect
-                options={rewardTypeOptions}
-                value={form.rewardType}
-                preservedLabel="Сохраненный тип награды"
-                onChange={(rewardType) =>
-                  setForm({ ...form, rewardType })
-                }
-              />
-            </Field>
-            <Field label="Сумма">
-              <input
-                className={fieldClass}
-                type="number"
-                value={form.rewardAmount}
-                onChange={(event) =>
-                  setForm({ ...form, rewardAmount: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-          <Field label="Название">
-            <input
-              className={fieldClass}
-              value={form.rewardLabel}
-              onChange={(event) =>
-                setForm({ ...form, rewardLabel: event.target.value })
-              }
-            />
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Код">
-              <input
-                className={fieldClass}
-                value={form.rewardCode}
-                onChange={(event) =>
-                  setForm({ ...form, rewardCode: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Сгорает">
-              <input
-                className={fieldClass}
-                type="datetime-local"
-                value={form.expiresAt}
-                onChange={(event) =>
-                  setForm({ ...form, expiresAt: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-          <Field label="Клуб">
-            <select
-              className={fieldClass}
-              value={form.storeId}
-              onChange={(event) =>
-                setForm({ ...form, storeId: event.target.value })
-              }
-            >
-              <option value="">Любой</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <LinkSelect
-            label="Лутбокс"
-            value={form.lootBoxId}
-            items={lootBoxes}
-            onChange={(lootBoxId) => setForm({ ...form, lootBoxId })}
-          />
-          <LinkSelect
-            label="Задание"
-            value={form.missionId}
-            items={missions}
-            onChange={(missionId) => setForm({ ...form, missionId })}
-          />
-          <LinkSelect
-            label="Сезон"
-            value={form.seasonId}
-            items={seasons}
-            onChange={(seasonId) => setForm({ ...form, seasonId })}
-          />
-          <Field label="Заметка">
-            <textarea
-              className={`${fieldClass} min-h-20`}
-              value={form.note}
-              onChange={(event) =>
-                setForm({ ...form, note: event.target.value })
-              }
-            />
-          </Field>
-          <JsonField
-            label="Evidence"
-            value={form.evidenceText}
-            onChange={(evidenceText) => setForm({ ...form, evidenceText })}
-          />
-          <button
-            type="button"
-            className={primaryButtonClass}
-            disabled={saving === "reward"}
-            onClick={onSave}
-          >
-            {editingId ? "Изменить награду" : "Поставить в кошелек"}
-          </button>
-          {editingId ? (
-            <button type="button" className={smallButtonClass} onClick={onReset}>
-              Сбросить выбор
-            </button>
-          ) : null}
-        </div>
-        </div>
-      </details>
+        </details>
       ) : null}
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionTitle title="Кошелек наград" />
           {canApprove ? (
-          <a
-            className={smallButtonClass}
-            href="/api/guests/gamification/rewards/export"
-            download
-          >
-            Экспорт CSV
-          </a>
+            <a
+              className={smallButtonClass}
+              href="/api/guests/gamification/rewards/export"
+              download
+            >
+              Экспорт CSV
+            </a>
           ) : null}
         </div>
         {canApprove ? (
-        <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-zinc-950 dark:text-white">
-                Погашение кода гостя
-              </p>
-              <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                Когда гость показывает код из кошелька или QR-код, вставьте
-                короткий код кассиру. После погашения награда считается
-                выданной и повторно использовать код нельзя.
-              </p>
+          <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-zinc-950 dark:text-white">
+                  Погашение кода гостя
+                </p>
+                <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                  Когда гость показывает код из кошелька или QR-код, вставьте
+                  короткий код кассиру. После погашения награда считается
+                  выданной и повторно использовать код нельзя.
+                </p>
+              </div>
+              <div className="grid flex-1 gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+                <input
+                  className={fieldClass}
+                  value={redeemForm.claim}
+                  placeholder="Например, LP-D5791101"
+                  onChange={(event) =>
+                    setRedeemForm((current) => ({
+                      ...current,
+                      claim: event.target.value,
+                    }))
+                  }
+                />
+                <select
+                  className={fieldClass}
+                  value={redeemForm.storeId}
+                  onChange={(event) =>
+                    setRedeemForm((current) => ({
+                      ...current,
+                      storeId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">Клуб не проверять</option>
+                  {stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className={primaryButtonClass}
+                disabled={saving === "rewardRedeem"}
+                onClick={onRedeem}
+              >
+                Погасить
+              </button>
             </div>
-            <div className="grid flex-1 gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+            <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <input
                 className={fieldClass}
-                value={redeemForm.claim}
-                placeholder="Например, LP-D5791101"
+                value={redeemForm.note}
+                placeholder="Заметка кассира, если нужна"
                 onChange={(event) =>
                   setRedeemForm((current) => ({
                     ...current,
-                    claim: event.target.value,
+                    note: event.target.value,
                   }))
                 }
               />
-              <select
-                className={fieldClass}
-                value={redeemForm.storeId}
-                onChange={(event) =>
-                  setRedeemForm((current) => ({
-                    ...current,
-                    storeId: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Клуб не проверять</option>
-                {stores.map((store) => (
-                  <option key={store.id} value={store.id}>
-                    {store.name}
-                  </option>
-                ))}
-              </select>
+              {redeemedReward ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+                  Погашено:{" "}
+                  <span className="font-bold">
+                    {redeemedReward.rewardLabel}
+                  </span>
+                  {" · "}
+                  {redeemedReward.profile?.displayName ??
+                    redeemedReward.guest?.displayName ??
+                    redeemedReward.guestExternalId ??
+                    "гость"}
+                  {" · "}
+                  <span className="font-mono">
+                    {redeemedReward.rewardCode ?? "без кода"}
+                  </span>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                  Погашение проверяет код, клуб и статус награды, затем
+                  закрывает приз как выданный и защищает его от повторного
+                  использования.
+                </div>
+              )}
             </div>
-            <button
-              type="button"
-              className={primaryButtonClass}
-              disabled={saving === "rewardRedeem"}
-              onClick={onRedeem}
-            >
-              Погасить
-            </button>
+            <div className="mt-3 rounded-lg border border-cyan-200/70 bg-white/70 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-cyan-900/50 dark:bg-zinc-950/40 dark:text-zinc-300">
+              <span className="font-semibold text-zinc-900 dark:text-white">
+                Согласовано
+              </span>{" "}
+              — право на приз подтверждено, но выдача еще не закрыта.{" "}
+              <span className="font-semibold text-zinc-900 dark:text-white">
+                Выдано
+              </span>{" "}
+              — приз уже погашен или начислен, повторная выдача заблокирована.
+            </div>
           </div>
-          <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <input
-              className={fieldClass}
-              value={redeemForm.note}
-              placeholder="Заметка кассира, если нужна"
-              onChange={(event) =>
-                setRedeemForm((current) => ({
-                  ...current,
-                  note: event.target.value,
-                }))
-              }
-            />
-            {redeemedReward ? (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-                Погашено:{" "}
-                <span className="font-bold">{redeemedReward.rewardLabel}</span>
-                {" · "}
-                {redeemedReward.profile?.displayName ??
-                  redeemedReward.guest?.displayName ??
-                  redeemedReward.guestExternalId ??
-                  "гость"}
-                {" · "}
-                <span className="font-mono">
-                  {redeemedReward.rewardCode ?? "без кода"}
-                </span>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-                Погашение проверяет код, клуб и статус награды, затем закрывает
-                приз как выданный и защищает его от повторного использования.
-              </div>
-            )}
-          </div>
-          <div className="mt-3 rounded-lg border border-cyan-200/70 bg-white/70 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-cyan-900/50 dark:bg-zinc-950/40 dark:text-zinc-300">
-            <span className="font-semibold text-zinc-900 dark:text-white">
-              Согласовано
-            </span>{" "}
-            — право на приз подтверждено, но выдача еще не закрыта.{" "}
-            <span className="font-semibold text-zinc-900 dark:text-white">
-              Выдано
-            </span>{" "}
-            — приз уже погашен или начислен, повторная выдача заблокирована.
-          </div>
-        </div>
         ) : (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
             У вас read-only доступ к кошельку наград: можно смотреть очередь,
@@ -9627,7 +9777,11 @@ function RewardsTab({
               />
             ))
           ) : (
-            <EmptyState text={rewards.length ? "По фильтрам наград нет" : "Наград пока нет"} />
+            <EmptyState
+              text={
+                rewards.length ? "По фильтрам наград нет" : "Наград пока нет"
+              }
+            />
           )}
         </div>
       </section>
@@ -9803,8 +9957,8 @@ function LootBoxBusinessRules({
             Лимит на одного гостя
           </p>
           <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            Включите периодичность, если лутбокс можно открывать регулярно,
-            но не чаще одного раза за выбранный период.
+            Включите периодичность, если лутбокс можно открывать регулярно, но
+            не чаще одного раза за выбранный период.
           </p>
           <label className="mt-3 flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
             <input
@@ -9874,7 +10028,9 @@ function LootBoxBusinessRules({
               type="number"
               min="1"
               value={form.totalPerDay}
-              onChange={(event) => onChange({ totalPerDay: event.target.value })}
+              onChange={(event) =>
+                onChange({ totalPerDay: event.target.value })
+              }
             />
           </label>
           <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
@@ -10000,7 +10156,8 @@ function LootBoxScheduleFields({
             className={fieldClass}
             value={form.timeWindowMode}
             onChange={(event) => {
-              const timeWindowMode = event.target.value as LootBoxTimeWindowMode;
+              const timeWindowMode = event.target
+                .value as LootBoxTimeWindowMode;
 
               onChange({
                 timeWindowMode,
@@ -10112,16 +10269,14 @@ function LootBoxPrizesEditor({
   const topPrize = sortedPrizes[0] ?? null;
   const chanceDiff = Math.round((100 - chanceTotal) * 100) / 100;
   const isChanceBalanced = Math.abs(chanceDiff) < 0.01;
-  const chanceStatus =
-    isChanceBalanced
-      ? "Сумма шансов 100%"
-      : chanceDiff > 0
-        ? `Осталось ${formatChanceNumber(chanceDiff)}%`
-        : `Превышение ${formatChanceNumber(Math.abs(chanceDiff))}%`;
-  const chanceStatusClass =
-    isChanceBalanced
-      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-      : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
+  const chanceStatus = isChanceBalanced
+    ? "Сумма шансов 100%"
+    : chanceDiff > 0
+      ? `Осталось ${formatChanceNumber(chanceDiff)}%`
+      : `Превышение ${formatChanceNumber(Math.abs(chanceDiff))}%`;
+  const chanceStatusClass = isChanceBalanced
+    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+    : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
 
   const updatePrize = (index: number, patch: Partial<LootBoxPrizeForm>) => {
     onChange(
@@ -10373,11 +10528,7 @@ function LootBoxRulePrizeSummary({ lootBox }: { lootBox: GuestGameLootBox }) {
   );
 }
 
-function MissionQuestStepIdSummary({
-  mission,
-}: {
-  mission: GuestGameMission;
-}) {
+function MissionQuestStepIdSummary({ mission }: { mission: GuestGameMission }) {
   const steps = missionQuestSteps(mission.conditions);
 
   if (!steps.length) {
@@ -10408,11 +10559,7 @@ function MissionQuestStepIdSummary({
   );
 }
 
-function BattlePassLevelIdSummary({
-  season,
-}: {
-  season: GuestGameSeason;
-}) {
+function BattlePassLevelIdSummary({ season }: { season: GuestGameSeason }) {
   const levels = battlePassLevelRows(season);
 
   if (!levels.length) {
@@ -10531,7 +10678,9 @@ function MissionBusinessRules({
               className={fieldClass}
               placeholder="22:00-06:00"
               value={form.metricHours}
-              onChange={(event) => onChange({ metricHours: event.target.value })}
+              onChange={(event) =>
+                onChange({ metricHours: event.target.value })
+              }
             />
           </Field>
         </div>
@@ -10722,9 +10871,7 @@ function MissionQuestChainFields({
               <select
                 className={fieldClass}
                 value={step.missionId}
-                onChange={(event) =>
-                  selectTemplate(index, event.target.value)
-                }
+                onChange={(event) => selectTemplate(index, event.target.value)}
               >
                 <option value="">
                   {missionTemplates.length
@@ -10855,8 +11002,13 @@ function SeasonBusinessRules({
     });
   };
   const removeStep = (index: number) => {
-    const levelSteps = form.levelSteps.filter((_, stepIndex) => stepIndex !== index);
-    onChange({ levelSteps, levelCount: String(Math.max(1, levelSteps.length)) });
+    const levelSteps = form.levelSteps.filter(
+      (_, stepIndex) => stepIndex !== index,
+    );
+    onChange({
+      levelSteps,
+      levelCount: String(Math.max(1, levelSteps.length)),
+    });
   };
   const mainRewardStepIndex = form.levelSteps.length - 1;
   const mainRewardStep =
@@ -10933,7 +11085,11 @@ function SeasonBusinessRules({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={smallButtonClass} onClick={addStep}>
+            <button
+              type="button"
+              className={smallButtonClass}
+              onClick={addStep}
+            >
               Добавить шаг
             </button>
           </div>
@@ -10963,14 +11119,18 @@ function SeasonBusinessRules({
                   type="number"
                   min="1"
                   value={step.level}
-                  onChange={(event) => updateStep(index, { level: event.target.value })}
+                  onChange={(event) =>
+                    updateStep(index, { level: event.target.value })
+                  }
                 />
               </Field>
               <Field label="Название этапа">
                 <input
                   className={fieldClass}
                   value={step.title}
-                  onChange={(event) => updateStep(index, { title: event.target.value })}
+                  onChange={(event) =>
+                    updateStep(index, { title: event.target.value })
+                  }
                 />
               </Field>
             </div>
@@ -10979,14 +11139,18 @@ function SeasonBusinessRules({
                 <textarea
                   className={`${fieldClass} min-h-[72px] resize-y`}
                   value={step.condition}
-                  onChange={(event) => updateStep(index, { condition: event.target.value })}
+                  onChange={(event) =>
+                    updateStep(index, { condition: event.target.value })
+                  }
                 />
               </Field>
               <Field label="Подробное пояснение">
                 <textarea
                   className={`${fieldClass} min-h-[72px] resize-y`}
                   value={step.description}
-                  onChange={(event) => updateStep(index, { description: event.target.value })}
+                  onChange={(event) =>
+                    updateStep(index, { description: event.target.value })
+                  }
                 />
               </Field>
             </div>
@@ -11052,9 +11216,9 @@ function BattlePassRewardSummary({
           Итог за полное прохождение
         </p>
         <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-          Диапазон учитывает суммы бонусов и все исходы привязанных
-          лутбоксов. Остальные призы перечислены отдельно и не переводятся в
-          бонусы или рубли.
+          Диапазон учитывает суммы бонусов и все исходы привязанных лутбоксов.
+          Остальные призы перечислены отдельно и не переводятся в бонусы или
+          рубли.
         </p>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
@@ -11359,7 +11523,9 @@ function SeasonStepRewardFields({
             className={fieldClass}
             value={rewardType}
             onChange={(event) =>
-              patchReward({ [typeKey]: event.target.value } as Partial<SeasonLevelStepForm>)
+              patchReward({
+                [typeKey]: event.target.value,
+              } as Partial<SeasonLevelStepForm>)
             }
           >
             {battlePassStepRewardTypeOptions.map((option) => (
@@ -11472,9 +11638,9 @@ function SeasonStepRewardFields({
               ))}
             </select>
             <OptionHelp>
-              Можно использовать активный витринный или подарочный лутбокс.
-              Его таблица призов будет участвовать в расчете минимальной,
-              ожидаемой и максимальной награды Battle Pass.
+              Можно использовать активный витринный или подарочный лутбокс. Его
+              таблица призов будет участвовать в расчете минимальной, ожидаемой
+              и максимальной награды Battle Pass.
             </OptionHelp>
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -11672,7 +11838,10 @@ function BudgetField({
 }: {
   value: string;
   unlimited: boolean;
-  onChange: (patch: { budgetAmount?: string; budgetUnlimited?: boolean }) => void;
+  onChange: (patch: {
+    budgetAmount?: string;
+    budgetUnlimited?: boolean;
+  }) => void;
 }) {
   return (
     <Field label="Бюджет">
@@ -11753,7 +11922,9 @@ function RuleCommonFields({
           </Field>
         </div>
       </FormSection>
-      <FormSection title={hideRewardFields ? "Бюджет и выдача" : "Награда и бюджет"}>
+      <FormSection
+        title={hideRewardFields ? "Бюджет и выдача" : "Награда и бюджет"}
+      >
         {hideRewardFields ? (
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,260px)]">
             <BudgetField
@@ -11846,7 +12017,9 @@ function RuleCommonFields({
                     } as Partial<LootBoxForm & MissionForm>)
                   }
                 >
-                  <span className="block text-sm font-bold">{option.label}</span>
+                  <span className="block text-sm font-bold">
+                    {option.label}
+                  </span>
                   <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                     {option.description}
                   </span>
@@ -11962,7 +12135,9 @@ function ProfileCard({
             {profile.displayName}
           </h3>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {profile.contactMasked ?? profile.guest?.externalGuestId ?? "контакт не задан"}
+            {profile.contactMasked ??
+              profile.guest?.externalGuestId ??
+              "контакт не задан"}
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
@@ -11980,29 +12155,36 @@ function ProfileCard({
       <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
         <MiniMetric label="XP" value={profile.xp} />
         <MiniMetric label="Уровень" value={profile.level} />
-        <MiniMetric label="Канал" value={profile.telegramIdentity ? "TG" : profile.maxIdentity ? "MAX" : "-"} />
+        <MiniMetric
+          label="Канал"
+          value={
+            profile.telegramIdentity ? "TG" : profile.maxIdentity ? "MAX" : "-"
+          }
+        />
       </div>
       {canManage ? (
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={smallButtonClass}
-          onClick={() => onEdit(profile)}
-        >
-          Редактировать
-        </button>
-        {profileStatusOptions.map((status) => (
+        <div className="mt-4 flex flex-wrap gap-2">
           <button
-            key={status}
             type="button"
             className={smallButtonClass}
-            disabled={saving === `profile-${profile.id}` || profile.status === status}
-            onClick={() => onStatus(profile, status)}
+            onClick={() => onEdit(profile)}
           >
-            {profileStatusLabels[status]}
+            Редактировать
           </button>
-        ))}
-      </div>
+          {profileStatusOptions.map((status) => (
+            <button
+              key={status}
+              type="button"
+              className={smallButtonClass}
+              disabled={
+                saving === `profile-${profile.id}` || profile.status === status
+              }
+              onClick={() => onStatus(profile, status)}
+            >
+              {profileStatusLabels[status]}
+            </button>
+          ))}
+        </div>
       ) : (
         <p className="mt-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
           Только просмотр профиля: изменение XP и статуса недоступно.
@@ -12070,7 +12252,10 @@ function RuleCard({
             {subtitle}
           </p>
         </div>
-        <StatusPill label={statusLabels[status]} tone={ruleStatusPillTone(status)} />
+        <StatusPill
+          label={statusLabels[status]}
+          tone={ruleStatusPillTone(status)}
+        />
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {meta.map((item) => (
@@ -12114,10 +12299,7 @@ function RuleCard({
               type="button"
               className={smallButtonClass}
               disabled={
-                saving ||
-                restartSaving ||
-                deleteSaving ||
-                status === nextStatus
+                saving || restartSaving || deleteSaving || status === nextStatus
               }
               onClick={() => onStatus(nextStatus)}
             >
@@ -12155,8 +12337,7 @@ function formatGuestShortName(value: string | null | undefined) {
   }
 
   const parts = normalized.split(" ").filter(Boolean);
-  const initial = (part: string) =>
-    part.slice(0, 1).toLocaleUpperCase("ru-RU");
+  const initial = (part: string) => part.slice(0, 1).toLocaleUpperCase("ru-RU");
 
   if (parts.length >= 3) {
     return `${parts[0]} ${initial(parts[1])}.${initial(parts[2])}.`;
@@ -12188,7 +12369,9 @@ function formatPhoneTail(value: string | null | undefined) {
 }
 
 function formatRewardPhone(reward: GuestGameReward) {
-  return formatPhoneTail(reward.guest?.contact ?? reward.profile?.contactMasked);
+  return formatPhoneTail(
+    reward.guest?.contact ?? reward.profile?.contactMasked,
+  );
 }
 
 function rewardActivityLabel(reward: GuestGameReward) {
@@ -12252,8 +12435,9 @@ function isAutomaticLedgerReward(reward: GuestGameReward) {
 }
 
 function rewardRarityLabel(reward: GuestGameReward) {
-  return reward.rewardRarityLabel ?? (
-    reward.rewardRarity ? rewardRarityLabels[reward.rewardRarity] : null
+  return (
+    reward.rewardRarityLabel ??
+    (reward.rewardRarity ? rewardRarityLabels[reward.rewardRarity] : null)
   );
 }
 
@@ -12436,45 +12620,48 @@ function RewardRow({
                   Срок
                 </span>
                 <span className="mt-1 block text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-                  {reward.expiresAt ? formatDate(reward.expiresAt) : "без срока"}
+                  {reward.expiresAt
+                    ? formatDate(reward.expiresAt)
+                    : "без срока"}
                 </span>
               </div>
             </div>
             {reward.claimPayload ? (
               <p className="mt-2 rounded-lg border border-dashed border-cyan-300/40 px-3 py-2 text-xs text-cyan-700 dark:text-cyan-200">
-                QR-код готов для гостевой страницы. Для ручной выдачи используйте
-                короткий код кассиру выше.
+                QR-код готов для гостевой страницы. Для ручной выдачи
+                используйте короткий код кассиру выше.
               </p>
             ) : null}
           </div>
           {canApprove ? (
-          <div className="min-w-0 space-y-2">
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-              {rewardActionNotice(reward)}
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-              <button
-                type="button"
-                className={smallButtonClass}
-                onClick={() => onEdit(reward)}
-              >
-                Редактировать
-              </button>
-              {rewardStatusOptions.map((status) => (
+            <div className="min-w-0 space-y-2">
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                {rewardActionNotice(reward)}
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
                 <button
-                  key={status}
                   type="button"
                   className={smallButtonClass}
-                  disabled={
-                    saving === `reward-${reward.id}` || reward.status === status
-                  }
-                  onClick={() => onStatus(reward, status)}
+                  onClick={() => onEdit(reward)}
                 >
-                  {rewardStatusButtonLabel(reward, status)}
+                  Редактировать
                 </button>
-              ))}
+                {rewardStatusOptions.map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    className={smallButtonClass}
+                    disabled={
+                      saving === `reward-${reward.id}` ||
+                      reward.status === status
+                    }
+                    onClick={() => onStatus(reward, status)}
+                  >
+                    {rewardStatusButtonLabel(reward, status)}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
           ) : (
             <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 xl:text-right">
               Только просмотр награды
@@ -12495,8 +12682,12 @@ function EventRow({ event }: { event: GuestGameEvent }) {
             {event.eventType}
           </h3>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {event.profile?.displayName ?? event.guest?.displayName ?? "без профиля"}
-            {event.xpDelta ? ` · ${event.xpDelta > 0 ? "+" : ""}${event.xpDelta} XP` : ""}
+            {event.profile?.displayName ??
+              event.guest?.displayName ??
+              "без профиля"}
+            {event.xpDelta
+              ? ` · ${event.xpDelta > 0 ? "+" : ""}${event.xpDelta} XP`
+              : ""}
           </p>
         </div>
         <p className="text-xs font-medium text-zinc-400">
@@ -12746,7 +12937,8 @@ const guestLogBusinessPresetDefinitions: Array<
   {
     id: "events_and_tournaments",
     label: "Турниры и события",
-    description: "Подходит для заданий за участие в турнирах и клубных событиях.",
+    description:
+      "Подходит для заданий за участие в турнирах и клубных событиях.",
     intent: "allow",
     tokens: [
       "tournament",
@@ -12765,7 +12957,8 @@ const guestLogBusinessPresetDefinitions: Array<
   {
     id: "balance_and_payment",
     label: "Баланс и оплата",
-    description: "Подходит для заданий или XP за пополнение, оплату или бонусы.",
+    description:
+      "Подходит для заданий или XP за пополнение, оплату или бонусы.",
     intent: "allow",
     tokens: [
       "balance",
@@ -12787,7 +12980,8 @@ const guestLogBusinessPresetDefinitions: Array<
   {
     id: "manual_or_risk",
     label: "Ручные и рискованные события",
-    description: "Лучше добавлять в запрет anti-fraud, чтобы исключить тесты и корректировки.",
+    description:
+      "Лучше добавлять в запрет anti-fraud, чтобы исключить тесты и корректировки.",
     intent: "block",
     tokens: [
       "manual",
@@ -12857,7 +13051,7 @@ function guestLogBusinessPresets(
       label:
         item.mapping.preset === "custom"
           ? item.mapping.label
-          : definition?.label ?? item.mapping.label,
+          : (definition?.label ?? item.mapping.label),
       description:
         item.mapping.note ??
         definition?.description ??
@@ -12882,7 +13076,8 @@ function guestLogBusinessPresets(
           items
             .filter(
               (item) =>
-                !item.mapping && guestLogTypeMatchesPreset(item, definition.tokens),
+                !item.mapping &&
+                guestLogTypeMatchesPreset(item, definition.tokens),
             )
             .map((item) => item.type),
         ),
@@ -12922,7 +13117,8 @@ const fallbackGuestLogEventOptions: GuestLogEventOption[] = [
   {
     value: "session_start",
     label: "Старт игровой сессии",
-    description: "Начало игровой активности, если такой тип есть в guests/logs.",
+    description:
+      "Начало игровой активности, если такой тип есть в guests/logs.",
   },
   {
     value: "tournament",
@@ -13241,7 +13437,9 @@ function GuestLogConditionFields({
                 </span>
                 <span className="mt-2 block truncate text-[11px] font-semibold text-cyan-700 dark:text-cyan-300">
                   {preset.types.slice(0, 4).join(", ")}
-                  {preset.types.length > 4 ? ` +${preset.types.length - 4}` : ""}
+                  {preset.types.length > 4
+                    ? ` +${preset.types.length - 4}`
+                    : ""}
                 </span>
               </button>
             ))}
@@ -13295,8 +13493,8 @@ function GuestLogConditionFields({
             })}
           </div>
           <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            Нажатие на название добавляет событие как условие открытия.
-            Кнопка `запретить` добавляет событие в список исключений.
+            Нажатие на название добавляет событие как условие открытия. Кнопка
+            `запретить` добавляет событие в список исключений.
           </p>
         </div>
       ) : null}
@@ -13410,7 +13608,12 @@ function MissionProductMetricSelector({
         selectedCategoryIds,
         selectedCategoryNames,
       ).slice(0, 10),
-    [categoryOptions, categoryQuery, selectedCategoryIds, selectedCategoryNames],
+    [
+      categoryOptions,
+      categoryQuery,
+      selectedCategoryIds,
+      selectedCategoryNames,
+    ],
   );
   const selectedProducts = selectedProductIds.map((id) => ({
     value: id,
@@ -13479,8 +13682,12 @@ function MissionProductMetricSelector({
                     {product.name}
                   </span>
                   <span className="block text-xs text-zinc-500 dark:text-zinc-400">
-                    {product.article ? `Артикул ${product.article}` : "без артикула"}
-                    {product.category?.name ? ` · ${product.category.name}` : ""}
+                    {product.article
+                      ? `Артикул ${product.article}`
+                      : "без артикула"}
+                    {product.category?.name
+                      ? ` · ${product.category.name}`
+                      : ""}
                   </span>
                 </button>
               ))
@@ -13501,7 +13708,9 @@ function MissionProductMetricSelector({
                 : "Выберите клуб выше, чтобы искать товары по его ассортименту."
           }
           onRemove={(productId) =>
-            onChange({ metricProductIds: removeCsvToken(productIds, productId) })
+            onChange({
+              metricProductIds: removeCsvToken(productIds, productId),
+            })
           }
         />
         {selectedExternalProductIds.length ? (
@@ -13565,7 +13774,9 @@ function MissionProductMetricSelector({
           items={[...selectedCategories, ...selectedNameCategories]}
           emptyLabel="Категории не выбраны."
           onRemove={(value) => {
-            const option = categoryOptions.find((category) => category.id === value);
+            const option = categoryOptions.find(
+              (category) => category.id === value,
+            );
 
             onChange({
               metricCategoryIds: removeCsvToken(categoryIds, value),
@@ -13812,7 +14023,10 @@ function TariffConditionSelect({
       >
         <option value="">{emptyLabel}</option>
         {items.map((item) => (
-          <option key={`${item.domain}-${tariffItemValue(item)}`} value={tariffItemValue(item)}>
+          <option
+            key={`${item.domain}-${tariffItemValue(item)}`}
+            value={tariffItemValue(item)}
+          >
             {tariffItemLabel(item)}
           </option>
         ))}
@@ -13969,16 +14183,14 @@ const statusPillToneClasses: Record<StatusPillTone, string> = {
     "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700",
   success:
     "bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:ring-emerald-800",
-  info:
-    "bg-sky-100 text-sky-800 ring-sky-200 dark:bg-sky-950 dark:text-sky-200 dark:ring-sky-800",
+  info: "bg-sky-100 text-sky-800 ring-sky-200 dark:bg-sky-950 dark:text-sky-200 dark:ring-sky-800",
   warning:
     "bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-800",
   danger:
     "bg-red-100 text-red-800 ring-red-200 dark:bg-red-950 dark:text-red-200 dark:ring-red-800",
   purple:
     "bg-violet-100 text-violet-800 ring-violet-200 dark:bg-violet-950 dark:text-violet-200 dark:ring-violet-800",
-  cyan:
-    "bg-cyan-100 text-cyan-800 ring-cyan-200 dark:bg-cyan-950 dark:text-cyan-200 dark:ring-cyan-800",
+  cyan: "bg-cyan-100 text-cyan-800 ring-cyan-200 dark:bg-cyan-950 dark:text-cyan-200 dark:ring-cyan-800",
 };
 
 function StatusPill({
@@ -14118,7 +14330,11 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
       "blockedGuestLogTypes",
     ),
     storeIds: lootBox.storeIds,
-    quietHoursEnabled: booleanRule(lootBox.periodRules, "quietHoursEnabled", true),
+    quietHoursEnabled: booleanRule(
+      lootBox.periodRules,
+      "quietHoursEnabled",
+      true,
+    ),
     weekdaysOnly: booleanRule(lootBox.periodRules, "weekdaysOnly", true),
     timeWindowMode: lootBoxTimeWindowMode(lootBox.periodRules),
     weekdayMode: lootBoxWeekdayMode(lootBox.periodRules),
@@ -14127,19 +14343,17 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     hourTo: timeWindowPart(lootBox.periodRules, 1, "16:00"),
     perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", "1"),
     periodicLimitEnabled:
-      lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) != null,
+      lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) !=
+      null,
     periodicLimitPeriod:
       lootBoxPeriodicLimitPeriod(asRecord(lootBox.limits).periodicLimit) ??
       "DAILY",
     totalPerDay: numberRule(lootBox.limits, "totalPerDay", "30"),
-    prizes: lootBoxPrizesToForm(
-      lootBox.probabilityRules,
-      {
-        rewardType: lootBox.rewardType,
-        rewardAmount: moneyFormValue(lootBox.rewardAmount),
-        rewardLabel: lootBox.rewardLabel ?? lootBox.name,
-      },
-    ),
+    prizes: lootBoxPrizesToForm(lootBox.probabilityRules, {
+      rewardType: lootBox.rewardType,
+      rewardAmount: moneyFormValue(lootBox.rewardAmount),
+      rewardLabel: lootBox.rewardLabel ?? lootBox.name,
+    }),
     requireCashierConfirmation: booleanRule(
       lootBox.antiFraudRules,
       "requiresCashierConfirmation",
@@ -14182,7 +14396,9 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     rewardAmount: moneyFormValue(mission.rewardAmount),
     rewardLabel: mission.rewardLabel ?? "",
     xpReward: String(mission.xpReward),
-    progressTarget: mission.progressTarget ? String(mission.progressTarget) : "",
+    progressTarget: mission.progressTarget
+      ? String(mission.progressTarget)
+      : "",
     progressUnit: mission.progressUnit ?? "",
     audienceId: mission.audience?.id ?? "",
     storeIds: mission.storeIds,
@@ -14209,21 +14425,34 @@ function missionToForm(mission: GuestGameMission): MissionForm {
       "aggregation",
       "count",
     ),
-    metricEventTypes: stringListRule(metricRule(mission.conditions), "eventTypes"),
+    metricEventTypes: stringListRule(
+      metricRule(mission.conditions),
+      "eventTypes",
+    ),
     metricHours: stringListRule(metricRule(mission.conditions), "hours"),
-    metricProductIds: stringListRule(metricRule(mission.conditions), "productIds"),
+    metricProductIds: stringListRule(
+      metricRule(mission.conditions),
+      "productIds",
+    ),
     metricExternalProductIds: stringListRule(
       metricRule(mission.conditions),
       "externalProductIds",
     ),
-    metricCategoryIds: stringListRule(metricRule(mission.conditions), "categoryIds"),
+    metricCategoryIds: stringListRule(
+      metricRule(mission.conditions),
+      "categoryIds",
+    ),
     metricCategoryNames: stringListRule(
       metricRule(mission.conditions),
       "categoryNames",
     ),
     windowDays: numberRule(mission.conditions, "windowDays", "7"),
     weekdaysOnly: booleanRule(mission.conditions, "weekdaysOnly", true),
-    minSessionMinutes: numberRule(mission.conditions, "minSessionMinutes", "90"),
+    minSessionMinutes: numberRule(
+      mission.conditions,
+      "minSessionMinutes",
+      "90",
+    ),
     minSpendAmount: numberRule(mission.conditions, "minSpendAmount", "0"),
     questEnabled: missionQuestEnabled(mission.conditions),
     questSteps,
@@ -14253,7 +14482,9 @@ function missionToForm(mission: GuestGameMission): MissionForm {
 }
 
 function isCheckInMission(mission: GuestGameMission) {
-  return mission.missionType === "CHECK_IN" || mission.triggerKind === "CHECK_IN";
+  return (
+    mission.missionType === "CHECK_IN" || mission.triggerKind === "CHECK_IN"
+  );
 }
 
 function isCheckInMissionForm(form: MissionForm) {
@@ -14262,8 +14493,7 @@ function isCheckInMissionForm(form: MissionForm) {
 
 function normalizeCheckInMissionForm(form: MissionForm): MissionForm {
   const rewardType = form.rewardType || "XP";
-  const xpReward =
-    form.xpReward && form.xpReward !== "0" ? form.xpReward : "0";
+  const xpReward = form.xpReward && form.xpReward !== "0" ? form.xpReward : "0";
 
   return {
     ...form,
@@ -14299,11 +14529,7 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     xpCheckIn: numberRule(season.xpRules, "checkIn", "20"),
     xpPlayHour: numberRule(season.xpRules, "playHour", "10"),
     xpBarPurchase: numberRule(season.xpRules, "barPurchase", "25"),
-    xpMissionCompletion: numberRule(
-      season.xpRules,
-      "missionCompletion",
-      "50",
-    ),
+    xpMissionCompletion: numberRule(season.xpRules, "missionCompletion", "50"),
     xpPacketSessionBonus: numberRule(
       season.xpRules,
       "packetSessionBonus",
@@ -14324,7 +14550,10 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     freeRewardEvery: rewardFrequency(season.freeRewards, "2"),
     premiumRewardEvery: rewardFrequency(season.premiumRewards, "2"),
     freeRewardLabel: rewardLabel(season.freeRewards, "Промокод бара"),
-    premiumRewardLabel: rewardLabel(season.premiumRewards, "Усиленный промокод"),
+    premiumRewardLabel: rewardLabel(
+      season.premiumRewards,
+      "Усиленный промокод",
+    ),
     levelSteps: seasonLevelStepsToForm(season.levels),
     xpRulesText: jsonFormValue(season.xpRules, defaultSeasonForm.xpRulesText),
     levelsText: jsonFormValue(season.levels, defaultSeasonForm.levelsText),
@@ -14407,9 +14636,9 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as
-      | ApiRequestErrorBody
-      | null;
+    const body = (await response
+      .json()
+      .catch(() => null)) as ApiRequestErrorBody | null;
     throw new ApiRequestError(response.status, body);
   }
 
@@ -14489,9 +14718,7 @@ function buildDeleteActivityModal(
 
   return {
     ...request,
-    message:
-      body?.message ??
-      "Элемент сейчас активен в клубе.",
+    message: body?.message ?? "Элемент сейчас активен в клубе.",
     stores,
   };
 }
@@ -14624,8 +14851,14 @@ function buildPromoBannerUsage(
         storeId: store.id,
         storeName: store.name,
         activeCount: eligibleCards.length,
-        visibleCount: Math.min(eligibleCards.length, PROMO_BANNER_DISPLAY_LIMIT),
-        overflowCount: Math.max(eligibleCards.length - PROMO_BANNER_DISPLAY_LIMIT, 0),
+        visibleCount: Math.min(
+          eligibleCards.length,
+          PROMO_BANNER_DISPLAY_LIMIT,
+        ),
+        overflowCount: Math.max(
+          eligibleCards.length - PROMO_BANNER_DISPLAY_LIMIT,
+          0,
+        ),
       };
     })
     .filter((usage) => usage.activeCount > 0);
@@ -14650,16 +14883,18 @@ function promoBannerDraftLimitWarning(
   }
 
   const nowMs = Date.now();
-  const fullStores = promoBannerFormTargetStores(form, stores).filter((store) => {
-    const activeCount = promoCards.filter(
-      (promoCard) =>
-        promoCard.id !== editingId &&
-        promoBannerCanAppear(promoCard, nowMs) &&
-        promoBannerMatchesStore(promoCard, store.id),
-    ).length;
+  const fullStores = promoBannerFormTargetStores(form, stores).filter(
+    (store) => {
+      const activeCount = promoCards.filter(
+        (promoCard) =>
+          promoCard.id !== editingId &&
+          promoBannerCanAppear(promoCard, nowMs) &&
+          promoBannerMatchesStore(promoCard, store.id),
+      ).length;
 
-    return activeCount >= PROMO_BANNER_DISPLAY_LIMIT;
-  });
+      return activeCount >= PROMO_BANNER_DISPLAY_LIMIT;
+    },
+  );
 
   if (!fullStores.length) {
     return null;
@@ -14747,7 +14982,10 @@ function promoBannerIsInActivePeriod(
   return true;
 }
 
-function promoBannerMatchesStore(promoCard: GuestGamePromoCard, storeId: string) {
+function promoBannerMatchesStore(
+  promoCard: GuestGamePromoCard,
+  storeId: string,
+) {
   return (
     storeId === "__all__" ||
     !promoCard.storeIds.length ||
@@ -14765,7 +15003,8 @@ function comparePromoBannersForPortal(
     return priorityDelta;
   }
 
-  const updatedDelta = (dateMs(right.updatedAt) ?? 0) - (dateMs(left.updatedAt) ?? 0);
+  const updatedDelta =
+    (dateMs(right.updatedAt) ?? 0) - (dateMs(left.updatedAt) ?? 0);
 
   if (updatedDelta !== 0) {
     return updatedDelta;
@@ -14892,10 +15131,11 @@ async function renderPromoBannerImage(form: PromoBannerForm) {
         return;
       }
 
-      const scale = Math.max(
-        PROMO_BANNER_IMAGE_WIDTH / image.naturalWidth,
-        PROMO_BANNER_IMAGE_HEIGHT / image.naturalHeight,
-      ) * clampPromoBannerScale(Number(form.imageScale));
+      const scale =
+        Math.max(
+          PROMO_BANNER_IMAGE_WIDTH / image.naturalWidth,
+          PROMO_BANNER_IMAGE_HEIGHT / image.naturalHeight,
+        ) * clampPromoBannerScale(Number(form.imageScale));
       const drawWidth = image.naturalWidth * scale;
       const drawHeight = image.naturalHeight * scale;
       const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
@@ -14908,7 +15148,12 @@ async function renderPromoBannerImage(form: PromoBannerForm) {
         (offsetY / 100) * PROMO_BANNER_IMAGE_HEIGHT;
 
       context.fillStyle = "#050b0e";
-      context.fillRect(0, 0, PROMO_BANNER_IMAGE_WIDTH, PROMO_BANNER_IMAGE_HEIGHT);
+      context.fillRect(
+        0,
+        0,
+        PROMO_BANNER_IMAGE_WIDTH,
+        PROMO_BANNER_IMAGE_HEIGHT,
+      );
       context.drawImage(image, dx, dy, drawWidth, drawHeight);
 
       try {
@@ -15046,7 +15291,7 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
 function buildLootBoxLimits(form: LootBoxForm) {
   const perGuestPerWeek = form.periodicLimitEnabled
     ? null
-    : optionalNumber(form.perGuestPerWeek) ?? 1;
+    : (optionalNumber(form.perGuestPerWeek) ?? 1);
   const totalPerDay = optionalNumber(form.totalPerDay);
 
   return {
@@ -15081,16 +15326,15 @@ function buildLootBoxProbabilityRules(form: LootBoxForm) {
     })
     .filter(
       (prize) =>
-        prize.rewardLabel.trim() ||
-        prize.rewardAmount > 0 ||
-        prize.rewardType,
+        prize.rewardLabel.trim() || prize.rewardAmount > 0 || prize.rewardType,
     );
   const safePrizes = prizes.length
     ? prizes
     : [
         {
           ...primaryLootBoxPrize(form),
-          rewardAmount: optionalNumber(primaryLootBoxPrize(form).rewardAmount) ?? 0,
+          rewardAmount:
+            optionalNumber(primaryLootBoxPrize(form).rewardAmount) ?? 0,
           chancePercent: 100,
           weight: 100,
         },
@@ -15230,7 +15474,11 @@ function buildAutomaticSeasonLevels(form: SeasonForm) {
       title: `Этап ${level}`,
       condition: `Выполните условие шага ${level}.`,
       description: null,
-      freeReward: levelRewardLabel(level, form.freeRewardEvery, form.freeRewardLabel),
+      freeReward: levelRewardLabel(
+        level,
+        form.freeRewardEvery,
+        form.freeRewardLabel,
+      ),
       premiumReward: levelRewardLabel(
         level,
         form.premiumRewardEvery,
@@ -15240,7 +15488,9 @@ function buildAutomaticSeasonLevels(form: SeasonForm) {
   });
 }
 
-function buildAutomaticSeasonLevelSteps(form: SeasonForm): SeasonLevelStepForm[] {
+function buildAutomaticSeasonLevelSteps(
+  form: SeasonForm,
+): SeasonLevelStepForm[] {
   return buildAutomaticSeasonLevels(form).map((level) => ({
     id: nextSeasonStepId(),
     level: String(level.level),
@@ -15382,11 +15632,14 @@ function seasonStepRewardDefinition(
     track === "free" ? step.freeRewardAmount : step.premiumRewardAmount;
   const labelValue =
     track === "free" ? step.freeRewardLabel : step.premiumRewardLabel;
-  const codeValue = track === "free" ? step.freeRewardCode : step.premiumRewardCode;
+  const codeValue =
+    track === "free" ? step.freeRewardCode : step.premiumRewardCode;
   const lootBoxIdValue =
     track === "free" ? step.freeRewardLootBoxId : step.premiumRewardLootBoxId;
   const lootBoxNameValue =
-    track === "free" ? step.freeRewardLootBoxName : step.premiumRewardLootBoxName;
+    track === "free"
+      ? step.freeRewardLootBoxName
+      : step.premiumRewardLootBoxName;
   const lootBoxRarityValue =
     track === "free"
       ? step.freeRewardLootBoxRarity
@@ -15402,7 +15655,7 @@ function seasonStepRewardDefinition(
       : rewardType === "PROMOCODE"
         ? "Промокод"
         : rewardType === "LOOT_BOX"
-          ? nullable(lootBoxNameValue ?? "") ?? "Лутбокс Battle Pass"
+          ? (nullable(lootBoxNameValue ?? "") ?? "Лутбокс Battle Pass")
           : "Ручная награда");
 
   return {
@@ -15435,7 +15688,9 @@ function battlePassRewardTrackSummary(
   track: "free" | "premium",
   lootBoxes: GuestGameLootBox[],
 ): BattlePassRewardTrackSummary {
-  const lootBoxesById = new Map(lootBoxes.map((lootBox) => [lootBox.id, lootBox]));
+  const lootBoxesById = new Map(
+    lootBoxes.map((lootBox) => [lootBox.id, lootBox]),
+  );
   const summary: BattlePassRewardTrackSummary = {
     rewardCount: 0,
     lootBoxCount: 0,
@@ -15457,10 +15712,13 @@ function battlePassRewardTrackSummary(
     summary.rewardCount += 1;
 
     if (definition.type === "BONUS_BALANCE") {
-      const amount = definition.amount ?? bonusAmountFromRewardLabel(definition.label);
+      const amount =
+        definition.amount ?? bonusAmountFromRewardLabel(definition.label);
 
       if (amount == null) {
-        summary.unresolved.push(`${definition.label}: не указана сумма бонусов`);
+        summary.unresolved.push(
+          `${definition.label}: не указана сумма бонусов`,
+        );
         continue;
       }
 
@@ -15484,7 +15742,9 @@ function battlePassRewardTrackSummary(
       : null;
 
     if (!linkedLootBox) {
-      summary.unresolved.push(`${definition.label}: не выбран конкретный лутбокс`);
+      summary.unresolved.push(
+        `${definition.label}: не выбран конкретный лутбокс`,
+      );
       continue;
     }
 
@@ -15499,7 +15759,9 @@ function battlePassRewardTrackSummary(
     );
 
     if (!prizes.length || totalWeight <= 0) {
-      summary.unresolved.push(`${definition.label}: нет корректной таблицы призов`);
+      summary.unresolved.push(
+        `${definition.label}: нет корректной таблицы призов`,
+      );
       continue;
     }
 
@@ -15517,13 +15779,19 @@ function battlePassRewardTrackSummary(
     });
 
     if (outcomes.some((outcome) => outcome.missingAmount)) {
-      summary.unresolved.push(`${definition.label}: у приза не указана сумма бонусов`);
+      summary.unresolved.push(
+        `${definition.label}: у приза не указана сумма бонусов`,
+      );
       continue;
     }
 
     summary.linkedLootBoxCount += 1;
-    summary.minBonus += Math.min(...outcomes.map((outcome) => outcome.bonusAmount));
-    summary.maxBonus += Math.max(...outcomes.map((outcome) => outcome.bonusAmount));
+    summary.minBonus += Math.min(
+      ...outcomes.map((outcome) => outcome.bonusAmount),
+    );
+    summary.maxBonus += Math.max(
+      ...outcomes.map((outcome) => outcome.bonusAmount),
+    );
     summary.expectedBonus += outcomes.reduce(
       (total, outcome) =>
         total + outcome.bonusAmount * (outcome.weight / totalWeight),
@@ -15550,7 +15818,9 @@ function battlePassBonusRewardType(value: string | null | undefined) {
 }
 
 function bonusAmountFromRewardLabel(value: string | null | undefined) {
-  const match = (value ?? "").match(/(\d[\d\s]*(?:[.,]\d+)?)\s*(?:бонус|балл)/i);
+  const match = (value ?? "").match(
+    /(\d[\d\s]*(?:[.,]\d+)?)\s*(?:бонус|балл)/i,
+  );
 
   if (!match) {
     return null;
@@ -15594,7 +15864,7 @@ function legacySeasonRewardForm(
       "",
     lootBoxName:
       recordString(asRecord(details.lootBox), "name") ??
-      (type === "LOOT_BOX" ? rewardLabel ?? "" : ""),
+      (type === "LOOT_BOX" ? (rewardLabel ?? "") : ""),
     lootBoxRarity: lootBoxCaseRarity(asRecord(details.lootBox)) ?? "common",
     delivery: recordString(details, "delivery") ?? "AUTO",
   };
@@ -15635,7 +15905,8 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
         level: String(level),
         xp: "0",
         title,
-        condition: recordString(row, "condition") ?? `Выполните условие шага ${level}.`,
+        condition:
+          recordString(row, "condition") ?? `Выполните условие шага ${level}.`,
         description: recordString(row, "description") ?? "",
         freeReward: freeReward ?? "",
         premiumReward: premiumReward ?? "",
@@ -15685,9 +15956,7 @@ function recordString(record: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function lootBoxCanBeRewardTemplate(
-  lootBox: Pick<GuestGameLootBox, "status">,
-) {
+function lootBoxCanBeRewardTemplate(lootBox: Pick<GuestGameLootBox, "status">) {
   return lootBox.status === "ACTIVE";
 }
 
@@ -15734,7 +16003,9 @@ function numberArrayRule(value: unknown, key: string) {
 }
 
 function sortWeekdays(value: number[]) {
-  const order = new Map(weekdayOptions.map((item, index) => [item.value, index]));
+  const order = new Map(
+    weekdayOptions.map((item, index) => [item.value, index]),
+  );
 
   return Array.from(new Set(value))
     .filter((item) => order.has(item))
@@ -15755,7 +16026,8 @@ function lootBoxTimeWindowMode(value: unknown): LootBoxTimeWindowMode {
   const record = asRecord(value);
   const storedMode = record.timeWindowMode;
   const hours = arrayRule(record.hours).filter(
-    (item): item is string => typeof item === "string" && item.trim().length > 0,
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
   );
 
   if (
@@ -15828,12 +16100,9 @@ function lootBoxWeekdaysForMode(form: LootBoxForm) {
 function lootBoxPeriodicLimitPeriod(
   value: unknown,
 ): LootBoxPeriodicLimitPeriod | null {
-  const raw =
-    typeof value === "string" ? value.trim().toUpperCase() : "";
+  const raw = typeof value === "string" ? value.trim().toUpperCase() : "";
 
-  return raw === "DAILY" || raw === "WEEKLY" || raw === "MONTHLY"
-    ? raw
-    : null;
+  return raw === "DAILY" || raw === "WEEKLY" || raw === "MONTHLY" ? raw : null;
 }
 
 function metricRule(value: unknown) {
@@ -15861,7 +16130,10 @@ function stringListRule(value: unknown, key: string, fallback = "") {
   const raw = asRecord(value)[key];
   if (Array.isArray(raw)) {
     return raw
-      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
       .join(", ");
   }
 
@@ -15990,14 +16262,17 @@ function missionQuestSteps(value: unknown) {
 
       return title ? { id, title, missionId } : null;
     })
-    .filter(
-      (item): item is { id: string; title: string; missionId: string } =>
-        Boolean(item),
+    .filter((item): item is { id: string; title: string; missionId: string } =>
+      Boolean(item),
     );
 }
 
 function missionQuestEnabled(value: unknown) {
-  return booleanRule(value, "questEnabled", missionQuestSteps(value).length > 0);
+  return booleanRule(
+    value,
+    "questEnabled",
+    missionQuestSteps(value).length > 0,
+  );
 }
 
 function missionStepCountLabel(count: number) {
@@ -16048,7 +16323,7 @@ function missionMetricSummary(value: unknown) {
 
   return eventTypes
     ? `${labels[aggregation] ?? aggregation}: ${eventTypes}`
-    : labels[aggregation] ?? aggregation;
+    : (labels[aggregation] ?? aggregation);
 }
 
 function booleanRule(value: unknown, key: string, fallback: boolean) {
@@ -16573,7 +16848,9 @@ function normalizeUiSessionType(value: string | null | undefined) {
     return "packet_hours";
   }
 
-  if (["regular_session", "regular", "common", "default"].includes(normalized)) {
+  if (
+    ["regular_session", "regular", "common", "default"].includes(normalized)
+  ) {
     return "regular_session";
   }
 
@@ -16585,7 +16862,9 @@ function battlePassLevelRows(season: GuestGameSeason) {
     const record = asRecord(item);
     const levelValue = Number(record.level);
     const xpValue = Number(record.xp);
-    const level = Number.isFinite(levelValue) ? Math.trunc(levelValue) : index + 1;
+    const level = Number.isFinite(levelValue)
+      ? Math.trunc(levelValue)
+      : index + 1;
     const rewardLabel = String(
       record.freeReward ??
         record.premiumReward ??

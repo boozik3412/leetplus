@@ -961,6 +961,13 @@ export type GuestPortalGameSummary = {
         | 'periodTo'
         | 'manualApprovalRequired'
         | 'rewardStatus'
+        | 'description'
+        | 'actionText'
+        | 'coverUrl'
+        | 'conditionLabel'
+        | 'productNames'
+        | 'productMode'
+        | 'minimumAmount'
       >
     >;
     history: Array<
@@ -980,6 +987,13 @@ export type GuestPortalGameSummary = {
         | 'periodTo'
         | 'manualApprovalRequired'
         | 'rewardStatus'
+        | 'description'
+        | 'actionText'
+        | 'coverUrl'
+        | 'conditionLabel'
+        | 'productNames'
+        | 'productMode'
+        | 'minimumAmount'
       >
     >;
   };
@@ -1291,6 +1305,13 @@ export type GuestPortalMission = {
   periodTo: string | null;
   manualApprovalRequired: boolean;
   rewardStatus: GuestPortalMissionRewardStatus;
+  description: string | null;
+  actionText: string | null;
+  coverUrl: string | null;
+  conditionLabel: string;
+  productNames: string[];
+  productMode: 'ANY' | 'ALL' | null;
+  minimumAmount: number | null;
 };
 
 export type GuestPortalMissionRewardStatus = {
@@ -8642,6 +8663,7 @@ export class GuestPortalService {
       guest,
       profile,
       missionRules,
+      context.store.timeZone,
     );
     const visibleMissions = missionRules
       .filter((item) =>
@@ -8763,6 +8785,8 @@ export class GuestPortalService {
     profile: { id: string } | null,
     missions: Array<{
       id: string;
+      createdAt: Date;
+      definitionVersion: number;
       triggerKind: string;
       conditions: Prisma.JsonValue;
       storeIds: Prisma.JsonValue | null;
@@ -8771,6 +8795,7 @@ export class GuestPortalService {
       progressTarget: number | null;
       progressUnit: string | null;
     }>,
+    timeZone: string | null,
   ): Promise<Map<string, GuestPortalMissionProgress>> {
     if ((!guest && !profile) || missions.length === 0) {
       return new Map();
@@ -8798,6 +8823,7 @@ export class GuestPortalService {
         select: {
           eventType: true,
           occurredAt: true,
+          externalDomain: true,
           payload: true,
         },
         orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
@@ -8850,8 +8876,12 @@ export class GuestPortalService {
           progressUnit: mission.progressUnit,
           conditions: mission.conditions,
           storeIds: stringArray(mission.storeIds),
-          periodFrom: mission.periodFrom,
+          externalDomains: stringArray(
+            jsonRecord(mission.conditions).externalDomains as Prisma.JsonValue,
+          ),
+          periodFrom: portalMissionProgressStart(mission),
           periodTo: mission.periodTo,
+          timeZone,
         },
         null,
         progressEvents,
@@ -11744,6 +11774,13 @@ function mapGameSummaryMission(
     periodTo: mission.periodTo,
     manualApprovalRequired: mission.manualApprovalRequired,
     rewardStatus: mission.rewardStatus,
+    description: mission.description,
+    actionText: mission.actionText,
+    coverUrl: mission.coverUrl,
+    conditionLabel: mission.conditionLabel,
+    productNames: mission.productNames,
+    productMode: mission.productMode,
+    minimumAmount: mission.minimumAmount,
   };
 }
 
@@ -14288,6 +14325,14 @@ function mapMission(
     ? percent(progressCurrent, progressTarget ?? questSteps.length)
     : (progress?.percent ?? 0);
   const conditions = jsonRecord(row.conditions);
+  const metric = jsonRecord(conditions.metric);
+  const presentation = jsonRecord(conditions.presentation);
+  const productRefs = Array.isArray(metric.productRefs)
+    ? metric.productRefs.map((item) => jsonRecord(item as Prisma.JsonValue))
+    : [];
+  const productNames = productRefs
+    .map((item) => stringField(item.name))
+    .filter((item): item is string => Boolean(item));
 
   return {
     id: row.id,
@@ -14311,7 +14356,90 @@ function mapMission(
       rewards,
       bonusLedgerRows,
     }),
+    description: stringField(presentation.description),
+    actionText: stringField(presentation.actionText),
+    coverUrl: guestPortalMissionCoverUrl(presentation.coverUrl),
+    conditionLabel: guestPortalMissionConditionLabel(
+      row.missionType,
+      metric,
+      stringField(conditions.sessionType),
+    ),
+    productNames,
+    productMode:
+      stringField(metric.productMatch)?.toUpperCase() === 'ALL'
+        ? 'ALL'
+        : row.missionType === 'PRODUCT_PURCHASE'
+          ? 'ANY'
+          : null,
+    minimumAmount:
+      stringField(metric.amountMode)?.toUpperCase() === 'SINGLE_MINIMUM'
+        ? numberField(metric.minSpendAmount)
+        : null,
   };
+}
+
+function guestPortalMissionCoverUrl(value: unknown) {
+  const url = stringField(value);
+  if (!url) return null;
+  return url.startsWith('/api/guest-game/media/') ? url : null;
+}
+
+function guestPortalMissionConditionLabel(
+  missionType: string,
+  metric: Record<string, unknown>,
+  sessionType: string | null,
+) {
+  const target = numberField(metric.target) ?? 1;
+  if (missionType === 'PRODUCT_PURCHASE') {
+    const mode = stringField(metric.productMatch)?.toUpperCase();
+    const amountMode = stringField(metric.amountMode)?.toUpperCase();
+    const amount =
+      amountMode === 'PERIOD_TOTAL'
+        ? (numberField(metric.totalAmount) ?? target)
+        : numberField(metric.minSpendAmount);
+    return [
+      mode === 'ALL'
+        ? 'Купить все выбранные товары'
+        : 'Купить любой выбранный товар',
+      amountMode === 'SINGLE_MINIMUM' && amount
+        ? `одной покупкой не менее чем на ${amount} ₽`
+        : amountMode === 'PERIOD_TOTAL' && amount
+          ? `на общую сумму не менее ${amount} ₽ за период`
+          : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+  if (missionType === 'BALANCE_TOPUP') {
+    const topupMode = stringField(metric.topupMode)?.toUpperCase();
+    const amount = numberField(metric.amount) ?? 0;
+    const comparison =
+      stringField(metric.amountComparison)?.toUpperCase() === 'EXACT'
+        ? 'ровно'
+        : 'не менее';
+    if (topupMode === 'PERIOD_TOTAL') {
+      return `Пополнить баланс суммарно не менее чем на ${target} ₽`;
+    }
+    if (topupMode === 'COUNT') {
+      return `Пополнить баланс ${target} раз${amount ? `, каждое ${comparison} ${amount} ₽` : ''}`;
+    }
+    return `Пополнить баланс ${comparison} чем на ${amount || target} ₽`;
+  }
+  if (missionType === 'CHECK_IN') {
+    const mode = stringField(metric.checkInMode)?.toUpperCase();
+    return mode === 'STREAK'
+      ? `Сделать чекин ${target} дней подряд`
+      : target > 1
+        ? `Сделать ${target} чекинов`
+        : 'Сделать чекин в клубе';
+  }
+  const sessionLabel =
+    sessionType === 'HOURLY'
+      ? ' в почасовой сессии'
+      : sessionType === 'PACKAGE_OR_SUBSCRIPTION'
+        ? ' по пакету или абонементу'
+        : '';
+  return `Провести в игре ${target} минут${sessionLabel}`;
 }
 
 function buildMissionRewardStatus({
@@ -17079,16 +17207,6 @@ function lootBoxRewardAfterRestart(value: Date, restartedAt: Date | null) {
   return !restartedAt || value.getTime() >= restartedAt.getTime();
 }
 
-function lootBoxRewardWithinLastHours(
-  value: Date,
-  reference: Date,
-  hours: number,
-) {
-  const diff = reference.getTime() - value.getTime();
-
-  return diff >= 0 && diff < hours * 60 * 60 * 1000;
-}
-
 function latestLootBoxRewardQualifiedAt(
   rewards: GuestPortalRewardRow[],
   predicate: (reward: GuestPortalRewardRow) => boolean,
@@ -17165,6 +17283,7 @@ function guestGameTriggerLabel(value: string) {
 function portalEventToProgressEvent(row: {
   eventType: string;
   occurredAt: Date;
+  externalDomain?: string | null;
   payload: Prisma.JsonValue | null;
 }): GuestGameProgressEvent {
   const payload = jsonRecord(row.payload);
@@ -17175,6 +17294,8 @@ function portalEventToProgressEvent(row: {
     eventType: row.eventType,
     occurredAt: row.occurredAt,
     storeId: stringField(store.id),
+    externalDomain:
+      stringField(row.externalDomain) ?? stringField(payload.externalDomain),
     sessionType: stringField(input.sessionType),
     sessionPacket: booleanField(input.sessionPacket),
     sessionMinutes: numberField(input.sessionMinutes),
@@ -17191,6 +17312,25 @@ function portalEventToProgressEvent(row: {
     supplierName: stringField(input.supplierName),
     quantity: numberField(input.quantity),
   };
+}
+
+function portalMissionProgressStart(mission: {
+  createdAt: Date;
+  definitionVersion: number;
+  periodFrom: Date | null;
+  conditions: Prisma.JsonValue;
+}) {
+  if (mission.definitionVersion < 2) {
+    return mission.periodFrom;
+  }
+  const activatedRaw = stringField(jsonRecord(mission.conditions).activatedAt);
+  const activatedAt = activatedRaw ? new Date(activatedRaw) : mission.createdAt;
+  const safeActivatedAt = Number.isNaN(activatedAt.getTime())
+    ? mission.createdAt
+    : activatedAt;
+  return mission.periodFrom && mission.periodFrom > safeActivatedAt
+    ? mission.periodFrom
+    : safeActivatedAt;
 }
 
 function guestGameDebugJson(payload: Record<string, unknown>) {

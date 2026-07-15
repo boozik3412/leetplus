@@ -3,12 +3,14 @@ export type GuestGameProgressAggregation =
   | 'sum'
   | 'duration'
   | 'distinctDays'
-  | 'exists';
+  | 'exists'
+  | 'streak';
 
 export type GuestGameProgressEvent = {
   eventType: string;
   occurredAt: Date;
   storeId?: string | null;
+  externalDomain?: string | null;
   sessionType?: string | null;
   sessionPacket?: boolean | null;
   sessionMinutes?: number | null;
@@ -32,8 +34,10 @@ export type GuestGameProgressRule = {
   progressUnit?: string | null;
   conditions?: unknown;
   storeIds?: string[];
+  externalDomains?: string[];
   periodFrom?: Date | string | null;
   periodTo?: Date | string | null;
+  timeZone?: string | null;
 };
 
 export type GuestGameProgressResult = {
@@ -82,6 +86,7 @@ export function evaluateGuestGameProgress(
     progressString(metric.aggregation) ??
       progressString(metric.type) ??
       progressString(conditions.aggregation),
+    progressString(metric.checkInMode ?? conditions.checkInMode),
   );
   const resolvedTarget = Math.max(1, target ?? 1);
   const windowDays =
@@ -109,7 +114,12 @@ export function evaluateGuestGameProgress(
       windowDays,
     }),
   );
-  const current = progressValue(aggregation, allEvents);
+  const current = progressValue(aggregation, allEvents, rule.timeZone);
+  const productCoverageComplete = productCoverageMatches(
+    conditions,
+    metric,
+    allEvents,
+  );
 
   return {
     applicable: true,
@@ -117,7 +127,7 @@ export function evaluateGuestGameProgress(
     current,
     target: resolvedTarget,
     percent: progressPercent(current, resolvedTarget),
-    completed: current >= resolvedTarget,
+    completed: current >= resolvedTarget && productCoverageComplete,
     matchedEvents: allEvents.length,
     unit: rule.progressUnit ?? progressString(metric.unit) ?? null,
     windowDays,
@@ -190,7 +200,15 @@ function matchesProgressEvent(
   }
 
   if (rule.storeIds?.length) {
-    if (!event.storeId || !rule.storeIds.includes(event.storeId)) {
+    const matchesStore = Boolean(
+      event.storeId && rule.storeIds.includes(event.storeId),
+    );
+    const matchesDomain = Boolean(
+      event.externalDomain &&
+      rule.externalDomains?.includes(event.externalDomain),
+    );
+
+    if (!matchesStore && !matchesDomain) {
       return false;
     }
   }
@@ -215,11 +233,21 @@ function matchesProgressEvent(
     return false;
   }
 
-  if (!matchesWeekdays(conditions, metric, event.occurredAt)) {
+  if (!matchesWeekdays(conditions, metric, event.occurredAt, rule.timeZone)) {
     return false;
   }
 
-  if (!matchesHours(conditions, metric, event.occurredAt)) {
+  const exactSpendAmount = progressNumber(
+    metric.exactSpendAmount ?? conditions.exactSpendAmount,
+  );
+  if (
+    exactSpendAmount !== null &&
+    Math.abs(Math.max(0, event.spendAmount ?? 0) - exactSpendAmount) > 0.005
+  ) {
+    return false;
+  }
+
+  if (!matchesHours(conditions, metric, event.occurredAt, rule.timeZone)) {
     return false;
   }
 
@@ -245,6 +273,7 @@ function matchesProgressEvent(
 function progressValue(
   aggregation: GuestGameProgressAggregation,
   events: GuestGameProgressEvent[],
+  timeZone?: string | null,
 ) {
   if (aggregation === 'exists') {
     return events.length > 0 ? 1 : 0;
@@ -270,8 +299,14 @@ function progressValue(
 
   if (aggregation === 'distinctDays') {
     return new Set(
-      events.map((event) => event.occurredAt.toISOString().slice(0, 10)),
+      events.map((event) => localDateKey(event.occurredAt, timeZone)),
     ).size;
+  }
+
+  if (aggregation === 'streak') {
+    return longestDayStreak(
+      events.map((event) => localDateKey(event.occurredAt, timeZone)),
+    );
   }
 
   return events.length;
@@ -281,9 +316,10 @@ function matchesWeekdays(
   conditions: Record<string, unknown>,
   metric: Record<string, unknown>,
   occurredAt: Date,
+  timeZone?: string | null,
 ) {
   const weekdays = progressNumberArray(metric.weekdays ?? conditions.weekdays);
-  const weekday = occurredAt.getDay();
+  const weekday = localWeekday(occurredAt, timeZone);
 
   if (weekdays.length && !weekdays.includes(weekday)) {
     return false;
@@ -303,12 +339,13 @@ function matchesHours(
   conditions: Record<string, unknown>,
   metric: Record<string, unknown>,
   occurredAt: Date,
+  timeZone?: string | null,
 ) {
   const hours = progressStringValues(metric.hours, conditions.hours);
 
   return (
     !hours.length ||
-    hours.some((window) => isWithinTimeWindow(occurredAt, window))
+    hours.some((window) => isWithinTimeWindow(occurredAt, window, timeZone))
   );
 }
 
@@ -457,6 +494,34 @@ function matchesProductFilters(
   );
 }
 
+function productCoverageMatches(
+  conditions: Record<string, unknown>,
+  metric: Record<string, unknown>,
+  events: GuestGameProgressEvent[],
+) {
+  const productMatch = normalizeProgressToken(
+    progressString(metric.productMatch ?? conditions.productMatch),
+  );
+  if (productMatch !== 'ALL') return true;
+
+  const expected = new Set(
+    progressStringValues(
+      metric.productIds,
+      metric.externalProductIds,
+      conditions.productIds,
+      conditions.externalProductIds,
+    ),
+  );
+  if (!expected.size) return true;
+
+  const purchased = new Set<string>();
+  events.forEach((event) => {
+    if (event.productId) purchased.add(event.productId);
+    if (event.externalProductId) purchased.add(event.externalProductId);
+  });
+  return [...expected].every((id) => purchased.has(id));
+}
+
 function matchesOneOf(
   values: string[],
   actualValue: string | null | undefined,
@@ -491,7 +556,9 @@ function dateWithinLastDays(value: Date, reference: Date, days: number) {
 
 function progressAggregation(
   value: string | null,
+  checkInMode: string | null,
 ): GuestGameProgressAggregation {
+  if (normalizeProgressToken(checkInMode) === 'STREAK') return 'streak';
   switch (value) {
     case 'sum':
       return 'sum';
@@ -585,18 +652,73 @@ function dateValue(value: Date | string | null | undefined) {
   return null;
 }
 
-function isWithinTimeWindow(date: Date, window: string) {
+function isWithinTimeWindow(
+  date: Date,
+  window: string,
+  timeZone?: string | null,
+) {
   const [from, to] = window.split('-').map((value) => timeToMinutes(value));
 
   if (from === null || to === null) {
     return false;
   }
 
-  const current = date.getHours() * 60 + date.getMinutes();
+  const current = localTimeMinutes(date, timeZone);
 
   return from <= to
     ? current >= from && current <= to
     : current >= from || current <= to;
+}
+
+function localDateKey(value: Date, timeZone?: string | null) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timeZone || 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(value);
+}
+
+function localWeekday(value: Date, timeZone?: string | null) {
+  const token = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || 'UTC',
+    weekday: 'short',
+  }).format(value);
+  return (
+    { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<
+      string,
+      number
+    >
+  )[token];
+}
+
+function localTimeMinutes(value: Date, timeZone?: string | null) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((item) => item.type === type)?.value ?? 0);
+  return part('hour') * 60 + part('minute');
+}
+
+function longestDayStreak(keys: string[]) {
+  const days = [...new Set(keys)]
+    .map((key) => Date.parse(`${key}T00:00:00Z`))
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  let longest = 0;
+  let current = 0;
+  let previous: number | null = null;
+  for (const day of days) {
+    current =
+      previous !== null && day - previous === 86_400_000 ? current + 1 : 1;
+    longest = Math.max(longest, current);
+    previous = day;
+  }
+  return longest;
 }
 
 function timeToMinutes(value: string | undefined) {

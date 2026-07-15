@@ -51,10 +51,15 @@ function createPrismaMock() {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     guestGameEntitlement: {
+      findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn().mockResolvedValue({}),
     },
     guestActivityFact: {
       findMany: jest.fn().mockResolvedValue([]),
+    },
+    guestGameSupplementalFactReceipt: {
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     guestGameReward: {
       count: jest.fn(),
@@ -301,6 +306,8 @@ function activeMission(
     perGuestLimit: null,
     totalRewardLimit: null,
     antiFraudRules: null,
+    definitionVersion: 1,
+    evaluationPolicy: 'LIVE_PRIMARY',
     ...overrides,
   };
 }
@@ -1330,8 +1337,7 @@ describe('GuestGamificationService', () => {
           ),
           guestPhone: '+7 *** **-11',
           storeName: '1337-Пушкинская',
-          actionHref:
-            '/gamification?tab=rewards&rewardId=reward-pending-chat',
+          actionHref: '/gamification?tab=rewards&rewardId=reward-pending-chat',
         }),
       );
       const notification =
@@ -6210,6 +6216,113 @@ describe('GuestGamificationService', () => {
       expect(second.update).not.toHaveProperty('consumedAt');
     });
 
+    it('creates a mission reward lootbox entitlement without creating a prize', async () => {
+      const { service, prisma } = createService();
+      const missionRun = dryRunResult({
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'mission-lootbox',
+            kind: 'MISSION',
+            rewardType: 'LOOT_BOX_ENTITLEMENT',
+            rewardAmount: 0,
+            rewardLabel: 'Ежедневный шанс',
+            manualApprovalRequired: false,
+          },
+        ],
+      });
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: 'mission-lootbox',
+          conditions: { reward: { lootBoxId: 'reward-lootbox' } },
+        },
+      ]);
+      prisma.guestGameLootBox.findMany.mockResolvedValue([
+        { id: 'reward-lootbox', name: 'Ежедневный шанс' },
+      ]);
+
+      await service.recordRuleDecisions(user, missionRun, {
+        eventId: 'mission-event-1',
+        evaluationMode: 'LIVE',
+      });
+
+      expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            tenantId_idempotencyKey: {
+              tenantId: user.tenantId,
+              idempotencyKey:
+                'mission-loot-box:mission-lootbox:mission-event-1',
+            },
+          },
+          create: expect.objectContaining({
+            ruleId: 'reward-lootbox',
+            status: 'AVAILABLE',
+            evidence: expect.objectContaining({
+              missionId: 'mission-lootbox',
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('waits for administrator approval before creating a mission lootbox entitlement', async () => {
+      const { service, prisma } = createService();
+      const missionRun = dryRunResult({
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'mission-lootbox-manual',
+            kind: 'MISSION',
+            rewardType: 'LOOT_BOX_ENTITLEMENT',
+            rewardAmount: 0,
+            manualApprovalRequired: true,
+          },
+        ],
+      });
+
+      await service.recordRuleDecisions(user, missionRun, {
+        eventId: 'mission-event-manual',
+        evaluationMode: 'LIVE',
+      });
+
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
+
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'reward-lootbox',
+        name: 'Ежедневный шанс',
+      });
+      await (service as any).createApprovedMissionLootBoxEntitlement(user, {
+        id: 'pending-reward-1',
+        tenantId: user.tenantId,
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        qualifiedAt: now,
+        mission: {
+          id: 'mission-lootbox-manual',
+          conditions: { reward: { lootBoxId: 'reward-lootbox' } },
+        },
+      });
+
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            tenantId_idempotencyKey: {
+              tenantId: user.tenantId,
+              idempotencyKey: 'mission-loot-box-approval:pending-reward-1',
+            },
+          },
+          create: expect.objectContaining({
+            rewardId: 'pending-reward-1',
+            status: 'AVAILABLE',
+          }),
+        }),
+      );
+    });
+
     it('scopes daily lootbox entitlements to the local calendar day of the club', async () => {
       const { service, prisma } = createService();
       const baseRule = dryRunResult().rules[0];
@@ -6244,7 +6357,8 @@ describe('GuestGamificationService', () => {
         where: {
           tenantId_idempotencyKey: {
             tenantId: user.tenantId,
-            idempotencyKey: 'loot-box:loot-box-daily:daily:profile-1:2026-06-10',
+            idempotencyKey:
+              'loot-box:loot-box-daily:daily:profile-1:2026-06-10',
           },
         },
         create: {
@@ -6264,17 +6378,20 @@ describe('GuestGamificationService', () => {
         { eventId: 'event-after-midnight' },
       );
 
-      expect(prisma.guestGameEntitlement.upsert.mock.calls[2][0]).toMatchObject({
-        where: {
-          tenantId_idempotencyKey: {
-            tenantId: user.tenantId,
-            idempotencyKey: 'loot-box:loot-box-daily:daily:profile-1:2026-06-11',
+      expect(prisma.guestGameEntitlement.upsert.mock.calls[2][0]).toMatchObject(
+        {
+          where: {
+            tenantId_idempotencyKey: {
+              tenantId: user.tenantId,
+              idempotencyKey:
+                'loot-box:loot-box-daily:daily:profile-1:2026-06-11',
+            },
+          },
+          create: {
+            validUntil: new Date('2026-06-11T19:00:00.000Z'),
           },
         },
-        create: {
-          validUntil: new Date('2026-06-11T19:00:00.000Z'),
-        },
-      });
+      );
     });
 
     it('does not create a new entitlement from the lootbox opening event', async () => {
@@ -8472,5 +8589,163 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
       expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('GuestGamificationService supplemental pipeline', () => {
+  const supplementalMission = {
+    id: 'mission-topup-1',
+    createdAt: new Date('2026-07-14T00:00:00.000Z'),
+    periodFrom: new Date('2026-07-14T00:00:00.000Z'),
+    periodTo: new Date('2026-08-14T00:00:00.000Z'),
+    conditions: {
+      activatedAt: '2026-07-14T00:00:00.000Z',
+      externalDomains: ['46.langamepro.ru'],
+    },
+  };
+  const supplementalFact = {
+    id: 'fact-version-2',
+    tenantId: user.tenantId,
+    guestId: 'guest-1',
+    profileId: 'profile-1',
+    storeId: null,
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain: '46.langamepro.ru',
+    externalGuestId: 'guest-external-1',
+    externalClubId: null,
+    sourceKind: 'BALANCE_LIST',
+    sourceHash: 'stable-balance-operation-hash',
+    factType: 'BALANCE_TOPUP',
+    happenedAt: new Date('2026-07-15T10:00:00.000Z'),
+    sourceLocalDate: '2026-07-15',
+    sessionExternalId: null,
+    tariffName: null,
+    tariffType: null,
+    amount: new Prisma.Decimal(500),
+    bonusAmount: null,
+    durationMinutes: null,
+    confidence: 'EXACT',
+    evidence: null,
+    parserVersion: 'balance-v2',
+    normalizationRunId: 'run-1',
+    lifecycleStatus: 'ACTIVE',
+    validFrom: new Date('2026-07-15T10:00:00.000Z'),
+    supersededAt: null,
+    createdAt: new Date('2026-07-15T10:00:00.000Z'),
+    updatedAt: new Date('2026-07-15T10:00:00.000Z'),
+    rawRecordId: 'raw-1',
+  };
+
+  it('records SHADOW decisions without creating an event or reward', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    const shadowDryRun = dryRunResult({
+      eventType: 'BALANCE_TOPUP',
+      occurredAt: supplementalFact.happenedAt.toISOString(),
+      rules: [
+        {
+          ...dryRunResult().rules[0],
+          id: supplementalMission.id,
+          triggerKind: 'BALANCE_TOPUP',
+        },
+      ],
+    });
+    jest.spyOn(service, 'dryRun').mockResolvedValue(shadowDryRun);
+    const decisions = jest
+      .spyOn(service, 'recordRuleDecisions')
+      .mockResolvedValue();
+    const process = jest.spyOn(service, 'processEvent');
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'SHADOW',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 10,
+    });
+
+    expect(result).toMatchObject({
+      shadowFacts: 1,
+      processedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(process).not.toHaveBeenCalled();
+    expect(decisions).toHaveBeenCalledWith(
+      expect.objectContaining(user),
+      expect.objectContaining({
+        rules: [expect.objectContaining({ id: supplementalMission.id })],
+      }),
+      expect.objectContaining({
+        evaluationMode: 'SHADOW_SUPPLEMENTAL',
+        evaluatorVersion: 'ledger-supplemental-v1',
+      }),
+    );
+  });
+
+  it('uses sourceHash for LIVE idempotency and isolates allowed rules', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    const processed = processResult({
+      summary: {
+        ...processResult().summary,
+        createdRewards: 1,
+        idempotent: false,
+      },
+    });
+    const process = jest
+      .spyOn(service, 'processEvent')
+      .mockResolvedValue(processed);
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 10,
+    });
+
+    expect(result).toMatchObject({
+      processedFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    expect(process).toHaveBeenCalledWith(
+      expect.objectContaining(user),
+      expect.objectContaining({
+        externalId: supplementalFact.sourceHash,
+        sourceFactId: supplementalFact.id,
+        sourceFactKind: 'SUPPLEMENTAL_BALANCE_TOPUP',
+      }),
+      expect.objectContaining({
+        allowedRuleIds: [supplementalMission.id],
+        evaluationMode: 'LIVE_SUPPLEMENTAL',
+      }),
+    );
+  });
+
+  it('does not process a receipt already claimed by another worker', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    prisma.guestGameSupplementalFactReceipt.updateMany.mockResolvedValue({
+      count: 0,
+    });
+    const process = jest.spyOn(service, 'processEvent');
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 10,
+    });
+
+    expect(result).toMatchObject({
+      duplicateFacts: 1,
+      processedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(process).not.toHaveBeenCalled();
   });
 });

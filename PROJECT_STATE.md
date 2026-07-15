@@ -1,5 +1,14 @@
 # LeetPlus Project State
 
+## Mission wizard v2 and supplemental ledger layer (15.07.2026)
+
+- Added the embedded mission wizard route `/gamification/missions/wizard` with the three steps `Условия → Награды → Внешнее оформление`, DRAFT-only autosave, backend readiness-check and explicit activation confirmation. The legacy advanced editor remains available.
+- Mission definitions are versioned. Existing v1 missions remain on the current LIVE path; v2 `PLAY_TIME`, `PRODUCT_PURCHASE` and `CHECK_IN` missions use `LIVE_PRIMARY`, while v2 `BALANCE_TOPUP` missions are assigned `LEDGER_SUPPLEMENTAL` exclusively by the backend.
+- Added an isolated supplemental scheduler with `OFF`, `SHADOW` and `LIVE` modes, a kill switch, tenant scope, safe normalized evidence and stable sourceHash idempotency. Its allowed fact set is currently hard-limited to `BALANCE_TOPUP`.
+- Purchase v2 rules support ANY/ALL across separate purchases and single/minimum/cumulative amount modes. Only positive, non-canceled purchases linked to a guest are eligible. Category selection and exact tariff dictionaries remain disabled as `В разработке`.
+- Guest task cards now open a full modal rendered by the same React preview component used by the wizard. Quest covers use a dedicated tenant-owned media store with JPG/PNG/WebP signature validation and a 2 MB limit.
+- Supplemental production mode remains `OFF` by default. Production rollout must pass `SHADOW` diagnostics before `LIVE` is enabled; the existing LIVE snapshot pipeline is not replaced.
+
 Last updated: 2026-07-15
 
 ## Current Workflow

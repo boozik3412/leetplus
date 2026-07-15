@@ -32,6 +32,7 @@ import {
 } from './guest-activity-ledger.service';
 import { GuestGamificationLogService } from './guest-gamification-log.service';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
+import type { GuestGameMissionWizardDto } from './guest-game-mission-contract';
 import {
   GuestGamificationService,
   type GuestGameCheckInDto,
@@ -52,6 +53,7 @@ import {
   type GuestGameMission,
   type GuestGameMissionDto,
   type GuestGameMissionUpdateDto,
+  type GuestGameMissionWizardSaveResult,
   type GuestGamePromoCard,
   type GuestGamePromoCardDto,
   type GuestGamePromoCardUpdateDto,
@@ -313,6 +315,39 @@ export class GuestGamificationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestGameMission[]> {
     return this.gamificationService.getMissions(user);
+  }
+
+  @Post('missions/wizard/readiness')
+  getMissionWizardReadiness(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameMissionWizardDto,
+  ) {
+    return this.gamificationService.validateMissionWizard(user, dto);
+  }
+
+  @Post('missions/wizard')
+  saveNewMissionWizard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameMissionWizardDto,
+  ): Promise<GuestGameMissionWizardSaveResult> {
+    return this.gamificationService.saveMissionWizard(user, dto);
+  }
+
+  @Patch('missions/wizard/:id')
+  saveMissionWizard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestGameMissionWizardDto,
+  ): Promise<GuestGameMissionWizardSaveResult> {
+    return this.gamificationService.saveMissionWizard(user, dto, id);
+  }
+
+  @Post('missions/wizard/:id/activate')
+  activateMissionWizard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestGameMissionWizardSaveResult> {
+    return this.gamificationService.activateMissionWizard(user, id);
   }
 
   @Post('missions')

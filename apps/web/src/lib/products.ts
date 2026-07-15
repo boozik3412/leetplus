@@ -36,6 +36,7 @@ export type Product = {
   isMandatory: boolean;
   createdAt: string;
   externalDomain: string | null;
+  externalProductId: string | null;
   storeIds: string[];
   storeNames: string[];
   categoryId: string | null;

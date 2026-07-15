@@ -105,6 +105,7 @@ type ComparisonRow = {
   title: string;
   triggerKind: string | null;
   sessionType: string | null;
+  evaluationPolicy: string;
   current: {
     status: string;
     reason: string | null;
@@ -147,6 +148,11 @@ type ComparisonRow = {
     }>;
   };
   verdict: string;
+  reward: {
+    count: number;
+    latestStatus: string | null;
+    latestRewardId: string | null;
+  };
   paired: boolean;
   differingConditions: string[];
   timeline: Array<{
@@ -703,7 +709,9 @@ export function GamificationLogPanel() {
             <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold">Источники игрового журнала</p>
+                  <p className="text-sm font-semibold">
+                    Источники игрового журнала
+                  </p>
                   <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                     Статус последнего чтения Langame для выбранного гостя.
                   </p>
@@ -735,7 +743,8 @@ export function GamificationLogPanel() {
                         </span>
                       </div>
                       <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-                        Получено: {source.rowsFetched} · гостя: {source.rowsMatched}
+                        Получено: {source.rowsFetched} · гостя:{" "}
+                        {source.rowsMatched}
                       </p>
                       <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
                         Страниц: {source.pagesFetched}
@@ -1464,7 +1473,8 @@ function ComparisonList({
               <h3 className="mt-2 text-base font-semibold">{row.title}</h3>
               <p className="mt-1 text-xs text-zinc-500">
                 {row.ruleId} · {row.triggerKind ?? "без события"} ·{" "}
-                {row.sessionType ?? "любой тип"}
+                {row.sessionType ?? "любой тип"} · policy:{" "}
+                {row.evaluationPolicy}
               </p>
             </div>
           </div>
@@ -1489,6 +1499,10 @@ function ComparisonList({
               <p className="mt-1 text-xs text-zinc-500">
                 {row.current.source} · run:{" "}
                 {row.current.evaluationRunId ?? "нет"}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                reward: {row.reward.latestStatus ?? "не создан"} · всего:{" "}
+                {row.reward.count}
               </p>
             </div>
             <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -1525,6 +1539,10 @@ function ComparisonList({
               <p className="mt-2 text-xs text-zinc-500">
                 {row.ledger.source} · freshness: {row.ledger.sourceFreshness} ·
                 run: {row.ledger.evaluationRunId ?? "нет"}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                evaluator: {row.ledger.evaluatorVersion ?? "не указан"} · fact:{" "}
+                {row.ledger.sourceFactKind ?? "нет"}
               </p>
             </div>
           </div>

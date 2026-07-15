@@ -23,6 +23,10 @@ import {
   normalizeExternalActionUrl,
 } from "@/lib/external-links";
 import { lootboxSkinForRarity } from "@/lib/lootbox-assets";
+import {
+  GuestMissionPreview,
+  type GuestMissionPreviewData,
+} from "@/components/guest-mission-preview";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
@@ -38,11 +42,6 @@ type GameMissionHistoryItem =
 type GameProgressTimelineItem =
   GuestPortalGameSummary["progress"]["timeline"][number];
 type GameJourneyStep = GuestPortalGameSummary["journey"]["steps"][number];
-type MissionBoardFilter =
-  | "AVAILABLE"
-  | "ALMOST_DONE"
-  | "REWARD_PENDING"
-  | "ALL";
 type HomeBanner = {
   id: string;
   label: string;
@@ -374,6 +373,7 @@ type PlayerQuest = {
     type: "xp" | "lootbox" | "rank" | "promo";
     value: string | number;
   };
+  preview: GuestMissionPreviewData;
 };
 type QuestCompletionDialog = {
   id: string;
@@ -1716,10 +1716,7 @@ function ReadyGameView({
       ) : null}
 
       {questDetails ? (
-        <QuestDetailsModal
-          quest={questDetails}
-          onClose={closeQuestDetails}
-        />
+        <QuestDetailsModal quest={questDetails} onClose={closeQuestDetails} />
       ) : null}
 
       {activeCompletionDialog?.kind === "BATTLE_PASS" ? (
@@ -1903,39 +1900,15 @@ function QuestDetailsModal({
         >
           ×
         </button>
-        <h3 id="questDetailsTitle">{quest.title}</h3>
-
-        <div className="lp-quest-details-block">
-          <span>Условие</span>
-          <strong>{quest.condition}</strong>
-        </div>
-
-        {quest.progress ? (
-          <div className="lp-quest-details-progress">
-            <div>
-              <span>Прогресс</span>
-              <strong>{quest.progress.label}</strong>
-            </div>
-            <span className="lp-quest-details-meter" aria-hidden="true">
-              <i style={{ width: `${quest.progress.percent}%` }} />
-            </span>
-          </div>
-        ) : null}
-
-        {quest.reward ? (
-          <div className="lp-quest-details-block is-reward">
-            <span>Награда</span>
-            <strong>{quest.reward.value}</strong>
-          </div>
-        ) : null}
-
-        <button
-          type="button"
-          className="lp-lootbox-unavailable-primary"
-          onClick={onClose}
-        >
-          Понятно
-        </button>
+        <h3 id="questDetailsTitle" className="sr-only">
+          {quest.title}
+        </h3>
+        <GuestMissionPreview
+          data={quest.preview}
+          mode="full"
+          showLabels={false}
+          onAction={onClose}
+        />
       </div>
     </div>
   );
@@ -4359,27 +4332,11 @@ function PlayerProfilePanel({
                 aria-haspopup="dialog"
                 onClick={() => onQuestClick(quest)}
               >
-                <span className="lp-club-side-quest-icon" aria-hidden="true">
-                  {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
-                </span>
-                <span className="lp-club-side-quest-copy">
-                  <strong>{quest.title}</strong>
-                  <span>{quest.progress?.label ?? quest.description}</span>
-                  {quest.progress ? (
-                    <span
-                      className="lp-club-side-quest-progress"
-                      aria-hidden="true"
-                    >
-                      <i
-                        style={
-                          {
-                            "--value": `${quest.progress.percent}%`,
-                          } as CSSProperties
-                        }
-                      />
-                    </span>
-                  ) : null}
-                </span>
+                <GuestMissionPreview
+                  data={quest.preview}
+                  mode="compact"
+                  showLabels={false}
+                />
               </button>
             ))
           ) : (
@@ -4463,30 +4420,11 @@ function QuestBoard({
                   aria-haspopup="dialog"
                   onClick={() => onQuestClick(quest)}
                 >
-                  <span className="lp-club-quest-full-icon" aria-hidden="true">
-                    {quest.status === "done" ? <CheckIcon /> : <QuestIcon />}
-                  </span>
-                  <span className="lp-club-quest-full-main">
-                    <strong>{quest.title}</strong>
-                    <span>{quest.description}</span>
-                    {quest.progress ? (
-                      <span className="lp-club-quest-progress">
-                        <span
-                          className="lp-club-quest-progress-bar"
-                          aria-hidden="true"
-                        >
-                          <i
-                            style={
-                              {
-                                "--value": `${quest.progress.percent}%`,
-                              } as CSSProperties
-                            }
-                          />
-                        </span>
-                        <span>{quest.progress.label}</span>
-                      </span>
-                    ) : null}
-                  </span>
+                  <GuestMissionPreview
+                    data={quest.preview}
+                    mode="compact"
+                    showLabels={false}
+                  />
                 </button>
               ))
             ) : (
@@ -5141,6 +5079,7 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
         status,
         progress,
         reward,
+        preview: gameMissionPreviewData(mission),
       };
     });
 }
@@ -5970,34 +5909,6 @@ function PencilIcon() {
     >
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      aria-hidden="true"
-    >
-      <path d="m5 12 4 4L19 6" />
-    </svg>
-  );
-}
-
-function QuestIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M4 7h16v10H4z" />
-      <path d="M8 7v10" />
-      <path d="M16 7v10" />
     </svg>
   );
 }
@@ -7556,191 +7467,29 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MissionsPanel({
-  missions,
-}: {
-  missions: GuestPortalGameSummary["missions"]["featured"];
-}) {
-  const [activeFilter, setActiveFilter] =
-    useState<MissionBoardFilter>("AVAILABLE");
-  const filterOptions = useMemo(
-    () => buildMissionFilterOptions(missions),
-    [missions],
-  );
-  const visibleMissions = useMemo(
-    () =>
-      missions.filter((mission) => missionMatchesFilter(mission, activeFilter)),
-    [activeFilter, missions],
-  );
-
-  return (
-    <section
-      id="missions"
-      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
-    >
-      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
-        Миссии
-      </p>
-      <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-xl font-black">Ближайшие квесты</h2>
-          <p className="mt-1 text-xs leading-5 text-zinc-400">
-            Выберите цель: новый квест, почти готовый прогресс или награду.
-          </p>
-        </div>
-        {missions.length ? (
-          <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-zinc-200">
-            {visibleMissions.length} из {missions.length}
-          </span>
-        ) : null}
-      </div>
-      {missions.length ? (
-        <MissionFilterTabs
-          activeFilter={activeFilter}
-          options={filterOptions}
-          onChange={setActiveFilter}
-        />
-      ) : null}
-      <div className="mt-5 space-y-3">
-        {missions.length ? (
-          visibleMissions.length ? (
-            visibleMissions.map((mission) => {
-              const activeStep =
-                mission.questSteps.find((step) => step.current) ??
-                mission.questSteps.find((step) => !step.completed) ??
-                null;
-              const progressTarget = mission.progressTarget ?? 1;
-              const progressUnit = mission.progressUnit
-                ? ` ${mission.progressUnit}`
-                : "";
-              const progressLabel =
-                mission.progressPercent >= 100
-                  ? `Выполнено: ${formatNumber(
-                      mission.progressCurrent,
-                    )}/${formatNumber(progressTarget)}${progressUnit}`
-                  : `Прогресс: ${formatNumber(
-                      mission.progressCurrent,
-                    )}/${formatNumber(progressTarget)}${progressUnit}`;
-
-              return (
-                <article key={mission.id} className={missionCardClass(mission)}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-sm font-black">
-                        {mission.name}
-                      </h3>
-                      <p className="mt-1 text-xs text-zinc-400">
-                        {mission.rewardLabel ?? `${mission.xpReward} XP`}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <span className="block text-sm font-black text-emerald-300">
-                        {Math.round(mission.progressPercent)}%
-                      </span>
-                      <span className={missionStatusBadgeClass(mission)}>
-                        {missionStateLabel(mission)}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-xs font-semibold leading-5 text-cyan-100">
-                    {missionConditionHint(mission)}
-                  </p>
-                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-emerald-300"
-                      style={{
-                        width: `${clampPercent(mission.progressPercent)}%`,
-                      }}
-                    />
-                  </div>
-                  <div className="mt-3 flex flex-col gap-2 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
-                    <span>{progressLabel}</span>
-                    <span className="font-bold text-zinc-200">
-                      +{formatNumber(mission.xpReward)} XP
-                    </span>
-                  </div>
-
-                  <MissionRewardStatusCard status={mission.rewardStatus} />
-
-                  {activeStep ? (
-                    <div className="mt-4 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
-                        Текущий шаг
-                      </p>
-                      <p className="mt-1 text-sm font-black text-white">
-                        {activeStep.title}
-                      </p>
-                      <p className="mt-1 text-xs text-emerald-100/80">
-                        {formatMissionStepProgress(activeStep)}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {mission.questSteps.length ? (
-                    <div className="mt-3 grid gap-2">
-                      {mission.questSteps.map((step, index) => (
-                        <div
-                          key={step.id}
-                          className={[
-                            "flex min-h-12 items-center gap-3 rounded-lg border px-3 py-2",
-                            step.completed
-                              ? "border-emerald-300/30 bg-emerald-300/[0.07]"
-                              : step.current
-                                ? "border-emerald-300/25 bg-white/[0.06]"
-                                : "border-white/10 bg-white/[0.03]",
-                          ].join(" ")}
-                        >
-                          <span
-                            className={[
-                              "grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-black",
-                              step.completed
-                                ? "bg-emerald-300 text-zinc-950"
-                                : step.current
-                                  ? "bg-white text-zinc-950"
-                                  : "bg-white/10 text-zinc-300",
-                            ].join(" ")}
-                          >
-                            {index + 1}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-bold text-white">
-                              {step.title}
-                            </p>
-                            <p className="text-xs text-zinc-500">
-                              {formatMissionStepProgress(step)}
-                            </p>
-                          </div>
-                          <span className="shrink-0 text-xs font-black text-zinc-300">
-                            {missionStepStateLabel(step)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
-                    <span>{missionRewardNote(mission)}</span>
-                    {mission.periodTo ? (
-                      <span>до {formatDate(mission.periodTo)}</span>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })
-          ) : (
-            <p className="rounded-lg border border-white/10 bg-zinc-950/45 p-4 text-sm leading-6 text-zinc-300">
-              В этой вкладке квестов пока нет. Откройте другую группу или
-              дождитесь нового события клуба.
-            </p>
-          )
-        ) : (
-          <p className="text-sm leading-6 text-zinc-300">
-            Активных миссий пока нет. Клуб может включить их в Guest Game Hub.
-          </p>
-        )}
-      </div>
-    </section>
-  );
+function gameMissionPreviewData(mission: GameMission): GuestMissionPreviewData {
+  return {
+    title: mission.name,
+    description:
+      mission.description ??
+      "Выполните условие квеста и получите указанную награду.",
+    condition: mission.conditionLabel || missionConditionHint(mission),
+    reward:
+      mission.rewardStatus.rewardLabel ??
+      mission.rewardLabel ??
+      (mission.xpReward > 0
+        ? `${mission.xpReward} XP`
+        : "Без основной награды"),
+    xp: mission.xpReward,
+    progressCurrent: mission.progressCurrent,
+    progressTarget: mission.progressTarget ?? 1,
+    progressUnit: mission.progressUnit ?? "",
+    actionText: mission.actionText ?? "Подробнее",
+    coverUrl: mission.coverUrl,
+    products: mission.productNames,
+    productMode: mission.productMode ?? undefined,
+    minimumAmount: mission.minimumAmount,
+  };
 }
 
 function MissionHistoryPanel({
@@ -7854,166 +7603,6 @@ function missionHistoryBadgeClass(
     default:
       return `${base} bg-white/10 text-zinc-200`;
   }
-}
-
-function MissionFilterTabs({
-  activeFilter,
-  options,
-  onChange,
-}: {
-  activeFilter: MissionBoardFilter;
-  options: Array<{ key: MissionBoardFilter; label: string; count: number }>;
-  onChange: (filter: MissionBoardFilter) => void;
-}) {
-  return (
-    <div
-      aria-label="Фильтр квестов"
-      className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-zinc-950/35 p-1 sm:grid-cols-4"
-      role="tablist"
-    >
-      {options.map((option) => {
-        const active = option.key === activeFilter;
-
-        return (
-          <button
-            key={option.key}
-            aria-selected={active}
-            className={[
-              "min-h-11 rounded-md px-3 py-2 text-left text-xs font-bold transition",
-              active
-                ? "bg-emerald-300 text-zinc-950"
-                : "bg-transparent text-zinc-300 hover:bg-white/10 hover:text-white",
-            ].join(" ")}
-            onClick={() => onChange(option.key)}
-            role="tab"
-            type="button"
-          >
-            <span className="block truncate">{option.label}</span>
-            <span className="mt-1 block text-[11px] opacity-75">
-              {option.count}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function buildMissionFilterOptions(missions: GameMission[]) {
-  return [
-    {
-      key: "AVAILABLE" as const,
-      label: "Доступные",
-      count: missions.filter((mission) =>
-        missionMatchesFilter(mission, "AVAILABLE"),
-      ).length,
-    },
-    {
-      key: "ALMOST_DONE" as const,
-      label: "Почти готовы",
-      count: missions.filter((mission) =>
-        missionMatchesFilter(mission, "ALMOST_DONE"),
-      ).length,
-    },
-    {
-      key: "REWARD_PENDING" as const,
-      label: "Награда",
-      count: missions.filter((mission) =>
-        missionMatchesFilter(mission, "REWARD_PENDING"),
-      ).length,
-    },
-    {
-      key: "ALL" as const,
-      label: "Все",
-      count: missions.length,
-    },
-  ];
-}
-
-function missionMatchesFilter(
-  mission: GameMission,
-  filter: MissionBoardFilter,
-) {
-  switch (filter) {
-    case "AVAILABLE":
-      return mission.progressPercent < 100;
-    case "ALMOST_DONE":
-      return mission.progressPercent >= 70 && mission.progressPercent < 100;
-    case "REWARD_PENDING":
-      return mission.rewardStatus.state !== "IN_PROGRESS";
-    case "ALL":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function missionCardClass(mission: GameMission) {
-  if (
-    mission.rewardStatus.state === "FAILED" ||
-    mission.rewardStatus.state === "CANCELED" ||
-    mission.rewardStatus.state === "EXPIRED"
-  ) {
-    return "rounded-lg border border-rose-300/25 bg-rose-300/[0.06] p-4";
-  }
-
-  if (
-    mission.rewardStatus.state === "QUEUED" ||
-    mission.rewardStatus.state === "SENDING" ||
-    mission.rewardStatus.state === "WAITING_APPROVAL"
-  ) {
-    return "rounded-lg border border-amber-300/25 bg-amber-300/[0.06] p-4";
-  }
-
-  return [
-    "rounded-lg border p-4",
-    mission.progressPercent >= 100
-      ? "border-emerald-300/30 bg-emerald-300/[0.07]"
-      : mission.progressPercent >= 70
-        ? "border-amber-300/25 bg-amber-300/[0.06]"
-        : "border-white/10 bg-zinc-950/45",
-  ].join(" ");
-}
-
-function missionStatusBadgeClass(mission: GameMission) {
-  if (
-    mission.rewardStatus.state === "FAILED" ||
-    mission.rewardStatus.state === "CANCELED" ||
-    mission.rewardStatus.state === "EXPIRED"
-  ) {
-    return "mt-1 block rounded-full bg-rose-300/20 px-2 py-1 text-xs font-bold text-rose-100";
-  }
-
-  if (
-    mission.rewardStatus.state === "QUEUED" ||
-    mission.rewardStatus.state === "SENDING" ||
-    mission.rewardStatus.state === "WAITING_APPROVAL"
-  ) {
-    return "mt-1 block rounded-full bg-amber-300/20 px-2 py-1 text-xs font-bold text-amber-100";
-  }
-
-  return [
-    "mt-1 block rounded-full px-2 py-1 text-xs font-bold",
-    mission.progressPercent >= 100
-      ? "bg-emerald-300 text-zinc-950"
-      : mission.progressPercent >= 70
-        ? "bg-amber-300/20 text-amber-100"
-        : "bg-white/10 text-zinc-200",
-  ].join(" ");
-}
-
-function missionStateLabel(mission: GameMission) {
-  if (mission.rewardStatus.state !== "IN_PROGRESS") {
-    return mission.rewardStatus.label.toLowerCase();
-  }
-
-  if (mission.progressPercent >= 100) {
-    return mission.manualApprovalRequired
-      ? "ждет подтверждения"
-      : "квест выполнен";
-  }
-
-  return "в процессе";
 }
 
 function missionRewardNote(mission: GameMission) {

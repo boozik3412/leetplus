@@ -41,11 +41,7 @@ export type GuestPortalGamificationClubDirectory = {
   clubs: GuestPortalGamificationClub[];
 };
 
-export type GuestPortalLootBoxRarity =
-  | "common"
-  | "rare"
-  | "epic"
-  | "legendary";
+export type GuestPortalLootBoxRarity = "common" | "rare" | "epic" | "legendary";
 
 export type GuestPortalLootBoxSchedule = {
   timeWindowMode: "ANY" | "QUIET_HOURS" | "CUSTOM";
@@ -381,6 +377,13 @@ export type GuestPortalPayload = {
       periodTo: string | null;
       manualApprovalRequired: boolean;
       rewardStatus: GuestPortalMissionRewardStatus;
+      description: string | null;
+      actionText: string | null;
+      coverUrl: string | null;
+      conditionLabel: string;
+      productNames: string[];
+      productMode: "ANY" | "ALL" | null;
+      minimumAmount: number | null;
     }>;
     seasons: Array<{
       id: string;
@@ -584,12 +587,7 @@ export type GuestPortalGameJourney = {
     label: string;
     status: GuestPortalGameJourneyStepStatus;
     hint: string;
-    anchor:
-      | "profile"
-      | "langame-match"
-      | "progress"
-      | "missions"
-      | "rewards";
+    anchor: "profile" | "langame-match" | "progress" | "missions" | "rewards";
   }>;
 };
 
@@ -710,6 +708,13 @@ export type GuestPortalGameSummary = {
         | "periodTo"
         | "manualApprovalRequired"
         | "rewardStatus"
+        | "description"
+        | "actionText"
+        | "coverUrl"
+        | "conditionLabel"
+        | "productNames"
+        | "productMode"
+        | "minimumAmount"
       >
     >;
     history: Array<
@@ -729,40 +734,49 @@ export type GuestPortalGameSummary = {
         | "periodTo"
         | "manualApprovalRequired"
         | "rewardStatus"
+        | "description"
+        | "actionText"
+        | "coverUrl"
+        | "conditionLabel"
+        | "productNames"
+        | "productMode"
+        | "minimumAmount"
       >
     >;
   };
   battlePass: {
-    active: (Pick<
-      GuestPortalPayload["gamification"]["seasons"][number],
-      | "id"
-      | "name"
-      | "periodTo"
-      | "currentLevel"
-      | "nextLevel"
-      | "progressPercent"
-      | "xpToNextLevel"
-      | "nextRewardLabel"
-      | "readyRewards"
-      | "waitingApprovalRewards"
-      | "rewardOverview"
-    > & {
-      levels: Array<
-        Pick<
-          GuestPortalPayload["gamification"]["seasons"][number]["levels"][number],
-          | "level"
-          | "xp"
-          | "title"
-          | "condition"
-          | "description"
-          | "freeReward"
-          | "premiumReward"
-          | "reached"
-          | "current"
-          | "next"
-        >
-      >;
-    }) | null;
+    active:
+      | (Pick<
+          GuestPortalPayload["gamification"]["seasons"][number],
+          | "id"
+          | "name"
+          | "periodTo"
+          | "currentLevel"
+          | "nextLevel"
+          | "progressPercent"
+          | "xpToNextLevel"
+          | "nextRewardLabel"
+          | "readyRewards"
+          | "waitingApprovalRewards"
+          | "rewardOverview"
+        > & {
+          levels: Array<
+            Pick<
+              GuestPortalPayload["gamification"]["seasons"][number]["levels"][number],
+              | "level"
+              | "xp"
+              | "title"
+              | "condition"
+              | "description"
+              | "freeReward"
+              | "premiumReward"
+              | "reached"
+              | "current"
+              | "next"
+            >
+          >;
+        })
+      | null;
   };
   progress: {
     summary: {

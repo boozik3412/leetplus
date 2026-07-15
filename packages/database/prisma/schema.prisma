@@ -188,6 +188,8 @@ model Tenant {
   guestGameLogTypeMappings             GuestGameLogTypeMapping[]
   guestActivityRawRecords              GuestActivityRawRecord[]
   guestActivityFacts                   GuestActivityFact[]
+  guestGameSupplementalFactReceipts    GuestGameSupplementalFactReceipt[]
+  guestGameMediaAssets                 GuestGameMediaAsset[]
   guestActivitySyncStates              GuestActivitySyncState[]
   guestActivitySourceSyncStates        GuestActivitySourceSyncState[]
   guestActivitySyncJobs                GuestActivitySyncJob[]
@@ -1615,6 +1617,8 @@ model GuestGameMission {
   totalRewardLimit       Int?
   antiFraudRules         Json?
   manualApprovalRequired Boolean   @default(true)
+  definitionVersion      Int       @default(1)
+  evaluationPolicy       String    @default("LIVE_PRIMARY")
   note                   String?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
@@ -1626,6 +1630,7 @@ model GuestGameMission {
   events        GuestGameEvent[]
 
   @@index([tenantId, status, updatedAt], map: "guest_game_mission_status_idx")
+  @@index([tenantId, status, evaluationPolicy], map: "guest_game_mission_evaluation_policy_idx")
   @@index([tenantId, missionType], map: "guest_game_mission_type_idx")
   @@index([audienceId], map: "guest_game_mission_audience_idx")
   @@index([createdByUserId], map: "guest_game_mission_created_by_idx")
@@ -2411,6 +2416,43 @@ model GuestActivityFact {
   @@index([guestId], map: "guest_activity_fact_guest_idx")
   @@index([profileId], map: "guest_activity_fact_profile_idx")
   @@index([storeId], map: "guest_activity_fact_store_idx")
+}
+
+model GuestGameSupplementalFactReceipt {
+  id             String    @id @default(uuid())
+  tenantId       String
+  factId         String?
+  eventId        String?
+  factType       String
+  externalDomain String
+  sourceHash     String
+  mode           String
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  lastError      String?
+  processedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, factType, externalDomain, sourceHash], map: "guest_game_supplemental_fact_uidx")
+  @@index([tenantId, status, updatedAt], map: "guest_game_supplemental_fact_status_idx")
+}
+
+model GuestGameMediaAsset {
+  id               String   @id @default(uuid())
+  tenantId         String
+  uploadedByUserId String?
+  fileName         String
+  contentType      String
+  byteSize         Int
+  data             Bytes
+  createdAt        DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt], map: "guest_game_media_asset_tenant_created_idx")
 }
 
 model GuestActivitySyncState {
@@ -3671,13 +3713,13 @@ model StaffChatMessage {
 }
 
 model StaffChatMessageEdit {
-  id          String   @id @default(uuid())
-  tenantId    String
-  messageId   String
-  actorUserId String?
+  id           String   @id @default(uuid())
+  tenantId     String
+  messageId    String
+  actorUserId  String?
   previousBody String
   nextBody     String
-  createdAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
 
   tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   message   StaffChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)

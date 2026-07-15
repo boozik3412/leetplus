@@ -1003,6 +1003,7 @@ export class GuestGamificationLogService {
           ),
           progressTarget: null,
           progressUnit: null,
+          evaluationPolicy: 'LIVE_PRIMARY',
         })),
       ...missions
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -1027,6 +1028,7 @@ export class GuestGamificationLogService {
           ),
           progressTarget: rule.progressTarget,
           progressUnit: rule.progressUnit,
+          evaluationPolicy: rule.evaluationPolicy,
         })),
       ...seasons
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -1048,6 +1050,7 @@ export class GuestGamificationLogService {
           ),
           progressTarget: null,
           progressUnit: null,
+          evaluationPolicy: 'LIVE_PRIMARY',
         })),
     ].slice(0, options.limit);
 
@@ -1065,11 +1068,11 @@ export class GuestGamificationLogService {
         (decision) =>
           decision.ruleType === rule.type && decision.ruleId === rule.id,
       );
-      const liveDecisions = ruleDecisions.filter(
-        (decision) => decision.evaluationMode !== 'SHADOW',
+      const liveDecisions = ruleDecisions.filter((decision) =>
+        decision.evaluationMode.startsWith('LIVE'),
       );
-      const shadowDecisions = ruleDecisions.filter(
-        (decision) => decision.evaluationMode === 'SHADOW',
+      const shadowDecisions = ruleDecisions.filter((decision) =>
+        decision.evaluationMode.startsWith('SHADOW'),
       );
       const latestDecision = liveDecisions[0] ?? null;
       const pairedShadowDecision = latestDecision
@@ -1128,6 +1131,7 @@ export class GuestGamificationLogService {
         title: rule.title,
         triggerKind: rule.triggerKind,
         sessionType: rule.sessionType,
+        evaluationPolicy: rule.evaluationPolicy,
         current: {
           status: currentStatus,
           reason:
@@ -1186,6 +1190,11 @@ export class GuestGamificationLogService {
           })),
         },
         verdict: comparison.verdict,
+        reward: {
+          count: ruleRewards.length,
+          latestStatus: ruleRewards[0]?.status ?? null,
+          latestRewardId: ruleRewards[0]?.id ?? null,
+        },
         differingConditions: comparison.differingConditions,
         timeline: buildGuestGameComparisonTimeline({
           ruleCreatedAt: rule.createdAt,

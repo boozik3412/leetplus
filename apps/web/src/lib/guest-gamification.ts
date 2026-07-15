@@ -16,11 +16,7 @@ export type GuestGameRewardStatus =
   | "CANCELED"
   | "EXPIRED";
 
-export type GuestGameRewardRarity =
-  | "common"
-  | "rare"
-  | "epic"
-  | "legendary";
+export type GuestGameRewardRarity = "common" | "rare" | "epic" | "legendary";
 
 export type GuestGameLootBoxUsageKind =
   | "STANDALONE"
@@ -132,6 +128,8 @@ export type GuestGameMission = {
   updatedAt: string;
   audience: GuestGameAudience | null;
   createdBy: GuestGameUser | null;
+  definitionVersion: number;
+  evaluationPolicy: string;
 };
 
 export type GuestGameSeason = {
@@ -173,6 +171,42 @@ export type GuestGamePromoCard = {
   createdAt: string;
   updatedAt: string;
   createdBy: GuestGameUser | null;
+};
+
+export type GuestGameMissionWizardTaskType =
+  | "PLAY_TIME"
+  | "PRODUCT_PURCHASE"
+  | "BALANCE_TOPUP"
+  | "CHECK_IN";
+
+export type GuestGameMissionWizardDto = {
+  name: string;
+  taskType: GuestGameMissionWizardTaskType;
+  visibility: "VISIBLE" | "HIDDEN";
+  audienceId: string | null;
+  storeIds: string[];
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  conditions: Record<string, unknown>;
+  reward: Record<string, unknown>;
+  appearance: Record<string, unknown>;
+  note: string | null;
+};
+
+export type GuestGameMissionWizardReadiness = {
+  ready: boolean;
+  definitionVersion: 2;
+  taskType: GuestGameMissionWizardTaskType;
+  evaluationPolicy: "LIVE_PRIMARY" | "LEDGER_SUPPLEMENTAL";
+  source: "LIVE" | "ACTIVITY_LEDGER";
+  sourceLabel: string;
+  blockers: string[];
+  warnings: string[];
+};
+
+export type GuestGameMissionWizardSaveResult = {
+  mission: GuestGameMission;
+  readiness: GuestGameMissionWizardReadiness;
 };
 
 export type GuestGameVisualEditorRewardMode = "XP" | "BONUS" | "";
@@ -746,7 +780,11 @@ export type GuestGameDeliveryStatus =
   | "FAILED"
   | "CANCELED";
 
-export type GuestGameDeliveryChannel = "TELEGRAM" | "MAX" | "CASHIER" | "MANUAL";
+export type GuestGameDeliveryChannel =
+  | "TELEGRAM"
+  | "MAX"
+  | "CASHIER"
+  | "MANUAL";
 
 export type GuestGameDeliveryProviderStatus = {
   channel: "TELEGRAM" | "MAX";

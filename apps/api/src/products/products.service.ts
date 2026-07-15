@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import type {
+  AssignProductsCategoryDto,
   CreateProductDto,
   ProductCatalogQuery,
   UpdateProductDto,
@@ -18,6 +19,7 @@ import { buildProductCostBasis } from '../reports/stock-cost-basis';
 const OPERATIONAL_ACTIVE_DAYS = 14;
 const CATALOG_PAGE_SIZE = 50;
 const MAX_CATALOG_PAGE_SIZE = 100;
+const MAX_BULK_CATEGORY_ASSIGNMENT_SIZE = 100;
 
 const PRODUCT_CATALOG_SORT_FIELDS = [
   'name',
@@ -281,6 +283,7 @@ export class ProductsService {
       ...(request.name
         ? { name: { contains: request.name, mode: 'insensitive' } }
         : {}),
+      ...(request.categoryStatus === 'unassigned' ? { categoryId: null } : {}),
       ...(request.storeIds.length > 0
         ? {
             inventorySnapshots: {
@@ -514,6 +517,8 @@ export class ProductsService {
       pageSize,
       name: query.name?.trim() ?? '',
       storeIds,
+      categoryStatus:
+        query.categoryStatus === 'unassigned' ? 'unassigned' : 'all',
       sort,
       direction: query.direction === 'desc' ? 'desc' : 'asc',
     } satisfies {
@@ -521,6 +526,7 @@ export class ProductsService {
       pageSize: number;
       name: string;
       storeIds: string[];
+      categoryStatus: 'all' | 'unassigned';
       sort: ProductCatalogSort;
       direction: ProductCatalogDirection;
     };
@@ -625,6 +631,54 @@ export class ProductsService {
     });
   }
 
+  async assignCategoryToUncategorizedProducts(
+    dto: AssignProductsCategoryDto,
+    user: AuthenticatedUser,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const productIds = this.normalizeProductIds(dto.productIds);
+
+    if (productIds.length === 0) {
+      throw new BadRequestException('Select at least one product');
+    }
+
+    if (productIds.length > MAX_BULK_CATEGORY_ASSIGNMENT_SIZE) {
+      throw new BadRequestException(
+        `Select no more than ${MAX_BULK_CATEGORY_ASSIGNMENT_SIZE} products`,
+      );
+    }
+
+    const categoryId = await this.resolveOptionalCategory(
+      dto.categoryId,
+      tenantId,
+    );
+
+    if (!categoryId) {
+      throw new BadRequestException('Category is required');
+    }
+
+    const where: Prisma.ProductWhereInput = {
+      tenantId,
+      id: { in: productIds },
+      isActive: true,
+      categoryId: null,
+    };
+    const eligibleProducts = await this.prisma.product.count({ where });
+
+    if (eligibleProducts !== productIds.length) {
+      throw new ConflictException(
+        'Some selected products have already been categorized or are unavailable',
+      );
+    }
+
+    const result = await this.prisma.product.updateMany({
+      where,
+      data: { categoryId },
+    });
+
+    return { updated: result.count };
+  }
+
   private async findOneForTenant(id: string, tenantId: string) {
     const product = await this.prisma.product.findFirst({
       where: { id, tenantId },
@@ -727,6 +781,23 @@ export class ProductsService {
     }
 
     return normalized;
+  }
+
+  private normalizeProductIds(value: unknown) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        value
+          .filter(
+            (productId): productId is string => typeof productId === 'string',
+          )
+          .map((productId) => productId.trim())
+          .filter(Boolean),
+      ),
+    ];
   }
 
   private normalizeOptionalInteger(

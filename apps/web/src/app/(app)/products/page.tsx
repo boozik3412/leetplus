@@ -48,7 +48,7 @@ export default async function ProductsPage() {
 
         <section
           aria-label="Сводка ассортимента"
-          className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+          className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
         >
           <SummaryCard label="Всего SKU" value={summary.totalSku} />
           <SummaryCard
@@ -57,6 +57,10 @@ export default async function ProductsPage() {
             hint="Остаток сейчас или продажи за последние 14 дней."
           />
           <SummaryCard label="С категорией" value={summary.categorizedSku} />
+          <SummaryCard
+            label="Без категории"
+            value={summary.totalSku - summary.categorizedSku}
+          />
           <SummaryCard label="С поставщиком" value={summary.suppliedSku} />
         </section>
 
@@ -66,6 +70,12 @@ export default async function ProductsPage() {
             title="Каталог SKU"
             description="Поиск, фильтры, сортировка и редактирование товаров с постраничной загрузкой."
             action="Открыть каталог"
+          />
+          <HubLink
+            href="/categories/triage"
+            title="Разбор категорий"
+            description="Очередь SKU без категории: выберите товары и назначьте им категорию LeetPlus."
+            action="Разобрать SKU"
           />
           <HubLink
             href="/products/movement/table"

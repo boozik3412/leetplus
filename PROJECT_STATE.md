@@ -55,6 +55,7 @@ Connected production Langame sources:
 - Sales facts keep snapshot fields such as product/store names at the moment of sale.
 - Deleted or missing Langame nomenclature must not delete historical sales.
 - Langame sync must not automatically set `canonicalProductId`.
+- The verified Langame product directory (`/products/list`) supplies only external `id`, product `name`, and `active` status; it has no category directory in the currently available routes. Product categories are therefore LeetPlus-owned tenant data and must not be overwritten by Langame sync.
 - Product grouping into a canonical/network SKU happens only through analysis/manual confirmation.
 - A rejected parsing suggestion should not delete existing product links.
 - Already confirmed parsing groups should not be suggested again unless there is a real change/new item to review.

@@ -60,6 +60,7 @@ export type ProductCatalogQuery = {
   pageSize?: string;
   name?: string;
   storeIds?: string[];
+  categoryStatus?: "unassigned";
   sort?: ProductCatalogSort;
   direction?: "asc" | "desc";
 };
@@ -110,6 +111,10 @@ export async function getProductCatalog(
   }
 
   query.storeIds?.forEach((storeId) => params.append("storeId", storeId));
+
+  if (query.categoryStatus) {
+    params.set("categoryStatus", query.categoryStatus);
+  }
 
   if (query.sort) {
     params.set("sort", query.sort);

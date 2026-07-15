@@ -5,8 +5,14 @@ export type ProductCatalogQuery = {
   pageSize?: string | number;
   name?: string;
   storeId?: string | string[];
+  categoryStatus?: string;
   sort?: string;
   direction?: string;
+};
+
+export type AssignProductsCategoryDto = {
+  productIds: string[];
+  categoryId: string;
 };
 
 export type CreateProductDto = {

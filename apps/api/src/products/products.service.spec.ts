@@ -11,6 +11,7 @@ type ProductsPrismaMock = {
     findFirst: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
+    updateMany: jest.Mock;
   };
   inventorySnapshot: {
     findMany: jest.Mock;
@@ -67,6 +68,7 @@ type ProductCatalogFindManyQuery = {
         storeId: { in: string[] };
       };
     };
+    categoryId?: null;
   };
 };
 
@@ -78,6 +80,7 @@ function createPrismaMock(): ProductsPrismaMock {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     inventorySnapshot: {
       findMany: jest.fn(),
@@ -332,6 +335,50 @@ describe('ProductsService', () => {
         },
       }),
     );
+  });
+
+  it('limits the category triage queue to uncategorized active products', async () => {
+    prisma.product.findMany.mockResolvedValue([]);
+    prisma.product.count.mockResolvedValue(3);
+
+    await service.getCatalog({ categoryStatus: 'unassigned' }, user);
+
+    const [catalogQuery] = prisma.product.findMany.mock.calls[0] as [
+      ProductCatalogFindManyQuery,
+    ];
+    expect(catalogQuery.where.tenantId).toBe('tenant-demo');
+    expect(catalogQuery.where.isActive).toBe(true);
+    expect(catalogQuery.where.categoryId).toBeNull();
+  });
+
+  it('assigns a LeetPlus category only to the selected uncategorized products', async () => {
+    prisma.category.findFirst.mockResolvedValue({ id: 'category-1' });
+    prisma.product.count.mockResolvedValue(2);
+    prisma.product.updateMany.mockResolvedValue({ count: 2 });
+
+    await expect(
+      service.assignCategoryToUncategorizedProducts(
+        {
+          productIds: ['product-1', 'product-2', 'product-1'],
+          categoryId: 'category-1',
+        },
+        user,
+      ),
+    ).resolves.toEqual({ updated: 2 });
+
+    expect(prisma.category.findFirst).toHaveBeenCalledWith({
+      where: { id: 'category-1', tenantId: 'tenant-demo' },
+      select: { id: true },
+    });
+    expect(prisma.product.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-demo',
+        id: { in: ['product-1', 'product-2'] },
+        isActive: true,
+        categoryId: null,
+      },
+      data: { categoryId: 'category-1' },
+    });
   });
 
   it('creates product in resolved tenant with validated relations', async () => {

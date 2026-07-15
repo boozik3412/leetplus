@@ -18,6 +18,7 @@ import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ProductsService } from './products.service';
 import type {
+  AssignProductsCategoryDto,
   CreateProductDto,
   ProductCatalogQuery,
   UpdateProductDto,
@@ -65,6 +66,19 @@ export class ProductsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.productsService.create(dto, user);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Patch('bulk-category')
+  assignCategoryToUncategorizedProducts(
+    @Body() dto: AssignProductsCategoryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.productsService.assignCategoryToUncategorizedProducts(
+      dto,
+      user,
+    );
   }
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)

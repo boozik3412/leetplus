@@ -81,6 +81,8 @@ export function evaluateGuestGameLedgerRule(
     const happenedAt = fact.happenedAt ?? fact.createdAt;
     const factBlockers: string[] = [];
     const factInsufficient: string[] = [];
+    const domainScopedFact =
+      fact.factType === 'BALANCE_TOPUP' && fact.storeId === null;
 
     if (happenedAt < rule.activatedAt) {
       factBlockers.push('факт произошел до активации правила');
@@ -94,7 +96,7 @@ export function evaluateGuestGameLedgerRule(
     if (selectedStoreId && fact.storeId && fact.storeId !== selectedStoreId) {
       factBlockers.push('факт относится к другому выбранному клубу');
     }
-    if (rule.storeIds.length > 0) {
+    if (rule.storeIds.length > 0 && !domainScopedFact) {
       if (!fact.storeId) {
         factInsufficient.push('у факта не определен клуб');
       } else if (!rule.storeIds.includes(fact.storeId)) {
@@ -219,9 +221,41 @@ function evaluateLedgerProgress(
   }
   qualifiedFacts = productFilter.facts;
 
-  const minSpendAmount = numericValue(
-    metric.minSpendAmount ?? conditions.minSpendAmount,
+  const amountComparison = normalizeLedgerToken(
+    nullableString(metric.amountComparison ?? conditions.amountComparison),
   );
+  const configuredTopupAmount = numericValue(
+    metric.topupAmount ??
+      conditions.topupAmount ??
+      metric.amount ??
+      conditions.amount,
+  );
+  const exactTopupAmount =
+    qualifiedFacts.some((fact) => fact.factType === 'BALANCE_TOPUP') &&
+    ['exact', 'equal', 'equals'].includes(amountComparison)
+      ? configuredTopupAmount
+      : null;
+
+  if (exactTopupAmount !== null) {
+    qualifiedFacts = qualifiedFacts.filter(
+      (fact) =>
+        fact.factType === 'BALANCE_TOPUP' &&
+        Math.abs(decimalNumber(fact.amount) - exactTopupAmount) < 0.005,
+    );
+    if (qualifiedFacts.length === 0) {
+      return ledgerBlockedEvaluation(
+        `Нет пополнения ровно на ${exactTopupAmount} руб.`,
+        facts,
+        null,
+      );
+    }
+  }
+
+  const minSpendAmount =
+    numericValue(metric.minSpendAmount ?? conditions.minSpendAmount) ??
+    (['at_least', 'minimum', 'min'].includes(amountComparison)
+      ? configuredTopupAmount
+      : null);
   if (minSpendAmount !== null) {
     qualifiedFacts = qualifiedFacts.filter(
       (fact) => decimalNumber(fact.amount) >= minSpendAmount,

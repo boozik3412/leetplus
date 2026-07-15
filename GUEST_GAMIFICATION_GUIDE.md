@@ -1,6 +1,6 @@
 # Геймификация гостей LeetPlus
 
-Дата: 14.07.2026
+Дата: 15.07.2026
 Статус: рабочий guide для поддержки и развития Guest Game Hub.
 
 > Актуальный production-контур описан в `docs/deployment/guest-gamification-live-rewards.md`. Старые заметки ниже сохранены как исторический контекст только там, где не противоречат этому документу.
@@ -15,9 +15,10 @@
 
 ## 2. Где находится
 
-- Web route: `/guests/gamification`
-- Sidebar: `Гости -> Геймификация`
-- Frontend: `apps/web/src/app/(app)/guests/gamification/page.tsx`
+- Web route: `/gamification` (legacy `/guests/gamification` redirects here)
+- Sidebar: отдельный родительский раздел `Геймификация`
+- Frontend: `apps/web/src/app/(app)/gamification/page.tsx`
+- Diagnostics: `/gamification/log` (legacy `/gamification-log` redirects here)
 - UI component: `apps/web/src/components/guest-gamification-panel.tsx`
 - API: `/guests/gamification/*`
 - Backend: `apps/api/src/guest-gamification/*`

@@ -25,6 +25,7 @@ type NavGroup = {
   title: string;
   icon:
     | "guests"
+    | "gamification"
     | "communications"
     | "staff"
     | "marketing"
@@ -50,9 +51,16 @@ const navGroups: NavGroup[] = [
       { href: "/guests#guest-list", label: "Список гостей" },
       { href: "/guests/report", label: "Полный отчет" },
       { href: "/guests/report#audiences", label: "Группы" },
-      { href: "/guests/gamification", label: "Геймификация" },
       { href: "/guests/crm", label: "CRM" },
       { href: "/guests/crm/tasks", label: "Задачи CRM" },
+    ],
+  },
+  {
+    title: "Геймификация",
+    icon: "gamification",
+    items: [
+      { href: "/gamification", label: "Управление" },
+      { href: "/gamification/log", label: "Игровой журнал" },
     ],
   },
   {
@@ -117,7 +125,6 @@ const navGroups: NavGroup[] = [
       { href: "/commercial/demo", label: "Демо-режим" },
       { href: "/commercial/tariffs", label: "Тарифы" },
       { href: "/users", label: "Пользователи и роли" },
-      { href: "/gamification-log", label: "Игровой журнал" },
       { href: "/stores", label: "Торговые точки" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
@@ -424,6 +431,18 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
+  if (icon === "gamification") {
+    return (
+      <svg {...common}>
+        <path d="M8 7h8a5 5 0 0 1 4.8 6.4l-.8 2.8a2.5 2.5 0 0 1-4.2 1.1L14.5 16h-5l-1.3 1.3A2.5 2.5 0 0 1 4 16.2l-.8-2.8A5 5 0 0 1 8 7Z" />
+        <path d="M7 11h4" />
+        <path d="M9 9v4" />
+        <circle cx="16.5" cy="10.5" r=".8" fill="currentColor" stroke="none" />
+        <circle cx="18.5" cy="12.5" r=".8" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+
   if (icon === "staff") {
     return (
       <svg {...common}>
@@ -636,6 +655,10 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
 
   if (currentPathname.startsWith("/marketing")) {
     return "Маркетинг";
+  }
+
+  if (currentPathname.startsWith("/gamification")) {
+    return "Геймификация";
   }
 
   if (currentPathname.startsWith("/guests")) {

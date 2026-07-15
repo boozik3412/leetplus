@@ -117,12 +117,19 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
   },
   {
     id: "guests",
-    title: "Гости, CRM и геймификация",
-    description: "Клиентская база, игровые механики, награды и ПДн.",
+    title: "Гости и CRM",
+    description: "Клиентская база, сегменты, CRM-задачи и ПДн.",
     permissions: [
       "view_guests",
       "export_guests",
       "manage_guest_crm",
+    ],
+  },
+  {
+    id: "gamification",
+    title: "Геймификация",
+    description: "Игровые механики, правила, журнал и награды.",
+    permissions: [
       "view_guest_gamification",
       "manage_guest_game_rules",
       "approve_guest_game_rewards",
@@ -191,7 +198,12 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
   { group: "Гости", href: "/guests", label: "Дашборд гостей" },
   { group: "Гости", href: "/guests/report", label: "Полный отчет" },
   { group: "Гости", href: "/guests/crm/tasks", label: "CRM-задачи" },
-  { group: "Гости", href: "/guests/gamification", label: "Геймификация" },
+  { group: "Геймификация", href: "/gamification", label: "Управление" },
+  {
+    group: "Геймификация",
+    href: "/gamification/log",
+    label: "Игровой журнал",
+  },
   { group: "Коммуникации", href: "/communications", label: "Обзор" },
   {
     group: "Коммуникации",

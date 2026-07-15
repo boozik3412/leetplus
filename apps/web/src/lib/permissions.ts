@@ -812,11 +812,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "view_communications") || can(user, "view_guests");
   }
 
-  if (href.startsWith("/guests/gamification")) {
-    return can(user, "view_guest_gamification");
-  }
-
-  if (href.startsWith("/gamification-log")) {
+  if (
+    href.startsWith("/gamification") ||
+    href.startsWith("/guests/gamification")
+  ) {
     return can(user, "view_guest_gamification");
   }
 

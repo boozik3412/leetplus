@@ -2217,7 +2217,10 @@ function getGamificationRewardApprovalId(action: {
   try {
     const url = new URL(action.href, "https://leetplus.local");
 
-    if (url.pathname !== "/guests/gamification") {
+    if (
+      url.pathname !== "/gamification" &&
+      url.pathname !== "/guests/gamification"
+    ) {
       return null;
     }
 

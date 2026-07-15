@@ -398,7 +398,7 @@ export function MarketingMissionsPanel({
             </p>
           </div>
           <Link
-            href="/guests/gamification"
+            href="/gamification"
             className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-500/70 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
           >
             <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">

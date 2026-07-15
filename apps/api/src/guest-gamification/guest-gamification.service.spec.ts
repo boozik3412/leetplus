@@ -1331,7 +1331,7 @@ describe('GuestGamificationService', () => {
           guestPhone: '+7 *** **-11',
           storeName: '1337-Пушкинская',
           actionHref:
-            '/guests/gamification?tab=rewards&rewardId=reward-pending-chat',
+            '/gamification?tab=rewards&rewardId=reward-pending-chat',
         }),
       );
       const notification =
@@ -2385,7 +2385,7 @@ describe('GuestGamificationService', () => {
             status: 'BLOCKED',
             ready: false,
             metric: 'нет готового входа',
-            actionHref: '/guests/gamification',
+            actionHref: '/gamification',
           }),
         ]),
       );
@@ -2600,7 +2600,7 @@ describe('GuestGamificationService', () => {
             statusLabel: '0 после sync',
             note: expect.stringContaining('Диагностика guests/logs закрыта'),
             nextAction: expect.stringContaining('Хвост закрыт'),
-            actionHref: '/guests/gamification?mode=advanced&tab=lootBoxes',
+            actionHref: '/gamification?mode=advanced&tab=lootBoxes',
             actionLabel: 'Открыть конструктор',
           }),
         ]),

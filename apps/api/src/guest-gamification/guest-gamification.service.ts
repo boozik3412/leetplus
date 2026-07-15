@@ -4281,7 +4281,7 @@ export class GuestGamificationService {
             ? '/game/auth'
             : !targetStoreCoordinatesReady
               ? '/stores'
-              : '/guests/gamification',
+              : '/gamification',
         actionLabel:
           registrationReady && targetStoreCoordinatesReady && publicAuthReady
             ? 'Открыть /game/auth'
@@ -4350,7 +4350,7 @@ export class GuestGamificationService {
         nextAction: activeRuleCount
           ? 'Запустить dry-run по тестовому профилю и пилотному клубу.'
           : 'Создать простое задание или лутбокс для клуба 1337.',
-        actionHref: '/guests/gamification?mode=advanced&tab=lootBoxes',
+        actionHref: '/gamification?mode=advanced&tab=lootBoxes',
         actionLabel: 'Открыть конструктор',
       },
       {
@@ -4411,7 +4411,7 @@ export class GuestGamificationService {
         actionHref: guestLogsReady
           ? '/api/guests/gamification/guest-log-catalog/export'
           : guestLogsRequiredByRules && guestLogsCheckedEmpty
-            ? '/guests/gamification?mode=advanced&tab=lootBoxes'
+            ? '/gamification?mode=advanced&tab=lootBoxes'
             : '/sync?includeGuestLogs=1',
         actionLabel: guestLogsReady
           ? 'Скачать CSV'
@@ -11912,7 +11912,7 @@ export class GuestGamificationService {
           storeId: row.storeId,
           storeName: row.store?.name ?? null,
           qualifiedAt: row.qualifiedAt,
-          actionHref: `/guests/gamification?tab=rewards&rewardId=${encodeURIComponent(row.id)}`,
+          actionHref: `/gamification?tab=rewards&rewardId=${encodeURIComponent(row.id)}`,
         },
       );
     } catch (error) {

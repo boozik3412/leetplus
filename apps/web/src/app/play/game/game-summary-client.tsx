@@ -5154,10 +5154,7 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
         id: mission.id,
         title: mission.name,
         description: playerQuestDescription(mission, reward),
-        condition: gameRuleConditionLabel(
-          mission.triggerKind,
-          mission.sessionType,
-        ),
+        condition: playerQuestCondition(mission, progress),
         status,
         label: playerQuestStatusLabel(status),
         progress,
@@ -5554,9 +5551,34 @@ function playerQuestProgressLabel(
   total: number,
   unit: string | null,
 ) {
-  const unitLabel = unit ? ` ${unit}` : "";
+  const formattedUnit = gameProgressUnitLabel(unit);
+  const unitLabel = formattedUnit ? ` ${formattedUnit}` : "";
 
   return `${formatNumber(current)} / ${formatNumber(total)}${unitLabel}`;
+}
+
+function gameProgressUnitLabel(unit: string | null) {
+  if (!unit) {
+    return null;
+  }
+
+  const labels: Record<string, string> = {
+    minute: "минут",
+    minutes: "минут",
+    min: "минут",
+    hour: "часов",
+    hours: "часов",
+    day: "дней",
+    days: "дней",
+    purchase: "покупок",
+    purchases: "покупок",
+    rub: "рублей",
+    rouble: "рублей",
+    ruble: "рублей",
+  };
+  const normalized = unit.trim().toLocaleLowerCase("ru-RU");
+
+  return labels[normalized] ?? unit;
 }
 
 function playerQuestReward(mission: GameMission): PlayerQuest["reward"] {
@@ -5595,6 +5617,25 @@ function playerQuestDescription(
   }
 
   return parts.join(" ");
+}
+
+function playerQuestCondition(
+  mission: GameMission,
+  progress: PlayerQuest["progress"],
+) {
+  if (normalizeGameRuleTrigger(mission.triggerKind) === "PLAY_HOUR") {
+    const minutes = progress?.total ?? mission.progressTarget ?? 0;
+
+    if (minutes === 60) {
+      return "Сыграйте один час в игровой сессии.";
+    }
+
+    if (minutes > 0) {
+      return `Сыграйте ${formatNumber(minutes)} минут в игровой сессии.`;
+    }
+  }
+
+  return guestActionRequirementLabel(mission.triggerKind, mission.sessionType);
 }
 
 function missionConditionHint(mission: GameMission) {

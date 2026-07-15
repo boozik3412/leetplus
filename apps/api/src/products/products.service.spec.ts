@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 
 type ProductsPrismaMock = {
   product: {
+    count: jest.Mock;
     findMany: jest.Mock;
     findFirst: jest.Mock;
     create: jest.Mock;
@@ -53,9 +54,26 @@ type ProductSalesFactQuery = {
   distinct: ['productId'];
 };
 
+type ProductCatalogFindManyQuery = {
+  skip: number;
+  take: number;
+  orderBy: Array<Record<string, unknown>>;
+  where: {
+    tenantId: string;
+    isActive: boolean;
+    name: { contains: string; mode: string };
+    inventorySnapshots: {
+      some: {
+        storeId: { in: string[] };
+      };
+    };
+  };
+};
+
 function createPrismaMock(): ProductsPrismaMock {
   return {
     product: {
+      count: jest.fn(),
       findMany: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
@@ -195,6 +213,109 @@ describe('ProductsService', () => {
           isOperationalActive: false,
         }),
       ]),
+    );
+  });
+
+  it('builds the product summary from latest stock per club and product', async () => {
+    prisma.product.count
+      .mockResolvedValueOnce(12)
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(7);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      {
+        productId: 'stocked-product',
+        quantity: new Prisma.Decimal(2),
+      },
+      {
+        productId: 'empty-product',
+        quantity: new Prisma.Decimal(0),
+      },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      { productId: 'recently-sold-product' },
+    ]);
+
+    await expect(service.getSummary(user)).resolves.toEqual({
+      totalSku: 12,
+      operationalActiveSku: 2,
+      categorizedSku: 9,
+      suppliedSku: 7,
+    });
+
+    expect(prisma.inventorySnapshot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distinct: ['storeId', 'productId'],
+        orderBy: [
+          { storeId: 'asc' },
+          { productId: 'asc' },
+          { snapshotDate: 'desc' },
+        ],
+      }),
+    );
+  });
+
+  it('paginates the catalog in the database and only loads its current page', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        article: 'BAR-001',
+        name: 'Батончик',
+        purchasePrice: new Prisma.Decimal(50),
+        salePrice: new Prisma.Decimal(90),
+        category: null,
+        supplier: null,
+      },
+    ]);
+    prisma.product.count.mockResolvedValue(151);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+    prisma.salesFact.findMany.mockResolvedValue([]);
+
+    const catalog = await service.getCatalog(
+      {
+        page: '2',
+        pageSize: '50',
+        name: 'батон',
+        storeId: ['store-1', 'store-2'],
+        sort: 'salePrice',
+        direction: 'desc',
+      },
+      user,
+    );
+
+    const [catalogQuery] = prisma.product.findMany.mock.calls[0] as [
+      ProductCatalogFindManyQuery,
+    ];
+    expect(catalogQuery.skip).toBe(50);
+    expect(catalogQuery.take).toBe(50);
+    expect(catalogQuery.orderBy).toEqual([
+      { salePrice: 'desc' },
+      { name: 'asc' },
+      { id: 'asc' },
+    ]);
+    expect(catalogQuery.where).toMatchObject({
+      tenantId: 'tenant-demo',
+      isActive: true,
+      name: { contains: 'батон', mode: 'insensitive' },
+      inventorySnapshots: {
+        some: {
+          storeId: { in: ['store-1', 'store-2'] },
+        },
+      },
+    });
+    expect(catalog).toEqual(
+      expect.objectContaining({
+        page: 2,
+        pageSize: 50,
+        total: 151,
+        totalPages: 4,
+        items: [
+          expect.objectContaining({
+            id: 'product-1',
+            unitCost: 50,
+            storeIds: [],
+          }),
+        ],
+      }),
     );
   });
 

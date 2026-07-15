@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["nativeDistinct"]
 }
 
 datasource db {
@@ -845,6 +846,7 @@ model InventorySnapshot {
 
   @@unique([tenantId, storeId, productId, snapshotDate])
   @@index([tenantId, snapshotDate])
+  @@index([tenantId, productId, storeId, snapshotDate])
   @@index([storeId])
   @@index([productId])
 }

@@ -1,67 +1,20 @@
+import Link from "next/link";
+
 import { ProductCreateForm } from "@/components/product-actions";
-import { ProductsTable } from "@/components/products-table";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
-import { getProducts } from "@/lib/products";
-import {
-  getReplenishmentReport,
-  getSalesDetailReport,
-  type ReplenishmentRow,
-  type SalesDetailRow,
-} from "@/lib/reports";
-import { getStores } from "@/lib/stores";
+import { getProductCatalogSummary } from "@/lib/products";
 
-type ProductsPageProps = {
-  searchParams?: Promise<{
-    movementStoreId?: string;
-    movementCategory?: string;
-    movementName?: string;
-    movementSort?: string;
-    movementDir?: string;
-  }>;
-};
-
-export default async function ProductsPage({
-  searchParams,
-}: ProductsPageProps) {
-  const params = await searchParams;
-  const movementRange = lastFullDaysRange(7);
-  const [
-    user,
-    products,
-    categories,
-    suppliers,
-    stores,
-    salesMovementReport,
-    replenishmentReport,
-  ] = await Promise.all([
+export default async function ProductsPage() {
+  const [user, summary, categories, suppliers] = await Promise.all([
     requireCurrentUser(),
-    getProducts(),
+    getProductCatalogSummary(),
     getCategories(),
     getSuppliers(),
-    getStores(),
-    getSalesDetailReport(movementRange),
-    getReplenishmentReport(movementRange),
   ]);
   const canEditProducts = can(user, "edit_products");
-  const operationalActiveProducts = products.filter(
-    (product) => product.isOperationalActive,
-  );
-  const movementRows = buildMovementRows(
-    salesMovementReport.rows,
-    movementRange.from,
-    movementRange.to,
-    {
-      storeId: params?.movementStoreId ?? "",
-      categoryName: params?.movementCategory ?? "",
-      name: params?.movementName ?? "",
-      sortKey: params?.movementSort ?? "",
-      sortDirection: params?.movementDir ?? "",
-      stockRows: replenishmentReport.rows,
-    },
-  );
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -73,618 +26,136 @@ export default async function ProductsPage({
             { href: "/assortment/dashboard", label: "Ассортимент" },
           ]}
         />
-        <div className="mb-8">
-          <p className="text-sm font-medium text-zinc-500">LeetPlus</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Товары</h1>
+
+        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-sm font-medium text-zinc-500">LeetPlus</p>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+              Товары
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-zinc-600">
+              Короткий рабочий хаб: переходите к нужному сценарию, не ожидая
+              загрузки всей истории ассортимента и остатков.
+            </p>
+          </div>
+          <Link
+            href="/products/table"
+            className="inline-flex w-fit items-center rounded-xl bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800"
+          >
+            Открыть каталог SKU
+          </Link>
         </div>
+
+        <section
+          aria-label="Сводка ассортимента"
+          className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <SummaryCard label="Всего SKU" value={summary.totalSku} />
+          <SummaryCard
+            label="Активные SKU"
+            value={summary.operationalActiveSku}
+            hint="Остаток сейчас или продажи за последние 14 дней."
+          />
+          <SummaryCard label="С категорией" value={summary.categorizedSku} />
+          <SummaryCard label="С поставщиком" value={summary.suppliedSku} />
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <HubLink
+            href="/products/table"
+            title="Каталог SKU"
+            description="Поиск, фильтры, сортировка и редактирование товаров с постраничной загрузкой."
+            action="Открыть каталог"
+          />
+          <HubLink
+            href="/products/movement/table"
+            title="Движение товаров"
+            description="Продажи и остатки по SKU за период — без смешения с каталогом."
+            action="Открыть движение"
+          />
+          <HubLink
+            href="/reports/oos/table"
+            title="Нет в наличии"
+            description="Оперативный список дефицита и рисков по ассортименту."
+            action="Открыть дефицит"
+          />
+          <HubLink
+            href="/reports/assortment-matrix/table"
+            title="Матрица ассортимента"
+            description="Настройка ролей и обязательности SKU для клубов."
+            action="Открыть матрицу"
+          />
+          <HubLink
+            href="/reports"
+            title="Отчёты и экспорт"
+            description="Экспортные сценарии и аналитика вынесены в самостоятельный раздел."
+            action="Перейти к отчётам"
+          />
+          <HubLink
+            href="/utilities/product-parsing/manual"
+            title="Поступления"
+            description="Ручная обработка товарных документов и поступлений."
+            action="Открыть поступления"
+          />
+        </section>
 
         {canEditProducts ? (
-          <div className="mb-6">
-            <ProductCreateForm categories={categories} suppliers={suppliers} />
-          </div>
+          <details className="mt-6 rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-zinc-800">
+              Добавить товар
+            </summary>
+            <div className="border-t border-zinc-200 p-5">
+              <ProductCreateForm
+                categories={categories}
+                suppliers={suppliers}
+              />
+            </div>
+          </details>
         ) : null}
-
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-zinc-500">Всего SKU</p>
-            <p className="mt-2 text-2xl font-semibold">{products.length}</p>
-          </div>
-
-          <div
-            title="Товары с остатками либо с продажами за последние 14 дней"
-            className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-          >
-            <p className="text-sm text-zinc-500">Активные SKU</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Остаток сейчас или продажи за последние 14 дней.
-            </p>
-            <p className="mt-2 text-2xl font-semibold">
-              {operationalActiveProducts.length}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-zinc-500">Категории</p>
-            <p className="mt-2 text-2xl font-semibold">
-              {
-                new Set(
-                  products
-                    .map((product) => product.category?.name)
-                    .filter(Boolean),
-                ).size
-              }
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-zinc-500">Поставщики</p>
-            <p className="mt-2 text-2xl font-semibold">
-              {
-                new Set(
-                  products
-                    .map((product) => product.supplier?.name)
-                    .filter(Boolean),
-                ).size
-              }
-            </p>
-          </div>
-        </div>
-
-        <ProductMovementSection
-          from={movementRange.from}
-          to={movementRange.to}
-          rows={movementRows}
-          stores={stores}
-          categories={categories}
-          selectedStoreId={params?.movementStoreId ?? ""}
-          selectedCategoryName={params?.movementCategory ?? ""}
-          selectedName={params?.movementName ?? ""}
-          sortKey={movementRows.sortKey}
-          sortDirection={movementRows.sortDirection}
-        />
-
-        <details className="mt-6 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-zinc-200 px-5 py-4 transition-colors hover:bg-zinc-50 [&::-webkit-details-marker]:hidden">
-            <span>
-              <span className="block text-base font-semibold">Ассортимент</span>
-              <span className="mt-1 block text-sm text-zinc-500">
-                Таблица SKU с фильтрами, экспортом и полным отчетом.
-              </span>
-            </span>
-            <span className="text-sm font-semibold text-zinc-500">
-              Развернуть
-            </span>
-          </summary>
-
-          <div>
-            <ProductsTable
-              products={products}
-              categories={categories}
-              suppliers={suppliers}
-              stores={stores}
-              canEditProducts={canEditProducts}
-            />
-          </div>
-        </details>
       </div>
     </main>
   );
 }
 
-type MovementRow = {
-  key: string;
+function SummaryCard({
+  label,
+  value,
+  hint,
+}: {
   label: string;
-  meta: string;
-  totalQuantity: number;
-  stockQuantity: number;
-  totalRevenue: number;
-  dailyQuantity: Record<string, number>;
-};
-
-type MovementSortKey =
-  | "totalQuantity"
-  | "stockQuantity"
-  | "totalRevenue"
-  | `day:${string}`;
-type MovementSortDirection = "asc" | "desc";
-
-function lastFullDaysRange(days: number) {
-  const now = new Date();
-  const toDate = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
-  );
-  const fromDate = new Date(toDate);
-  fromDate.setUTCDate(fromDate.getUTCDate() - (days - 1));
-
-  return {
-    from: fromDate.toISOString().slice(0, 10),
-    to: toDate.toISOString().slice(0, 10),
-  };
-}
-
-function buildMovementRows(
-  rows: SalesDetailRow[],
-  from: string,
-  to: string,
-  filters: {
-    storeId?: string;
-    categoryName?: string;
-    name?: string;
-    sortKey?: string;
-    sortDirection?: string;
-    stockRows: ReplenishmentRow[];
-  },
-) {
-  const dates = dateRange(from, to);
-  const stockByStoreProduct = new Map(
-    filters.stockRows.map((row) => [
-      `${row.storeId}:${row.productId}`,
-      row.stockQuantity,
-    ]),
-  );
-  const normalizedName = filters.name?.trim().toLowerCase() ?? "";
-  const filteredRows = rows.filter((row) => {
-    if (filters.storeId && row.storeId !== filters.storeId) {
-      return false;
-    }
-
-    if (
-      filters.categoryName &&
-      (row.categoryName ?? "Без категории") !== filters.categoryName
-    ) {
-      return false;
-    }
-
-    if (
-      normalizedName &&
-      !(row.productNameAtSale ?? row.productName)
-        .toLowerCase()
-        .includes(normalizedName)
-    ) {
-      return false;
-    }
-
-    return true;
-  });
-  const sortKey = resolveMovementSortKey(filters.sortKey, dates);
-  const sortDirection = resolveMovementSortDirection(filters.sortDirection);
-  const sortedRows = sortMovementRows(
-    aggregateMovementRows(filteredRows, dates, stockByStoreProduct),
-    sortKey,
-    sortDirection,
-  );
-
-  return {
-    dates,
-    products: sortedRows.slice(0, 20),
-    sortKey,
-    sortDirection,
-  };
-}
-
-function aggregateMovementRows(
-  rows: SalesDetailRow[],
-  dates: string[],
-  stockByStoreProduct: Map<string, number>,
-) {
-  const result = new Map<string, MovementRow>();
-
-  rows.forEach((row) => {
-    const categoryName = row.categoryName ?? "Без категории";
-    const key = `${row.storeId}:${row.productId}`;
-    const date = row.saleDate.slice(0, 10);
-    const current =
-      result.get(key) ??
-      ({
-        key,
-        label: row.productNameAtSale ?? row.productName,
-        meta: `${row.storeName} · ${categoryName}`,
-        totalQuantity: 0,
-        stockQuantity: stockByStoreProduct.get(key) ?? 0,
-        totalRevenue: 0,
-        dailyQuantity: Object.fromEntries(dates.map((day) => [day, 0])),
-      } satisfies MovementRow);
-
-    current.totalQuantity += row.quantity;
-    current.totalRevenue += row.revenue;
-    current.dailyQuantity[date] =
-      (current.dailyQuantity[date] ?? 0) + row.quantity;
-    result.set(key, current);
-  });
-
-  return [...result.values()].sort(
-    (a, b) =>
-      b.totalRevenue - a.totalRevenue ||
-      b.totalQuantity - a.totalQuantity ||
-      a.label.localeCompare(b.label, "ru"),
-  );
-}
-
-function sortMovementRows(
-  rows: MovementRow[],
-  sortKey: MovementSortKey,
-  sortDirection: MovementSortDirection,
-) {
-  const direction = sortDirection === "asc" ? 1 : -1;
-
-  return [...rows].sort((a, b) => {
-    const aValue = movementSortValue(a, sortKey);
-    const bValue = movementSortValue(b, sortKey);
-
-    if (aValue !== bValue) {
-      return (aValue - bValue) * direction;
-    }
-
-    return a.label.localeCompare(b.label, "ru");
-  });
-}
-
-function movementSortValue(row: MovementRow, sortKey: MovementSortKey) {
-  if (sortKey.startsWith("day:")) {
-    return row.dailyQuantity[sortKey.slice(4)] ?? 0;
-  }
-
-  if (sortKey === "stockQuantity") {
-    return row.stockQuantity;
-  }
-
-  if (sortKey === "totalQuantity") {
-    return row.totalQuantity;
-  }
-
-  return row.totalRevenue;
-}
-
-function resolveMovementSortKey(
-  value: string | undefined,
-  dates: string[],
-): MovementSortKey {
-  if (
-    value === "totalQuantity" ||
-    value === "stockQuantity" ||
-    value === "totalRevenue"
-  ) {
-    return value;
-  }
-
-  if (value?.startsWith("day:") && dates.includes(value.slice(4))) {
-    return value as MovementSortKey;
-  }
-
-  return "totalRevenue";
-}
-
-function resolveMovementSortDirection(
-  value: string | undefined,
-): MovementSortDirection {
-  return value === "asc" ? "asc" : "desc";
-}
-
-function dateRange(from: string, to: string) {
-  const dates: string[] = [];
-  const current = new Date(`${from}T00:00:00.000Z`);
-  const end = new Date(`${to}T00:00:00.000Z`);
-
-  while (current <= end) {
-    dates.push(current.toISOString().slice(0, 10));
-    current.setUTCDate(current.getUTCDate() + 1);
-  }
-
-  return dates;
-}
-
-function ProductMovementSection({
-  from,
-  to,
-  rows,
-  stores,
-  categories,
-  selectedStoreId,
-  selectedCategoryName,
-  selectedName,
-  sortKey,
-  sortDirection,
-}: {
-  from: string;
-  to: string;
-  rows: ReturnType<typeof buildMovementRows>;
-  stores: Awaited<ReturnType<typeof getStores>>;
-  categories: Awaited<ReturnType<typeof getCategories>>;
-  selectedStoreId: string;
-  selectedCategoryName: string;
-  selectedName: string;
-  sortKey: MovementSortKey;
-  sortDirection: MovementSortDirection;
-}) {
-  const fullReportParams = new URLSearchParams();
-
-  if (selectedStoreId) {
-    fullReportParams.set("storeId", selectedStoreId);
-  }
-
-  if (selectedCategoryName) {
-    fullReportParams.set("category", selectedCategoryName);
-  }
-
-  const fullReportHref = `/products/movement/table${
-    fullReportParams.size > 0 ? `?${fullReportParams.toString()}` : ""
-  }`;
-
-  return (
-    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h2 className="text-base font-semibold">Движение товара</h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Продажи за последние 7 полных дней, {formatDateLabel(from)} -{" "}
-              {formatDateLabel(to)}, по SKU с фильтрами по клубу и категории.
-            </p>
-          </div>
-          <a
-            href={fullReportHref}
-            className="inline-flex w-fit items-center rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-          >
-            Открыть полный отчет
-          </a>
-        </div>
-        <form className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
-          <input type="hidden" name="movementSort" value={sortKey} />
-          <input type="hidden" name="movementDir" value={sortDirection} />
-          <label className="block text-xs font-medium uppercase text-zinc-500">
-            Клуб
-            <select
-              name="movementStoreId"
-              defaultValue={selectedStoreId}
-              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-950"
-            >
-              <option value="">Все клубы</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-xs font-medium uppercase text-zinc-500">
-            Категория
-            <select
-              name="movementCategory"
-              defaultValue={selectedCategoryName}
-              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-950"
-            >
-              <option value="">Все категории</option>
-              <option value="Без категории">Без категории</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.name}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-xs font-medium uppercase text-zinc-500">
-            Наименование
-            <input
-              name="movementName"
-              defaultValue={selectedName}
-              placeholder="Фильтр"
-              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-950"
-            />
-          </label>
-          <button
-            type="submit"
-            className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-          >
-            Применить
-          </button>
-        </form>
-      </div>
-      <MovementTable
-        rows={rows.products}
-        dates={rows.dates}
-        selectedStoreId={selectedStoreId}
-        selectedCategoryName={selectedCategoryName}
-        selectedName={selectedName}
-        sortKey={sortKey}
-        sortDirection={sortDirection}
-      />
-    </section>
-  );
-}
-
-function MovementTable({
-  rows,
-  dates,
-  selectedStoreId,
-  selectedCategoryName,
-  selectedName,
-  sortKey,
-  sortDirection,
-}: {
-  rows: MovementRow[];
-  dates: string[];
-  selectedStoreId: string;
-  selectedCategoryName: string;
-  selectedName: string;
-  sortKey: MovementSortKey;
-  sortDirection: MovementSortDirection;
+  value: number;
+  hint?: string;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[920px]">
-        <table className="w-full text-left text-sm">
-          <thead className="uppercase text-zinc-400">
-            <tr className="border-b border-zinc-200 bg-zinc-50">
-              <th className="px-5 py-3 font-medium">Наименование</th>
-              <th className="px-5 py-3 font-medium">Клуб / категория</th>
-              {dates.map((date) => (
-                <th key={date} className="px-3 py-3 text-right font-medium">
-                  <MovementSortLink
-                    label={formatShortDate(date)}
-                    columnKey={`day:${date}`}
-                    selectedStoreId={selectedStoreId}
-                    selectedCategoryName={selectedCategoryName}
-                    selectedName={selectedName}
-                    sortKey={sortKey}
-                    sortDirection={sortDirection}
-                  />
-                </th>
-              ))}
-              <th className="px-5 py-3 text-right font-medium">
-                <MovementSortLink
-                  label="Итого"
-                  columnKey="totalQuantity"
-                  selectedStoreId={selectedStoreId}
-                  selectedCategoryName={selectedCategoryName}
-                  selectedName={selectedName}
-                  sortKey={sortKey}
-                  sortDirection={sortDirection}
-                />
-              </th>
-              <th className="px-5 py-3 text-right font-medium">
-                <MovementSortLink
-                  label="Остаток"
-                  columnKey="stockQuantity"
-                  selectedStoreId={selectedStoreId}
-                  selectedCategoryName={selectedCategoryName}
-                  selectedName={selectedName}
-                  sortKey={sortKey}
-                  sortDirection={sortDirection}
-                />
-              </th>
-              <th className="px-5 py-3 text-right font-medium">
-                <MovementSortLink
-                  label="Выручка"
-                  columnKey="totalRevenue"
-                  selectedStoreId={selectedStoreId}
-                  selectedCategoryName={selectedCategoryName}
-                  selectedName={selectedName}
-                  sortKey={sortKey}
-                  sortDirection={sortDirection}
-                />
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {rows.map((row) => (
-              <tr key={row.key}>
-                <td className="max-w-[280px] px-5 py-3 font-medium text-zinc-950">
-                  {row.label}
-                </td>
-                <td className="px-5 py-3 text-zinc-500">{row.meta}</td>
-                {dates.map((date) => (
-                  <td key={date} className="px-3 py-3 text-right tabular-nums">
-                    {formatQuantity(row.dailyQuantity[date] ?? 0)}
-                  </td>
-                ))}
-                <td className="px-5 py-3 text-right font-semibold tabular-nums">
-                  {formatQuantity(row.totalQuantity)}
-                </td>
-                <td className="px-5 py-3 text-right font-semibold tabular-nums">
-                  {formatQuantity(row.stockQuantity)}
-                </td>
-                <td className="px-5 py-3 text-right font-semibold tabular-nums">
-                  {formatCurrency(row.totalRevenue)}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 ? (
-              <tr>
-                <td
-                  className="px-5 py-8 text-center text-zinc-500"
-                  colSpan={dates.length + 5}
-                >
-                  Продаж за период нет.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <p className="text-sm text-zinc-500">{label}</p>
+      {hint ? <p className="mt-1 text-xs text-zinc-500">{hint}</p> : null}
+      <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
 
-function MovementSortLink({
-  label,
-  columnKey,
-  selectedStoreId,
-  selectedCategoryName,
-  selectedName,
-  sortKey,
-  sortDirection,
+function HubLink({
+  href,
+  title,
+  description,
+  action,
 }: {
-  label: string;
-  columnKey: MovementSortKey;
-  selectedStoreId: string;
-  selectedCategoryName: string;
-  selectedName: string;
-  sortKey: MovementSortKey;
-  sortDirection: MovementSortDirection;
+  href: string;
+  title: string;
+  description: string;
+  action: string;
 }) {
-  const isActive = sortKey === columnKey;
-  const nextDirection: MovementSortDirection =
-    isActive && sortDirection === "desc" ? "asc" : "desc";
-  const params = new URLSearchParams({
-    movementSort: columnKey,
-    movementDir: nextDirection,
-  });
-
-  if (selectedStoreId) {
-    params.set("movementStoreId", selectedStoreId);
-  }
-
-  if (selectedCategoryName) {
-    params.set("movementCategory", selectedCategoryName);
-  }
-
-  if (selectedName) {
-    params.set("movementName", selectedName);
-  }
-
   return (
-    <a
-      href={`?${params.toString()}`}
-      className="inline-flex items-center justify-end gap-1 text-zinc-500 transition hover:text-zinc-950"
+    <Link
+      href={href}
+      className="group rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
     >
-      <span>{label}</span>
-      <span aria-hidden="true" className="text-xs">
-        {isActive ? (sortDirection === "desc" ? "↓" : "↑") : "↕"}
-      </span>
-    </a>
+      <h2 className="text-base font-semibold text-zinc-950">{title}</h2>
+      <p className="mt-2 text-sm leading-5 text-zinc-600">{description}</p>
+      <p className="mt-4 text-sm font-semibold text-zinc-700 group-hover:text-zinc-950">
+        {action} →
+      </p>
+    </Link>
   );
-}
-
-function formatQuantity(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 0,
-    style: "currency",
-    currency: "RUB",
-  }).format(value);
-}
-
-function formatDateLabel(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-
-  if (!match) {
-    return value;
-  }
-
-  return `${match[3]}.${match[2]}.${match[1]}`;
-}
-
-function formatShortDate(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-
-  if (!match) {
-    return value;
-  }
-
-  return `${match[3]}.${match[2]}`;
 }

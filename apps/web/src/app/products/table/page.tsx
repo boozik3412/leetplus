@@ -4,13 +4,37 @@ import { ProductsTable } from "@/components/products-table";
 import { requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
-import { getProducts } from "@/lib/products";
+import {
+  getProductCatalog,
+  type ProductCatalogQuery,
+  type ProductCatalogSort,
+} from "@/lib/products";
 import { getStores } from "@/lib/stores";
 
-export default async function ProductsTablePage() {
-  const [user, products, categories, suppliers, stores] = await Promise.all([
+type ProductsTablePageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+const PRODUCT_CATALOG_SORTS = new Set<ProductCatalogSort>([
+  "name",
+  "article",
+  "category",
+  "supplier",
+  "assortmentRole",
+  "isMandatory",
+  "purchasePrice",
+  "salePrice",
+  "createdAt",
+]);
+
+export default async function ProductsTablePage({
+  searchParams,
+}: ProductsTablePageProps) {
+  const params = await searchParams;
+  const query = resolveCatalogQuery(params);
+  const [user, catalog, categories, suppliers, stores] = await Promise.all([
     requireCurrentUser(),
-    getProducts(),
+    getProductCatalog(query),
     getCategories(),
     getSuppliers(),
     getStores(),
@@ -45,40 +69,67 @@ export default async function ProductsTablePage() {
               /
             </li>
             <li className="font-medium text-zinc-950" aria-current="page">
-              Табличный режим
+              Каталог
             </li>
           </ol>
         </nav>
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-medium text-emerald-700">
-              Табличный режим
-            </p>
+            <p className="text-sm font-medium text-emerald-700">Каталог SKU</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">
               Товары
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-              Расширенный вид ассортимента с фильтрами, сортировкой, экспортом и
-              горизонтальным скроллом.
+              Фильтруйте, сортируйте и редактируйте ассортимент. На странице
+              загружается только выбранная часть каталога.
             </p>
           </div>
-          <a
+          <Link
             href="/products"
             className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
           >
-            Вернуться к товарам
-          </a>
+            К хабу товаров
+          </Link>
         </div>
       </div>
 
       <ProductsTable
-        products={products}
+        catalog={catalog}
         categories={categories}
         suppliers={suppliers}
         stores={stores}
         canEditProducts={canEditProducts}
-        tableMode
+        query={query}
       />
     </main>
   );
+}
+
+function resolveCatalogQuery(
+  params: Record<string, string | string[] | undefined>,
+): ProductCatalogQuery {
+  const sort = firstParam(params.sort);
+
+  return {
+    page: firstParam(params.page),
+    pageSize: firstParam(params.pageSize),
+    name: firstParam(params.name),
+    storeIds: allParams(params.storeId),
+    sort: PRODUCT_CATALOG_SORTS.has(sort as ProductCatalogSort)
+      ? (sort as ProductCatalogSort)
+      : undefined,
+    direction: firstParam(params.direction) === "desc" ? "desc" : "asc",
+  };
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function allParams(value: string | string[] | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
 }

@@ -1,5 +1,14 @@
 import type { ProductAssortmentRole } from '@prisma/client';
 
+export type ProductCatalogQuery = {
+  page?: string | number;
+  pageSize?: string | number;
+  name?: string;
+  storeId?: string | string[];
+  sort?: string;
+  direction?: string;
+};
+
 export type CreateProductDto = {
   article: string;
   name: string;

@@ -8,10 +8,31 @@ import { Prisma, ProductAssortmentRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { AuthenticatedUser } from '../auth/auth.types';
-import type { CreateProductDto, UpdateProductDto } from './products.dto';
+import type {
+  CreateProductDto,
+  ProductCatalogQuery,
+  UpdateProductDto,
+} from './products.dto';
 import { buildProductCostBasis } from '../reports/stock-cost-basis';
 
 const OPERATIONAL_ACTIVE_DAYS = 14;
+const CATALOG_PAGE_SIZE = 50;
+const MAX_CATALOG_PAGE_SIZE = 100;
+
+const PRODUCT_CATALOG_SORT_FIELDS = [
+  'name',
+  'article',
+  'category',
+  'supplier',
+  'assortmentRole',
+  'isMandatory',
+  'purchasePrice',
+  'salePrice',
+  'createdAt',
+] as const;
+
+type ProductCatalogSort = (typeof PRODUCT_CATALOG_SORT_FIELDS)[number];
+type ProductCatalogDirection = 'asc' | 'desc';
 
 @Injectable()
 export class ProductsService {
@@ -179,6 +200,257 @@ export class ProductsService {
     });
   }
 
+  async getSummary(user?: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const operationalActivePeriod = this.resolveOperationalActivePeriod();
+
+    const [
+      totalSku,
+      categorizedSku,
+      suppliedSku,
+      latestInventory,
+      recentSalesFacts,
+    ] = await Promise.all([
+      this.prisma.product.count({
+        where: { tenantId, isActive: true },
+      }),
+      this.prisma.product.count({
+        where: { tenantId, isActive: true, categoryId: { not: null } },
+      }),
+      this.prisma.product.count({
+        where: { tenantId, isActive: true, supplierId: { not: null } },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          snapshotDate: { lte: operationalActivePeriod.toDate },
+          product: { isActive: true },
+        },
+        select: {
+          productId: true,
+          quantity: true,
+        },
+        distinct: ['storeId', 'productId'],
+        orderBy: [
+          { storeId: 'asc' },
+          { productId: 'asc' },
+          { snapshotDate: 'desc' },
+        ],
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          saleDate: {
+            gte: operationalActivePeriod.fromDate,
+            lte: operationalActivePeriod.toDate,
+          },
+          product: { isActive: true },
+        },
+        select: { productId: true },
+        distinct: ['productId'],
+      }),
+    ]);
+
+    const operationalActiveProductIds = new Set(
+      latestInventory
+        .filter((snapshot) => snapshot.quantity.toNumber() > 0)
+        .map((snapshot) => snapshot.productId),
+    );
+
+    recentSalesFacts.forEach((fact) => {
+      operationalActiveProductIds.add(fact.productId);
+    });
+
+    return {
+      totalSku,
+      operationalActiveSku: operationalActiveProductIds.size,
+      categorizedSku,
+      suppliedSku,
+    };
+  }
+
+  async getCatalog(query: ProductCatalogQuery, user?: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const request = this.resolveCatalogQuery(query);
+    const operationalActivePeriod = this.resolveOperationalActivePeriod();
+    const latestSalesPeriod = this.resolveLatestSalesPeriod();
+    const where: Prisma.ProductWhereInput = {
+      tenantId,
+      isActive: true,
+      ...(request.name
+        ? { name: { contains: request.name, mode: 'insensitive' } }
+        : {}),
+      ...(request.storeIds.length > 0
+        ? {
+            inventorySnapshots: {
+              some: {
+                storeId: { in: request.storeIds },
+                snapshotDate: { lte: operationalActivePeriod.toDate },
+              },
+            },
+          }
+        : {}),
+    };
+
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where,
+        include: {
+          category: true,
+          supplier: true,
+        },
+        orderBy: this.catalogOrderBy(request.sort, request.direction),
+        skip: (request.page - 1) * request.pageSize,
+        take: request.pageSize,
+      }),
+      this.prisma.product.count({ where }),
+    ]);
+
+    if (products.length === 0) {
+      return {
+        items: [],
+        page: request.page,
+        pageSize: request.pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / request.pageSize)),
+      };
+    }
+
+    const productIds = products.map((product) => product.id);
+    const [latestInventory, recentSalesFacts, latestSalesFacts] =
+      await Promise.all([
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            productId: { in: productIds },
+            snapshotDate: { lte: operationalActivePeriod.toDate },
+          },
+          select: {
+            productId: true,
+            storeId: true,
+            quantity: true,
+            store: { select: { name: true } },
+          },
+          distinct: ['storeId', 'productId'],
+          orderBy: [
+            { storeId: 'asc' },
+            { productId: 'asc' },
+            { snapshotDate: 'desc' },
+          ],
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            productId: { in: productIds },
+            isCanceled: false,
+            saleDate: {
+              gte: operationalActivePeriod.fromDate,
+              lte: operationalActivePeriod.toDate,
+            },
+          },
+          select: { productId: true },
+          distinct: ['productId'],
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            productId: { in: productIds },
+            isCanceled: false,
+            saleDate: {
+              gte: latestSalesPeriod.fromDate,
+              lte: latestSalesPeriod.toDate,
+            },
+          },
+          select: {
+            productId: true,
+            quantity: true,
+            revenue: true,
+            cost: true,
+          },
+          distinct: ['productId'],
+          orderBy: [{ productId: 'asc' }, { saleDate: 'desc' }],
+        }),
+      ]);
+
+    const stockByProduct = new Map<string, number>();
+    const storesByProduct = new Map<
+      string,
+      { storeIds: string[]; storeNames: string[] }
+    >();
+
+    latestInventory.forEach((snapshot) => {
+      const current = storesByProduct.get(snapshot.productId) ?? {
+        storeIds: [],
+        storeNames: [],
+      };
+
+      current.storeIds.push(snapshot.storeId);
+      current.storeNames.push(snapshot.store.name);
+      storesByProduct.set(snapshot.productId, current);
+      stockByProduct.set(
+        snapshot.productId,
+        (stockByProduct.get(snapshot.productId) ?? 0) +
+          snapshot.quantity.toNumber(),
+      );
+    });
+
+    const recentlySoldProductIds = new Set(
+      recentSalesFacts.map((fact) => fact.productId),
+    );
+    const latestSaleByProduct = new Map(
+      latestSalesFacts.map((fact) => {
+        const quantity = fact.quantity.toNumber();
+
+        return [
+          fact.productId,
+          {
+            unitCost: quantity > 0 ? fact.cost.toNumber() / quantity : null,
+            unitSalePrice:
+              quantity > 0 ? fact.revenue.toNumber() / quantity : null,
+          },
+        ] as const;
+      }),
+    );
+
+    return {
+      items: products.map((product) => {
+        const latestSale = latestSaleByProduct.get(product.id);
+        const storeInfo = storesByProduct.get(product.id) ?? {
+          storeIds: [],
+          storeNames: [],
+        };
+        const purchasePrice =
+          product.purchasePrice.toNumber() > 0
+            ? product.purchasePrice
+            : new Prisma.Decimal(latestSale?.unitCost ?? 0);
+        const salePrice =
+          product.salePrice.toNumber() > 0
+            ? product.salePrice
+            : new Prisma.Decimal(latestSale?.unitSalePrice ?? 0);
+
+        return {
+          ...product,
+          purchasePrice,
+          salePrice,
+          unitCost:
+            product.purchasePrice.toNumber() > 0
+              ? product.purchasePrice.toNumber()
+              : (latestSale?.unitCost ?? null),
+          isOperationalActive:
+            (stockByProduct.get(product.id) ?? 0) > 0 ||
+            recentlySoldProductIds.has(product.id),
+          storeIds: storeInfo.storeIds,
+          storeNames: storeInfo.storeNames.sort((a, b) => a.localeCompare(b)),
+        };
+      }),
+      page: request.page,
+      pageSize: request.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / request.pageSize)),
+    };
+  }
+
   private resolveOperationalActivePeriod() {
     const now = new Date();
     const toDate = new Date(
@@ -203,6 +475,87 @@ export class ProductsService {
     toDate.setUTCHours(23, 59, 59, 999);
 
     return { fromDate, toDate };
+  }
+
+  private resolveCatalogQuery(query: ProductCatalogQuery) {
+    const page = this.resolveBoundedInteger(
+      query.page,
+      1,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    );
+    const pageSize = this.resolveBoundedInteger(
+      query.pageSize,
+      CATALOG_PAGE_SIZE,
+      1,
+      MAX_CATALOG_PAGE_SIZE,
+    );
+    const sort = PRODUCT_CATALOG_SORT_FIELDS.includes(
+      query.sort as ProductCatalogSort,
+    )
+      ? (query.sort as ProductCatalogSort)
+      : 'name';
+    const storeValues = Array.isArray(query.storeId)
+      ? query.storeId
+      : query.storeId
+        ? [query.storeId]
+        : [];
+    const storeIds = [
+      ...new Set(
+        storeValues
+          .flatMap((value) => value.split(','))
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    return {
+      page,
+      pageSize,
+      name: query.name?.trim() ?? '',
+      storeIds,
+      sort,
+      direction: query.direction === 'desc' ? 'desc' : 'asc',
+    } satisfies {
+      page: number;
+      pageSize: number;
+      name: string;
+      storeIds: string[];
+      sort: ProductCatalogSort;
+      direction: ProductCatalogDirection;
+    };
+  }
+
+  private resolveBoundedInteger(
+    value: string | number | undefined,
+    fallback: number,
+    min: number,
+    max: number,
+  ) {
+    const parsed = Number(value);
+
+    if (!Number.isInteger(parsed)) {
+      return fallback;
+    }
+
+    return Math.min(Math.max(parsed, min), max);
+  }
+
+  private catalogOrderBy(
+    sort: ProductCatalogSort,
+    direction: ProductCatalogDirection,
+  ): Prisma.ProductOrderByWithRelationInput[] {
+    const tieBreaker: Prisma.ProductOrderByWithRelationInput = { id: 'asc' };
+
+    if (sort === 'category') {
+      return [{ category: { name: direction } }, { name: 'asc' }, tieBreaker];
+    }
+
+    if (sort === 'supplier') {
+      return [{ supplier: { name: direction } }, { name: 'asc' }, tieBreaker];
+    }
+
+    return [{ [sort]: direction }, { name: 'asc' }, tieBreaker];
   }
 
   async findById(id: string, user?: AuthenticatedUser) {

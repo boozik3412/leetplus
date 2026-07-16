@@ -30,4 +30,10 @@ export type CategorySourceProductResolutionDto = {
 export type ApplyCategorySourceMappingsDto =
   PreviewCategorySourceMappingsDto & {
     resolutions?: CategorySourceProductResolutionDto[];
+    /**
+     * Applies the mapped internal category only to active products that do not
+     * have one yet. Products with an existing category and ambiguous Langame
+     * sources are deliberately left untouched.
+     */
+    assignUncategorized?: boolean;
   };

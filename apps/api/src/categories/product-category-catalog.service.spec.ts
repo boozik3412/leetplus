@@ -89,4 +89,103 @@ describe('ProductCategoryCatalogService', () => {
     );
     expect(prisma).not.toHaveProperty('product');
   });
+
+  it('bulk-assigns only uncategorized products with one Langame target', async () => {
+    const service = new ProductCategoryCatalogService(
+      {} as never,
+      {} as never,
+      { syncTenant: jest.fn() } as never,
+    );
+    const tx = {
+      langameClubProductConfiguration: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            externalDomain: '46.langamepro.ru',
+            externalGroupId: '3',
+            productId: 'product-safe',
+            product: { categoryId: null, isActive: true },
+          },
+          {
+            externalDomain: '46.langamepro.ru',
+            externalGroupId: '3',
+            productId: 'product-already-categorized',
+            product: { categoryId: 'category-existing', isActive: true },
+          },
+          {
+            externalDomain: '46.langamepro.ru',
+            externalGroupId: '3',
+            productId: 'product-ambiguous',
+            product: { categoryId: null, isActive: true },
+          },
+          {
+            externalDomain: '46.langamepro.ru',
+            externalGroupId: '5',
+            productId: 'product-ambiguous',
+            product: { categoryId: null, isActive: true },
+          },
+        ]),
+      },
+      product: { update: jest.fn() },
+      categorySourceMappingEvent: { create: jest.fn() },
+    };
+
+    const updated = await (service as unknown as {
+      assignUncategorizedProducts: (
+        transaction: unknown,
+        tenantId: string,
+        mappings: unknown[],
+        categoryIdsByCreateName: Map<string, string>,
+        mappingIdsByKey: Map<string, string>,
+        userId: string,
+      ) => Promise<number>;
+    }).assignUncategorizedProducts(
+      tx,
+      'tenant-1',
+      [
+        {
+          externalDomain: '46.langamepro.ru',
+          externalGroupId: '3',
+          action: 'MAP',
+          categoryId: 'category-drinks',
+          categoryName: 'Напитки',
+          createCategoryName: null,
+          status: 'CONFIRMED',
+          confidence: 100,
+        },
+        {
+          externalDomain: '46.langamepro.ru',
+          externalGroupId: '5',
+          action: 'MAP',
+          categoryId: 'category-snacks',
+          categoryName: 'Снэки',
+          createCategoryName: null,
+          status: 'CONFIRMED',
+          confidence: 100,
+        },
+      ],
+      new Map(),
+      new Map([
+        ['46.langamepro.ru:3', 'mapping-drinks'],
+        ['46.langamepro.ru:5', 'mapping-snacks'],
+      ]),
+      'user-1',
+    );
+
+    expect(updated).toBe(1);
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 'product-safe' },
+      data: { categoryId: 'category-drinks' },
+    });
+    expect(tx.product.update).toHaveBeenCalledTimes(1);
+    expect(tx.categorySourceMappingEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          productId: 'product-safe',
+          mappingId: 'mapping-drinks',
+          previousValue: { categoryId: null },
+          nextValue: { categoryId: 'category-drinks', assignedBy: 'bulk-import' },
+        }),
+      }),
+    );
+  });
 });

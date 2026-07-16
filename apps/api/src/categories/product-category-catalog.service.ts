@@ -40,6 +40,12 @@ type PreviewCategoryTarget = {
   isNew: boolean;
 };
 
+type BulkAssignmentTarget = {
+  categoryId: string;
+  externalDomain: string;
+  externalGroupId: string;
+};
+
 @Injectable()
 export class ProductCategoryCatalogService {
   constructor(
@@ -523,11 +529,22 @@ export class ProductCategoryCatalogService {
         mappingIdsByKey,
         user.id,
       );
+      const autoAssignedProducts = dto.assignUncategorized
+        ? await this.assignUncategorizedProducts(
+            tx,
+            tenantId,
+            mappings,
+            categoryIdsByCreateName,
+            mappingIdsByKey,
+            user.id,
+          )
+        : 0;
 
       return {
         mappingsChanged,
         categoriesCreated: materializedCategories.createdCount,
-        productsUpdated: updatedProducts,
+        productsUpdated: updatedProducts + autoAssignedProducts,
+        autoAssignedProducts,
       };
     });
   }
@@ -772,6 +789,140 @@ export class ProductCategoryCatalogService {
           externalGroupId: resolution.externalGroupId,
           previousValue: { categoryId: product.categoryId },
           nextValue: { categoryId: resolution.categoryId },
+          createdByUserId: userId,
+        },
+      });
+      updated += 1;
+    }
+
+    return updated;
+  }
+
+  private async assignUncategorizedProducts(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    mappings: MappingTarget[],
+    categoryIdsByCreateName: Map<string, string>,
+    mappingIdsByKey: Map<string, string>,
+    userId: string,
+  ) {
+    const targetsBySourceKey = new Map<string, BulkAssignmentTarget>();
+
+    for (const mapping of mappings) {
+      if (mapping.action !== 'MAP') {
+        continue;
+      }
+
+      const categoryId =
+        mapping.categoryId ??
+        categoryIdsByCreateName.get(mapping.createCategoryName ?? '');
+
+      if (!categoryId) {
+        throw new BadRequestException('Category target is required');
+      }
+
+      targetsBySourceKey.set(
+        this.externalKey(mapping.externalDomain, mapping.externalGroupId),
+        {
+          categoryId,
+          externalDomain: mapping.externalDomain,
+          externalGroupId: mapping.externalGroupId,
+        },
+      );
+    }
+
+    if (targetsBySourceKey.size === 0) {
+      return 0;
+    }
+
+    const configurations = await tx.langameClubProductConfiguration.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        productId: { not: null },
+      },
+      select: {
+        externalDomain: true,
+        externalGroupId: true,
+        productId: true,
+        product: {
+          select: { categoryId: true, isActive: true },
+        },
+      },
+    });
+    const candidatesByProduct = new Map<
+      string,
+      {
+        productId: string;
+        productCategoryId: string | null;
+        productIsActive: boolean;
+        targets: Map<string, BulkAssignmentTarget>;
+      }
+    >();
+
+    for (const configuration of configurations) {
+      if (
+        !configuration.productId ||
+        !configuration.product ||
+        !configuration.externalGroupId
+      ) {
+        continue;
+      }
+
+      const target = targetsBySourceKey.get(
+        this.externalKey(
+          configuration.externalDomain,
+          configuration.externalGroupId,
+        ),
+      );
+
+      if (!target) {
+        continue;
+      }
+
+      const candidate = candidatesByProduct.get(configuration.productId) ?? {
+        productId: configuration.productId,
+        productCategoryId: configuration.product.categoryId,
+        productIsActive: configuration.product.isActive,
+        targets: new Map(),
+      };
+      candidate.targets.set(target.categoryId, target);
+      candidatesByProduct.set(configuration.productId, candidate);
+    }
+
+    let updated = 0;
+
+    for (const candidate of candidatesByProduct.values()) {
+      // Existing internal categories are never overwritten by the bulk action.
+      // A product that receives different Langame targets in different clubs is
+      // ambiguous and must be handled through the preview by a user.
+      if (
+        !candidate.productIsActive ||
+        candidate.productCategoryId ||
+        candidate.targets.size !== 1
+      ) {
+        continue;
+      }
+
+      const target = [...candidate.targets.values()][0];
+
+      await tx.product.update({
+        where: { id: candidate.productId },
+        data: { categoryId: target.categoryId },
+      });
+      await tx.categorySourceMappingEvent.create({
+        data: {
+          tenantId,
+          mappingId: mappingIdsByKey.get(
+            this.externalKey(target.externalDomain, target.externalGroupId),
+          ) ?? null,
+          productId: candidate.productId,
+          action: 'PRODUCT_CATEGORY_ASSIGNED',
+          source: IntegrationProvider.LANGAME,
+          externalDomain: target.externalDomain,
+          externalGroupId: target.externalGroupId,
+          previousValue: { categoryId: null },
+          nextValue: { categoryId: target.categoryId, assignedBy: 'bulk-import' },
           createdByUserId: userId,
         },
       });

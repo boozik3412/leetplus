@@ -15453,7 +15453,9 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
         )
       : 1;
   const target =
-    taskType === "PLAY_TIME"
+    taskType === "APP_OPEN"
+      ? 1
+      : taskType === "PLAY_TIME"
       ? Math.max(1, condition.target)
       : taskType === "PRODUCT_PURCHASE"
         ? condition.amountMode === "PERIOD_TOTAL"
@@ -15472,6 +15474,7 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
               : Math.max(1, condition.checkInCount);
   const triggerKinds: Record<BattlePassStepConditionValue["taskType"], string> =
     {
+      APP_OPEN: "APP_OPEN",
       PLAY_TIME: "PLAY_HOUR",
       PRODUCT_PURCHASE: "PRODUCT_PURCHASE",
       BALANCE_TOPUP: "BALANCE_TOPUP",
@@ -15479,13 +15482,16 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
     };
   const eventTypes: Record<BattlePassStepConditionValue["taskType"], string[]> =
     {
+      APP_OPEN: ["APP_OPEN"],
       PLAY_TIME: ["PLAY_HOUR", "SESSION_STOP"],
       PRODUCT_PURCHASE: ["PRODUCT_PURCHASE", "BAR_PURCHASE"],
       BALANCE_TOPUP: ["BALANCE_TOPUP"],
       CHECK_IN: ["CHECK_IN"],
     };
   const aggregation =
-    taskType === "PLAY_TIME"
+    taskType === "APP_OPEN"
+      ? "exists"
+      : taskType === "PLAY_TIME"
       ? "duration"
       : taskType === "PRODUCT_PURCHASE"
         ? condition.amountMode === "PERIOD_TOTAL"
@@ -15501,7 +15507,9 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
             ? "streak"
             : "count";
   const unit =
-    taskType === "PLAY_TIME"
+    taskType === "APP_OPEN"
+      ? "открытие"
+      : taskType === "PLAY_TIME"
       ? "минут"
       : taskType === "PRODUCT_PURCHASE"
         ? condition.amountMode === "PERIOD_TOTAL"
@@ -15515,11 +15523,13 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
             ? "дней"
             : "чекинов";
   const weekdays =
-    taskType === "CHECK_IN" && !condition.specificDayEnabled
+    taskType === "APP_OPEN" ||
+    (taskType === "CHECK_IN" && !condition.specificDayEnabled)
       ? []
       : sortWeekdays(condition.weekdays);
   const hours =
-    taskType === "CHECK_IN" && !condition.specificTimeEnabled
+    taskType === "APP_OPEN" ||
+    (taskType === "CHECK_IN" && !condition.specificTimeEnabled)
       ? []
       : condition.hours.trim()
         ? [condition.hours.trim()]
@@ -15530,7 +15540,7 @@ function seasonStepActivationRules(step: SeasonLevelStepForm) {
     schemaVersion: 2,
     taskType,
     triggerKind: triggerKinds[taskType],
-    sessionType: condition.sessionType,
+    sessionType: taskType === "APP_OPEN" ? "ANY" : condition.sessionType,
     periodicity: "NONE",
     purchaseSource:
       taskType === "PRODUCT_PURCHASE" ? condition.purchaseSource : undefined,
@@ -15962,12 +15972,15 @@ function seasonStepConditionFromRules(
   const triggerKind = recordString(rules, "triggerKind")?.toUpperCase() ?? "";
   const rawTaskType = recordString(rules, "taskType")?.toUpperCase();
   const taskType: BattlePassStepConditionValue["taskType"] =
+    rawTaskType === "APP_OPEN" ||
     rawTaskType === "PRODUCT_PURCHASE" ||
     rawTaskType === "BALANCE_TOPUP" ||
     rawTaskType === "CHECK_IN" ||
     rawTaskType === "PLAY_TIME"
       ? rawTaskType
-      : triggerKind.includes("PURCHASE")
+      : triggerKind === "APP_OPEN"
+        ? "APP_OPEN"
+        : triggerKind.includes("PURCHASE")
         ? "PRODUCT_PURCHASE"
         : triggerKind.includes("BALANCE")
           ? "BALANCE_TOPUP"

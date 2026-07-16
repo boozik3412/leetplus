@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 export const guestGameMissionDefinitionVersion = 2;
 
 export const guestGameMissionTaskTypes = [
+  'APP_OPEN',
   'PLAY_TIME',
   'PRODUCT_PURCHASE',
   'BALANCE_TOPUP',
@@ -62,6 +63,7 @@ export function missionEvaluationPolicy(
 
 export function missionWizardTrigger(taskType: GuestGameMissionTaskType) {
   const values: Record<GuestGameMissionTaskType, string> = {
+    APP_OPEN: 'APP_OPEN',
     PLAY_TIME: 'PLAY_HOUR',
     PRODUCT_PURCHASE: 'PRODUCT_PURCHASE',
     BALANCE_TOPUP: 'BALANCE_TOPUP',
@@ -99,6 +101,7 @@ export function normalizeMissionWizardConditions(
     'ANY',
   );
   const eventTypes: Record<GuestGameMissionTaskType, string[]> = {
+    APP_OPEN: ['APP_OPEN'],
     PLAY_TIME: ['PLAY_HOUR', 'SESSION_STOP'],
     PRODUCT_PURCHASE: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
     BALANCE_TOPUP: ['BALANCE_TOPUP'],
@@ -213,14 +216,22 @@ export function normalizeMissionWizardConditions(
       stringValue(dto.visibility)?.toUpperCase() === 'HIDDEN'
         ? 'HIDDEN'
         : 'VISIBLE',
-    sessionType,
+    sessionType: taskType === 'APP_OPEN' ? 'ANY' : sessionType,
     ...(taskType === 'PRODUCT_PURCHASE'
       ? {
           purchaseSource,
           ...(purchaseSource === 'CATEGORY' ? { categoryCatalogSource } : {}),
         }
       : {}),
-    metric: jsonObject(normalizedMetric),
+    metric:
+      taskType === 'APP_OPEN'
+        ? jsonObject({
+            eventTypes: ['APP_OPEN'],
+            aggregation: 'exists',
+            target: 1,
+            unit: 'открытие',
+          })
+        : jsonObject(normalizedMetric),
     presentation: jsonObject({
       ...jsonObject(appearance),
       description: stringValue(appearance.description),

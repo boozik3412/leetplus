@@ -11,7 +11,7 @@ import type { Store } from "@/lib/stores";
 
 export type BattlePassStepConditionValue = {
   schemaVersion?: number;
-  taskType: GuestGameMissionWizardTaskType;
+  taskType: GuestGameMissionWizardTaskType | "APP_OPEN";
   sessionType: "ANY" | "HOURLY" | "PACKAGE_OR_SUBSCRIPTION";
   target: number;
   windowDays: number;
@@ -219,12 +219,23 @@ export function BattlePassStepConditionEditor({
             })
           }
         >
+          <option value="APP_OPEN">Открытие игрового модуля</option>
           <option value="PLAY_TIME">Игровое время</option>
           <option value="PRODUCT_PURCHASE">Покупка</option>
           <option value="BALANCE_TOPUP">Пополнение баланса</option>
           <option value="CHECK_IN">Чекин</option>
         </select>
       </Field>
+
+      {value.taskType === "APP_OPEN" ? (
+        <div className={subClass}>
+          <SectionTitle>Открытие игрового модуля</SectionTitle>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            Шаг выполнится, когда гость войдёт в игровой модуль. Дополнительные
+            настройки не требуются.
+          </p>
+        </div>
+      ) : null}
 
       {value.taskType === "PLAY_TIME" ? (
         <div className={subClass}>

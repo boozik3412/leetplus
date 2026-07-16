@@ -4560,6 +4560,64 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('evaluates a parameterless Battle Pass app-open step with the v2 contract', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Открыть игровой модуль',
+              freeReward: '100 бонусов',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                sessionType: 'ANY',
+                metric: {
+                  aggregation: 'exists',
+                  eventTypes: ['APP_OPEN'],
+                  target: 1,
+                  unit: 'открытие',
+                },
+              },
+            },
+          ],
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        battlePassStep: 1,
+        progress: {
+          applicable: true,
+          current: 1,
+          target: 1,
+          completed: true,
+        },
+      });
+    });
+
     it('evaluates a Battle Pass play-time step with the mission wizard v2 contract', async () => {
       const { service } = createService();
 

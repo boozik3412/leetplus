@@ -17,9 +17,39 @@ describe('guest mission wizard contract', () => {
     expect(missionEvaluationPolicy('BALANCE_TOPUP')).toBe(
       'LEDGER_SUPPLEMENTAL',
     );
+    expect(missionEvaluationPolicy('APP_OPEN')).toBe('LIVE_PRIMARY');
     expect(missionEvaluationPolicy('PLAY_TIME')).toBe('LIVE_PRIMARY');
     expect(missionEvaluationPolicy('PRODUCT_PURCHASE')).toBe('LIVE_PRIMARY');
     expect(missionEvaluationPolicy('CHECK_IN')).toBe('LIVE_PRIMARY');
+  });
+
+  it('normalizes app open as a parameterless live condition', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'APP_OPEN',
+      conditions: {
+        sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+        metric: {
+          target: 99,
+          windowDays: 30,
+          hours: ['09:00-21:00'],
+        },
+      },
+    });
+
+    expect(conditions).toMatchObject({
+      schemaVersion: 2,
+      taskType: 'APP_OPEN',
+      sessionType: 'ANY',
+      metric: {
+        eventTypes: ['APP_OPEN'],
+        aggregation: 'exists',
+        target: 1,
+        unit: 'открытие',
+      },
+    });
+    expect(conditions.metric).not.toHaveProperty('hours');
+    expect(conditions.metric).not.toHaveProperty('windowDays');
   });
 
   it('normalizes an exact single top-up without trusting client policy', () => {

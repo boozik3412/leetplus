@@ -262,6 +262,12 @@ describe('GuestActivityLedgerService', () => {
         findFirst: jest.fn().mockResolvedValue(store),
         findMany: jest.fn().mockResolvedValue([store]),
       },
+      langameClubProductConfiguration: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      langameProductGroup: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       guestGameLootBox: {
         findMany: jest.fn().mockResolvedValue([
           {
@@ -795,6 +801,18 @@ describe('GuestActivityLedgerService', () => {
     langameClient.listGoods.mockResolvedValue([
       { id: 415, name: 'Чебупицца Пепперони', count: 4 },
     ]);
+    (
+      prisma.langameClubProductConfiguration.findMany as jest.Mock
+    ).mockResolvedValue([
+      {
+        externalClubId: '15',
+        externalProductId: '415',
+        externalGroupId: '9',
+      },
+    ]);
+    (prisma.langameProductGroup.findMany as jest.Mock).mockResolvedValue([
+      { externalGroupId: '9', name: 'Горячая кухня' },
+    ]);
 
     const result = await service.syncProfile({
       tenantId,
@@ -844,6 +862,9 @@ describe('GuestActivityLedgerService', () => {
         quantity: 1,
         unitPrice: 250,
         totalAmount: 250,
+        externalCategoryKey: 'demo.langame:9',
+        externalCategoryId: '9',
+        externalCategoryName: 'Горячая кухня',
       }),
     );
   });

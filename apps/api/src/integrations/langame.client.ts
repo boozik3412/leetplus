@@ -14,6 +14,8 @@ import type {
   LangamePcTypeInClub,
   LangamePcTypeLink,
   LangameProduct,
+  LangameProductGroup,
+  LangameClubProductConfiguration,
   LangameProductExpense,
   LangameTariffTypeGroup,
   LangameTransaction,
@@ -25,6 +27,12 @@ type LangameResponse<T> = {
   status?: boolean;
   data?: T[];
   message?: string;
+};
+
+type LangameMasterResponse<T> = {
+  error_code?: number | string | null;
+  error_message?: string | null;
+  items?: T[];
 };
 
 type LangameQueryParams = Record<string, string>;
@@ -43,6 +51,28 @@ export class LangameClient {
 
   async listProducts(baseUrl: string, apiKey: string) {
     return this.getList<LangameProduct>(baseUrl, '/products/list', apiKey);
+  }
+
+  async listActiveProductGroups(baseUrl: string, apiKey: string) {
+    return this.getMasterList<LangameProductGroup>(
+      baseUrl,
+      '/products/groups/active',
+      apiKey,
+      'X-API-KEY',
+    );
+  }
+
+  async listClubProductConfiguration(
+    baseUrl: string,
+    requestToken: string,
+    clubId: number | string,
+  ) {
+    return this.getMasterList<LangameClubProductConfiguration>(
+      baseUrl,
+      `/products/configuration/club/${encodeURIComponent(String(clubId))}`,
+      requestToken,
+      'X-Request-Token',
+    );
   }
 
   async listGoods(baseUrl: string, apiKey: string, clubId: number) {
@@ -605,6 +635,47 @@ export class LangameClient {
     }
 
     return Array.isArray(payload.data) ? payload.data : [];
+  }
+
+  private async getMasterList<T>(
+    baseUrl: string,
+    path: string,
+    credential: string,
+    headerName: 'X-API-KEY' | 'X-Request-Token',
+  ): Promise<T[]> {
+    const normalizedPath = this.masterApiPath(path);
+    const displayPath = `/master_api${normalizedPath}`;
+    const response = await fetch(
+      new URL(`${this.masterApiBaseUrl(baseUrl)}${normalizedPath}`),
+      {
+        method: 'GET',
+        headers: { [headerName]: credential },
+      },
+    );
+
+    if (!response.ok) {
+      const errorDetails = await this.readErrorDetails(response);
+      throw new BadRequestException(
+        [
+          `Langame ${displayPath} failed: ${response.status} ${response.statusText}`,
+          errorDetails,
+        ]
+          .filter(Boolean)
+          .join(' - '),
+      );
+    }
+
+    const payload = (await response.json()) as LangameMasterResponse<T>;
+    const errorCode = Number(payload.error_code ?? 0);
+    if (Number.isFinite(errorCode) && errorCode !== 0) {
+      throw new BadRequestException(
+        payload.error_message
+          ? `Langame ${displayPath} returned an error: ${payload.error_message}`
+          : `Langame ${displayPath} returned error code ${errorCode}`,
+      );
+    }
+
+    return Array.isArray(payload.items) ? payload.items : [];
   }
 
   private async getListWithDateFallback<T>(

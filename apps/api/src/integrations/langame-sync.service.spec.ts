@@ -23,6 +23,14 @@ type PrismaMock = {
     updateMany: jest.Mock;
     upsert: jest.Mock;
   };
+  langameProductGroup: {
+    upsert: jest.Mock;
+    updateMany: jest.Mock;
+  };
+  langameClubProductConfiguration: {
+    upsert: jest.Mock;
+    updateMany: jest.Mock;
+  };
   store: {
     upsert: jest.Mock;
     findMany: jest.Mock;
@@ -48,6 +56,8 @@ type TenantContextMock = {
 type LangameClientMock = {
   listClubs: jest.Mock;
   listProducts: jest.Mock;
+  listActiveProductGroups: jest.Mock;
+  listClubProductConfiguration: jest.Mock;
   listGoods: jest.Mock;
   listProductExpenses: jest.Mock;
   listAllOperationsLog: jest.Mock;
@@ -72,6 +82,27 @@ type ProductUpsertCall = [
   {
     create: Record<string, unknown>;
     update: Record<string, unknown>;
+  },
+];
+
+type ProductGroupUpsertCall = [
+  {
+    create: {
+      externalDomain: string;
+      externalGroupId: string;
+      name: string;
+    };
+  },
+];
+
+type ClubProductConfigurationUpsertCall = [
+  {
+    create: {
+      storeId: string;
+      productId: string | null;
+      externalProductId: string;
+      externalGroupId: string | null;
+    };
   },
 ];
 
@@ -140,6 +171,14 @@ function createPrismaMock(): PrismaMock {
       updateMany: jest.fn(),
       upsert: jest.fn(),
     },
+    langameProductGroup: {
+      upsert: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    langameClubProductConfiguration: {
+      upsert: jest.fn(),
+      updateMany: jest.fn(),
+    },
     store: {
       upsert: jest.fn(),
       findMany: jest.fn(),
@@ -187,6 +226,26 @@ describe('LangameSyncService', () => {
         {
           id: 10,
           name: 'Cola',
+          active: 1,
+        },
+      ]),
+      listActiveProductGroups: jest.fn().mockResolvedValue([
+        {
+          id: 5,
+          name: 'Напитки',
+          active: 1,
+          deleted: 0,
+        },
+      ]),
+      listClubProductConfiguration: jest.fn().mockResolvedValue([
+        {
+          id: 50,
+          product_id: 10,
+          product_name: 'Cola',
+          club_id: 1,
+          group_id: 5,
+          price_sale: 100,
+          purchase_price: 50,
           active: 1,
         },
       ]),
@@ -294,6 +353,8 @@ describe('LangameSyncService', () => {
       failedSources: 0,
       stores: 1,
       products: 1,
+      productGroups: 1,
+      productConfigurations: 1,
       inventorySnapshots: 1,
       salesFacts: 1,
       clubRevenueFacts: 2,
@@ -304,6 +365,8 @@ describe('LangameSyncService', () => {
           status: 'SUCCESS',
           stores: 1,
           products: 1,
+          productGroups: 1,
+          productConfigurations: 1,
           inventorySnapshots: 1,
           salesFacts: 1,
           clubRevenueFacts: 2,
@@ -320,6 +383,21 @@ describe('LangameSyncService', () => {
     expect(storeUpsert.create.externalClubId).toBe('1');
     expect(storeUpsert.update).not.toHaveProperty('name');
     expect(prisma.inventorySnapshot.upsert).toHaveBeenCalled();
+    const [groupUpsert] = prisma.langameProductGroup.upsert.mock
+      .calls[0] as ProductGroupUpsertCall;
+    expect(groupUpsert.create).toMatchObject({
+      externalDomain: '443.langame.ru',
+      externalGroupId: '5',
+      name: 'Напитки',
+    });
+    const [configurationUpsert] = prisma.langameClubProductConfiguration.upsert
+      .mock.calls[0] as ClubProductConfigurationUpsertCall;
+    expect(configurationUpsert.create).toMatchObject({
+      storeId: 'store-1',
+      productId: 'product-1',
+      externalProductId: '10',
+      externalGroupId: '5',
+    });
     const [salesUpsert] = prisma.salesFact.upsert.mock
       .calls[0] as SalesFactUpsertCall;
     expect(salesUpsert.create.tenantId).toBe('tenant-1');

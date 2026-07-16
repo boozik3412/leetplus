@@ -21,6 +21,8 @@ export type GuestGameProgressEvent = {
   guestLogType?: string | null;
   productId?: string | null;
   externalProductId?: string | null;
+  externalCategoryKey?: string | null;
+  externalCategoryId?: string | null;
   categoryId?: string | null;
   productName?: string | null;
   categoryName?: string | null;
@@ -475,6 +477,15 @@ function matchesProductFilters(
     ) &&
     matchesOneOf(
       progressStringValues(
+        metric.externalCategoryKeys,
+        metric.externalCategoryKey,
+        conditions.externalCategoryKeys,
+        conditions.externalCategoryKey,
+      ),
+      event.externalCategoryKey,
+    ) &&
+    matchesOneOf(
+      progressStringValues(
         metric.categoryIds,
         metric.categoryId,
         conditions.categoryIds,
@@ -503,6 +514,30 @@ function productCoverageMatches(
     progressString(metric.productMatch ?? conditions.productMatch),
   );
   if (productMatch !== 'ALL') return true;
+
+  const purchaseSource = normalizeProgressToken(
+    progressString(metric.purchaseSource ?? conditions.purchaseSource),
+  );
+  if (purchaseSource === 'CATEGORY') {
+    const selections = Array.isArray(metric.categorySelections)
+      ? metric.categorySelections
+          .filter(
+            (item): item is Record<string, unknown> =>
+              Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+          )
+          .map((item) => progressStringValues(item.externalCategoryKeys))
+          .filter((keys) => keys.length > 0)
+      : [];
+    if (!selections.length) return true;
+    const purchasedCategoryKeys = new Set(
+      events
+        .map((event) => event.externalCategoryKey)
+        .filter((key): key is string => Boolean(key)),
+    );
+    return selections.every((keys) =>
+      keys.some((key) => purchasedCategoryKeys.has(key)),
+    );
+  }
 
   const expected = new Set(
     progressStringValues(

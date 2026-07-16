@@ -78,6 +78,11 @@ export function normalizeMissionWizardConditions(
   const metric = objectValue(source.metric);
   const appearance = objectValue(dto.appearance);
   const productMatch = enumValue(metric.productMatch, ['ANY', 'ALL'], 'ANY');
+  const purchaseSource = enumValue(
+    source.purchaseSource,
+    ['PRODUCT', 'CATEGORY'],
+    'PRODUCT',
+  );
   const amountMode = enumValue(
     metric.amountMode,
     ['NONE', 'SINGLE_MINIMUM', 'PERIOD_TOTAL'],
@@ -101,12 +106,21 @@ export function normalizeMissionWizardConditions(
   };
 
   if (taskType === 'PRODUCT_PURCHASE') {
+    normalizedMetric.purchaseSource = purchaseSource;
     normalizedMetric.productMatch = productMatch;
     normalizedMetric.amountMode = amountMode;
-    normalizedMetric.productIds = stringArray(metric.productIds);
-    normalizedMetric.externalProductIds = stringArray(
-      metric.externalProductIds,
-    );
+    normalizedMetric.productIds =
+      purchaseSource === 'PRODUCT' ? stringArray(metric.productIds) : [];
+    normalizedMetric.externalProductIds =
+      purchaseSource === 'PRODUCT'
+        ? stringArray(metric.externalProductIds)
+        : [];
+    normalizedMetric.categoryIds =
+      purchaseSource === 'CATEGORY' ? stringArray(metric.categoryIds) : [];
+    normalizedMetric.externalCategoryKeys =
+      purchaseSource === 'CATEGORY'
+        ? stringArray(metric.externalCategoryKeys)
+        : [];
     normalizedMetric.aggregation =
       amountMode === 'PERIOD_TOTAL'
         ? 'sum'
@@ -117,9 +131,15 @@ export function normalizeMissionWizardConditions(
     } else if (productMatch === 'ALL') {
       normalizedMetric.target = Math.max(
         1,
-        stringArray(metric.productIds).length,
-        stringArray(metric.externalProductIds).length,
+        purchaseSource === 'CATEGORY'
+          ? stringArray(metric.categoryIds).length
+          : stringArray(metric.productIds).length,
+        purchaseSource === 'CATEGORY'
+          ? 0
+          : stringArray(metric.externalProductIds).length,
       );
+    } else {
+      normalizedMetric.target = 1;
     }
   }
 
@@ -187,6 +207,7 @@ export function normalizeMissionWizardConditions(
         ? 'HIDDEN'
         : 'VISIBLE',
     sessionType,
+    ...(taskType === 'PRODUCT_PURCHASE' ? { purchaseSource } : {}),
     metric: jsonObject(normalizedMetric),
     presentation: jsonObject({
       ...jsonObject(appearance),
@@ -225,13 +246,20 @@ export function validateMissionWizard(
   if (!target || target <= 0) blockers.push('Цель должна быть больше нуля.');
 
   if (taskType === 'PRODUCT_PURCHASE') {
-    const products = [
-      ...stringArray(metric.productIds),
-      ...stringArray(metric.externalProductIds),
-    ];
-    if (!products.length) blockers.push('Выберите товары для задания.');
-    if (objectValue(dto.conditions).purchaseSource === 'CATEGORY') {
-      blockers.push('Выбор по категориям пока находится в разработке.');
+    const purchaseSource = stringValue(conditions.purchaseSource);
+    const selection =
+      purchaseSource === 'CATEGORY'
+        ? stringArray(metric.categoryIds)
+        : [
+            ...stringArray(metric.productIds),
+            ...stringArray(metric.externalProductIds),
+          ];
+    if (!selection.length) {
+      blockers.push(
+        purchaseSource === 'CATEGORY'
+          ? 'Выберите категории для задания.'
+          : 'Выберите товары для задания.',
+      );
     }
   }
 

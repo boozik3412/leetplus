@@ -338,6 +338,84 @@ describe('guest game progress trigger matching', () => {
     });
   });
 
+  it('matches a club-scoped Langame category by domain and group id', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PRODUCT_PURCHASE',
+        progressTarget: 1,
+        conditions: {
+          purchaseSource: 'CATEGORY',
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['PRODUCT_PURCHASE'],
+            purchaseSource: 'CATEGORY',
+            externalCategoryKeys: ['46.langamepro.ru:7'],
+            target: 1,
+          },
+        },
+      },
+      {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        externalCategoryKey: '46.langamepro.ru:7',
+        spendAmount: 219,
+      },
+      [],
+    );
+
+    expect(result).toMatchObject({ current: 1, completed: true });
+  });
+
+  it('completes ALL semantic categories across domains and purchases', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PRODUCT_PURCHASE',
+        progressTarget: 2,
+        conditions: {
+          purchaseSource: 'CATEGORY',
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['PRODUCT_PURCHASE'],
+            purchaseSource: 'CATEGORY',
+            productMatch: 'ALL',
+            externalCategoryKeys: ['46.langamepro.ru:7', '443.langame.ru:12'],
+            categorySelections: [
+              {
+                id: 'energy',
+                externalCategoryKeys: ['46.langamepro.ru:7'],
+              },
+              {
+                id: 'rental',
+                externalCategoryKeys: ['443.langame.ru:12'],
+              },
+            ],
+            target: 2,
+          },
+        },
+      },
+      {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        externalCategoryKey: '443.langame.ru:12',
+        spendAmount: 399,
+      },
+      [
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: new Date('2026-07-14T10:00:00.000Z'),
+          externalCategoryKey: '46.langamepro.ru:7',
+          spendAmount: 219,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 2,
+      completed: true,
+      matchedEvents: 2,
+    });
+  });
+
   it('counts a check-in streak by the club timezone', () => {
     const result = evaluateGuestGameProgress(
       {

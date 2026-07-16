@@ -11,6 +11,27 @@ export type LangameProduct = {
   active: number;
 };
 
+export type LangameProductGroup = {
+  id: number | string;
+  name: string;
+  icon?: string | null;
+  icon_link?: string | null;
+  sort?: number | string | null;
+  active?: number | boolean | null;
+  deleted?: number | boolean | null;
+};
+
+export type LangameClubProductConfiguration = {
+  id?: number | string | null;
+  product_id: number | string;
+  product_name: string;
+  club_id?: number | string | null;
+  group_id?: number | string | null;
+  price_sale?: number | string | null;
+  purchase_price?: number | string | null;
+  active?: number | boolean | null;
+} & Record<string, unknown>;
+
 export type LangameGood = {
   id: number;
   name: string;
@@ -546,6 +567,8 @@ export type LangameSyncResult = {
   failedSources: number;
   stores: number;
   products: number;
+  productGroups: number;
+  productConfigurations: number;
   inventorySnapshots: number;
   salesFacts: number;
   clubRevenueFacts: number;
@@ -558,6 +581,8 @@ export type LangameSyncSourceResult = {
   status: 'SUCCESS' | 'FAILED';
   stores: number;
   products: number;
+  productGroups: number;
+  productConfigurations: number;
   inventorySnapshots: number;
   salesFacts: number;
   clubRevenueFacts: number;

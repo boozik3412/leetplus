@@ -144,6 +144,8 @@ model Tenant {
   productParsingRuns                   ProductParsingRun[]
   productParsingSuggestions            ProductParsingSuggestion[]
   productOosExclusions                 ProductOosExclusion[]
+  langameProductGroups                 LangameProductGroup[]
+  langameClubProductConfigurations     LangameClubProductConfiguration[]
   categories                           Category[]
   importJobs                           ImportJob[]
   salesFacts                           SalesFact[]
@@ -521,8 +523,8 @@ model Store {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  tenant                          Tenant                           @relation(fields: [tenantId], references: [id])
-  integrationSource               IntegrationSource?               @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  tenant                          Tenant                            @relation(fields: [tenantId], references: [id])
+  integrationSource               IntegrationSource?                @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
   salesFacts                      SalesFact[]
   guestSessions                   GuestSession[]
   guestTransactions               GuestTransaction[]
@@ -566,6 +568,7 @@ model Store {
   staffNotifications              StaffNotification[]
   staffMembers                    StaffMember[]
   userAccesses                    UserStoreAccess[]
+  langameProductConfigurations    LangameClubProductConfiguration[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@unique([tenantId, publicSlug], map: "store_tenant_public_slug_uidx")
@@ -627,14 +630,15 @@ model Product {
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 
-  tenant             Tenant                @relation(fields: [tenantId], references: [id])
-  category           Category?             @relation(fields: [categoryId], references: [id])
-  supplier           Supplier?             @relation(fields: [supplierId], references: [id])
-  canonicalProduct   CanonicalProduct?     @relation(fields: [canonicalProductId], references: [id], onDelete: SetNull)
-  salesFacts         SalesFact[]
-  inventorySnapshots InventorySnapshot[]
-  stockMovements     StockMovement[]
-  oosExclusions      ProductOosExclusion[]
+  tenant                    Tenant                            @relation(fields: [tenantId], references: [id])
+  category                  Category?                         @relation(fields: [categoryId], references: [id])
+  supplier                  Supplier?                         @relation(fields: [supplierId], references: [id])
+  canonicalProduct          CanonicalProduct?                 @relation(fields: [canonicalProductId], references: [id], onDelete: SetNull)
+  salesFacts                SalesFact[]
+  inventorySnapshots        InventorySnapshot[]
+  stockMovements            StockMovement[]
+  oosExclusions             ProductOosExclusion[]
+  langameClubConfigurations LangameClubProductConfiguration[]
 
   @@unique([tenantId, article])
   @@unique([tenantId, externalProvider, externalDomain, externalProductId])
@@ -889,8 +893,8 @@ model IntegrationSource {
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
 
-  tenant                        Tenant                         @relation(fields: [tenantId], references: [id])
-  credential                    IntegrationCredential          @relation(fields: [credentialId], references: [id])
+  tenant                        Tenant                            @relation(fields: [tenantId], references: [id])
+  credential                    IntegrationCredential             @relation(fields: [credentialId], references: [id])
   stores                        Store[]
   syncJobs                      IntegrationSyncJob[]
   guestDataProfileRuns          GuestDataProfileRun[]
@@ -900,11 +904,67 @@ model IntegrationSource {
   guestActivityRawRecords       GuestActivityRawRecord[]
   guestActivitySyncStates       GuestActivitySyncState[]
   guestActivitySourceSyncStates GuestActivitySourceSyncState[]
+  productGroups                 LangameProductGroup[]
+  clubProductConfigurations     LangameClubProductConfiguration[]
 
   @@unique([tenantId, provider, domain])
   @@index([tenantId])
   @@index([credentialId])
   @@index([lastSyncedDate])
+}
+
+model LangameProductGroup {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  integrationSourceId String
+  externalDomain      String
+  externalGroupId     String
+  name                String
+  icon                String?
+  iconUrl             String?
+  sort                Int?
+  isActive            Boolean  @default(true)
+  isDeleted           Boolean  @default(false)
+  syncedAt            DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id])
+  integrationSource IntegrationSource @relation(fields: [integrationSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalDomain, externalGroupId], map: "langame_product_group_scope_uidx")
+  @@index([tenantId, externalDomain, isActive], map: "langame_product_group_active_idx")
+  @@index([integrationSourceId], map: "langame_product_group_source_idx")
+}
+
+model LangameClubProductConfiguration {
+  id                      String   @id @default(uuid())
+  tenantId                String
+  integrationSourceId     String
+  storeId                 String
+  productId               String?
+  externalDomain          String
+  externalClubId          String
+  externalConfigurationId String?
+  externalProductId       String
+  externalGroupId         String?
+  productName             String
+  priceSale               Decimal? @db.Decimal(12, 2)
+  purchasePrice           Decimal? @db.Decimal(12, 2)
+  isActive                Boolean  @default(true)
+  syncedAt                DateTime
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id])
+  integrationSource IntegrationSource @relation(fields: [integrationSourceId], references: [id], onDelete: Cascade)
+  store             Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product           Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalDomain, externalClubId, externalProductId], map: "langame_club_product_scope_uidx")
+  @@index([tenantId, storeId, externalGroupId, isActive], map: "langame_club_product_group_active_idx")
+  @@index([tenantId, productId], map: "langame_club_product_product_idx")
+  @@index([integrationSourceId], map: "langame_club_product_source_idx")
 }
 
 model IntegrationSyncJob {

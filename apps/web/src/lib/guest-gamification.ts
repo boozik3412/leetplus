@@ -209,6 +209,33 @@ export type GuestGameMissionWizardSaveResult = {
   readiness: GuestGameMissionWizardReadiness;
 };
 
+export type GuestGameMissionProductGroup = {
+  id: string;
+  name: string;
+  productCount: number;
+  storeCount: number;
+  storeNames: string[];
+  refs: Array<{
+    externalDomain: string;
+    externalGroupId: string;
+    productCount: number;
+    storeIds: string[];
+  }>;
+};
+
+export type GuestGameMissionProductGroupCatalog = {
+  status: "READY" | "PARTIAL" | "EMPTY";
+  latestSyncedAt: string | null;
+  stores: Array<{
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    ready: boolean;
+  }>;
+  warnings: string[];
+  groups: GuestGameMissionProductGroup[];
+};
+
 export type GuestGameVisualEditorRewardMode = "XP" | "BONUS" | "";
 
 export type GuestGameVisualEditorLootBoxPrize = {

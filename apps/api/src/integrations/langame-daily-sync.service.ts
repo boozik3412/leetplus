@@ -670,6 +670,8 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       failedSources: result.failedSources,
       stores: result.stores,
       products: result.products,
+      productGroups: result.productGroups,
+      productConfigurations: result.productConfigurations,
       inventorySnapshots: result.inventorySnapshots,
       salesFacts: result.salesFacts,
       clubRevenueFacts: result.clubRevenueFacts,

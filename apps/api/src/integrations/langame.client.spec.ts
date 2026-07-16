@@ -312,6 +312,75 @@ describe('LangameClient', () => {
       }),
     );
   });
+
+  it('loads active product groups from the domain master API', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        error_code: 0,
+        items: [{ id: 7, name: 'Энергетики' }],
+      }),
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.listActiveProductGroups(
+        'https://46.langamepro.ru/public_api',
+        'master-key',
+      ),
+    ).resolves.toEqual([{ id: 7, name: 'Энергетики' }]);
+
+    const calls = fetchMock.mock.calls as Array<[string | URL, RequestInit?]>;
+    expect(new URL(calls[0][0]).pathname).toBe(
+      '/master_api/products/groups/active',
+    );
+    expect(calls[0][1]?.headers).toMatchObject({
+      'X-API-KEY': 'master-key',
+    });
+  });
+
+  it('loads club product configuration with X-Request-Token', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        error_code: 0,
+        items: [
+          {
+            id: 70,
+            product_id: 10,
+            product_name: 'Burn',
+            club_id: 2,
+            group_id: 7,
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      client.listClubProductConfiguration(
+        'https://46.langamepro.ru/public_api',
+        'request-token',
+        2,
+      ),
+    ).resolves.toEqual([
+      {
+        id: 70,
+        product_id: 10,
+        product_name: 'Burn',
+        club_id: 2,
+        group_id: 7,
+      },
+    ]);
+
+    const calls = fetchMock.mock.calls as Array<[string | URL, RequestInit?]>;
+    expect(new URL(calls[0][0]).pathname).toBe(
+      '/master_api/products/configuration/club/2',
+    );
+    expect(calls[0][1]?.headers).toMatchObject({
+      'X-Request-Token': 'request-token',
+    });
+  });
 });
 
 function responseWithRows(rows: unknown[]) {

@@ -135,6 +135,17 @@ type RawRecordDraft = {
 };
 
 type ProductNamesByClub = Map<string, Map<string, string>>;
+type ProductCategoriesByClub = Map<
+  string,
+  Map<
+    string,
+    {
+      externalCategoryKey: string;
+      externalCategoryId: string;
+      externalCategoryName: string | null;
+    }
+  >
+>;
 
 type FactDraft = {
   factType: GuestActivityFactType;
@@ -1088,6 +1099,10 @@ export class GuestActivityLedgerService {
       context,
       productExpenses.rows,
     );
+    const productCategoriesByClub = await this.fetchProductCategoriesByClub(
+      context,
+      productExpenses.rows,
+    );
 
     const balanceTopups = await this.fetchSourceRows(
       context,
@@ -1147,7 +1162,12 @@ export class GuestActivityLedgerService {
         context,
         SOURCE_PRODUCT_EXPENSE,
         row,
-        this.buildRawRecordFromProductExpense(context, row, productNamesByClub),
+        this.buildRawRecordFromProductExpense(
+          context,
+          row,
+          productNamesByClub,
+          productCategoriesByClub,
+        ),
         normalizationRunId,
       );
       rawRecordsCount += persisted.rawRecordCreated ? 1 : 0;
@@ -1811,6 +1831,7 @@ export class GuestActivityLedgerService {
     context: LedgerSyncContext,
     row: LangameProductExpense,
     productNamesByClub: ProductNamesByClub,
+    productCategoriesByClub: ProductCategoriesByClub,
   ): RawRecordDraft {
     const externalClubId = firstString(row.list_clubs_id, row.club_id);
     const storeId = this.resolveStoreId(context, externalClubId);
@@ -1823,6 +1844,10 @@ export class GuestActivityLedgerService {
     const productName =
       firstString(row.name, row.good_name, row.goods_name, row.product_name) ??
       resolveProductName(productNamesByClub, externalClubId, productId);
+    const productCategory =
+      externalClubId && productId
+        ? (productCategoriesByClub.get(externalClubId)?.get(productId) ?? null)
+        : null;
     const quantity = firstNumber(row.count, row.quantity, row.qty);
     const unitPrice = firstNumber(row.price_sale, row.price, row.unit_price);
     const totalAmount =
@@ -1835,6 +1860,9 @@ export class GuestActivityLedgerService {
     const payload = sanitizeGuestActivityRawPayload({
       ...row,
       product_name_resolved: productName,
+      external_category_key: productCategory?.externalCategoryKey ?? null,
+      external_category_id: productCategory?.externalCategoryId ?? null,
+      external_category_name: productCategory?.externalCategoryName ?? null,
     });
     const happenedAt = parseLangameDate(
       firstString(
@@ -2262,6 +2290,12 @@ export class GuestActivityLedgerService {
     );
     const quantity = firstNumber(row.count, row.quantity, row.qty);
     const unitPrice = firstNumber(row.price_sale, row.price, row.unit_price);
+    const rawPayload =
+      raw.rawPayload &&
+      typeof raw.rawPayload === 'object' &&
+      !Array.isArray(raw.rawPayload)
+        ? (raw.rawPayload as Record<string, unknown>)
+        : {};
 
     return [
       {
@@ -2284,6 +2318,9 @@ export class GuestActivityLedgerService {
           quantity,
           unitPrice,
           totalAmount: raw.amount,
+          externalCategoryKey: firstString(rawPayload.external_category_key),
+          externalCategoryId: firstString(rawPayload.external_category_id),
+          externalCategoryName: firstString(rawPayload.external_category_name),
         }),
       },
     ];
@@ -2671,6 +2708,96 @@ export class GuestActivityLedgerService {
 
     return productNamesByClub;
   }
+
+  private async fetchProductCategoriesByClub(
+    context: LedgerSyncContext,
+    rows: LangameProductExpense[],
+  ): Promise<ProductCategoriesByClub> {
+    const externalClubIds = Array.from(
+      new Set(
+        rows
+          .map((row) => firstString(row.list_clubs_id, row.club_id))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+    const externalProductIds = Array.from(
+      new Set(
+        rows
+          .map((row) =>
+            firstString(
+              row.list_goods_id,
+              row.goods_id,
+              row.good_id,
+              row.product_id,
+            ),
+          )
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+    if (!externalClubIds.length || !externalProductIds.length) {
+      return new Map();
+    }
+
+    const configurations =
+      await this.prisma.langameClubProductConfiguration.findMany({
+        where: {
+          tenantId: context.tenantId,
+          externalDomain: context.externalDomain,
+          externalClubId: { in: externalClubIds },
+          externalProductId: { in: externalProductIds },
+          externalGroupId: { not: null },
+          isActive: true,
+        },
+        select: {
+          externalClubId: true,
+          externalProductId: true,
+          externalGroupId: true,
+        },
+      });
+    const groupIds = Array.from(
+      new Set(
+        configurations
+          .map((row) => row.externalGroupId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+    const groups = groupIds.length
+      ? await this.prisma.langameProductGroup.findMany({
+          where: {
+            tenantId: context.tenantId,
+            externalDomain: context.externalDomain,
+            externalGroupId: { in: groupIds },
+          },
+          select: { externalGroupId: true, name: true },
+        })
+      : [];
+    const groupNames = new Map(
+      groups.map((group) => [group.externalGroupId, group.name]),
+    );
+    const result: ProductCategoriesByClub = new Map();
+    configurations.forEach((row) => {
+      if (!row.externalGroupId) return;
+      const products =
+        result.get(row.externalClubId) ??
+        new Map<
+          string,
+          {
+            externalCategoryKey: string;
+            externalCategoryId: string;
+            externalCategoryName: string | null;
+          }
+        >();
+      products.set(row.externalProductId, {
+        externalCategoryKey: `${context.externalDomain}:${row.externalGroupId}`,
+        externalCategoryId: row.externalGroupId,
+        externalCategoryName: groupNames.get(row.externalGroupId) ?? null,
+      });
+      result.set(row.externalClubId, products);
+    });
+
+    return result;
+  }
+
   private rowMatchesGuest(
     row: Record<string, unknown>,
     externalGuestId: string,
@@ -2871,7 +2998,7 @@ function maskPossiblePhone(value: string) {
 }
 
 const RAW_PAYLOAD_ALLOWED_KEY =
-  /^(?:id|uuid|type|status|state|date(?:_normal|_insert|_update|_start|_stop)?|created(?:_at)?|updated(?:_at)?|time|datetime|start(?:ed)?_at|stop(?:ped)?_at|duration(?:_minutes)?|minutes|packet|tarif(?:f)?(?:_id|_name|_title|_type)?|session(?:_id|_type|_packet|_minutes)?|club_id|list_clubs_id|guest_id|real_guest_id|amount|sum|total|balance|bonus(?:_balance|es)?|product(?:_id|_name|_name_resolved)?|goods?(?:_id|_name)?|list_goods_id|category(?:_id|_name)?|supplier(?:_id|_name)?|quantity|count|qty|price(?:_sale)?|unit_price|cancel|operation|source|comment|text|message|title|description|data|items|rows|result)$/i;
+  /^(?:id|uuid|type|status|state|date(?:_normal|_insert|_update|_start|_stop)?|created(?:_at)?|updated(?:_at)?|time|datetime|start(?:ed)?_at|stop(?:ped)?_at|duration(?:_minutes)?|minutes|packet|tarif(?:f)?(?:_id|_name|_title|_type)?|session(?:_id|_type|_packet|_minutes)?|club_id|list_clubs_id|guest_id|real_guest_id|amount|sum|total|balance|bonus(?:_balance|es)?|product(?:_id|_name|_name_resolved)?|goods?(?:_id|_name)?|list_goods_id|category(?:_id|_name)?|external_category(?:_key|_id|_name)?|supplier(?:_id|_name)?|quantity|count|qty|price(?:_sale)?|unit_price|cancel|operation|source|comment|text|message|title|description|data|items|rows|result)$/i;
 const RAW_PAYLOAD_SENSITIVE_KEY =
   /(?:phone|тел|mobile|contact|email|mail|fio|full.?name|first.?name|last.?name|middle.?name|passport|document|address|birth|card.?number)/i;
 

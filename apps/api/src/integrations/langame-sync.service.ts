@@ -16,8 +16,10 @@ import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import type {
   LangameGood,
+  LangameClubProductConfiguration,
   LangameOperationLog,
   LangameProduct,
+  LangameProductGroup,
   LangameProductExpense,
   LangameSyncQuery,
   LangameSyncResult,
@@ -127,6 +129,8 @@ export class LangameSyncService {
       failedSources: 0,
       stores: 0,
       products: 0,
+      productGroups: 0,
+      productConfigurations: 0,
       inventorySnapshots: 0,
       salesFacts: 0,
       clubRevenueFacts: 0,
@@ -170,6 +174,8 @@ export class LangameSyncService {
         status: 'FAILED',
         stores: 0,
         products: 0,
+        productGroups: 0,
+        productConfigurations: 0,
         inventorySnapshots: 0,
         salesFacts: 0,
         clubRevenueFacts: 0,
@@ -179,9 +185,15 @@ export class LangameSyncService {
       };
 
       try {
-        const products = shouldSyncCatalog
-          ? await this.langameClient.listProducts(source.baseUrl, apiKey)
-          : [];
+        const [products, productGroups] = shouldSyncCatalog
+          ? await Promise.all([
+              this.langameClient.listProducts(source.baseUrl, apiKey),
+              this.langameClient.listActiveProductGroups(
+                source.baseUrl,
+                apiKey,
+              ),
+            ])
+          : [[], []];
         const productsByExternalId = shouldSyncCatalog
           ? await this.syncProducts(
               tenantId,
@@ -193,6 +205,17 @@ export class LangameSyncService {
 
         result.products += products.length;
         sourceResult.products = products.length;
+
+        if (shouldSyncCatalog) {
+          const syncedGroups = await this.syncProductGroups(
+            tenantId,
+            source.id,
+            source.domain,
+            productGroups,
+          );
+          result.productGroups += syncedGroups;
+          sourceResult.productGroups = syncedGroups;
+        }
 
         if (shouldSyncCatalog || shouldSyncInventory) {
           const clubs = await this.langameClient.listClubs(
@@ -231,6 +254,27 @@ export class LangameSyncService {
 
             result.stores += 1;
             sourceResult.stores += 1;
+
+            if (shouldSyncCatalog) {
+              const configuration =
+                await this.langameClient.listClubProductConfiguration(
+                  source.baseUrl,
+                  apiKey,
+                  club.id,
+                );
+              const syncedConfigurations =
+                await this.syncClubProductConfiguration(
+                  tenantId,
+                  source.id,
+                  source.domain,
+                  store.id,
+                  String(club.id),
+                  productsByExternalId,
+                  configuration,
+                );
+              result.productConfigurations += syncedConfigurations;
+              sourceResult.productConfigurations += syncedConfigurations;
+            }
 
             if (shouldSyncInventory) {
               const goods = await this.langameClient.listGoods(
@@ -368,6 +412,141 @@ export class LangameSyncService {
           },
         ]),
     );
+  }
+
+  private async syncProductGroups(
+    tenantId: string,
+    integrationSourceId: string,
+    domain: string,
+    groups: LangameProductGroup[],
+  ) {
+    const syncedAt = new Date();
+    const externalGroupIds = groups.map((group) => String(group.id));
+
+    for (const group of groups) {
+      const externalGroupId = String(group.id);
+      await this.prisma.langameProductGroup.upsert({
+        where: {
+          tenantId_externalDomain_externalGroupId: {
+            tenantId,
+            externalDomain: domain,
+            externalGroupId,
+          },
+        },
+        create: {
+          tenantId,
+          integrationSourceId,
+          externalDomain: domain,
+          externalGroupId,
+          name: group.name,
+          icon: this.nullableString(group.icon),
+          iconUrl: this.nullableString(group.icon_link),
+          sort: this.nullableInteger(group.sort),
+          isActive: this.langameFlag(group.active, true),
+          isDeleted: this.langameFlag(group.deleted, false),
+          syncedAt,
+        },
+        update: {
+          integrationSourceId,
+          name: group.name,
+          icon: this.nullableString(group.icon),
+          iconUrl: this.nullableString(group.icon_link),
+          sort: this.nullableInteger(group.sort),
+          isActive: this.langameFlag(group.active, true),
+          isDeleted: this.langameFlag(group.deleted, false),
+          syncedAt,
+        },
+      });
+    }
+
+    await this.prisma.langameProductGroup.updateMany({
+      where: {
+        tenantId,
+        externalDomain: domain,
+        ...(externalGroupIds.length > 0
+          ? { externalGroupId: { notIn: externalGroupIds } }
+          : {}),
+      },
+      data: {
+        isActive: false,
+        syncedAt,
+      },
+    });
+
+    return groups.length;
+  }
+
+  private async syncClubProductConfiguration(
+    tenantId: string,
+    integrationSourceId: string,
+    domain: string,
+    storeId: string,
+    externalClubId: string,
+    productsByExternalId: Map<string, ProductSyncRef>,
+    rows: LangameClubProductConfiguration[],
+  ) {
+    const syncedAt = new Date();
+    const externalProductIds = rows.map((row) => String(row.product_id));
+
+    for (const row of rows) {
+      const externalProductId = String(row.product_id);
+      const product = productsByExternalId.get(externalProductId);
+      await this.prisma.langameClubProductConfiguration.upsert({
+        where: {
+          tenantId_externalDomain_externalClubId_externalProductId: {
+            tenantId,
+            externalDomain: domain,
+            externalClubId,
+            externalProductId,
+          },
+        },
+        create: {
+          tenantId,
+          integrationSourceId,
+          storeId,
+          productId: product?.id ?? null,
+          externalDomain: domain,
+          externalClubId,
+          externalConfigurationId: this.nullableString(row.id),
+          externalProductId,
+          externalGroupId: this.nullableString(row.group_id),
+          productName: row.product_name || product?.name || externalProductId,
+          priceSale: this.nullableDecimal(row.price_sale),
+          purchasePrice: this.nullableDecimal(row.purchase_price),
+          isActive: this.langameFlag(row.active, true),
+          syncedAt,
+        },
+        update: {
+          integrationSourceId,
+          storeId,
+          productId: product?.id ?? null,
+          externalConfigurationId: this.nullableString(row.id),
+          externalGroupId: this.nullableString(row.group_id),
+          productName: row.product_name || product?.name || externalProductId,
+          priceSale: this.nullableDecimal(row.price_sale),
+          purchasePrice: this.nullableDecimal(row.purchase_price),
+          isActive: this.langameFlag(row.active, true),
+          syncedAt,
+        },
+      });
+    }
+
+    await this.prisma.langameClubProductConfiguration.updateMany({
+      where: {
+        tenantId,
+        externalDomain: domain,
+        externalClubId,
+        ...(externalProductIds.length > 0
+          ? { externalProductId: { notIn: externalProductIds } }
+          : {}),
+      },
+      data: {
+        isActive: false,
+        syncedAt,
+      },
+    });
+
+    return rows.length;
   }
 
   private async syncProducts(
@@ -1193,6 +1372,73 @@ export class LangameSyncService {
 
   private toDateTimeValue(date: Date) {
     return date.toISOString();
+  }
+
+  private nullableString(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      return String(value);
+    }
+
+    return null;
+  }
+
+  private nullableInteger(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return null;
+    }
+    const parsed = Number(value);
+    return Number.isInteger(parsed) ? parsed : null;
+  }
+
+  private nullableDecimal(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    try {
+      if (typeof value !== 'string' && typeof value !== 'number') {
+        return null;
+      }
+      return new Prisma.Decimal(value);
+    } catch {
+      return null;
+    }
+  }
+
+  private langameFlag(value: unknown, fallback: boolean) {
+    if (value === null || value === undefined || value === '') {
+      return fallback;
+    }
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return fallback;
+    }
+    const normalized = String(value).trim().toLowerCase();
+    if (['1', 'true', 'yes'].includes(normalized)) {
+      return true;
+    }
+    if (['0', 'false', 'no'].includes(normalized)) {
+      return false;
+    }
+
+    return fallback;
   }
 
   private addDiscrepancy(

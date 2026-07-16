@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GuestAudience } from "@/lib/guests";
 import type {
   GuestGameLootBox,
+  GuestGameMissionProductGroup,
+  GuestGameMissionProductGroupCatalog,
   GuestGameMissionWizardDto,
   GuestGameMissionWizardReadiness,
   GuestGameMissionWizardSaveResult,
@@ -35,6 +37,7 @@ type WizardState = {
   hours: string;
   weekdays: number[];
   minSessionMinutes: number;
+  purchaseSource: "PRODUCT" | "CATEGORY";
   productMatch: "ANY" | "ALL";
   amountMode: "NONE" | "SINGLE_MINIMUM" | "PERIOD_TOTAL";
   minimumAmount: number;
@@ -77,6 +80,10 @@ const subsectionClass =
   "rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20";
 const productCatalogCache = new Map<string, ProductCatalog>();
 const productCatalogCacheLimit = 100;
+const productGroupCatalogCache = new Map<
+  string,
+  GuestGameMissionProductGroupCatalog
+>();
 
 export function GuestMissionWizard({
   stores,
@@ -92,6 +99,16 @@ export function GuestMissionWizard({
   const [step, setStep] = useState<Step>("conditions");
   const [form, setForm] = useState<WizardState>(() => initialState(stores));
   const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
+  const [productGroups, setProductGroups] = useState<
+    GuestGameMissionProductGroup[]
+  >([]);
+  const [selectedProductGroups, setSelectedProductGroups] = useState<
+    GuestGameMissionProductGroup[]
+  >([]);
+  const [productGroupWarnings, setProductGroupWarnings] = useState<string[]>(
+    [],
+  );
+  const [loadingProductGroups, setLoadingProductGroups] = useState(false);
   const [search, setSearch] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [searching, setSearching] = useState(false);
@@ -121,12 +138,38 @@ export function GuestMissionWizard({
     [promoBundles],
   );
   const dto = useMemo(
-    () => buildWizardDto(form, selectedProducts, rewardLootBoxes, activePromos),
-    [activePromos, form, rewardLootBoxes, selectedProducts],
+    () =>
+      buildWizardDto(
+        form,
+        selectedProducts,
+        selectedProductGroups,
+        rewardLootBoxes,
+        activePromos,
+      ),
+    [
+      activePromos,
+      form,
+      rewardLootBoxes,
+      selectedProductGroups,
+      selectedProducts,
+    ],
   );
   const preview = useMemo(
-    () => buildPreview(form, selectedProducts, rewardLootBoxes, activePromos),
-    [activePromos, form, rewardLootBoxes, selectedProducts],
+    () =>
+      buildPreview(
+        form,
+        selectedProducts,
+        selectedProductGroups,
+        rewardLootBoxes,
+        activePromos,
+      ),
+    [
+      activePromos,
+      form,
+      rewardLootBoxes,
+      selectedProductGroups,
+      selectedProducts,
+    ],
   );
 
   useEffect(() => {
@@ -158,9 +201,52 @@ export function GuestMissionWizard({
   }, [dto]);
 
   useEffect(() => {
+    if (
+      form.taskType !== "PRODUCT_PURCHASE" ||
+      form.purchaseSource !== "CATEGORY" ||
+      !form.storeIds.length
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    const storeIds = [...form.storeIds].sort();
+    const cacheKey = storeIds.join("|");
+    const load = async () => {
+      setLoadingProductGroups(true);
+      try {
+        const cached = productGroupCatalogCache.get(cacheKey);
+        const catalog =
+          cached ?? (await fetchProductGroupCatalog(storeIds, controller));
+        if (!cached) productGroupCatalogCache.set(cacheKey, catalog);
+        setProductGroups(catalog.groups);
+        setProductGroupWarnings(catalog.warnings);
+        setSelectedProductGroups((current) =>
+          current.filter((selected) =>
+            catalog.groups.some((group) => group.id === selected.id),
+          ),
+        );
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setProductGroups([]);
+          setProductGroupWarnings([
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить категории Langame.",
+          ]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoadingProductGroups(false);
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [form.purchaseSource, form.storeIds, form.taskType]);
+
+  useEffect(() => {
     if (form.taskType !== "PRODUCT_PURCHASE" || search.trim().length < 3) {
       return;
     }
+    if (form.purchaseSource !== "PRODUCT") return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSearching(true);
@@ -204,7 +290,7 @@ export function GuestMissionWizard({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [form.storeIds, form.taskType, productPage, search]);
+  }, [form.purchaseSource, form.storeIds, form.taskType, productPage, search]);
 
   useEffect(() => {
     if (!draftId || !autosaveReady.current) return;
@@ -311,6 +397,14 @@ export function GuestMissionWizard({
     );
   }
 
+  function toggleProductGroup(group: GuestGameMissionProductGroup) {
+    setSelectedProductGroups((current) =>
+      current.some((item) => item.id === group.id)
+        ? current.filter((item) => item.id !== group.id)
+        : [...current, group],
+    );
+  }
+
   return (
     <div className="pb-28">
       <div className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-2 shadow-sm md:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -352,12 +446,18 @@ export function GuestMissionWizard({
               }}
               products={products}
               selectedProducts={selectedProducts}
+              productGroups={productGroups}
+              selectedProductGroups={selectedProductGroups}
+              productGroupWarnings={productGroupWarnings}
+              loadingProductGroups={loadingProductGroups}
               searching={searching}
               productPage={productPage}
               productTotalPages={productTotalPages}
               setProductPage={setProductPage}
               toggleProduct={toggleProduct}
+              toggleProductGroup={toggleProductGroup}
               clearProducts={() => setSelectedProducts([])}
+              clearProductGroups={() => setSelectedProductGroups([])}
             />
           ) : null}
           {step === "rewards" ? (
@@ -441,12 +541,18 @@ function ConditionsStep(props: {
   setSearch: (value: string) => void;
   products: Product[];
   selectedProducts: Product[];
+  productGroups: GuestGameMissionProductGroup[];
+  selectedProductGroups: GuestGameMissionProductGroup[];
+  productGroupWarnings: string[];
+  loadingProductGroups: boolean;
   searching: boolean;
   productPage: number;
   productTotalPages: number;
   setProductPage: (page: number) => void;
   toggleProduct: (product: Product) => void;
+  toggleProductGroup: (group: GuestGameMissionProductGroup) => void;
   clearProducts: () => void;
+  clearProductGroups: () => void;
 }) {
   const { form, setForm } = props;
   return (
@@ -654,126 +760,132 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
         <ChoiceRow
           values={[
             { id: "PRODUCT", label: "Конкретные товары" },
-            {
-              id: "CATEGORY",
-              label: "Категории · в разработке",
-              disabled: true,
-            },
+            { id: "CATEGORY", label: "Категории товаров" },
           ]}
-          value="PRODUCT"
-          onChange={() => undefined}
+          value={form.purchaseSource}
+          onChange={(value) =>
+            setForm((state) => ({
+              ...state,
+              purchaseSource: value as WizardState["purchaseSource"],
+            }))
+          }
         />
         <p className="mt-3 text-xs text-zinc-500">
           Учитываются только положительные покупки, привязанные к гостю. Отмены,
           возвраты и продажи без гостя не засчитываются.
         </p>
       </div>
-      <div className={subsectionClass}>
-        <div className="flex items-center justify-between gap-3">
-          <SubTitle>Товары выбранных клубов</SubTitle>
-          <span className="text-xs font-bold text-emerald-700">
-            Сохранено: {props.selectedProducts.length}
-          </span>
-        </div>
-        <Field label="Поиск товаров">
-          <input
-            className={fieldClass}
-            value={props.search}
-            onChange={(event) => props.setSearch(event.target.value)}
-            placeholder="Введите минимум 3 символа, например: арен"
-          />
-        </Field>
-        <p className="mt-2 text-xs text-zinc-500">
-          {props.search.trim().length < 3
-            ? "Результаты появятся после третьего символа."
-            : props.searching
-              ? "Ищем товары…"
-              : `Найдено: ${props.products.length}`}
-        </p>
-        {props.search.trim().length >= 3 && props.products.length ? (
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {props.products.map((product) => {
-              const checked = props.selectedProducts.some(
-                (item) => item.id === product.id,
-              );
-              return (
-                <label
-                  key={product.id}
-                  className={`flex cursor-pointer gap-3 rounded-lg border p-3 ${checked ? "border-emerald-400 bg-emerald-100/50 dark:bg-emerald-950/30" : "border-zinc-200 dark:border-zinc-800"}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => props.toggleProduct(product)}
-                  />
-                  <span>
-                    <strong className="block text-sm">{product.name}</strong>
-                    <span className="text-xs text-zinc-500">
-                      {product.category?.name ?? "Без категории"} ·{" "}
-                      {product.salePrice} ₽
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        ) : null}
-        {props.search.trim().length >= 3 && props.productTotalPages > 1 ? (
-          <div className="mt-3 flex items-center justify-between gap-3 text-xs">
-            <button
-              type="button"
-              disabled={props.productPage <= 1 || props.searching}
-              onClick={() => props.setProductPage(props.productPage - 1)}
-              className="rounded-lg border border-zinc-200 px-3 py-2 font-bold disabled:opacity-40 dark:border-zinc-700"
-            >
-              Назад
-            </button>
-            <span className="text-zinc-500">
-              Страница {props.productPage} из {props.productTotalPages}
+      {form.purchaseSource === "PRODUCT" ? (
+        <div className={subsectionClass}>
+          <div className="flex items-center justify-between gap-3">
+            <SubTitle>Товары выбранных клубов</SubTitle>
+            <span className="text-xs font-bold text-emerald-700">
+              Сохранено: {props.selectedProducts.length}
             </span>
-            <button
-              type="button"
-              disabled={
-                props.productPage >= props.productTotalPages || props.searching
-              }
-              onClick={() => props.setProductPage(props.productPage + 1)}
-              className="rounded-lg border border-zinc-200 px-3 py-2 font-bold disabled:opacity-40 dark:border-zinc-700"
-            >
-              Дальше
-            </button>
           </div>
-        ) : null}
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-white/70 p-3 dark:border-emerald-900 dark:bg-zinc-950/40">
-          <div className="flex items-center justify-between">
-            <strong className="text-sm">Сохранённые товары</strong>
-            <button
-              type="button"
-              onClick={props.clearProducts}
-              className="text-xs font-bold text-red-600"
-            >
-              Очистить
-            </button>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {props.selectedProducts.map((product) => (
-              <span
-                key={product.id}
-                className="group inline-flex items-center gap-2 rounded-lg border border-emerald-300 px-2.5 py-1.5 text-xs"
+          <Field label="Поиск товаров">
+            <input
+              className={fieldClass}
+              value={props.search}
+              onChange={(event) => props.setSearch(event.target.value)}
+              placeholder="Введите минимум 3 символа, например: арен"
+            />
+          </Field>
+          <p className="mt-2 text-xs text-zinc-500">
+            {props.search.trim().length < 3
+              ? "Результаты появятся после третьего символа."
+              : props.searching
+                ? "Ищем товары…"
+                : `Найдено: ${props.products.length}`}
+          </p>
+          {props.search.trim().length >= 3 && props.products.length ? (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {props.products.map((product) => {
+                const checked = props.selectedProducts.some(
+                  (item) => item.id === product.id,
+                );
+                return (
+                  <label
+                    key={product.id}
+                    className={`flex cursor-pointer gap-3 rounded-lg border p-3 ${checked ? "border-emerald-400 bg-emerald-100/50 dark:bg-emerald-950/30" : "border-zinc-200 dark:border-zinc-800"}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => props.toggleProduct(product)}
+                    />
+                    <span>
+                      <strong className="block text-sm">{product.name}</strong>
+                      <span className="text-xs text-zinc-500">
+                        {product.category?.name ?? "Без категории"} ·{" "}
+                        {product.salePrice} ₽
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
+          {props.search.trim().length >= 3 && props.productTotalPages > 1 ? (
+            <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+              <button
+                type="button"
+                disabled={props.productPage <= 1 || props.searching}
+                onClick={() => props.setProductPage(props.productPage - 1)}
+                className="rounded-lg border border-zinc-200 px-3 py-2 font-bold disabled:opacity-40 dark:border-zinc-700"
               >
-                {product.name}
-                <button
-                  type="button"
-                  onClick={() => props.toggleProduct(product)}
-                  aria-label={`Удалить ${product.name}`}
-                  className="font-black text-zinc-400 group-hover:text-red-600"
-                >
-                  ×
-                </button>
+                Назад
+              </button>
+              <span className="text-zinc-500">
+                Страница {props.productPage} из {props.productTotalPages}
               </span>
-            ))}
+              <button
+                type="button"
+                disabled={
+                  props.productPage >= props.productTotalPages ||
+                  props.searching
+                }
+                onClick={() => props.setProductPage(props.productPage + 1)}
+                className="rounded-lg border border-zinc-200 px-3 py-2 font-bold disabled:opacity-40 dark:border-zinc-700"
+              >
+                Дальше
+              </button>
+            </div>
+          ) : null}
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-white/70 p-3 dark:border-emerald-900 dark:bg-zinc-950/40">
+            <div className="flex items-center justify-between">
+              <strong className="text-sm">Сохранённые товары</strong>
+              <button
+                type="button"
+                onClick={props.clearProducts}
+                className="text-xs font-bold text-red-600"
+              >
+                Очистить
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {props.selectedProducts.map((product) => (
+                <span
+                  key={product.id}
+                  className="group inline-flex items-center gap-2 rounded-lg border border-emerald-300 px-2.5 py-1.5 text-xs"
+                >
+                  {product.name}
+                  <button
+                    type="button"
+                    onClick={() => props.toggleProduct(product)}
+                    aria-label={`Удалить ${product.name}`}
+                    className="font-black text-zinc-400 group-hover:text-red-600"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <CategoryPicker {...props} />
+      )}
       <div className={subsectionClass}>
         <SubTitle>Как сопоставлять выбранное</SubTitle>
         <ChoiceRow
@@ -790,8 +902,11 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
           }
         />
         <p className="mt-2 text-xs text-zinc-500">
-          Для варианта «Все выбранные» товары можно купить разными покупками в
-          течение периода задания — один чек не требуется.
+          Для варианта «Все выбранные»{" "}
+          {form.purchaseSource === "CATEGORY"
+            ? "достаточно купить хотя бы один товар из каждой выбранной категории"
+            : "товары можно купить разными покупками"}{" "}
+          в течение периода задания — один чек не требуется.
         </p>
       </div>
       <div className={subsectionClass}>
@@ -834,6 +949,98 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
         ) : null}
       </div>
       <CommonSchedule form={form} setForm={setForm} />
+    </div>
+  );
+}
+
+function CategoryPicker(props: Parameters<typeof ConditionsStep>[0]) {
+  return (
+    <div className={subsectionClass}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <SubTitle>Категории выбранных клубов</SubTitle>
+          <p className="mt-1 text-xs text-zinc-500">
+            Категории объединяются по названию, но сохраняются с точными ID
+            каждого домена и клуба.
+          </p>
+        </div>
+        <span className="text-xs font-bold text-emerald-700">
+          Выбрано: {props.selectedProductGroups.length}
+        </span>
+      </div>
+      {props.productGroupWarnings.map((warning) => (
+        <p
+          key={warning}
+          className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          {warning}
+        </p>
+      ))}
+      {props.loadingProductGroups ? (
+        <p className="mt-4 text-sm text-zinc-500">Загружаем категории…</p>
+      ) : props.productGroups.length ? (
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {props.productGroups.map((group) => {
+            const checked = props.selectedProductGroups.some(
+              (selected) => selected.id === group.id,
+            );
+            return (
+              <label
+                key={group.id}
+                className={`flex cursor-pointer gap-3 rounded-lg border p-3 ${checked ? "border-emerald-400 bg-emerald-100/50 dark:bg-emerald-950/30" : "border-zinc-200 bg-white/70 dark:border-zinc-800 dark:bg-zinc-950/40"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => props.toggleProductGroup(group)}
+                />
+                <span className="min-w-0">
+                  <strong className="block text-sm">{group.name}</strong>
+                  <span className="mt-1 block text-xs leading-5 text-zinc-500">
+                    {group.productCount} товаров · {group.storeCount} клубов
+                    <br />
+                    {group.storeNames.join(", ")}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-zinc-500">
+          Категории пока не синхронизированы для выбранных клубов.
+        </p>
+      )}
+      <div className="mt-4 rounded-lg border border-emerald-200 bg-white/70 p-3 dark:border-emerald-900 dark:bg-zinc-950/40">
+        <div className="flex items-center justify-between">
+          <strong className="text-sm">Сохранённые категории</strong>
+          <button
+            type="button"
+            onClick={props.clearProductGroups}
+            className="text-xs font-bold text-red-600"
+          >
+            Очистить
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {props.selectedProductGroups.map((group) => (
+            <span
+              key={group.id}
+              className="group inline-flex items-center gap-2 rounded-lg border border-emerald-300 px-2.5 py-1.5 text-xs"
+            >
+              {group.name}
+              <button
+                type="button"
+                onClick={() => props.toggleProductGroup(group)}
+                aria-label={`Удалить ${group.name}`}
+                className="font-black text-zinc-400 group-hover:text-red-600"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1691,6 +1898,7 @@ function StepButton({
 function buildWizardDto(
   form: WizardState,
   products: Product[],
+  productGroups: GuestGameMissionProductGroup[],
   lootBoxes: GuestGameLootBox[],
   promos: MarketingPromoBundle[],
 ): GuestGameMissionWizardDto {
@@ -1711,15 +1919,29 @@ function buildWizardDto(
     });
   if (form.taskType === "PRODUCT_PURCHASE")
     Object.assign(metric, {
-      productIds: products.map((product) => product.id),
-      externalProductIds: products
-        .map((product) => product.externalProductId)
-        .filter((id): id is string => Boolean(id)),
-      productRefs: products.map((product) => ({
-        productId: product.id,
-        externalProductId: product.externalProductId,
-        externalDomain: product.externalDomain,
-      })),
+      purchaseSource: form.purchaseSource,
+      productIds:
+        form.purchaseSource === "PRODUCT"
+          ? products.map((product) => product.id)
+          : [],
+      externalProductIds:
+        form.purchaseSource === "PRODUCT"
+          ? products
+              .map((product) => product.externalProductId)
+              .filter((id): id is string => Boolean(id))
+          : [],
+      productRefs:
+        form.purchaseSource === "PRODUCT"
+          ? products.map((product) => ({
+              productId: product.id,
+              externalProductId: product.externalProductId,
+              externalDomain: product.externalDomain,
+            }))
+          : [],
+      categoryIds:
+        form.purchaseSource === "CATEGORY"
+          ? productGroups.map((group) => group.id)
+          : [],
       productMatch: form.productMatch,
       amountMode: form.amountMode,
       minSpendAmount:
@@ -1727,6 +1949,9 @@ function buildWizardDto(
       totalAmount: form.totalAmount,
       unit: "покупок",
     });
+  if (form.taskType === "PRODUCT_PURCHASE") {
+    conditions.purchaseSource = form.purchaseSource;
+  }
   if (form.taskType === "BALANCE_TOPUP")
     Object.assign(metric, {
       topupMode: form.topupMode,
@@ -1791,6 +2016,7 @@ function buildWizardDto(
 function buildPreview(
   form: WizardState,
   products: Product[],
+  productGroups: GuestGameMissionProductGroup[],
   lootBoxes: GuestGameLootBox[],
   promos: MarketingPromoBundle[],
 ): GuestMissionPreviewData {
@@ -1816,7 +2042,12 @@ function buildPreview(
               ? 1
               : form.checkInCount
           : form.productMatch === "ALL"
-            ? Math.max(1, products.length)
+            ? Math.max(
+                1,
+                form.purchaseSource === "CATEGORY"
+                  ? productGroups.length
+                  : products.length,
+              )
             : 1;
   const unit =
     form.taskType === "PLAY_TIME"
@@ -1833,7 +2064,7 @@ function buildPreview(
   return {
     title: form.name || "Новое задание",
     description: form.description || logicSubtitle(form.taskType),
-    condition: previewCondition(form, products),
+    condition: previewCondition(form, products, productGroups),
     reward,
     xp: form.xpEnabled ? form.xpAmount : 0,
     progressCurrent: Math.min(target, Math.round(target * 0.6)),
@@ -1843,18 +2074,24 @@ function buildPreview(
     coverUrl: form.coverUrl,
     products:
       form.taskType === "PRODUCT_PURCHASE"
-        ? products.map((product) => product.name)
+        ? form.purchaseSource === "CATEGORY"
+          ? productGroups.map((group) => group.name)
+          : products.map((product) => product.name)
         : [],
     productMode: form.productMatch,
     minimumAmount:
       form.amountMode === "SINGLE_MINIMUM" ? form.minimumAmount : null,
   };
 }
-function previewCondition(form: WizardState, products: Product[]) {
+function previewCondition(
+  form: WizardState,
+  products: Product[],
+  productGroups: GuestGameMissionProductGroup[],
+) {
   if (form.taskType === "PLAY_TIME")
     return `Провести в игре ${form.target} минут${form.minSessionMinutes ? `, минимум ${form.minSessionMinutes} минут за сессию` : ""}.`;
   if (form.taskType === "PRODUCT_PURCHASE")
-    return `${form.productMatch === "ALL" ? "Купить все выбранные товары" : "Купить любой выбранный товар"}${form.amountMode === "SINGLE_MINIMUM" ? ` не менее чем на ${form.minimumAmount} ₽` : form.amountMode === "PERIOD_TOTAL" ? ` на общую сумму ${form.totalAmount} ₽` : ""}. Выбрано: ${products.length}.`;
+    return `${form.productMatch === "ALL" ? `Купить ${form.purchaseSource === "CATEGORY" ? "товар из каждой выбранной категории" : "все выбранные товары"}` : `Купить ${form.purchaseSource === "CATEGORY" ? "товар из любой выбранной категории" : "любой выбранный товар"}`}${form.amountMode === "SINGLE_MINIMUM" ? ` не менее чем на ${form.minimumAmount} ₽` : form.amountMode === "PERIOD_TOTAL" ? ` на общую сумму ${form.totalAmount} ₽` : ""}. Выбрано: ${form.purchaseSource === "CATEGORY" ? productGroups.length : products.length}.`;
   if (form.taskType === "BALANCE_TOPUP")
     return form.topupMode === "PERIOD_TOTAL"
       ? `Пополнить баланс суммарно на ${form.totalAmount} ₽.`
@@ -1919,6 +2156,23 @@ function cacheProductCatalog(key: string, catalog: ProductCatalog) {
   }
   productCatalogCache.set(key, catalog);
 }
+
+async function fetchProductGroupCatalog(
+  storeIds: string[],
+  controller: AbortController,
+) {
+  const params = new URLSearchParams();
+  storeIds.forEach((storeId) => params.append("storeId", storeId));
+  const response = await fetch(
+    `/api/guests/gamification/missions/wizard/product-groups?${params}`,
+    { signal: controller.signal },
+  );
+  if (!response.ok) {
+    throw new Error(await responseMessage(response));
+  }
+  return response.json() as Promise<GuestGameMissionProductGroupCatalog>;
+}
+
 function initialState(stores: Store[]): WizardState {
   const now = new Date();
   const end = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -1936,6 +2190,7 @@ function initialState(stores: Store[]): WizardState {
     hours: "09:00-21:00",
     weekdays: [],
     minSessionMinutes: 60,
+    purchaseSource: "PRODUCT",
     productMatch: "ANY",
     amountMode: "NONE",
     minimumAmount: 200,

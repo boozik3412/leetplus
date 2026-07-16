@@ -7,7 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import {
   DailyDataCoverageScope,
   DailyDataCoverageStatus,
@@ -2015,6 +2015,31 @@ export type GuestGameMissionWizardSaveResult = {
   readiness: GuestGameMissionWizardReadiness;
 };
 
+export type GuestGameMissionProductGroupCatalog = {
+  status: 'READY' | 'PARTIAL' | 'EMPTY';
+  latestSyncedAt: string | null;
+  stores: Array<{
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    ready: boolean;
+  }>;
+  warnings: string[];
+  groups: Array<{
+    id: string;
+    name: string;
+    productCount: number;
+    storeCount: number;
+    storeNames: string[];
+    refs: Array<{
+      externalDomain: string;
+      externalGroupId: string;
+      productCount: number;
+      storeIds: string[];
+    }>;
+  }>;
+};
+
 export type GuestGameSeasonDto = {
   name?: string;
   status?: string;
@@ -2308,6 +2333,8 @@ export type GuestGameDryRunDto = {
   guestLogType?: string | null;
   productId?: string | null;
   externalProductId?: string | null;
+  externalCategoryKey?: string | null;
+  externalCategoryId?: string | null;
   categoryId?: string | null;
   productName?: string | null;
   categoryName?: string | null;
@@ -2389,6 +2416,8 @@ export type GuestGameDryRunResult = {
     guestLogType: string | null;
     productId: string | null;
     externalProductId: string | null;
+    externalCategoryKey: string | null;
+    externalCategoryId: string | null;
     categoryId: string | null;
     productName: string | null;
     categoryName: string | null;
@@ -2482,6 +2511,8 @@ export type GuestGameSnapshotFact = {
   guestLogType?: string | null;
   productId?: string | null;
   externalProductId?: string | null;
+  externalCategoryKey?: string | null;
+  externalCategoryId?: string | null;
   categoryId?: string | null;
   productName?: string | null;
   categoryName?: string | null;
@@ -5674,6 +5705,74 @@ export class GuestGamificationService {
     const referralFacts = referralEvents.flatMap((event) =>
       mapReferralFact(event, referralProfileMap, referralStoreMap),
     );
+    const productConfigurations = productExpenses.length
+      ? await this.prisma.langameClubProductConfiguration.findMany({
+          where: {
+            tenantId: user.tenantId,
+            isActive: true,
+            storeId: {
+              in: uniqueStrings(
+                productExpenses.map((row) => row.store?.id ?? ''),
+              ),
+            },
+            externalProductId: {
+              in: uniqueStrings(
+                productExpenses.map((row) => row.externalProductId ?? ''),
+              ),
+            },
+          },
+          select: {
+            storeId: true,
+            externalDomain: true,
+            externalProductId: true,
+            externalGroupId: true,
+          },
+        })
+      : [];
+    const configurationGroupRefs = productConfigurations
+      .filter((row): row is typeof row & { externalGroupId: string } =>
+        Boolean(row.externalGroupId),
+      )
+      .map((row) => ({
+        externalDomain: row.externalDomain,
+        externalGroupId: row.externalGroupId,
+      }));
+    const productGroupRows = configurationGroupRefs.length
+      ? await this.prisma.langameProductGroup.findMany({
+          where: {
+            tenantId: user.tenantId,
+            OR: configurationGroupRefs,
+          },
+          select: {
+            externalDomain: true,
+            externalGroupId: true,
+            name: true,
+          },
+        })
+      : [];
+    const productGroupNames = new Map(
+      productGroupRows.map((row) => [
+        `${row.externalDomain}:${row.externalGroupId}`,
+        row.name,
+      ]),
+    );
+    const productCategoryMappings = new Map<
+      string,
+      ExternalProductCategoryMapping
+    >();
+    productConfigurations.forEach((row) => {
+      if (!row.externalGroupId) return;
+      const externalCategoryKey = `${row.externalDomain}:${row.externalGroupId}`;
+      productCategoryMappings.set(
+        `${row.storeId}:${row.externalDomain}:${row.externalProductId}`,
+        {
+          externalCategoryKey,
+          externalCategoryId: row.externalGroupId,
+          externalCategoryName:
+            productGroupNames.get(externalCategoryKey) ?? null,
+        },
+      );
+    });
 
     const facts = [
       ...sessions.flatMap(mapSessionFacts),
@@ -5696,7 +5795,9 @@ export class GuestGamificationService {
             : null,
         ),
       ),
-      ...productExpenses.flatMap(mapProductExpenseFact),
+      ...productExpenses.flatMap((row) =>
+        mapProductExpenseFact(row, productCategoryMappings),
+      ),
       ...referralFacts,
     ]
       .sort(
@@ -6672,6 +6773,198 @@ export class GuestGamificationService {
     return rows.map(mapMission);
   }
 
+  async getMissionProductGroupCatalog(
+    user: AuthenticatedUser,
+    requestedStoreIds: string[],
+  ): Promise<GuestGameMissionProductGroupCatalog> {
+    const storeIds = uniqueStrings(requestedStoreIds);
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: user.tenantId,
+        isActive: true,
+        ...(storeIds.length ? { id: { in: storeIds } } : {}),
+      },
+      select: { id: true, name: true, externalDomain: true },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    });
+    if (storeIds.length && stores.length !== storeIds.length) {
+      throw new BadRequestException(
+        'Один или несколько выбранных клубов недоступны.',
+      );
+    }
+
+    const configurations = stores.length
+      ? await this.prisma.langameClubProductConfiguration.findMany({
+          where: {
+            tenantId: user.tenantId,
+            storeId: { in: stores.map((store) => store.id) },
+            externalGroupId: { not: null },
+            isActive: true,
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            externalDomain: true,
+            externalGroupId: true,
+            externalProductId: true,
+            syncedAt: true,
+          },
+        })
+      : [];
+    const groupKeys = new Map<string, { domain: string; groupId: string }>();
+    configurations.forEach((row) => {
+      if (!row.externalGroupId) return;
+      groupKeys.set(`${row.externalDomain}:${row.externalGroupId}`, {
+        domain: row.externalDomain,
+        groupId: row.externalGroupId,
+      });
+    });
+    const groups = groupKeys.size
+      ? await this.prisma.langameProductGroup.findMany({
+          where: {
+            tenantId: user.tenantId,
+            isActive: true,
+            isDeleted: false,
+            OR: [...groupKeys.values()].map((item) => ({
+              externalDomain: item.domain,
+              externalGroupId: item.groupId,
+            })),
+          },
+          select: {
+            externalDomain: true,
+            externalGroupId: true,
+            name: true,
+            syncedAt: true,
+          },
+        })
+      : [];
+    const groupByExternalKey = new Map(
+      groups.map((group) => [
+        `${group.externalDomain}:${group.externalGroupId}`,
+        group,
+      ]),
+    );
+    const storeById = new Map(stores.map((store) => [store.id, store]));
+    const readyStoreIds = new Set(configurations.map((row) => row.storeId));
+    const buckets = new Map<
+      string,
+      {
+        name: string;
+        refs: Map<
+          string,
+          {
+            externalDomain: string;
+            externalGroupId: string;
+            productIds: Set<string>;
+            storeIds: Set<string>;
+          }
+        >;
+        productIds: Set<string>;
+        storeIds: Set<string>;
+      }
+    >();
+
+    configurations.forEach((row) => {
+      if (!row.externalGroupId) return;
+      const externalKey = `${row.externalDomain}:${row.externalGroupId}`;
+      const group = groupByExternalKey.get(externalKey);
+      if (!group) return;
+      const semanticKey = group.name.trim().toLocaleLowerCase('ru-RU');
+      const bucket = buckets.get(semanticKey) ?? {
+        name: group.name.trim(),
+        refs: new Map<
+          string,
+          {
+            externalDomain: string;
+            externalGroupId: string;
+            productIds: Set<string>;
+            storeIds: Set<string>;
+          }
+        >(),
+        productIds: new Set<string>(),
+        storeIds: new Set<string>(),
+      };
+      const ref = bucket.refs.get(externalKey) ?? {
+        externalDomain: row.externalDomain,
+        externalGroupId: row.externalGroupId,
+        productIds: new Set<string>(),
+        storeIds: new Set<string>(),
+      };
+      const productKey =
+        row.productId ?? `${row.externalDomain}:${row.externalProductId}`;
+      ref.productIds.add(productKey);
+      ref.storeIds.add(row.storeId);
+      bucket.productIds.add(productKey);
+      bucket.storeIds.add(row.storeId);
+      bucket.refs.set(externalKey, ref);
+      buckets.set(semanticKey, bucket);
+    });
+
+    const catalogGroups = [...buckets.values()]
+      .map((bucket) => {
+        const refs = [...bucket.refs.values()]
+          .map((ref) => ({
+            externalDomain: ref.externalDomain,
+            externalGroupId: ref.externalGroupId,
+            productCount: ref.productIds.size,
+            storeIds: [...ref.storeIds].sort(),
+          }))
+          .sort((left, right) =>
+            `${left.externalDomain}:${left.externalGroupId}`.localeCompare(
+              `${right.externalDomain}:${right.externalGroupId}`,
+            ),
+          );
+        const identity = refs
+          .map((ref) => `${ref.externalDomain}:${ref.externalGroupId}`)
+          .join('|');
+        return {
+          id: createHash('sha256').update(identity).digest('hex').slice(0, 24),
+          name: bucket.name,
+          productCount: bucket.productIds.size,
+          storeCount: bucket.storeIds.size,
+          storeNames: [...bucket.storeIds]
+            .map((storeId) => storeById.get(storeId)?.name)
+            .filter((name): name is string => Boolean(name))
+            .sort((left, right) => left.localeCompare(right, 'ru')),
+          refs,
+        };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+    const missingStores = stores.filter(
+      (store) => !readyStoreIds.has(store.id),
+    );
+    const timestamps = [
+      ...configurations.map((row) => row.syncedAt),
+      ...groups.map((group) => group.syncedAt),
+    ];
+    const latestSyncedAt = timestamps.length
+      ? new Date(
+          Math.max(...timestamps.map((value) => value.getTime())),
+        ).toISOString()
+      : null;
+
+    return {
+      status: !catalogGroups.length
+        ? 'EMPTY'
+        : missingStores.length
+          ? 'PARTIAL'
+          : 'READY',
+      latestSyncedAt,
+      stores: stores.map((store) => ({
+        ...store,
+        ready: readyStoreIds.has(store.id),
+      })),
+      warnings: missingStores.length
+        ? [
+            `Нет свежей клубной конфигурации: ${missingStores
+              .map((store) => store.name)
+              .join(', ')}. Запустите синхронизацию каталога.`,
+          ]
+        : [],
+      groups: catalogGroups,
+    };
+  }
+
   validateMissionWizard(
     _user: AuthenticatedUser,
     dto: GuestGameMissionWizardDto,
@@ -6708,42 +7001,94 @@ export class GuestGamificationService {
       selectedStores.map((store) => store.externalDomain ?? ''),
     );
     if (taskType === 'PRODUCT_PURCHASE') {
-      const selectedProductIds = uniqueStrings(
-        guestGameStringArray(metric.productIds),
-      );
-      const selectedProducts = selectedProductIds.length
-        ? await this.prisma.product.findMany({
-            where: {
-              tenantId: user.tenantId,
-              id: { in: selectedProductIds },
-              isActive: true,
-            },
-            select: {
-              id: true,
-              name: true,
-              externalProductId: true,
-              externalDomain: true,
-            },
-          })
-        : [];
-      if (selectedProducts.length !== selectedProductIds.length) {
-        throw new BadRequestException(
-          'Один или несколько выбранных товаров недоступны.',
+      const purchaseSource =
+        nullableString(conditions.purchaseSource)?.toUpperCase() === 'CATEGORY'
+          ? 'CATEGORY'
+          : 'PRODUCT';
+      if (purchaseSource === 'CATEGORY') {
+        const selectedCategoryIds = uniqueStrings(
+          guestGameStringArray(metric.categoryIds),
         );
+        const catalog = await this.getMissionProductGroupCatalog(
+          user,
+          storeIds,
+        );
+        const selectedCategories = catalog.groups.filter((group) =>
+          selectedCategoryIds.includes(group.id),
+        );
+        if (selectedCategories.length !== selectedCategoryIds.length) {
+          throw new BadRequestException(
+            'Одна или несколько выбранных категорий недоступны в выбранных клубах.',
+          );
+        }
+        const categorySelections = selectedCategories.map((group) => ({
+          id: group.id,
+          name: group.name,
+          externalCategoryKeys: group.refs.map(
+            (ref) => `${ref.externalDomain}:${ref.externalGroupId}`,
+          ),
+          refs: group.refs.map((ref) => ({
+            externalDomain: ref.externalDomain,
+            externalGroupId: ref.externalGroupId,
+          })),
+        }));
+        metric = {
+          ...metric,
+          productIds: [],
+          externalProductIds: [],
+          categoryIds: selectedCategories.map((group) => group.id),
+          categoryNames: selectedCategories.map((group) => group.name),
+          externalCategoryKeys: uniqueStrings(
+            categorySelections.flatMap(
+              (selection) => selection.externalCategoryKeys,
+            ),
+          ),
+          categorySelections,
+          target:
+            nullableString(metric.productMatch)?.toUpperCase() === 'ALL'
+              ? Math.max(1, selectedCategories.length)
+              : 1,
+        };
+      } else {
+        const selectedProductIds = uniqueStrings(
+          guestGameStringArray(metric.productIds),
+        );
+        const selectedProducts = selectedProductIds.length
+          ? await this.prisma.product.findMany({
+              where: {
+                tenantId: user.tenantId,
+                id: { in: selectedProductIds },
+                isActive: true,
+              },
+              select: {
+                id: true,
+                name: true,
+                externalProductId: true,
+                externalDomain: true,
+              },
+            })
+          : [];
+        if (selectedProducts.length !== selectedProductIds.length) {
+          throw new BadRequestException(
+            'Один или несколько выбранных товаров недоступны.',
+          );
+        }
+        metric = {
+          ...metric,
+          categoryIds: [],
+          externalCategoryKeys: [],
+          productIds: selectedProducts.map((product) => product.id),
+          externalProductIds: uniqueStrings(
+            selectedProducts.map((product) => product.externalProductId ?? ''),
+          ),
+          productRefs: selectedProducts.map((product) => ({
+            productId: product.id,
+            name: product.name,
+            externalProductId: product.externalProductId,
+            externalDomain: product.externalDomain,
+          })),
+        };
       }
-      metric = {
-        ...metric,
-        productIds: selectedProducts.map((product) => product.id),
-        externalProductIds: uniqueStrings(
-          selectedProducts.map((product) => product.externalProductId ?? ''),
-        ),
-        productRefs: selectedProducts.map((product) => ({
-          productId: product.id,
-          name: product.name,
-          externalProductId: product.externalProductId,
-          externalDomain: product.externalDomain,
-        })),
-      };
       conditions = { ...conditions, metric: cleanJsonRecord(metric) };
     }
     const missionDto: GuestGameMissionDto = {
@@ -9443,6 +9788,8 @@ export class GuestGamificationService {
     const guestLogType = nullableString(dto.guestLogType) ?? null;
     const productId = nullableString(dto.productId) ?? null;
     const externalProductId = nullableString(dto.externalProductId) ?? null;
+    const externalCategoryKey = nullableString(dto.externalCategoryKey) ?? null;
+    const externalCategoryId = nullableString(dto.externalCategoryId) ?? null;
     const categoryId = nullableString(dto.categoryId) ?? null;
     const productName = nullableString(dto.productName) ?? null;
     const categoryName = nullableString(dto.categoryName) ?? null;
@@ -9497,6 +9844,8 @@ export class GuestGamificationService {
       guestLogType,
       productId,
       externalProductId,
+      externalCategoryKey,
+      externalCategoryId,
       categoryId,
       productName,
       categoryName,
@@ -9555,6 +9904,8 @@ export class GuestGamificationService {
         guestLogType,
         productId,
         externalProductId,
+        externalCategoryKey,
+        externalCategoryId,
         categoryId,
         productName,
         categoryName,
@@ -18234,8 +18585,15 @@ function mapLoyaltyGroupFact(
   ];
 }
 
+type ExternalProductCategoryMapping = {
+  externalCategoryKey: string;
+  externalCategoryId: string;
+  externalCategoryName: string | null;
+};
+
 function mapProductExpenseFact(
   row: SnapshotProductExpenseRow,
+  categoryMappings: Map<string, ExternalProductCategoryMapping>,
 ): GuestGameSnapshotFact[] {
   const revenue = numberValue(row.revenue);
   const cost = numberValue(row.cost);
@@ -18248,6 +18606,11 @@ function mapProductExpenseFact(
   const categoryName = row.product?.category?.name ?? null;
   const supplierName = row.product?.supplier?.name ?? null;
   const guestName = snapshotGuestName(row.guest, row.externalGuestId);
+  const externalCategory = categoryMappings.get(
+    `${row.store.id}:${row.externalDomain}:${row.externalProductId}`,
+  );
+  const displayCategoryName =
+    externalCategory?.externalCategoryName ?? categoryName;
 
   return [
     {
@@ -18269,16 +18632,18 @@ function mapProductExpenseFact(
       tariffTypeId: null,
       productId: row.productId,
       externalProductId: row.externalProductId,
+      externalCategoryKey: externalCategory?.externalCategoryKey ?? null,
+      externalCategoryId: externalCategory?.externalCategoryId ?? null,
       categoryId: row.product?.category?.id ?? null,
       productName,
-      categoryName,
+      categoryName: displayCategoryName,
       supplierName,
       quantity,
       label: `Товарная покупка: ${productName ?? 'товар'} · ${guestName}`,
       details: [
         row.storeNameAtSale ?? row.store?.name,
         productName,
-        categoryName,
+        displayCategoryName,
         supplierName,
         quantity ? `${quantity} шт` : null,
         revenue ? `${Math.abs(revenue)} руб` : null,
@@ -18566,6 +18931,8 @@ function pipelineProcessDtoFromFact(
     guestLogType: fact.guestLogType ?? null,
     productId: fact.productId ?? null,
     externalProductId: fact.externalProductId ?? null,
+    externalCategoryKey: fact.externalCategoryKey ?? null,
+    externalCategoryId: fact.externalCategoryId ?? null,
     categoryId: fact.categoryId ?? null,
     productName: fact.productName ?? null,
     categoryName: fact.categoryName ?? null,
@@ -19487,6 +19854,8 @@ function storedEventToProgressEvent(row: {
     guestLogType: nullableString(input.guestLogType),
     productId: nullableString(input.productId),
     externalProductId: nullableString(input.externalProductId),
+    externalCategoryKey: nullableString(input.externalCategoryKey),
+    externalCategoryId: nullableString(input.externalCategoryId),
     categoryId: nullableString(input.categoryId),
     productName: nullableString(input.productName),
     categoryName: nullableString(input.categoryName),
@@ -19513,6 +19882,8 @@ function currentEventToProgressEvent(
     guestLogType: context.guestLogType,
     productId: context.productId,
     externalProductId: context.externalProductId,
+    externalCategoryKey: context.externalCategoryKey,
+    externalCategoryId: context.externalCategoryId,
     categoryId: context.categoryId,
     productName: context.productName,
     categoryName: context.categoryName,
@@ -19540,6 +19911,8 @@ type DryRunContext = {
   guestLogType: string | null;
   productId: string | null;
   externalProductId: string | null;
+  externalCategoryKey: string | null;
+  externalCategoryId: string | null;
   categoryId: string | null;
   productName: string | null;
   categoryName: string | null;

@@ -75,13 +75,13 @@ describe('guest mission wizard contract', () => {
     expect(topup.warnings).toHaveLength(1);
   });
 
-  it('keeps categories and exact tariff dictionaries blocked', () => {
+  it('accepts synced category selections and keeps exact tariff dictionaries blocked', () => {
     const category = validateMissionWizard({
       ...common,
       taskType: 'PRODUCT_PURCHASE',
       conditions: {
         purchaseSource: 'CATEGORY',
-        metric: { productIds: ['product-1'], target: 1 },
+        metric: { categoryIds: ['category-1'], target: 1 },
       },
     });
     const tariff = validateMissionWizard({
@@ -93,7 +93,7 @@ describe('guest mission wizard contract', () => {
       },
     });
 
-    expect(category.ready).toBe(false);
+    expect(category.ready).toBe(true);
     expect(tariff.ready).toBe(false);
   });
 });

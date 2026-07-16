@@ -5,11 +5,12 @@
 - Added the embedded mission wizard route `/gamification/missions/wizard` with the three steps `Условия → Награды → Внешнее оформление`, DRAFT-only autosave, backend readiness-check and explicit activation confirmation. The legacy advanced editor remains available.
 - Mission definitions are versioned. Existing v1 missions remain on the current LIVE path; v2 `PLAY_TIME`, `PRODUCT_PURCHASE` and `CHECK_IN` missions use `LIVE_PRIMARY`, while v2 `BALANCE_TOPUP` missions are assigned `LEDGER_SUPPLEMENTAL` exclusively by the backend.
 - Added an isolated supplemental scheduler with `OFF`, `SHADOW` and `LIVE` modes, a kill switch, tenant scope, safe normalized evidence and stable sourceHash idempotency. Its allowed fact set is currently hard-limited to `BALANCE_TOPUP`.
-- Purchase v2 rules support ANY/ALL across separate purchases and single/minimum/cumulative amount modes. Only positive, non-canceled purchases linked to a guest are eligible. Category selection and exact tariff dictionaries remain disabled as `В разработке`.
+- Purchase v2 rules support ANY/ALL across separate purchases and single/minimum/cumulative amount modes. Only positive, non-canceled purchases linked to a guest are eligible. Product categories are synchronized for every Langame domain and club and can be selected in the wizard; exact tariff dictionaries remain disabled as `В разработке`.
+- Langame catalog sync reads the active product-group directory per domain and the product configuration per club. Category membership is stored separately as a club-scoped mapping and joins to the canonical product through Langame `product_id`, so sync does not overwrite the LeetPlus-owned `Product.categoryId`.
 - Guest task cards now open a full modal rendered by the same React preview component used by the wizard. Quest covers use a dedicated tenant-owned media store with JPG/PNG/WebP signature validation and a 2 MB limit.
 - Supplemental production mode remains `OFF` by default. Production rollout must pass `SHADOW` diagnostics before `LIVE` is enabled; the existing LIVE snapshot pipeline is not replaced.
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 ## Current Workflow
 
@@ -64,7 +65,7 @@ Connected production Langame sources:
 - Sales facts keep snapshot fields such as product/store names at the moment of sale.
 - Deleted or missing Langame nomenclature must not delete historical sales.
 - Langame sync must not automatically set `canonicalProductId`.
-- The verified Langame product directory (`/products/list`) supplies only external `id`, product `name`, and `active` status; it has no category directory in the currently available routes. Product categories are therefore LeetPlus-owned tenant data and must not be overwritten by Langame sync.
+- The public Langame product directory (`/products/list`) supplies external product identity, name and active status. The master product-group directory and club product configuration supply a separate club-scoped category mapping. Sync joins that mapping through Langame `product_id` and must not overwrite the LeetPlus-owned `Product.categoryId`.
 - Product grouping into a canonical/network SKU happens only through analysis/manual confirmation.
 - A rejected parsing suggestion should not delete existing product links.
 - Already confirmed parsing groups should not be suggested again unless there is a real change/new item to review.

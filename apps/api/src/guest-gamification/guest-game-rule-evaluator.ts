@@ -346,6 +346,10 @@ function filterLedgerProductFacts(
 ):
   | { status: 'MATCHED'; facts: GuestGameLedgerFact[] }
   | { status: 'BLOCKED' | 'INSUFFICIENT_DATA'; reason: string } {
+  const categorySource =
+    nullableString(
+      metric.purchaseSource ?? conditions.purchaseSource,
+    )?.toUpperCase() === 'CATEGORY';
   const selectors = {
     productIds: stringValues(
       metric.productIds,
@@ -365,11 +369,19 @@ function filterLedgerProductFacts(
       conditions.productNames,
       conditions.productName,
     ),
-    categoryIds: stringValues(
-      metric.categoryIds,
-      metric.categoryId,
-      conditions.categoryIds,
-      conditions.categoryId,
+    categoryIds: categorySource
+      ? []
+      : stringValues(
+          metric.categoryIds,
+          metric.categoryId,
+          conditions.categoryIds,
+          conditions.categoryId,
+        ),
+    externalCategoryKeys: stringValues(
+      metric.externalCategoryKeys,
+      metric.externalCategoryKey,
+      conditions.externalCategoryKeys,
+      conditions.externalCategoryKey,
     ),
     categoryNames: lowerStringValues(
       metric.categoryNames,
@@ -395,12 +407,14 @@ function filterLedgerProductFacts(
     const productName =
       nullableString(evidence.productName)?.toLowerCase() ?? null;
     const categoryId = nullableString(evidence.categoryId);
+    const externalCategoryKey = nullableString(evidence.externalCategoryKey);
     const categoryName =
       nullableString(evidence.categoryName)?.toLowerCase() ?? null;
     if (productId) fieldsPresent.add('productIds');
     if (externalProductId || productId) fieldsPresent.add('externalProductIds');
     if (productName) fieldsPresent.add('productNames');
     if (categoryId) fieldsPresent.add('categoryIds');
+    if (externalCategoryKey) fieldsPresent.add('externalCategoryKeys');
     if (categoryName) fieldsPresent.add('categoryNames');
 
     return (
@@ -414,11 +428,45 @@ function filterLedgerProductFacts(
       ]) &&
       matchesLedgerSelector(selectors.productNames, [productName]) &&
       matchesLedgerSelector(selectors.categoryIds, [categoryId]) &&
+      matchesLedgerSelector(selectors.externalCategoryKeys, [
+        externalCategoryKey,
+      ]) &&
       matchesLedgerSelector(selectors.categoryNames, [categoryName])
     );
   });
 
   if (matched.length > 0) {
+    const productMatch = nullableString(
+      metric.productMatch ?? conditions.productMatch,
+    )?.toUpperCase();
+    if (
+      categorySource &&
+      productMatch === 'ALL' &&
+      Array.isArray(metric.categorySelections)
+    ) {
+      const categorySelections = metric.categorySelections
+        .filter(
+          (item): item is Record<string, unknown> =>
+            Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+        )
+        .map((item) => stringValues(item.externalCategoryKeys))
+        .filter((keys) => keys.length > 0);
+      const coverageFacts = categorySelections
+        .map((keys) =>
+          matched.find((fact) => {
+            const evidence = jsonObject(fact.evidence) ?? {};
+            const key = nullableString(evidence.externalCategoryKey);
+            return Boolean(key && keys.includes(key));
+          }),
+        )
+        .filter((fact): fact is GuestGameLedgerFact => Boolean(fact));
+      return {
+        status: 'MATCHED',
+        facts: [
+          ...new Map(coverageFacts.map((fact) => [fact.id, fact])).values(),
+        ],
+      };
+    }
     return { status: 'MATCHED', facts: matched };
   }
 

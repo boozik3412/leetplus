@@ -30,6 +30,12 @@ enum IntegrationProvider {
   LANGAME
 }
 
+enum CategorySourceMappingStatus {
+  SUGGESTED
+  CONFIRMED
+  REJECTED
+}
+
 enum IntegrationSyncStatus {
   SUCCESS
   FAILED
@@ -43,6 +49,7 @@ enum IntegrationSyncTrigger {
 enum IntegrationSyncMode {
   QUICK
   INVENTORY
+  CATEGORIES
   CATALOG
   BACKFILL
   FULL
@@ -147,6 +154,8 @@ model Tenant {
   langameProductGroups                 LangameProductGroup[]
   langameClubProductConfigurations     LangameClubProductConfiguration[]
   categories                           Category[]
+  categorySourceMappings               CategorySourceMapping[]
+  categorySourceMappingEvents          CategorySourceMappingEvent[]
   importJobs                           ImportJob[]
   salesFacts                           SalesFact[]
   clubRevenueFacts                     ClubRevenueFact[]
@@ -306,6 +315,8 @@ model User {
   createdGuestGamePromoCards           GuestGamePromoCard[]                  @relation("GuestGamePromoCardCreatedBy")
   createdGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftCreatedBy")
   updatedGuestGameVisualDrafts         GuestGameVisualDraft[]                @relation("GuestGameVisualDraftUpdatedBy")
+  confirmedCategorySourceMappings      CategorySourceMapping[]               @relation("CategorySourceMappingConfirmedBy")
+  categorySourceMappingEvents          CategorySourceMappingEvent[]          @relation("CategorySourceMappingEventActor")
   publishedGuestGameVisualDrafts       GuestGameVisualDraft[]                @relation("GuestGameVisualDraftPublishedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   guestStaffIdentityMappingEvents      GuestStaffIdentityMappingEvent[]
@@ -577,17 +588,68 @@ model Store {
 }
 
 model Category {
-  id        String   @id @default(uuid())
-  tenantId  String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String                  @id @default(uuid())
+  tenantId       String
+  name           String
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id])
-  products Product[]
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id])
+  products       Product[]
+  sourceMappings CategorySourceMapping[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
+}
+
+model CategorySourceMapping {
+  id                String                      @id @default(uuid())
+  tenantId          String
+  categoryId        String
+  source            IntegrationProvider         @default(LANGAME)
+  externalDomain    String
+  externalGroupId   String
+  status            CategorySourceMappingStatus @default(SUGGESTED)
+  confidence        Int?
+  confirmedByUserId String?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  tenant          Tenant                       @relation(fields: [tenantId], references: [id])
+  category        Category                     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  confirmedByUser User?                        @relation("CategorySourceMappingConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  events          CategorySourceMappingEvent[]
+
+  @@unique([tenantId, source, externalDomain, externalGroupId], map: "category_source_mapping_external_uidx")
+  @@index([tenantId, categoryId], map: "category_source_mapping_category_idx")
+  @@index([tenantId, source, status], map: "category_source_mapping_status_idx")
+  @@index([confirmedByUserId], map: "category_source_mapping_confirmed_by_idx")
+}
+
+model CategorySourceMappingEvent {
+  id               String   @id @default(uuid())
+  tenantId         String
+  mappingId        String?
+  productId        String?
+  action           String
+  source           IntegrationProvider
+  externalDomain   String
+  externalGroupId  String
+  previousValue    Json?
+  nextValue        Json?
+  createdByUserId  String?
+  createdAt        DateTime @default(now())
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id])
+  mapping       CategorySourceMapping? @relation(fields: [mappingId], references: [id], onDelete: SetNull)
+  product       Product?               @relation(fields: [productId], references: [id], onDelete: SetNull)
+  createdByUser User?                  @relation("CategorySourceMappingEventActor", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt], map: "category_source_mapping_event_created_idx")
+  @@index([tenantId, source, externalDomain, externalGroupId], map: "category_source_mapping_event_external_idx")
+  @@index([mappingId], map: "category_source_mapping_event_mapping_idx")
+  @@index([productId], map: "category_source_mapping_event_product_idx")
+  @@index([createdByUserId], map: "category_source_mapping_event_user_idx")
 }
 
 model Supplier {
@@ -639,6 +701,7 @@ model Product {
   stockMovements            StockMovement[]
   oosExclusions             ProductOosExclusion[]
   langameClubConfigurations LangameClubProductConfiguration[]
+  categorySourceMappingEvents CategorySourceMappingEvent[]
 
   @@unique([tenantId, article])
   @@unique([tenantId, externalProvider, externalDomain, externalProductId])

@@ -140,6 +140,12 @@ export class LangameSyncService {
     const mode = this.resolveMode(query.mode);
     const trigger = this.resolveTrigger(query.trigger);
     const shouldSyncCatalog = ['CATALOG', 'BACKFILL', 'FULL'].includes(mode);
+    const shouldSyncProductGroups = [
+      'CATEGORIES',
+      'CATALOG',
+      'BACKFILL',
+      'FULL',
+    ].includes(mode);
     const shouldSyncInventory = ['INVENTORY', 'BACKFILL', 'FULL'].includes(
       mode,
     );
@@ -185,15 +191,20 @@ export class LangameSyncService {
       };
 
       try {
-        const [products, productGroups] = shouldSyncCatalog
-          ? await Promise.all([
-              this.langameClient.listProducts(source.baseUrl, apiKey),
-              this.langameClient.listActiveProductGroups(
-                source.baseUrl,
-                apiKey,
-              ),
-            ])
-          : [[], []];
+        let products: LangameProduct[] = [];
+        let productGroups: LangameProductGroup[] = [];
+
+        if (shouldSyncCatalog) {
+          [products, productGroups] = await Promise.all([
+            this.langameClient.listProducts(source.baseUrl, apiKey),
+            this.langameClient.listActiveProductGroups(source.baseUrl, apiKey),
+          ]);
+        } else if (shouldSyncProductGroups) {
+          productGroups = await this.langameClient.listActiveProductGroups(
+            source.baseUrl,
+            apiKey,
+          );
+        }
         const productsByExternalId = shouldSyncCatalog
           ? await this.syncProducts(
               tenantId,
@@ -206,7 +217,7 @@ export class LangameSyncService {
         result.products += products.length;
         sourceResult.products = products.length;
 
-        if (shouldSyncCatalog) {
+        if (shouldSyncProductGroups) {
           const syncedGroups = await this.syncProductGroups(
             tenantId,
             source.id,
@@ -217,7 +228,7 @@ export class LangameSyncService {
           sourceResult.productGroups = syncedGroups;
         }
 
-        if (shouldSyncCatalog || shouldSyncInventory) {
+        if (shouldSyncProductGroups || shouldSyncInventory) {
           const clubs = await this.langameClient.listClubs(
             source.baseUrl,
             apiKey,
@@ -255,7 +266,7 @@ export class LangameSyncService {
             result.stores += 1;
             sourceResult.stores += 1;
 
-            if (shouldSyncCatalog) {
+            if (shouldSyncProductGroups) {
               const configuration =
                 await this.langameClient.listClubProductConfiguration(
                   source.baseUrl,
@@ -339,10 +350,14 @@ export class LangameSyncService {
           where: { id: source.id },
           data: {
             lastSyncedAt: new Date(),
-            lastSyncedDate: this.maxSyncedDate(
-              source.lastSyncedDate ?? null,
-              period.toDate,
-            ),
+            ...(mode === IntegrationSyncMode.CATEGORIES
+              ? {}
+              : {
+                  lastSyncedDate: this.maxSyncedDate(
+                    source.lastSyncedDate ?? null,
+                    period.toDate,
+                  ),
+                }),
           },
         });
         await this.prisma.integrationSyncJob.update({

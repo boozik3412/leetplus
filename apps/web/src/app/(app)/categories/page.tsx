@@ -3,15 +3,20 @@ import {
   CatalogDeleteButton,
   CatalogRenameForm,
 } from "@/components/catalog-actions";
+import { LangameCategoryImport } from "@/components/langame-category-import";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
-import { getCategories } from "@/lib/catalog";
+import { getCategories, getLangameCategoryCatalog } from "@/lib/catalog";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 
 export default async function CategoriesPage() {
   const user = await requireCurrentUser();
-  const categories = await getCategories();
+  const [categories, langameCatalog] = await Promise.all([
+    getCategories(),
+    getLangameCategoryCatalog(),
+  ]);
   const canEditCatalog = can(user, "edit_catalog");
+  const canEditProducts = can(user, "edit_products");
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -71,6 +76,13 @@ export default async function CategoriesPage() {
             ) : null}
           </div>
         </div>
+
+        <LangameCategoryImport
+          categories={categories}
+          overview={langameCatalog}
+          canEditCatalog={canEditCatalog}
+          canEditProducts={canEditProducts}
+        />
       </div>
     </main>
   );

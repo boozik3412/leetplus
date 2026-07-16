@@ -16,16 +16,58 @@ import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CategoriesService } from './categories.service';
-import type { CreateCategoryDto, UpdateCategoryDto } from './categories.dto';
+import type {
+  ApplyCategorySourceMappingsDto,
+  CreateCategoryDto,
+  PreviewCategorySourceMappingsDto,
+  UpdateCategoryDto,
+} from './categories.dto';
+import { ProductCategoryCatalogService } from './product-category-catalog.service';
 
 @Controller('categories')
 export class CategoriesController {
-  constructor(private readonly categoriesService: CategoriesService) {}
+  constructor(
+    private readonly categoriesService: CategoriesService,
+    private readonly productCategoryCatalogService: ProductCategoryCatalogService,
+  ) {}
 
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
   findAll(@CurrentUser() user?: AuthenticatedUser) {
     return this.categoriesService.findAll(user);
+  }
+
+  @UseGuards(OptionalJwtAuthGuard)
+  @Get('langame/overview')
+  getLangameOverview(@CurrentUser() user?: AuthenticatedUser) {
+    return this.productCategoryCatalogService.getLangameOverview(user);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('langame/preview')
+  previewLangameMappings(
+    @Body() dto: PreviewCategorySourceMappingsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.productCategoryCatalogService.previewLangameMappings(dto, user);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('langame/apply')
+  applyLangameMappings(
+    @Body() dto: ApplyCategorySourceMappingsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.productCategoryCatalogService.applyLangameMappings(dto, user);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('langame/refresh')
+  refreshLangameCatalog(@CurrentUser() user: AuthenticatedUser) {
+    return this.productCategoryCatalogService.refreshLangameCatalog(user);
   }
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

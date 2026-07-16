@@ -555,7 +555,13 @@ export type LangameEndpointSnapshotCandidate = {
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;
-  mode?: 'QUICK' | 'INVENTORY' | 'CATALOG' | 'BACKFILL' | 'FULL';
+  mode?:
+    | 'QUICK'
+    | 'INVENTORY'
+    | 'CATEGORIES'
+    | 'CATALOG'
+    | 'BACKFILL'
+    | 'FULL';
   trigger?: 'MANUAL' | 'AUTO';
   tenantSlug?: string;
   catchUp?: boolean;

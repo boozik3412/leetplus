@@ -69,16 +69,30 @@ export class CategoriesService {
   async remove(id: string, user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
-    const productsCount = await this.prisma.product.count({
-      where: {
-        tenantId,
-        categoryId: current.id,
-      },
-    });
+    const [productsCount, mappingsCount] = await Promise.all([
+      this.prisma.product.count({
+        where: {
+          tenantId,
+          categoryId: current.id,
+        },
+      }),
+      this.prisma.categorySourceMapping.count({
+        where: {
+          tenantId,
+          categoryId: current.id,
+        },
+      }),
+    ]);
 
     if (productsCount > 0) {
       throw new BadRequestException(
         'Category with linked products cannot be deleted',
+      );
+    }
+
+    if (mappingsCount > 0) {
+      throw new BadRequestException(
+        'Category with Langame mappings cannot be deleted',
       );
     }
 

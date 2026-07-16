@@ -2318,6 +2318,8 @@ export type GuestGameEventDto = {
 
 export type GuestGameDryRunDto = {
   traceId?: string | null;
+  sourceFactId?: string | null;
+  sourceFactKind?: string | null;
   profileId?: string | null;
   guestId?: string | null;
   lootBoxId?: string | null;
@@ -2346,8 +2348,6 @@ export type GuestGameDryRunDto = {
 };
 
 export type GuestGameProcessEventDto = GuestGameDryRunDto & {
-  sourceFactId?: string | null;
-  sourceFactKind?: string | null;
   externalProvider?: string | null;
   externalDomain?: string | null;
   externalId?: string | null;
@@ -6174,40 +6174,60 @@ export class GuestGamificationService {
     factTypes: string[],
     limit: number,
   ): Promise<GuestGameSupplementalPipelineTenantResult> {
-    const missions = await this.prisma.guestGameMission.findMany({
-      where: {
-        tenantId: user.tenantId,
-        status: 'ACTIVE',
-        definitionVersion: guestGameMissionDefinitionVersion,
-        evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
-        triggerKind: { in: factTypes },
-      },
-      select: {
-        id: true,
-        createdAt: true,
-        periodFrom: true,
-        periodTo: true,
-        conditions: true,
-      },
-    });
-    if (!missions.length) {
+    const [missions, seasonRows, ruleStores] = await Promise.all([
+      this.prisma.guestGameMission.findMany({
+        where: {
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+          definitionVersion: guestGameMissionDefinitionVersion,
+          evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+          triggerKind: { in: factTypes },
+        },
+        select: {
+          id: true,
+          createdAt: true,
+          periodFrom: true,
+          periodTo: true,
+          conditions: true,
+        },
+      }),
+      this.prisma.guestGameSeason.findMany({
+        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        select: {
+          id: true,
+          createdAt: true,
+          periodFrom: true,
+          periodTo: true,
+          levels: true,
+          storeIds: true,
+        },
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId: user.tenantId, isActive: true },
+        select: { id: true, externalDomain: true },
+      }),
+    ]);
+    const seasons = (seasonRows ?? []).filter((season) =>
+      seasonHasSupplementalBattlePassStep(season.levels, factTypes),
+    );
+    const stores = ruleStores ?? [];
+    if (!missions.length && !seasons.length) {
       return supplementalTenantResult(
         user.tenantId,
         user.tenantSlug,
         'SKIPPED',
-        'No active supplemental missions.',
+        'No active supplemental missions or Battle Pass steps.',
       );
     }
 
-    const earliestActivation = missions.reduce(
-      (earliest, mission) => {
-        const activatedAt = guestGameRuleActivationAt(
-          mission.createdAt,
-          mission.conditions,
-        );
-        return activatedAt < earliest ? activatedAt : earliest;
-      },
-      guestGameRuleActivationAt(missions[0].createdAt, missions[0].conditions),
+    const activationDates = [
+      ...missions.map((mission) =>
+        guestGameRuleActivationAt(mission.createdAt, mission.conditions),
+      ),
+      ...seasons.map((season) => season.periodFrom ?? season.createdAt),
+    ];
+    const earliestActivation = activationDates.reduce((earliest, value) =>
+      value < earliest ? value : earliest,
     );
     const facts = await this.prisma.guestActivityFact.findMany({
       where: {
@@ -6237,15 +6257,27 @@ export class GuestGamificationService {
       if (!happenedAt || !fact.externalDomain || !fact.amount) {
         continue;
       }
-      const ruleIds = missions
-        .filter((mission) =>
-          supplementalMissionMatchesFact(
-            mission,
-            fact.externalDomain,
-            happenedAt,
-          ),
-        )
-        .map((mission) => mission.id);
+      const ruleIds = [
+        ...missions
+          .filter((mission) =>
+            supplementalMissionMatchesFact(
+              mission,
+              fact.externalDomain,
+              happenedAt,
+            ),
+          )
+          .map((mission) => mission.id),
+        ...seasons
+          .filter((season) =>
+            supplementalSeasonMatchesFact(
+              season,
+              stores,
+              fact.externalDomain,
+              happenedAt,
+            ),
+          )
+          .map((season) => season.id),
+      ];
       if (!ruleIds.length) {
         continue;
       }
@@ -7509,8 +7541,13 @@ export class GuestGamificationService {
     id: string,
     dto: GuestGameSeasonUpdateDto,
   ): Promise<GuestGameSeason> {
-    await this.assertSeason(user, id);
-    const data = await this.buildSeasonData(user, dto, false);
+    const current = await this.assertSeason(user, id);
+    const data = await this.buildSeasonData(
+      user,
+      dto,
+      false,
+      guestGameStringArray(current.storeIds),
+    );
     const row = await this.prisma.guestGameSeason.update({
       where: { id },
       data,
@@ -9946,6 +9983,7 @@ export class GuestGamificationService {
     const supplierName = nullableString(dto.supplierName) ?? null;
     const quantity = dryRunOptionalNumber(dto.quantity);
     const externalDomain = nullableString(dto.externalDomain) ?? null;
+    const sourceFactId = nullableString(dto.sourceFactId) ?? null;
     const [profile, lootBoxes, missions, seasons, rewards] = await Promise.all([
       this.resolveDryRunProfile(user, dto),
       this.getLootBoxes(user),
@@ -9979,6 +10017,7 @@ export class GuestGamificationService {
       eventType,
       occurredAt,
       limitOccurredAt,
+      sourceFactId,
       profile,
       guest,
       storeId: store?.id ?? null,
@@ -10575,26 +10614,46 @@ export class GuestGamificationService {
           progressTarget: rule.progressTarget,
           progressUnit: rule.progressUnit,
         })),
-        ...seasons.map((rule) => ({
-          type: 'BATTLE_PASS',
-          id: rule.id,
-          title: rule.name,
-          triggerKind:
-            dryRules.get(rule.id)?.triggerKind ?? dryRun.eventType ?? null,
-          sessionType: dryRun.input.sessionType,
-          createdAt: rule.createdAt,
-          activatedAt: rule.periodFrom ?? rule.createdAt,
-          periodFrom: rule.periodFrom,
-          periodTo: rule.periodTo,
-          periodRules: rule.xpRules,
-          storeIds: guestGameStringArray(rule.storeIds),
-          externalDomains: guestGameRuleExternalDomains(
-            guestGameStringArray(rule.storeIds),
-            ruleStores,
-          ),
-          progressTarget: null,
-          progressUnit: null,
-        })),
+        ...seasons.map((rule) => {
+          const dryRule = dryRules.get(rule.id);
+          const currentStep = dryRunSeasonLevels(rule.levels).find(
+            (level) => level.level === dryRule?.battlePassLevel,
+          );
+          const periodRules = dryRunRecord(
+            currentStep?.activationRules ?? rule.xpRules,
+          );
+          const metric = dryRunRecord(periodRules.metric);
+
+          return {
+            type: 'BATTLE_PASS' as const,
+            id: rule.id,
+            title: rule.name,
+            triggerKind:
+              dryRunString(periodRules.triggerKind) ??
+              dryRule?.triggerKind ??
+              dryRun.eventType ??
+              null,
+            sessionType:
+              guestGameSessionTypeFromConditions(
+                periodRules as Prisma.JsonValue,
+              ) ?? dryRun.input.sessionType,
+            createdAt: rule.createdAt,
+            activatedAt: rule.periodFrom ?? rule.createdAt,
+            periodFrom: rule.periodFrom,
+            periodTo: rule.periodTo,
+            periodRules: periodRules as Prisma.JsonValue,
+            storeIds: guestGameStringArray(rule.storeIds),
+            externalDomains:
+              dryRunStringArray(periodRules.externalDomains).length > 0
+                ? dryRunStringArray(periodRules.externalDomains)
+                : guestGameRuleExternalDomains(
+                    guestGameStringArray(rule.storeIds),
+                    ruleStores,
+                  ),
+            progressTarget: dryRunOptionalNumber(metric.target),
+            progressUnit: dryRunString(metric.unit),
+          };
+        }),
       ];
 
       if (!rules.length) {
@@ -13047,6 +13106,7 @@ export class GuestGamificationService {
     user: AuthenticatedUser,
     dto: GuestGameSeasonDto,
     isCreate: boolean,
+    currentStoreIds: string[] = [],
   ): Promise<
     | Prisma.GuestGameSeasonUncheckedCreateInput
     | Prisma.GuestGameSeasonUncheckedUpdateInput
@@ -13054,6 +13114,16 @@ export class GuestGamificationService {
     if (dto.audienceId) {
       await this.assertAudience(user, dto.audienceId);
     }
+
+    const storeIds = uniqueStrings(dto.storeIds ?? currentStoreIds);
+    const levels =
+      dto.levels === undefined
+        ? isCreate
+          ? defaultLevels()
+          : undefined
+        : dto.levels === null
+          ? Prisma.JsonNull
+          : await this.normalizeBattlePassLevels(user, dto.levels, storeIds);
 
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
@@ -13071,7 +13141,7 @@ export class GuestGamificationService {
       periodTo: dateValue(dto.periodTo),
       xpRules:
         jsonValue(dto.xpRules) ?? (isCreate ? defaultXpRules() : undefined),
-      levels: jsonValue(dto.levels) ?? (isCreate ? defaultLevels() : undefined),
+      levels,
       freeRewards: jsonValue(dto.freeRewards),
       premiumRewards: jsonValue(dto.premiumRewards),
       premiumEnabled: dto.premiumEnabled ?? (isCreate ? false : undefined),
@@ -13082,6 +13152,208 @@ export class GuestGamificationService {
         dto.manualApprovalRequired ?? (isCreate ? true : undefined),
       note: nullableString(dto.note),
     });
+  }
+
+  private async normalizeBattlePassLevels(
+    user: AuthenticatedUser,
+    value: Prisma.InputJsonValue,
+    storeIds: string[],
+  ): Promise<Prisma.InputJsonValue> {
+    if (!Array.isArray(value)) {
+      throw new BadRequestException('Шаги Battle Pass должны быть массивом.');
+    }
+
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId: user.tenantId,
+        isActive: true,
+        ...(storeIds.length ? { id: { in: storeIds } } : {}),
+      },
+      select: { id: true, externalDomain: true },
+    });
+    if (storeIds.length && stores.length !== storeIds.length) {
+      throw new BadRequestException(
+        'Один или несколько клубов Battle Pass недоступны.',
+      );
+    }
+    const externalDomains = uniqueStrings(
+      stores.map((store) => store.externalDomain ?? ''),
+    );
+
+    return Promise.all(
+      value.map(async (item, index) => {
+        const level = jsonRecord(item as Prisma.JsonValue);
+        const rawRules = jsonRecord(level.activationRules ?? null);
+        const rawTaskType = nullableString(rawRules.taskType);
+
+        // Published legacy seasons keep their old evaluator until an operator
+        // explicitly saves the step with the v2 condition editor.
+        if (!rawTaskType) {
+          return level as Prisma.InputJsonObject;
+        }
+
+        const taskType = missionTaskType(rawTaskType);
+        let conditions = normalizeMissionWizardConditions({
+          taskType,
+          conditions: rawRules,
+        });
+        let metric = jsonRecord(
+          (conditions.metric ?? null) as Prisma.JsonValue,
+        );
+
+        if (taskType === 'PRODUCT_PURCHASE') {
+          const purchaseSource =
+            nullableString(conditions.purchaseSource)?.toUpperCase() ===
+            'CATEGORY'
+              ? 'CATEGORY'
+              : 'PRODUCT';
+
+          if (purchaseSource === 'CATEGORY') {
+            const categoryCatalogSource =
+              nullableString(
+                conditions.categoryCatalogSource,
+              )?.toUpperCase() === 'LEETPLUS'
+                ? 'LEETPLUS'
+                : 'LANGAME';
+            const selectionIds = uniqueStrings(
+              guestGameStringArray(
+                metric.categorySelectionIds ?? metric.categoryIds,
+              ),
+            );
+            const catalog = await this.getMissionProductGroupCatalog(
+              user,
+              storeIds,
+              categoryCatalogSource,
+            );
+            const selected = catalog.groups.filter((group) =>
+              selectionIds.includes(group.id),
+            );
+            if (
+              !selectionIds.length ||
+              selected.length !== selectionIds.length
+            ) {
+              throw new BadRequestException(
+                `Шаг ${index + 1}: выберите доступные категории товаров.`,
+              );
+            }
+            const categorySelections = selected.map((group) => ({
+              id: group.id,
+              name: group.name,
+              categoryIds: group.categoryIds,
+              externalCategoryKeys: group.refs.map(
+                (ref) => `${ref.externalDomain}:${ref.externalGroupId}`,
+              ),
+              refs: group.refs.map((ref) => ({
+                externalDomain: ref.externalDomain,
+                externalGroupId: ref.externalGroupId,
+              })),
+            }));
+            metric = {
+              ...metric,
+              categoryCatalogSource,
+              productIds: [],
+              externalProductIds: [],
+              categorySelectionIds: selected.map((group) => group.id),
+              categoryIds:
+                categoryCatalogSource === 'LEETPLUS'
+                  ? uniqueStrings(
+                      selected.flatMap((group) => group.categoryIds),
+                    )
+                  : [],
+              categoryLabels: selected.map((group) => group.name),
+              categoryNames: [],
+              externalCategoryKeys:
+                categoryCatalogSource === 'LANGAME'
+                  ? uniqueStrings(
+                      categorySelections.flatMap(
+                        (selection) => selection.externalCategoryKeys,
+                      ),
+                    )
+                  : [],
+              categorySelections,
+              target:
+                nullableString(metric.productMatch)?.toUpperCase() === 'ALL'
+                  ? Math.max(1, selected.length)
+                  : 1,
+            };
+          } else {
+            const productIds = uniqueStrings(
+              guestGameStringArray(metric.productIds),
+            );
+            const products = productIds.length
+              ? await this.prisma.product.findMany({
+                  where: {
+                    tenantId: user.tenantId,
+                    id: { in: productIds },
+                    isActive: true,
+                  },
+                  select: {
+                    id: true,
+                    name: true,
+                    externalProductId: true,
+                    externalDomain: true,
+                  },
+                })
+              : [];
+            if (!productIds.length || products.length !== productIds.length) {
+              throw new BadRequestException(
+                `Шаг ${index + 1}: выберите доступные товары.`,
+              );
+            }
+            metric = {
+              ...metric,
+              categoryCatalogSource: null,
+              categoryIds: [],
+              categorySelectionIds: [],
+              categoryLabels: [],
+              categorySelections: [],
+              externalCategoryKeys: [],
+              productIds: products.map((product) => product.id),
+              externalProductIds: uniqueStrings(
+                products.map((product) => product.externalProductId ?? ''),
+              ),
+              productRefs: products.map((product) => ({
+                productId: product.id,
+                name: product.name,
+                externalProductId: product.externalProductId,
+                externalDomain: product.externalDomain,
+              })),
+            };
+          }
+          conditions = {
+            ...conditions,
+            categoryCatalogSource:
+              purchaseSource === 'CATEGORY'
+                ? (nullableString(metric.categoryCatalogSource) ?? 'LANGAME')
+                : null,
+            metric: cleanJsonRecord(metric),
+          };
+        }
+
+        const target = dryRunOptionalNumber(metric.target);
+        if (target == null || target <= 0) {
+          throw new BadRequestException(
+            `Шаг ${index + 1}: цель условия должна быть больше нуля.`,
+          );
+        }
+
+        return {
+          ...level,
+          activationRules: cleanJsonRecord({
+            ...conditions,
+            schemaVersion: guestGameMissionDefinitionVersion,
+            source: 'battle_pass_step',
+            taskType,
+            triggerKind: missionWizardTrigger(taskType),
+            evaluationPolicy: missionEvaluationPolicy(taskType),
+            periodicity: 'NONE',
+            ...(taskType === 'BALANCE_TOPUP'
+              ? { domainScoped: true, externalDomains }
+              : {}),
+          }),
+        };
+      }),
+    );
   }
 
   private buildPromoCardData(
@@ -19295,6 +19567,48 @@ function supplementalMissionMatchesFact(
   );
 }
 
+function seasonHasSupplementalBattlePassStep(
+  value: unknown,
+  factTypes: string[],
+) {
+  const accepted = new Set(factTypes.map((item) => item.toUpperCase()));
+
+  return dryRunSeasonLevels(value).some((level) => {
+    const rules = level.activationRules;
+    return (
+      dryRunNumber(rules.schemaVersion, 1) >=
+        guestGameMissionDefinitionVersion &&
+      dryRunString(rules.evaluationPolicy)?.toUpperCase() ===
+        'LEDGER_SUPPLEMENTAL' &&
+      accepted.has(dryRunString(rules.triggerKind)?.toUpperCase() ?? '')
+    );
+  });
+}
+
+function supplementalSeasonMatchesFact(
+  season: {
+    createdAt: Date;
+    periodFrom: Date | null;
+    periodTo: Date | null;
+    storeIds: Prisma.JsonValue;
+  },
+  stores: Array<{ id: string; externalDomain: string | null }>,
+  externalDomain: string,
+  happenedAt: Date,
+) {
+  const storeIds = guestGameStringArray(season.storeIds);
+  const domains = storeIds.length
+    ? guestGameRuleExternalDomains(storeIds, stores)
+    : uniqueStrings(stores.map((store) => store.externalDomain ?? ''));
+  const activatedAt = season.periodFrom ?? season.createdAt;
+
+  return (
+    domains.includes(externalDomain) &&
+    happenedAt >= activatedAt &&
+    (!season.periodTo || happenedAt <= season.periodTo)
+  );
+}
+
 function supplementalFactEvidence(fact: {
   factType: string;
   sourceHash: string;
@@ -19990,6 +20304,7 @@ function storedEventToProgressEvent(row: {
   return {
     eventType: row.eventType,
     occurredAt: row.occurredAt,
+    sourceFactId: nullableString(payload.sourceFactId),
     storeId: nullableString(store.id),
     externalDomain:
       nullableString(row.externalDomain) ??
@@ -20020,6 +20335,7 @@ function currentEventToProgressEvent(
   return {
     eventType: context.eventType,
     occurredAt: context.occurredAt,
+    sourceFactId: context.sourceFactId,
     storeId: context.storeId,
     externalDomain: context.externalDomain,
     sessionType: context.sessionType,
@@ -20046,6 +20362,7 @@ type DryRunContext = {
   eventType: string;
   occurredAt: Date;
   limitOccurredAt: Date;
+  sourceFactId: string | null;
   profile: GuestGameProfile | null;
   guest: GuestGameProfile['guest'];
   storeId: string | null;
@@ -20246,6 +20563,7 @@ function evaluateSeasonDryRun(
     context,
   );
   const currentStep = levels[completedLevelCount] ?? null;
+  let progress: GuestGameProgressResult | null = null;
 
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
@@ -20267,9 +20585,11 @@ function evaluateSeasonDryRun(
     reasons.push(
       `Текущий шаг Battle Pass: ${currentStep.sequence}/${levels.length}`,
     );
-    appendDryRunSeasonStepActivationCheck(
+    progress = appendDryRunSeasonStepActivationCheck(
+      rule,
       currentStep,
       context,
+      dryRunSeasonCurrentStepActivatedAt(rule, ruleRewards, context),
       blockers,
       reasons,
     );
@@ -20303,7 +20623,7 @@ function evaluateSeasonDryRun(
     selectedReward: null,
     xpDelta: 0,
     budgetAmount: rule.budgetAmount,
-    progress: null,
+    progress,
     battlePassLevel: currentStep?.level ?? null,
     battlePassStep: currentStep?.sequence ?? null,
     battlePassStepTitle: currentStep?.title ?? null,
@@ -21115,13 +21435,57 @@ function dryRunSeasonLevels(value: unknown): DryRunSeasonLevel[] {
 }
 
 function appendDryRunSeasonStepActivationCheck(
+  season: GuestGameSeason,
   step: DryRunSeasonLevel,
   context: DryRunContext,
+  activatedAt: Date,
   blockers: string[],
   reasons: string[],
-) {
+): GuestGameProgressResult | null {
   const rules = step.activationRules;
   const triggerKind = dryRunString(rules.triggerKind);
+  const taskType = dryRunString(rules.taskType)?.toUpperCase() ?? null;
+  const schemaVersion = dryRunNumber(rules.schemaVersion, 1);
+
+  if (schemaVersion >= guestGameMissionDefinitionVersion && taskType) {
+    if (!triggerKind) {
+      blockers.push(`Для шага ${step.sequence} не выбран тип условия`);
+      return null;
+    }
+
+    const metric = dryRunRecord(rules.metric);
+    const progress = evaluateGuestGameProgress(
+      {
+        triggerKind,
+        progressTarget: dryRunOptionalNumber(metric.target),
+        progressUnit: dryRunString(metric.unit),
+        conditions: rules,
+        storeIds: season.storeIds,
+        externalDomains: dryRunStringArray(rules.externalDomains),
+        periodFrom: activatedAt,
+        periodTo: season.periodTo,
+        timeZone: context.timeZone,
+      },
+      currentEventToProgressEvent(context),
+      context.progressEvents,
+    );
+
+    if (!progress.completed) {
+      const unit = progress.unit ? ` ${progress.unit}` : '';
+      blockers.push(
+        `Прогресс шага ${step.sequence}: ${progress.current}/${progress.target}${unit}`,
+      );
+    } else {
+      reasons.push(
+        `Условие шага ${step.sequence} выполнено: ${progress.current}/${progress.target}`,
+      );
+    }
+    if (taskType === 'BALANCE_TOPUP' && rules.domainScoped === true) {
+      reasons.push('Пополнение проверяется в пределах домена Langame');
+    }
+
+    return progress;
+  }
 
   if (!triggerKind) {
     blockers.push(`Для шага ${step.sequence} не выбрано событие активации`);
@@ -21144,6 +21508,36 @@ function appendDryRunSeasonStepActivationCheck(
     blockers,
     reasons,
   );
+
+  return null;
+}
+
+function dryRunSeasonCurrentStepActivatedAt(
+  season: GuestGameSeason,
+  rewards: GuestGameReward[],
+  context: DryRunContext,
+) {
+  const createdAt = new Date(season.createdAt);
+  const periodFrom = season.periodFrom ? new Date(season.periodFrom) : null;
+  let activatedAt =
+    periodFrom && !Number.isNaN(periodFrom.getTime()) && periodFrom > createdAt
+      ? periodFrom
+      : createdAt;
+
+  for (const reward of rewards) {
+    if (
+      !dryRunRewardMatchesGuest(reward, context) ||
+      !dryRunSeasonRewardCountsAsStep(reward)
+    ) {
+      continue;
+    }
+    const qualifiedAt = new Date(reward.qualifiedAt);
+    if (!Number.isNaN(qualifiedAt.getTime()) && qualifiedAt > activatedAt) {
+      activatedAt = qualifiedAt;
+    }
+  }
+
+  return activatedAt;
 }
 
 function dryRunSeasonCompletedLevelCount(

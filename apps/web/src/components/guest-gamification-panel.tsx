@@ -11,6 +11,11 @@ import {
   type SetStateAction,
 } from "react";
 import { GuestGamificationVisualEditor } from "@/components/guest-gamification-visual-editor";
+import {
+  BattlePassStepConditionEditor,
+  defaultBattlePassStepCondition,
+  type BattlePassStepConditionValue,
+} from "@/components/battle-pass-step-condition-editor";
 import { normalizeExternalActionUrl } from "@/lib/external-links";
 import type {
   GuestAudience,
@@ -289,6 +294,7 @@ type SeasonLevelStepForm = {
   description: string;
   freeReward: string;
   premiumReward: string;
+  conditionV2?: BattlePassStepConditionValue;
   triggerKind?: string;
   sessionType?: string;
   timeWindowMode?: LootBoxTimeWindowMode;
@@ -2926,7 +2932,7 @@ export function GuestGamificationPanel({
               seasons={workspace.seasons}
               audiences={audiences}
               stores={stores}
-              tariffSnapshots={workspace.tariffSnapshots}
+              products={products}
               lootBoxes={workspace.lootBoxes}
               editingId={editingSeasonId}
               isFormOpen={isSeasonFormOpen}
@@ -8275,7 +8281,7 @@ function SeasonsTab({
   seasons,
   audiences,
   stores,
-  tariffSnapshots,
+  products,
   lootBoxes,
   editingId,
   isFormOpen,
@@ -8293,7 +8299,7 @@ function SeasonsTab({
   seasons: GuestGameSeason[];
   audiences: GuestAudience[];
   stores: Store[];
-  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  products: Product[];
   lootBoxes: GuestGameLootBox[];
   editingId: string | null;
   isFormOpen: boolean;
@@ -8397,7 +8403,8 @@ function SeasonsTab({
             </div>
             <SeasonBusinessRules
               form={form}
-              tariffSnapshots={tariffSnapshots}
+              stores={stores}
+              products={products}
               lootBoxes={lootBoxes}
               onChange={(patch) => setForm({ ...form, ...patch })}
             />
@@ -10934,12 +10941,14 @@ function MissionQuestChainFields({
 
 function SeasonBusinessRules({
   form,
-  tariffSnapshots,
+  stores,
+  products,
   lootBoxes,
   onChange,
 }: {
   form: SeasonForm;
-  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  stores: Store[];
+  products: Product[];
   lootBoxes: GuestGameLootBox[];
   onChange: (patch: Partial<SeasonForm>) => void;
 }) {
@@ -10969,6 +10978,7 @@ function SeasonBusinessRules({
           description: "",
           freeReward: "",
           premiumReward: "",
+          conditionV2: { ...defaultBattlePassStepCondition },
           triggerKind: "",
           sessionType: "",
           timeWindowMode: "ANY",
@@ -11154,9 +11164,11 @@ function SeasonBusinessRules({
                 />
               </Field>
             </div>
-            <SeasonStepActivationFields
+            <SeasonStepActivationFieldsV2
               step={step}
-              tariffSnapshots={tariffSnapshots}
+              storeIds={form.storeIds}
+              stores={stores}
+              products={products}
               onChange={(patch) => updateStep(index, patch)}
             />
             <div className="grid gap-3 sm:grid-cols-2">
@@ -11291,184 +11303,27 @@ function BattlePassRewardMetric({
   );
 }
 
-function SeasonStepActivationFields({
+function SeasonStepActivationFieldsV2({
   step,
-  tariffSnapshots,
+  storeIds,
+  stores,
+  products,
   onChange,
 }: {
   step: SeasonLevelStepForm;
-  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  storeIds: string[];
+  stores: Store[];
+  products: Product[];
   onChange: (patch: Partial<SeasonLevelStepForm>) => void;
 }) {
-  const triggerKind = step.triggerKind ?? "";
-  const timeWindowMode = step.timeWindowMode ?? "ANY";
-  const weekdayMode = step.weekdayMode ?? "ANY";
-  const selectedWeekdays = step.selectedWeekdays?.length
-    ? step.selectedWeekdays
-    : weekdayPresets.CUSTOM;
-  const usesTimeWindow = timeWindowMode !== "ANY";
-  const usesCustomWeekdays = weekdayMode === "CUSTOM";
-
-  const setWeekdayMode = (nextMode: LootBoxWeekdayMode) => {
-    onChange({
-      weekdayMode: nextMode,
-      selectedWeekdays:
-        nextMode === "CUSTOM" ? selectedWeekdays : weekdayPresets[nextMode],
-    });
-  };
-  const toggleWeekday = (weekday: number) => {
-    const next = selectedWeekdays.includes(weekday)
-      ? selectedWeekdays.filter((item) => item !== weekday)
-      : [...selectedWeekdays, weekday];
-
-    onChange({
-      weekdayMode: "CUSTOM",
-      selectedWeekdays: sortWeekdays(next),
-    });
-  };
-
   return (
-    <div className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
-        Условия активации шага
-      </p>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Field label="Событие активации">
-          <select
-            className={fieldClass}
-            value={triggerKind}
-            onChange={(event) => onChange({ triggerKind: event.target.value })}
-          >
-            <option value="">Выберите действие</option>
-            {lootBoxTriggerOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Тип сессии">
-          <select
-            className={fieldClass}
-            value={step.sessionType ?? ""}
-            onChange={(event) => onChange({ sessionType: event.target.value })}
-          >
-            <option value="">Любой тип</option>
-            {sessionTypeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Field label="Когда активировать">
-          <select
-            className={fieldClass}
-            value={timeWindowMode}
-            onChange={(event) =>
-              onChange({
-                timeWindowMode: event.target.value as LootBoxTimeWindowMode,
-              })
-            }
-          >
-            {lootBoxTimeWindowOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="По каким дням">
-          <select
-            className={fieldClass}
-            value={weekdayMode}
-            onChange={(event) =>
-              setWeekdayMode(event.target.value as LootBoxWeekdayMode)
-            }
-          >
-            {lootBoxWeekdayOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-      {usesTimeWindow ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Начало окна">
-            <input
-              className={fieldClass}
-              type="time"
-              value={step.hourFrom ?? "10:00"}
-              onChange={(event) => onChange({ hourFrom: event.target.value })}
-            />
-          </Field>
-          <Field label="Конец окна">
-            <input
-              className={fieldClass}
-              type="time"
-              value={step.hourTo ?? "16:00"}
-              onChange={(event) => onChange({ hourTo: event.target.value })}
-            />
-          </Field>
-        </div>
-      ) : null}
-      {usesCustomWeekdays ? (
-        <div className="flex flex-wrap gap-2">
-          {weekdayOptions.map((weekday) => {
-            const active = selectedWeekdays.includes(weekday.value);
-
-            return (
-              <button
-                key={weekday.value}
-                type="button"
-                className={[
-                  "rounded-lg border px-3 py-2 text-xs font-bold transition",
-                  active
-                    ? "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
-                    : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300",
-                ].join(" ")}
-                onClick={() => toggleWeekday(weekday.value)}
-              >
-                {weekday.label}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-      <TariffConditionFields
-        snapshots={tariffSnapshots}
-        tariffGroupId={step.tariffGroupId ?? ""}
-        tariffPeriodId={step.tariffPeriodId ?? ""}
-        tariffTypeId={step.tariffTypeId ?? ""}
-        onChange={onChange}
-      />
-      {triggerKind === "GUEST_LOG" ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <Field label="Какие события Langame засчитывать">
-            <textarea
-              className={`${fieldClass} min-h-[72px] resize-y`}
-              value={step.guestLogTypes ?? ""}
-              onChange={(event) =>
-                onChange({ guestLogTypes: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="Какие события не засчитывать">
-            <textarea
-              className={`${fieldClass} min-h-[72px] resize-y`}
-              value={step.blockedGuestLogTypes ?? ""}
-              onChange={(event) =>
-                onChange({ blockedGuestLogTypes: event.target.value })
-              }
-            />
-          </Field>
-        </div>
-      ) : null}
-    </div>
+    <BattlePassStepConditionEditor
+      value={step.conditionV2 ?? defaultBattlePassStepCondition}
+      storeIds={storeIds}
+      stores={stores}
+      products={products}
+      onChange={(conditionV2) => onChange({ conditionV2 })}
+    />
   );
 }
 
@@ -15500,6 +15355,7 @@ function buildAutomaticSeasonLevelSteps(
     description: level.description ?? "",
     freeReward: level.freeReward ?? "",
     premiumReward: level.premiumReward ?? "",
+    conditionV2: { ...defaultBattlePassStepCondition },
     triggerKind: "",
     sessionType: "",
     timeWindowMode: "ANY",
@@ -15585,33 +15441,181 @@ function seasonLevelStepFormsToRewards(
 }
 
 function seasonStepActivationRules(step: SeasonLevelStepForm) {
-  const timeWindowMode = step.timeWindowMode ?? "ANY";
-  const weekdayMode = step.weekdayMode ?? "ANY";
-  const selectedWeekdays = step.selectedWeekdays?.length
-    ? sortWeekdays(step.selectedWeekdays)
-    : weekdayPresets[weekdayMode];
-  const usesTimeWindow = timeWindowMode !== "ANY";
-  const usesGuestLogTypes = step.triggerKind === "GUEST_LOG";
+  const condition = step.conditionV2 ?? defaultBattlePassStepCondition;
+  const taskType = condition.taskType;
+  const purchaseTarget =
+    condition.productMatch === "ALL"
+      ? Math.max(
+          1,
+          condition.purchaseSource === "CATEGORY"
+            ? condition.categorySelectionIds.length
+            : condition.productIds.length,
+        )
+      : 1;
+  const target =
+    taskType === "PLAY_TIME"
+      ? Math.max(1, condition.target)
+      : taskType === "PRODUCT_PURCHASE"
+        ? condition.amountMode === "PERIOD_TOTAL"
+          ? Math.max(1, condition.totalAmount)
+          : purchaseTarget
+        : taskType === "BALANCE_TOPUP"
+          ? condition.topupMode === "PERIOD_TOTAL"
+            ? Math.max(1, condition.totalAmount)
+            : condition.topupMode === "COUNT"
+              ? Math.max(1, condition.topupCount)
+              : 1
+          : condition.checkInMode === "SINGLE"
+            ? 1
+            : condition.checkInMode === "STREAK"
+              ? Math.max(1, condition.checkInDays)
+              : Math.max(1, condition.checkInCount);
+  const triggerKinds: Record<BattlePassStepConditionValue["taskType"], string> =
+    {
+      PLAY_TIME: "PLAY_HOUR",
+      PRODUCT_PURCHASE: "PRODUCT_PURCHASE",
+      BALANCE_TOPUP: "BALANCE_TOPUP",
+      CHECK_IN: "CHECK_IN",
+    };
+  const eventTypes: Record<BattlePassStepConditionValue["taskType"], string[]> =
+    {
+      PLAY_TIME: ["PLAY_HOUR", "SESSION_STOP"],
+      PRODUCT_PURCHASE: ["PRODUCT_PURCHASE", "BAR_PURCHASE"],
+      BALANCE_TOPUP: ["BALANCE_TOPUP"],
+      CHECK_IN: ["CHECK_IN"],
+    };
+  const aggregation =
+    taskType === "PLAY_TIME"
+      ? "duration"
+      : taskType === "PRODUCT_PURCHASE"
+        ? condition.amountMode === "PERIOD_TOTAL"
+          ? "sum"
+          : "count"
+        : taskType === "BALANCE_TOPUP"
+          ? condition.topupMode === "PERIOD_TOTAL"
+            ? "sum"
+            : condition.topupMode === "SINGLE"
+              ? "exists"
+              : "count"
+          : condition.checkInMode === "STREAK"
+            ? "streak"
+            : "count";
+  const unit =
+    taskType === "PLAY_TIME"
+      ? "минут"
+      : taskType === "PRODUCT_PURCHASE"
+        ? condition.amountMode === "PERIOD_TOTAL"
+          ? "₽"
+          : "покупок"
+        : taskType === "BALANCE_TOPUP"
+          ? condition.topupMode === "PERIOD_TOTAL"
+            ? "₽"
+            : "пополнений"
+          : condition.checkInMode === "STREAK"
+            ? "дней"
+            : "чекинов";
+  const weekdays =
+    taskType === "CHECK_IN" && !condition.specificDayEnabled
+      ? []
+      : sortWeekdays(condition.weekdays);
+  const hours =
+    taskType === "CHECK_IN" && !condition.specificTimeEnabled
+      ? []
+      : condition.hours.trim()
+        ? [condition.hours.trim()]
+        : [];
 
   return {
     source: "battle_pass_step",
-    triggerKind: nullable(step.triggerKind ?? ""),
-    sessionType: nullable(step.sessionType ?? ""),
-    timeWindowMode,
-    weekdayMode,
-    quietHoursEnabled: usesTimeWindow,
-    weekdaysOnly: weekdayMode === "WEEKDAYS",
-    weekdays: weekdayMode === "ANY" ? [] : selectedWeekdays,
-    hours: usesTimeWindow
-      ? [`${step.hourFrom || "10:00"}-${step.hourTo || "16:00"}`]
-      : [],
-    tariffGroupId: nullable(step.tariffGroupId ?? ""),
-    tariffPeriodId: nullable(step.tariffPeriodId ?? ""),
-    tariffTypeId: nullable(step.tariffTypeId ?? ""),
-    guestLogTypes: usesGuestLogTypes ? csvList(step.guestLogTypes ?? "") : [],
-    blockedGuestLogTypes: usesGuestLogTypes
-      ? csvList(step.blockedGuestLogTypes ?? "")
-      : [],
+    schemaVersion: 2,
+    taskType,
+    triggerKind: triggerKinds[taskType],
+    sessionType: condition.sessionType,
+    periodicity: "NONE",
+    purchaseSource:
+      taskType === "PRODUCT_PURCHASE" ? condition.purchaseSource : undefined,
+    categoryCatalogSource:
+      taskType === "PRODUCT_PURCHASE" && condition.purchaseSource === "CATEGORY"
+        ? condition.categoryCatalogSource
+        : undefined,
+    metric: {
+      eventTypes: eventTypes[taskType],
+      aggregation,
+      target,
+      unit,
+      windowDays: Math.max(1, condition.windowDays),
+      weekdays,
+      hours,
+      minSessionMinutes:
+        taskType === "PLAY_TIME"
+          ? Math.max(0, condition.minSessionMinutes)
+          : undefined,
+      purchaseSource:
+        taskType === "PRODUCT_PURCHASE" ? condition.purchaseSource : undefined,
+      categoryCatalogSource:
+        taskType === "PRODUCT_PURCHASE" &&
+        condition.purchaseSource === "CATEGORY"
+          ? condition.categoryCatalogSource
+          : undefined,
+      productMatch:
+        taskType === "PRODUCT_PURCHASE" ? condition.productMatch : undefined,
+      amountMode:
+        taskType === "PRODUCT_PURCHASE" ? condition.amountMode : undefined,
+      productIds:
+        taskType === "PRODUCT_PURCHASE" &&
+        condition.purchaseSource === "PRODUCT"
+          ? condition.productIds
+          : [],
+      externalProductIds: [],
+      categorySelectionIds:
+        taskType === "PRODUCT_PURCHASE" &&
+        condition.purchaseSource === "CATEGORY"
+          ? condition.categorySelectionIds
+          : [],
+      categoryIds:
+        taskType === "PRODUCT_PURCHASE" &&
+        condition.purchaseSource === "CATEGORY"
+          ? condition.categorySelectionIds
+          : [],
+      categorySelectionLabels:
+        taskType === "PRODUCT_PURCHASE" &&
+        condition.purchaseSource === "CATEGORY"
+          ? condition.categorySelectionLabels
+          : [],
+      minSpendAmount:
+        taskType === "PRODUCT_PURCHASE" &&
+        condition.amountMode === "SINGLE_MINIMUM"
+          ? Math.max(0, condition.minimumAmount)
+          : taskType === "BALANCE_TOPUP" &&
+              condition.topupMode !== "PERIOD_TOTAL" &&
+              condition.topupComparison === "AT_LEAST"
+            ? Math.max(0, condition.topupAmount)
+            : undefined,
+      exactSpendAmount:
+        taskType === "BALANCE_TOPUP" &&
+        condition.topupMode !== "PERIOD_TOTAL" &&
+        condition.topupComparison === "EXACT"
+          ? Math.max(0, condition.topupAmount)
+          : undefined,
+      totalAmount:
+        (taskType === "PRODUCT_PURCHASE" &&
+          condition.amountMode === "PERIOD_TOTAL") ||
+        (taskType === "BALANCE_TOPUP" && condition.topupMode === "PERIOD_TOTAL")
+          ? Math.max(1, condition.totalAmount)
+          : undefined,
+      topupMode: taskType === "BALANCE_TOPUP" ? condition.topupMode : undefined,
+      amountComparison:
+        taskType === "BALANCE_TOPUP" ? condition.topupComparison : undefined,
+      amount: taskType === "BALANCE_TOPUP" ? condition.topupAmount : undefined,
+      count:
+        taskType === "BALANCE_TOPUP"
+          ? condition.topupCount
+          : taskType === "CHECK_IN"
+            ? condition.checkInCount
+            : undefined,
+      checkInMode: taskType === "CHECK_IN" ? condition.checkInMode : undefined,
+      days: taskType === "CHECK_IN" ? condition.checkInDays : undefined,
+    },
   };
 }
 
@@ -15910,6 +15914,7 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
         description: recordString(row, "description") ?? "",
         freeReward: freeReward ?? "",
         premiumReward: premiumReward ?? "",
+        conditionV2: seasonStepConditionFromRules(activationRules),
         triggerKind: recordString(activationRules, "triggerKind") ?? "",
         sessionType: recordString(activationRules, "sessionType") ?? "",
         timeWindowMode: lootBoxTimeWindowMode(activationRules),
@@ -15948,6 +15953,153 @@ function seasonLevelStepsToForm(value: unknown): SeasonLevelStepForm[] {
   return steps.length
     ? steps
     : defaultSeasonLevelSteps.map((step) => ({ ...step }));
+}
+
+function seasonStepConditionFromRules(
+  rules: Record<string, unknown>,
+): BattlePassStepConditionValue {
+  const metric = asRecord(rules.metric);
+  const triggerKind = recordString(rules, "triggerKind")?.toUpperCase() ?? "";
+  const rawTaskType = recordString(rules, "taskType")?.toUpperCase();
+  const taskType: BattlePassStepConditionValue["taskType"] =
+    rawTaskType === "PRODUCT_PURCHASE" ||
+    rawTaskType === "BALANCE_TOPUP" ||
+    rawTaskType === "CHECK_IN" ||
+    rawTaskType === "PLAY_TIME"
+      ? rawTaskType
+      : triggerKind.includes("PURCHASE")
+        ? "PRODUCT_PURCHASE"
+        : triggerKind.includes("BALANCE")
+          ? "BALANCE_TOPUP"
+          : triggerKind === "CHECK_IN"
+            ? "CHECK_IN"
+            : "PLAY_TIME";
+  const rawSessionType = recordString(rules, "sessionType")?.toUpperCase();
+  const sessionType: BattlePassStepConditionValue["sessionType"] =
+    rawSessionType === "HOURLY" || rawSessionType === "REGULAR_SESSION"
+      ? "HOURLY"
+      : rawSessionType === "PACKAGE_OR_SUBSCRIPTION" ||
+          rawSessionType === "PACKET_HOURS"
+        ? "PACKAGE_OR_SUBSCRIPTION"
+        : "ANY";
+  const purchaseSource =
+    recordString(rules, "purchaseSource")?.toUpperCase() === "CATEGORY" ||
+    recordString(metric, "purchaseSource")?.toUpperCase() === "CATEGORY"
+      ? "CATEGORY"
+      : "PRODUCT";
+  const categoryCatalogSource =
+    recordString(rules, "categoryCatalogSource")?.toUpperCase() ===
+      "LEETPLUS" ||
+    recordString(metric, "categoryCatalogSource")?.toUpperCase() === "LEETPLUS"
+      ? "LEETPLUS"
+      : "LANGAME";
+  const categorySelections = arrayRule(metric.categorySelections)
+    .map((item) => asRecord(item))
+    .map((item) => ({
+      id: recordString(item, "id") ?? "",
+      name: recordString(item, "name") ?? "Сохранённая категория",
+    }))
+    .filter((item) => item.id);
+  const savedCategoryLabels = arrayRule(metric.categorySelectionLabels)
+    .map((item) => asRecord(item))
+    .map((item) => ({
+      id: recordString(item, "id") ?? "",
+      name: recordString(item, "name") ?? "Сохранённая категория",
+    }))
+    .filter((item) => item.id);
+  const categorySelectionIds = stringArrayRule(
+    metric.categorySelectionIds ?? metric.categoryIds,
+  );
+  const labels = [...categorySelections, ...savedCategoryLabels];
+  const labelById = new Map(labels.map((item) => [item.id, item.name]));
+  const topupMode = enumConditionValue(
+    recordString(metric, "topupMode"),
+    ["SINGLE", "COUNT", "PERIOD_TOTAL"] as const,
+    "SINGLE",
+  );
+  const checkInMode = enumConditionValue(
+    recordString(metric, "checkInMode"),
+    ["SINGLE", "COUNT", "PERIOD", "STREAK"] as const,
+    "SINGLE",
+  );
+  const amountMode = enumConditionValue(
+    recordString(metric, "amountMode"),
+    ["NONE", "SINGLE_MINIMUM", "PERIOD_TOTAL"] as const,
+    "NONE",
+  );
+  const hours = stringArrayRule(metric.hours);
+  const weekdays = numberArrayRule(metric, "weekdays");
+
+  return {
+    ...defaultBattlePassStepCondition,
+    schemaVersion: numeric(String(rules.schemaVersion ?? "1"), 1),
+    taskType,
+    sessionType,
+    target: numeric(String(metric.target ?? "60"), 60),
+    windowDays: numeric(String(metric.windowDays ?? "30"), 30),
+    hours: hours[0] ?? "09:00-21:00",
+    weekdays,
+    minSessionMinutes: numeric(String(metric.minSessionMinutes ?? "0"), 0),
+    purchaseSource,
+    categoryCatalogSource,
+    productMatch: enumConditionValue(
+      recordString(metric, "productMatch"),
+      ["ANY", "ALL"] as const,
+      "ANY",
+    ),
+    amountMode,
+    minimumAmount: numeric(String(metric.minSpendAmount ?? "200"), 200),
+    totalAmount: numeric(
+      String(
+        metric.totalAmount ??
+          (amountMode === "PERIOD_TOTAL" ? metric.target : 1000),
+      ),
+      1000,
+    ),
+    productIds: stringArrayRule(metric.productIds),
+    categorySelectionIds,
+    categorySelectionLabels: categorySelectionIds.map((id) => ({
+      id,
+      name: labelById.get(id) ?? "Сохранённая категория",
+    })),
+    topupMode,
+    topupComparison:
+      recordString(metric, "amountComparison")?.toUpperCase() === "EXACT"
+        ? "EXACT"
+        : "AT_LEAST",
+    topupAmount: numeric(
+      String(
+        metric.exactSpendAmount ??
+          metric.minSpendAmount ??
+          metric.amount ??
+          "500",
+      ),
+      500,
+    ),
+    topupCount: numeric(String(metric.count ?? "3"), 3),
+    checkInMode,
+    checkInCount: numeric(String(metric.count ?? "5"), 5),
+    checkInDays: numeric(String(metric.days ?? "7"), 7),
+    specificDayEnabled: weekdays.length > 0,
+    specificTimeEnabled: hours.length > 0,
+  };
+}
+
+function stringArrayRule(value: unknown) {
+  return arrayRule(value)
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+}
+
+function enumConditionValue<const T extends readonly string[]>(
+  value: string | null | undefined,
+  values: T,
+  fallback: T[number],
+): T[number] {
+  const normalized = value?.toUpperCase();
+  return values.includes(normalized as T[number])
+    ? (normalized as T[number])
+    : fallback;
 }
 
 function recordString(record: Record<string, unknown>, key: string) {

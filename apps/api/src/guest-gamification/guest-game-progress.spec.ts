@@ -300,6 +300,42 @@ describe('guest game progress trigger matching', () => {
     expect(result).toMatchObject({ current: 1_000, completed: true });
   });
 
+  it('does not count the same source fact twice during an idempotent retry', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'BALANCE_TOPUP',
+        progressTarget: 2,
+        conditions: {
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['BALANCE_TOPUP'],
+            target: 2,
+          },
+        },
+      },
+      {
+        eventType: 'BALANCE_TOPUP',
+        occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        sourceFactId: 'fact-1',
+        spendAmount: 500,
+      },
+      [
+        {
+          eventType: 'BALANCE_TOPUP',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'fact-1',
+          spendAmount: 500,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 1,
+      matchedEvents: 1,
+      completed: false,
+    });
+  });
+
   it('completes ALL product selection across separate purchases', () => {
     const result = evaluateGuestGameProgress(
       {

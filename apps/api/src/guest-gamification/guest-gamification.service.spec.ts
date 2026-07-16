@@ -4559,6 +4559,309 @@ describe('GuestGamificationService', () => {
         projectedXpDelta: 40,
       });
     });
+
+    it('evaluates a Battle Pass play-time step with the mission wizard v2 contract', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Сыграть час',
+              freeReward: '100 бонусов',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'PLAY_TIME',
+                triggerKind: 'PLAY_HOUR',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                sessionType: 'ANY',
+                metric: {
+                  aggregation: 'duration',
+                  eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+                  target: 60,
+                  unit: 'минута',
+                },
+              },
+            },
+          ],
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'SESSION_STOP',
+          occurredAt: new Date('2026-06-09T10:00:00.000Z'),
+          storeId: null,
+          sessionMinutes: 40,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'PLAY_HOUR',
+        occurredAt: isoNow,
+        sessionMinutes: 20,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        battlePassStep: 1,
+        progress: {
+          applicable: true,
+          current: 60,
+          target: 60,
+          completed: true,
+        },
+      });
+    });
+
+    it('evaluates all selected Battle Pass products across separate purchases', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Купить набор',
+              freeReward: '100 бонусов',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'PRODUCT_PURCHASE',
+                triggerKind: 'PRODUCT_PURCHASE',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                purchaseSource: 'PRODUCT',
+                metric: {
+                  aggregation: 'count',
+                  eventTypes: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
+                  productMatch: 'ALL',
+                  productIds: ['product-1', 'product-2'],
+                  amountMode: 'NONE',
+                  target: 2,
+                },
+              },
+            },
+          ],
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: new Date('2026-06-09T10:00:00.000Z'),
+          storeId: null,
+          productId: 'product-1',
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: isoNow,
+        productId: 'product-2',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        progress: {
+          current: 2,
+          target: 2,
+          completed: true,
+        },
+      });
+    });
+
+    it('evaluates a domain-scoped Battle Pass balance total through the supplemental contract', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Пополнить баланс',
+              freeReward: '100 бонусов',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'BALANCE_TOPUP',
+                triggerKind: 'BALANCE_TOPUP',
+                evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+                domainScoped: true,
+                externalDomains: ['club-1'],
+                metric: {
+                  aggregation: 'sum',
+                  eventTypes: ['BALANCE_TOPUP'],
+                  topupMode: 'PERIOD_TOTAL',
+                  amountComparison: 'AT_LEAST',
+                  target: 1000,
+                },
+              },
+            },
+          ],
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'BALANCE_TOPUP',
+          occurredAt: new Date('2026-06-09T10:00:00.000Z'),
+          storeId: null,
+          externalDomain: 'club-1',
+          spendAmount: 600,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'BALANCE_TOPUP',
+        occurredAt: isoNow,
+        externalDomain: 'club-1',
+        spendAmount: 400,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        progress: {
+          current: 1000,
+          target: 1000,
+          completed: true,
+        },
+        reasons: expect.arrayContaining([
+          'Пополнение проверяется в пределах домена Langame',
+        ]),
+      });
+    });
+
+    it('evaluates a Battle Pass check-in streak with the mission wizard v2 contract', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Три дня подряд',
+              freeReward: '100 бонусов',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'CHECK_IN',
+                triggerKind: 'CHECK_IN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                windowDays: 7,
+                metric: {
+                  aggregation: 'streak',
+                  eventTypes: ['CHECK_IN'],
+                  checkInMode: 'STREAK',
+                  target: 3,
+                  windowDays: 7,
+                },
+              },
+            },
+          ],
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-06-08T10:00:00.000Z'),
+          storeId: null,
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-06-09T10:00:00.000Z'),
+          storeId: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'CHECK_IN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        progress: {
+          current: 3,
+          target: 3,
+          completed: true,
+        },
+      });
+    });
+
+    it('keeps evaluating legacy Battle Pass activation rules', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Старый шаг',
+              freeReward: '100 бонусов',
+              activationRules: {
+                triggerKind: 'SESSION_START',
+                sessionType: 'regular_session',
+              },
+            },
+          ],
+        }),
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        battlePassStep: 1,
+        progress: null,
+      });
+    });
   });
 
   describe('checkIn', () => {

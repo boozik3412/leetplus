@@ -9,6 +9,7 @@ export type GuestGameProgressAggregation =
 export type GuestGameProgressEvent = {
   eventType: string;
   occurredAt: Date;
+  sourceFactId?: string | null;
   storeId?: string | null;
   externalDomain?: string | null;
   sessionType?: string | null;
@@ -107,8 +108,13 @@ export function evaluateGuestGameProgress(
       eventType: '__REFERENCE__',
       occurredAt: new Date(),
     } satisfies GuestGameProgressEvent);
+  const uniqueHistoryEvents = currentEvent?.sourceFactId
+    ? historyEvents.filter(
+        (event) => event.sourceFactId !== currentEvent.sourceFactId,
+      )
+    : historyEvents;
   const allEvents = [
-    ...historyEvents,
+    ...uniqueHistoryEvents,
     ...(currentEvent ? [currentEvent] : []),
   ].filter((event) =>
     matchesProgressEvent(rule, conditions, metric, event, referenceEvent, {

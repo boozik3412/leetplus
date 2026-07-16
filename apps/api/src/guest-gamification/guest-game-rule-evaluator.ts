@@ -350,6 +350,12 @@ function filterLedgerProductFacts(
     nullableString(
       metric.purchaseSource ?? conditions.purchaseSource,
     )?.toUpperCase() === 'CATEGORY';
+  const categoryCatalogSource =
+    nullableString(
+      metric.categoryCatalogSource ?? conditions.categoryCatalogSource,
+    )?.toUpperCase() === 'LEETPLUS'
+      ? 'LEETPLUS'
+      : 'LANGAME';
   const selectors = {
     productIds: stringValues(
       metric.productIds,
@@ -369,26 +375,32 @@ function filterLedgerProductFacts(
       conditions.productNames,
       conditions.productName,
     ),
-    categoryIds: categorySource
+    categoryIds:
+      categorySource && categoryCatalogSource !== 'LEETPLUS'
+        ? []
+        : stringValues(
+            metric.categoryIds,
+            metric.categoryId,
+            conditions.categoryIds,
+            conditions.categoryId,
+          ),
+    externalCategoryKeys:
+      categorySource && categoryCatalogSource === 'LEETPLUS'
+        ? []
+        : stringValues(
+            metric.externalCategoryKeys,
+            metric.externalCategoryKey,
+            conditions.externalCategoryKeys,
+            conditions.externalCategoryKey,
+          ),
+    categoryNames: categorySource
       ? []
-      : stringValues(
-          metric.categoryIds,
-          metric.categoryId,
-          conditions.categoryIds,
-          conditions.categoryId,
+      : lowerStringValues(
+          metric.categoryNames,
+          metric.categoryName,
+          conditions.categoryNames,
+          conditions.categoryName,
         ),
-    externalCategoryKeys: stringValues(
-      metric.externalCategoryKeys,
-      metric.externalCategoryKey,
-      conditions.externalCategoryKeys,
-      conditions.externalCategoryKey,
-    ),
-    categoryNames: lowerStringValues(
-      metric.categoryNames,
-      metric.categoryName,
-      conditions.categoryNames,
-      conditions.categoryName,
-    ),
   };
   const hasSelectors = Object.values(selectors).some((values) => values.length);
 
@@ -444,18 +456,26 @@ function filterLedgerProductFacts(
       productMatch === 'ALL' &&
       Array.isArray(metric.categorySelections)
     ) {
+      const selectionField =
+        categoryCatalogSource === 'LEETPLUS'
+          ? 'categoryIds'
+          : 'externalCategoryKeys';
       const categorySelections = metric.categorySelections
         .filter(
           (item): item is Record<string, unknown> =>
             Boolean(item) && typeof item === 'object' && !Array.isArray(item),
         )
-        .map((item) => stringValues(item.externalCategoryKeys))
+        .map((item) => stringValues(item[selectionField]))
         .filter((keys) => keys.length > 0);
       const coverageFacts = categorySelections
         .map((keys) =>
           matched.find((fact) => {
             const evidence = jsonObject(fact.evidence) ?? {};
-            const key = nullableString(evidence.externalCategoryKey);
+            const key = nullableString(
+              categoryCatalogSource === 'LEETPLUS'
+                ? evidence.categoryId
+                : evidence.externalCategoryKey,
+            );
             return Boolean(key && keys.includes(key));
           }),
         )

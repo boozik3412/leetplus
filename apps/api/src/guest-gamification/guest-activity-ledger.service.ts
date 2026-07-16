@@ -140,8 +140,10 @@ type ProductCategoriesByClub = Map<
   Map<
     string,
     {
-      externalCategoryKey: string;
-      externalCategoryId: string;
+      categoryId: string | null;
+      categoryName: string | null;
+      externalCategoryKey: string | null;
+      externalCategoryId: string | null;
       externalCategoryName: string | null;
     }
   >
@@ -1860,6 +1862,8 @@ export class GuestActivityLedgerService {
     const payload = sanitizeGuestActivityRawPayload({
       ...row,
       product_name_resolved: productName,
+      category_id: productCategory?.categoryId ?? null,
+      category_name: productCategory?.categoryName ?? null,
       external_category_key: productCategory?.externalCategoryKey ?? null,
       external_category_id: productCategory?.externalCategoryId ?? null,
       external_category_name: productCategory?.externalCategoryName ?? null,
@@ -2318,6 +2322,8 @@ export class GuestActivityLedgerService {
           quantity,
           unitPrice,
           totalAmount: raw.amount,
+          categoryId: firstString(rawPayload.category_id),
+          categoryName: firstString(rawPayload.category_name),
           externalCategoryKey: firstString(rawPayload.external_category_key),
           externalCategoryId: firstString(rawPayload.external_category_id),
           externalCategoryName: firstString(rawPayload.external_category_name),
@@ -2745,13 +2751,17 @@ export class GuestActivityLedgerService {
           externalDomain: context.externalDomain,
           externalClubId: { in: externalClubIds },
           externalProductId: { in: externalProductIds },
-          externalGroupId: { not: null },
           isActive: true,
         },
         select: {
           externalClubId: true,
           externalProductId: true,
           externalGroupId: true,
+          product: {
+            select: {
+              category: { select: { id: true, name: true } },
+            },
+          },
         },
       });
     const groupIds = Array.from(
@@ -2776,21 +2786,28 @@ export class GuestActivityLedgerService {
     );
     const result: ProductCategoriesByClub = new Map();
     configurations.forEach((row) => {
-      if (!row.externalGroupId) return;
       const products =
         result.get(row.externalClubId) ??
         new Map<
           string,
           {
-            externalCategoryKey: string;
-            externalCategoryId: string;
+            categoryId: string | null;
+            categoryName: string | null;
+            externalCategoryKey: string | null;
+            externalCategoryId: string | null;
             externalCategoryName: string | null;
           }
         >();
       products.set(row.externalProductId, {
-        externalCategoryKey: `${context.externalDomain}:${row.externalGroupId}`,
+        categoryId: row.product?.category?.id ?? null,
+        categoryName: row.product?.category?.name ?? null,
+        externalCategoryKey: row.externalGroupId
+          ? `${context.externalDomain}:${row.externalGroupId}`
+          : null,
         externalCategoryId: row.externalGroupId,
-        externalCategoryName: groupNames.get(row.externalGroupId) ?? null,
+        externalCategoryName: row.externalGroupId
+          ? (groupNames.get(row.externalGroupId) ?? null)
+          : null,
       });
       result.set(row.externalClubId, products);
     });

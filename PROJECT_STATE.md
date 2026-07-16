@@ -7,6 +7,7 @@
 - Added an isolated supplemental scheduler with `OFF`, `SHADOW` and `LIVE` modes, a kill switch, tenant scope, safe normalized evidence and stable sourceHash idempotency. Its allowed fact set is currently hard-limited to `BALANCE_TOPUP`.
 - Purchase v2 rules support ANY/ALL across separate purchases and single/minimum/cumulative amount modes. Only positive, non-canceled purchases linked to a guest are eligible. Product categories are synchronized for every Langame domain and club and can be selected in the wizard; exact tariff dictionaries remain disabled as `В разработке`.
 - Langame catalog sync reads the active product-group directory per domain and the product configuration per club. Category membership is stored separately as a club-scoped mapping and joins to the canonical product through Langame `product_id`, so sync does not overwrite the LeetPlus-owned `Product.categoryId`.
+- Category-based purchase missions explicitly select `LANGAME` or `LEETPLUS`. Langame rules match club-scoped `domain:groupId` values; LeetPlus rules match the internal `Category.id`. The wizard, LIVE evaluator and SHADOW ledger never combine the two selector sets implicitly.
 - Guest task cards now open a full modal rendered by the same React preview component used by the wizard. Quest covers use a dedicated tenant-owned media store with JPG/PNG/WebP signature validation and a 2 MB limit.
 - Supplemental production mode remains `OFF` by default. Production rollout must pass `SHADOW` diagnostics before `LIVE` is enabled; the existing LIVE snapshot pipeline is not replaced.
 

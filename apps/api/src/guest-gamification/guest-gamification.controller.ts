@@ -322,10 +322,12 @@ export class GuestGamificationController {
   getMissionWizardProductGroups(
     @CurrentUser() user: AuthenticatedUser,
     @Query('storeId') storeId?: string | string[],
+    @Query('source') source?: string,
   ): Promise<GuestGameMissionProductGroupCatalog> {
     return this.gamificationService.getMissionProductGroupCatalog(
       user,
       Array.isArray(storeId) ? storeId : storeId ? [storeId] : [],
+      source,
     );
   }
 

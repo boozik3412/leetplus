@@ -96,4 +96,34 @@ describe('guest mission wizard contract', () => {
     expect(category.ready).toBe(true);
     expect(tariff.ready).toBe(false);
   });
+
+  it('keeps the selected category catalog explicit in the v2 contract', () => {
+    const leetplus = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'CATEGORY',
+        categoryCatalogSource: 'LEETPLUS',
+        metric: { categoryIds: ['category-1'], target: 1 },
+      },
+    });
+    const legacyDefault = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'PRODUCT_PURCHASE',
+      conditions: {
+        purchaseSource: 'CATEGORY',
+        metric: { categoryIds: ['category-1'], target: 1 },
+      },
+    });
+
+    expect(leetplus).toMatchObject({
+      purchaseSource: 'CATEGORY',
+      categoryCatalogSource: 'LEETPLUS',
+      metric: { categoryCatalogSource: 'LEETPLUS' },
+    });
+    expect(legacyDefault).toMatchObject({
+      categoryCatalogSource: 'LANGAME',
+      metric: { categoryCatalogSource: 'LANGAME' },
+    });
+  });
 });

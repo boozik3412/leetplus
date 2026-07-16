@@ -416,6 +416,60 @@ describe('guest game progress trigger matching', () => {
     });
   });
 
+  it('matches LeetPlus categories by internal category id without Langame groups', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PRODUCT_PURCHASE',
+        progressTarget: 2,
+        conditions: {
+          purchaseSource: 'CATEGORY',
+          categoryCatalogSource: 'LEETPLUS',
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['PRODUCT_PURCHASE'],
+            purchaseSource: 'CATEGORY',
+            categoryCatalogSource: 'LEETPLUS',
+            productMatch: 'ALL',
+            categoryIds: ['leet-category-drinks', 'leet-category-rental'],
+            categorySelections: [
+              {
+                id: 'leet-category-drinks',
+                categoryIds: ['leet-category-drinks'],
+              },
+              {
+                id: 'leet-category-rental',
+                categoryIds: ['leet-category-rental'],
+              },
+            ],
+            target: 2,
+          },
+        },
+      },
+      {
+        eventType: 'PRODUCT_PURCHASE',
+        occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        categoryId: 'leet-category-rental',
+        externalCategoryKey: '46.langamepro.ru:7',
+        spendAmount: 399,
+      },
+      [
+        {
+          eventType: 'PRODUCT_PURCHASE',
+          occurredAt: new Date('2026-07-14T10:00:00.000Z'),
+          categoryId: 'leet-category-drinks',
+          externalCategoryKey: '443.langame.ru:12',
+          spendAmount: 219,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 2,
+      completed: true,
+      matchedEvents: 2,
+    });
+  });
+
   it('counts a check-in streak by the club timezone', () => {
     const result = evaluateGuestGameProgress(
       {

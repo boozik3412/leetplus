@@ -38,6 +38,7 @@ type WizardState = {
   weekdays: number[];
   minSessionMinutes: number;
   purchaseSource: "PRODUCT" | "CATEGORY";
+  categoryCatalogSource: "LANGAME" | "LEETPLUS";
   productMatch: "ANY" | "ALL";
   amountMode: "NONE" | "SINGLE_MINIMUM" | "PERIOD_TOTAL";
   minimumAmount: number;
@@ -210,13 +211,18 @@ export function GuestMissionWizard({
     }
     const controller = new AbortController();
     const storeIds = [...form.storeIds].sort();
-    const cacheKey = storeIds.join("|");
+    const cacheKey = `${form.categoryCatalogSource}|${storeIds.join("|")}`;
     const load = async () => {
       setLoadingProductGroups(true);
       try {
         const cached = productGroupCatalogCache.get(cacheKey);
         const catalog =
-          cached ?? (await fetchProductGroupCatalog(storeIds, controller));
+          cached ??
+          (await fetchProductGroupCatalog(
+            storeIds,
+            form.categoryCatalogSource,
+            controller,
+          ));
         if (!cached) productGroupCatalogCache.set(cacheKey, catalog);
         setProductGroups(catalog.groups);
         setProductGroupWarnings(catalog.warnings);
@@ -231,7 +237,7 @@ export function GuestMissionWizard({
           setProductGroupWarnings([
             error instanceof Error
               ? error.message
-              : "Не удалось загрузить категории Langame.",
+              : `Не удалось загрузить категории ${form.categoryCatalogSource === "LANGAME" ? "Langame" : "LeetPlus"}.`,
           ]);
         }
       } finally {
@@ -240,7 +246,12 @@ export function GuestMissionWizard({
     };
     void load();
     return () => controller.abort();
-  }, [form.purchaseSource, form.storeIds, form.taskType]);
+  }, [
+    form.categoryCatalogSource,
+    form.purchaseSource,
+    form.storeIds,
+    form.taskType,
+  ]);
 
   useEffect(() => {
     if (form.taskType !== "PRODUCT_PURCHASE" || search.trim().length < 3) {
@@ -956,12 +967,36 @@ function PurchaseLogic(props: Parameters<typeof ConditionsStep>[0]) {
 function CategoryPicker(props: Parameters<typeof ConditionsStep>[0]) {
   return (
     <div className={subsectionClass}>
+      <div className="mb-4 rounded-lg border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+        <SubTitle>Источник категорий</SubTitle>
+        <ChoiceRow
+          values={[
+            { id: "LANGAME", label: "Категории Langame" },
+            { id: "LEETPLUS", label: "Категории LeetPlus" },
+          ]}
+          value={props.form.categoryCatalogSource}
+          onChange={(value) => {
+            props.clearProductGroups();
+            props.setForm((state) => ({
+              ...state,
+              categoryCatalogSource:
+                value as WizardState["categoryCatalogSource"],
+            }));
+          }}
+        />
+        <p className="mt-2 text-xs leading-5 text-zinc-500">
+          {props.form.categoryCatalogSource === "LANGAME"
+            ? "Категории берутся из клубной конфигурации Langame и синхронизируются отдельно для каждого домена и клуба."
+            : "Категории берутся из внутреннего справочника LeetPlus и назначений в карточках товаров."}
+        </p>
+      </div>
       <div className="flex items-center justify-between gap-3">
         <div>
           <SubTitle>Категории выбранных клубов</SubTitle>
           <p className="mt-1 text-xs text-zinc-500">
-            Категории объединяются по названию, но сохраняются с точными ID
-            каждого домена и клуба.
+            {props.form.categoryCatalogSource === "LANGAME"
+              ? "Категории объединяются по названию, но сохраняются с точными ID каждого домена и клуба."
+              : "Используются внутренние ID категорий LeetPlus; они не смешиваются с группами Langame."}
           </p>
         </div>
         <span className="text-xs font-bold text-emerald-700">
@@ -1920,6 +1955,10 @@ function buildWizardDto(
   if (form.taskType === "PRODUCT_PURCHASE")
     Object.assign(metric, {
       purchaseSource: form.purchaseSource,
+      categoryCatalogSource:
+        form.purchaseSource === "CATEGORY"
+          ? form.categoryCatalogSource
+          : undefined,
       productIds:
         form.purchaseSource === "PRODUCT"
           ? products.map((product) => product.id)
@@ -1951,6 +1990,9 @@ function buildWizardDto(
     });
   if (form.taskType === "PRODUCT_PURCHASE") {
     conditions.purchaseSource = form.purchaseSource;
+    if (form.purchaseSource === "CATEGORY") {
+      conditions.categoryCatalogSource = form.categoryCatalogSource;
+    }
   }
   if (form.taskType === "BALANCE_TOPUP")
     Object.assign(metric, {
@@ -2159,9 +2201,11 @@ function cacheProductCatalog(key: string, catalog: ProductCatalog) {
 
 async function fetchProductGroupCatalog(
   storeIds: string[],
+  source: WizardState["categoryCatalogSource"],
   controller: AbortController,
 ) {
   const params = new URLSearchParams();
+  params.set("source", source);
   storeIds.forEach((storeId) => params.append("storeId", storeId));
   const response = await fetch(
     `/api/guests/gamification/missions/wizard/product-groups?${params}`,
@@ -2191,6 +2235,7 @@ function initialState(stores: Store[]): WizardState {
     weekdays: [],
     minSessionMinutes: 60,
     purchaseSource: "PRODUCT",
+    categoryCatalogSource: "LANGAME",
     productMatch: "ANY",
     amountMode: "NONE",
     minimumAmount: 200,

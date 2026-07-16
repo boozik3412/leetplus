@@ -211,7 +211,9 @@ export type GuestGameMissionWizardSaveResult = {
 
 export type GuestGameMissionProductGroup = {
   id: string;
+  source: "LANGAME" | "LEETPLUS";
   name: string;
+  categoryIds: string[];
   productCount: number;
   storeCount: number;
   storeNames: string[];
@@ -224,6 +226,7 @@ export type GuestGameMissionProductGroup = {
 };
 
 export type GuestGameMissionProductGroupCatalog = {
+  source: "LANGAME" | "LEETPLUS";
   status: "READY" | "PARTIAL" | "EMPTY";
   latestSyncedAt: string | null;
   stores: Array<{

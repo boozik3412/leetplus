@@ -83,6 +83,11 @@ export function normalizeMissionWizardConditions(
     ['PRODUCT', 'CATEGORY'],
     'PRODUCT',
   );
+  const categoryCatalogSource = enumValue(
+    source.categoryCatalogSource ?? metric.categoryCatalogSource,
+    ['LANGAME', 'LEETPLUS'],
+    'LANGAME',
+  );
   const amountMode = enumValue(
     metric.amountMode,
     ['NONE', 'SINGLE_MINIMUM', 'PERIOD_TOTAL'],
@@ -107,6 +112,8 @@ export function normalizeMissionWizardConditions(
 
   if (taskType === 'PRODUCT_PURCHASE') {
     normalizedMetric.purchaseSource = purchaseSource;
+    normalizedMetric.categoryCatalogSource =
+      purchaseSource === 'CATEGORY' ? categoryCatalogSource : null;
     normalizedMetric.productMatch = productMatch;
     normalizedMetric.amountMode = amountMode;
     normalizedMetric.productIds =
@@ -207,7 +214,12 @@ export function normalizeMissionWizardConditions(
         ? 'HIDDEN'
         : 'VISIBLE',
     sessionType,
-    ...(taskType === 'PRODUCT_PURCHASE' ? { purchaseSource } : {}),
+    ...(taskType === 'PRODUCT_PURCHASE'
+      ? {
+          purchaseSource,
+          ...(purchaseSource === 'CATEGORY' ? { categoryCatalogSource } : {}),
+        }
+      : {}),
     metric: jsonObject(normalizedMetric),
     presentation: jsonObject({
       ...jsonObject(appearance),

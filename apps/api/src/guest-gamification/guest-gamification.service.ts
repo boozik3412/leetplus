@@ -2016,6 +2016,7 @@ export type GuestGameMissionWizardSaveResult = {
 };
 
 export type GuestGameMissionProductGroupCatalog = {
+  source: 'LANGAME' | 'LEETPLUS';
   status: 'READY' | 'PARTIAL' | 'EMPTY';
   latestSyncedAt: string | null;
   stores: Array<{
@@ -2027,7 +2028,9 @@ export type GuestGameMissionProductGroupCatalog = {
   warnings: string[];
   groups: Array<{
     id: string;
+    source: 'LANGAME' | 'LEETPLUS';
     name: string;
+    categoryIds: string[];
     productCount: number;
     storeCount: number;
     storeNames: string[];
@@ -6776,7 +6779,12 @@ export class GuestGamificationService {
   async getMissionProductGroupCatalog(
     user: AuthenticatedUser,
     requestedStoreIds: string[],
+    requestedSource?: string | null,
   ): Promise<GuestGameMissionProductGroupCatalog> {
+    const source =
+      nullableString(requestedSource)?.toUpperCase() === 'LEETPLUS'
+        ? 'LEETPLUS'
+        : 'LANGAME';
     const storeIds = uniqueStrings(requestedStoreIds);
     const stores = await this.prisma.store.findMany({
       where: {
@@ -6798,7 +6806,9 @@ export class GuestGamificationService {
           where: {
             tenantId: user.tenantId,
             storeId: { in: stores.map((store) => store.id) },
-            externalGroupId: { not: null },
+            ...(source === 'LANGAME'
+              ? { externalGroupId: { not: null } }
+              : { productId: { not: null } }),
             isActive: true,
           },
           select: {
@@ -6811,6 +6821,114 @@ export class GuestGamificationService {
           },
         })
       : [];
+    const storeById = new Map(stores.map((store) => [store.id, store]));
+    const readyStoreIds = new Set(configurations.map((row) => row.storeId));
+
+    if (source === 'LEETPLUS') {
+      const products = configurations.length
+        ? await this.prisma.product.findMany({
+            where: {
+              tenantId: user.tenantId,
+              id: {
+                in: uniqueStrings(
+                  configurations.map((row) => row.productId ?? ''),
+                ),
+              },
+              isActive: true,
+              categoryId: { not: null },
+            },
+            select: {
+              id: true,
+              updatedAt: true,
+              category: {
+                select: { id: true, name: true, updatedAt: true },
+              },
+            },
+          })
+        : [];
+      const productById = new Map(
+        products.map((product) => [product.id, product]),
+      );
+      const buckets = new Map<
+        string,
+        {
+          name: string;
+          productIds: Set<string>;
+          storeIds: Set<string>;
+        }
+      >();
+      configurations.forEach((configuration) => {
+        if (!configuration.productId) return;
+        const product = productById.get(configuration.productId);
+        if (!product?.category) return;
+        const bucket = buckets.get(product.category.id) ?? {
+          name: product.category.name,
+          productIds: new Set<string>(),
+          storeIds: new Set<string>(),
+        };
+        bucket.productIds.add(product.id);
+        bucket.storeIds.add(configuration.storeId);
+        buckets.set(product.category.id, bucket);
+      });
+      const catalogGroups = [...buckets.entries()]
+        .map(([categoryId, bucket]) => ({
+          id: categoryId,
+          source: 'LEETPLUS' as const,
+          name: bucket.name,
+          categoryIds: [categoryId],
+          productCount: bucket.productIds.size,
+          storeCount: bucket.storeIds.size,
+          storeNames: [...bucket.storeIds]
+            .map((storeId) => storeById.get(storeId)?.name)
+            .filter((name): name is string => Boolean(name))
+            .sort((left, right) => left.localeCompare(right, 'ru')),
+          refs: [],
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+      const missingStores = stores.filter(
+        (store) => !readyStoreIds.has(store.id),
+      );
+      const timestamps = [
+        ...configurations.map((row) => row.syncedAt),
+        ...products.flatMap((product) => [
+          product.updatedAt,
+          ...(product.category ? [product.category.updatedAt] : []),
+        ]),
+      ];
+      return {
+        source,
+        status: !catalogGroups.length
+          ? 'EMPTY'
+          : missingStores.length
+            ? 'PARTIAL'
+            : 'READY',
+        latestSyncedAt: timestamps.length
+          ? new Date(
+              Math.max(...timestamps.map((value) => value.getTime())),
+            ).toISOString()
+          : null,
+        stores: stores.map((store) => ({
+          ...store,
+          ready: readyStoreIds.has(store.id),
+        })),
+        warnings: [
+          ...(missingStores.length
+            ? [
+                `Нет свежей клубной конфигурации: ${missingStores
+                  .map((store) => store.name)
+                  .join(', ')}. Запустите синхронизацию каталога.`,
+              ]
+            : []),
+          ...(!catalogGroups.length && configurations.length
+            ? [
+                'Для выбранных клубов пока нет товаров с назначенной категорией LeetPlus.',
+              ]
+            : []),
+        ],
+        groups: catalogGroups,
+      };
+    }
+
     const groupKeys = new Map<string, { domain: string; groupId: string }>();
     configurations.forEach((row) => {
       if (!row.externalGroupId) return;
@@ -6844,8 +6962,6 @@ export class GuestGamificationService {
         group,
       ]),
     );
-    const storeById = new Map(stores.map((store) => [store.id, store]));
-    const readyStoreIds = new Set(configurations.map((row) => row.storeId));
     const buckets = new Map<
       string,
       {
@@ -6919,7 +7035,9 @@ export class GuestGamificationService {
           .join('|');
         return {
           id: createHash('sha256').update(identity).digest('hex').slice(0, 24),
+          source: 'LANGAME' as const,
           name: bucket.name,
+          categoryIds: [],
           productCount: bucket.productIds.size,
           storeCount: bucket.storeIds.size,
           storeNames: [...bucket.storeIds]
@@ -6944,6 +7062,7 @@ export class GuestGamificationService {
       : null;
 
     return {
+      source,
       status: !catalogGroups.length
         ? 'EMPTY'
         : missingStores.length
@@ -7006,12 +7125,18 @@ export class GuestGamificationService {
           ? 'CATEGORY'
           : 'PRODUCT';
       if (purchaseSource === 'CATEGORY') {
+        const categoryCatalogSource =
+          nullableString(conditions.categoryCatalogSource)?.toUpperCase() ===
+          'LEETPLUS'
+            ? 'LEETPLUS'
+            : 'LANGAME';
         const selectedCategoryIds = uniqueStrings(
           guestGameStringArray(metric.categoryIds),
         );
         const catalog = await this.getMissionProductGroupCatalog(
           user,
           storeIds,
+          categoryCatalogSource,
         );
         const selectedCategories = catalog.groups.filter((group) =>
           selectedCategoryIds.includes(group.id),
@@ -7024,6 +7149,7 @@ export class GuestGamificationService {
         const categorySelections = selectedCategories.map((group) => ({
           id: group.id,
           name: group.name,
+          categoryIds: group.categoryIds,
           externalCategoryKeys: group.refs.map(
             (ref) => `${ref.externalDomain}:${ref.externalGroupId}`,
           ),
@@ -7034,15 +7160,26 @@ export class GuestGamificationService {
         }));
         metric = {
           ...metric,
+          categoryCatalogSource,
           productIds: [],
           externalProductIds: [],
-          categoryIds: selectedCategories.map((group) => group.id),
-          categoryNames: selectedCategories.map((group) => group.name),
-          externalCategoryKeys: uniqueStrings(
-            categorySelections.flatMap(
-              (selection) => selection.externalCategoryKeys,
-            ),
-          ),
+          categorySelectionIds: selectedCategories.map((group) => group.id),
+          categoryIds:
+            categoryCatalogSource === 'LEETPLUS'
+              ? uniqueStrings(
+                  selectedCategories.flatMap((group) => group.categoryIds),
+                )
+              : [],
+          categoryLabels: selectedCategories.map((group) => group.name),
+          categoryNames: [],
+          externalCategoryKeys:
+            categoryCatalogSource === 'LANGAME'
+              ? uniqueStrings(
+                  categorySelections.flatMap(
+                    (selection) => selection.externalCategoryKeys,
+                  ),
+                )
+              : [],
           categorySelections,
           target:
             nullableString(metric.productMatch)?.toUpperCase() === 'ALL'
@@ -7075,7 +7212,11 @@ export class GuestGamificationService {
         }
         metric = {
           ...metric,
+          categoryCatalogSource: null,
           categoryIds: [],
+          categorySelectionIds: [],
+          categoryLabels: [],
+          categorySelections: [],
           externalCategoryKeys: [],
           productIds: selectedProducts.map((product) => product.id),
           externalProductIds: uniqueStrings(
@@ -7089,7 +7230,16 @@ export class GuestGamificationService {
           })),
         };
       }
-      conditions = { ...conditions, metric: cleanJsonRecord(metric) };
+      conditions = {
+        ...conditions,
+        ...(purchaseSource === 'CATEGORY'
+          ? {
+              categoryCatalogSource:
+                nullableString(metric.categoryCatalogSource) ?? 'LANGAME',
+            }
+          : { categoryCatalogSource: null }),
+        metric: cleanJsonRecord(metric),
+      };
     }
     const missionDto: GuestGameMissionDto = {
       name: stringValue(dto.name) ?? 'Новое задание',

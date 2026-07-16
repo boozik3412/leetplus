@@ -266,6 +266,89 @@ describe('Игровой журнал: обезличенный replay-набо�
     expect(result.facts).toHaveLength(2);
   });
 
+  it('keeps Langame and LeetPlus category selectors isolated in shadow replay', () => {
+    const facts = [
+      fact('PRODUCT_PURCHASED', '2026-07-10T11:11:00.000Z', {
+        id: 'purchase-drink',
+        amount: 200,
+        evidence: {
+          productId: 'langame-product-1',
+          categoryId: 'leetplus-drinks',
+          externalCategoryKey: 'network.langame.example:9',
+        },
+      }),
+      fact('PRODUCT_PURCHASED', '2026-07-10T12:11:00.000Z', {
+        id: 'purchase-rental',
+        amount: 300,
+        evidence: {
+          productId: 'langame-product-2',
+          categoryId: 'leetplus-rental',
+          externalCategoryKey: 'network.langame.example:12',
+        },
+      }),
+    ];
+    const langame = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'PRODUCT_PURCHASE',
+        sessionType: null,
+        progressTarget: 2,
+        periodRules: {
+          purchaseSource: 'CATEGORY',
+          categoryCatalogSource: 'LANGAME',
+          metric: {
+            aggregation: 'count',
+            target: 2,
+            purchaseSource: 'CATEGORY',
+            categoryCatalogSource: 'LANGAME',
+            productMatch: 'ALL',
+            externalCategoryKeys: [
+              'network.langame.example:9',
+              'network.langame.example:12',
+            ],
+            categorySelections: [
+              { externalCategoryKeys: ['network.langame.example:9'] },
+              { externalCategoryKeys: ['network.langame.example:12'] },
+            ],
+          },
+        },
+      }),
+      facts,
+      STORE_ID,
+    );
+    const leetplus = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'PRODUCT_PURCHASE',
+        sessionType: null,
+        progressTarget: 2,
+        periodRules: {
+          purchaseSource: 'CATEGORY',
+          categoryCatalogSource: 'LEETPLUS',
+          metric: {
+            aggregation: 'count',
+            target: 2,
+            purchaseSource: 'CATEGORY',
+            categoryCatalogSource: 'LEETPLUS',
+            productMatch: 'ALL',
+            categoryIds: ['leetplus-drinks', 'leetplus-rental'],
+            categorySelections: [
+              { categoryIds: ['leetplus-drinks'] },
+              { categoryIds: ['leetplus-rental'] },
+            ],
+          },
+        },
+      }),
+      facts,
+      STORE_ID,
+    );
+
+    expect(langame).toMatchObject({ status: 'MATCHED' });
+    expect(leetplus).toMatchObject({ status: 'MATCHED' });
+    expect(langame.facts).toHaveLength(2);
+    expect(leetplus.facts).toHaveLength(2);
+  });
+
   it('reports insufficient data when a configured product category is absent from facts', () => {
     const result = evaluateGuestGameLedgerRule(
       rule({

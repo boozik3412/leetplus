@@ -808,6 +808,9 @@ describe('GuestActivityLedgerService', () => {
         externalClubId: '15',
         externalProductId: '415',
         externalGroupId: '9',
+        product: {
+          category: { id: 'leet-category-hot', name: 'Горячая еда LeetPlus' },
+        },
       },
     ]);
     (prisma.langameProductGroup.findMany as jest.Mock).mockResolvedValue([
@@ -862,6 +865,8 @@ describe('GuestActivityLedgerService', () => {
         quantity: 1,
         unitPrice: 250,
         totalAmount: 250,
+        categoryId: 'leet-category-hot',
+        categoryName: 'Горячая еда LeetPlus',
         externalCategoryKey: 'demo.langame:9',
         externalCategoryId: '9',
         externalCategoryName: 'Горячая кухня',

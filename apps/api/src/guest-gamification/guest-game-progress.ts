@@ -456,6 +456,15 @@ function matchesProductFilters(
   metric: Record<string, unknown>,
   event: GuestGameProgressEvent,
 ) {
+  const purchaseSource = normalizeProgressToken(
+    progressString(metric.purchaseSource ?? conditions.purchaseSource),
+  );
+  const categoryCatalogSource = normalizeProgressToken(
+    progressString(
+      metric.categoryCatalogSource ?? conditions.categoryCatalogSource,
+    ),
+  );
+  const categoryMode = purchaseSource === 'CATEGORY';
   return (
     matchesOneOf(
       progressStringValues(
@@ -476,30 +485,36 @@ function matchesProductFilters(
       event.externalProductId,
     ) &&
     matchesOneOf(
-      progressStringValues(
-        metric.externalCategoryKeys,
-        metric.externalCategoryKey,
-        conditions.externalCategoryKeys,
-        conditions.externalCategoryKey,
-      ),
+      categoryMode && categoryCatalogSource === 'LEETPLUS'
+        ? []
+        : progressStringValues(
+            metric.externalCategoryKeys,
+            metric.externalCategoryKey,
+            conditions.externalCategoryKeys,
+            conditions.externalCategoryKey,
+          ),
       event.externalCategoryKey,
     ) &&
     matchesOneOf(
-      progressStringValues(
-        metric.categoryIds,
-        metric.categoryId,
-        conditions.categoryIds,
-        conditions.categoryId,
-      ),
+      categoryMode && categoryCatalogSource !== 'LEETPLUS'
+        ? []
+        : progressStringValues(
+            metric.categoryIds,
+            metric.categoryId,
+            conditions.categoryIds,
+            conditions.categoryId,
+          ),
       event.categoryId,
     ) &&
     matchesOneOf(
-      progressStringValues(
-        metric.categoryNames,
-        metric.categoryName,
-        conditions.categoryNames,
-        conditions.categoryName,
-      ).map((value) => value.toLowerCase()),
+      categoryMode
+        ? []
+        : progressStringValues(
+            metric.categoryNames,
+            metric.categoryName,
+            conditions.categoryNames,
+            conditions.categoryName,
+          ).map((value) => value.toLowerCase()),
       event.categoryName?.toLowerCase() ?? null,
     )
   );
@@ -519,19 +534,32 @@ function productCoverageMatches(
     progressString(metric.purchaseSource ?? conditions.purchaseSource),
   );
   if (purchaseSource === 'CATEGORY') {
+    const categoryCatalogSource = normalizeProgressToken(
+      progressString(
+        metric.categoryCatalogSource ?? conditions.categoryCatalogSource,
+      ),
+    );
+    const selectionField =
+      categoryCatalogSource === 'LEETPLUS'
+        ? 'categoryIds'
+        : 'externalCategoryKeys';
     const selections = Array.isArray(metric.categorySelections)
       ? metric.categorySelections
           .filter(
             (item): item is Record<string, unknown> =>
               Boolean(item) && typeof item === 'object' && !Array.isArray(item),
           )
-          .map((item) => progressStringValues(item.externalCategoryKeys))
+          .map((item) => progressStringValues(item[selectionField]))
           .filter((keys) => keys.length > 0)
       : [];
     if (!selections.length) return true;
     const purchasedCategoryKeys = new Set(
       events
-        .map((event) => event.externalCategoryKey)
+        .map((event) =>
+          categoryCatalogSource === 'LEETPLUS'
+            ? event.categoryId
+            : event.externalCategoryKey,
+        )
         .filter((key): key is string => Boolean(key)),
     );
     return selections.every((keys) =>

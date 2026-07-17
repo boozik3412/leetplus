@@ -30,6 +30,7 @@ type WizardState = {
   visibility: "VISIBLE" | "HIDDEN";
   audienceId: string;
   storeIds: string[];
+  indefinite: boolean;
   periodFrom: string;
   periodTo: string;
   sessionType: "ANY" | "HOURLY" | "PACKAGE_OR_SUBSCRIPTION";
@@ -657,31 +658,55 @@ function ConditionsStep(props: {
             </div>
           </Field>
         </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <Field label="Начало" required>
-            <input
-              className={fieldClass}
-              type="datetime-local"
-              value={form.periodFrom}
-              onChange={(event) =>
-                setForm((state) => ({
-                  ...state,
-                  periodFrom: event.target.value,
-                }))
-              }
-            />
-          </Field>
-          <Field label="Окончание" required>
-            <input
-              className={fieldClass}
-              type="datetime-local"
-              value={form.periodTo}
-              onChange={(event) =>
-                setForm((state) => ({ ...state, periodTo: event.target.value }))
-              }
-            />
-          </Field>
-        </div>
+        <label className="mt-4 flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <span>
+            <span className="block text-sm font-semibold">Бессрочно</span>
+            <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+              Началом станет момент активации; дата окончания не устанавливается.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={form.indefinite}
+            onChange={(event) =>
+              setForm((state) => ({
+                ...state,
+                indefinite: event.target.checked,
+              }))
+            }
+            className="h-5 w-5 shrink-0 accent-emerald-500"
+          />
+        </label>
+        {!form.indefinite ? (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Начало" required>
+              <input
+                className={fieldClass}
+                type="datetime-local"
+                value={form.periodFrom}
+                onChange={(event) =>
+                  setForm((state) => ({
+                    ...state,
+                    periodFrom: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+            <Field label="Окончание" required>
+              <input
+                className={fieldClass}
+                type="datetime-local"
+                value={form.periodTo}
+                onChange={(event) =>
+                  setForm((state) => ({
+                    ...state,
+                    periodTo: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+          </div>
+        ) : null}
       </section>
 
       <section className={cardClass}>
@@ -2041,8 +2066,9 @@ function buildWizardDto(
     visibility: form.visibility,
     audienceId: form.audienceId || null,
     storeIds: form.storeIds,
-    periodFrom: localInputToIso(form.periodFrom),
-    periodTo: localInputToIso(form.periodTo),
+    indefinite: form.indefinite,
+    periodFrom: form.indefinite ? null : localInputToIso(form.periodFrom),
+    periodTo: form.indefinite ? null : localInputToIso(form.periodTo),
     conditions,
     reward: {
       type: form.rewardType,
@@ -2257,6 +2283,7 @@ function initialState(stores: Store[]): WizardState {
     visibility: "VISIBLE",
     audienceId: "",
     storeIds: stores[0] ? [stores[0].id] : [],
+    indefinite: false,
     periodFrom: localDateTime(now),
     periodTo: localDateTime(end),
     sessionType: "ANY",

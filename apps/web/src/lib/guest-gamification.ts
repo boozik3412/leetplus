@@ -186,6 +186,7 @@ export type GuestGameMissionWizardDto = {
   visibility: "VISIBLE" | "HIDDEN";
   audienceId: string | null;
   storeIds: string[];
+  indefinite?: boolean;
   periodFrom?: string | null;
   periodTo?: string | null;
   conditions: Record<string, unknown>;

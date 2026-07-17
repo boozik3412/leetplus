@@ -52,6 +52,42 @@ describe('guest mission wizard contract', () => {
     expect(conditions.metric).not.toHaveProperty('windowDays');
   });
 
+  it('accepts an indefinite mission without dates and preserves the mode', () => {
+    const readiness = validateMissionWizard({
+      ...common,
+      taskType: 'APP_OPEN',
+      indefinite: true,
+      periodFrom: null,
+      periodTo: null,
+      conditions: { metric: { target: 1 } },
+    });
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'APP_OPEN',
+      indefinite: true,
+      periodFrom: null,
+      periodTo: null,
+      conditions: { metric: { target: 1 } },
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(conditions).toMatchObject({ indefinite: true });
+  });
+
+  it('still requires both dates for a fixed-period mission', () => {
+    const readiness = validateMissionWizard({
+      ...common,
+      taskType: 'APP_OPEN',
+      indefinite: false,
+      periodFrom: null,
+      periodTo: null,
+      conditions: { metric: { target: 1 } },
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.blockers).toHaveLength(2);
+  });
+
   it('normalizes an exact single top-up without trusting client policy', () => {
     const conditions = normalizeMissionWizardConditions({
       ...common,

@@ -133,6 +133,7 @@ function createPrismaMock() {
     guestGameMission: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      findFirstOrThrow: jest.fn(),
       create: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
@@ -308,6 +309,49 @@ function activeMission(
     antiFraudRules: null,
     definitionVersion: 1,
     evaluationPolicy: 'LIVE_PRIMARY',
+    ...overrides,
+  };
+}
+
+function missionRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'mission-1',
+    tenantId: user.tenantId,
+    audienceId: null,
+    createdByUserId: user.id,
+    name: 'Indefinite mission',
+    status: 'DRAFT',
+    missionType: 'APP_OPEN',
+    triggerKind: 'APP_OPEN',
+    rewardType: 'NONE',
+    rewardAmount: null,
+    rewardLabel: null,
+    xpReward: 0,
+    progressTarget: 1,
+    progressUnit: 'вход',
+    conditions: {
+      schemaVersion: 2,
+      taskType: 'APP_OPEN',
+      indefinite: true,
+      visibility: 'VISIBLE',
+      metric: { eventTypes: ['APP_OPEN'], aggregation: 'exists', target: 1 },
+      reward: { type: 'NONE', xpEnabled: false },
+    },
+    storeIds: ['store-1'],
+    periodFrom: null,
+    periodTo: null,
+    budgetAmount: null,
+    perGuestLimit: null,
+    totalRewardLimit: null,
+    antiFraudRules: null,
+    manualApprovalRequired: false,
+    definitionVersion: 2,
+    evaluationPolicy: 'LIVE_PRIMARY',
+    note: null,
+    createdAt: now,
+    updatedAt: now,
+    audience: null,
+    createdByUser: null,
     ...overrides,
   };
 }
@@ -3539,6 +3583,42 @@ describe('GuestGamificationService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('mission wizard activation', () => {
+    it('starts an indefinite mission at the server activation time', async () => {
+      const { service, prisma } = createService();
+      const draft = missionRow();
+      prisma.guestGameMission.findFirst.mockResolvedValue(draft);
+      prisma.guestGameMission.findFirstOrThrow.mockResolvedValue(draft);
+      prisma.store.findFirst.mockResolvedValue(visualEditorStore());
+      prisma.guestGameMission.update.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve(
+            missionRow({
+              ...data,
+              updatedAt: new Date(),
+            }),
+          ),
+      );
+
+      const result = await service.activateMissionWizard(user, 'mission-1');
+      const activationData =
+        prisma.guestGameMission.update.mock.calls[0][0].data;
+
+      expect(activationData.status).toBe('ACTIVE');
+      expect(activationData.periodFrom).toBeInstanceOf(Date);
+      expect(activationData.periodTo).toBeNull();
+      expect(activationData.conditions).toMatchObject({
+        indefinite: true,
+        activatedAt: activationData.periodFrom.toISOString(),
+      });
+      expect(result.readiness.ready).toBe(true);
+      expect(result.mission.periodFrom).toBe(
+        activationData.periodFrom.toISOString(),
+      );
+      expect(result.mission.periodTo).toBeNull();
     });
   });
 

@@ -7293,8 +7293,10 @@ export class GuestGamificationService {
         reward: cleanJsonRecord(reward),
       },
       storeIds,
-      periodFrom: nullableString(dto.periodFrom),
-      periodTo: nullableString(dto.periodTo),
+      periodFrom:
+        conditions.indefinite === true ? null : nullableString(dto.periodFrom),
+      periodTo:
+        conditions.indefinite === true ? null : nullableString(dto.periodTo),
       budgetAmount:
         rewardType === 'LOOT_BOX_ENTITLEMENT' || reward.budgetUnlimited === true
           ? null
@@ -7417,11 +7419,18 @@ export class GuestGamificationService {
         this.assertStore(user, storeId),
       ),
     );
+    const activatedAt = new Date();
     const row = await this.prisma.guestGameMission.update({
       where: { id },
       data: {
         status: 'ACTIVE',
-        conditions: ruleMetadataWithActivatedAt(mission.conditions),
+        ...(missionConditions.indefinite === true
+          ? { periodFrom: activatedAt, periodTo: null }
+          : {}),
+        conditions: ruleMetadataWithActivatedAt(
+          mission.conditions,
+          activatedAt,
+        ),
       },
       include: missionInclude,
     });
@@ -15652,6 +15661,7 @@ function missionRowToWizardDto(row: MissionRow): GuestGameMissionWizardDto {
     visibility: nullableString(conditions.visibility) ?? 'VISIBLE',
     audienceId: row.audienceId,
     storeIds: guestGameStringArray(row.storeIds),
+    indefinite: conditions.indefinite === true,
     periodFrom: row.periodFrom?.toISOString() ?? null,
     periodTo: row.periodTo?.toISOString() ?? null,
     conditions,
@@ -20748,7 +20758,10 @@ function dryRunRuleActivatedAt(
   ].reduce(maxDate, null);
 }
 
-function ruleMetadataWithActivatedAt(value: unknown): Prisma.InputJsonObject {
+function ruleMetadataWithActivatedAt(
+  value: unknown,
+  activatedAt = new Date(),
+): Prisma.InputJsonObject {
   const record =
     value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -20756,7 +20769,7 @@ function ruleMetadataWithActivatedAt(value: unknown): Prisma.InputJsonObject {
 
   return {
     ...record,
-    activatedAt: new Date().toISOString(),
+    activatedAt: activatedAt.toISOString(),
   };
 }
 

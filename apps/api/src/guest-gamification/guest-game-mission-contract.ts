@@ -25,6 +25,7 @@ export type GuestGameMissionWizardDto = {
   visibility?: string;
   audienceId?: string | null;
   storeIds?: string[];
+  indefinite?: boolean;
   periodFrom?: string | null;
   periodTo?: string | null;
   conditions?: Record<string, unknown> | null;
@@ -77,6 +78,7 @@ export function normalizeMissionWizardConditions(
 ): Prisma.InputJsonObject {
   const taskType = missionTaskType(dto.taskType);
   const source = objectValue(dto.conditions);
+  const indefinite = dto.indefinite === true || source.indefinite === true;
   const metric = objectValue(source.metric);
   const appearance = objectValue(dto.appearance);
   const productMatch = enumValue(metric.productMatch, ['ANY', 'ALL'], 'ANY');
@@ -212,6 +214,7 @@ export function normalizeMissionWizardConditions(
     schemaVersion: guestGameMissionDefinitionVersion,
     source: 'mission_wizard',
     taskType,
+    indefinite,
     visibility:
       stringValue(dto.visibility)?.toUpperCase() === 'HIDDEN'
         ? 'HIDDEN'
@@ -256,13 +259,15 @@ export function validateMissionWizard(
   if (!stringValue(dto.name)) blockers.push('Укажите название задания.');
   if (!stringArray(dto.storeIds).length)
     blockers.push('Выберите хотя бы один клуб.');
-  if (!stringValue(dto.periodFrom)) blockers.push('Укажите начало задания.');
-  if (!stringValue(dto.periodTo)) blockers.push('Укажите окончание задания.');
+  if (conditions.indefinite !== true) {
+    if (!stringValue(dto.periodFrom)) blockers.push('Укажите начало задания.');
+    if (!stringValue(dto.periodTo)) blockers.push('Укажите окончание задания.');
 
-  const from = dateValue(dto.periodFrom);
-  const to = dateValue(dto.periodTo);
-  if (from && to && from >= to) {
-    blockers.push('Окончание задания должно быть позже начала.');
+    const from = dateValue(dto.periodFrom);
+    const to = dateValue(dto.periodTo);
+    if (from && to && from >= to) {
+      blockers.push('Окончание задания должно быть позже начала.');
+    }
   }
 
   const target = numberValue(metric.target);

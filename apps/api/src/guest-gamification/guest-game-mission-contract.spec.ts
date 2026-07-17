@@ -35,7 +35,7 @@ describe('guest mission wizard contract', () => {
           hours: ['09:00-21:00'],
         },
       },
-      appearance: { theme: 'VIOLET' },
+      appearance: { theme: 'BLACK_RED' },
     });
 
     expect(conditions).toMatchObject({
@@ -51,7 +51,7 @@ describe('guest mission wizard contract', () => {
     });
     expect(conditions.metric).not.toHaveProperty('hours');
     expect(conditions.metric).not.toHaveProperty('windowDays');
-    expect(conditions.presentation).toMatchObject({ theme: 'VIOLET' });
+    expect(conditions.presentation).toMatchObject({ theme: 'BLACK_RED' });
   });
 
   it('accepts an indefinite mission without dates and preserves the mode', () => {

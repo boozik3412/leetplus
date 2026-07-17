@@ -2,7 +2,13 @@
 
 import type { ReactNode } from "react";
 
-export type GuestMissionPreviewTheme = "EMERALD" | "VIOLET" | "DARK";
+export type GuestMissionPreviewTheme =
+  | "CLASSIC"
+  | "EMERALD"
+  | "VIOLET"
+  | "DARK"
+  | "GOLD"
+  | "BLACK_RED";
 
 export type GuestMissionPreviewData = {
   title: string;
@@ -22,6 +28,25 @@ export type GuestMissionPreviewData = {
 };
 
 const missionPreviewPalettes = {
+  CLASSIC: {
+    stage: "bg-zinc-950",
+    label: "text-cyan-200/70",
+    compact: "border-cyan-200/25 bg-[#0c2e46]",
+    badge: "border-cyan-200/25 bg-cyan-200/5 text-cyan-200",
+    muted: "text-cyan-100/60",
+    progress: "bg-cyan-300",
+    modal: "border-cyan-200/25 bg-[#06151a]",
+    hero: "bg-gradient-to-br from-[#123a5f] via-[#075b63] to-[#07383d]",
+    coverOverlay:
+      "linear-gradient(120deg, rgba(4,20,31,.45), rgba(2,32,35,.7))",
+    status: "bg-cyan-200/15 text-cyan-100",
+    description: "text-cyan-50/75",
+    block: "border-white/10 bg-white/[0.035]",
+    blockLabel: "text-cyan-100/55",
+    product: "border-cyan-200/20 bg-cyan-200/[0.07] text-cyan-50",
+    reward: "text-cyan-200",
+    button: "bg-cyan-300 text-zinc-950",
+  },
   EMERALD: {
     stage: "bg-emerald-950",
     label: "text-emerald-200/70",
@@ -84,6 +109,44 @@ const missionPreviewPalettes = {
     reward: "text-zinc-100",
     button: "bg-zinc-100 text-zinc-950",
   },
+  GOLD: {
+    stage: "bg-[#1a1305]",
+    label: "text-amber-200/75",
+    compact: "border-amber-300/30 bg-[#3b2908]",
+    badge: "border-amber-300/30 bg-amber-200/10 text-amber-200",
+    muted: "text-amber-100/65",
+    progress: "bg-amber-300",
+    modal: "border-amber-300/30 bg-[#181105]",
+    hero: "bg-gradient-to-br from-[#6f4c0b] via-[#9a6810] to-[#2f2108]",
+    coverOverlay:
+      "linear-gradient(120deg, rgba(47,33,8,.5), rgba(92,56,5,.78))",
+    status: "bg-amber-200/15 text-amber-100",
+    description: "text-amber-50/80",
+    block: "border-amber-100/10 bg-amber-100/[0.045]",
+    blockLabel: "text-amber-100/55",
+    product: "border-amber-200/20 bg-amber-200/[0.08] text-amber-50",
+    reward: "text-amber-200",
+    button: "bg-amber-300 text-amber-950",
+  },
+  BLACK_RED: {
+    stage: "bg-black",
+    label: "text-red-300/75",
+    compact: "border-red-500/35 bg-[#26090c]",
+    badge: "border-red-500/40 bg-red-500/10 text-red-300",
+    muted: "text-red-100/60",
+    progress: "bg-red-500",
+    modal: "border-red-500/35 bg-[#090506]",
+    hero: "bg-gradient-to-br from-[#4a080d] via-[#250508] to-black",
+    coverOverlay:
+      "linear-gradient(120deg, rgba(25,2,4,.6), rgba(92,5,14,.76))",
+    status: "bg-red-500/15 text-red-200",
+    description: "text-red-50/75",
+    block: "border-red-500/15 bg-red-950/20",
+    blockLabel: "text-red-200/55",
+    product: "border-red-500/25 bg-red-500/[0.08] text-red-100",
+    reward: "text-red-300",
+    button: "bg-red-600 text-white",
+  },
 } satisfies Record<GuestMissionPreviewTheme, Record<string, string>>;
 
 type MissionPreviewPalette =
@@ -108,7 +171,7 @@ export function GuestMissionPreview({
     ),
   );
   const progress = `${data.progressCurrent} из ${data.progressTarget} ${data.progressUnit}`;
-  const palette = missionPreviewPalettes[data.theme ?? "EMERALD"];
+  const palette = missionPreviewPalettes[data.theme ?? "CLASSIC"];
 
   return (
     <div className={`space-y-5 p-4 text-white ${palette.stage}`}>

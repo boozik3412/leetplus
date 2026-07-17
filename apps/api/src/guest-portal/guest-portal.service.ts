@@ -1309,7 +1309,7 @@ export type GuestPortalMission = {
   rewardStatus: GuestPortalMissionRewardStatus;
   description: string | null;
   actionText: string | null;
-  theme: 'EMERALD' | 'VIOLET' | 'DARK';
+  theme: 'CLASSIC' | 'EMERALD' | 'VIOLET' | 'DARK' | 'GOLD' | 'BLACK_RED';
   coverUrl: string | null;
   conditionLabel: string;
   productNames: string[];
@@ -14391,7 +14391,13 @@ function guestPortalMissionCoverUrl(value: unknown) {
 
 function guestPortalMissionTheme(value: unknown): GuestPortalMission['theme'] {
   const theme = stringField(value)?.toUpperCase();
-  return theme === 'VIOLET' || theme === 'DARK' ? theme : 'EMERALD';
+  return theme === 'EMERALD' ||
+    theme === 'VIOLET' ||
+    theme === 'DARK' ||
+    theme === 'GOLD' ||
+    theme === 'BLACK_RED'
+    ? theme
+    : 'CLASSIC';
 }
 
 function guestPortalMissionConditionLabel(

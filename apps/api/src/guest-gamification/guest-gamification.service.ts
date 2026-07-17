@@ -23319,7 +23319,7 @@ function buildVisualEditorPreviewSummary(
     manualApprovalRequired: false,
     description: null,
     actionText: null,
-    theme: 'EMERALD' as const,
+    theme: 'CLASSIC' as const,
     coverUrl: null,
     conditionLabel: 'Выполните условие задания',
     productNames: [],

@@ -70,7 +70,13 @@ type WizardState = {
   totalRewardLimit: number;
   description: string;
   actionText: string;
-  theme: "EMERALD" | "VIOLET" | "DARK";
+  theme:
+    | "CLASSIC"
+    | "EMERALD"
+    | "VIOLET"
+    | "DARK"
+    | "GOLD"
+    | "BLACK_RED";
   icon: string;
   coverUrl: string;
 };
@@ -1664,9 +1670,12 @@ function AppearanceStep({
           <SubTitle>Цветовая тема</SubTitle>
           <ChoiceRow
             values={[
+              { id: "CLASSIC", label: "Классическая" },
               { id: "EMERALD", label: "Изумрудная" },
               { id: "VIOLET", label: "Фиолетовая" },
               { id: "DARK", label: "Тёмная" },
+              { id: "GOLD", label: "Золотая" },
+              { id: "BLACK_RED", label: "Чёрно-красная" },
             ]}
             value={form.theme}
             onChange={(value) =>
@@ -2324,7 +2333,7 @@ function initialState(stores: Store[]): WizardState {
     totalRewardLimit: 1000,
     description: "Выполни условие задания и получи награду.",
     actionText: "Играть",
-    theme: "EMERALD",
+    theme: "CLASSIC",
     icon: "Игровой контроллер",
     coverUrl: "",
   };

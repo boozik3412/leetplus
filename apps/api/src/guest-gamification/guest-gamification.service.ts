@@ -23807,6 +23807,7 @@ function buildVisualEditorPreviewSummary(
     manualApprovalRequired: false,
     description: null,
     actionText: null,
+    icon: 'Игровой контроллер',
     theme: 'CLASSIC' as const,
     coverUrl: null,
     conditionLabel: 'Выполните условие задания',

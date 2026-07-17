@@ -2291,6 +2291,7 @@ function buildPreview(
     progressTarget: target,
     progressUnit: unit,
     actionText: form.actionText,
+    icon: form.icon,
     theme: form.theme,
     coverUrl: form.coverUrl,
     products:

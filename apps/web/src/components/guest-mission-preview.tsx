@@ -20,12 +20,77 @@ export type GuestMissionPreviewData = {
   progressTarget: number;
   progressUnit: string;
   actionText: string;
+  icon?: string | null;
   theme?: GuestMissionPreviewTheme;
   coverUrl?: string | null;
   products?: string[];
   productMode?: "ANY" | "ALL";
   minimumAmount?: number | null;
 };
+
+const missionIconLabels = {
+  "Игровой контроллер": "Игровой контроллер",
+  Подарок: "Подарок",
+  Молния: "Молния",
+  Кубок: "Кубок",
+} as const;
+
+function missionIconLabel(icon: string | null | undefined) {
+  return (
+    missionIconLabels[icon as keyof typeof missionIconLabels] ??
+    missionIconLabels["Игровой контроллер"]
+  );
+}
+
+export function GuestMissionIcon({
+  icon,
+  className = "h-5 w-5",
+}: {
+  icon?: string | null;
+  className?: string;
+}) {
+  const common = {
+    className,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.9,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  switch (icon) {
+    case "Подарок":
+      return (
+        <svg {...common}>
+          <path d="M4 10h16v10H4zM12 10v10M3 10h18V6H3z" />
+          <path d="M12 6H8.5a2 2 0 1 1 2-2c0 1.1.9 2 1.5 2Zm0 0h3.5a2 2 0 1 0-2-2c0 1.1-.9 2-1.5 2Z" />
+        </svg>
+      );
+    case "Молния":
+      return (
+        <svg {...common}>
+          <path d="m13 2-8 12h6l-1 8 8-12h-6z" />
+        </svg>
+      );
+    case "Кубок":
+      return (
+        <svg {...common}>
+          <path d="M7 3h10v5a5 5 0 0 1-10 0V3Z" />
+          <path d="M7 5H4v1a4 4 0 0 0 4 4M17 5h3v1a4 4 0 0 1-4 4M12 13v4M8 21h8M9 17h6" />
+        </svg>
+      );
+    case "Игровой контроллер":
+    default:
+      return (
+        <svg {...common}>
+          <path d="M7 8h10a3 3 0 0 1 2.9 2.2l1 3.8a2.4 2.4 0 0 1-4 2.4L15 15H9l-1.9 1.4a2.4 2.4 0 0 1-4-2.4l1-3.8A3 3 0 0 1 7 8Z" />
+          <path d="M8 11v4M6 13h4M16.5 12.5h.01M18.5 14.5h.01" />
+        </svg>
+      );
+  }
+}
 
 const missionPreviewPalettes = {
   CLASSIC: {
@@ -189,9 +254,11 @@ export function GuestMissionPreview({
           >
             <div className="flex items-center gap-3">
               <div
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border text-xs font-black ${palette.badge}`}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border ${palette.badge}`}
+                role="img"
+                aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
               >
-                QUEST
+                <GuestMissionIcon icon={data.icon} />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-black">{data.title}</p>
@@ -237,6 +304,13 @@ export function GuestMissionPreview({
               >
                 Квест в процессе
               </span>
+              <div
+                className={`absolute right-5 top-5 grid h-12 w-12 place-items-center rounded-xl border ${palette.badge}`}
+                role="img"
+                aria-label={`Иконка задания: ${missionIconLabel(data.icon)}`}
+              >
+                <GuestMissionIcon icon={data.icon} className="h-6 w-6" />
+              </div>
               <h3 className="mt-4 max-w-md text-2xl font-black leading-tight">
                 {data.title}
               </h3>

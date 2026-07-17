@@ -963,6 +963,7 @@ export type GuestPortalGameSummary = {
         | 'rewardStatus'
         | 'description'
         | 'actionText'
+        | 'icon'
         | 'theme'
         | 'coverUrl'
         | 'conditionLabel'
@@ -990,6 +991,7 @@ export type GuestPortalGameSummary = {
         | 'rewardStatus'
         | 'description'
         | 'actionText'
+        | 'icon'
         | 'theme'
         | 'coverUrl'
         | 'conditionLabel'
@@ -1309,6 +1311,7 @@ export type GuestPortalMission = {
   rewardStatus: GuestPortalMissionRewardStatus;
   description: string | null;
   actionText: string | null;
+  icon: string;
   theme: 'CLASSIC' | 'EMERALD' | 'VIOLET' | 'DARK' | 'GOLD' | 'BLACK_RED';
   coverUrl: string | null;
   conditionLabel: string;
@@ -8651,16 +8654,11 @@ export class GuestPortalService {
     const storeMissions = missions
       .filter((item) => matchesStore(item.storeIds, context.store.id))
       .filter((item) => activePeriod(item.periodFrom, item.periodTo));
-    const checkInMissionRule =
-      storeMissions.find(isGuestPortalCheckInMissionRule) ?? null;
     const portalCheckIn = buildPortalCheckInSummary({
-      mission: checkInMissionRule,
       ready: checkInReadiness.ready,
       blockedReason: checkInReadiness.message,
     });
-    const missionRules = storeMissions.filter(
-      (item) => !isGuestPortalCheckInMissionRule(item),
-    );
+    const missionRules = storeMissions;
     const missionProgress = await this.buildMissionProgress(
       context.tenant.id,
       guest,
@@ -11779,6 +11777,7 @@ function mapGameSummaryMission(
     rewardStatus: mission.rewardStatus,
     description: mission.description,
     actionText: mission.actionText,
+    icon: mission.icon,
     theme: mission.theme,
     coverUrl: mission.coverUrl,
     conditionLabel: mission.conditionLabel,
@@ -12984,12 +12983,7 @@ function formatTelegramBotBalance(value: number | null) {
 function telegramBotCheckInAvailable(portal: GuestPortalPayload) {
   return (
     portal.gamification.checkIn.enabled ||
-    portal.gamification.nextActions.some((item) => item.kind === 'CHECK_IN') ||
-    portal.gamification.missions.some(
-      (item) =>
-        item.missionType === 'CHECK_IN' &&
-        item.rewardStatus.state === 'IN_PROGRESS',
-    )
+    portal.gamification.nextActions.some((item) => item.kind === 'CHECK_IN')
   );
 }
 
@@ -14362,6 +14356,7 @@ function mapMission(
     }),
     description: stringField(presentation.description),
     actionText: stringField(presentation.actionText),
+    icon: guestPortalMissionIcon(presentation.icon),
     theme: guestPortalMissionTheme(presentation.theme),
     coverUrl: guestPortalMissionCoverUrl(presentation.coverUrl),
     conditionLabel: guestPortalMissionConditionLabel(
@@ -14387,6 +14382,10 @@ function guestPortalMissionCoverUrl(value: unknown) {
   const url = stringField(value);
   if (!url) return null;
   return url.startsWith('/api/guest-game/media/') ? url : null;
+}
+
+function guestPortalMissionIcon(value: unknown) {
+  return stringField(value) ?? 'Игровой контроллер';
 }
 
 function guestPortalMissionTheme(value: unknown): GuestPortalMission['theme'] {
@@ -15046,52 +15045,20 @@ function resolveLangameCheckInReadiness(input: {
   return { ready: true, message: null };
 }
 
-function isGuestPortalCheckInMissionRule(mission: {
-  missionType?: string | null;
-  triggerKind?: string | null;
-}) {
-  return (
-    mission.missionType === 'CHECK_IN' || mission.triggerKind === 'CHECK_IN'
-  );
-}
-
 function buildPortalCheckInSummary(input: {
-  mission: {
-    name: string;
-    rewardLabel: string | null;
-    xpReward: number;
-  } | null;
   ready: boolean;
   blockedReason: string | null;
 }): GuestPortalCheckInSummary {
   const fallbackTitle = 'Чекин в клубе';
   const fallbackDescription = 'Зафиксируйте присутствие в выбранном клубе.';
 
-  if (!input.mission) {
-    return {
-      enabled: false,
-      ready: false,
-      title: fallbackTitle,
-      description: fallbackDescription,
-      rewardLabel: null,
-      xpReward: 0,
-      blockedReason: null,
-    };
-  }
-
-  const description =
-    input.mission.rewardLabel ??
-    (input.mission.xpReward > 0
-      ? `${input.mission.xpReward} XP за чекин.`
-      : fallbackDescription);
-
   return {
-    enabled: true,
+    enabled: input.ready,
     ready: input.ready,
-    title: input.mission.name || fallbackTitle,
-    description,
-    rewardLabel: input.mission.rewardLabel,
-    xpReward: input.mission.xpReward,
+    title: fallbackTitle,
+    description: fallbackDescription,
+    rewardLabel: null,
+    xpReward: 0,
     blockedReason: input.ready ? null : input.blockedReason,
   };
 }

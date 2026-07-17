@@ -379,6 +379,7 @@ export type GuestPortalPayload = {
       rewardStatus: GuestPortalMissionRewardStatus;
       description: string | null;
       actionText: string | null;
+      icon: string;
       theme:
         | "CLASSIC"
         | "EMERALD"
@@ -717,6 +718,7 @@ export type GuestPortalGameSummary = {
         | "rewardStatus"
         | "description"
         | "actionText"
+        | "icon"
         | "theme"
         | "coverUrl"
         | "conditionLabel"
@@ -744,6 +746,7 @@ export type GuestPortalGameSummary = {
         | "rewardStatus"
         | "description"
         | "actionText"
+        | "icon"
         | "theme"
         | "coverUrl"
         | "conditionLabel"

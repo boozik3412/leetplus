@@ -4486,8 +4486,7 @@ function buildHomeBanners(
   primaryAction: GameNextAction | null,
   primaryActionHref: string | null,
 ): HomeBanner[] {
-  const featuredMissions =
-    summary.missions.featured.filter(isPlayerQuestMission);
+  const featuredMissions = summary.missions.featured;
   const featuredMission = featuredMissions[0] ?? null;
   const secondMission = featuredMissions[1] ?? null;
   const fallbackBanners: HomeBanner[] = [
@@ -5064,24 +5063,22 @@ function normalizeGameRuleSessionType(value: string | null) {
 }
 
 function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
-  return summary.missions.featured
-    .filter(isPlayerQuestMission)
-    .map((mission) => {
-      const status = playerQuestStatus(mission);
-      const progress = playerQuestProgress(mission);
-      const reward = playerQuestReward(mission);
+  return summary.missions.featured.map((mission) => {
+    const status = playerQuestStatus(mission);
+    const progress = playerQuestProgress(mission);
+    const reward = playerQuestReward(mission);
 
-      return {
-        id: mission.id,
-        title: mission.name,
-        description: playerQuestDescription(mission, reward),
-        condition: playerQuestCondition(mission, progress),
-        status,
-        progress,
-        reward,
-        preview: gameMissionPreviewData(mission),
-      };
-    });
+    return {
+      id: mission.id,
+      title: mission.name,
+      description: playerQuestDescription(mission, reward),
+      condition: playerQuestCondition(mission, progress),
+      status,
+      progress,
+      reward,
+      preview: gameMissionPreviewData(mission),
+    };
+  });
 }
 
 function buildCheckInCompletionDialog(
@@ -5607,24 +5604,22 @@ function buildHomeBattleQuests(
       label: homeQuestStateLabel(step.status),
       reward: "Награда: прогресс сезона и доступ к следующему этапу.",
     }));
-  const missionQuests = summary.missions.featured
-    .filter(isPlayerQuestMission)
-    .map((mission) => {
-      const progress = playerQuestProgress(mission);
+  const missionQuests = summary.missions.featured.map((mission) => {
+    const progress = playerQuestProgress(mission);
 
-      return {
-        id: mission.id,
-        sourceKind: "mission" as const,
-        sourceId: mission.id,
-        title: mission.name,
-        description: missionBattlePassDescription(mission),
-        state: mission.progressPercent >= 100 ? "complete" : "locked",
-        label: mission.progressPercent >= 100 ? "готово" : "квест",
-        reward: missionBattlePassReward(mission),
-        progress,
-        periodTo: mission.periodTo,
-      };
-    });
+    return {
+      id: mission.id,
+      sourceKind: "mission" as const,
+      sourceId: mission.id,
+      title: mission.name,
+      description: missionBattlePassDescription(mission),
+      state: mission.progressPercent >= 100 ? "complete" : "locked",
+      label: mission.progressPercent >= 100 ? "готово" : "квест",
+      reward: missionBattlePassReward(mission),
+      progress,
+      periodTo: mission.periodTo,
+    };
+  });
   const fallback = [
     {
       id: "promo",
@@ -7485,6 +7480,7 @@ function gameMissionPreviewData(mission: GameMission): GuestMissionPreviewData {
     progressTarget: mission.progressTarget ?? 1,
     progressUnit: mission.progressUnit ?? "",
     actionText: mission.actionText ?? "Подробнее",
+    icon: mission.icon,
     theme: mission.theme,
     coverUrl: mission.coverUrl,
     products: mission.productNames,
@@ -13861,26 +13857,8 @@ function gameActionButtonLabel(action: GameNextAction) {
 function isCheckInAvailable(summary: GuestPortalGameSummary) {
   return (
     Boolean(summary.checkIn?.enabled) ||
-    summary.nextActions.some((action) => action.kind === "CHECK_IN") ||
-    summary.missions.featured.some(isCheckInMission)
+    summary.nextActions.some((action) => action.kind === "CHECK_IN")
   );
-}
-
-function isCheckInMission(mission: GameMission) {
-  const progressUnit = mission.progressUnit?.trim().toLocaleLowerCase("ru-RU");
-  const missionName = mission.name.toLocaleLowerCase("ru-RU");
-
-  return (
-    progressUnit === "check-in" ||
-    progressUnit === "checkin" ||
-    progressUnit === "чекин" ||
-    progressUnit === "чек-ин" ||
-    missionName.includes("чекин")
-  );
-}
-
-function isPlayerQuestMission(mission: GameMission) {
-  return !isCheckInMission(mission);
 }
 
 async function loadGameSummary() {

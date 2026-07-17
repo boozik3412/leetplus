@@ -2167,6 +2167,7 @@ function buildPreview(
     progressTarget: target,
     progressUnit: unit,
     actionText: form.actionText,
+    theme: form.theme,
     coverUrl: form.coverUrl,
     products:
       form.taskType === "PRODUCT_PURCHASE"

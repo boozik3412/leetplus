@@ -7485,6 +7485,7 @@ function gameMissionPreviewData(mission: GameMission): GuestMissionPreviewData {
     progressTarget: mission.progressTarget ?? 1,
     progressUnit: mission.progressUnit ?? "",
     actionText: mission.actionText ?? "Подробнее",
+    theme: mission.theme,
     coverUrl: mission.coverUrl,
     products: mission.productNames,
     productMode: mission.productMode ?? undefined,

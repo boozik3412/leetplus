@@ -963,6 +963,7 @@ export type GuestPortalGameSummary = {
         | 'rewardStatus'
         | 'description'
         | 'actionText'
+        | 'theme'
         | 'coverUrl'
         | 'conditionLabel'
         | 'productNames'
@@ -989,6 +990,7 @@ export type GuestPortalGameSummary = {
         | 'rewardStatus'
         | 'description'
         | 'actionText'
+        | 'theme'
         | 'coverUrl'
         | 'conditionLabel'
         | 'productNames'
@@ -1307,6 +1309,7 @@ export type GuestPortalMission = {
   rewardStatus: GuestPortalMissionRewardStatus;
   description: string | null;
   actionText: string | null;
+  theme: 'EMERALD' | 'VIOLET' | 'DARK';
   coverUrl: string | null;
   conditionLabel: string;
   productNames: string[];
@@ -11776,6 +11779,7 @@ function mapGameSummaryMission(
     rewardStatus: mission.rewardStatus,
     description: mission.description,
     actionText: mission.actionText,
+    theme: mission.theme,
     coverUrl: mission.coverUrl,
     conditionLabel: mission.conditionLabel,
     productNames: mission.productNames,
@@ -14358,6 +14362,7 @@ function mapMission(
     }),
     description: stringField(presentation.description),
     actionText: stringField(presentation.actionText),
+    theme: guestPortalMissionTheme(presentation.theme),
     coverUrl: guestPortalMissionCoverUrl(presentation.coverUrl),
     conditionLabel: guestPortalMissionConditionLabel(
       row.missionType,
@@ -14382,6 +14387,11 @@ function guestPortalMissionCoverUrl(value: unknown) {
   const url = stringField(value);
   if (!url) return null;
   return url.startsWith('/api/guest-game/media/') ? url : null;
+}
+
+function guestPortalMissionTheme(value: unknown): GuestPortalMission['theme'] {
+  const theme = stringField(value)?.toUpperCase();
+  return theme === 'VIOLET' || theme === 'DARK' ? theme : 'EMERALD';
 }
 
 function guestPortalMissionConditionLabel(

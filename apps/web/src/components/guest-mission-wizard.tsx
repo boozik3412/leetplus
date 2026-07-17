@@ -129,6 +129,7 @@ export function GuestMissionWizard({
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
+  const [activated, setActivated] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const autosaveReady = useRef(false);
@@ -312,12 +313,12 @@ export function GuestMissionWizard({
   }, [form.purchaseSource, form.storeIds, form.taskType, productPage, search]);
 
   useEffect(() => {
-    if (!draftId || !autosaveReady.current) return;
+    if (activated || !draftId || !autosaveReady.current) return;
     const timer = window.setTimeout(() => void saveDraft(true), 900);
     return () => window.clearTimeout(timer);
     // dto is the intentionally stable serialization of all editable fields.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftId, dto]);
+  }, [activated, draftId, dto]);
 
   async function saveDraft(automatic = false) {
     if (!automatic) setMessage(null);
@@ -379,7 +380,8 @@ export function GuestMissionWizard({
     const saved = (await response.json()) as GuestGameMissionWizardSaveResult;
     setReadiness(saved.readiness);
     setSaveState("saved");
-    setMessage("Задание активировано.");
+    setActivated(true);
+    setMessage(null);
   }
 
   async function uploadCover(file: File | null) {
@@ -425,7 +427,7 @@ export function GuestMissionWizard({
   }
 
   return (
-    <div className="pb-28">
+    <div className="pb-4">
       <div className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-2 shadow-sm md:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-950">
         <StepButton
           index="01"
@@ -511,40 +513,66 @@ export function GuestMissionWizard({
         </aside>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm">
-            <p className="font-semibold">
-              {draftId ? `Черновик ${draftId.slice(0, 8)}` : "Новый черновик"}
-            </p>
-            <p className="text-xs text-zinc-500">
-              {message ?? saveLabel(saveState)}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+      <div
+        aria-live="polite"
+        className={`mt-5 rounded-xl border px-4 py-4 shadow-sm ${activated ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30" : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"}`}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {activated ? (
+            <div className="text-sm">
+              <p className="font-bold text-emerald-700 underline decoration-2 underline-offset-4 dark:text-emerald-300">
+                Задание активировано
+              </p>
+              <p className="mt-1 text-xs leading-5 text-emerald-800/80 dark:text-emerald-200/80">
+                Задание {draftId?.slice(0, 8)} уже находится в боевом контуре.
+                Мастер можно закрыть.
+              </p>
+            </div>
+          ) : (
+            <div className="text-sm">
+              <p className="font-semibold">
+                {draftId
+                  ? `Черновик ${draftId.slice(0, 8)}`
+                  : "Новый черновик"}
+              </p>
+              <p className="text-xs text-zinc-500">
+                {message ?? saveLabel(saveState)}
+              </p>
+            </div>
+          )}
+          {activated ? (
             <Link
               href="/gamification?tab=missions"
-              className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold dark:border-zinc-800"
+              className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
             >
-              Закрыть
+              Перейти в раздел «Задания»
             </Link>
-            <button
-              type="button"
-              onClick={() => void saveDraft(false)}
-              disabled={saveState === "saving"}
-              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold disabled:opacity-50 dark:border-zinc-700"
-            >
-              Сохранить черновик
-            </button>
-            <button
-              type="button"
-              onClick={() => void activate()}
-              disabled={saveState === "saving" || readiness?.ready === false}
-              className="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 dark:bg-emerald-400 dark:text-zinc-950"
-            >
-              Подтвердить активацию
-            </button>
-          </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/gamification?tab=missions"
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold dark:border-zinc-800"
+              >
+                Закрыть
+              </Link>
+              <button
+                type="button"
+                onClick={() => void saveDraft(false)}
+                disabled={saveState === "saving"}
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold disabled:opacity-50 dark:border-zinc-700"
+              >
+                Сохранить черновик
+              </button>
+              <button
+                type="button"
+                onClick={() => void activate()}
+                disabled={saveState === "saving" || readiness?.ready === false}
+                className="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 dark:bg-emerald-400 dark:text-zinc-950"
+              >
+                Подтвердить активацию
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

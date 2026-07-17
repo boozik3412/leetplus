@@ -4338,6 +4338,7 @@ function PlayerProfilePanel({
                   data={quest.preview}
                   mode="compact"
                   showLabels={false}
+                  className="!p-0"
                 />
               </button>
             ))
@@ -4426,6 +4427,7 @@ function QuestBoard({
                     data={quest.preview}
                     mode="compact"
                     showLabels={false}
+                    className="!p-0"
                   />
                 </button>
               ))
@@ -8687,7 +8689,7 @@ const clubHomeCss = `
 .lp-club-brand {
   gap: 12px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 820;
   letter-spacing: 0.14em;
 }

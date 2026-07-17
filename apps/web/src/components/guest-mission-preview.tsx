@@ -222,11 +222,13 @@ export function GuestMissionPreview({
   mode = "both",
   showLabels = true,
   onAction,
+  className = "",
 }: {
   data: GuestMissionPreviewData;
   mode?: "both" | "compact" | "full";
   showLabels?: boolean;
   onAction?: () => void;
+  className?: string;
 }) {
   const percent = Math.max(
     0,
@@ -239,7 +241,7 @@ export function GuestMissionPreview({
   const palette = missionPreviewPalettes[data.theme ?? "CLASSIC"];
 
   return (
-    <div className={`space-y-5 p-4 text-white ${palette.stage}`}>
+    <div className={`space-y-5 p-4 text-white ${palette.stage} ${className}`}>
       {mode !== "full" ? (
         <div>
           {showLabels ? (

@@ -10,6 +10,7 @@ import type {
   GuestGameMissionWizardDto,
   GuestGameMissionWizardReadiness,
   GuestGameMissionWizardSaveResult,
+  GuestGameMissionWizardTaskType,
 } from "@/lib/guest-gamification";
 import type { MarketingPromoBundle } from "@/lib/marketing";
 import type { Product, ProductCatalog } from "@/lib/products";
@@ -20,7 +21,7 @@ import {
 } from "@/components/guest-mission-preview";
 
 type Step = "conditions" | "rewards" | "appearance";
-type TaskType = "PLAY_TIME" | "PRODUCT_PURCHASE" | "BALANCE_TOPUP" | "CHECK_IN";
+type TaskType = GuestGameMissionWizardTaskType;
 type RewardType = "LANGAME_BONUS" | "LOOTBOX" | "PROMOCODE" | "NONE";
 
 type WizardState = {
@@ -585,6 +586,7 @@ function ConditionsStep(props: {
                 }))
               }
             >
+              <option value="APP_OPEN">Вход в игровой модуль</option>
               <option value="PLAY_TIME">Игровое время</option>
               <option value="PRODUCT_PURCHASE">Покупка</option>
               <option value="BALANCE_TOPUP">Пополнение баланса</option>
@@ -688,6 +690,7 @@ function ConditionsStep(props: {
           subtitle={logicSubtitle(form.taskType)}
         />
         <div className="mt-5">
+          {form.taskType === "APP_OPEN" ? <AppOpenLogic /> : null}
           {form.taskType === "PLAY_TIME" ? (
             <PlayTimeLogic form={form} setForm={setForm} />
           ) : null}
@@ -703,6 +706,18 @@ function ConditionsStep(props: {
         </div>
       </section>
     </>
+  );
+}
+
+function AppOpenLogic() {
+  return (
+    <div className={subsectionClass}>
+      <SubTitle>Вход в игровой модуль</SubTitle>
+      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+        Задание выполнится, когда гость откроет игровой модуль. Дополнительные
+        настройки не требуются.
+      </p>
+    </div>
   );
 }
 
@@ -1946,6 +1961,12 @@ function buildWizardDto(
     sessionType: form.sessionType,
     periodicity: form.periodicity,
   };
+  if (form.taskType === "APP_OPEN")
+    Object.assign(metric, {
+      aggregation: "exists",
+      target: 1,
+      unit: "вход",
+    });
   if (form.taskType === "PLAY_TIME")
     Object.assign(metric, {
       aggregation: "duration",
@@ -2073,7 +2094,9 @@ function buildPreview(
             "Промокод")
           : "Без основной награды";
   const target =
-    form.taskType === "PLAY_TIME"
+    form.taskType === "APP_OPEN"
+      ? 1
+      : form.taskType === "PLAY_TIME"
       ? form.target
       : form.taskType === "BALANCE_TOPUP" && form.topupMode === "PERIOD_TOTAL"
         ? form.totalAmount
@@ -2092,7 +2115,9 @@ function buildPreview(
               )
             : 1;
   const unit =
-    form.taskType === "PLAY_TIME"
+    form.taskType === "APP_OPEN"
+      ? "вход"
+      : form.taskType === "PLAY_TIME"
       ? "минут"
       : form.taskType === "PRODUCT_PURCHASE"
         ? "покупок"
@@ -2109,7 +2134,10 @@ function buildPreview(
     condition: previewCondition(form, products, productGroups),
     reward,
     xp: form.xpEnabled ? form.xpAmount : 0,
-    progressCurrent: Math.min(target, Math.round(target * 0.6)),
+    progressCurrent:
+      form.taskType === "APP_OPEN"
+        ? 0
+        : Math.min(target, Math.round(target * 0.6)),
     progressTarget: target,
     progressUnit: unit,
     actionText: form.actionText,
@@ -2130,6 +2158,7 @@ function previewCondition(
   products: Product[],
   productGroups: GuestGameMissionProductGroup[],
 ) {
+  if (form.taskType === "APP_OPEN") return "Войти в игровой модуль.";
   if (form.taskType === "PLAY_TIME")
     return `Провести в игре ${form.target} минут${form.minSessionMinutes ? `, минимум ${form.minSessionMinutes} минут за сессию` : ""}.`;
   if (form.taskType === "PRODUCT_PURCHASE")
@@ -2147,7 +2176,9 @@ function previewCondition(
       : `Сделать ${form.checkInCount} чекинов.`;
 }
 function logicSubtitle(taskType: TaskType) {
-  return taskType === "PLAY_TIME"
+  return taskType === "APP_OPEN"
+    ? "Условие выполняется при входе гостя в игровой модуль."
+    : taskType === "PLAY_TIME"
     ? "Условие проверяется по игровым сессиям гостя."
     : taskType === "PRODUCT_PURCHASE"
       ? "Условие проверяется по положительным фактам покупок, привязанным к гостю."

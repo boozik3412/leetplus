@@ -174,6 +174,7 @@ export type GuestGamePromoCard = {
 };
 
 export type GuestGameMissionWizardTaskType =
+  | "APP_OPEN"
   | "PLAY_TIME"
   | "PRODUCT_PURCHASE"
   | "BALANCE_TOPUP"

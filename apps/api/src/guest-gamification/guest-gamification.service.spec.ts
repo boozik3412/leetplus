@@ -4618,6 +4618,60 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('evaluates a parameterless app-open mission created by the wizard', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          name: 'Вход в игровой модуль',
+          missionType: 'APP_OPEN',
+          triggerKind: 'APP_OPEN',
+          progressTarget: 1,
+          progressUnit: 'вход',
+          definitionVersion: 2,
+          conditions: {
+            schemaVersion: 2,
+            source: 'mission_wizard',
+            taskType: 'APP_OPEN',
+            visibility: 'VISIBLE',
+            sessionType: 'ANY',
+            metric: {
+              aggregation: 'exists',
+              eventTypes: ['APP_OPEN'],
+              target: 1,
+              unit: 'открытие',
+            },
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'mission-1',
+        kind: 'MISSION',
+        eligible: true,
+        progress: {
+          applicable: true,
+          current: 1,
+          target: 1,
+          completed: true,
+        },
+      });
+    });
+
     it('evaluates a Battle Pass play-time step with the mission wizard v2 contract', async () => {
       const { service } = createService();
 

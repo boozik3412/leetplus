@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import {
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -142,6 +141,15 @@ type RuleDeleteActivityModal = RuleDeleteRequestModal & {
 type RuleActivationRequestModal = RuleDeleteRequestModal & {
   stores: string[];
   confirmAction?: () => Promise<void>;
+};
+
+type MissionWizardMigrationResult = {
+  migrated: GuestGameMission[];
+  skipped: Array<{ id: string; name: string; reason: string }>;
+};
+
+type MissionMigrationNotice = {
+  message: string;
 };
 
 type PromoBannerUsageInfo = {
@@ -1462,6 +1470,8 @@ export function GuestGamificationPanel({
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [missionMigrationNotice, setMissionMigrationNotice] =
+    useState<MissionMigrationNotice | null>(null);
   const [editorModeRefreshing, setEditorModeRefreshing] =
     useState<EditorMode | null>(null);
   const [deleteRequestModal, setDeleteRequestModal] =
@@ -1511,17 +1521,6 @@ export function GuestGamificationPanel({
     () => workspace.missions,
     [workspace.missions],
   );
-
-  useEffect(() => {
-    setDirectoryGuests(guests);
-    setDirectoryLeads(leads);
-    directoryRequested.current = guests.length > 0 || leads.length > 0;
-  }, [guests, leads]);
-
-  useEffect(() => {
-    setMissionProducts(products);
-    missionProductsRequested.current = products.length > 0;
-  }, [products]);
 
   async function ensureGuestDirectory() {
     if (directoryRequested.current || directoryLoading) return;
@@ -2729,6 +2728,38 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function migrateActiveMissionsToWizard() {
+    setSaving("missions-migrate-wizard");
+    setError(null);
+
+    try {
+      assertCan(
+        access.canManageRules,
+        "Для переноса заданий в мастер нужно право `Геймификация: правила`.",
+      );
+      const result = await postJson<MissionWizardMigrationResult>(
+        "/api/guests/gamification/missions/migrate-active-to-wizard",
+        {},
+      );
+      await reloadWorkspace();
+      setMissionMigrationNotice({
+        message: result.migrated.length
+          ? `В мастер перенесено активных заданий: ${result.migrated.length}. ID, статусы, награды, лимиты и текущий прогресс сохранены.`
+          : "Активных заданий старого формата не осталось.",
+      });
+      return true;
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось перенести активные задания в мастер.",
+      );
+      return false;
+    } finally {
+      setSaving(null);
+    }
+  }
+
   async function saveAction(key: string, action: () => Promise<void>) {
     setSaving(key);
     setError(null);
@@ -3001,6 +3032,14 @@ export function GuestGamificationPanel({
               onReset={resetMissionForm}
               onStatus={updateRuleStatus}
               onDelete={deleteRuleTemplate}
+              legacyActiveMissionCount={
+                workspace.missions.filter(
+                  (mission) =>
+                    mission.status === "ACTIVE" && mission.definitionVersion < 2,
+                ).length
+              }
+              migrationNotice={missionMigrationNotice}
+              onMigrateActive={migrateActiveMissionsToWizard}
               saving={saving}
               canManage={access.canManageRules}
             />
@@ -7745,6 +7784,9 @@ function MissionsTab({
   onReset,
   onStatus,
   onDelete,
+  legacyActiveMissionCount,
+  migrationNotice,
+  onMigrateActive,
   saving,
   canManage,
 }: {
@@ -7769,12 +7811,16 @@ function MissionsTab({
     status: GuestGameStatus,
   ) => Promise<void>;
   onDelete: (type: RuleTemplateType, id: string, name: string) => Promise<void>;
+  legacyActiveMissionCount: number;
+  migrationNotice: MissionMigrationNotice | null;
+  onMigrateActive: () => Promise<boolean>;
   saving: string | null;
   canManage: boolean;
 }) {
   const [editorChoice, setEditorChoice] = useState<GuestGameMission | null>(
     null,
   );
+  const [migrationConfirmation, setMigrationConfirmation] = useState(false);
   const missionTemplates = missions.filter(
     (mission) => mission.id !== editingId,
   );
@@ -7793,20 +7839,23 @@ function MissionsTab({
       formTitle={formTitle}
       formAction={
         !isFormOpen ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {legacyActiveMissionCount > 0 && canManage ? (
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={() => setMigrationConfirmation(true)}
+                disabled={saving === "missions-migrate-wizard"}
+              >
+                Перевести старые задания
+              </button>
+            ) : null}
             <Link
               href="/gamification/missions/wizard"
               className={`${primaryButtonClass} sm:min-w-64`}
             >
               Создать задание с помощью мастера
             </Link>
-            <button
-              type="button"
-              className={`${smallButtonClass} text-sm sm:min-w-52`}
-              onClick={onCreateNew}
-            >
-              Открыть старый редактор
-            </button>
           </div>
         ) : undefined
       }
@@ -8001,7 +8050,7 @@ function MissionsTab({
               </button>
             ) : null}
           </div>
-        ) : null
+      ) : null
       }
       listTitle="Созданные правила заданий"
       items={missions}
@@ -8036,6 +8085,94 @@ function MissionsTab({
         />
       )}
       />
+      {migrationNotice ? (
+        <div
+          className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100"
+          role="status"
+        >
+          {migrationNotice.message}
+        </div>
+      ) : null}
+      {legacyActiveMissionCount > 0 ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/25">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-bold text-amber-950 dark:text-amber-100">
+                Активные задания старого формата: {legacyActiveMissionCount}
+              </h3>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-amber-900 dark:text-amber-200">
+                Перевод создаст v2-контракт мастера без смены ID, статуса, сроков,
+                наград, лимитов и даты активации. Накопленный прогресс не будет
+                пересчитан или выдан повторно.
+              </p>
+            </div>
+            {canManage ? (
+              <button
+                type="button"
+                className={`${primaryButtonClass} shrink-0`}
+                onClick={() => setMigrationConfirmation(true)}
+                disabled={saving === "missions-migrate-wizard"}
+              >
+                Перевести в мастер
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+      {migrationConfirmation ? (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center bg-zinc-950/55 p-4 backdrop-blur-sm"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setMigrationConfirmation(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mission-migration-title"
+            className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <h2
+              id="mission-migration-title"
+              className="text-xl font-black text-zinc-950 dark:text-white"
+            >
+              Перевести активные задания в мастер?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Будут перенесены все {legacyActiveMissionCount} активных заданий
+              старого формата. Сначала сервер проверит, что каждое условие можно
+              выразить через мастер; при любой несовместимости ничего не изменится.
+            </p>
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={() => setMigrationConfirmation(false)}
+                disabled={saving === "missions-migrate-wizard"}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className={primaryButtonClass}
+                disabled={saving === "missions-migrate-wizard"}
+                onClick={() => {
+                  void onMigrateActive().then((migrated) => {
+                    if (migrated) setMigrationConfirmation(false);
+                  });
+                }}
+              >
+                {saving === "missions-migrate-wizard"
+                  ? "Проверяем и переносим…"
+                  : "Подтвердить перенос"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {editorChoice ? (
         <div
           className="fixed inset-0 z-[80] grid place-items-center bg-zinc-950/55 p-4 backdrop-blur-sm"
@@ -8057,8 +8194,7 @@ function MissionsTab({
               Как редактировать задание?
             </h2>
             <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              «{editorChoice.name}» можно открыть в мастере с live-предпросмотром
-              или в старом расширенном редакторе.
+              «{editorChoice.name}» открывается в мастере с live-предпросмотром.
             </p>
             <div className="mt-5 grid gap-3">
               {editorChoice.definitionVersion === 2 ? (
@@ -8070,21 +8206,10 @@ function MissionsTab({
                 </Link>
               ) : (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-                  Это правило создано в контракте v1. Для него доступен старый
-                  редактор; новые правила v2 можно редактировать в мастере.
+                  Это правило ещё в контракте v1. Сначала переведите активные
+                  задания в мастер — старый редактор больше не используется.
                 </div>
               )}
-              <button
-                type="button"
-                className={`${smallButtonClass} justify-center`}
-                onClick={() => {
-                  const mission = editorChoice;
-                  setEditorChoice(null);
-                  onEdit(mission);
-                }}
-              >
-                Открыть старый редактор
-              </button>
               <button
                 type="button"
                 className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950 dark:hover:bg-zinc-900 dark:hover:text-white"
@@ -8200,13 +8325,12 @@ function CheckInTab({
       formTitle={formTitle}
       formAction={
         !showForm ? (
-          <button
-            type="button"
+          <Link
+            href="/gamification/missions/wizard?taskType=CHECK_IN"
             className={`${primaryButtonClass} sm:min-w-52`}
-            onClick={onCreateNew}
           >
-            Создать правило чек-ина
-          </button>
+            Создать чек-ин в мастере
+          </Link>
         ) : undefined
       }
       form={
@@ -8438,7 +8562,11 @@ function CheckInTab({
               календарный день по времени клуба.
             </p>
           }
-          onEdit={() => onEdit(item)}
+          onEdit={() => {
+            window.location.assign(
+              `/gamification/missions/wizard?missionId=${encodeURIComponent(item.id)}`,
+            );
+          }}
           onStatus={(status) => onStatus("missions", item.id, status)}
           saving={saving === `missions-${item.id}`}
           onDelete={() => onDelete("missions", item.id, item.name)}

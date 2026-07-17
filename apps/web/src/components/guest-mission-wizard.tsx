@@ -105,15 +105,19 @@ export function GuestMissionWizard({
   lootBoxes,
   promoBundles,
   initialMissionId,
+  initialTaskType,
 }: {
   stores: Store[];
   audiences: GuestAudience[];
   lootBoxes: GuestGameLootBox[];
   promoBundles: MarketingPromoBundle[];
   initialMissionId?: string | null;
+  initialTaskType?: TaskType;
 }) {
   const [step, setStep] = useState<Step>("conditions");
-  const [form, setForm] = useState<WizardState>(() => initialState(stores));
+  const [form, setForm] = useState<WizardState>(() =>
+    initialState(stores, initialTaskType),
+  );
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>(
     [],
   );
@@ -809,7 +813,7 @@ function ConditionsStep(props: {
                 }
               />
             </Field>
-            <Field label="Окончание" required>
+            <Field label="Окончание (необязательно)">
               <input
                 className={fieldClass}
                 type="datetime-local"
@@ -2654,12 +2658,15 @@ function uniqueSelectedProducts(products: SelectedProduct[]) {
   );
 }
 
-function initialState(stores: Store[]): WizardState {
+function initialState(
+  stores: Store[],
+  taskType: TaskType = "PLAY_TIME",
+): WizardState {
   const now = new Date();
   const end = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   return {
     name: "Играй час — получай награду",
-    taskType: "PLAY_TIME",
+    taskType,
     visibility: "VISIBLE",
     audienceId: "",
     storeIds: stores[0] ? [stores[0].id] : [],

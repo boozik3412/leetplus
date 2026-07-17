@@ -76,7 +76,7 @@ describe('guest mission wizard contract', () => {
     expect(conditions).toMatchObject({ indefinite: true });
   });
 
-  it('still requires both dates for a fixed-period mission', () => {
+  it('requires a start date for a scheduled mission, but allows an open-ended schedule', () => {
     const readiness = validateMissionWizard({
       ...common,
       taskType: 'APP_OPEN',
@@ -87,7 +87,17 @@ describe('guest mission wizard contract', () => {
     });
 
     expect(readiness.ready).toBe(false);
-    expect(readiness.blockers).toHaveLength(2);
+    expect(readiness.blockers).toHaveLength(1);
+
+    const openEnded = validateMissionWizard({
+      ...common,
+      taskType: 'APP_OPEN',
+      indefinite: false,
+      periodTo: null,
+      conditions: { metric: { target: 1 } },
+    });
+
+    expect(openEnded.ready).toBe(true);
   });
 
   it('normalizes an exact single top-up without trusting client policy', () => {

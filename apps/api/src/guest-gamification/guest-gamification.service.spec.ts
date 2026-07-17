@@ -164,6 +164,9 @@ function createPrismaMock() {
       count: jest.fn(),
       findMany: jest.fn(),
     },
+    $transaction: jest.fn((operations: Promise<unknown>[]) =>
+      Promise.all(operations),
+    ),
     $queryRaw: jest.fn(),
   } as any;
 }
@@ -3579,6 +3582,151 @@ describe('GuestGamificationService', () => {
                   chancePercent: 20,
                 }),
               ],
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('active mission wizard migration', () => {
+    it('converts a scheduled legacy play-time mission without changing its activation point', async () => {
+      const { service, prisma } = createService();
+      const legacy = missionRow({
+        id: 'legacy-play-time',
+        status: 'ACTIVE',
+        missionType: 'PLAY_TIME',
+        triggerKind: 'PLAY_HOUR',
+        rewardType: 'BONUS',
+        rewardAmount: new Prisma.Decimal(60),
+        xpReward: 30,
+        progressTarget: 600,
+        progressUnit: 'минуты',
+        definitionVersion: 1,
+        evaluationPolicy: 'LIVE_PRIMARY',
+        periodFrom: new Date('2026-07-17T20:00:00.000Z'),
+        periodTo: null,
+        conditions: {
+          activatedAt: '2026-07-17T20:00:00.000Z',
+          visibility: 'VISIBLE',
+          sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+          metric: {
+            eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+            aggregation: 'duration',
+            target: 600,
+            unit: 'минуты',
+            minSessionMinutes: 60,
+          },
+        },
+      });
+      const migrated = missionRow({
+        ...legacy,
+        definitionVersion: 2,
+        missionType: 'PLAY_TIME',
+        triggerKind: 'PLAY_HOUR',
+        rewardType: 'BONUS_BALANCE',
+      });
+      prisma.guestGameMission.findMany.mockResolvedValue([legacy]);
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+      prisma.guestGameMission.update.mockResolvedValue(migrated);
+
+      const result = await service.migrateActiveMissionsToWizard(user);
+
+      expect(result.migrated).toHaveLength(1);
+      expect(prisma.guestGameMission.update).toHaveBeenCalledTimes(1);
+      const update = prisma.guestGameMission.update.mock.calls[0][0];
+      expect(update.data).toMatchObject({
+        definitionVersion: 2,
+        evaluationPolicy: 'LIVE_PRIMARY',
+        missionType: 'PLAY_TIME',
+        triggerKind: 'PLAY_HOUR',
+        rewardType: 'BONUS_BALANCE',
+        progressTarget: 600,
+      });
+      expect(update.data.conditions).toMatchObject({
+        schemaVersion: 2,
+        source: 'mission_wizard',
+        taskType: 'PLAY_TIME',
+        activatedAt: '2026-07-17T20:00:00.000Z',
+        sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+        metric: {
+          eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+          aggregation: 'duration',
+          target: 600,
+          minSessionMinutes: 60,
+        },
+      });
+      expect(update.data).not.toHaveProperty('periodFrom');
+      expect(update.data).not.toHaveProperty('periodTo');
+    });
+
+    it('does not update any active rule if one legacy condition is unsupported', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        missionRow({
+          id: 'legacy-visit',
+          status: 'ACTIVE',
+          missionType: 'VISIT',
+          triggerKind: 'SESSION_START',
+          definitionVersion: 1,
+          conditions: {},
+        }),
+      ]);
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+
+      await expect(
+        service.migrateActiveMissionsToWizard(user),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(prisma.guestGameMission.update).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('uses the saved balance-topup fact instead of a legacy display type', async () => {
+      const { service, prisma } = createService();
+      const legacy = missionRow({
+        id: 'legacy-topup',
+        status: 'ACTIVE',
+        missionType: 'PACKAGE_OR_SUBSCRIPTION',
+        triggerKind: 'SESSION_START',
+        definitionVersion: 1,
+        progressTarget: 10,
+        progressUnit: 'topups',
+        conditions: {
+          metric: {
+            eventTypes: ['BALANCE_TOPUP'],
+            aggregation: 'count',
+            target: 10,
+          },
+        },
+      });
+      prisma.guestGameMission.findMany.mockResolvedValue([legacy]);
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+      prisma.guestGameMission.update.mockResolvedValue(
+        missionRow({ ...legacy, definitionVersion: 2 }),
+      );
+
+      await service.migrateActiveMissionsToWizard(user);
+
+      expect(prisma.guestGameMission.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            missionType: 'BALANCE_TOPUP',
+            evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+            conditions: expect.objectContaining({
+              domainScoped: true,
+              externalDomains: ['domain-1'],
+              metric: expect.objectContaining({
+                eventTypes: ['BALANCE_TOPUP'],
+                topupMode: 'COUNT',
+                count: 10,
+              }),
             }),
           }),
         }),

@@ -62,6 +62,7 @@ import {
   validateMissionWizard,
   type GuestGameMissionWizardDto,
   type GuestGameMissionWizardReadiness,
+  type GuestGameMissionTaskType,
 } from './guest-game-mission-contract';
 
 const statusValues = [
@@ -2019,6 +2020,15 @@ export type GuestGameMissionWizardLoadResult =
   GuestGameMissionWizardSaveResult & {
     definition: GuestGameMissionWizardDto;
   };
+
+export type GuestGameMissionWizardMigrationResult = {
+  migrated: GuestGameMission[];
+  skipped: Array<{
+    id: string;
+    name: string;
+    reason: string;
+  }>;
+};
 
 export type GuestGameMissionProductGroupCatalog = {
   source: 'LANGAME' | 'LEETPLUS';
@@ -6811,6 +6821,130 @@ export class GuestGamificationService {
     });
 
     return rows.map(mapMission);
+  }
+
+  async migrateActiveMissionsToWizard(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameMissionWizardMigrationResult> {
+    const legacyMissions = await this.prisma.guestGameMission.findMany({
+      where: {
+        tenantId: user.tenantId,
+        status: 'ACTIVE',
+        definitionVersion: { lt: guestGameMissionDefinitionVersion },
+      },
+      include: missionInclude,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+
+    if (!legacyMissions.length) {
+      return { migrated: [], skipped: [] };
+    }
+
+    const storeIds = uniqueStrings(
+      legacyMissions.flatMap((mission) =>
+        guestGameStringArray(mission.storeIds),
+      ),
+    );
+    const stores = storeIds.length
+      ? await this.prisma.store.findMany({
+          where: { tenantId: user.tenantId, id: { in: storeIds } },
+          select: { id: true, externalDomain: true },
+        })
+      : [];
+    const storesById = new Map(stores.map((store) => [store.id, store]));
+    const skipped: GuestGameMissionWizardMigrationResult['skipped'] = [];
+    const prepared: Array<{
+      id: string;
+      taskType: GuestGameMissionTaskType;
+      definition: GuestGameMissionWizardDto;
+      data: Prisma.GuestGameMissionUpdateInput;
+    }> = [];
+
+    for (const mission of legacyMissions) {
+      try {
+        const missionStoreIds = guestGameStringArray(mission.storeIds);
+        const missingStoreIds = missionStoreIds.filter(
+          (storeId) => !storesById.has(storeId),
+        );
+        if (missingStoreIds.length) {
+          throw new BadRequestException(
+            'У задания есть недоступные клубы, поэтому его нельзя безопасно перенести в мастер.',
+          );
+        }
+
+        const externalDomains = uniqueStrings(
+          missionStoreIds.map(
+            (storeId) => storesById.get(storeId)?.externalDomain ?? '',
+          ),
+        );
+        const { taskType, definition } = legacyMissionWizardDefinition(mission);
+        const readiness = validateMissionWizard(definition);
+        if (!readiness.ready) {
+          throw new BadRequestException(readiness.blockers.join(' '));
+        }
+
+        const reward = jsonRecord(definition.reward as Prisma.JsonValue | null);
+        const rewardType = wizardRewardType(reward.type);
+        const normalizedConditions =
+          normalizeMissionWizardConditions(definition);
+        const conditions: Record<string, unknown> = {
+          ...normalizedConditions,
+          ...(taskType === 'BALANCE_TOPUP'
+            ? { domainScoped: true, externalDomains }
+            : {}),
+          reward: cleanJsonRecord(reward),
+        };
+        const metric = jsonRecord(conditions.metric as Prisma.JsonValue | null);
+
+        prepared.push({
+          id: mission.id,
+          taskType,
+          definition,
+          data: {
+            definitionVersion: guestGameMissionDefinitionVersion,
+            evaluationPolicy: missionEvaluationPolicy(taskType),
+            missionType: taskType,
+            triggerKind: missionWizardTrigger(taskType),
+            rewardType,
+            rewardAmount: new Prisma.Decimal(
+              wizardRewardAmount(rewardType, mission.rewardAmount),
+            ),
+            progressTarget: intValue(metric.target) ?? 1,
+            progressUnit: nullableString(metric.unit) ?? mission.progressUnit,
+            conditions: cleanJsonRecord(conditions),
+          },
+        });
+      } catch (caught) {
+        skipped.push({
+          id: mission.id,
+          name: mission.name,
+          reason:
+            caught instanceof Error
+              ? caught.message
+              : 'Не удалось безопасно привести задание к контракту мастера.',
+        });
+      }
+    }
+
+    if (skipped.length) {
+      throw new BadRequestException({
+        message:
+          'Не все активные задания можно безопасно перенести в мастер. Изменения не применены.',
+        migrations: skipped,
+      });
+    }
+
+    const migrated = await this.prisma.$transaction(
+      prepared.map(({ id, data }) =>
+        this.prisma.guestGameMission.update({
+          where: { id },
+          data,
+          include: missionInclude,
+        }),
+      ),
+    );
+
+    return { migrated: migrated.map(mapMission), skipped: [] };
   }
 
   async getMissionProductGroupCatalog(
@@ -15712,10 +15846,336 @@ function missionRowToWizardDto(row: MissionRow): GuestGameMissionWizardDto {
   };
 }
 
+function legacyMissionWizardDefinition(row: MissionRow): {
+  taskType: GuestGameMissionTaskType;
+  definition: GuestGameMissionWizardDto;
+} {
+  const source = jsonRecord(row.conditions);
+  const metric = jsonRecord(source.metric as Prisma.JsonValue | null);
+  const taskType = legacyMissionTaskType(row, source, metric);
+
+  if (!taskType) {
+    throw new BadRequestException(
+      'Тип условия этого задания не поддерживается мастером. Перенесите его вручную после настройки подходящего сценария.',
+    );
+  }
+
+  const reward = jsonRecord(source.reward as Prisma.JsonValue | null);
+  const presentation = jsonRecord(
+    source.presentation as Prisma.JsonValue | null,
+  );
+  const rewardType = wizardRewardType(row.rewardType);
+  const sessionType = legacyMissionSessionType(source.sessionType);
+  const target =
+    positiveMissionNumber(metric.target) ??
+    positiveMissionNumber(row.progressTarget) ??
+    1;
+  const normalizedMetric = legacyMissionWizardMetric(
+    taskType,
+    source,
+    metric,
+    target,
+    row.progressUnit,
+  );
+  const indefinite =
+    source.indefinite === true && !row.periodFrom && !row.periodTo
+      ? true
+      : !row.periodFrom && !row.periodTo;
+
+  return {
+    taskType,
+    definition: {
+      name: row.name,
+      status: row.status,
+      taskType,
+      visibility:
+        nullableString(source.visibility)?.toUpperCase() === 'HIDDEN'
+          ? 'HIDDEN'
+          : 'VISIBLE',
+      audienceId: row.audienceId,
+      storeIds: guestGameStringArray(row.storeIds),
+      indefinite,
+      periodFrom: row.periodFrom?.toISOString() ?? null,
+      periodTo: row.periodTo?.toISOString() ?? null,
+      conditions: {
+        ...source,
+        sessionType,
+        metric: normalizedMetric,
+      },
+      reward: {
+        ...reward,
+        type: rewardType,
+        amount: wizardRewardAmount(rewardType, row.rewardAmount),
+        label: row.rewardLabel,
+        xpEnabled: row.xpReward > 0,
+        xpAmount: row.xpReward,
+        perGuestLimit: row.perGuestLimit,
+        perGuestLimitUnlimited: row.perGuestLimit === null,
+        totalRewardLimit: row.totalRewardLimit,
+        budgetAmount: numberOrNull(row.budgetAmount),
+        budgetUnlimited: row.budgetAmount === null,
+        delivery: row.manualApprovalRequired ? 'ADMIN_APPROVAL' : 'AUTOMATIC',
+        periodicity: legacyMissionPeriodicity(source, reward),
+      },
+      appearance: {
+        ...presentation,
+        description:
+          nullableString(presentation.description) ??
+          nullableString(source.description),
+        actionText:
+          nullableString(presentation.actionText) ??
+          nullableString(source.actionText),
+        theme: nullableString(presentation.theme) ?? 'CLASSIC',
+        icon: nullableString(presentation.icon) ?? nullableString(source.icon),
+        coverUrl:
+          nullableString(presentation.coverUrl) ??
+          nullableString(source.coverUrl),
+      },
+      note: row.note,
+    },
+  };
+}
+
+function legacyMissionTaskType(
+  row: MissionRow,
+  source: Record<string, unknown>,
+  metric: Record<string, unknown>,
+): GuestGameMissionTaskType | null {
+  const candidates = [
+    source.taskType,
+    ...guestGameStringArray(metric.eventTypes),
+    row.missionType,
+    row.triggerKind,
+  ];
+
+  for (const candidate of candidates) {
+    const value = nullableString(candidate)?.toUpperCase();
+    if (!value) continue;
+    if (value === 'APP_OPEN') return 'APP_OPEN';
+    if (['PLAY_TIME', 'PLAY_HOUR', 'SESSION_STOP'].includes(value)) {
+      return 'PLAY_TIME';
+    }
+    if (['PRODUCT_PURCHASE', 'BAR_PURCHASE', 'PURCHASE'].includes(value)) {
+      return 'PRODUCT_PURCHASE';
+    }
+    if (['BALANCE_TOPUP', 'BALANCE_TOP_UP'].includes(value)) {
+      return 'BALANCE_TOPUP';
+    }
+    if (['CHECK_IN', 'CHECKIN'].includes(value)) return 'CHECK_IN';
+  }
+
+  return null;
+}
+
+function legacyMissionSessionType(value: unknown) {
+  const normalized = nullableString(value)?.toUpperCase();
+  if (
+    [
+      'PACKAGE_OR_SUBSCRIPTION',
+      'PACKAGE',
+      'PACKET',
+      'PACKET_HOURS',
+      'SUBSCRIPTION',
+      'MEMBERSHIP',
+      'ABONEMENT',
+      'ABONNEMENT',
+    ].includes(normalized ?? '')
+  ) {
+    return 'PACKAGE_OR_SUBSCRIPTION';
+  }
+  if (
+    ['HOURLY', 'REGULAR', 'REGULAR_SESSION', 'COMMON', 'DEFAULT'].includes(
+      normalized ?? '',
+    )
+  ) {
+    return 'HOURLY';
+  }
+  return 'ANY';
+}
+
+function legacyMissionWizardMetric(
+  taskType: GuestGameMissionTaskType,
+  source: Record<string, unknown>,
+  metric: Record<string, unknown>,
+  target: number,
+  progressUnit: string | null,
+) {
+  const base = {
+    ...metric,
+    unit: nullableString(metric.unit) ?? progressUnit ?? 'шаг',
+    windowDays:
+      positiveMissionNumber(metric.windowDays) ??
+      positiveMissionNumber(source.windowDays) ??
+      undefined,
+    weekdays: guestGameStringArray(metric.weekdays),
+    hours: guestGameStringArray(metric.hours),
+  };
+
+  if (taskType === 'APP_OPEN') {
+    return {
+      eventTypes: ['APP_OPEN'],
+      aggregation: 'exists',
+      target: 1,
+      unit: 'вход',
+    };
+  }
+
+  if (taskType === 'PLAY_TIME') {
+    return {
+      ...base,
+      eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+      aggregation: 'duration',
+      target,
+      unit: nullableString(metric.unit) ?? progressUnit ?? 'минуты',
+      minSessionMinutes:
+        positiveMissionNumber(metric.minSessionMinutes) ??
+        positiveMissionNumber(source.minSessionMinutes) ??
+        undefined,
+    };
+  }
+
+  if (taskType === 'PRODUCT_PURCHASE') {
+    const purchaseSource =
+      nullableString(source.purchaseSource)?.toUpperCase() === 'CATEGORY'
+        ? 'CATEGORY'
+        : 'PRODUCT';
+    const productMatch =
+      nullableString(metric.productMatch)?.toUpperCase() === 'ALL'
+        ? 'ALL'
+        : 'ANY';
+    const legacyMinimumAmount =
+      positiveMissionNumber(metric.minSpendAmount) ??
+      positiveMissionNumber(metric.exactSpendAmount) ??
+      positiveMissionNumber(metric.amount);
+    const aggregation = nullableString(metric.aggregation)?.toLowerCase();
+    const amountMode =
+      nullableString(metric.amountMode)?.toUpperCase() === 'PERIOD_TOTAL'
+        ? 'PERIOD_TOTAL'
+        : nullableString(metric.amountMode)?.toUpperCase() === 'SINGLE_MINIMUM'
+          ? 'SINGLE_MINIMUM'
+          : aggregation === 'sum'
+            ? 'PERIOD_TOTAL'
+          : legacyMinimumAmount
+            ? 'SINGLE_MINIMUM'
+            : 'NONE';
+    return {
+      ...base,
+      eventTypes: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
+      aggregation: amountMode === 'PERIOD_TOTAL' ? 'sum' : 'count',
+      target,
+      purchaseSource,
+      categoryCatalogSource:
+        purchaseSource === 'CATEGORY'
+          ? (nullableString(source.categoryCatalogSource) ?? 'LANGAME')
+          : null,
+      productMatch,
+      amountMode,
+      minSpendAmount:
+        amountMode === 'NONE' ? undefined : (legacyMinimumAmount ?? undefined),
+      productIds:
+        purchaseSource === 'PRODUCT'
+          ? guestGameStringArray(metric.productIds)
+          : [],
+      externalProductIds:
+        purchaseSource === 'PRODUCT'
+          ? guestGameStringArray(metric.externalProductIds)
+          : [],
+      categoryIds:
+        purchaseSource === 'CATEGORY'
+          ? guestGameStringArray(metric.categoryIds)
+          : [],
+      externalCategoryKeys:
+        purchaseSource === 'CATEGORY'
+          ? guestGameStringArray(metric.externalCategoryKeys)
+          : [],
+    };
+  }
+
+  if (taskType === 'BALANCE_TOPUP') {
+    const aggregation = nullableString(metric.aggregation)?.toLowerCase();
+    const topupMode =
+      nullableString(metric.topupMode)?.toUpperCase() === 'PERIOD_TOTAL' ||
+      aggregation === 'sum'
+        ? 'PERIOD_TOTAL'
+        : nullableString(metric.topupMode)?.toUpperCase() === 'COUNT' ||
+            target > 1
+          ? 'COUNT'
+          : 'SINGLE';
+    const amountComparison =
+      metric.exactSpendAmount !== undefined ||
+      nullableString(metric.amountComparison)?.toUpperCase() === 'EXACT'
+        ? 'EXACT'
+        : 'AT_LEAST';
+    const amount =
+      positiveMissionNumber(
+        amountComparison === 'EXACT'
+          ? metric.exactSpendAmount
+          : metric.minSpendAmount,
+      ) ??
+      positiveMissionNumber(metric.amount) ??
+      0;
+    return {
+      ...base,
+      eventTypes: ['BALANCE_TOPUP'],
+      aggregation:
+        topupMode === 'PERIOD_TOTAL'
+          ? 'sum'
+          : topupMode === 'COUNT'
+            ? 'count'
+            : 'exists',
+      target,
+      topupMode,
+      amountComparison,
+      amount,
+      count: topupMode === 'COUNT' ? target : undefined,
+      totalAmount: topupMode === 'PERIOD_TOTAL' ? target : undefined,
+    };
+  }
+
+  const aggregation = nullableString(metric.aggregation)?.toLowerCase();
+  const checkInMode =
+    nullableString(metric.checkInMode)?.toUpperCase() === 'STREAK' ||
+    aggregation === 'streak'
+      ? 'STREAK'
+      : nullableString(metric.checkInMode)?.toUpperCase() === 'PERIOD'
+        ? 'PERIOD'
+        : target > 1
+          ? 'COUNT'
+          : 'SINGLE';
+  return {
+    ...base,
+    eventTypes: ['CHECK_IN'],
+    aggregation: checkInMode === 'STREAK' ? 'streak' : 'count',
+    target,
+    checkInMode,
+    count: checkInMode === 'STREAK' ? undefined : target,
+    days: checkInMode === 'STREAK' ? target : undefined,
+  };
+}
+
+function legacyMissionPeriodicity(
+  source: Record<string, unknown>,
+  reward: Record<string, unknown>,
+) {
+  const value = (
+    nullableString(reward.periodicity) ?? nullableString(source.periodicity)
+  )?.toUpperCase();
+  return ['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'].includes(value ?? '')
+    ? value
+    : 'NONE';
+}
+
+function positiveMissionNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
 function wizardRewardType(value: unknown) {
   const normalized = (nullableString(value) ?? 'NONE').toUpperCase();
   const values: Record<string, string> = {
     LANGAME_BONUS: 'BONUS_BALANCE',
+    BONUS: 'BONUS_BALANCE',
+    LANGAME: 'BONUS_BALANCE',
     BONUS_BALANCE: 'BONUS_BALANCE',
     LOOTBOX: 'LOOT_BOX_ENTITLEMENT',
     LOOT_BOX_ENTITLEMENT: 'LOOT_BOX_ENTITLEMENT',

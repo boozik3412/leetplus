@@ -55,6 +55,7 @@ import {
   type GuestGameMissionUpdateDto,
   type GuestGameMissionProductGroupCatalog,
   type GuestGameMissionWizardLoadResult,
+  type GuestGameMissionWizardMigrationResult,
   type GuestGameMissionWizardSaveResult,
   type GuestGamePromoCard,
   type GuestGamePromoCardDto,
@@ -317,6 +318,13 @@ export class GuestGamificationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestGameMission[]> {
     return this.gamificationService.getMissions(user);
+  }
+
+  @Post('missions/migrate-active-to-wizard')
+  migrateActiveMissionsToWizard(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestGameMissionWizardMigrationResult> {
+    return this.gamificationService.migrateActiveMissionsToWizard(user);
   }
 
   @Get('missions/wizard/product-groups')

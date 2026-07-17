@@ -18,12 +18,20 @@ async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
 export default async function GuestMissionWizardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ missionId?: string | string[] }>;
+  searchParams: Promise<{
+    missionId?: string | string[];
+    taskType?: string | string[];
+  }>;
 }) {
   const params = await searchParams;
   const initialMissionId = Array.isArray(params.missionId)
     ? params.missionId[0]
     : params.missionId;
+  const requestedTaskType = Array.isArray(params.taskType)
+    ? params.taskType[0]
+    : params.taskType;
+  const initialTaskType =
+    requestedTaskType === "CHECK_IN" ? "CHECK_IN" : undefined;
   const user = await requireCurrentUser();
 
   if (!can(user, "manage_guest_game_rules")) {
@@ -77,6 +85,7 @@ export default async function GuestMissionWizardPage({
           audiences={audiences}
           lootBoxes={lootBoxes}
           initialMissionId={initialMissionId ?? null}
+          initialTaskType={initialTaskType}
           promoBundles={promoBundles.filter(
             (bundle) => bundle.status === "ACTIVE",
           )}

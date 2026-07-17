@@ -384,6 +384,8 @@ function normalizeProgressSessionType(value: string | null | undefined) {
       'packet',
       'package',
       'package_hours',
+      'package_or_subscription',
+      'package_or_subscription_session',
       'subscription',
       'membership',
       'abonement',
@@ -395,7 +397,14 @@ function normalizeProgressSessionType(value: string | null | undefined) {
   }
 
   if (
-    ['regular_session', 'regular', 'common', 'default'].includes(normalized)
+    [
+      'regular_session',
+      'regular',
+      'common',
+      'default',
+      'hourly',
+      'hourly_session',
+    ].includes(normalized)
   ) {
     return 'regular_session';
   }

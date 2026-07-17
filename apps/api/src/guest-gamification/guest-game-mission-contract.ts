@@ -261,7 +261,6 @@ export function validateMissionWizard(
     blockers.push('Выберите хотя бы один клуб.');
   if (conditions.indefinite !== true) {
     if (!stringValue(dto.periodFrom)) blockers.push('Укажите начало задания.');
-    if (!stringValue(dto.periodTo)) blockers.push('Укажите окончание задания.');
 
     const from = dateValue(dto.periodFrom);
     const to = dateValue(dto.periodTo);

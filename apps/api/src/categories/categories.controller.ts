@@ -19,6 +19,7 @@ import { CategoriesService } from './categories.service';
 import type {
   ApplyCategorySourceMappingsDto,
   CreateCategoryDto,
+  MergeCategoriesDto,
   PreviewCategorySourceMappingsDto,
   UpdateCategoryDto,
 } from './categories.dto';
@@ -68,6 +69,16 @@ export class CategoriesController {
   @Post('langame/refresh')
   refreshLangameCatalog(@CurrentUser() user: AuthenticatedUser) {
     return this.productCategoryCatalogService.refreshLangameCatalog(user);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('merge')
+  merge(
+    @Body() dto: MergeCategoriesDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.categoriesService.merge(dto, user);
   }
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

@@ -6,6 +6,13 @@ export type UpdateCategoryDto = {
   name?: string;
 };
 
+export type MergeCategoriesDto = {
+  /** Categories selected by a user, including the category that remains. */
+  categoryIds: string[];
+  /** The selected internal LeetPlus category that will remain after the merge. */
+  targetCategoryId: string;
+};
+
 export type CategorySourceMappingDto = {
   externalDomain: string;
   externalGroupId: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Category } from "@/lib/catalog";
 
@@ -17,6 +17,13 @@ function errorMessage(payload: unknown) {
   return "Не удалось сохранить изменения";
 }
 
+type MergeResult = {
+  targetCategory: { id: string; name: string };
+  mergedCategories: number;
+  productsUpdated: number;
+  mappingsUpdated: number;
+};
+
 export function LeetplusCategoryDirectory({
   categories,
   canEditCatalog,
@@ -28,11 +35,52 @@ export function LeetplusCategoryDirectory({
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [isMergeOpen, setIsMergeOpen] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const selectedCategories = useMemo(
+    () => categories.filter((category) => selectedCategoryIds.includes(category.id)),
+    [categories, selectedCategoryIds],
+  );
+  const selectedSkuCount = selectedCategories.reduce(
+    (total, category) => total + category._count.products,
+    0,
+  );
+
+  function resetMergeSelection() {
+    setSelectedCategoryIds([]);
+    setIsMergeOpen(false);
+    setMergeTargetId("");
+  }
+
+  function toggleCategorySelection(categoryId: string) {
+    setSelectedCategoryIds((current) =>
+      current.includes(categoryId)
+        ? current.filter((id) => id !== categoryId)
+        : [...current, categoryId],
+    );
+    setIsMergeOpen(false);
+    setError(null);
+    setMessage(null);
+  }
+
+  function openMergePanel() {
+    if (selectedCategories.length < 2) {
+      return;
+    }
+
+    setMergeTargetId(selectedCategories[0].id);
+    setIsMergeOpen(true);
+    setError(null);
+    setMessage(null);
+  }
 
   async function createCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setMessage(null);
     setPendingId("new");
     const name = String(new FormData(event.currentTarget).get("name") ?? "").trim();
 
@@ -65,6 +113,7 @@ export function LeetplusCategoryDirectory({
   ) {
     event.preventDefault();
     setError(null);
+    setMessage(null);
     setPendingId(category.id);
     const name = String(new FormData(event.currentTarget).get("name") ?? "").trim();
 
@@ -96,6 +145,7 @@ export function LeetplusCategoryDirectory({
     }
 
     setError(null);
+    setMessage(null);
     setPendingId(category.id);
 
     try {
@@ -109,6 +159,53 @@ export function LeetplusCategoryDirectory({
         return;
       }
 
+      router.refresh();
+    } catch {
+      setError("API недоступен");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  async function mergeCategories(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+
+    if (
+      selectedCategories.length < 2 ||
+      !mergeTargetId ||
+      !selectedCategoryIds.includes(mergeTargetId)
+    ) {
+      setError("Выберите минимум две категории и укажите, какую из них оставить.");
+      return;
+    }
+
+    setPendingId("merge");
+
+    try {
+      const response = await fetch("/api/categories/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryIds: selectedCategoryIds,
+          targetCategoryId: mergeTargetId,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | MergeResult
+        | null;
+
+      if (!response.ok) {
+        setError(errorMessage(payload));
+        return;
+      }
+
+      const result = payload as MergeResult;
+      setMessage(
+        `Объединено категорий: ${result.mergedCategories}; перенесено SKU: ${result.productsUpdated}; перенесено связей Langame: ${result.mappingsUpdated}.`,
+      );
+      resetMergeSelection();
       router.refresh();
     } catch {
       setError("API недоступен");
@@ -137,6 +234,7 @@ export function LeetplusCategoryDirectory({
             onClick={() => {
               setIsAdding((current) => !current);
               setError(null);
+              setMessage(null);
             }}
             className="self-start rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 sm:self-auto"
           >
@@ -144,6 +242,81 @@ export function LeetplusCategoryDirectory({
           </button>
         ) : null}
       </div>
+
+      {selectedCategories.length > 0 ? (
+        <div className="flex flex-col gap-3 border-t border-sky-100 bg-sky-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-sky-950">
+              Выбрано категорий: {selectedCategories.length}
+            </p>
+            <p className="mt-0.5 text-xs text-sky-800">
+              SKU в выбранных категориях: {selectedSkuCount}. При объединении они перейдут в выбранную основную категорию.
+            </p>
+          </div>
+          {canEditCatalog ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={openMergePanel}
+                disabled={selectedCategories.length < 2}
+                className="rounded-md bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-sky-300"
+              >
+                Объединить
+              </button>
+              <button
+                type="button"
+                onClick={resetMergeSelection}
+                className="rounded-md border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-sky-800 hover:bg-sky-100"
+              >
+                Снять выбор
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {isMergeOpen ? (
+        <form
+          onSubmit={mergeCategories}
+          className="border-t border-sky-100 bg-sky-50/70 px-5 py-4"
+        >
+          <h3 className="text-sm font-semibold text-zinc-950">Объединение категорий</h3>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-600">
+            Выберите категорию, которая останется. Все SKU и подтверждённые связи с группами Langame из остальных выбранных категорий будут перенесены в неё. Удалённые названия восстановить нельзя.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="text-sm font-medium text-zinc-800" htmlFor="merge-target-category">
+              Оставить категорию
+            </label>
+            <select
+              id="merge-target-category"
+              value={mergeTargetId}
+              onChange={(event) => setMergeTargetId(event.target.value)}
+              className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+            >
+              {selectedCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name} · {category._count.products} SKU
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              disabled={pendingId === "merge"}
+              className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:bg-emerald-400"
+            >
+              {pendingId === "merge" ? "Объединение..." : "Подтвердить объединение"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsMergeOpen(false)}
+              className="text-sm text-zinc-600 hover:text-zinc-900"
+            >
+              Отмена
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       {isAdding ? (
         <form
@@ -173,7 +346,11 @@ export function LeetplusCategoryDirectory({
             {categories.map((category) => (
               <div
                 key={category.id}
-                className="rounded-md border border-zinc-200 px-3 py-2.5"
+                className={`rounded-md border px-3 py-2.5 ${
+                  selectedCategoryIds.includes(category.id)
+                    ? "border-sky-400 bg-sky-50/60"
+                    : "border-zinc-200"
+                }`}
               >
                 {editingId === category.id ? (
                   <form
@@ -219,6 +396,7 @@ export function LeetplusCategoryDirectory({
                           onClick={() => {
                             setEditingId(category.id);
                             setError(null);
+                            setMessage(null);
                           }}
                           className="text-zinc-600 hover:text-zinc-950"
                         >
@@ -231,6 +409,20 @@ export function LeetplusCategoryDirectory({
                           className="text-zinc-500 hover:text-red-700 disabled:text-zinc-300"
                         >
                           {pendingId === category.id ? "Удаление..." : "Удалить"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleCategorySelection(category.id)}
+                          disabled={pendingId !== null}
+                          className={
+                            selectedCategoryIds.includes(category.id)
+                              ? "text-sky-700 hover:text-sky-900 disabled:text-zinc-300"
+                              : "text-zinc-600 hover:text-sky-900 disabled:text-zinc-300"
+                          }
+                        >
+                          {selectedCategoryIds.includes(category.id)
+                            ? "Выбрана"
+                            : "Выбрать"}
                         </button>
                       </div>
                     ) : null}
@@ -245,6 +437,7 @@ export function LeetplusCategoryDirectory({
       </div>
 
       {error ? <p className="border-t border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">{error}</p> : null}
+      {message ? <p className="border-t border-emerald-100 bg-emerald-50 px-5 py-3 text-sm text-emerald-800">{message}</p> : null}
     </section>
   );
 }

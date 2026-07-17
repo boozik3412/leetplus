@@ -8,7 +8,11 @@ import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
-import type { CreateCategoryDto, UpdateCategoryDto } from './categories.dto';
+import type {
+  CreateCategoryDto,
+  MergeCategoriesDto,
+  UpdateCategoryDto,
+} from './categories.dto';
 
 @Injectable()
 export class CategoriesService {
@@ -103,6 +107,95 @@ export class CategoriesService {
     return { ok: true };
   }
 
+  async merge(dto: MergeCategoriesDto, user: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const categoryIds = this.normalizeMergeCategoryIds(dto.categoryIds);
+    const targetCategoryId = this.requiredId(
+      dto.targetCategoryId,
+      'Target category',
+    );
+
+    if (!categoryIds.includes(targetCategoryId)) {
+      throw new BadRequestException(
+        'The target category must be one of the selected categories',
+      );
+    }
+
+    const categories = await this.prisma.category.findMany({
+      where: { tenantId, id: { in: categoryIds } },
+      select: { id: true, name: true },
+    });
+
+    if (categories.length !== categoryIds.length) {
+      throw new NotFoundException('One or more categories are unavailable');
+    }
+
+    const target = categories.find((category) => category.id === targetCategoryId);
+
+    if (!target) {
+      throw new NotFoundException('Target category not found');
+    }
+
+    const sourceCategoryIds = categoryIds.filter((id) => id !== targetCategoryId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const mappings = await tx.categorySourceMapping.findMany({
+        where: {
+          tenantId,
+          categoryId: { in: sourceCategoryIds },
+        },
+        select: {
+          id: true,
+          categoryId: true,
+          source: true,
+          externalDomain: true,
+          externalGroupId: true,
+        },
+      });
+      const productsUpdated = await tx.product.updateMany({
+        where: {
+          tenantId,
+          categoryId: { in: sourceCategoryIds },
+        },
+        data: { categoryId: targetCategoryId },
+      });
+
+      for (const mapping of mappings) {
+        await tx.categorySourceMapping.update({
+          where: { id: mapping.id },
+          data: { categoryId: targetCategoryId },
+        });
+        await tx.categorySourceMappingEvent.create({
+          data: {
+            tenantId,
+            mappingId: mapping.id,
+            action: 'CATEGORY_MERGED',
+            source: mapping.source,
+            externalDomain: mapping.externalDomain,
+            externalGroupId: mapping.externalGroupId,
+            previousValue: { categoryId: mapping.categoryId },
+            nextValue: { categoryId: targetCategoryId },
+            createdByUserId: user.id,
+          },
+        });
+      }
+
+      await tx.category.deleteMany({
+        where: {
+          tenantId,
+          id: { in: sourceCategoryIds },
+        },
+      });
+
+      return {
+        targetCategory: target,
+        mergedCategories: sourceCategoryIds.length,
+        productsUpdated: productsUpdated.count,
+        mappingsUpdated: mappings.length,
+      };
+    });
+  }
+
   private async findOneForTenant(id: string, tenantId: string) {
     const category = await this.prisma.category.findFirst({
       where: { id, tenantId },
@@ -123,6 +216,28 @@ export class CategoriesService {
     }
 
     return normalized;
+  }
+
+  private normalizeMergeCategoryIds(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      throw new BadRequestException('Categories to merge are required');
+    }
+
+    const categoryIds = [...new Set(value.map((id) => this.requiredId(id, 'Category')))];
+
+    if (categoryIds.length < 2) {
+      throw new BadRequestException('Select at least two categories to merge');
+    }
+
+    return categoryIds;
+  }
+
+  private requiredId(value: unknown, field: string): string {
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new BadRequestException(`${field} is required`);
+    }
+
+    return value.trim();
   }
 
   private handleUniqueConstraint(error: unknown, name: string): void {

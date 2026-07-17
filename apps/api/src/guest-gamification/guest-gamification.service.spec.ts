@@ -3587,6 +3587,20 @@ describe('GuestGamificationService', () => {
   });
 
   describe('mission wizard activation', () => {
+    it('loads a v2 mission into the wizard without changing its active state', async () => {
+      const { service, prisma } = createService();
+      const active = missionRow({ status: 'ACTIVE' });
+      prisma.guestGameMission.findFirst.mockResolvedValue(active);
+      prisma.guestGameMission.findFirstOrThrow.mockResolvedValue(active);
+
+      const result = await service.getMissionWizard(user, 'mission-1');
+
+      expect(result.mission.status).toBe('ACTIVE');
+      expect(result.definition.taskType).toBe('APP_OPEN');
+      expect(result.readiness.ready).toBe(true);
+      expect(prisma.guestGameMission.update).not.toHaveBeenCalled();
+    });
+
     it('starts an indefinite mission at the server activation time', async () => {
       const { service, prisma } = createService();
       const draft = missionRow();

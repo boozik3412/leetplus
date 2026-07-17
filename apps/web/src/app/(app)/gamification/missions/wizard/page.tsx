@@ -15,7 +15,15 @@ async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-export default async function GuestMissionWizardPage() {
+export default async function GuestMissionWizardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ missionId?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const initialMissionId = Array.isArray(params.missionId)
+    ? params.missionId[0]
+    : params.missionId;
   const user = await requireCurrentUser();
 
   if (!can(user, "manage_guest_game_rules")) {
@@ -68,6 +76,7 @@ export default async function GuestMissionWizardPage() {
           stores={stores}
           audiences={audiences}
           lootBoxes={lootBoxes}
+          initialMissionId={initialMissionId ?? null}
           promoBundles={promoBundles.filter(
             (bundle) => bundle.status === "ACTIVE",
           )}

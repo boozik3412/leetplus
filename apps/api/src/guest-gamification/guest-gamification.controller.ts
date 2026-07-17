@@ -54,6 +54,7 @@ import {
   type GuestGameMissionDto,
   type GuestGameMissionUpdateDto,
   type GuestGameMissionProductGroupCatalog,
+  type GuestGameMissionWizardLoadResult,
   type GuestGameMissionWizardSaveResult,
   type GuestGamePromoCard,
   type GuestGamePromoCardDto,
@@ -337,6 +338,14 @@ export class GuestGamificationController {
     @Body() dto: GuestGameMissionWizardDto,
   ) {
     return this.gamificationService.validateMissionWizard(user, dto);
+  }
+
+  @Get('missions/wizard/:id')
+  getMissionWizard(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestGameMissionWizardLoadResult> {
+    return this.gamificationService.getMissionWizard(user, id);
   }
 
   @Post('missions/wizard')

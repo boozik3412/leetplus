@@ -2015,6 +2015,11 @@ export type GuestGameMissionWizardSaveResult = {
   readiness: GuestGameMissionWizardReadiness;
 };
 
+export type GuestGameMissionWizardLoadResult =
+  GuestGameMissionWizardSaveResult & {
+    definition: GuestGameMissionWizardDto;
+  };
+
 export type GuestGameMissionProductGroupCatalog = {
   source: 'LANGAME' | 'LEETPLUS';
   status: 'READY' | 'PARTIAL' | 'EMPTY';
@@ -7123,6 +7128,30 @@ export class GuestGamificationService {
     return validateMissionWizard(dto);
   }
 
+  async getMissionWizard(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<GuestGameMissionWizardLoadResult> {
+    await this.assertMission(user, id);
+    const row = await this.prisma.guestGameMission.findFirstOrThrow({
+      where: { id, tenantId: user.tenantId },
+      include: missionInclude,
+    });
+
+    if (row.definitionVersion !== guestGameMissionDefinitionVersion) {
+      throw new ConflictException(
+        'Задание создано в старом редакторе и не может быть открыто в мастере.',
+      );
+    }
+
+    const definition = missionRowToWizardDto(row);
+    return {
+      mission: mapMission(row),
+      definition,
+      readiness: validateMissionWizard(definition),
+    };
+  }
+
   async saveMissionWizard(
     user: AuthenticatedUser,
     dto: GuestGameMissionWizardDto,
@@ -7318,11 +7347,6 @@ export class GuestGamificationService {
       if (existing.definitionVersion !== guestGameMissionDefinitionVersion) {
         throw new ConflictException(
           'Задание создано в старом редакторе и не может быть перезаписано мастером.',
-        );
-      }
-      if (existing.status === 'ACTIVE') {
-        throw new ConflictException(
-          'Сначала переведите активное задание в черновик, затем изменяйте условия.',
         );
       }
       const row = await this.prisma.guestGameMission.update({

@@ -8,6 +8,7 @@ import type {
   GuestGameMissionProductGroup,
   GuestGameMissionProductGroupCatalog,
   GuestGameMissionWizardDto,
+  GuestGameMissionWizardLoadResult,
   GuestGameMissionWizardReadiness,
   GuestGameMissionWizardSaveResult,
   GuestGameMissionWizardTaskType,
@@ -23,6 +24,10 @@ import {
 type Step = "conditions" | "rewards" | "appearance";
 type TaskType = GuestGameMissionWizardTaskType;
 type RewardType = "LANGAME_BONUS" | "LOOTBOX" | "PROMOCODE" | "NONE";
+type SelectedProduct = Pick<
+  Product,
+  "id" | "name" | "externalProductId" | "externalDomain"
+>;
 
 type WizardState = {
   name: string;
@@ -99,15 +104,19 @@ export function GuestMissionWizard({
   audiences,
   lootBoxes,
   promoBundles,
+  initialMissionId,
 }: {
   stores: Store[];
   audiences: GuestAudience[];
   lootBoxes: GuestGameLootBox[];
   promoBundles: MarketingPromoBundle[];
+  initialMissionId?: string | null;
 }) {
   const [step, setStep] = useState<Step>("conditions");
   const [form, setForm] = useState<WizardState>(() => initialState(stores));
-  const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>(
+    [],
+  );
   const [productGroups, setProductGroups] = useState<
     GuestGameMissionProductGroup[]
   >([]);
@@ -124,6 +133,12 @@ export function GuestMissionWizard({
   const [productPage, setProductPage] = useState(1);
   const [productTotalPages, setProductTotalPages] = useState(1);
   const [draftId, setDraftId] = useState<string | null>(null);
+  const [loadingMission, setLoadingMission] = useState(
+    Boolean(initialMissionId),
+  );
+  const [loadedMissionStatus, setLoadedMissionStatus] = useState<
+    "DRAFT" | "ACTIVE" | null
+  >(null);
   const [readiness, setReadiness] =
     useState<GuestGameMissionWizardReadiness | null>(null);
   const [saveState, setSaveState] = useState<
@@ -183,6 +198,55 @@ export function GuestMissionWizard({
   );
 
   useEffect(() => {
+    if (!initialMissionId) return;
+
+    const controller = new AbortController();
+    const load = async () => {
+      setLoadingMission(true);
+      try {
+        const response = await fetch(
+          `/api/guests/gamification/missions/wizard/${encodeURIComponent(initialMissionId)}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error(await responseMessage(response));
+        const loaded = (await response.json()) as GuestGameMissionWizardLoadResult;
+        if (controller.signal.aborted) return;
+
+        const hydrated = wizardStateFromDefinition(loaded.definition, stores);
+        setForm(hydrated.form);
+        setSelectedProducts(hydrated.products);
+        setSelectedProductGroups(hydrated.productGroups);
+        setDraftId(loaded.mission.id);
+        setReadiness(loaded.readiness);
+        setLoadedMissionStatus(
+          loaded.mission.status === "ACTIVE" ? "ACTIVE" : "DRAFT",
+        );
+        setActivated(false);
+        autosaveReady.current = false;
+        setMessage(
+          loaded.mission.status === "ACTIVE"
+            ? "Активное задание загружено. При первом сохранении оно станет черновиком и потребует повторной активации."
+            : "Черновик загружен. После первого сохранения изменения будут сохраняться автоматически.",
+        );
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить задание для редактирования.",
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoadingMission(false);
+      }
+    };
+
+    void load();
+    return () => controller.abort();
+  }, [initialMissionId, stores]);
+
+  useEffect(() => {
+    if (loadingMission) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
@@ -236,9 +300,15 @@ export function GuestMissionWizard({
         setProductGroups(catalog.groups);
         setProductGroupWarnings(catalog.warnings);
         setSelectedProductGroups((current) =>
-          current.filter((selected) =>
-            catalog.groups.some((group) => group.id === selected.id),
-          ),
+          current
+            .map(
+              (selected) =>
+                catalog.groups.find((group) => group.id === selected.id) ??
+                selected,
+            )
+            .filter((selected) =>
+              catalog.groups.some((group) => group.id === selected.id),
+            ),
         );
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -337,6 +407,7 @@ export function GuestMissionWizard({
       if (!response.ok) throw new Error(await responseMessage(response));
       const saved = (await response.json()) as GuestGameMissionWizardSaveResult;
       setDraftId(saved.mission.id);
+      setLoadedMissionStatus("DRAFT");
       setReadiness(saved.readiness);
       setSaveState("saved");
       autosaveReady.current = true;
@@ -410,7 +481,7 @@ export function GuestMissionWizard({
     }
   }
 
-  function toggleProduct(product: Product) {
+  function toggleProduct(product: SelectedProduct) {
     setSelectedProducts((current) =>
       current.some((item) => item.id === product.id)
         ? current.filter((item) => item.id !== product.id)
@@ -428,6 +499,18 @@ export function GuestMissionWizard({
 
   return (
     <div className="pb-4">
+      {loadingMission ? (
+        <div className="mb-5 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-medium text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+          Загружаем задание в мастер…
+        </div>
+      ) : null}
+      {loadedMissionStatus === "ACTIVE" ? (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          Активное задание пока продолжает работать. Первое сохранение в мастере
+          создаст его обновлённую черновую версию; затем потребуется отдельное
+          подтверждение активации.
+        </div>
+      ) : null}
       <div className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-2 shadow-sm md:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-950">
         <StepButton
           index="01"
@@ -587,7 +670,7 @@ function ConditionsStep(props: {
   search: string;
   setSearch: (value: string) => void;
   products: Product[];
-  selectedProducts: Product[];
+  selectedProducts: SelectedProduct[];
   productGroups: GuestGameMissionProductGroup[];
   selectedProductGroups: GuestGameMissionProductGroup[];
   productGroupWarnings: string[];
@@ -596,7 +679,7 @@ function ConditionsStep(props: {
   productPage: number;
   productTotalPages: number;
   setProductPage: (page: number) => void;
-  toggleProduct: (product: Product) => void;
+  toggleProduct: (product: SelectedProduct) => void;
   toggleProductGroup: (group: GuestGameMissionProductGroup) => void;
   clearProducts: () => void;
   clearProductGroups: () => void;
@@ -2009,7 +2092,7 @@ function StepButton({
 
 function buildWizardDto(
   form: WizardState,
-  products: Product[],
+  products: SelectedProduct[],
   productGroups: GuestGameMissionProductGroup[],
   lootBoxes: GuestGameLootBox[],
   promos: MarketingPromoBundle[],
@@ -2141,7 +2224,7 @@ function buildWizardDto(
 
 function buildPreview(
   form: WizardState,
-  products: Product[],
+  products: SelectedProduct[],
   productGroups: GuestGameMissionProductGroup[],
   lootBoxes: GuestGameLootBox[],
   promos: MarketingPromoBundle[],
@@ -2219,7 +2302,7 @@ function buildPreview(
 }
 function previewCondition(
   form: WizardState,
-  products: Product[],
+  products: SelectedProduct[],
   productGroups: GuestGameMissionProductGroup[],
 ) {
   if (form.taskType === "APP_OPEN") return "Войти в игровой модуль.";
@@ -2310,6 +2393,261 @@ async function fetchProductGroupCatalog(
     throw new Error(await responseMessage(response));
   }
   return response.json() as Promise<GuestGameMissionProductGroupCatalog>;
+}
+
+function wizardStateFromDefinition(
+  definition: GuestGameMissionWizardDto,
+  stores: Store[],
+): {
+  form: WizardState;
+  products: SelectedProduct[];
+  productGroups: GuestGameMissionProductGroup[];
+} {
+  const defaults = initialState(stores);
+  const conditions = recordValue(definition.conditions);
+  const metric = recordValue(conditions.metric);
+  const reward = recordValue(definition.reward);
+  const appearance = recordValue(definition.appearance);
+  const taskType = wizardTaskType(definition.taskType, defaults.taskType);
+  const weekdays = numberListValue(metric.weekdays);
+  const hours = stringListValue(metric.hours);
+  const productIds = stringListValue(metric.productIds);
+  const externalProductIds = stringListValue(metric.externalProductIds);
+  const productRefs = recordListValue(metric.productRefs);
+  const categorySelections = recordListValue(metric.categorySelections);
+  const categoryCatalogSource = enumValue(
+    stringValue(conditions.categoryCatalogSource) ??
+      stringValue(metric.categoryCatalogSource),
+    ["LANGAME", "LEETPLUS"] as const,
+    defaults.categoryCatalogSource,
+  );
+  const purchaseSource = enumValue(
+    stringValue(conditions.purchaseSource) ?? stringValue(metric.purchaseSource),
+    ["PRODUCT", "CATEGORY"] as const,
+    defaults.purchaseSource,
+  );
+  const selectedProducts = productRefs.length
+    ? productRefs
+        .map((product, index) => {
+          const id = stringValue(product.productId) ?? productIds[index];
+          if (!id) return null;
+          const externalProductId: string | null =
+            stringValue(product.externalProductId) ??
+            externalProductIds[index] ??
+            null;
+          return {
+            id,
+            name: stringValue(product.name) ?? "Выбранный товар",
+            externalProductId,
+            externalDomain: stringValue(product.externalDomain),
+          } as SelectedProduct;
+        })
+        .filter((product): product is SelectedProduct => product !== null)
+    : productIds.map((id, index) => ({
+        id,
+        name: "Выбранный товар",
+        externalProductId: externalProductIds[index] ?? null,
+        externalDomain: null,
+      }));
+  const selectedProductGroups = categorySelections.map((group) => ({
+    id: stringValue(group.id) ?? "",
+    source: categoryCatalogSource,
+    name: stringValue(group.name) ?? "Выбранная категория",
+    categoryIds: stringListValue(group.categoryIds),
+    productCount: 0,
+    storeCount: 0,
+    storeNames: [],
+    refs: recordListValue(group.refs)
+      .map((ref) => {
+        const externalDomain = stringValue(ref.externalDomain);
+        const externalGroupId = stringValue(ref.externalGroupId);
+        if (!externalDomain || !externalGroupId) return null;
+        return {
+          externalDomain,
+          externalGroupId,
+          productCount: numberValue(ref.productCount, 0),
+          storeIds: stringListValue(ref.storeIds),
+        };
+      })
+      .filter(
+        (
+          ref,
+        ): ref is GuestGameMissionProductGroup["refs"][number] => ref !== null,
+      ),
+  })).filter((group) => Boolean(group.id));
+
+  return {
+    form: {
+      ...defaults,
+      name: definition.name || defaults.name,
+      taskType,
+      visibility:
+        definition.visibility === "HIDDEN" ? "HIDDEN" : defaults.visibility,
+      audienceId: definition.audienceId ?? "",
+      storeIds:
+        definition.storeIds.length > 0 ? definition.storeIds : defaults.storeIds,
+      indefinite:
+        definition.indefinite === true || conditions.indefinite === true,
+      periodFrom: localInputFromIso(definition.periodFrom, defaults.periodFrom),
+      periodTo: localInputFromIso(definition.periodTo, defaults.periodTo),
+      sessionType: enumValue(
+        stringValue(conditions.sessionType),
+        ["ANY", "HOURLY", "PACKAGE_OR_SUBSCRIPTION"] as const,
+        defaults.sessionType,
+      ),
+      target: numberValue(metric.target, defaults.target),
+      windowDays: numberValue(metric.windowDays, defaults.windowDays),
+      hours: stringValue(metric.hours) ?? hours[0] ?? defaults.hours,
+      weekdays,
+      minSessionMinutes: numberValue(
+        metric.minSessionMinutes,
+        defaults.minSessionMinutes,
+      ),
+      purchaseSource,
+      categoryCatalogSource,
+      productMatch: enumValue(
+        stringValue(metric.productMatch),
+        ["ANY", "ALL"] as const,
+        defaults.productMatch,
+      ),
+      amountMode: enumValue(
+        stringValue(metric.amountMode),
+        ["NONE", "SINGLE_MINIMUM", "PERIOD_TOTAL"] as const,
+        defaults.amountMode,
+      ),
+      minimumAmount: numberValue(metric.minSpendAmount, defaults.minimumAmount),
+      totalAmount: numberValue(metric.totalAmount, defaults.totalAmount),
+      topupMode: enumValue(
+        stringValue(metric.topupMode),
+        ["SINGLE", "COUNT", "PERIOD_TOTAL"] as const,
+        defaults.topupMode,
+      ),
+      topupComparison: enumValue(
+        stringValue(metric.amountComparison),
+        ["EXACT", "AT_LEAST"] as const,
+        defaults.topupComparison,
+      ),
+      topupAmount: numberValue(metric.amount, defaults.topupAmount),
+      topupCount: numberValue(metric.count, defaults.topupCount),
+      checkInMode: enumValue(
+        stringValue(metric.checkInMode),
+        ["SINGLE", "COUNT", "PERIOD", "STREAK"] as const,
+        defaults.checkInMode,
+      ),
+      checkInCount: numberValue(metric.count, defaults.checkInCount),
+      checkInDays: numberValue(metric.days, defaults.checkInDays),
+      specificDayEnabled: weekdays.length > 0,
+      specificTimeEnabled: hours.length > 0,
+      periodicity: enumValue(
+        stringValue(conditions.periodicity) ?? stringValue(reward.periodicity),
+        ["NONE", "DAILY", "WEEKLY", "MONTHLY"] as const,
+        defaults.periodicity,
+      ),
+      rewardType: wizardRewardTypeFromDefinition(reward.type),
+      rewardAmount: numberValue(reward.amount, defaults.rewardAmount),
+      rewardLabel: stringValue(reward.label) ?? defaults.rewardLabel,
+      delivery:
+        reward.delivery === "ADMIN_APPROVAL" ? "ADMIN_APPROVAL" : "AUTOMATIC",
+      lootBoxId: stringValue(reward.lootBoxId) ?? "",
+      promoCodeId: stringValue(reward.promoCodeId) ?? "",
+      xpEnabled: reward.xpEnabled !== false,
+      xpAmount: numberValue(reward.xpAmount, defaults.xpAmount),
+      budgetUnlimited: reward.budgetUnlimited === true,
+      budgetAmount: numberValue(reward.budgetAmount, defaults.budgetAmount),
+      perGuestLimitUnlimited: reward.perGuestLimitUnlimited === true,
+      perGuestLimit: numberValue(reward.perGuestLimit, defaults.perGuestLimit),
+      totalRewardLimit: numberValue(
+        reward.totalRewardLimit,
+        defaults.totalRewardLimit,
+      ),
+      description: stringValue(appearance.description) ?? defaults.description,
+      actionText: stringValue(appearance.actionText) ?? defaults.actionText,
+      theme: enumValue(
+        stringValue(appearance.theme),
+        ["CLASSIC", "EMERALD", "VIOLET", "DARK", "GOLD", "BLACK_RED"] as const,
+        defaults.theme,
+      ),
+      icon: stringValue(appearance.icon) ?? defaults.icon,
+      coverUrl: stringValue(appearance.coverUrl) ?? "",
+    },
+    products: uniqueSelectedProducts(selectedProducts),
+    productGroups: selectedProductGroups,
+  };
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function recordListValue(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(recordValue) : [];
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function stringListValue(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(stringValue).filter((item): item is string => Boolean(item))
+    : [];
+}
+
+function numberListValue(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is number =>
+          typeof item === "number" && Number.isFinite(item),
+      )
+    : [];
+}
+
+function numberValue(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function enumValue<T extends string>(
+  value: string | null,
+  values: readonly T[],
+  fallback: T,
+): T {
+  return values.includes(value as T) ? (value as T) : fallback;
+}
+
+function wizardTaskType(value: string, fallback: TaskType) {
+  return enumValue(
+    value,
+    ["APP_OPEN", "PLAY_TIME", "PRODUCT_PURCHASE", "BALANCE_TOPUP", "CHECK_IN"] as const,
+    fallback,
+  );
+}
+
+function wizardRewardTypeFromDefinition(value: unknown): RewardType {
+  const normalized = stringValue(value)?.toUpperCase();
+  if (normalized === "BONUS_BALANCE" || normalized === "LANGAME_BONUS") {
+    return "LANGAME_BONUS";
+  }
+  if (normalized === "LOOT_BOX_ENTITLEMENT" || normalized === "LOOTBOX") {
+    return "LOOTBOX";
+  }
+  if (normalized === "PROMOCODE") return "PROMOCODE";
+  return "NONE";
+}
+
+function localInputFromIso(value: string | null | undefined, fallback: string) {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : localDateTime(date);
+}
+
+function uniqueSelectedProducts(products: SelectedProduct[]) {
+  return products.filter(
+    (product, index) =>
+      product.id && products.findIndex((candidate) => candidate.id === product.id) === index,
+  );
 }
 
 function initialState(stores: Store[]): WizardState {

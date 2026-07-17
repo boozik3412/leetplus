@@ -211,6 +211,11 @@ export type GuestGameMissionWizardSaveResult = {
   readiness: GuestGameMissionWizardReadiness;
 };
 
+export type GuestGameMissionWizardLoadResult =
+  GuestGameMissionWizardSaveResult & {
+    definition: GuestGameMissionWizardDto;
+  };
+
 export type GuestGameMissionProductGroup = {
   id: string;
   source: "LANGAME" | "LEETPLUS";

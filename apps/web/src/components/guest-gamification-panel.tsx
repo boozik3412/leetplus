@@ -1499,7 +1499,7 @@ export function GuestGamificationPanel({
     [workspace.missions],
   );
   const regularMissions = useMemo(
-    () => workspace.missions.filter((mission) => !isCheckInMission(mission)),
+    () => workspace.missions,
     [workspace.missions],
   );
 
@@ -1824,8 +1824,8 @@ export function GuestGamificationPanel({
         progressUnit: nullable(missionForm.progressUnit),
         audienceId: nullable(missionForm.audienceId),
         storeIds: missionForm.storeIds,
-        periodFrom: nullable(missionForm.periodFrom),
-        periodTo: nullable(missionForm.periodTo),
+        periodFrom: dateInputIsoValue(missionForm.periodFrom),
+        periodTo: dateInputIsoValue(missionForm.periodTo),
         budgetAmount: missionForm.budgetUnlimited
           ? null
           : missionForm.budgetAmount,
@@ -7668,6 +7668,9 @@ function MissionsTab({
   saving: string | null;
   canManage: boolean;
 }) {
+  const [editorChoice, setEditorChoice] = useState<GuestGameMission | null>(
+    null,
+  );
   const missionTemplates = missions.filter(
     (mission) => mission.id !== editingId,
   );
@@ -7680,7 +7683,8 @@ function MissionsTab({
         : "Настройка задания";
 
   return (
-    <RulesLayout
+    <>
+      <RulesLayout
       canManage={canManage}
       formTitle={formTitle}
       formAction={
@@ -7904,6 +7908,7 @@ function MissionsTab({
           meta={[
             item.audience?.name ?? "все гости",
             missionVisibilitySummary(item.conditions),
+            missionAvailabilitySummary(item),
             `тип: ${sessionTypeLabel(stringRule(item.conditions, "sessionType", ""))}`,
             tariffRuleSummary(item.conditions),
             guestLogRuleSummary(item.conditions, item.antiFraudRules),
@@ -7913,7 +7918,7 @@ function MissionsTab({
             formatBudgetAmount(item.budgetAmount),
           ]}
           details={<MissionQuestStepIdSummary mission={item} />}
-          onEdit={() => onEdit(item)}
+          onEdit={() => setEditorChoice(item)}
           onStatus={(status) => onStatus("missions", item.id, status)}
           saving={saving === `missions-${item.id}`}
           onDelete={() => onDelete("missions", item.id, item.name)}
@@ -7921,7 +7926,68 @@ function MissionsTab({
           canManage={canManage}
         />
       )}
-    />
+      />
+      {editorChoice ? (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center bg-zinc-950/55 p-4 backdrop-blur-sm"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setEditorChoice(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mission-editor-choice-title"
+            className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <h2
+              id="mission-editor-choice-title"
+              className="text-xl font-black text-zinc-950 dark:text-white"
+            >
+              Как редактировать задание?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              «{editorChoice.name}» можно открыть в мастере с live-предпросмотром
+              или в старом расширенном редакторе.
+            </p>
+            <div className="mt-5 grid gap-3">
+              {editorChoice.definitionVersion === 2 ? (
+                <Link
+                  href={`/gamification/missions/wizard?missionId=${encodeURIComponent(editorChoice.id)}`}
+                  className={`${primaryButtonClass} justify-center text-center`}
+                >
+                  Открыть мастер с предпросмотром
+                </Link>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  Это правило создано в контракте v1. Для него доступен старый
+                  редактор; новые правила v2 можно редактировать в мастере.
+                </div>
+              )}
+              <button
+                type="button"
+                className={`${smallButtonClass} justify-center`}
+                onClick={() => {
+                  const mission = editorChoice;
+                  setEditorChoice(null);
+                  onEdit(mission);
+                }}
+              >
+                Открыть старый редактор
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950 dark:hover:bg-zinc-900 dark:hover:text-white"
+                onClick={() => setEditorChoice(null)}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -16769,6 +16835,21 @@ function formatMoney(value: number) {
 
 function formatBudgetAmount(value: number | null | undefined) {
   return value == null ? "Безлимит" : formatMoney(value);
+}
+
+function missionAvailabilitySummary(mission: GuestGameMission) {
+  const now = Date.now();
+  const from = mission.periodFrom ? new Date(mission.periodFrom).getTime() : null;
+  const to = mission.periodTo ? new Date(mission.periodTo).getTime() : null;
+
+  if (mission.status === "ACTIVE" && from && Number.isFinite(from) && from > now) {
+    return `начнётся ${formatDate(mission.periodFrom)}`;
+  }
+  if (mission.status === "ACTIVE" && to && Number.isFinite(to) && to < now) {
+    return `период завершён ${formatDate(mission.periodTo)}`;
+  }
+  if (!mission.periodTo) return "бессрочно";
+  return `до ${formatDate(mission.periodTo)}`;
 }
 
 function formatPercent(value: number) {

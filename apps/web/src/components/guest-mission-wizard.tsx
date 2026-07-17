@@ -2627,7 +2627,11 @@ function wizardTaskType(value: string, fallback: TaskType) {
 
 function wizardRewardTypeFromDefinition(value: unknown): RewardType {
   const normalized = stringValue(value)?.toUpperCase();
-  if (normalized === "BONUS_BALANCE" || normalized === "LANGAME_BONUS") {
+  if (
+    normalized === "BONUS" ||
+    normalized === "BONUS_BALANCE" ||
+    normalized === "LANGAME_BONUS"
+  ) {
     return "LANGAME_BONUS";
   }
   if (normalized === "LOOT_BOX_ENTITLEMENT" || normalized === "LOOTBOX") {

@@ -15677,6 +15677,8 @@ function mapMission(row: MissionRow): GuestGameMission {
 function missionRowToWizardDto(row: MissionRow): GuestGameMissionWizardDto {
   const conditions = jsonRecord(row.conditions);
   const reward = jsonRecord(conditions.reward ?? null);
+  const embeddedRewardType = wizardRewardType(reward.type);
+  const useEmbeddedRewardReference = embeddedRewardType === row.rewardType;
   return {
     name: row.name,
     status: row.status,
@@ -15691,9 +15693,11 @@ function missionRowToWizardDto(row: MissionRow): GuestGameMissionWizardDto {
     conditions,
     reward: {
       ...reward,
-      type: reward.type ?? row.rewardType,
-      amount: reward.amount ?? numberOrNull(row.rewardAmount),
-      label: reward.label ?? row.rewardLabel,
+      type: row.rewardType,
+      amount: numberOrNull(row.rewardAmount),
+      label: row.rewardLabel,
+      lootBoxId: useEmbeddedRewardReference ? reward.lootBoxId : null,
+      promoCodeId: useEmbeddedRewardReference ? reward.promoCodeId : null,
       xpEnabled: row.xpReward > 0,
       xpAmount: row.xpReward,
       perGuestLimit: row.perGuestLimit,

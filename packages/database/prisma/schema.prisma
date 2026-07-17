@@ -2385,6 +2385,7 @@ model GuestSession {
 
   @@unique([tenantId, externalProvider, externalDomain, externalSessionId])
   @@index([tenantId, startedAt])
+  @@index([tenantId, updatedAt], map: "guest_session_tenant_updated_idx")
   @@index([tenantId, externalGuestId])
   @@index([guestId])
   @@index([storeId])

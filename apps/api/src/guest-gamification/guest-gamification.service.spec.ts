@@ -7883,6 +7883,29 @@ describe('GuestGamificationService', () => {
   });
 
   describe('getSnapshotFacts', () => {
+    it('prioritizes sessions updated by the latest Langame synchronization', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestSession.findMany.mockResolvedValue([]);
+      prisma.guestLog.findMany.mockResolvedValue([]);
+      prisma.guestTransaction.findMany.mockResolvedValue([]);
+      prisma.guestOperationLog.findMany.mockResolvedValue([]);
+      prisma.guestBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guest.findMany.mockResolvedValue([]);
+      prisma.guestGroup.findMany.mockResolvedValue([]);
+      prisma.salesFact.findMany.mockResolvedValue([]);
+      prisma.guestGameEvent.findMany.mockResolvedValue([]);
+
+      await service.getSnapshotFacts(user);
+
+      expect(prisma.guestSession.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+        }),
+      );
+    });
+
     it('exposes eligible referral registrations as profile-linked facts', async () => {
       const { service, prisma } = createService();
 
@@ -7970,6 +7993,91 @@ describe('GuestGamificationService', () => {
   });
 
   describe('runSnapshotPipeline', () => {
+    it('stores matching intermediate progress facts without issuing a reward', async () => {
+      const { service } = createService();
+      const progressDryRun = dryRunResult({
+        summary: {
+          checkedRules: 1,
+          eligibleRules: 0,
+          blockedRules: 1,
+          estimatedRewardAmount: 0,
+          projectedXpDelta: 0,
+        },
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            eligible: false,
+            xpDelta: 0,
+            rewardAmount: null,
+            progress: {
+              applicable: true,
+              aggregation: 'duration',
+              current: 40,
+              target: 60,
+              percent: 66.67,
+              completed: false,
+              matchedEvents: 1,
+              unit: 'минуты',
+              windowDays: 7,
+            },
+            blockers: ['Прогресс задания: 40/60 минут'],
+          },
+        ],
+      });
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: [
+          snapshotFact('fact-play-progress', {
+            eventType: 'PLAY_HOUR',
+            sessionMinutes: 40,
+          }),
+        ],
+        summary: {
+          sessions: 1,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(progressDryRun);
+      jest.spyOn(service, 'processEvent').mockResolvedValue(
+        processResult({
+          dryRun: progressDryRun,
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: 0,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+            idempotencyKey: 'guest-game:GUEST_SESSION:PLAY_HOUR:progress',
+            idempotent: false,
+            langameWrite: false,
+          },
+        }),
+      );
+
+      const result = await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(result).toMatchObject({
+        processedFacts: 1,
+        queuedRewards: 0,
+        appliedXpDelta: 0,
+      });
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'fact-play-progress',
+          eventType: 'PLAY_HOUR',
+          activeRulesOnly: true,
+        }),
+      );
+    });
+
     it('skips facts without guests, skips non-active eligible rules, and marks duplicates', async () => {
       const { service } = createService();
       const activeDryRun = dryRunResult();

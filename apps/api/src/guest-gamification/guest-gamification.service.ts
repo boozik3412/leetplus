@@ -5618,7 +5618,10 @@ export class GuestGamificationService {
       this.prisma.guestSession.findMany({
         where: { tenantId: user.tenantId, startedAt: { not: null } },
         select: snapshotSessionSelect,
-        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+        // A session gets its duration and stop time only after the next
+        // Langame synchronization. Order by that synchronization update so a
+        // just-finished session cannot be hidden behind newer session starts.
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
         take: 30,
       }),
       this.prisma.guestLog.findMany({
@@ -5882,6 +5885,12 @@ export class GuestGamificationService {
         const activeXpDelta = sum(
           activeEligibleRules.map((rule) => rule.xpDelta),
         );
+        const activeProgressRules = dryRun.rules.filter(
+          (rule) =>
+            rule.status === 'ACTIVE' &&
+            rule.progress?.applicable === true &&
+            rule.progress.matchedEvents > 0,
+        );
 
         if (dryRunOnly) {
           facts.push({
@@ -5894,7 +5903,11 @@ export class GuestGamificationService {
           continue;
         }
 
-        if (!activeEligibleRules.length && activeXpDelta === 0) {
+        if (
+          !activeEligibleRules.length &&
+          activeXpDelta === 0 &&
+          !activeProgressRules.length
+        ) {
           facts.push({
             ...pipelineFactBase(fact),
             status: 'SKIPPED',

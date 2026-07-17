@@ -4338,7 +4338,7 @@ function PlayerProfilePanel({
                   data={quest.preview}
                   mode="compact"
                   showLabels={false}
-                  className="!p-0"
+                  className="!p-2"
                 />
               </button>
             ))
@@ -4427,7 +4427,7 @@ function QuestBoard({
                     data={quest.preview}
                     mode="compact"
                     showLabels={false}
-                    className="!p-0"
+                    className="!p-2"
                   />
                 </button>
               ))

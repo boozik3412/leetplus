@@ -132,7 +132,7 @@ export function SimpleReportTable({
   return (
     <div>
       <div className="flex flex-col gap-3 border-b border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800/45 dark:bg-zinc-950 lg:flex-row lg:items-end lg:justify-between">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {filters.map((filter) => {
             const options = uniqueValues(rows, filter.key);
             const selectedValues = selectedFilterValues(filterValues[filter.key]);

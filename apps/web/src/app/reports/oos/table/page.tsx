@@ -24,6 +24,7 @@ export default async function OosTablePage({
   const rows = report.outOfStockRiskProducts.map((row) => ({
     storeName: row.storeName,
     supplierName: row.supplierName ?? "Без поставщика",
+    categoryName: row.categoryName ?? "Без категории",
     name: row.name,
     stockQuantity: row.stockQuantity,
     averageDailySales: row.averageDailySales,
@@ -72,6 +73,7 @@ export default async function OosTablePage({
         filters={[
           { key: "storeName", label: "Клуб", type: "multi-select" },
           { key: "supplierName", label: "Поставщик", type: "multi-select" },
+          { key: "categoryName", label: "Категория", type: "multi-select" },
           { key: "name", label: "Товар", type: "text" },
         ]}
       />

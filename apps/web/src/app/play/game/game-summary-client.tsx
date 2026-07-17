@@ -2078,7 +2078,9 @@ function HomeLootBoxes({
                   />
                 </span>
                 <span className="lp-lootbox-entry-bottom">
-                  <span>{lootboxCardHint(card)}</span>
+                  <span className="lp-lootbox-entry-hint">
+                    {lootboxCardHint(card)}
+                  </span>
                   <span className="lp-lootbox-mini-lock" aria-hidden="true">
                     <LockIcon />
                   </span>
@@ -8685,7 +8687,7 @@ const clubHomeCss = `
 .lp-club-brand {
   gap: 12px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 820;
   letter-spacing: 0.14em;
 }
@@ -9307,12 +9309,23 @@ const clubHomeCss = `
 }
 
 .lp-lootbox-entry-bottom {
+  height: 46px;
   min-height: 46px;
+  overflow: hidden;
   padding-top: 13px;
   border-top: 1px solid rgba(196, 224, 225, 0.12);
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.lp-lootbox-entry-hint {
+  display: -webkit-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .lp-lootbox-mini-lock {
@@ -11852,8 +11865,8 @@ const clubHomeCss = `
 
 .lp-club-profile-logo {
   display: grid;
-  min-height: 92px;
-  grid-template-columns: 58px minmax(0, 1fr);
+  min-height: 40px;
+  grid-template-columns: 40px minmax(0, 1fr);
   align-items: center;
   gap: 13px;
   padding-bottom: 18px;
@@ -11868,8 +11881,8 @@ const clubHomeCss = `
   position: relative;
   display: grid;
   place-items: center;
-  width: 58px;
-  height: 58px;
+  width: 40px;
+  height: 40px;
   border: 1px solid rgba(131, 228, 236, 0.4);
   border-radius: 50%;
   color: var(--cyan);

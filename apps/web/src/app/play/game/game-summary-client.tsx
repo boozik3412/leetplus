@@ -12201,92 +12201,48 @@ const clubHomeCss = `
 }
 
 .lp-club-side-quest {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
+  display: block;
   width: 100%;
-  min-height: 58px;
-  padding: 10px;
-  border: 1px solid rgba(196, 224, 225, 0.14);
-  border-radius: 7px;
+  padding: 0;
+  border: 0;
   color: inherit;
   cursor: pointer;
   font: inherit;
   text-align: left;
   text-decoration: none;
-  background: rgba(2, 8, 11, 0.48);
+  background: transparent;
+}
+
+.lp-club-side-quest > div,
+.lp-club-quest-full-card > div {
+  width: 100%;
   transition:
-    border-color 180ms ease,
-    background 180ms ease,
+    filter 180ms ease,
     transform 180ms ease;
 }
 
-.lp-club-side-quest:hover,
-.lp-club-side-quest.is-current {
-  border-color: rgba(131, 228, 236, 0.58);
-  background:
-    linear-gradient(90deg, rgba(131, 228, 236, 0.1), transparent),
-    rgba(8, 18, 22, 0.82);
+.lp-club-side-quest:hover > div,
+.lp-club-side-quest.is-current > div,
+.lp-club-quest-full-card:hover > div,
+.lp-club-quest-full-card.is-current > div {
+  filter: brightness(1.08);
   transform: translateY(-1px);
 }
 
-.lp-club-side-quest.is-done {
-  border-color: rgba(148, 214, 184, 0.42);
-  background: rgba(23, 48, 40, 0.3);
+.lp-club-side-quest.is-done > div,
+.lp-club-quest-full-card.is-done > div {
+  filter: saturate(0.8);
 }
 
-.lp-club-side-quest-icon {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgba(131, 228, 236, 0.26);
-  border-radius: 7px;
-  color: var(--cyan);
-  background: rgba(196, 224, 225, 0.045);
+.lp-club-side-quest:focus-visible,
+.lp-club-quest-full-card:focus-visible {
+  outline: none;
 }
 
-.lp-club-side-quest-copy {
-  display: block;
-  min-width: 0;
-}
-
-.lp-club-side-quest strong {
-  display: block;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lp-club-side-quest-copy > span {
-  display: block;
-  margin-top: 5px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lp-club-side-quest-progress {
-  position: relative;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(196, 224, 225, 0.08);
-}
-
-.lp-club-side-quest-progress i {
-  display: block;
-  width: var(--value);
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--cyan), var(--teal));
-  box-shadow: 0 0 14px rgba(131, 228, 236, 0.4);
+.lp-club-side-quest:focus-visible > div,
+.lp-club-quest-full-card:focus-visible > div {
+  outline: 2px solid var(--cyan);
+  outline-offset: 4px;
 }
 
 .lp-club-quest-widget-actions {
@@ -12483,103 +12439,15 @@ const clubHomeCss = `
 }
 
 .lp-club-quest-full-card {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  min-height: 68px;
-  padding: 10px 12px;
-  border: 1px solid rgba(196, 224, 225, 0.14);
-  border-radius: 7px;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
   color: inherit;
   cursor: pointer;
   font: inherit;
   text-align: left;
-  background: rgba(2, 8, 11, 0.58);
-  transition:
-    border-color 180ms ease,
-    background 180ms ease,
-    transform 180ms ease;
-}
-
-.lp-club-quest-full-card:hover,
-.lp-club-quest-full-card.is-current {
-  border-color: rgba(131, 228, 236, 0.6);
-  background:
-    linear-gradient(90deg, rgba(131, 228, 236, 0.1), transparent),
-    rgba(8, 18, 22, 0.86);
-  transform: translateY(-1px);
-}
-
-.lp-club-quest-full-card.is-done {
-  border-color: rgba(148, 214, 184, 0.46);
-  background: rgba(23, 48, 40, 0.3);
-}
-
-.lp-club-quest-full-icon {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid rgba(131, 228, 236, 0.28);
-  border-radius: 7px;
-  color: var(--cyan);
-  background: rgba(196, 224, 225, 0.045);
-}
-
-.lp-club-quest-full-main {
-  min-width: 0;
-}
-
-.lp-club-quest-full-main strong {
-  display: block;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.15;
-}
-
-.lp-club-quest-full-main > span {
-  display: block;
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.35;
-}
-
-.lp-club-quest-progress {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  margin-top: 7px;
-}
-
-.lp-club-quest-progress-bar {
-  display: block;
-  width: 100%;
-  height: 6px;
-  overflow: hidden;
-  border: 1px solid rgba(196, 224, 225, 0.14);
-  border-radius: 999px;
-  background: rgba(0, 6, 9, 0.72);
-}
-
-.lp-club-quest-progress-bar i {
-  display: block;
-  width: var(--value);
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--cyan), var(--teal));
-  box-shadow: 0 0 18px rgba(131, 228, 236, 0.38);
-}
-
-.lp-club-quest-progress > span:not(.lp-club-quest-progress-bar) {
-  color: var(--quiet);
-  font-size: 9px;
-  font-weight: 860;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
+  background: transparent;
 }
 
 .sr-only {
@@ -13676,10 +13544,6 @@ const clubHomeCss = `
     background:
       linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 28%),
       rgba(5, 12, 15, 0.985);
-  }
-
-  .lp-club-quest-full-card {
-    grid-template-columns: 42px minmax(0, 1fr);
   }
 
   .lp-club-detail-head {

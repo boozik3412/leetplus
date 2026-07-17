@@ -585,14 +585,25 @@ export default async function GamificationPage({
     );
   }
 
+  const needsGuestDirectory = ["profiles", "rewards", "testRun"].includes(
+    initialTab,
+  );
+  const needsLeads = initialTab === "profiles";
+  const needsProductCatalog = initialTab === "seasons";
   const [workspace, audiences, stores, guestsResponse, leads, products] =
     await Promise.all([
       safeValue(getGuestGamificationWorkspace(), emptyWorkspace),
       safeValue(getGuestAudiences(), []),
       safeValue<Store[]>(getStores(), []),
-      safeNullable(getGuests({ pageSize: "80", sort: "lastActivity" })),
-      safeValue<GuestCrmLead[]>(getGuestCrmLeads(), []),
-      safeValue<Product[]>(getProducts(), []),
+      needsGuestDirectory
+        ? safeNullable(getGuests({ pageSize: "80", sort: "lastActivity" }))
+        : Promise.resolve(null),
+      needsLeads
+        ? safeValue<GuestCrmLead[]>(getGuestCrmLeads(), [])
+        : Promise.resolve([]),
+      needsProductCatalog
+        ? safeValue<Product[]>(getProducts(), [])
+        : Promise.resolve([]),
     ]);
 
   const guests: GuestDashboardRow[] = guestsResponse?.rows ?? [];

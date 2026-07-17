@@ -4,7 +4,7 @@ import { getApiUrl, getAuthHeaders } from "./api";
 export async function proxyJsonRequest(
   request: Request,
   path: string,
-  method: "POST" | "PATCH" | "DELETE",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
 ) {
   const headers = await getAuthHeaders();
 
@@ -15,10 +15,12 @@ export async function proxyJsonRequest(
     );
   }
 
-  const body = method === "DELETE" ? undefined : await request.text();
+  const body =
+    method === "GET" || method === "DELETE" ? undefined : await request.text();
   const url = new URL(request.url);
   const response = await fetch(`${getApiUrl()}${path}${url.search}`, {
     method,
+    cache: "no-store",
     headers: {
       ...headers,
       ...(body ? { "Content-Type": "application/json" } : {}),

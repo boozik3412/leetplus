@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type Dispatch,
@@ -1405,6 +1407,13 @@ export function GuestGamificationPanel({
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
   const [editorMode, setEditorMode] = useState<EditorMode>(initialEditorMode);
+  const [directoryGuests, setDirectoryGuests] = useState(guests);
+  const [directoryLeads, setDirectoryLeads] = useState(leads);
+  const [missionProducts, setMissionProducts] = useState(products);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [missionProductsLoading, setMissionProductsLoading] = useState(false);
+  const directoryRequested = useRef(guests.length > 0 || leads.length > 0);
+  const missionProductsRequested = useRef(products.length > 0);
   const [profileForm, setProfileForm] =
     useState<ProfileForm>(defaultProfileForm);
   const [lootBoxForm, setLootBoxForm] =
@@ -1503,10 +1512,91 @@ export function GuestGamificationPanel({
     [workspace.missions],
   );
 
+  useEffect(() => {
+    setDirectoryGuests(guests);
+    setDirectoryLeads(leads);
+    directoryRequested.current = guests.length > 0 || leads.length > 0;
+  }, [guests, leads]);
+
+  useEffect(() => {
+    setMissionProducts(products);
+    missionProductsRequested.current = products.length > 0;
+  }, [products]);
+
+  async function ensureGuestDirectory() {
+    if (directoryRequested.current || directoryLoading) return;
+
+    directoryRequested.current = true;
+    setDirectoryLoading(true);
+    try {
+      const [guestsResponse, leadsResponse] = await Promise.all([
+        fetch("/api/guests?pageSize=80&sort=lastActivity", {
+          cache: "no-store",
+        }),
+        fetch("/api/guests/crm/leads", { cache: "no-store" }),
+      ]);
+      if (!guestsResponse.ok || !leadsResponse.ok) {
+        throw new Error("Не удалось загрузить справочник гостей.");
+      }
+      const [guestPayload, leadPayload] = (await Promise.all([
+        guestsResponse.json(),
+        leadsResponse.json(),
+      ])) as [
+        { rows?: GuestDashboardRow[] },
+        GuestCrmLead[],
+      ];
+      setDirectoryGuests(guestPayload.rows ?? []);
+      setDirectoryLeads(Array.isArray(leadPayload) ? leadPayload : []);
+    } catch (loadError) {
+      directoryRequested.current = false;
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Не удалось загрузить справочник гостей.",
+      );
+    } finally {
+      setDirectoryLoading(false);
+    }
+  }
+
+  async function ensureMissionProducts() {
+    if (missionProductsRequested.current || missionProductsLoading) return;
+
+    missionProductsRequested.current = true;
+    setMissionProductsLoading(true);
+    try {
+      const response = await fetch("/api/products", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Не удалось загрузить каталог товаров.");
+      }
+      const payload = (await response.json()) as Product[];
+      setMissionProducts(Array.isArray(payload) ? payload : []);
+    } catch (loadError) {
+      missionProductsRequested.current = false;
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Не удалось загрузить каталог товаров.",
+      );
+    } finally {
+      setMissionProductsLoading(false);
+    }
+  }
+
+  function openGamificationTab(tab: TabId) {
+    if (["profiles", "rewards", "testRun"].includes(tab)) {
+      void ensureGuestDirectory();
+    }
+    if (["missions", "seasons"].includes(tab)) {
+      void ensureMissionProducts();
+    }
+    setActiveTab(tab);
+  }
+
   function editProfile(profile: GuestGameProfile) {
     setProfileForm(profileToForm(profile));
     setEditingProfileId(profile.id);
-    setActiveTab("profiles");
+    openGamificationTab("profiles");
   }
 
   function resetProfileForm() {
@@ -1538,14 +1628,16 @@ export function GuestGamificationPanel({
     setMissionForm(missionToForm(mission));
     setEditingMissionId(mission.id);
     setIsMissionFormOpen(true);
-    setActiveTab(isCheckInMission(mission) ? "checkIn" : "missions");
+    if (!isCheckInMission(mission)) void ensureMissionProducts();
+    openGamificationTab(isCheckInMission(mission) ? "checkIn" : "missions");
   }
 
   function createMission() {
     setMissionForm(defaultMissionForm);
     setEditingMissionId(null);
     setIsMissionFormOpen(true);
-    setActiveTab("missions");
+    void ensureMissionProducts();
+    openGamificationTab("missions");
   }
 
   function editCheckInMission(mission: GuestGameMission) {
@@ -1578,14 +1670,16 @@ export function GuestGamificationPanel({
     setSeasonForm(seasonToForm(season));
     setEditingSeasonId(season.id);
     setIsSeasonFormOpen(true);
-    setActiveTab("seasons");
+    void ensureMissionProducts();
+    openGamificationTab("seasons");
   }
 
   function createSeason() {
     setSeasonForm(defaultSeasonForm);
     setEditingSeasonId(null);
     setIsSeasonFormOpen(true);
-    setActiveTab("seasons");
+    void ensureMissionProducts();
+    openGamificationTab("seasons");
   }
 
   function resetSeasonForm() {
@@ -1620,7 +1714,7 @@ export function GuestGamificationPanel({
   function editReward(reward: GuestGameReward) {
     setRewardForm(rewardToForm(reward));
     setEditingRewardId(reward.id);
-    setActiveTab("rewards");
+    openGamificationTab("rewards");
   }
 
   function resetRewardForm() {
@@ -2794,7 +2888,7 @@ export function GuestGamificationPanel({
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => openGamificationTab(tab.id)}
                 className={[
                   "whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition",
                   activeTab === tab.id
@@ -2807,13 +2901,20 @@ export function GuestGamificationPanel({
             ))}
           </div>
 
+          {directoryLoading &&
+          ["profiles", "rewards", "testRun"].includes(activeTab) ? (
+            <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+              Загружаем справочник гостей…
+            </p>
+          ) : null}
+
           {activeTab === "overview" ? (
             <OverviewTab
               workspace={workspace}
               pendingRewards={pendingRewards}
               onRewardStatus={updateRewardStatus}
               onEditReward={editReward}
-              onOpenTab={setActiveTab}
+              onOpenTab={openGamificationTab}
               saving={saving}
               tenantSlug={tenantSlug}
               stores={stores}
@@ -2839,8 +2940,8 @@ export function GuestGamificationPanel({
             <ProfilesTab
               form={profileForm}
               setForm={setProfileForm}
-              guests={guests}
-              leads={leads}
+              guests={directoryGuests}
+              leads={directoryLeads}
               profiles={filteredProfiles}
               query={query}
               setQuery={setQuery}
@@ -2888,7 +2989,8 @@ export function GuestGamificationPanel({
               missions={regularMissions}
               audiences={audiences}
               stores={stores}
-              products={products}
+              products={missionProducts}
+              productsLoading={missionProductsLoading}
               tariffSnapshots={workspace.tariffSnapshots}
               guestLogCatalog={workspace.guestLogCatalog}
               editingId={editingMissionId}
@@ -2932,7 +3034,7 @@ export function GuestGamificationPanel({
               seasons={workspace.seasons}
               audiences={audiences}
               stores={stores}
-              products={products}
+              products={missionProducts}
               lootBoxes={workspace.lootBoxes}
               editingId={editingSeasonId}
               isFormOpen={isSeasonFormOpen}
@@ -2976,7 +3078,7 @@ export function GuestGamificationPanel({
               redeemedReward={redeemedReward}
               rewards={workspace.rewards}
               profiles={workspace.profiles}
-              guests={guests}
+              guests={directoryGuests}
               stores={stores}
               lootBoxes={workspace.lootBoxes}
               missions={workspace.missions}
@@ -2999,7 +3101,7 @@ export function GuestGamificationPanel({
               result={dryRunResult}
               processResult={processEventResult}
               profiles={workspace.profiles}
-              guests={guests}
+              guests={directoryGuests}
               stores={stores}
               tariffSnapshots={workspace.tariffSnapshots}
               guestLogCatalog={workspace.guestLogCatalog}
@@ -7632,6 +7734,7 @@ function MissionsTab({
   audiences,
   stores,
   products,
+  productsLoading,
   tariffSnapshots,
   guestLogCatalog,
   editingId,
@@ -7651,6 +7754,7 @@ function MissionsTab({
   audiences: GuestAudience[];
   stores: Store[];
   products: Product[];
+  productsLoading: boolean;
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
@@ -7874,6 +7978,11 @@ function MissionsTab({
               products={products}
               onChange={(patch) => setForm({ ...form, ...patch })}
             />
+            {productsLoading && form.missionType === "PRODUCT_PURCHASE" ? (
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                Загружаем каталог товаров…
+              </p>
+            ) : null}
             <button
               type="button"
               className={primaryButtonClass}

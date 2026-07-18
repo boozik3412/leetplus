@@ -811,6 +811,9 @@ type BonusBalanceCurrentReconciliationRow =
   Prisma.GuestBonusBalanceCurrentGetPayload<{
     select: typeof bonusBalanceCurrentReconciliationSelect;
   }>;
+type SupplementalActivityFactRow = Prisma.GuestActivityFactGetPayload<
+  Record<string, never>
+>;
 
 export type GuestGameUser = {
   id: string;
@@ -6348,27 +6351,116 @@ export class GuestGamificationService {
     const earliestActivation = activationDates.reduce((earliest, value) =>
       value < earliest ? value : earliest,
     );
-    const facts = await this.prisma.guestActivityFact.findMany({
-      where: {
-        tenantId: user.tenantId,
-        factType: { in: factTypes },
-        lifecycleStatus: 'ACTIVE',
-        confidence: 'EXACT',
-        supersededAt: null,
-        happenedAt: { gte: earliestActivation },
-        OR: [{ guestId: { not: null } }, { profileId: { not: null } }],
-      },
-      orderBy: [{ happenedAt: 'asc' }, { createdAt: 'asc' }],
-      take: limit * 10,
-    });
     const result = supplementalTenantResult(
       user.tenantId,
       user.tenantSlug,
       'PROCESSED',
       null,
     );
+    const candidates: Array<{
+      fact: SupplementalActivityFactRow;
+      ruleIds: string[];
+    }> = [];
+    const factPageSize = Math.max(50, limit);
+    let factCursor: { id: string } | undefined;
 
-    for (const fact of facts) {
+    while (candidates.length < limit) {
+      const facts = await this.prisma.guestActivityFact.findMany({
+        where: {
+          tenantId: user.tenantId,
+          factType: { in: factTypes },
+          lifecycleStatus: 'ACTIVE',
+          confidence: 'EXACT',
+          supersededAt: null,
+          happenedAt: { gte: earliestActivation },
+          OR: [{ guestId: { not: null } }, { profileId: { not: null } }],
+        },
+        orderBy: [{ happenedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        take: factPageSize,
+        ...(factCursor ? { cursor: factCursor, skip: 1 } : {}),
+      });
+      if (!facts.length) {
+        break;
+      }
+
+      const pageCandidates = facts.flatMap((fact) => {
+        const happenedAt = fact.happenedAt;
+        if (!happenedAt || !fact.externalDomain || !fact.amount) {
+          return [];
+        }
+        const ruleIds = [
+          ...missions
+            .filter((mission) =>
+              supplementalMissionMatchesFact(
+                mission,
+                fact.externalDomain,
+                happenedAt,
+              ),
+            )
+            .map((mission) => mission.id),
+          ...seasons
+            .filter((season) =>
+              supplementalSeasonMatchesFact(
+                season,
+                stores,
+                fact.externalDomain,
+                happenedAt,
+              ),
+            )
+            .map((season) => season.id),
+        ];
+
+        return ruleIds.length ? [{ fact, ruleIds }] : [];
+      });
+      const uniqueReceiptKeys = new Map<
+        string,
+        { factType: string; externalDomain: string; sourceHash: string }
+      >();
+      for (const { fact } of pageCandidates) {
+        uniqueReceiptKeys.set(supplementalReceiptKey(fact), {
+          factType: fact.factType,
+          externalDomain: fact.externalDomain,
+          sourceHash: fact.sourceHash,
+        });
+      }
+      const receipts = uniqueReceiptKeys.size
+        ? await this.prisma.guestGameSupplementalFactReceipt.findMany({
+            where: {
+              tenantId: user.tenantId,
+              OR: [...uniqueReceiptKeys.values()],
+            },
+            select: {
+              factType: true,
+              externalDomain: true,
+              sourceHash: true,
+              status: true,
+              attempts: true,
+            },
+          })
+        : [];
+      const receiptByKey = new Map(
+        receipts.map((receipt) => [supplementalReceiptKey(receipt), receipt]),
+      );
+
+      for (const candidate of pageCandidates) {
+        const receipt = receiptByKey.get(
+          supplementalReceiptKey(candidate.fact),
+        );
+        if (receipt && !supplementalReceiptCanBeClaimed(mode, receipt)) {
+          result.duplicateFacts += 1;
+          continue;
+        }
+
+        candidates.push(candidate);
+      }
+
+      factCursor = { id: facts[facts.length - 1].id };
+      if (facts.length < factPageSize) {
+        break;
+      }
+    }
+
+    for (const { fact, ruleIds } of candidates) {
       if (result.checkedFacts >= limit) {
         break;
       }
@@ -6376,32 +6468,6 @@ export class GuestGamificationService {
       if (!happenedAt || !fact.externalDomain || !fact.amount) {
         continue;
       }
-      const ruleIds = [
-        ...missions
-          .filter((mission) =>
-            supplementalMissionMatchesFact(
-              mission,
-              fact.externalDomain,
-              happenedAt,
-            ),
-          )
-          .map((mission) => mission.id),
-        ...seasons
-          .filter((season) =>
-            supplementalSeasonMatchesFact(
-              season,
-              stores,
-              fact.externalDomain,
-              happenedAt,
-            ),
-          )
-          .map((season) => season.id),
-      ];
-      if (!ruleIds.length) {
-        continue;
-      }
-
-      result.checkedFacts += 1;
       const receiptKey = {
         tenantId: user.tenantId,
         factType: fact.factType,
@@ -6443,6 +6509,7 @@ export class GuestGamificationService {
         result.duplicateFacts += 1;
         continue;
       }
+      result.checkedFacts += 1;
 
       try {
         const processDto: GuestGameProcessEventDto = {
@@ -20140,6 +20207,29 @@ function supplementalFactTypes(value: unknown): string[] {
   }
 
   return requested.includes('BALANCE_TOPUP') ? ['BALANCE_TOPUP'] : [];
+}
+
+function supplementalReceiptKey(value: {
+  factType: string;
+  externalDomain: string;
+  sourceHash: string;
+}) {
+  return `${value.factType}\u0000${value.externalDomain}\u0000${value.sourceHash}`;
+}
+
+function supplementalReceiptCanBeClaimed(
+  mode: Exclude<GuestGameSupplementalPipelineMode, 'OFF'>,
+  receipt: { status: string; attempts: number },
+) {
+  if (receipt.attempts >= 3) {
+    return false;
+  }
+
+  return (
+    receipt.status === 'PENDING' ||
+    receipt.status === 'FAILED' ||
+    (mode === 'LIVE' && receipt.status === 'SHADOWED')
+  );
 }
 
 function supplementalTenantResult(

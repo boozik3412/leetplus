@@ -59,6 +59,7 @@ function createPrismaMock() {
     },
     guestGameSupplementalFactReceipt: {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      findMany: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     guestGameReward: {
@@ -9851,6 +9852,153 @@ describe('GuestGamificationService supplemental pipeline', () => {
         allowedRuleIds: [supplementalMission.id],
         evaluationMode: 'LIVE_SUPPLEMENTAL',
       }),
+    );
+  });
+
+  it('promotes a SHADOWED receipt to LIVE instead of treating it as a terminal duplicate', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    prisma.guestGameSupplementalFactReceipt.findMany.mockResolvedValue([
+      {
+        factType: supplementalFact.factType,
+        externalDomain: supplementalFact.externalDomain,
+        sourceHash: supplementalFact.sourceHash,
+        status: 'SHADOWED',
+        attempts: 1,
+      },
+    ]);
+    const process = jest
+      .spyOn(service, 'processEvent')
+      .mockResolvedValue(processResult());
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 0,
+      processedFacts: 1,
+    });
+    expect(
+      prisma.guestGameSupplementalFactReceipt.updateMany,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: ['PENDING', 'FAILED', 'SHADOWED'] },
+        }),
+      }),
+    );
+    expect(process).toHaveBeenCalledTimes(1);
+  });
+
+  it('pages past terminal receipts so they cannot starve a fresh fact at the batch limit', async () => {
+    const { service, prisma } = createService();
+    const processedFacts = Array.from({ length: 50 }, (_, index) => ({
+      ...supplementalFact,
+      id: `processed-fact-${index}`,
+      sourceHash: `processed-source-hash-${index}`,
+      happenedAt: new Date(
+        supplementalFact.happenedAt.getTime() + index * 60_000,
+      ),
+    }));
+    const freshFact = {
+      ...supplementalFact,
+      id: 'fresh-fact-after-terminal-page',
+      sourceHash: 'fresh-source-hash-after-terminal-page',
+      happenedAt: new Date(supplementalFact.happenedAt.getTime() + 51 * 60_000),
+    };
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce(processedFacts)
+      .mockResolvedValueOnce([freshFact]);
+    prisma.guestGameSupplementalFactReceipt.findMany
+      .mockResolvedValueOnce(
+        processedFacts.map((fact) => ({
+          factType: fact.factType,
+          externalDomain: fact.externalDomain,
+          sourceHash: fact.sourceHash,
+          status: 'PROCESSED',
+          attempts: 1,
+        })),
+      )
+      .mockResolvedValueOnce([]);
+    const process = jest
+      .spyOn(service, 'processEvent')
+      .mockResolvedValue(processResult());
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 50,
+      processedFacts: 1,
+    });
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.guestActivityFact.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        cursor: { id: 'processed-fact-49' },
+        skip: 1,
+      }),
+    );
+    expect(process).toHaveBeenCalledWith(
+      expect.objectContaining(user),
+      expect.objectContaining({
+        sourceFactId: freshFact.id,
+        externalId: freshFact.sourceHash,
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('continues within a fetched page when a candidate loses the receipt claim race', async () => {
+    const { service, prisma } = createService();
+    const racedFact = {
+      ...supplementalFact,
+      id: 'fact-claimed-by-another-worker',
+      sourceHash: 'source-hash-claimed-by-another-worker',
+    };
+    const freshFact = {
+      ...supplementalFact,
+      id: 'fact-claimed-by-this-worker',
+      sourceHash: 'source-hash-claimed-by-this-worker',
+      happenedAt: new Date(supplementalFact.happenedAt.getTime() + 60_000),
+    };
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([racedFact, freshFact]);
+    prisma.guestGameSupplementalFactReceipt.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    const process = jest
+      .spyOn(service, 'processEvent')
+      .mockResolvedValue(processResult());
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 1,
+      processedFacts: 1,
+    });
+    expect(process).toHaveBeenCalledTimes(1);
+    expect(process).toHaveBeenCalledWith(
+      expect.objectContaining(user),
+      expect.objectContaining({ sourceFactId: freshFact.id }),
+      expect.any(Object),
     );
   });
 

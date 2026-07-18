@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/unbound-method */
 
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import {
   IntegrationProvider,
   Prisma,
@@ -173,6 +177,7 @@ function createPrismaMock() {
       create: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     guestGameSeason: {
       findMany: jest.fn(),
@@ -4524,6 +4529,207 @@ describe('GuestGamificationService', () => {
         activationData.periodFrom.toISOString(),
       );
       expect(result.mission.periodTo).toBeNull();
+    });
+  });
+
+  describe('mission ledger fallback policy', () => {
+    it('allows an administrator flow to opt a v2 play-time draft into fallback', async () => {
+      const { service, prisma } = createService();
+      const draft = missionRow({
+        missionType: 'PLAY_TIME',
+        conditions: {
+          schemaVersion: 2,
+          taskType: 'PLAY_TIME',
+          metric: { eventTypes: ['PLAY_HOUR', 'SESSION_STOP'], target: 60 },
+        },
+      });
+      prisma.guestGameMission.findFirst.mockResolvedValue(draft);
+      prisma.guestGameMission.findFirstOrThrow.mockResolvedValue(
+        missionRow({
+          ...draft,
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        }),
+      );
+
+      const result = await service.updateMissionEvaluationPolicy(
+        user,
+        'mission-1',
+        { evaluationPolicy: 'live_with_ledger_fallback' },
+      );
+
+      expect(result.evaluationPolicy).toBe('LIVE_WITH_LEDGER_FALLBACK');
+      expect(prisma.guestGameMission.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'mission-1',
+            tenantId: user.tenantId,
+            status: 'DRAFT',
+            definitionVersion: 2,
+          }),
+          data: { evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK' },
+        }),
+      );
+    });
+
+    it('refuses to change the source policy of an active mission', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameMission.findFirst.mockResolvedValue(
+        missionRow({
+          status: 'ACTIVE',
+          missionType: 'PLAY_TIME',
+          conditions: { schemaVersion: 2, taskType: 'PLAY_TIME' },
+        }),
+      );
+
+      await expect(
+        service.updateMissionEvaluationPolicy(user, 'mission-1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.guestGameMission.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses ledger fallback for non play-time missions', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameMission.findFirst.mockResolvedValue(
+        missionRow({
+          missionType: 'PRODUCT_PURCHASE',
+          conditions: {
+            schemaVersion: 2,
+            taskType: 'PRODUCT_PURCHASE',
+          },
+        }),
+      );
+
+      await expect(
+        service.updateMissionEvaluationPolicy(user, 'mission-1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.guestGameMission.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-admin roles even if their capability can edit missions', async () => {
+      const { service, prisma } = createService();
+      const marketer = { ...user, role: UserRole.MARKETER };
+
+      await expect(
+        service.updateMissionEvaluationPolicy(marketer, 'mission-1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.guestGameMission.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameMission.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('can return a play-time draft to the primary source', async () => {
+      const { service, prisma } = createService();
+      const draft = missionRow({
+        missionType: 'PLAY_TIME',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        conditions: { schemaVersion: 2, taskType: 'PLAY_TIME' },
+      });
+      prisma.guestGameMission.findFirst.mockResolvedValue(draft);
+      prisma.guestGameMission.findFirstOrThrow.mockResolvedValue(
+        missionRow({ ...draft, evaluationPolicy: 'LIVE_PRIMARY' }),
+      );
+
+      const result = await service.updateMissionEvaluationPolicy(
+        user,
+        'mission-1',
+        { evaluationPolicy: 'LIVE_PRIMARY' },
+      );
+
+      expect(result.evaluationPolicy).toBe('LIVE_PRIMARY');
+      expect(prisma.guestGameMission.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { evaluationPolicy: 'LIVE_PRIMARY' },
+        }),
+      );
+    });
+
+    it('fails closed when the draft changes during a policy update', async () => {
+      const { service, prisma } = createService();
+      const draft = missionRow({
+        missionType: 'PLAY_TIME',
+        conditions: { schemaVersion: 2, taskType: 'PLAY_TIME' },
+      });
+      prisma.guestGameMission.findFirst.mockResolvedValue(draft);
+      prisma.guestGameMission.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(
+        service.updateMissionEvaluationPolicy(user, 'mission-1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(prisma.guestGameMission.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'mission-1',
+            missionType: 'PLAY_TIME',
+            updatedAt: draft.updatedAt,
+          }),
+        }),
+      );
+      expect(prisma.guestGameMission.findFirstOrThrow).not.toHaveBeenCalled();
+    });
+
+    it('keeps the explicit fallback policy when the play-time draft autosaves', async () => {
+      const { service, prisma } = createService();
+      const draft = missionRow({
+        missionType: 'PLAY_TIME',
+        triggerKind: 'PLAY_HOUR',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        conditions: {
+          schemaVersion: 2,
+          taskType: 'PLAY_TIME',
+          sessionType: 'HOURLY',
+          metric: {
+            eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+            aggregation: 'duration',
+            target: 60,
+          },
+        },
+      });
+      prisma.guestGameMission.findFirst.mockResolvedValue(draft);
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+      prisma.guestGameMission.update.mockResolvedValue(draft);
+
+      await service.saveMissionWizard(
+        user,
+        {
+          name: 'Play-time fallback canary',
+          taskType: 'PLAY_TIME',
+          visibility: 'HIDDEN',
+          storeIds: ['store-1'],
+          indefinite: true,
+          conditions: {
+            sessionType: 'HOURLY',
+            metric: {
+              aggregation: 'duration',
+              target: 60,
+              unit: 'minutes',
+            },
+          },
+          reward: { type: 'NONE', xpEnabled: false },
+        },
+        'mission-1',
+      );
+
+      expect(prisma.guestGameMission.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'DRAFT',
+            definitionVersion: 2,
+          }),
+        }),
+      );
+      expect(
+        prisma.guestGameMission.update.mock.calls[0][0].data,
+      ).not.toHaveProperty('evaluationPolicy');
     });
   });
 

@@ -8,14 +8,14 @@
 
 ## Техническое резюме
 
-Игровой журнал уже пригоден как боевой источник для пополнений баланса и как диагностический источник для остальных условий. В коде начата безопасная подстраховка игрового времени: добавлены единый `originKey`, строгая policy-маршрутизация и последовательный `LIVE_WITH_LEDGER_FALLBACK` после grace period через общий `processEvent`. Контур остаётся `OFF`, миграция и production-rollout не выполнялись. До LIVE-canary нужно закрыть атомарное восстановление XP после частичного сбоя, проверить индексы/миграцию и накопить новую event-aligned production-метрику. Покупки дополнительно заблокированы до lifecycle reconciliation отмен и возвратов.
+Игровой журнал уже пригоден как боевой источник для пополнений баланса и как диагностический источник для остальных условий. Для безопасной подстраховки игрового времени добавлены единый `originKey`, строгая policy-маршрутизация и последовательный `LIVE_WITH_LEDGER_FALLBACK` после grace period через общий `processEvent`. Additive-миграции применены на production в режиме `OFF`, индексы проверены как ready/valid/live, а event, XP posting и reward intent теперь фиксируются атомарно. Fallback остаётся `OFF` до tenant-scoped SHADOW. Покупки дополнительно заблокированы до lifecycle reconciliation отмен и возвратов.
 
 Текущий вердикт по типам условий:
 
 | Тип условия | Текущий боевой путь | Готовность Ledger | Решение |
 | --- | --- | --- | --- |
 | Пополнение баланса | `LEDGER_SUPPLEMENTAL` | Готов | Оставить и развивать как второй боевой слой |
-| Игровое время | `LIVE_PRIMARY`; fallback-контур реализован, но `OFF` | Контракт, evaluator, origin receipt и router готовы к tenant-scoped SHADOW; сквозной production-допуск пока не получен | После миграционного preflight и XP-recovery — SHADOW и контролируемый canary |
+| Игровое время | `LIVE_PRIMARY`; fallback-контур реализован, но `OFF` | Контракт, evaluator, origin receipt, атомарные postings и router готовы к tenant/profile-scoped SHADOW; стабильным ID служит `sourceExternalId`, а при его отсутствии — только для play-time — `sessionExternalId` | SHADOW одного tenant и одного точного профиля со скрытым canary-заданием без награды, затем отдельный LIVE-canary |
 | Покупка товара | `LIVE_PRIMARY`; fallback только явным opt-in | Логика готова по автоматическим тестам, но lifecycle отмен/возвратов не закрыт | Не включать fallback до reconciliation sale ID и контролируемой production-покупки |
 | Вход в игровой модуль | `LIVE_PRIMARY` | Не готов: отдельного канонического Ledger-факта нет | Оставить только в LIVE |
 | Чекин | Отдельный LIVE check-in pipeline | Не готов: отдельного канонического Ledger-факта нет | Оставить только в LIVE и не подменять стартом сессии |
@@ -194,20 +194,20 @@ Langame / игровой журнал
 
 ## Что пока блокирует равноправное включение времени и покупок
 
-### Общая межконтурная идемпотентность реализована в коде, но не проверена на production
+### Общая межконтурная идемпотентность развёрнута на production в режиме OFF
 
-LIVE и Ledger теперь строят одинаковый `originKey` из tenant, домена, типа события и стабильного внешнего ID операции; origin receipt и уникальные ограничения защищают событие и награду от повторов. До включения необходимо применить additive-миграцию в `OFF`, перенормализовать стабильные `sourceExternalId` и подтвердить replay/race на production. В ключ входят:
+LIVE и Ledger строят одинаковый `originKey` из tenant, домена, типа события и стабильного внешнего ID операции; origin receipt и уникальные ограничения защищают событие и награду от повторов. Additive-миграции применены с fallback/materializer в `OFF`, а целевые индексы прошли postflight. Для игрового времени при отсутствии общего ID строки используется стабильный `sessionExternalId`; для покупок такая подстановка запрещена, там по-прежнему обязателен ID продажи/расхода. До LIVE необходимо подтвердить replay/race на production. В ключ входят:
 
 - домен;
 - внешний идентификатор сессии или операции;
 - тип канонического события;
 - tenant.
 
-Отдельная cross-source receipt-таблица с уникальным ограничением на эту комбинацию уже добавлена в схему, но ещё не применена на production.
+Отдельная cross-source receipt-таблица с уникальным ограничением на эту комбинацию применена на production. При `SHADOW` receipt и диагностическое решение сохраняются, но event, XP, entitlement и reward не создаются.
 
 ### Политика источника изолирована в коде, fallback ещё не назначен production-правилам
 
-Централизованный router разводит `LIVE_PRIMARY`, `LIVE_WITH_LEDGER_FALLBACK`, `LEDGER_SUPPLEMENTAL` и write-free `SHADOW` по разным execution lane. Backend намеренно не назначает fallback действующим правилам автоматически: сначала нужны migration preflight, tenant-scoped SHADOW и отдельная управляемая смена policy.
+Централизованный router разводит `LIVE_PRIMARY`, `LIVE_WITH_LEDGER_FALLBACK`, `LEDGER_SUPPLEMENTAL` и write-free `SHADOW` по разным execution lane. Backend намеренно не назначает fallback действующим правилам автоматически. Для оператора добавлены tenant-redacted `GET /guests/gamification/ledger-fallback/status` и отдельная смена policy только у v2-черновика `PLAY_TIME`; она дополнительно защищена строгой проверкой роли `OWNER|ADMIN|MANAGER` и optimistic lock по версии прочитанного черновика. Активное или не-play-time правило через этот путь переключить нельзя.
 
 ### Fallback batch больше не расходуется на терминальные receipts
 

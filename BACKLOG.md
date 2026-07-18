@@ -114,17 +114,18 @@
 
 #### 10.1. Единый `originKey` физического события
 
-- Статус 18.07.2026: реализован каркас `originKey` и производного reward idempotency key для сессий, покупок и пополнений; добавлены уникальные ограничения и совместимый поиск старых событий/наград без `originKey`. Production-миграция и rollout ещё не выполнялись.
+- Статус 18.07.2026: реализован каркас `originKey` и производного reward idempotency key для сессий, покупок и пополнений; additive-миграции применены на production в режиме `OFF`, а целевые индексы подтверждены как ready/valid/live. Fallback rollout ещё не включался.
 - Готово в коде: введена независимая от источника каноническая идентичность события по tenant, домену, типу события и стабильному внешнему ID операции. Snapshot/LIVE и Игровой журнал строят одинаковый `originKey`; `sourceFactKind`, ID версии парсера и внутренний ID строки не меняют идентичность физического действия.
 - Готово в коде P0: `GuestGameEvent`, атомарное изменение XP профиля, append-only `GuestGameXpPosting` и набор `GuestGameRewardIntent` создаются одной транзакцией. Ошибка на любом из этих шагов откатывает весь набор; повтор события защищён уникальностью posting по `eventId` и tenant-scoped idempotency key.
-- Следующее: перед additive-миграциями проверить дубли, объём таблиц и допустимое время блокировки индексов; затем применить их с fallback в `OFF`, перенормализовать факты со стабильными внешними ID и подтвердить уникальность на production replay до включения SHADOW. Миграция effect postings `20260718180000_guest_game_effect_postings` подготовлена, но на production ещё не применялась.
+- Готово: миграционный preflight, последовательный deploy и postflight индексов выполнены; effect postings и reward outbox развёрнуты, materializer/fallback оставлены в `OFF`.
+- Следующее: tenant-scoped SHADOW игрового времени и production replay. Для play-time разрешён стабильный `sessionExternalId`, когда Langame не отдаёт общий ID строки; покупки по-прежнему требуют отдельный sale/expense ID.
 - Критерий приемки: LIVE-first, Ledger-first, одновременная гонка, retry, reparse и restart для одного физического действия создают ровно одно событие, один XP-результат и одну награду; разные типы событий одной сессии не смешиваются.
 
 #### 10.2. Жёсткий маршрутизатор источников
 
-- Статус 18.07.2026: добавлены policy `LIVE_WITH_LEDGER_FALLBACK`, централизованная матрица execution lane и тесты взаимного исключения `LIVE`, fallback и supplemental. Автоматическое назначение fallback действующим правилам намеренно не включено до SHADOW-проверки.
+- Статус 18.07.2026: добавлены policy `LIVE_WITH_LEDGER_FALLBACK`, централизованная матрица execution lane и тесты взаимного исключения `LIVE`, fallback и supplemental. Добавлен строго административный переход policy только для v2-черновиков `PLAY_TIME`; активные правила автоматически не меняются.
 - Готово в коде: `LIVE_PRIMARY`, `LIVE_WITH_LEDGER_FALLBACK` и `LEDGER_SUPPLEMENTAL` разведены по отдельным execution lane; один processor не может одновременно выполнить правило другого lane.
-- Безопасное ограничение: клиент не может сам повысить правило до Ledger fallback. `SHADOW` остается write-free по игровому контуру, `LEDGER_SUPPLEMENTAL` сохраняется для типов без полного LIVE-источника, а kill switch мгновенно возвращает обработку к безопасному режиму.
+- Безопасное ограничение: обычный клиент и роли `MARKETER`/`CLUB_MANAGER` не могут повысить правило до Ledger fallback. `SHADOW` остается write-free по игровому контуру, `LEDGER_SUPPLEMENTAL` сохраняется для типов без полного LIVE-источника, а kill switch мгновенно возвращает обработку к безопасному режиму.
 - Критерий приемки: для каждой пары `rule + originKey` выбран ровно один боевой источник; SHADOW не создает event, XP, reward или entitlement; выключение fallback не останавливает существующий LIVE-контур.
 
 #### 10.3. Последовательный fallback после grace period

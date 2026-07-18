@@ -46,6 +46,22 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
 
     await expect(scheduler.runOnce()).resolves.toBeNull();
     expect(fallbackService.runScheduled).not.toHaveBeenCalled();
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      mode: 'OFF',
+      enabled: false,
+      backgroundReady: false,
+      running: false,
+      killSwitchEnabled: false,
+      scope: {
+        tenantId: null,
+        tenantSlug: null,
+        profileId: null,
+        allowAllTenants: false,
+        configured: false,
+      },
+      lastResult: null,
+      lastError: null,
+    });
   });
 
   it('passes only the allowed fact types and scoped settings in SHADOW', async () => {
@@ -57,6 +73,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
       GUEST_GAME_LEDGER_FALLBACK_GRACE_MS: '45000',
       GUEST_GAME_LEDGER_FALLBACK_CLAIM_LEASE_MS: '90000',
       GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG: 'demo',
+      GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID: 'profile-1',
     });
 
     await expect(scheduler.runOnce()).resolves.toMatchObject({
@@ -70,6 +87,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
       graceMs: 45_000,
       claimLeaseMs: 90_000,
       tenantSlug: 'demo',
+      profileId: 'profile-1',
     });
   });
 
@@ -149,9 +167,103 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
     );
 
     const first = scheduler.runOnce();
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      mode: 'SHADOW',
+      enabled: true,
+      backgroundReady: true,
+      running: true,
+    });
     await expect(scheduler.runOnce()).resolves.toBeNull();
     expect(fallbackService.runScheduled).toHaveBeenCalledTimes(1);
     release?.(runResult());
     await expect(first).resolves.toMatchObject({ mode: 'SHADOW' });
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      running: false,
+      lastResult: { mode: 'SHADOW', shadowFacts: 1 },
+      lastError: null,
+    });
+  });
+
+  it('exposes a fail-closed scoped runtime status', () => {
+    const { scheduler } = createScheduler({
+      GUEST_GAME_LEDGER_FALLBACK_MODE: 'LIVE',
+      GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH: 'true',
+      GUEST_GAME_LEDGER_FALLBACK_TENANT_ID: 'tenant-1',
+      GUEST_GAME_LEDGER_FALLBACK_BATCH_SIZE: '5',
+    });
+
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      mode: 'LIVE',
+      enabled: true,
+      backgroundReady: false,
+      killSwitchEnabled: true,
+      batchSize: 5,
+      scope: {
+        tenantId: 'tenant-1',
+        tenantSlug: null,
+        allowAllTenants: false,
+        configured: true,
+      },
+    });
+  });
+
+  it('redacts other tenants from a tenant-scoped runtime status', async () => {
+    const { scheduler, fallbackService } = createScheduler({
+      GUEST_GAME_LEDGER_FALLBACK_MODE: 'SHADOW',
+      GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS: 'true',
+    });
+    fallbackService.runScheduled.mockResolvedValue(
+      runResult({
+        tenants: [
+          {
+            tenantId: 'tenant-1',
+            tenantSlug: 'demo',
+            status: 'PROCESSED',
+            reason: null,
+            checkedFacts: 1,
+            deferredFacts: 0,
+            liveHandledFacts: 0,
+            shadowFacts: 1,
+            fallbackFacts: 0,
+            duplicateFacts: 0,
+            failedFacts: 0,
+            createdEvents: 0,
+            createdRewards: 0,
+          },
+          {
+            tenantId: 'tenant-2',
+            tenantSlug: 'private-tenant',
+            status: 'PROCESSED',
+            reason: null,
+            checkedFacts: 99,
+            deferredFacts: 0,
+            liveHandledFacts: 0,
+            shadowFacts: 99,
+            fallbackFacts: 0,
+            duplicateFacts: 0,
+            failedFacts: 0,
+            createdEvents: 0,
+            createdRewards: 0,
+          },
+        ],
+      }),
+    );
+
+    await scheduler.runOnce();
+
+    const status = scheduler.getTenantRuntimeStatus('tenant-1', 'demo');
+    expect(status.scope).toEqual({
+      configured: true,
+      targetsCurrentTenant: true,
+      profileConfigured: false,
+    });
+    expect(status.lastResult).toMatchObject({
+      status: 'PROCESSED',
+      checkedFacts: 1,
+    });
+    expect(status.lastResult).not.toHaveProperty('tenantId');
+    expect(status.lastResult).not.toHaveProperty('tenantSlug');
+    expect(JSON.stringify(status)).not.toContain('private-tenant');
+    expect(JSON.stringify(status)).not.toContain('tenant-2');
   });
 });

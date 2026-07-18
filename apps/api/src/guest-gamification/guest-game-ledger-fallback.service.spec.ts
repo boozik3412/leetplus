@@ -32,6 +32,7 @@ function fact(validFrom: Date) {
     externalDomain: '46.langamepro.ru',
     sourceHash: 'ledger-parser-version-specific-hash',
     sourceExternalId: 'session-42',
+    sessionExternalId: 'session-42',
     factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
     lifecycleStatus: 'ACTIVE',
     confidence: 'EXACT',
@@ -232,6 +233,93 @@ describe('GuestGameLedgerFallbackService', () => {
       where: { id: 'receipt-1', status: 'WAITING_LIVE' },
       data: { status: 'SHADOWED', processedAt: now },
     });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('limits a canary run to the configured exact profile', async () => {
+    const { service, prisma } = createService();
+
+    await service.runScheduled({
+      mode: 'SHADOW',
+      tenantId: 'tenant-1',
+      profileId: 'profile-1',
+    });
+
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+        }),
+      }),
+    );
+  });
+
+  it('uses the stable session id when Langame omits a generic source id', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      {
+        ...fact(new Date(now.getTime() - 60_000)),
+        sourceExternalId: null,
+        sessionExternalId: 'session-without-row-id',
+      },
+    ]);
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      shadowFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(gamification.dryRun).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        externalId: 'session-without-row-id',
+      }),
+    );
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const query = prisma.guestActivityFact.findMany.mock.calls[0]?.[0] as
+      | { where?: unknown }
+      | undefined;
+    expect(JSON.stringify(query?.where)).toContain(
+      '"sessionExternalId":{"not":null}',
+    );
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not substitute a session id for a purchase sale id', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      {
+        ...fact(new Date(now.getTime() - 60_000)),
+        factType: 'PRODUCT_PURCHASED',
+        sourceExternalId: null,
+        sessionExternalId: 'checkout-session-is-not-a-sale-id',
+        amount: 250,
+      },
+    ]);
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        factTypes: ['PRODUCT_PURCHASED'],
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 0,
+      shadowFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -927,6 +928,10 @@ export type GuestGameMission = GuestGameRuleBase & {
   perGuestLimit: number | null;
   totalRewardLimit: number | null;
   antiFraudRules: Prisma.JsonValue | null;
+};
+
+export type GuestGameMissionEvaluationPolicyDto = {
+  evaluationPolicy?: string | null;
 };
 
 export type GuestGameSeason = {
@@ -7743,12 +7748,24 @@ export class GuestGamificationService {
           'Задание создано в старом редакторе и не может быть перезаписано мастером.',
         );
       }
+      const existingTaskType = missionTaskType(
+        nullableString(jsonRecord(existing.conditions).taskType) ??
+          existing.missionType,
+      );
+      const preserveEvaluationPolicy =
+        existing.status === 'DRAFT' &&
+        existingTaskType === taskType &&
+        taskType === 'PLAY_TIME' &&
+        (existing.evaluationPolicy === 'LIVE_PRIMARY' ||
+          existing.evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK');
       const row = await this.prisma.guestGameMission.update({
         where: { id },
         data: {
           ...(await this.buildMissionData(user, missionDto, false)),
           definitionVersion: guestGameMissionDefinitionVersion,
-          evaluationPolicy: missionEvaluationPolicy(taskType),
+          ...(preserveEvaluationPolicy
+            ? {}
+            : { evaluationPolicy: missionEvaluationPolicy(taskType) }),
         },
         include: missionInclude,
       });
@@ -7895,6 +7912,85 @@ export class GuestGamificationService {
       include: missionInclude,
     });
 
+    return mapMission(row);
+  }
+
+  async updateMissionEvaluationPolicy(
+    user: AuthenticatedUser,
+    id: string,
+    dto: GuestGameMissionEvaluationPolicyDto,
+  ): Promise<GuestGameMission> {
+    if (
+      user.role !== UserRole.OWNER &&
+      user.role !== UserRole.ADMIN &&
+      user.role !== UserRole.MANAGER
+    ) {
+      throw new ForbiddenException(
+        'Переключать источник оценки могут только владелец, администратор или менеджер.',
+      );
+    }
+
+    const mission = await this.assertMission(user, id);
+    if (mission.status !== 'DRAFT') {
+      throw new ConflictException(
+        'Политику источника можно менять только у черновика задания.',
+      );
+    }
+    if (mission.definitionVersion !== guestGameMissionDefinitionVersion) {
+      throw new ConflictException(
+        'Политику источника можно менять только у задания нового мастера.',
+      );
+    }
+
+    const taskType = missionTaskType(
+      nullableString(jsonRecord(mission.conditions).taskType) ??
+        mission.missionType,
+    );
+    const storedTaskType = missionTaskType(mission.missionType);
+    if (taskType !== storedTaskType) {
+      throw new ConflictException(
+        'Тип задания и версия условий не совпадают. Сначала пересохраните черновик в мастере.',
+      );
+    }
+    if (taskType !== 'PLAY_TIME') {
+      throw new BadRequestException(
+        'Ledger fallback пока разрешён только для игрового времени.',
+      );
+    }
+
+    const evaluationPolicy = nullableString(
+      dto.evaluationPolicy,
+    )?.toUpperCase();
+    if (
+      evaluationPolicy !== 'LIVE_PRIMARY' &&
+      evaluationPolicy !== 'LIVE_WITH_LEDGER_FALLBACK'
+    ) {
+      throw new BadRequestException(
+        'Разрешены только LIVE_PRIMARY и LIVE_WITH_LEDGER_FALLBACK.',
+      );
+    }
+
+    const updated = await this.prisma.guestGameMission.updateMany({
+      where: {
+        id,
+        tenantId: user.tenantId,
+        status: 'DRAFT',
+        definitionVersion: guestGameMissionDefinitionVersion,
+        missionType: mission.missionType,
+        updatedAt: mission.updatedAt,
+      },
+      data: { evaluationPolicy },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException(
+        'Черновик изменился одновременно с переключением источника. Обновите страницу и повторите.',
+      );
+    }
+
+    const row = await this.prisma.guestGameMission.findFirstOrThrow({
+      where: { id, tenantId: user.tenantId },
+      include: missionInclude,
+    });
     return mapMission(row);
   }
 

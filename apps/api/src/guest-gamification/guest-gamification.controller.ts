@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Header,
   Param,
@@ -33,6 +34,11 @@ import {
 import { GuestGamificationLogService } from './guest-gamification-log.service';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
 import {
+  GuestGameLedgerFallbackSchedulerService,
+  type GuestGameLedgerFallbackRuntimeStatus,
+  type GuestGameLedgerFallbackTenantRuntimeStatus,
+} from './guest-game-ledger-fallback-scheduler.service';
+import {
   GuestGameRewardMaterializerSchedulerService,
   type GuestGameRewardMaterializerQueueSnapshot,
   type GuestGameRewardMaterializerRuntimeStatus,
@@ -57,6 +63,7 @@ import {
   type GuestGameGuestLogTypeMappingDto,
   type GuestGameMission,
   type GuestGameMissionDto,
+  type GuestGameMissionEvaluationPolicyDto,
   type GuestGameMissionUpdateDto,
   type GuestGameMissionProductGroupCatalog,
   type GuestGameMissionWizardLoadResult,
@@ -111,6 +118,7 @@ export class GuestGamificationController {
     private readonly qualityMonitoringService: GuestGameQualityMonitoringService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
     private readonly rewardMaterializerScheduler: GuestGameRewardMaterializerSchedulerService,
+    private readonly ledgerFallbackScheduler: GuestGameLedgerFallbackSchedulerService,
   ) {}
 
   @Get('workspace')
@@ -177,6 +185,31 @@ export class GuestGamificationController {
       queue:
         await this.rewardMaterializerScheduler.getTenantQueueSnapshot(user),
     };
+  }
+
+  @Get('ledger-fallback/status')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  getLedgerFallbackStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ):
+    | GuestGameLedgerFallbackRuntimeStatus
+    | GuestGameLedgerFallbackTenantRuntimeStatus {
+    if (
+      !user.isPlatformAdmin &&
+      user.role !== UserRole.OWNER &&
+      user.role !== UserRole.ADMIN &&
+      user.role !== UserRole.MANAGER
+    ) {
+      throw new ForbiddenException(
+        'Статус fallback доступен только владельцу, администратору или менеджеру.',
+      );
+    }
+    return user.isPlatformAdmin
+      ? this.ledgerFallbackScheduler.getRuntimeStatus()
+      : this.ledgerFallbackScheduler.getTenantRuntimeStatus(
+          user.tenantId,
+          user.tenantSlug,
+        );
   }
 
   @Get('log/profiles/:profileId')
@@ -408,6 +441,20 @@ export class GuestGamificationController {
     @Body() dto: GuestGameMissionDto,
   ): Promise<GuestGameMission> {
     return this.gamificationService.createMission(user, dto);
+  }
+
+  @Patch('missions/:id/evaluation-policy')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  updateMissionEvaluationPolicy(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestGameMissionEvaluationPolicyDto,
+  ): Promise<GuestGameMission> {
+    return this.gamificationService.updateMissionEvaluationPolicy(
+      user,
+      id,
+      dto,
+    );
   }
 
   @Patch('missions/:id')

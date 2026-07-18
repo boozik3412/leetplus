@@ -22,6 +22,7 @@ export type GuestGameLedgerFallbackRunDto = {
   factTypes?: string[];
   tenantId?: string | null;
   tenantSlug?: string | null;
+  profileId?: string | null;
   allowAllTenants?: boolean;
   limit?: number | string | null;
   graceMs?: number | string | null;
@@ -97,6 +98,7 @@ export class GuestGameLedgerFallbackService {
     );
     const tenantId = normalizedString(dto.tenantId);
     const tenantSlug = normalizedString(dto.tenantSlug);
+    const profileId = normalizedString(dto.profileId);
     if (
       mode !== 'OFF' &&
       !tenantId &&
@@ -173,6 +175,7 @@ export class GuestGameLedgerFallbackService {
             limit,
             graceMs,
             claimLeaseMs,
+            profileId,
           ),
         );
       } catch (error) {
@@ -197,6 +200,7 @@ export class GuestGameLedgerFallbackService {
     limit: number,
     graceMs: number,
     claimLeaseMs: number,
+    profileId: string | null,
   ) {
     const [missions, seasons] = await Promise.all([
       this.prisma.guestGameMission.findMany({
@@ -247,13 +251,31 @@ export class GuestGameLedgerFallbackService {
       const facts = await this.prisma.guestActivityFact.findMany({
         where: {
           tenantId: user.tenantId,
+          profileId: profileId ?? undefined,
           factType: { in: factTypes },
           lifecycleStatus: 'ACTIVE',
           confidence: 'EXACT',
           supersededAt: null,
           happenedAt: { gte: earliestActivation },
-          sourceExternalId: { not: null },
-          OR: [{ guestId: { not: null } }, { profileId: { not: null } }],
+          AND: [
+            {
+              OR: [{ guestId: { not: null } }, { profileId: { not: null } }],
+            },
+            {
+              OR: [
+                { sourceExternalId: { not: null } },
+                {
+                  factType: {
+                    in: [
+                      'HOURLY_PLAY_TIME_ACCUMULATED',
+                      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+                    ],
+                  },
+                  sessionExternalId: { not: null },
+                },
+              ],
+            },
+          ],
         },
         orderBy: [{ validFrom: 'asc' }, { id: 'asc' }],
         take: factPageSize,
@@ -263,13 +285,14 @@ export class GuestGameLedgerFallbackService {
 
       for (const fact of facts) {
         if (result.checkedFacts >= limit) break;
-        const processDto = fallbackProcessDto(fact);
-        if (!processDto || !fact.happenedAt || !fact.sourceExternalId) continue;
+        const stableExternalId = fallbackStableExternalId(fact);
+        const processDto = fallbackProcessDto(fact, stableExternalId);
+        if (!processDto || !fact.happenedAt || !stableExternalId) continue;
         const originKey = buildGuestGameOriginKey({
           externalProvider: fact.externalProvider,
           externalDomain: fact.externalDomain,
           eventType: processDto.eventType,
-          stableExternalId: fact.sourceExternalId,
+          stableExternalId,
         });
         if (!originKey) continue;
 
@@ -561,6 +584,7 @@ function fallbackLegacyExternalReference(dto: GuestGameProcessEventDto) {
 
 function fallbackProcessDto(
   fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
+  stableExternalId: string | null = fallbackStableExternalId(fact),
 ): GuestGameProcessEventDto | null {
   const evidence = jsonRecord(fact.evidence);
   const legacySourceFactKind =
@@ -574,7 +598,7 @@ function fallbackProcessDto(
     sourceFactKind: legacySourceFactKind,
     externalProvider: fact.externalProvider,
     externalDomain: fact.externalDomain,
-    externalId: fact.sourceExternalId,
+    externalId: stableExternalId,
     suppressLootBoxRewards: true,
     payload: {
       fallback: true,
@@ -613,6 +637,26 @@ function fallbackProcessDto(
       categoryName: normalizedString(evidence.categoryName),
       quantity: numericValue(evidence.quantity),
     };
+  }
+  return null;
+}
+
+/**
+ * Langame session rows do not consistently expose a generic row id, but the
+ * session id is stable across sync, parser reruns and API restarts. It is safe
+ * to use only for play-time facts. Purchases deliberately keep requiring the
+ * sale/expense id so a receipt cannot be confused with an unrelated session.
+ */
+function fallbackStableExternalId(
+  fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
+) {
+  const sourceExternalId = normalizedString(fact.sourceExternalId);
+  if (sourceExternalId) return sourceExternalId;
+  if (
+    fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED' ||
+    fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
+  ) {
+    return normalizedString(fact.sessionExternalId);
   }
   return null;
 }

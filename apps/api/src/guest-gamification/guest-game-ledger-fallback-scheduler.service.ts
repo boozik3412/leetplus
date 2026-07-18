@@ -29,6 +29,47 @@ const DEFAULT_FACT_TYPES = [
 
 type AllowedFactType = (typeof ALLOWED_FACT_TYPES)[number];
 
+export type GuestGameLedgerFallbackRuntimeStatus = {
+  mode: GuestGameLedgerFallbackMode;
+  enabled: boolean;
+  backgroundReady: boolean;
+  running: boolean;
+  killSwitchEnabled: boolean;
+  factTypes: AllowedFactType[];
+  scope: {
+    tenantId: string | null;
+    tenantSlug: string | null;
+    profileId: string | null;
+    allowAllTenants: boolean;
+    configured: boolean;
+  };
+  intervalMs: number;
+  batchSize: number;
+  graceMs: number;
+  claimLeaseMs: number;
+  startedAt: string | null;
+  lastRunStartedAt: string | null;
+  lastRunFinishedAt: string | null;
+  lastResult: GuestGameLedgerFallbackRunResult | null;
+  lastError: string | null;
+};
+
+export type GuestGameLedgerFallbackTenantRuntimeStatus = Omit<
+  GuestGameLedgerFallbackRuntimeStatus,
+  'scope' | 'lastResult' | 'lastError'
+> & {
+  scope: {
+    configured: boolean;
+    targetsCurrentTenant: boolean;
+    profileConfigured: boolean;
+  };
+  lastResult: Omit<
+    GuestGameLedgerFallbackRunResult['tenants'][number],
+    'tenantId' | 'tenantSlug'
+  > | null;
+  lastRunFailed: boolean;
+};
+
 @Injectable()
 export class GuestGameLedgerFallbackSchedulerService
   implements OnModuleInit, OnModuleDestroy
@@ -38,6 +79,11 @@ export class GuestGameLedgerFallbackSchedulerService
   );
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private startedAt: Date | null = null;
+  private lastRunStartedAt: Date | null = null;
+  private lastRunFinishedAt: Date | null = null;
+  private lastResult: GuestGameLedgerFallbackRunResult | null = null;
+  private lastError: string | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -58,6 +104,7 @@ export class GuestGameLedgerFallbackSchedulerService
     }
 
     const intervalMs = this.intervalMs();
+    this.startedAt = new Date();
     void this.runOnce();
     this.timer = setInterval(() => void this.runOnce(), intervalMs);
     this.timer.unref?.();
@@ -99,10 +146,13 @@ export class GuestGameLedgerFallbackSchedulerService
     }
 
     this.running = true;
+    this.lastRunStartedAt = new Date();
+    this.lastError = null;
     try {
       const result = await this.fallbackService.runScheduled(
         this.runDto(factTypes),
       );
+      this.lastResult = result;
       if (
         result.checkedFacts > 0 ||
         result.failedFacts > 0 ||
@@ -125,14 +175,96 @@ export class GuestGameLedgerFallbackSchedulerService
       }
       return result;
     } catch (error) {
+      this.lastError =
+        error instanceof Error ? error.message : 'Unknown fallback error';
       this.logger.error(
         'Guest game ledger fallback failed',
         error instanceof Error ? error.stack : String(error),
       );
       return null;
     } finally {
+      this.lastRunFinishedAt = new Date();
       this.running = false;
     }
+  }
+
+  getRuntimeStatus(): GuestGameLedgerFallbackRuntimeStatus {
+    const mode = this.mode();
+    const factTypes = this.factTypes();
+    const tenantId = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_TENANT_ID',
+    );
+    const tenantSlug = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG',
+    );
+    const profileId = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID',
+    );
+    const allowAllTenants = this.allowAllTenants();
+    const scopeConfigured = Boolean(tenantId || tenantSlug || allowAllTenants);
+    const killSwitchEnabled = this.killSwitchEnabled();
+
+    return {
+      mode,
+      enabled: mode !== 'OFF',
+      backgroundReady:
+        mode !== 'OFF' &&
+        !killSwitchEnabled &&
+        factTypes.length > 0 &&
+        scopeConfigured,
+      running: this.running,
+      killSwitchEnabled,
+      factTypes,
+      scope: {
+        tenantId,
+        tenantSlug,
+        profileId,
+        allowAllTenants,
+        configured: scopeConfigured,
+      },
+      intervalMs: this.intervalMs(),
+      batchSize: this.batchSize(),
+      graceMs: this.graceMs(),
+      claimLeaseMs: this.claimLeaseMs(),
+      startedAt: this.startedAt?.toISOString() ?? null,
+      lastRunStartedAt: this.lastRunStartedAt?.toISOString() ?? null,
+      lastRunFinishedAt: this.lastRunFinishedAt?.toISOString() ?? null,
+      lastResult: this.lastResult,
+      lastError: this.lastError,
+    };
+  }
+
+  getTenantRuntimeStatus(
+    tenantId: string,
+    tenantSlug: string,
+  ): GuestGameLedgerFallbackTenantRuntimeStatus {
+    const status = this.getRuntimeStatus();
+    const targetsCurrentTenant =
+      status.scope.allowAllTenants ||
+      status.scope.tenantId === tenantId ||
+      status.scope.tenantSlug?.toLowerCase() === tenantSlug.toLowerCase();
+    const tenantResult = status.lastResult?.tenants.find(
+      (result) => result.tenantId === tenantId,
+    );
+    const {
+      scope: _scope,
+      lastResult: _lastResult,
+      lastError,
+      ...publicStatus
+    } = status;
+
+    return {
+      ...publicStatus,
+      scope: {
+        configured: status.scope.configured,
+        targetsCurrentTenant,
+        profileConfigured: Boolean(status.scope.profileId),
+      },
+      lastResult: tenantResult
+        ? omitTenantIdentityFromResult(tenantResult)
+        : null,
+      lastRunFailed: Boolean(lastError),
+    };
   }
 
   private runDto(factTypes: AllowedFactType[]): GuestGameLedgerFallbackRunDto {
@@ -149,8 +281,12 @@ export class GuestGameLedgerFallbackSchedulerService
     const tenantSlug = this.optionalString(
       'GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG',
     );
+    const profileId = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID',
+    );
     if (tenantId) dto.tenantId = tenantId;
     if (tenantSlug) dto.tenantSlug = tenantSlug;
+    if (profileId) dto.profileId = profileId;
     if (this.allowAllTenants()) dto.allowAllTenants = true;
     return dto;
   }
@@ -247,4 +383,18 @@ export class GuestGameLedgerFallbackSchedulerService
       ? Math.max(min, Math.min(max, Math.trunc(parsed)))
       : fallback;
   }
+}
+
+function omitTenantIdentityFromResult(
+  result: GuestGameLedgerFallbackRunResult['tenants'][number],
+): Omit<
+  GuestGameLedgerFallbackRunResult['tenants'][number],
+  'tenantId' | 'tenantSlug'
+> {
+  const {
+    tenantId: _tenantId,
+    tenantSlug: _tenantSlug,
+    ...publicResult
+  } = result;
+  return publicResult;
 }

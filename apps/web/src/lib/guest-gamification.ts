@@ -199,7 +199,10 @@ export type GuestGameMissionWizardReadiness = {
   ready: boolean;
   definitionVersion: 2;
   taskType: GuestGameMissionWizardTaskType;
-  evaluationPolicy: "LIVE_PRIMARY" | "LEDGER_SUPPLEMENTAL";
+  evaluationPolicy:
+    | "LIVE_PRIMARY"
+    | "LIVE_WITH_LEDGER_FALLBACK"
+    | "LEDGER_SUPPLEMENTAL";
   source: "LIVE" | "ACTIVITY_LEDGER";
   sourceLabel: string;
   blockers: string[];

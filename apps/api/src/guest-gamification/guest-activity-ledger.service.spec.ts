@@ -812,6 +812,7 @@ describe('GuestActivityLedgerService', () => {
         confidence: 'EXACT',
         durationMinutes: 120,
         tariffType: 'package_or_subscription',
+        sourceExternalId: 'session-package-1',
       }),
     );
   });
@@ -1040,6 +1041,7 @@ describe('GuestActivityLedgerService', () => {
         rawText: 'Чебупицца Пепперони',
         amount: 250,
         storeId,
+        sourceExternalId: '260973',
       }),
     );
     expect(productFact).toEqual(
@@ -1047,6 +1049,7 @@ describe('GuestActivityLedgerService', () => {
         confidence: 'EXACT',
         amount: 250,
         storeId,
+        sourceExternalId: '260973',
       }),
     );
     expect(productFact?.evidence).toEqual(
@@ -1179,6 +1182,7 @@ describe('GuestActivityLedgerService', () => {
         rawType: 'BALANCE_TOPUP',
         amount: 500,
         storeId: null,
+        sourceExternalId: '901',
       }),
     );
     expect(topupRaw?.rawPayload).toEqual({
@@ -1192,6 +1196,7 @@ describe('GuestActivityLedgerService', () => {
         confidence: 'EXACT',
         amount: 500,
         storeId: null,
+        sourceExternalId: '901',
       }),
     );
     expect(topupFact?.evidence).toEqual({

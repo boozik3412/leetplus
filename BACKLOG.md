@@ -110,6 +110,73 @@
 - Условия перехода в PRIMARY: decision coverage >= 99.9%, подтвержденное совпадение >= 99%, нет необъясненных финансовых/наградных дублей, sync freshness соответствует SLA, откат проверен.
 - Критерий приемки: feature flag мгновенно возвращает старый evaluator без потери фактов, entitlement или истории решений.
 
+### Этап 10. Детерминированный LIVE → Ledger fallback — 18.07.2026
+
+#### 10.1. Единый `originKey` физического события
+
+- Статус 18.07.2026: реализован каркас `originKey` и производного reward idempotency key для сессий, покупок и пополнений; добавлены уникальные ограничения и совместимый поиск старых событий/наград без `originKey`. Production-миграция и rollout ещё не выполнялись.
+- Готово в коде: введена независимая от источника каноническая идентичность события по tenant, домену, типу события и стабильному внешнему ID операции. Snapshot/LIVE и Игровой журнал строят одинаковый `originKey`; `sourceFactKind`, ID версии парсера и внутренний ID строки не меняют идентичность физического действия.
+- Готово в коде P0: `GuestGameEvent`, атомарное изменение XP профиля, append-only `GuestGameXpPosting` и набор `GuestGameRewardIntent` создаются одной транзакцией. Ошибка на любом из этих шагов откатывает весь набор; повтор события защищён уникальностью posting по `eventId` и tenant-scoped idempotency key.
+- Следующее: перед additive-миграциями проверить дубли, объём таблиц и допустимое время блокировки индексов; затем применить их с fallback в `OFF`, перенормализовать факты со стабильными внешними ID и подтвердить уникальность на production replay до включения SHADOW. Миграция effect postings `20260718180000_guest_game_effect_postings` подготовлена, но на production ещё не применялась.
+- Критерий приемки: LIVE-first, Ledger-first, одновременная гонка, retry, reparse и restart для одного физического действия создают ровно одно событие, один XP-результат и одну награду; разные типы событий одной сессии не смешиваются.
+
+#### 10.2. Жёсткий маршрутизатор источников
+
+- Статус 18.07.2026: добавлены policy `LIVE_WITH_LEDGER_FALLBACK`, централизованная матрица execution lane и тесты взаимного исключения `LIVE`, fallback и supplemental. Автоматическое назначение fallback действующим правилам намеренно не включено до SHADOW-проверки.
+- Готово в коде: `LIVE_PRIMARY`, `LIVE_WITH_LEDGER_FALLBACK` и `LEDGER_SUPPLEMENTAL` разведены по отдельным execution lane; один processor не может одновременно выполнить правило другого lane.
+- Безопасное ограничение: клиент не может сам повысить правило до Ledger fallback. `SHADOW` остается write-free по игровому контуру, `LEDGER_SUPPLEMENTAL` сохраняется для типов без полного LIVE-источника, а kill switch мгновенно возвращает обработку к безопасному режиму.
+- Критерий приемки: для каждой пары `rule + originKey` выбран ровно один боевой источник; SHADOW не создает event, XP, reward или entitlement; выключение fallback не останавливает существующий LIVE-контур.
+
+#### 10.3. Последовательный fallback после grace period
+
+- Статус 18.07.2026: реализованы отдельный scheduler, origin receipt, grace-window от первого обнаружения факта, атомарный claim с lease/reclaim и fencing по номеру попытки, а также повторное использование общего `processEvent`/reward pipeline. Режим production по умолчанию и до отдельного rollout остаётся `OFF`.
+- Готово в коде: реализован поток `Ledger-факт → ожидание LIVE → проверка origin receipt → fallback через существующий processEvent`. Grace period задается конфигурацией с безопасным значением по умолчанию и ограниченными минимальным/максимальным пределами.
+- Следующее: сохранять диагностическую причину каждого исхода: `LIVE_CONFIRMED`, `WAITING_FOR_LIVE`, `FALLBACK_PROCESSED`, `DUPLICATE_PREVENTED`, `SOURCE_NOT_ALLOWED` или `FAILED`.
+- Критерий приемки: до окончания grace period Ledger не создает боевое событие; появившийся LIVE receipt отменяет fallback; после grace period отсутствие LIVE создает событие только через общий reward pipeline; повторный tick, retry или restart не создают дубль.
+
+#### 10.4. Типизированные очереди, watermark и история без ограниченного смешанного окна
+
+- Частично готово: fallback pipeline страницами проходит терминальные receipts и регрессионным тестом подтверждает, что backlog больше batch не блокирует новый факт. В snapshot и evaluator остаются ограниченные входные окна и смешанные выборки истории; индексированная очередь/watermark ещё не реализованы.
+- Следующее: читать кандидатов по типу события и статусу обработки, использовать пагинацию/watermark, а накопительные условия считать серверной агрегацией за интервал `activatedAt → evaluatedAt`, не вытесняя нужные факты общей квотой истории.
+- Критерий приемки: backlog больше размера batch и история длиннее текущего окна не теряют новый факт и не уменьшают ранее накопленный прогресс; повторный проход по watermark идемпотентен.
+
+#### 10.5. Строгая нормализация и lifecycle фактов
+
+- Частично готово: версии сессий дедуплицируются, устаревшие версии переходят в `SUPERSEDED`, а обработка требует привязанного гостя, допустимый домен и достаточную confidence. Для покупок еще нужен полный lifecycle отмены и возврата по стабильному sale ID.
+- Следующее: зафиксировать отдельные канонические факты для APP_OPEN и CHECK_IN; никогда не выводить их из общего старта сессии. Отмена или возврат должны supersede ранее активный purchase-факт и пересчитать незавершенный прогресс без повторной выдачи уже подтвержденной награды.
+- Критерий приемки: для одного стабильного внешнего действия существует не более одной ACTIVE-версии; отмененные, возвратные, непривязанные и недостоверные факты не выполняют условие; APP_OPEN, CHECK_IN и SESSION_STARTED не подменяют друг друга.
+
+#### 10.6. Метрики качества по сопоставимым origin-парам
+
+- Частично готово: LIVE/SHADOW сравниваются по evaluation run и конкретному правилу. Требуется убрать зеленый `0% mismatch` при нулевом покрытии и добавить операционные метрики fallback.
+- Следующее: считать coverage, false negative LIVE, false positive Ledger, latency каждого источника, количество fallback-срабатываний, предотвращенных дублей и residual mismatch по `originKey + ruleId + evaluatorVersion`.
+- Критерий приемки: при отсутствии сопоставимых пар статус равен `INSUFFICIENT_DATA`, а не успешному нулевому mismatch; каждый mismatch и fallback восстанавливается до конкретных нормализованных фактов без raw phone и сырого Langame payload.
+
+#### 10.7. Сквозные тесты двух processors
+
+- Частично готово: differential/replay-набор проверяет основные варианты игрового времени, покупок, пополнений и границы шагов Battle Pass; отдельно покрыты маршрутизатор execution lane, write-free SHADOW, grace period от первого receipt, конкурентный claim, replay и backlog больше batch. Ещё нужны LIVE-first/Ledger-first гонки, restart/reparse, потеря worker после lease, атомарность event+XP, частичный набор наград и purchase cancel/return.
+- Следующее: добавить сценарии LIVE-first, Ledger-first, одновременной гонки, restart/retry/reparse, backlog больше batch, изменения длительности сессии, `покупка → отмена/возврат`, перехода через полночь/DST и запрета выполнять следующий шаг Battle Pass фактом предыдущего шага.
+- Критерий приемки: вся матрица проходит для заданий и Battle Pass; один физический факт при любом порядке processors дает один согласованный decision и не создает повторный event, XP, entitlement, reward или bonus ledger entry.
+
+#### 10.8. Контролируемый production canary
+
+- Заблокировано до корректной guest binding и club/domain scope: безопасный dry-run игрового времени подтвержден, но реальная выдача требует профиля с актуальной привязкой и контролируемых фактов.
+- Следующее: после исправления привязки провести последовательно одну завершенную сессию более 60 минут, одну покупку с привязанным гостем и одно пополнение баланса; затем повторить sync каждого факта.
+- Критерий приемки: для контрольного профиля `***0646` цепочка `fact → origin receipt → event → decision → reward → bonus ledger → /game` подтверждена на production, повторная синхронизация не меняет счетчики наград, а kill switch и откат проверены до расширения canary.
+
+#### 10.9. P0: атомарные effect postings и неизменяемый план награды
+
+- Готово в коде: добавлены append-only `GuestGameXpPosting` и `GuestGameRewardIntent`. XP posting фиксирует запрошенную и фактически применённую дельту, баланс до/после и исходное событие. Reward intent хранит неизменяемый снимок квалифицированного правила и выбранной награды в момент события, включая точный шаг Battle Pass или конкретный лутбокс; повторный запуск не пересчитывает уже квалифицированное событие по текущему состоянию правил.
+- Готово в коде: создание event, XP posting и reward intents объединено в одну короткую транзакцию без сетевых вызовов. Материализация reward выполняется после commit по сохранённому intent, а повторная обработка существующего reward сверяет и восстанавливает недостающие идемпотентные side effects через штатный entitlement/bonus-ledger контур.
+- Подготовлена additive-миграция `20260718180000_guest_game_effect_postings`; она создаёт таблицы, внешние ключи, tenant-scoped уникальности и queue/claim индексы без backfill исторических событий. Production-миграция не применялась, fallback/supplemental режимы не менялись и должны оставаться `OFF` до отдельного rollout.
+- Готово в коде: добавлен durable `GuestGameRewardEffect` outbox для `STAFF_APPROVAL_NOTIFICATION`, `LOOT_BOX_ENTITLEMENT` и `BONUS_LEDGER_QUEUE`. Effect создаётся в одной транзакции с reward и его системным событием; tenant-scoped idempotency/slot uniqueness защищают повторную постановку. `StaffChatMessage` получил отдельный dedupe key, поэтому восстановление approval notification не создаёт второй чат-месседж.
+- Готово в коде: effect materializer атомарно захватывает готовые и просроченные записи через `FOR UPDATE SKIP LOCKED`, повышает `leaseVersion`, завершает запись только при совпадении fencing-версии, возвращает ошибки в retry с backoff и после лимита переводит их в `DEAD_LETTER`. Для `BONUS_LEDGER_QUEUE` он только создаёт идемпотентную запись существующего bonus ledger; внешний provider dispatch остаётся исключительно обязанностью действующего bonus-ledger scheduler.
+- Подготовлена additive-миграция `20260718190000_guest_game_reward_effect_outbox`; production-миграция не применялась. Готов автономный `GuestGameRewardMaterializerSchedulerService`: он fail-closed выключен по умолчанию, требует tenant scope либо отдельный явный allow-all, имеет независимый kill switch, ограниченные batch/interval и последовательно обрабатывает reward intents и durable effects.
+- Готово в коде: intent и effect workers используют короткий атомарный claim через `FOR UPDATE SKIP LOCKED`, lease/reclaim и `leaseVersion` fencing. Ошибки side effect возвращаются в retry с backoff, после лимита переходят в `DEAD_LETTER`; устаревший worker не может завершить чужой claim. Materializer восстанавливает reward только из immutable plan и не переоценивает следующий шаг Battle Pass или случайный приз лутбокса.
+- Готово в тестах: fault-injection покрывает границы event/XP/intent и reward/effect, сбои approval notification, entitlement и bonus-ledger queue, устаревший claim, retry/dead-letter и запрет provider dispatch из materializer. Provider dispatch остаётся отдельной ответственностью действующего bonus-ledger scheduler.
+- Осталось перед production canary: проверить две additive-миграции и индексы на production-объёме, задеплоить API с materializer в `OFF`, подтвердить состояние очередей и метрик, затем провести tenant-scoped canary с проверкой kill switch. В рамках текущей реализации production и база данных не изменялись.
+- Критерий приемки: падение до commit не оставляет event, XP или intent; падение после commit восстанавливает ровно одну награду и её side effects из того же immutable plan; конкурентные workers, restart и replay не меняют выбранный шаг/приз и не создают повторные XP, reward, entitlement или bonus-ledger entry.
+
 ## Геймификация: коллекционный журнал наград в игровом модуле — 24.06.2026
 
 - Готово: журнал полученных наград вынесен в отдельное окно `/play/game/rewards`, а основной `/play/game` больше не приращивает историю снизу; кнопка `История наград` открывает журнал в новой вкладке.

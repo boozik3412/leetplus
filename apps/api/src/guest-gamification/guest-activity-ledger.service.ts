@@ -122,6 +122,7 @@ type RawRecordDraft = {
   sourceKind: string;
   sourceKey: string;
   sourceHash: string;
+  sourceExternalId: string | null;
   rawType: string | null;
   rawText: string | null;
   happenedAt: Date | null;
@@ -762,6 +763,7 @@ export class GuestActivityLedgerService {
         sourceKind: record.sourceKind,
         sourceKey: record.sourceKey,
         sourceHash: record.sourceHash,
+        sourceExternalId: record.sourceExternalId,
         rawType: record.rawType,
         rawText: record.rawText,
         happenedAt: record.happenedAt,
@@ -1271,6 +1273,7 @@ export class GuestActivityLedgerService {
       select: {
         id: true,
         sourceHash: true,
+        sourceExternalId: true,
         rawType: true,
         rawText: true,
         happenedAt: true,
@@ -1407,6 +1410,7 @@ export class GuestActivityLedgerService {
           externalClubId: signal.externalClubId,
           sourceKind: SOURCE_GUEST_LOG,
           sourceHash: signal.sourceHash,
+          sourceExternalId: signal.sourceExternalId,
           factType: 'PACKAGE_OR_SUBSCRIPTION_USED',
           happenedAt: signal.happenedAt,
           sourceLocalDate: signal.sourceLocalDate,
@@ -1434,6 +1438,7 @@ export class GuestActivityLedgerService {
           happenedAt: signal.happenedAt,
           sourceLocalDate: signal.sourceLocalDate,
           sessionExternalId: signal.sessionExternalId,
+          sourceExternalId: signal.sourceExternalId,
           tariffName: purchase?.tariffName ?? null,
           tariffType: 'package_or_subscription',
           confidence: 'INFERRED',
@@ -1718,6 +1723,7 @@ export class GuestActivityLedgerService {
         16,
       )}`,
       sourceHash,
+      sourceExternalId: firstString(row.id, row.UUID),
       rawType,
       rawText: text,
       happenedAt,
@@ -1760,6 +1766,7 @@ export class GuestActivityLedgerService {
         16,
       )}`,
       sourceHash,
+      sourceExternalId: firstString(row.id, row.UUID),
       rawType: nullableString(row.packet) ? 'SESSION' : null,
       rawText: sanitizeGuestActivityText(extractText(row)),
       happenedAt,
@@ -1819,6 +1826,7 @@ export class GuestActivityLedgerService {
         firstString(row.id) ?? context.externalGuestId
       }:${sourceHash.slice(0, 16)}`,
       sourceHash,
+      sourceExternalId: firstString(row.id, row.UUID),
       rawType: nullableString(row.type),
       rawText: text,
       happenedAt,
@@ -1906,6 +1914,7 @@ export class GuestActivityLedgerService {
         firstString(row.id) ?? context.externalGuestId
       }:${sourceHash.slice(0, 16)}`,
       sourceHash,
+      sourceExternalId: firstString(row.id),
       rawType: 'PRODUCT_PURCHASE',
       rawText: text,
       happenedAt,
@@ -1951,6 +1960,7 @@ export class GuestActivityLedgerService {
         operationId ?? context.externalGuestId
       }:${sourceHash.slice(0, 16)}`,
       sourceHash,
+      sourceExternalId: operationId,
       rawType: 'BALANCE_TOPUP',
       rawText:
         amount === null
@@ -2009,6 +2019,7 @@ export class GuestActivityLedgerService {
         sourceKind,
         sourceKey: raw.sourceKey,
         sourceHash: raw.sourceHash,
+        sourceExternalId: raw.sourceExternalId,
         rawType: raw.rawType,
         rawText: raw.rawText,
         happenedAt: raw.happenedAt,
@@ -2023,6 +2034,7 @@ export class GuestActivityLedgerService {
         profileId: context.profile.id,
         storeId: raw.storeId,
         integrationSourceId: context.source.id,
+        sourceExternalId: raw.sourceExternalId,
         rawType: raw.rawType,
         rawText: raw.rawText,
         happenedAt: raw.happenedAt,
@@ -2100,6 +2112,7 @@ export class GuestActivityLedgerService {
           externalClubId: fact.externalClubId,
           sourceKind,
           sourceHash: raw.sourceHash,
+          sourceExternalId: raw.sourceExternalId,
           factType: fact.factType,
           happenedAt: fact.happenedAt,
           sourceLocalDate: fact.sourceLocalDate,
@@ -2123,6 +2136,7 @@ export class GuestActivityLedgerService {
           happenedAt: fact.happenedAt,
           sourceLocalDate: fact.sourceLocalDate,
           sessionExternalId: fact.sessionExternalId,
+          sourceExternalId: raw.sourceExternalId,
           tariffName: fact.tariffName,
           tariffType: fact.tariffType,
           amount: fact.amount,

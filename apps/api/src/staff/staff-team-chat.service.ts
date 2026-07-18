@@ -690,8 +690,15 @@ export class StaffTeamChatService {
     const { channelId, memberUserIds } =
       await this.ensureGamificationApprovalChannel(client, tenantId);
     const body = this.buildGamificationRewardApprovalBody(dto);
-    const message = await client.staffChatMessage.create({
-      data: {
+    const dedupeKey = `guest-game-reward:${dto.rewardId}:approval:v1`;
+    const message = await client.staffChatMessage.upsert({
+      where: {
+        tenantId_dedupeKey: {
+          tenantId,
+          dedupeKey,
+        },
+      },
+      create: {
         tenantId,
         channelId,
         authorUserId: null,
@@ -700,7 +707,9 @@ export class StaffTeamChatService {
         kind: 'INCIDENT',
         priority: 'HIGH',
         isPinned: false,
+        dedupeKey,
       },
+      update: {},
       select: { id: true },
     });
 

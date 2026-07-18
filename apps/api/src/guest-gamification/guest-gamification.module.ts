@@ -11,8 +11,11 @@ import { GuestGamificationPipelineSchedulerService } from './guest-gamification-
 import { GuestGamificationSupplementalPipelineSchedulerService } from './guest-gamification-supplemental-pipeline-scheduler.service';
 import { GuestGameDataRetentionSchedulerService } from './guest-game-data-retention-scheduler.service';
 import { GuestGameDataRetentionService } from './guest-game-data-retention.service';
+import { GuestGameLedgerFallbackSchedulerService } from './guest-game-ledger-fallback-scheduler.service';
+import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
 import { GuestGameQualityMonitoringSchedulerService } from './guest-game-quality-monitoring-scheduler.service';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
+import { GuestGameRewardMaterializerSchedulerService } from './guest-game-reward-materializer-scheduler.service';
 import {
   GuestGameMediaController,
   GuestGamePublicMediaController,
@@ -39,9 +42,12 @@ import { GuestGamificationService } from './guest-gamification.service';
     GuestActivityLedgerSchedulerService,
     GuestGameDataRetentionService,
     GuestGameDataRetentionSchedulerService,
+    GuestGameLedgerFallbackService,
+    GuestGameLedgerFallbackSchedulerService,
     GuestGameQualityMonitoringService,
     GuestGameMediaService,
     GuestGameQualityMonitoringSchedulerService,
+    GuestGameRewardMaterializerSchedulerService,
     GuestBonusLedgerService,
     GuestBonusLedgerSchedulerService,
   ],

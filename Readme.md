@@ -559,9 +559,11 @@ Production-развертывание доступно по адресам:
 git pull --ff-only origin main
 pnpm install --frozen-lockfile
 pnpm --filter database db:generate
+pnpm --filter api build
 pnpm --filter database db:deploy
-pnpm build
 systemctl restart leetplus-api.service
+curl --fail --silent --show-error http://127.0.0.1:4000/health
+pnpm --filter web build
 systemctl restart leetplus-web.service
 ```
 

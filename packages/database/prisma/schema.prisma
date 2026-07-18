@@ -196,10 +196,14 @@ model Tenant {
   guestGameAuditEvents                 GuestGameAuditEvent[]
   guestGameRuleDecisions               GuestGameRuleDecision[]
   guestGameEntitlements                GuestGameEntitlement[]
+  guestGameXpPostings                  GuestGameXpPosting[]
+  guestGameRewardIntents               GuestGameRewardIntent[]
+  guestGameRewardEffects               GuestGameRewardEffect[]
   guestGameLogTypeMappings             GuestGameLogTypeMapping[]
   guestActivityRawRecords              GuestActivityRawRecord[]
   guestActivityFacts                   GuestActivityFact[]
   guestGameSupplementalFactReceipts    GuestGameSupplementalFactReceipt[]
+  guestGameOriginReceipts              GuestGameOriginReceipt[]
   guestGameMediaAssets                 GuestGameMediaAsset[]
   guestActivitySyncStates              GuestActivitySyncState[]
   guestActivitySourceSyncStates        GuestActivitySourceSyncState[]
@@ -1661,6 +1665,8 @@ model GuestGameProfile {
   auditEvents              GuestGameAuditEvent[]
   ruleDecisions            GuestGameRuleDecision[]
   entitlements             GuestGameEntitlement[]
+  xpPostings               GuestGameXpPosting[]
+  rewardIntents            GuestGameRewardIntent[]
   activityRawRecords       GuestActivityRawRecord[]
   activityFacts            GuestActivityFact[]
   activitySyncStates       GuestActivitySyncState[]
@@ -1861,6 +1867,8 @@ model GuestGameReward {
   externalProvider  IntegrationProvider?
   externalDomain    String?
   externalId        String?
+  originKey         String?
+  idempotencyKey    String?
   guestExternalId   String?
   rewardType        String
   rewardAmount      Decimal              @default(0) @db.Decimal(12, 2)
@@ -1890,8 +1898,12 @@ model GuestGameReward {
   deliveryEvents     GuestGameDeliveryEvent[]
   bonusLedgerEntries GuestBonusLedgerEntry[]
   entitlements       GuestGameEntitlement[]
+  rewardIntents      GuestGameRewardIntent[]
+  rewardEffects      GuestGameRewardEffect[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
+  @@unique([tenantId, idempotencyKey], map: "guest_game_reward_idempotency_uidx")
+  @@index([tenantId, originKey], map: "guest_game_reward_origin_idx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
   @@index([profileId], map: "guest_game_reward_profile_idx")
   @@index([guestId], map: "guest_game_reward_guest_idx")
@@ -1985,6 +1997,7 @@ model GuestGameEvent {
   externalProvider IntegrationProvider?
   externalDomain   String?
   externalId       String?
+  originKey        String?
   xpDelta          Int                  @default(0)
   occurredAt       DateTime             @default(now())
   payload          Json?
@@ -2000,8 +2013,11 @@ model GuestGameEvent {
   createdByUser User?                   @relation("GuestGameEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   ruleDecisions GuestGameRuleDecision[]
   entitlements  GuestGameEntitlement[]
+  xpPosting     GuestGameXpPosting?
+  rewardIntents GuestGameRewardIntent[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_event_external_uidx")
+  @@unique([tenantId, originKey], map: "guest_game_event_origin_uidx")
   @@index([tenantId, eventType, occurredAt], map: "guest_game_event_type_idx")
   @@index([profileId], map: "guest_game_event_profile_idx")
   @@index([guestId], map: "guest_game_event_guest_idx")
@@ -2048,6 +2064,7 @@ model GuestGameRuleDecision {
   guestId          String?
   storeId          String?
   eventId          String?
+  originKey        String?
   evaluationRunId  String
   evaluationMode   String   @default("LIVE")
   evaluatorVersion String   @default("legacy-v1")
@@ -2081,6 +2098,7 @@ model GuestGameRuleDecision {
   @@index([tenantId, ruleType, ruleId, evaluatedAt], map: "guest_game_rule_decision_rule_time_idx")
   @@index([evaluationRunId], map: "guest_game_rule_decision_run_idx")
   @@index([eventId], map: "guest_game_rule_decision_event_idx")
+  @@index([tenantId, originKey, evaluatedAt], map: "guest_game_rule_decision_origin_idx")
   @@index([tenantId, status, evaluatedAt], map: "guest_game_rule_decision_status_idx")
 }
 
@@ -2101,6 +2119,7 @@ model GuestGameEntitlement {
   traceId         String?
   status          String    @default("AVAILABLE")
   idempotencyKey  String
+  originKey       String?
   qualifiedAt     DateTime
   validUntil      DateTime?
   consumedAt      DateTime?
@@ -2118,6 +2137,7 @@ model GuestGameEntitlement {
   reward  GuestGameReward?  @relation(fields: [rewardId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, idempotencyKey], map: "guest_game_entitlement_idempotency_uidx")
+  @@index([tenantId, originKey], map: "guest_game_entitlement_origin_idx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_entitlement_status_idx")
   @@index([profileId, status, qualifiedAt], map: "guest_game_entitlement_profile_idx")
   @@index([guestId, status, qualifiedAt], map: "guest_game_entitlement_guest_idx")
@@ -2461,6 +2481,7 @@ model GuestActivityRawRecord {
   sourceKind          String
   sourceKey           String
   sourceHash          String
+  sourceExternalId    String?
   rawType             String?
   rawText             String?
   happenedAt          DateTime?
@@ -2484,6 +2505,7 @@ model GuestActivityRawRecord {
   @@index([tenantId, happenedAt], map: "guest_activity_raw_happened_idx")
   @@index([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_activity_raw_external_guest_idx")
   @@index([tenantId, sourceKind], map: "guest_activity_raw_kind_idx")
+  @@index([tenantId, externalProvider, externalDomain, sourceKind, sourceExternalId], map: "guest_activity_raw_external_source_idx")
   @@index([tenantId, rawType], map: "guest_activity_raw_type_idx")
   @@index([guestId], map: "guest_activity_raw_guest_idx")
   @@index([profileId], map: "guest_activity_raw_profile_idx")
@@ -2504,6 +2526,7 @@ model GuestActivityFact {
   externalClubId     String?
   sourceKind         String
   sourceHash         String
+  sourceExternalId   String?
   factType           String
   happenedAt         DateTime?
   sourceLocalDate    String?
@@ -2533,7 +2556,9 @@ model GuestActivityFact {
   @@index([tenantId, happenedAt], map: "guest_activity_fact_happened_idx")
   @@index([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_activity_fact_external_guest_idx")
   @@index([tenantId, factType, happenedAt], map: "guest_activity_fact_type_idx")
+  @@index([tenantId, externalProvider, externalDomain, factType, sourceExternalId], map: "guest_activity_fact_external_source_idx")
   @@index([tenantId, lifecycleStatus, factType, happenedAt], map: "guest_activity_fact_lifecycle_idx")
+  @@index([tenantId, lifecycleStatus, confidence, factType, validFrom, id], map: "guest_activity_fact_fallback_queue_idx")
   @@index([tenantId, parserVersion, normalizationRunId], map: "guest_activity_fact_parser_run_idx")
   @@index([tenantId, tariffType], map: "guest_activity_fact_tariff_type_idx")
   @@index([rawRecordId], map: "guest_activity_fact_raw_idx")
@@ -2562,6 +2587,126 @@ model GuestGameSupplementalFactReceipt {
 
   @@unique([tenantId, factType, externalDomain, sourceHash], map: "guest_game_supplemental_fact_uidx")
   @@index([tenantId, status, updatedAt], map: "guest_game_supplemental_fact_status_idx")
+}
+
+model GuestGameXpPosting {
+  id             String   @id @default(uuid())
+  tenantId       String
+  profileId      String
+  eventId        String   @unique
+  idempotencyKey String
+  requestedDelta Int
+  appliedDelta   Int
+  balanceBefore  Int
+  balanceAfter   Int
+  evidence       Json?
+  postedAt       DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id])
+  profile GuestGameProfile @relation(fields: [profileId], references: [id])
+  event   GuestGameEvent   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey], map: "guest_game_xp_posting_idempotency_uidx")
+  @@index([profileId, postedAt], map: "guest_game_xp_posting_profile_idx")
+  @@index([tenantId, postedAt], map: "guest_game_xp_posting_tenant_idx")
+}
+
+model GuestGameRewardIntent {
+  id             String    @id @default(uuid())
+  tenantId       String
+  eventId        String
+  profileId      String?
+  rewardId       String?   @unique
+  originKey      String?
+  ruleType       String
+  ruleId         String
+  effectKind     String    @default("REWARD")
+  slotKey        String
+  idempotencyKey String
+  claimKey       String?
+  status         String    @default("PENDING")
+  plan           Json
+  qualifiedAt    DateTime
+  attempts       Int       @default(0)
+  leaseVersion   Int       @default(0)
+  nextAttemptAt  DateTime?
+  claimExpiresAt DateTime?
+  processedAt    DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id])
+  event   GuestGameEvent    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  profile GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  reward  GuestGameReward?  @relation(fields: [rewardId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, idempotencyKey], map: "guest_game_reward_intent_idempotency_uidx")
+  @@unique([tenantId, claimKey], map: "guest_game_reward_intent_claim_uidx")
+  @@index([tenantId, status, nextAttemptAt, createdAt, id], map: "guest_game_reward_intent_queue_idx")
+  @@index([tenantId, status, claimExpiresAt], map: "guest_game_reward_intent_claim_idx")
+  @@index([eventId], map: "guest_game_reward_intent_event_idx")
+  @@index([profileId, status, qualifiedAt], map: "guest_game_reward_intent_profile_idx")
+}
+
+model GuestGameRewardEffect {
+  id             String    @id @default(uuid())
+  tenantId       String
+  rewardId       String
+  effectKind     String
+  slotKey        String    @default("primary")
+  idempotencyKey String
+  status         String    @default("PENDING")
+  payload        Json
+  result         Json?
+  attempts       Int       @default(0)
+  leaseVersion   Int       @default(0)
+  nextAttemptAt  DateTime?
+  claimedAt      DateTime?
+  claimExpiresAt DateTime?
+  appliedAt      DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id])
+  reward GuestGameReward @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey], map: "guest_game_reward_effect_idempotency_uidx")
+  @@unique([tenantId, rewardId, effectKind, slotKey], map: "guest_game_reward_effect_slot_uidx")
+  @@index([tenantId, status, nextAttemptAt, createdAt, id], map: "guest_game_reward_effect_queue_idx")
+  @@index([tenantId, status, claimExpiresAt], map: "guest_game_reward_effect_claim_idx")
+  @@index([rewardId, status], map: "guest_game_reward_effect_reward_idx")
+}
+
+model GuestGameOriginReceipt {
+  id                String              @id @default(uuid())
+  tenantId          String
+  originKey         String
+  factId            String?
+  eventId           String?
+  eventType         String
+  externalProvider  IntegrationProvider @default(LANGAME)
+  externalDomain    String
+  policy            String
+  status            String              @default("WAITING_LIVE")
+  claimedSource     String?
+  ledgerFirstSeenAt DateTime            @default(now())
+  graceUntil        DateTime
+  claimExpiresAt    DateTime?
+  processedAt       DateTime?
+  attempts          Int                 @default(0)
+  lastError         String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, originKey], map: "guest_game_origin_receipt_origin_uidx")
+  @@index([tenantId, status, graceUntil], map: "guest_game_origin_receipt_queue_idx")
+  @@index([tenantId, status, claimExpiresAt], map: "guest_game_origin_receipt_claim_idx")
+  @@index([tenantId, eventType, status], map: "guest_game_origin_receipt_event_idx")
 }
 
 model GuestGameMediaAsset {
@@ -3817,6 +3962,7 @@ model StaffChatMessage {
   kind         String   @default("MESSAGE")
   priority     String   @default("NORMAL")
   isPinned     Boolean  @default(false)
+  dedupeKey    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -3834,6 +3980,7 @@ model StaffChatMessage {
   @@index([channelId, createdAt], map: "staff_chat_message_channel_created_idx")
   @@index([authorUserId], map: "staff_chat_message_author_idx")
   @@index([storeId], map: "staff_chat_message_store_idx")
+  @@unique([tenantId, dedupeKey], map: "staff_chat_message_tenant_dedupe_unique")
 }
 
 model StaffChatMessageEdit {

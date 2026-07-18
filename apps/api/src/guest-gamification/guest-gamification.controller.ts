@@ -32,6 +32,11 @@ import {
 } from './guest-activity-ledger.service';
 import { GuestGamificationLogService } from './guest-gamification-log.service';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
+import {
+  GuestGameRewardMaterializerSchedulerService,
+  type GuestGameRewardMaterializerQueueSnapshot,
+  type GuestGameRewardMaterializerRuntimeStatus,
+} from './guest-game-reward-materializer-scheduler.service';
 import type { GuestGameMissionWizardDto } from './guest-game-mission-contract';
 import {
   GuestGamificationService,
@@ -105,6 +110,7 @@ export class GuestGamificationController {
     private readonly gamificationLogService: GuestGamificationLogService,
     private readonly qualityMonitoringService: GuestGameQualityMonitoringService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
+    private readonly rewardMaterializerScheduler: GuestGameRewardMaterializerSchedulerService,
   ) {}
 
   @Get('workspace')
@@ -156,6 +162,21 @@ export class GuestGamificationController {
   @Get('log/monitoring')
   getGamificationLogMonitoring(@CurrentUser() user: AuthenticatedUser) {
     return this.qualityMonitoringService.getDashboard(user);
+  }
+
+  @Get('reward-materializer/status')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  async getRewardMaterializerStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{
+    runtime: GuestGameRewardMaterializerRuntimeStatus;
+    queue: GuestGameRewardMaterializerQueueSnapshot;
+  }> {
+    return {
+      runtime: this.rewardMaterializerScheduler.getRuntimeStatus(),
+      queue:
+        await this.rewardMaterializerScheduler.getTenantQueueSnapshot(user),
+    };
   }
 
   @Get('log/profiles/:profileId')

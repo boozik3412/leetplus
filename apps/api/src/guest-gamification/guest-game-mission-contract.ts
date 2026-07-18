@@ -16,6 +16,7 @@ export type GuestGameMissionTaskType =
 
 export type GuestGameMissionEvaluationPolicy =
   | 'LIVE_PRIMARY'
+  | 'LIVE_WITH_LEDGER_FALLBACK'
   | 'LEDGER_SUPPLEMENTAL';
 
 export type GuestGameMissionWizardDto = {

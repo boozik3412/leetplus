@@ -1,0 +1,744 @@
+import { IntegrationProvider, TenantLifecycleStatus } from '@prisma/client';
+import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
+
+const now = new Date('2026-07-18T12:00:00.000Z');
+
+function tenant() {
+  return {
+    id: 'tenant-1',
+    slug: 'tenant-one',
+    status: TenantLifecycleStatus.ACTIVE,
+    users: [
+      {
+        id: 'user-1',
+        email: 'operator@example.test',
+        fullName: 'Operator',
+        role: 'OWNER',
+        customRoleId: null,
+        isPlatformAdmin: false,
+      },
+    ],
+  };
+}
+
+function fact(validFrom: Date) {
+  return {
+    id: 'fact-1',
+    tenantId: 'tenant-1',
+    profileId: 'profile-1',
+    guestId: 'guest-1',
+    storeId: 'store-1',
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain: '46.langamepro.ru',
+    sourceHash: 'ledger-parser-version-specific-hash',
+    sourceExternalId: 'session-42',
+    factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+    lifecycleStatus: 'ACTIVE',
+    confidence: 'EXACT',
+    validFrom,
+    happenedAt: validFrom,
+    durationMinutes: 60,
+    amount: null,
+    evidence: {},
+  };
+}
+
+function dryRun() {
+  return {
+    dryRun: true,
+    eventType: 'PLAY_HOUR',
+    occurredAt: now.toISOString(),
+    profile: null,
+    guest: null,
+    store: null,
+    input: {},
+    summary: {
+      checkedRules: 1,
+      eligibleRules: 1,
+      blockedRules: 0,
+      estimatedRewardAmount: 50,
+      projectedXpDelta: 10,
+    },
+    rules: [
+      {
+        id: 'mission-1',
+        kind: 'MISSION',
+        name: 'One hour',
+        status: 'ACTIVE',
+        triggerKind: 'PLAY_HOUR',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        manualApprovalRequired: false,
+        eligible: true,
+        rewardType: 'BONUS',
+        rewardAmount: 50,
+        rewardLabel: '50 bonuses',
+        selectedRewardLabel: null,
+        selectedReward: null,
+        xpDelta: 10,
+        budgetAmount: null,
+        progress: null,
+        reasons: [],
+        blockers: [],
+      },
+    ],
+    note: '',
+  };
+}
+
+function createService(options?: {
+  validFrom?: Date;
+  liveEventId?: string | null;
+  receiptGraceUntil?: Date;
+}) {
+  const validFrom = options?.validFrom ?? new Date(now.getTime() - 60_000);
+  const prisma = {
+    tenant: {
+      findMany: jest.fn().mockResolvedValue([tenant()]),
+    },
+    guestGameMission: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+          conditions: {},
+          periodFrom: null,
+        },
+      ]),
+    },
+    guestGameSeason: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    guestActivityFact: {
+      findMany: jest.fn().mockResolvedValue([fact(validFrom)]),
+    },
+    guestGameOriginReceipt: {
+      upsert: jest.fn().mockResolvedValue({
+        id: 'receipt-1',
+        status: 'WAITING_LIVE',
+        ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+        graceUntil:
+          options?.receiptGraceUntil ?? new Date(now.getTime() - 1_000),
+        attempts: 0,
+        claimExpiresAt: null,
+      }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    guestGameEvent: {
+      findFirst: jest.fn().mockResolvedValue(
+        options?.liveEventId
+          ? {
+              id: options.liveEventId,
+            }
+          : null,
+      ),
+    },
+  };
+  const gamification = {
+    dryRun: jest.fn().mockResolvedValue(dryRun()),
+    recordRuleDecisions: jest.fn().mockResolvedValue(undefined),
+    processEvent: jest.fn().mockResolvedValue({
+      event: { id: 'event-fallback-1' },
+      summary: { idempotent: false, createdRewards: 1 },
+    }),
+  };
+  return {
+    service: new GuestGameLedgerFallbackService(
+      prisma as never,
+      gamification as never,
+    ),
+    prisma,
+    gamification,
+  };
+}
+
+describe('GuestGameLedgerFallbackService', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(now);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('keeps the fallback completely passive in OFF mode', async () => {
+    const { service, prisma, gamification } = createService();
+
+    await expect(service.runScheduled({ mode: 'OFF' })).resolves.toMatchObject({
+      mode: 'OFF',
+      processedTenants: 0,
+      skippedTenants: 1,
+      checkedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when an enabled run has no tenant scope', async () => {
+    const { service, prisma, gamification } = createService();
+
+    await expect(
+      service.runScheduled({ mode: 'SHADOW' }),
+    ).resolves.toMatchObject({
+      mode: 'SHADOW',
+      checkedTenants: 0,
+      processedTenants: 0,
+      checkedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(prisma.tenant.findMany).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('records SHADOW evidence without creating an event or reward', async () => {
+    const { service, prisma, gamification } = createService();
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      shadowFacts: 1,
+      fallbackFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(gamification.recordRuleDecisions).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        rules: [
+          expect.objectContaining({
+            evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+          }),
+        ],
+      }),
+      expect.any(Object),
+    );
+    const decisionCalls = gamification.recordRuleDecisions.mock
+      .calls as unknown as Array<[unknown, unknown, Record<string, unknown>]>;
+    expect(decisionCalls[0]?.[2]).toMatchObject({
+      evaluationMode: 'SHADOW_LEDGER_FALLBACK',
+      suppressLedgerShadow: true,
+    });
+    expect(decisionCalls[0]?.[2].originKey).toMatch(/^ggo:v1:[a-f0-9]{64}$/);
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
+      where: { id: 'receipt-1', status: 'WAITING_LIVE' },
+      data: { status: 'SHADOWED', processedAt: now },
+    });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate a completed SHADOW decision on replay', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+      id: 'receipt-1',
+      status: 'SHADOWED',
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      shadowFacts: 0,
+      duplicateFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('waits for LIVE while the grace period is still open', async () => {
+    const { service, prisma, gamification } = createService({
+      receiptGraceUntil: new Date(now.getTime() + 10_000),
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      deferredFacts: 1,
+      liveHandledFacts: 0,
+      fallbackFacts: 0,
+    });
+    expect(prisma.guestGameEvent.findFirst).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+    const upsertCalls = prisma.guestGameOriginReceipt.upsert.mock
+      .calls as unknown as Array<
+      [{ create: Record<string, unknown>; update: Record<string, unknown> }]
+    >;
+    expect(upsertCalls[0]?.[0].create).toMatchObject({
+      ledgerFirstSeenAt: now,
+      graceUntil: new Date(now.getTime() + 15_000),
+    });
+    expect(upsertCalls[0]?.[0].update).toEqual({ factId: 'fact-1' });
+  });
+
+  it('accepts an existing LIVE event as the authoritative receipt', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-live-1',
+    });
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: 'event-live-1' },
+      summary: { idempotent: true, createdRewards: 0 },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      liveHandledFacts: 1,
+      fallbackFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
+      where: { id: 'receipt-1' },
+      data: {
+        status: 'LIVE_PROCESSED',
+        claimedSource: 'LIVE',
+        eventId: 'event-live-1',
+        claimExpiresAt: null,
+        processedAt: now,
+      },
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        OR: [
+          {
+            originKey: expect.stringMatching(
+              /^ggo:v1:[a-f0-9]{64}$/,
+            ) as unknown as string,
+          },
+          {
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: '46.langamepro.ru',
+            externalId: 'guest-game:GUEST_SESSION:PLAY_HOUR:session-42',
+          },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it('reconciles an existing event even after fallback retries are exhausted', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-live-1',
+    });
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+      id: 'receipt-1',
+      status: 'FAILED',
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 3,
+      claimExpiresAt: null,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      liveHandledFacts: 1,
+      duplicateFacts: 0,
+      fallbackFacts: 0,
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not process when another worker wins the atomic claim race', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameOriginReceipt.updateMany.mockResolvedValueOnce({
+      count: 0,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      duplicateFacts: 1,
+      fallbackFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalled();
+    const updateCalls = prisma.guestGameOriginReceipt.updateMany.mock
+      .calls as unknown as Array<
+      [
+        {
+          where: Record<string, unknown>;
+          data: Record<string, unknown>;
+        },
+      ]
+    >;
+    const claim = updateCalls[0]?.[0];
+    expect(claim?.where).toMatchObject({
+      id: 'receipt-1',
+      attempts: { lt: 3 },
+    });
+    expect(claim?.where.OR).toEqual(
+      expect.arrayContaining([
+        {
+          status: { in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'] },
+        },
+        expect.objectContaining({ status: 'PROCESSING' }),
+        { status: 'PROCESSING', claimExpiresAt: null },
+      ]),
+    );
+    expect(claim?.data).toMatchObject({
+      status: 'PROCESSING',
+      claimedSource: 'LEDGER_FALLBACK',
+      attempts: { increment: 1 },
+      claimExpiresAt: new Date(now.getTime() + 120_000),
+    });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('creates through the existing pipeline once and rejects a replay claim', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameOriginReceipt.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      fallbackFacts: 1,
+      duplicateFacts: 0,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      fallbackFacts: 0,
+      duplicateFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        activeRulesOnly: true,
+        sourceFactKind: 'GUEST_SESSION',
+        externalId: 'session-42',
+      }),
+      expect.any(Object),
+    );
+    const processCalls = gamification.processEvent.mock
+      .calls as unknown as Array<[unknown, unknown, Record<string, unknown>]>;
+    expect(processCalls[0]?.[2]).toMatchObject({
+      evaluationMode: 'LIVE_LEDGER_FALLBACK',
+      suppressLedgerShadow: true,
+    });
+    expect(processCalls[0]?.[2].originKey).toMatch(/^ggo:v1:[a-f0-9]{64}$/);
+    const receiptUpdates = prisma.guestGameOriginReceipt.updateMany.mock
+      .calls as unknown as Array<
+      [{ where: Record<string, unknown>; data: Record<string, unknown> }]
+    >;
+    expect(receiptUpdates[1]?.[0].where).toMatchObject({
+      id: 'receipt-1',
+      status: 'PROCESSING',
+      attempts: 1,
+    });
+  });
+
+  it('does not let an expired worker finalize a reclaimed receipt', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameOriginReceipt.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      fallbackFacts: 0,
+      duplicateFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates a dry-run failure and continues with the next fact', async () => {
+    const { service, prisma, gamification } = createService();
+    const brokenFact = {
+      ...fact(new Date(now.getTime() - 120_000)),
+      id: 'broken-fact',
+      sourceExternalId: 'broken-session',
+    };
+    const healthyFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'healthy-fact',
+      sourceExternalId: 'healthy-session',
+    };
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      brokenFact,
+      healthyFact,
+    ]);
+    gamification.dryRun
+      .mockRejectedValueOnce(new Error('malformed fact'))
+      .mockResolvedValueOnce(dryRun());
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        limit: 1,
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      processedTenants: 1,
+      erroredTenants: 0,
+      checkedFacts: 1,
+      failedFacts: 1,
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    expect(gamification.dryRun).toHaveBeenCalledTimes(2);
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates a LIVE reconciliation failure and continues with the next fact', async () => {
+    const { service, prisma, gamification } = createService();
+    const brokenFact = {
+      ...fact(new Date(now.getTime() - 120_000)),
+      id: 'broken-live-fact',
+      sourceExternalId: 'broken-live-session',
+    };
+    const healthyFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'healthy-fallback-fact',
+      sourceExternalId: 'healthy-fallback-session',
+    };
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      brokenFact,
+      healthyFact,
+    ]);
+    prisma.guestGameOriginReceipt.upsert.mockImplementation((args: unknown) => {
+      const input = args as { create: { factId: string } };
+      return Promise.resolve({
+        id: `receipt-${input.create.factId}`,
+        status: 'WAITING_LIVE',
+        ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+        graceUntil: new Date(now.getTime() - 1_000),
+        attempts: 0,
+        claimExpiresAt: null,
+      });
+    });
+    prisma.guestGameEvent.findFirst
+      .mockResolvedValueOnce({ id: 'event-live-broken' })
+      .mockResolvedValueOnce(null);
+    gamification.processEvent
+      .mockRejectedValueOnce(new Error('LIVE reconciliation failed'))
+      .mockResolvedValueOnce({
+        event: { id: 'event-fallback-healthy' },
+        summary: { idempotent: false, createdRewards: 1 },
+      });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        limit: 1,
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      processedTenants: 1,
+      erroredTenants: 0,
+      checkedFacts: 1,
+      failedFacts: 1,
+      liveHandledFacts: 0,
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(2);
+    const receiptUpdates = prisma.guestGameOriginReceipt.updateMany.mock
+      .calls as unknown as Array<
+      [{ where: Record<string, unknown>; data: Record<string, unknown> }]
+    >;
+    expect(
+      receiptUpdates.some((call) => call[0].data.status === 'LIVE_PROCESSED'),
+    ).toBe(false);
+  });
+
+  it('dead-letters exhausted receipts without starving a later fact', async () => {
+    const { service, prisma, gamification } = createService();
+    const exhaustedFacts = Array.from({ length: 100 }, (_, index) => ({
+      ...fact(new Date(now.getTime() - 180_000 + index)),
+      id: `exhausted-fact-${index}`,
+      sourceExternalId: `exhausted-session-${index}`,
+    }));
+    const healthyFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'healthy-fact',
+      sourceExternalId: 'healthy-session',
+    };
+    prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce(exhaustedFacts)
+      .mockResolvedValueOnce([healthyFact]);
+    prisma.guestGameOriginReceipt.upsert.mockImplementation((args: unknown) => {
+      const input = args as { create: { factId: string } };
+      const exhausted = input.create.factId.startsWith('exhausted-fact-');
+      return Promise.resolve({
+        id: `receipt-${input.create.factId}`,
+        status: exhausted ? 'FAILED' : 'WAITING_LIVE',
+        ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+        graceUntil: new Date(now.getTime() - 1_000),
+        attempts: exhausted ? 3 : 0,
+        claimExpiresAt: null,
+      });
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        limit: 1,
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      failedFacts: 100,
+      duplicateFacts: 0,
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(2);
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'receipt-exhausted-fact-0',
+        attempts: { gte: 3 },
+        status: {
+          in: ['WAITING_LIVE', 'FAILED', 'SHADOWED', 'PROCESSING'],
+        },
+      },
+      data: {
+        status: 'DEAD_LETTER',
+        claimExpiresAt: null,
+        processedAt: now,
+        lastError: 'Ledger fallback exhausted the maximum number of attempts.',
+      },
+    });
+  });
+
+  it('treats a DEAD_LETTER receipt as terminal on replay', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+      id: 'receipt-1',
+      status: 'DEAD_LETTER',
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 3,
+      claimExpiresAt: null,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 0,
+      failedFacts: 0,
+      duplicateFacts: 1,
+      fallbackFacts: 0,
+    });
+    expect(prisma.guestGameEvent.findFirst).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('paginates past terminal receipts instead of starving a new fact', async () => {
+    const { service, prisma, gamification } = createService();
+    const oldFacts = Array.from({ length: 100 }, (_, index) => ({
+      ...fact(new Date(now.getTime() - 120_000 + index)),
+      id: `old-fact-${index}`,
+      sourceExternalId: `old-session-${index}`,
+    }));
+    const freshFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fresh-fact',
+      sourceExternalId: 'fresh-session',
+    };
+    prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce(oldFacts)
+      .mockResolvedValueOnce([freshFact]);
+    prisma.guestGameOriginReceipt.upsert.mockImplementation((args: unknown) => {
+      const input = args as { create: { factId: string } };
+      const terminal = input.create.factId.startsWith('old-fact-');
+      return Promise.resolve({
+        id: `receipt-${input.create.factId}`,
+        status: terminal ? 'PROCESSED' : 'WAITING_LIVE',
+        ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+        graceUntil: new Date(now.getTime() - 1_000),
+        attempts: terminal ? 1 : 0,
+        claimExpiresAt: null,
+      });
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        limit: 1,
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 100,
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(2);
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+  });
+});

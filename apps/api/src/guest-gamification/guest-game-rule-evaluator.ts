@@ -234,6 +234,23 @@ function evaluateLedgerProgress(
     return ledgerBlockedEvaluation(productFilter.reason, qualifiedFacts, null);
   }
   qualifiedFacts = productFilter.facts;
+  const productCoverageBlocker = productFilter.coverageBlocker ?? null;
+
+  const minSessionMinutes = numericValue(
+    metric.minSessionMinutes ?? conditions.minSessionMinutes,
+  );
+  if (minSessionMinutes !== null) {
+    qualifiedFacts = qualifiedFacts.filter(
+      (fact) => Math.max(0, fact.durationMinutes ?? 0) >= minSessionMinutes,
+    );
+    if (qualifiedFacts.length === 0) {
+      return ledgerBlockedEvaluation(
+        `Нет сессии длительностью не менее ${minSessionMinutes} мин.`,
+        facts,
+        null,
+      );
+    }
+  }
 
   const amountComparison = normalizeLedgerToken(
     nullableString(metric.amountComparison ?? conditions.amountComparison),
@@ -244,21 +261,24 @@ function evaluateLedgerProgress(
       metric.amount ??
       conditions.amount,
   );
-  const exactTopupAmount =
-    qualifiedFacts.some((fact) => fact.factType === 'BALANCE_TOPUP') &&
+  const exactSpendAmount = numericValue(
+    metric.exactSpendAmount ?? conditions.exactSpendAmount,
+  );
+  const exactRequiredAmount =
+    exactSpendAmount ??
+    (qualifiedFacts.some((fact) => fact.factType === 'BALANCE_TOPUP') &&
     ['exact', 'equal', 'equals'].includes(amountComparison)
       ? configuredTopupAmount
-      : null;
+      : null);
 
-  if (exactTopupAmount !== null) {
+  if (exactRequiredAmount !== null) {
     qualifiedFacts = qualifiedFacts.filter(
       (fact) =>
-        fact.factType === 'BALANCE_TOPUP' &&
-        Math.abs(decimalNumber(fact.amount) - exactTopupAmount) < 0.005,
+        Math.abs(decimalNumber(fact.amount) - exactRequiredAmount) < 0.005,
     );
     if (qualifiedFacts.length === 0) {
       return ledgerBlockedEvaluation(
-        `Нет пополнения ровно на ${exactTopupAmount} руб.`,
+        `Нет подходящего факта с суммой ровно ${exactRequiredAmount} руб.`,
         facts,
         null,
       );
@@ -300,6 +320,13 @@ function evaluateLedgerProgress(
     );
 
   if (!hasProgressDefinition) {
+    if (productCoverageBlocker) {
+      return ledgerBlockedEvaluation(
+        productCoverageBlocker,
+        qualifiedFacts,
+        null,
+      );
+    }
     return {
       status: 'MATCHED',
       reason: 'Подходящий факт найден',
@@ -329,6 +356,14 @@ function evaluateLedgerProgress(
     );
   }
 
+  if (productCoverageBlocker) {
+    return ledgerBlockedEvaluation(
+      productCoverageBlocker,
+      qualifiedFacts,
+      progress,
+    );
+  }
+
   return {
     status: 'MATCHED',
     reason: `Цель выполнена: ${current}/${target}${progressUnitSuffix(unit)}`,
@@ -344,7 +379,11 @@ function filterLedgerProductFacts(
   conditions: Record<string, unknown>,
   metric: Record<string, unknown>,
 ):
-  | { status: 'MATCHED'; facts: GuestGameLedgerFact[] }
+  | {
+      status: 'MATCHED';
+      facts: GuestGameLedgerFact[];
+      coverageBlocker?: string;
+    }
   | { status: 'BLOCKED' | 'INSUFFICIENT_DATA'; reason: string } {
   const categorySource =
     nullableString(
@@ -356,6 +395,15 @@ function filterLedgerProductFacts(
     )?.toUpperCase() === 'LEETPLUS'
       ? 'LEETPLUS'
       : 'LANGAME';
+  const productRefs = Array.isArray(metric.productRefs)
+    ? metric.productRefs
+        .filter(
+          (item): item is Record<string, unknown> =>
+            Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+        )
+        .map((item) => stringValues(item.productId, item.externalProductId))
+        .filter((identifiers) => identifiers.length > 0)
+    : [];
   const selectors = {
     productIds: stringValues(
       metric.productIds,
@@ -403,8 +451,15 @@ function filterLedgerProductFacts(
         ),
   };
   const hasSelectors = Object.values(selectors).some((values) => values.length);
+  const selectedProductIdentifiers = [
+    ...new Set([
+      ...selectors.productIds,
+      ...selectors.externalProductIds,
+      ...productRefs.flat(),
+    ]),
+  ];
 
-  if (!hasSelectors) {
+  if (!hasSelectors && productRefs.length === 0) {
     return { status: 'MATCHED', facts };
   }
 
@@ -430,13 +485,9 @@ function filterLedgerProductFacts(
     if (categoryName) fieldsPresent.add('categoryNames');
 
     return (
-      matchesLedgerSelector(selectors.productIds, [
+      matchesLedgerSelector(selectedProductIdentifiers, [
         productId,
         externalProductId,
-      ]) &&
-      matchesLedgerSelector(selectors.externalProductIds, [
-        externalProductId,
-        productId,
       ]) &&
       matchesLedgerSelector(selectors.productNames, [productName]) &&
       matchesLedgerSelector(selectors.categoryIds, [categoryId]) &&
@@ -480,12 +531,44 @@ function filterLedgerProductFacts(
           }),
         )
         .filter((fact): fact is GuestGameLedgerFact => Boolean(fact));
+      const missingCategoryCount =
+        categorySelections.length - coverageFacts.length;
       return {
         status: 'MATCHED',
-        facts: [
-          ...new Map(coverageFacts.map((fact) => [fact.id, fact])).values(),
-        ],
+        facts: matched,
+        ...(missingCategoryCount > 0
+          ? {
+              coverageBlocker: `Куплены не все выбранные категории: отсутствует ${missingCategoryCount}`,
+            }
+          : {}),
       };
+    }
+    if (productMatch === 'ALL') {
+      const requiredProducts = productRefs.length
+        ? productRefs
+        : (selectors.externalProductIds.length
+            ? selectors.externalProductIds
+            : selectors.productIds
+          ).map((id) => [id]);
+      const missingProductCount = requiredProducts.filter(
+        (identifiers) =>
+          !matched.some((fact) => {
+            const evidence = jsonObject(fact.evidence) ?? {};
+            return identifiers.some((id) =>
+              [
+                nullableString(evidence.productId),
+                nullableString(evidence.externalProductId),
+              ].includes(id),
+            );
+          }),
+      );
+      if (missingProductCount.length > 0) {
+        return {
+          status: 'MATCHED',
+          facts: matched,
+          coverageBlocker: `Куплены не все выбранные товары: отсутствует ${missingProductCount.length}`,
+        };
+      }
     }
     return { status: 'MATCHED', facts: matched };
   }
@@ -758,10 +841,15 @@ export function relevantGuestGameFacts(
     return ['PRODUCT_PURCHASED'];
   }
   if (trigger.includes('CHECK_IN')) {
-    return ['VISIT', 'SESSION_STARTED'];
+    // A club visit or session start is not proof that the guest explicitly
+    // checked in. Keep the shadow evaluator conservative until the ledger
+    // receives the canonical check-in event from the guest portal.
+    return ['CHECK_IN_PERFORMED'];
   }
   if (trigger.includes('APP_OPEN')) {
-    return ['VISIT'];
+    // Opening the game module is a first-party portal event. Langame VISIT
+    // rows describe a different action and must not create a false match.
+    return ['APP_OPENED'];
   }
   return ['SESSION_STARTED', 'VISIT', 'REWARD_TRACE'];
 }

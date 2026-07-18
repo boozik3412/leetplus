@@ -2076,7 +2076,7 @@ export class GuestActivityLedgerService {
         select: { id: true },
       });
 
-      await this.prisma.guestActivityFact.upsert({
+      const persistedFact = await this.prisma.guestActivityFact.upsert({
         where: {
           tenantId_factType_sourceHash_parserVersion: {
             tenantId: context.tenantId,
@@ -2131,7 +2131,17 @@ export class GuestActivityLedgerService {
           supersededAt: null,
           evidence: fact.evidence,
         },
+        select: { id: true },
       });
+
+      if (sourceKind === SOURCE_GUEST_SESSION && fact.sessionExternalId) {
+        await this.reconcileSessionFactVersions(
+          context,
+          fact.factType,
+          fact.sessionExternalId,
+          persistedFact.id,
+        );
+      }
 
       if (!beforeFact) {
         factsCreated += 1;
@@ -2163,6 +2173,49 @@ export class GuestActivityLedgerService {
     });
 
     return factsCreated;
+  }
+
+  private async reconcileSessionFactVersions(
+    context: LedgerSyncContext,
+    factType: GuestActivityFactType,
+    sessionExternalId: string,
+    persistedFactId: string,
+  ) {
+    const stableIdentity = {
+      tenantId: context.tenantId,
+      profileId: context.profile.id,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: context.externalDomain,
+      sourceKind: SOURCE_GUEST_SESSION,
+      factType,
+      sessionExternalId,
+    } satisfies Prisma.GuestActivityFactWhereInput;
+    const versions = await this.prisma.guestActivityFact.findMany({
+      where: stableIdentity,
+      select: { id: true, createdAt: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    const activeVersionId = versions[0]?.id ?? persistedFactId;
+    const supersededAt = new Date();
+
+    await this.prisma.guestActivityFact.updateMany({
+      where: {
+        ...stableIdentity,
+        id: { not: activeVersionId },
+        lifecycleStatus: 'ACTIVE',
+      },
+      data: {
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt,
+      },
+    });
+    await this.prisma.guestActivityFact.updateMany({
+      where: { id: activeVersionId },
+      data: {
+        lifecycleStatus: 'ACTIVE',
+        supersededAt: null,
+      },
+    });
   }
 
   private normalizeFacts(
@@ -2294,6 +2347,14 @@ export class GuestActivityLedgerService {
     );
     const quantity = firstNumber(row.count, row.quantity, row.qty);
     const unitPrice = firstNumber(row.price_sale, row.price, row.unit_price);
+    if (
+      quantity === null ||
+      quantity <= 0 ||
+      raw.amount === null ||
+      raw.amount <= 0
+    ) {
+      return [];
+    }
     const rawPayload =
       raw.rawPayload &&
       typeof raw.rawPayload === 'object' &&
@@ -2943,11 +3004,11 @@ function relevantFactsForRule(
   }
 
   if (trigger.includes('check')) {
-    return ['VISIT', 'SESSION_STARTED'];
+    return ['CHECK_IN_PERFORMED'];
   }
 
   if (trigger.includes('visit') || trigger.includes('app')) {
-    return ['VISIT', 'SESSION_STARTED'];
+    return trigger.includes('app') ? ['APP_OPENED'] : ['VISIT'];
   }
 
   return ['SESSION_STARTED', 'REWARD_TRACE'];

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { guestGameTriggerMatches } from './guest-game-progress';
 
 const DEFAULT_SYNC_LAG_SECONDS = 10 * 60;
 const DEFAULT_PARTIAL_SECONDS = 60 * 60;
@@ -169,6 +170,10 @@ export class GuestGameQualityMonitoringService {
         select: {
           evaluationRunId: true,
           evaluationMode: true,
+          ruleType: true,
+          ruleId: true,
+          triggerKind: true,
+          sourceEventType: true,
           status: true,
         },
         orderBy: { evaluatedAt: 'desc' },
@@ -345,27 +350,55 @@ export function decisionPairMetrics(
   decisions: Array<{
     evaluationRunId: string;
     evaluationMode: string;
+    ruleType: string;
+    ruleId: string;
+    triggerKind: string | null;
+    sourceEventType: string | null;
     status: string;
   }>,
 ) {
-  const runs = new Map<
+  const ruleRuns = new Map<
     string,
-    { live: string | null; shadow: string | null }
+    { live: string | null; shadow: string | null; comparable: boolean }
   >();
   for (const decision of decisions) {
-    const run = runs.get(decision.evaluationRunId) ?? {
+    if (
+      decision.evaluationMode !== 'LIVE' &&
+      decision.evaluationMode !== 'SHADOW'
+    ) {
+      continue;
+    }
+
+    const pairKey = [
+      decision.evaluationRunId,
+      decision.ruleType,
+      decision.ruleId,
+    ].join(':');
+    const run = ruleRuns.get(pairKey) ?? {
       live: null,
       shadow: null,
+      comparable: false,
     };
+    run.comparable ||= Boolean(
+      decision.triggerKind &&
+      decision.sourceEventType &&
+      guestGameTriggerMatches(decision.triggerKind, decision.sourceEventType),
+    );
     if (decision.evaluationMode === 'SHADOW') {
       run.shadow ??= decision.status;
     } else {
       run.live ??= decision.status;
     }
-    runs.set(decision.evaluationRunId, run);
+    ruleRuns.set(pairKey, run);
   }
-  const values = [...runs.values()];
-  const paired = values.filter((run) => run.live && run.shadow);
+  const values = [...ruleRuns.values()];
+  const paired = values.filter(
+    (run) =>
+      run.live &&
+      run.shadow &&
+      run.comparable &&
+      !['NO_MATCH', 'INSUFFICIENT_DATA'].includes(run.shadow),
+  );
   const mismatched = paired.filter(
     (run) =>
       normalizeDecisionOutcome(run.live) !==

@@ -6774,6 +6774,272 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
     });
 
+    it('does not let a ledger fact from a completed Battle Pass step satisfy the next step', async () => {
+      const { service, prisma, configService } = createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      const previousStepFactAt = new Date('2026-06-10T09:00:00.000Z');
+      const nextStepActivatedAt = new Date('2026-06-10T09:30:00.000Z');
+      const playTimeRules = {
+        schemaVersion: 2,
+        taskType: 'PLAY_TIME',
+        triggerKind: 'PLAY_TIME',
+        sessionType: 'HOURLY',
+        metric: {
+          aggregation: 'duration',
+          target: 60,
+          unit: 'minutes',
+        },
+      };
+      prisma.guestGameSeason.findMany.mockResolvedValue([
+        {
+          id: 'season-1',
+          name: 'Test season',
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: null,
+          periodTo: null,
+          storeIds: [],
+          xpRules: {},
+          levels: [
+            { level: 1, title: 'Step one', activationRules: playTimeRules },
+            { level: 2, title: 'Step two', activationRules: playTimeRules },
+          ],
+        },
+      ]);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          seasonId: 'season-1',
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          status: 'APPROVED',
+          qualifiedAt: nextStepActivatedAt,
+          expiresAt: null,
+        },
+      ]);
+      prisma.guestActivityFact.findMany.mockResolvedValue([
+        {
+          id: 'previous-step-play-time',
+          factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+          confidence: 'EXACT',
+          happenedAt: previousStepFactAt,
+          createdAt: previousStepFactAt,
+          storeId: null,
+          externalDomain: 'club-1',
+          tariffName: null,
+          tariffType: null,
+          amount: null,
+          durationMinutes: 120,
+          evidence: null,
+          store: null,
+        },
+      ]);
+      const baseRule = dryRunResult().rules[0];
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          rules: [
+            {
+              ...baseRule,
+              id: 'season-1',
+              kind: 'SEASON',
+              name: 'Test season',
+              triggerKind: 'BATTLE_PASS',
+              eligible: false,
+              rewardType: null,
+              rewardAmount: 0,
+              rewardLabel: null,
+              selectedRewardLabel: null,
+              xpDelta: 0,
+              battlePassLevel: 2,
+              battlePassStep: 2,
+              battlePassStepTitle: 'Step two',
+              reasons: [],
+              blockers: ['step progress is incomplete'],
+            },
+          ],
+          summary: {
+            checkedRules: 1,
+            eligibleRules: 0,
+            blockedRules: 1,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          },
+        }),
+        { eventId: 'event-step-2' },
+      );
+
+      expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            happenedAt: {
+              gte: nextStepActivatedAt,
+              lte: now,
+            },
+          }),
+        }),
+      );
+      const shadowDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[1][0].data[0];
+      expect(shadowDecision).toMatchObject({
+        ruleType: 'BATTLE_PASS',
+        ruleId: 'season-1',
+        evaluationMode: 'SHADOW',
+        status: 'BLOCKED',
+      });
+    });
+
+    it('does not move the ledger boundary past accumulated facts when the current event reward already exists', async () => {
+      const { service, prisma, configService } = createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      const stepActivatedAt = new Date('2026-06-10T09:00:00.000Z');
+      const firstHalfAt = new Date('2026-06-10T09:15:00.000Z');
+      const currentEventAt = now;
+      const playTimeRules = {
+        schemaVersion: 2,
+        taskType: 'PLAY_TIME',
+        triggerKind: 'PLAY_TIME',
+        sessionType: 'HOURLY',
+        metric: {
+          aggregation: 'duration',
+          target: 60,
+          unit: 'minutes',
+        },
+      };
+      prisma.guestGameSeason.findMany.mockResolvedValue([
+        {
+          id: 'season-1',
+          name: 'Test season',
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: null,
+          periodTo: null,
+          storeIds: [],
+          xpRules: {},
+          levels: [
+            { level: 1, title: 'Step one', activationRules: playTimeRules },
+            { level: 2, title: 'Step two', activationRules: playTimeRules },
+          ],
+        },
+      ]);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-step-1',
+          seasonId: 'season-1',
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          status: 'APPROVED',
+          qualifiedAt: stepActivatedAt,
+          expiresAt: null,
+        },
+        {
+          id: 'reward-step-2-current-event',
+          seasonId: 'season-1',
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          status: 'APPROVED',
+          qualifiedAt: currentEventAt,
+          expiresAt: null,
+        },
+      ]);
+      prisma.guestActivityFact.findMany.mockResolvedValue([
+        {
+          id: 'play-time-first-half',
+          factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+          confidence: 'EXACT',
+          happenedAt: firstHalfAt,
+          createdAt: firstHalfAt,
+          storeId: null,
+          externalDomain: 'club-1',
+          tariffName: null,
+          tariffType: null,
+          amount: null,
+          durationMinutes: 30,
+          evidence: null,
+          store: null,
+        },
+        {
+          id: 'play-time-current-event-half',
+          factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+          confidence: 'EXACT',
+          happenedAt: currentEventAt,
+          createdAt: currentEventAt,
+          storeId: null,
+          externalDomain: 'club-1',
+          tariffName: null,
+          tariffType: null,
+          amount: null,
+          durationMinutes: 30,
+          evidence: null,
+          store: null,
+        },
+      ]);
+      const baseRule = dryRunResult().rules[0];
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          rules: [
+            {
+              ...baseRule,
+              id: 'season-1',
+              kind: 'SEASON',
+              name: 'Test season',
+              triggerKind: 'PLAY_TIME',
+              eligible: true,
+              rewardType: 'BONUS',
+              rewardAmount: 100,
+              rewardLabel: 'Step two reward',
+              selectedRewardLabel: 'Step two reward',
+              xpDelta: 0,
+              battlePassLevel: 2,
+              battlePassStep: 2,
+              battlePassStepTitle: 'Step two',
+              reasons: ['step progress is complete'],
+              blockers: [],
+            },
+          ],
+        }),
+        {
+          eventId: 'event-step-2',
+          excludeSeasonRewardIds: ['reward-step-2-current-event'],
+        },
+      );
+
+      expect(prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { notIn: ['reward-step-2-current-event'] },
+          }),
+        }),
+      );
+      expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            happenedAt: {
+              gte: stepActivatedAt,
+              lte: currentEventAt,
+            },
+          }),
+        }),
+      );
+      const shadowDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[1][0].data[0];
+      expect(shadowDecision).toMatchObject({
+        ruleType: 'BATTLE_PASS',
+        ruleId: 'season-1',
+        evaluationMode: 'SHADOW',
+        status: 'MATCHED',
+      });
+      expect(shadowDecision.evidence).toEqual(
+        expect.objectContaining({
+          progress: expect.objectContaining({ current: 60, target: 60 }),
+        }),
+      );
+    });
+
     it('pairs a blocked live open attempt with shadow without granting entitlement', async () => {
       const { service, prisma, configService } = createService();
       configService.get.mockImplementation((key: string) =>
@@ -7080,6 +7346,7 @@ describe('GuestGamificationService', () => {
     it('uses the generated idempotency key and keeps Langame writes disabled', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();
+      const recordDecisionsSpy = jest.spyOn(service, 'recordRuleDecisions');
 
       jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
         profile,
@@ -7125,6 +7392,14 @@ describe('GuestGamificationService', () => {
         idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
         langameWrite: false,
       });
+      expect(recordDecisionsSpy).toHaveBeenCalledWith(
+        user,
+        expect.any(Object),
+        expect.objectContaining({
+          eventId: 'event-1',
+          excludeSeasonRewardIds: ['reward-1'],
+        }),
+      );
       expect(prisma.guestGameRuleDecision.createMany).toHaveBeenCalledWith({
         data: [
           expect.objectContaining({
@@ -8214,6 +8489,96 @@ describe('GuestGamificationService', () => {
           activeRulesOnly: true,
           suppressLootBoxRewards: true,
         }),
+      );
+    });
+
+    it('prioritizes an unprocessed fact ahead of processed rows before applying the batch limit', async () => {
+      const { service, prisma } = createService();
+      const activeDryRun = dryRunResult();
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: [
+          snapshotFact('fact-already-processed'),
+          snapshotFact('fact-pending'),
+        ],
+        summary: {
+          sessions: 2,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      prisma.guestGameEvent.findMany.mockResolvedValue([
+        {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId:
+            'guest-game:GUEST_SESSION:SESSION_START:fact-already-processed',
+        },
+      ]);
+      jest.spyOn(service, 'dryRun').mockResolvedValue(activeDryRun);
+      jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, { limit: 1 });
+
+      expect(result).toMatchObject({
+        availableFacts: 2,
+        checkedFacts: 1,
+        processedFacts: 1,
+      });
+      expect(service.dryRun).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({ sourceFactId: 'fact-pending' }),
+      );
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({ sourceFactId: 'fact-pending' }),
+      );
+    });
+
+    it('keeps unbound diagnostic facts behind actionable guest facts', async () => {
+      const { service, prisma } = createService();
+      const activeDryRun = dryRunResult();
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: [
+          snapshotFact('fact-unbound-1', { guest: null }),
+          snapshotFact('fact-unbound-2', { guest: null }),
+          snapshotFact('fact-actionable'),
+        ],
+        summary: {
+          sessions: 3,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      prisma.guestGameEvent.findMany.mockResolvedValue([]);
+      jest.spyOn(service, 'dryRun').mockResolvedValue(activeDryRun);
+      jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, { limit: 1 });
+
+      expect(result).toMatchObject({
+        availableFacts: 3,
+        checkedFacts: 1,
+        processedFacts: 1,
+      });
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({ sourceFactId: 'fact-actionable' }),
       );
     });
 

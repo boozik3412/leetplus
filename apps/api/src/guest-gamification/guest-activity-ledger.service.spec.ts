@@ -56,6 +56,8 @@ describe('GuestActivityLedgerService', () => {
     normalizationRunId?: string | null;
     lifecycleStatus?: string;
     supersededAt?: Date | null;
+    sessionExternalId?: string | null;
+    createdAt?: Date;
   };
   type NewLedgerRow = Omit<LedgerRow, 'id'> & Partial<Pick<LedgerRow, 'id'>>;
   type RawWhere = {
@@ -67,9 +69,14 @@ describe('GuestActivityLedgerService', () => {
     OR?: RawWhere[];
   };
   type FactWhere = {
+    id?: string | { not?: string };
+    tenantId?: string;
     profileId?: string;
     externalDomain?: string;
+    externalProvider?: IntegrationProvider;
+    sourceKind?: string;
     factType?: string;
+    sessionExternalId?: string;
     lifecycleStatus?: string;
     happenedAt?: DateRange;
   };
@@ -118,6 +125,7 @@ describe('GuestActivityLedgerService', () => {
   type FactFindManyArgs = {
     where?: FactWhere;
     select?: SelectShape;
+    orderBy?: Array<Record<string, 'asc' | 'desc'>>;
   };
   type MockLangameSettingsService = {
     resolveTenantAccess: jest.MockedFunction<
@@ -212,6 +220,22 @@ describe('GuestActivityLedgerService', () => {
   };
 
   const matchesFactWhere = (row: LedgerRow, where: FactWhere) => {
+    if (typeof where.id === 'string' && row.id !== where.id) {
+      return false;
+    }
+
+    if (
+      typeof where.id === 'object' &&
+      where.id.not &&
+      row.id === where.id.not
+    ) {
+      return false;
+    }
+
+    if (where.tenantId && row.tenantId !== where.tenantId) {
+      return false;
+    }
+
     if (where.profileId && row.profileId !== where.profileId) {
       return false;
     }
@@ -220,7 +244,25 @@ describe('GuestActivityLedgerService', () => {
       return false;
     }
 
+    if (
+      where.externalProvider &&
+      row.externalProvider !== where.externalProvider
+    ) {
+      return false;
+    }
+
+    if (where.sourceKind && row.sourceKind !== where.sourceKind) {
+      return false;
+    }
+
     if (where.factType && row.factType !== where.factType) {
+      return false;
+    }
+
+    if (
+      where.sessionExternalId &&
+      row.sessionExternalId !== where.sessionExternalId
+    ) {
       return false;
     }
 
@@ -478,20 +520,21 @@ describe('GuestActivityLedgerService', () => {
               Object.assign(existing, update);
               return Promise.resolve(existing);
             }
-            const fact = { ...create, id: `fact-${facts.size + 1}` };
+            const fact = {
+              ...create,
+              id: `fact-${facts.size + 1}`,
+              createdAt: new Date(Date.now() + facts.size),
+            };
             facts.set(key, fact);
             return Promise.resolve(fact);
           }),
         updateMany: jest.fn().mockImplementation(({ where, data }) => {
           let count = 0;
           for (const fact of facts.values()) {
-            if (where.rawRecordId && fact.rawRecordId !== where.rawRecordId) {
+            if (!matchesFactWhere(fact, where)) {
               continue;
             }
-            if (
-              where.lifecycleStatus &&
-              fact.lifecycleStatus !== where.lifecycleStatus
-            ) {
+            if (where.rawRecordId && fact.rawRecordId !== where.rawRecordId) {
               continue;
             }
 
@@ -520,14 +563,36 @@ describe('GuestActivityLedgerService', () => {
         }),
         findMany: jest
           .fn()
-          .mockImplementation(({ where, select }: FactFindManyArgs) => {
-            const rows = Array.from(facts.values()).filter((row) =>
-              matchesFactWhere(row, where ?? {}),
-            );
-            return Promise.resolve(
-              rows.map((row) => selectFields(row, select)),
-            );
-          }),
+          .mockImplementation(
+            ({ where, select, orderBy }: FactFindManyArgs) => {
+              const rows = Array.from(facts.values()).filter((row) =>
+                matchesFactWhere(row, where ?? {}),
+              );
+              if (orderBy?.length) {
+                rows.sort((left, right) => {
+                  for (const ordering of orderBy) {
+                    const [field, direction] =
+                      Object.entries(ordering)[0] ?? [];
+                    if (!field || !direction) continue;
+                    const comparison =
+                      field === 'createdAt'
+                        ? (left.createdAt?.getTime() ?? 0) -
+                          (right.createdAt?.getTime() ?? 0)
+                        : field === 'id'
+                          ? left.id.localeCompare(right.id)
+                          : 0;
+                    if (comparison !== 0) {
+                      return direction === 'desc' ? -comparison : comparison;
+                    }
+                  }
+                  return 0;
+                });
+              }
+              return Promise.resolve(
+                rows.map((row) => selectFields(row, select)),
+              );
+            },
+          ),
       },
     } as unknown as PrismaService;
     langameClient = {
@@ -743,6 +808,76 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
+  it('keeps only the latest observed Langame session fact version active for a stable session id', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    const originalSession = {
+      id: 'session-shifted-1',
+      guest_id: externalGuestId,
+      club_id: '15',
+      date_start: '07.07.2026 10:00',
+      date_stop: '07.07.2026 11:00',
+      packet: 1,
+    };
+    const correctedSession = {
+      ...originalSession,
+      date_start: '07.07.2026 10:05',
+      date_stop: '07.07.2026 11:10',
+    };
+    langameClient.listGuestSessions
+      .mockResolvedValueOnce([originalSession])
+      .mockResolvedValueOnce([correctedSession])
+      .mockResolvedValueOnce([originalSession]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'SESSION_VERSION_ORIGINAL',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'SESSION_VERSION_CORRECTED',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'SESSION_VERSION_REPLAY_OLD',
+    });
+
+    const sessionFacts = Array.from(facts.values()).filter(
+      (fact) => fact.sessionExternalId === originalSession.id,
+    );
+    const factTypes = new Set(sessionFacts.map((fact) => fact.factType));
+
+    expect(rawRecords.size).toBe(2);
+    expect(sessionFacts).toHaveLength(factTypes.size * 2);
+    for (const factType of factTypes) {
+      const versions = sessionFacts.filter(
+        (fact) => fact.factType === factType,
+      );
+      expect(
+        versions.filter((fact) => fact.lifecycleStatus === 'ACTIVE'),
+      ).toHaveLength(1);
+      expect(
+        versions.filter(
+          (fact) =>
+            fact.lifecycleStatus === 'SUPERSEDED' &&
+            fact.supersededAt instanceof Date,
+        ),
+      ).toHaveLength(1);
+    }
+    expect(
+      sessionFacts.find(
+        (fact) =>
+          fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED' &&
+          fact.lifecycleStatus === 'ACTIVE',
+      ),
+    ).toEqual(expect.objectContaining({ durationMinutes: 65 }));
+  });
+
   it('does not classify a session as hourly when Langame omits the packet marker', async () => {
     langameClient.listGuestLogs.mockResolvedValue([]);
     langameClient.listGuestSessions.mockResolvedValue([
@@ -872,6 +1007,70 @@ describe('GuestActivityLedgerService', () => {
         externalCategoryName: 'Горячая кухня',
       }),
     );
+  });
+
+  it('keeps cancelled, returned, and non-positive product expenses out of active purchase facts', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listProductExpenses.mockResolvedValue([
+      {
+        id: 260974,
+        date: '10.07.2026 16:12:00',
+        list_goods_id: 415,
+        list_clubs_id: 15,
+        real_guest_id: externalGuestId,
+        price_sale: 250,
+        count: 1,
+        cancel: 1,
+      },
+      {
+        id: 260975,
+        date: '10.07.2026 16:13:00',
+        list_goods_id: 415,
+        list_clubs_id: 15,
+        real_guest_id: externalGuestId,
+        price_sale: 250,
+        count: -1,
+        cancel: 0,
+      },
+      {
+        id: 260976,
+        date: '10.07.2026 16:14:00',
+        list_goods_id: 415,
+        list_clubs_id: 15,
+        real_guest_id: externalGuestId,
+        price_sale: 250,
+        count: 0,
+        cancel: 0,
+      },
+      {
+        id: 260977,
+        date: '10.07.2026 16:15:00',
+        list_goods_id: 415,
+        list_clubs_id: 15,
+        real_guest_id: externalGuestId,
+        price_sale: 0,
+        count: 1,
+        cancel: 0,
+      },
+    ]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'PRODUCT_PURCHASE_REVERSALS',
+    });
+
+    expect(
+      Array.from(rawRecords.values()).filter(
+        (row) => row.sourceKind === 'LANGAME_PRODUCT_EXPENSE',
+      ),
+    ).toHaveLength(4);
+    expect(
+      Array.from(facts.values()).filter(
+        (fact) => fact.factType === 'PRODUCT_PURCHASED',
+      ),
+    ).toHaveLength(0);
   });
 
   it('normalizes guest-linked balance history rows into exact topup facts', async () => {

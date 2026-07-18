@@ -5853,9 +5853,100 @@ export class GuestGamificationService {
     const limit = Math.min(30, Math.max(1, intValue(dto.limit) ?? 20));
     const dryRunOnly = booleanValue(dto.dryRunOnly);
     const factsResult = await this.getSnapshotFacts(user);
-    const candidates = factsResult.facts
-      .filter((fact) => !source || fact.source === source)
-      .slice(0, limit);
+    const sourceCandidates = factsResult.facts.filter(
+      (fact) => !source || fact.source === source,
+    );
+    let orderedCandidates = sourceCandidates;
+
+    // Snapshot sources are intentionally bounded. If already processed rows
+    // keep occupying the head of that window, a newly completed session or
+    // purchase below them can otherwise starve forever. In live mode, scan
+    // the bounded window once and put facts without a canonical event first;
+    // processEvent still remains the final idempotency authority.
+    if (!dryRunOnly && sourceCandidates.length > limit) {
+      const candidateReferences = sourceCandidates.map((fact) => ({
+        fact,
+        reference: buildProcessExternalReference(
+          pipelineProcessDtoFromFact(fact),
+          fact.eventType,
+        ),
+      }));
+      const uniqueReferences = [
+        ...new Map(
+          candidateReferences
+            .filter(
+              (
+                item,
+              ): item is typeof item & {
+                reference: ProcessExternalReference;
+              } => Boolean(item.reference),
+            )
+            .map((item) => [
+              processExternalReferenceKey(item.reference),
+              item.reference,
+            ]),
+        ).values(),
+      ];
+      const existingEvents = uniqueReferences.length
+        ? ((await this.prisma.guestGameEvent.findMany({
+            where: {
+              tenantId: user.tenantId,
+              OR: uniqueReferences.map((reference) => ({
+                externalProvider: reference.externalProvider,
+                externalDomain: reference.externalDomain,
+                externalId: reference.externalId,
+              })),
+            },
+            select: {
+              externalProvider: true,
+              externalDomain: true,
+              externalId: true,
+            },
+          })) ?? [])
+        : [];
+      const processedReferences = new Set(
+        existingEvents
+          .filter(
+            (
+              event,
+            ): event is typeof event & {
+              externalProvider: IntegrationProvider;
+              externalDomain: string;
+              externalId: string;
+            } =>
+              Boolean(
+                event.externalProvider &&
+                event.externalDomain &&
+                event.externalId,
+              ),
+          )
+          .map((event) => processExternalReferenceKey(event)),
+      );
+      const pending: GuestGameSnapshotFact[] = [];
+      const processed: GuestGameSnapshotFact[] = [];
+      const unbound: GuestGameSnapshotFact[] = [];
+
+      for (const item of candidateReferences) {
+        if (!item.fact.guest?.id && !item.fact.profileId) {
+          unbound.push(item.fact);
+          continue;
+        }
+        if (
+          item.reference &&
+          processedReferences.has(processExternalReferenceKey(item.reference))
+        ) {
+          processed.push(item.fact);
+        } else {
+          pending.push(item.fact);
+        }
+      }
+      // Unbound facts can never produce a guest reward. Keep them visible in
+      // diagnostics, but do not let a dense block of them occupy the batch
+      // ahead of actionable guest-bound sessions and purchases.
+      orderedCandidates = [...pending, ...processed, ...unbound];
+    }
+
+    const candidates = orderedCandidates.slice(0, limit);
     const facts: GuestGamePipelineFactResult[] = [];
 
     for (const fact of candidates) {
@@ -10306,6 +10397,7 @@ export class GuestGamificationService {
       evaluationRunId?: string;
       evaluationMode?: string;
       evaluatorVersion?: string;
+      excludeSeasonRewardIds?: string[];
       evidence?: Prisma.InputJsonValue;
     } = {},
   ): Promise<void> {
@@ -10709,6 +10801,7 @@ export class GuestGamificationService {
       sourceFactId?: string | null;
       sourceFactKind?: string | null;
       evaluationRunId: string;
+      excludeSeasonRewardIds?: string[];
       evidence?: Prisma.InputJsonValue;
     },
   ): Promise<void> {
@@ -10743,6 +10836,35 @@ export class GuestGamificationService {
       const seasons = seasonIds.length
         ? await this.prisma.guestGameSeason.findMany({
             where: { tenantId: user.tenantId, id: { in: seasonIds } },
+          })
+        : [];
+      const seasonRewards = seasonIds.length
+        ? await this.prisma.guestGameReward.findMany({
+            where: {
+              tenantId: user.tenantId,
+              seasonId: { in: seasonIds },
+              status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+              ...(options.excludeSeasonRewardIds?.length
+                ? { id: { notIn: options.excludeSeasonRewardIds } }
+                : {}),
+              OR: [
+                ...(dryRun.profile?.id
+                  ? [{ profileId: dryRun.profile.id }]
+                  : []),
+                ...(dryRun.guest?.id ? [{ guestId: dryRun.guest.id }] : []),
+              ],
+            },
+            select: {
+              id: true,
+              seasonId: true,
+              profileId: true,
+              guestId: true,
+              status: true,
+              qualifiedAt: true,
+              expiresAt: true,
+            },
+            orderBy: { qualifiedAt: 'desc' },
+            take: 1000,
           })
         : [];
       const ruleStores =
@@ -10818,7 +10940,12 @@ export class GuestGamificationService {
                 periodRules as Prisma.JsonValue,
               ) ?? dryRun.input.sessionType,
             createdAt: rule.createdAt,
-            activatedAt: rule.periodFrom ?? rule.createdAt,
+            activatedAt: guestGameShadowBattlePassStepActivatedAt(
+              rule,
+              dryRun,
+              seasonRewards,
+              options.excludeSeasonRewardIds,
+            ),
             periodFrom: rule.periodFrom,
             periodTo: rule.periodTo,
             periodRules: periodRules as Prisma.JsonValue,
@@ -10982,6 +11109,7 @@ export class GuestGamificationService {
         sourceFactKind: nullableString(dto.sourceFactKind),
         evaluationMode: options.evaluationMode,
         evaluatorVersion: options.evaluatorVersion,
+        excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
         evidence: {
           idempotent: true,
           externalId: eventReference.externalId,
@@ -11065,6 +11193,7 @@ export class GuestGamificationService {
             sourceFactKind: nullableString(dto.sourceFactKind),
             evaluationMode: options.evaluationMode,
             evaluatorVersion: options.evaluatorVersion,
+            excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
             evidence: {
               idempotent: true,
               conflictRecovered: true,
@@ -11113,6 +11242,7 @@ export class GuestGamificationService {
       sourceFactKind: nullableString(dto.sourceFactKind),
       evaluationMode: options.evaluationMode,
       evaluatorVersion: options.evaluatorVersion,
+      excludeSeasonRewardIds: rewards.map((reward) => reward.id),
       evidence: {
         idempotent: false,
         createdRewardIds: rewards.map((reward) => reward.id),
@@ -16068,9 +16198,9 @@ function legacyMissionWizardMetric(
           ? 'SINGLE_MINIMUM'
           : aggregation === 'sum'
             ? 'PERIOD_TOTAL'
-          : legacyMinimumAmount
-            ? 'SINGLE_MINIMUM'
-            : 'NONE';
+            : legacyMinimumAmount
+              ? 'SINGLE_MINIMUM'
+              : 'NONE';
     return {
       ...base,
       eventTypes: ['PRODUCT_PURCHASE', 'BAR_PURCHASE'],
@@ -19756,6 +19886,14 @@ type ProcessExternalReference = {
   externalId: string;
 };
 
+function processExternalReferenceKey(reference: ProcessExternalReference) {
+  return [
+    reference.externalProvider,
+    reference.externalDomain,
+    reference.externalId,
+  ].join(':');
+}
+
 function buildProcessExternalReference(
   dto: GuestGameProcessEventDto,
   eventType: string,
@@ -22048,6 +22186,51 @@ function dryRunSeasonCurrentStepActivatedAt(
     const qualifiedAt = new Date(reward.qualifiedAt);
     if (!Number.isNaN(qualifiedAt.getTime()) && qualifiedAt > activatedAt) {
       activatedAt = qualifiedAt;
+    }
+  }
+
+  return activatedAt;
+}
+
+function guestGameShadowBattlePassStepActivatedAt(
+  season: { id: string; createdAt: Date; periodFrom: Date | null },
+  dryRun: Pick<GuestGameDryRunResult, 'profile' | 'guest'>,
+  rewards: Array<{
+    id: string;
+    seasonId: string | null;
+    profileId: string | null;
+    guestId: string | null;
+    status: string;
+    qualifiedAt: Date;
+    expiresAt: Date | null;
+  }>,
+  excludeRewardIds: string[] = [],
+) {
+  let activatedAt =
+    season.periodFrom && season.periodFrom > season.createdAt
+      ? season.periodFrom
+      : season.createdAt;
+  const now = Date.now();
+  const excludedRewardIds = new Set(excludeRewardIds);
+
+  for (const reward of rewards) {
+    if (
+      excludedRewardIds.has(reward.id) ||
+      reward.seasonId !== season.id ||
+      (reward.profileId !== dryRun.profile?.id &&
+        reward.guestId !== dryRun.guest?.id)
+    ) {
+      continue;
+    }
+    const status = reward.status.toUpperCase();
+    if (status === 'CANCELED' || status === 'EXPIRED') {
+      continue;
+    }
+    if (reward.expiresAt && reward.expiresAt.getTime() < now) {
+      continue;
+    }
+    if (reward.qualifiedAt > activatedAt) {
+      activatedAt = reward.qualifiedAt;
     }
   }
 

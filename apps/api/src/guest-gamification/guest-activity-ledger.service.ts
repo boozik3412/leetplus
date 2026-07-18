@@ -567,6 +567,7 @@ export class GuestActivityLedgerService {
 
     try {
       const result = await this.fetchAndPersist(context, window);
+      await this.reconcileHistoricalSessionFactVersions(context);
       const status: GuestActivitySyncStatus = result.staleBinding
         ? 'STALE_BINDING'
         : result.partial
@@ -802,6 +803,8 @@ export class GuestActivityLedgerService {
         normalizationRunId,
       );
     }
+
+    await this.reconcileHistoricalSessionFactVersions(context);
 
     return {
       normalizationRunId,
@@ -2216,6 +2219,69 @@ export class GuestActivityLedgerService {
         supersededAt: null,
       },
     });
+  }
+
+  private async reconcileHistoricalSessionFactVersions(
+    context: LedgerSyncContext,
+  ) {
+    const versions = await this.prisma.guestActivityFact.findMany({
+      where: {
+        tenantId: context.tenantId,
+        profileId: context.profile.id,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: context.externalDomain,
+        sourceKind: SOURCE_GUEST_SESSION,
+      },
+      select: {
+        id: true,
+        factType: true,
+        sessionExternalId: true,
+        createdAt: true,
+        lifecycleStatus: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    const groups = new Map<string, typeof versions>();
+
+    for (const version of versions) {
+      if (!version.sessionExternalId) {
+        continue;
+      }
+      const key = `${version.factType}:${version.sessionExternalId}`;
+      const group = groups.get(key) ?? [];
+      group.push(version);
+      groups.set(key, group);
+    }
+
+    const supersededAt = new Date();
+    for (const group of groups.values()) {
+      if (group.length < 2) {
+        continue;
+      }
+      const activeVersionId = group[0].id;
+      const staleActiveIds = group
+        .slice(1)
+        .filter((version) => version.lifecycleStatus === 'ACTIVE')
+        .map((version) => version.id);
+      if (staleActiveIds.length > 0) {
+        await this.prisma.guestActivityFact.updateMany({
+          where: { id: { in: staleActiveIds } },
+          data: {
+            lifecycleStatus: 'SUPERSEDED',
+            supersededAt,
+          },
+        });
+      }
+      if (group[0].lifecycleStatus !== 'ACTIVE') {
+        await this.prisma.guestActivityFact.updateMany({
+          where: { id: activeVersionId },
+          data: {
+            lifecycleStatus: 'ACTIVE',
+            supersededAt: null,
+          },
+        });
+      }
+    }
   }
 
   private normalizeFacts(

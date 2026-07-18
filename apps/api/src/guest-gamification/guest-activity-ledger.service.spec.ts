@@ -69,7 +69,7 @@ describe('GuestActivityLedgerService', () => {
     OR?: RawWhere[];
   };
   type FactWhere = {
-    id?: string | { not?: string };
+    id?: string | { not?: string; in?: string[] };
     tenantId?: string;
     profileId?: string;
     externalDomain?: string;
@@ -228,6 +228,14 @@ describe('GuestActivityLedgerService', () => {
       typeof where.id === 'object' &&
       where.id.not &&
       row.id === where.id.not
+    ) {
+      return false;
+    }
+
+    if (
+      typeof where.id === 'object' &&
+      where.id.in &&
+      !where.id.in.includes(row.id)
     ) {
       return false;
     }
@@ -876,6 +884,55 @@ describe('GuestActivityLedgerService', () => {
           fact.lifecycleStatus === 'ACTIVE',
       ),
     ).toEqual(expect.objectContaining({ durationMinutes: 65 }));
+  });
+
+  it('supersedes historical duplicate session facts outside the incremental source window', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions.mockResolvedValue([]);
+    const base = {
+      tenantId,
+      profileId,
+      guestId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: source.domain,
+      sourceKind: 'LANGAME_GUEST_SESSION',
+      factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+      sessionExternalId: 'historical-session-1',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+    };
+    facts.set('historical-old', {
+      ...base,
+      id: 'historical-old',
+      sourceHash: 'historical-old-hash',
+      createdAt: new Date('2026-07-13T12:00:00.000Z'),
+    });
+    facts.set('historical-new', {
+      ...base,
+      id: 'historical-new',
+      sourceHash: 'historical-new-hash',
+      createdAt: new Date('2026-07-14T12:00:00.000Z'),
+    });
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'HISTORICAL_SESSION_RECONCILIATION',
+    });
+
+    expect(facts.get('historical-new')).toEqual(
+      expect.objectContaining({
+        lifecycleStatus: 'ACTIVE',
+        supersededAt: null,
+      }),
+    );
+    expect(facts.get('historical-old')).toEqual(
+      expect.objectContaining({
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: expect.any(Date),
+      }),
+    );
   });
 
   it('does not classify a session as hourly when Langame omits the packet marker', async () => {

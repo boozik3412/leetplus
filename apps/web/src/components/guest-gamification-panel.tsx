@@ -15698,6 +15698,7 @@ function seasonLevelStepFormsToLevels(form: SeasonForm) {
       const premiumReward = seasonStepRewardLabel(step, "premium");
 
       return {
+        id: step.id,
         level,
         xp: 0,
         sequence: index + 1,

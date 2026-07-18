@@ -2104,6 +2104,11 @@ export type GuestGameSeasonDto = {
 
 export type GuestGameSeasonUpdateDto = Partial<GuestGameSeasonDto>;
 
+export type GuestGameBattlePassStepEvaluationPolicyDto = {
+  evaluationPolicy: string;
+  expectedUpdatedAt: string;
+};
+
 export type GuestGameRewardDto = {
   profileId?: string | null;
   guestId?: string | null;
@@ -8070,10 +8075,19 @@ export class GuestGamificationService {
       dto,
       false,
       guestGameStringArray(current.storeIds),
+      current.levels,
     );
-    const row = await this.prisma.guestGameSeason.update({
-      where: { id },
+    const updated = await this.prisma.guestGameSeason.updateMany({
+      where: { id, tenantId: user.tenantId, updatedAt: current.updatedAt },
       data,
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException(
+        'Battle Pass изменился одновременно с сохранением. Обновите страницу и повторите.',
+      );
+    }
+    const row = await this.prisma.guestGameSeason.findFirstOrThrow({
+      where: { id, tenantId: user.tenantId },
       include: seasonInclude,
     });
     const season = mapSeason(row);
@@ -8081,6 +8095,130 @@ export class GuestGamificationService {
     await this.reconcileActiveSeasonStores(user, season);
 
     return season;
+  }
+
+  async updateBattlePassStepEvaluationPolicy(
+    user: AuthenticatedUser,
+    seasonId: string,
+    stepSequence: string,
+    dto: GuestGameBattlePassStepEvaluationPolicyDto,
+  ): Promise<GuestGameSeason> {
+    if (
+      user.role !== UserRole.OWNER &&
+      user.role !== UserRole.ADMIN &&
+      user.role !== UserRole.MANAGER
+    ) {
+      throw new ForbiddenException(
+        'Менять источник оценки шага Battle Pass могут только владелец, администратор или менеджер.',
+      );
+    }
+
+    const season = await this.assertSeason(user, seasonId);
+    if (season.status !== 'ACTIVE' && season.status !== 'DRAFT') {
+      throw new ConflictException(
+        'Политику источника можно менять только у активного сезона или черновика Battle Pass.',
+      );
+    }
+
+    const expectedUpdatedAt = dateValue(dto.expectedUpdatedAt);
+    if (!(expectedUpdatedAt instanceof Date)) {
+      throw new BadRequestException(
+        'Для безопасного обновления укажите expectedUpdatedAt сезона.',
+      );
+    }
+
+    const evaluationPolicy = nullableString(
+      dto.evaluationPolicy,
+    )?.toUpperCase();
+    if (
+      evaluationPolicy !== 'LIVE_PRIMARY' &&
+      evaluationPolicy !== 'LIVE_WITH_LEDGER_FALLBACK'
+    ) {
+      throw new BadRequestException(
+        'Разрешены только LIVE_PRIMARY и LIVE_WITH_LEDGER_FALLBACK.',
+      );
+    }
+
+    if (!Array.isArray(season.levels)) {
+      throw new ConflictException('В Battle Pass нет настраиваемых шагов.');
+    }
+
+    const sequence = Number(stepSequence.trim());
+    if (!Number.isInteger(sequence) || sequence <= 0) {
+      throw new BadRequestException(
+        'Порядковый номер шага Battle Pass должен быть положительным целым числом.',
+      );
+    }
+
+    // Runtime evaluates Battle Pass steps after discarding invalid levels and
+    // sorting by level. Address the exact same canonical sequence here while
+    // retaining the original array index for a one-field JSON update.
+    const canonicalSteps = season.levels
+      .map((item, originalIndex) => ({
+        originalIndex,
+        level: dryRunNumber(jsonRecord(item).level, originalIndex + 1),
+      }))
+      .filter((step) => step.level > 0)
+      .sort((left, right) => left.level - right.level)
+      .map((step, index) => ({ ...step, sequence: index + 1 }));
+    const selectedStep = canonicalSteps.find(
+      (step) => step.sequence === sequence,
+    );
+    if (!selectedStep) {
+      throw new NotFoundException('Шаг Battle Pass не найден.');
+    }
+
+    const stepIndex = selectedStep.originalIndex;
+    const level = jsonRecord(season.levels[stepIndex]);
+    const stableStepId =
+      nullableString(level.id) ?? `bp-step-${randomBytes(8).toString('hex')}`;
+    const activationRules = jsonRecord(
+      level.activationRules as Prisma.JsonValue | null,
+    );
+    const schemaVersion = dryRunNumber(activationRules.schemaVersion, 1);
+    const taskType = nullableString(activationRules.taskType)?.toUpperCase();
+    if (
+      schemaVersion !== guestGameMissionDefinitionVersion ||
+      taskType !== 'PLAY_TIME'
+    ) {
+      throw new BadRequestException(
+        'Ledger fallback разрешён только для шага PLAY_TIME контракта v2.',
+      );
+    }
+
+    const levels = season.levels.map((item, index) =>
+      index === stepIndex
+        ? cleanJsonRecord({
+            ...level,
+            id: stableStepId,
+            activationRules: cleanJsonRecord({
+              ...activationRules,
+              evaluationPolicy,
+            }),
+          })
+        : item,
+    ) as Prisma.InputJsonValue;
+
+    const updated = await this.prisma.guestGameSeason.updateMany({
+      where: {
+        id: seasonId,
+        tenantId: user.tenantId,
+        status: { in: ['ACTIVE', 'DRAFT'] },
+        updatedAt: expectedUpdatedAt,
+      },
+      data: { levels },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException(
+        'Battle Pass изменился одновременно с переключением источника оценки. Обновите страницу и повторите.',
+      );
+    }
+
+    const row = await this.prisma.guestGameSeason.findFirstOrThrow({
+      where: { id: seasonId, tenantId: user.tenantId },
+      include: seasonInclude,
+    });
+    return mapSeason(row);
   }
 
   private async reconcileActiveSeasonStores(
@@ -9122,10 +9260,26 @@ export class GuestGamificationService {
               store.id,
             ),
             seasonPayload,
+            existingSeason.levels,
           );
-          const row = await this.prisma.guestGameSeason.update({
-            where: { id: payload.battlePass.id },
+          const updated = await this.prisma.guestGameSeason.updateMany({
+            where: {
+              id: payload.battlePass.id,
+              tenantId: user.tenantId,
+              updatedAt: existingSeason.updatedAt,
+            },
             data: seasonData,
+          });
+          if (updated.count !== 1) {
+            throw new ConflictException(
+              'Battle Pass изменился одновременно с публикацией визуального редактора. Обновите страницу и повторите.',
+            );
+          }
+          const row = await this.prisma.guestGameSeason.findFirstOrThrow({
+            where: {
+              id: payload.battlePass.id,
+              tenantId: user.tenantId,
+            },
             include: seasonInclude,
           });
           battlePass = visualBattlePassFromSeason(mapSeason(row));
@@ -14451,6 +14605,7 @@ export class GuestGamificationService {
     dto: GuestGameSeasonDto,
     isCreate: boolean,
     currentStoreIds: string[] = [],
+    currentLevels: Prisma.JsonValue | null = null,
   ): Promise<
     | Prisma.GuestGameSeasonUncheckedCreateInput
     | Prisma.GuestGameSeasonUncheckedUpdateInput
@@ -14467,7 +14622,12 @@ export class GuestGamificationService {
           : undefined
         : dto.levels === null
           ? Prisma.JsonNull
-          : await this.normalizeBattlePassLevels(user, dto.levels, storeIds);
+          : await this.normalizeBattlePassLevels(
+              user,
+              dto.levels,
+              storeIds,
+              currentLevels,
+            );
 
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
@@ -14502,6 +14662,7 @@ export class GuestGamificationService {
     user: AuthenticatedUser,
     value: Prisma.InputJsonValue,
     storeIds: string[],
+    currentLevels: Prisma.JsonValue | null = null,
   ): Promise<Prisma.InputJsonValue> {
     if (!Array.isArray(value)) {
       throw new BadRequestException('Шаги Battle Pass должны быть массивом.');
@@ -14523,6 +14684,10 @@ export class GuestGamificationService {
     const externalDomains = uniqueStrings(
       stores.map((store) => store.externalDomain ?? ''),
     );
+    const persistedLevelMatches = matchPersistedBattlePassLevels(
+      value,
+      currentLevels,
+    );
 
     return Promise.all(
       value.map(async (item, index) => {
@@ -14537,6 +14702,11 @@ export class GuestGamificationService {
         }
 
         const taskType = missionTaskType(rawTaskType);
+        const persistedEvaluationPolicy =
+          persistedBattlePassPlayTimeEvaluationPolicy(
+            persistedLevelMatches.get(index),
+            taskType,
+          );
         let conditions = normalizeMissionWizardConditions({
           taskType,
           conditions: rawRules,
@@ -14689,7 +14859,8 @@ export class GuestGamificationService {
             source: 'battle_pass_step',
             taskType,
             triggerKind: missionWizardTrigger(taskType),
-            evaluationPolicy: missionEvaluationPolicy(taskType),
+            evaluationPolicy:
+              persistedEvaluationPolicy ?? missionEvaluationPolicy(taskType),
             periodicity: 'NONE',
             ...(taskType === 'BALANCE_TOPUP'
               ? { domainScoped: true, externalDomains }
@@ -25656,10 +25827,128 @@ function visualCheckInFromMission(
   };
 }
 
+function matchPersistedBattlePassLevels(
+  incomingValue: unknown,
+  persistedValue: unknown,
+) {
+  const incomingLevels = Array.isArray(incomingValue) ? incomingValue : [];
+  const persistedLevels = Array.isArray(persistedValue) ? persistedValue : [];
+  const incomingEntries = incomingLevels.map((item, index) =>
+    battlePassLevelIdentity(item, index),
+  );
+  const persistedEntries = persistedLevels.map((item, index) =>
+    battlePassLevelIdentity(item, index),
+  );
+  const matches = new Map<number, Record<string, unknown>>();
+
+  const duplicateIncomingId = duplicateBattlePassLevelIdentity(
+    incomingEntries,
+    (entry) => entry.id,
+  );
+  const duplicatePersistedId = duplicateBattlePassLevelIdentity(
+    persistedEntries,
+    (entry) => entry.id,
+  );
+  const duplicateIncomingIdlessLevel = duplicateBattlePassLevelIdentity(
+    incomingEntries.filter((entry) => !entry.id),
+    (entry) => entry.level,
+  );
+  const duplicatePersistedIdlessLevel = duplicateBattlePassLevelIdentity(
+    persistedEntries.filter((entry) => !entry.id),
+    (entry) => entry.level,
+  );
+  if (
+    duplicateIncomingId != null ||
+    duplicatePersistedId != null ||
+    duplicateIncomingIdlessLevel != null ||
+    duplicatePersistedIdlessLevel != null
+  ) {
+    throw new ConflictException(
+      'Шаги Battle Pass имеют неоднозначные id или номера уровней. Сначала устраните дубли.',
+    );
+  }
+
+  for (const incoming of incomingEntries) {
+    let persisted: (typeof persistedEntries)[number] | null = null;
+    if (incoming.id) {
+      persisted =
+        persistedEntries.find((entry) => entry.id === incoming.id) ?? null;
+    }
+
+    if (!incoming.id && incoming.level != null) {
+      persisted =
+        persistedEntries.find(
+          (entry) => !entry.id && entry.level === incoming.level,
+        ) ?? null;
+    }
+
+    if (persisted) {
+      matches.set(incoming.index, persisted.record);
+    }
+  }
+
+  return matches;
+}
+
+function duplicateBattlePassLevelIdentity<T>(
+  entries: T[],
+  identity: (entry: T) => string | number | null,
+) {
+  const seen = new Set<string | number>();
+  for (const entry of entries) {
+    const value = identity(entry);
+    if (value == null) {
+      continue;
+    }
+    if (seen.has(value)) {
+      return value;
+    }
+    seen.add(value);
+  }
+  return null;
+}
+
+function battlePassLevelIdentity(value: unknown, index: number) {
+  const record = jsonRecord(value as Prisma.JsonValue | null);
+  const level = dryRunOptionalNumber(record.level);
+  return {
+    index,
+    record,
+    id: nullableString(record.id) ?? null,
+    level: level != null && level > 0 ? level : null,
+  };
+}
+
+function persistedBattlePassPlayTimeEvaluationPolicy(
+  persistedLevel: Record<string, unknown> | undefined,
+  incomingTaskType: GuestGameMissionTaskType,
+) {
+  if (!persistedLevel || incomingTaskType !== 'PLAY_TIME') {
+    return null;
+  }
+
+  const rules = jsonRecord(
+    persistedLevel.activationRules as Prisma.JsonValue | null,
+  );
+  if (
+    dryRunNumber(rules.schemaVersion, 1) !==
+      guestGameMissionDefinitionVersion ||
+    nullableString(rules.taskType)?.toUpperCase() !== 'PLAY_TIME'
+  ) {
+    return null;
+  }
+
+  const policy = nullableString(rules.evaluationPolicy)?.toUpperCase();
+  return policy === 'LIVE_PRIMARY' || policy === 'LIVE_WITH_LEDGER_FALLBACK'
+    ? policy
+    : null;
+}
+
 function buildVisualSeasonData(
   user: AuthenticatedUser,
   storeIds: string[],
   payload: GuestGameVisualEditorPayload,
+  currentLevels: Prisma.JsonValue | null = null,
 ) {
   const battlePass = payload.battlePass;
 
@@ -25676,7 +25965,7 @@ function buildVisualSeasonData(
       playHour: 10,
       missionCompletion: 50,
     },
-    levels: buildVisualSeasonLevels(battlePass),
+    levels: currentLevels ?? buildVisualSeasonLevels(battlePass),
     freeRewards: buildVisualSeasonRewards(battlePass),
     premiumRewards: [],
     premiumEnabled: false,

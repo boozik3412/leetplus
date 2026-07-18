@@ -89,6 +89,7 @@ import {
   type GuestGameDeliveryPrepareResult,
   type GuestGameDeliveryUpdateDto,
   type GuestGameSeason,
+  type GuestGameBattlePassStepEvaluationPolicyDto,
   type GuestGameSeasonDto,
   type GuestGameSeasonUpdateDto,
   type GuestGameSnapshotFactsResult,
@@ -497,6 +498,22 @@ export class GuestGamificationController {
     @Body() dto: GuestGameSeasonUpdateDto,
   ): Promise<GuestGameSeason> {
     return this.gamificationService.updateSeason(user, id, dto);
+  }
+
+  @Patch('seasons/:id/steps/by-sequence/:sequence/evaluation-policy')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  updateBattlePassStepEvaluationPolicy(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('sequence') sequence: string,
+    @Body() dto: GuestGameBattlePassStepEvaluationPolicyDto,
+  ): Promise<GuestGameSeason> {
+    return this.gamificationService.updateBattlePassStepEvaluationPolicy(
+      user,
+      id,
+      sequence,
+      dto,
+    );
   }
 
   @Delete('seasons/:id')

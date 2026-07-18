@@ -182,9 +182,11 @@ function createPrismaMock() {
     guestGameSeason: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      findFirstOrThrow: jest.fn(),
       create: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     guestGamePromoCard: {
       findFirst: jest.fn(),
@@ -3944,6 +3946,117 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGamePromoCard.create).not.toHaveBeenCalled();
     });
 
+    it('publishes appearance without replacing existing Battle Pass step logic', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: 'season-1',
+          enabled: true,
+          title: 'Updated visual title',
+          status: 'ACTIVE',
+          levelCount: 1,
+          xpPerLevel: 999,
+          mainPrize: 'Visual prize',
+          levelRewards: [],
+        },
+      });
+      const levels = [
+        {
+          id: 'play-step',
+          level: 2,
+          sequence: 1,
+          title: 'Operational title',
+          activationRules: {
+            schemaVersion: 2,
+            taskType: 'PLAY_TIME',
+            triggerKind: 'PLAY_HOUR',
+            evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+            metric: { aggregation: 'duration', target: 60 },
+          },
+          freeRewardDetails: { type: 'LOOT_BOX', id: 'loot-1' },
+        },
+      ];
+      const existingSeason = seasonRow({ levels });
+      let seasonUpdateData: Record<string, unknown> | null = null;
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValue(
+        visualDraftRow({ store, payload }),
+      );
+      prisma.guestGameMission.findMany.mockResolvedValue([]);
+      prisma.guestGameSeason.findFirst.mockResolvedValue(existingSeason);
+      prisma.guestGameSeason.updateMany.mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) => {
+          seasonUpdateData = data;
+          return Promise.resolve({ count: 1 });
+        },
+      );
+      prisma.guestGameSeason.findFirstOrThrow.mockImplementation(() =>
+        Promise.resolve(
+          seasonRow({
+            ...existingSeason,
+            ...seasonUpdateData,
+            levels,
+          }),
+        ),
+      );
+      prisma.guestGameVisualDraft.update.mockImplementation(({ data }) =>
+        Promise.resolve(
+          visualDraftRow({
+            store,
+            status: data.status,
+            payload: data.payload,
+          }),
+        ),
+      );
+
+      await service.publishVisualEditorDraft(user, { id: 'draft-1' });
+
+      expect(seasonUpdateData).toMatchObject({
+        name: 'Updated visual title',
+        levels,
+      });
+      expect(prisma.guestGameSeason.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'season-1',
+            tenantId: user.tenantId,
+            updatedAt: existingSeason.updatedAt,
+          },
+        }),
+      );
+      expect(prisma.guestGameSeason.update).not.toHaveBeenCalled();
+    });
+
+    it('aborts visual publication when the Battle Pass changes concurrently', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: 'season-1',
+          enabled: true,
+          title: 'Visual title',
+          status: 'ACTIVE',
+          levelCount: 1,
+          xpPerLevel: 100,
+          mainPrize: null,
+          levelRewards: [],
+        },
+      });
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValue(
+        visualDraftRow({ store, payload }),
+      );
+      prisma.guestGameSeason.findFirst.mockResolvedValue(
+        seasonRow({ levels: [{ level: 1 }] }),
+      );
+      prisma.guestGameSeason.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(
+        service.publishVisualEditorDraft(user, { id: 'draft-1' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.guestGameSeason.findFirstOrThrow).not.toHaveBeenCalled();
+      expect(prisma.guestGameVisualDraft.update).not.toHaveBeenCalled();
+    });
+
     it('reports event sync differences against the published visual editor', async () => {
       const { service, prisma } = createService();
       const store = visualEditorStore({
@@ -4730,6 +4843,396 @@ describe('GuestGamificationService', () => {
       expect(
         prisma.guestGameMission.update.mock.calls[0][0].data,
       ).not.toHaveProperty('evaluationPolicy');
+    });
+  });
+
+  describe('Battle Pass step ledger fallback policy', () => {
+    const playTimeRules = {
+      schemaVersion: 2,
+      source: 'battle_pass_step',
+      taskType: 'PLAY_TIME',
+      triggerKind: 'PLAY_HOUR',
+      evaluationPolicy: 'LIVE_PRIMARY',
+      metric: {
+        aggregation: 'duration',
+        target: 60,
+        unit: 'minutes',
+      },
+    };
+
+    it('updates an active v2 play-time step and preserves every other JSON field', async () => {
+      const { service, prisma } = createService();
+      const levels = [
+        {
+          id: 'welcome-step',
+          level: 1,
+          sequence: 1,
+          title: 'Welcome',
+          activationRules: {
+            schemaVersion: 2,
+            taskType: 'APP_OPEN',
+            triggerKind: 'APP_OPEN',
+            evaluationPolicy: 'LIVE_PRIMARY',
+          },
+          freeRewardDetails: { type: 'NONE', untouched: true },
+        },
+        {
+          id: 'play-step',
+          level: 7,
+          sequence: 2,
+          title: 'Play one hour',
+          description: 'Keep this text',
+          activationRules: {
+            ...playTimeRules,
+            nestedEvidence: { keep: ['all', 'values'] },
+          },
+          premiumRewardDetails: { type: 'LOOT_BOX', id: 'loot-1' },
+        },
+      ];
+      const season = seasonRow({ levels });
+      let updatedLevels: unknown = null;
+      prisma.guestGameSeason.findFirst.mockResolvedValue(season);
+      prisma.guestGameSeason.updateMany.mockImplementation(
+        ({ data }: { data: { levels: unknown } }) => {
+          updatedLevels = data.levels;
+          return Promise.resolve({ count: 1 });
+        },
+      );
+      prisma.guestGameSeason.findFirstOrThrow.mockImplementation(() =>
+        Promise.resolve(
+          seasonRow({
+            ...season,
+            levels: updatedLevels,
+            updatedAt: new Date('2026-06-10T10:00:01.000Z'),
+          }),
+        ),
+      );
+
+      const result = await service.updateBattlePassStepEvaluationPolicy(
+        user,
+        'season-1',
+        '2',
+        {
+          evaluationPolicy: 'live_with_ledger_fallback',
+          expectedUpdatedAt: isoNow,
+        },
+      );
+
+      expect(result.status).toBe('ACTIVE');
+      expect(updatedLevels).toEqual([
+        levels[0],
+        {
+          ...levels[1],
+          activationRules: {
+            ...levels[1].activationRules,
+            evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+          },
+        },
+      ]);
+      expect(prisma.guestGameSeason.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'season-1',
+          tenantId: user.tenantId,
+          status: { in: ['ACTIVE', 'DRAFT'] },
+          updatedAt: now,
+        },
+        data: { levels: updatedLevels },
+      });
+    });
+
+    it('uses the evaluator canonical sequence when raw levels are unsorted', async () => {
+      const { service, prisma } = createService();
+      const season = seasonRow({
+        status: 'DRAFT',
+        levels: [
+          {
+            level: 10,
+            sequence: 1,
+            title: 'Later raw step',
+            activationRules: {
+              schemaVersion: 2,
+              taskType: 'APP_OPEN',
+              triggerKind: 'APP_OPEN',
+              evaluationPolicy: 'LIVE_PRIMARY',
+            },
+          },
+          {
+            level: 3,
+            sequence: 2,
+            title: 'First canonical step',
+            activationRules: playTimeRules,
+          },
+        ],
+      });
+      prisma.guestGameSeason.findFirst.mockResolvedValue(season);
+      prisma.guestGameSeason.findFirstOrThrow.mockResolvedValue(
+        seasonRow({
+          ...season,
+          levels: [
+            {
+              level: 10,
+              sequence: 1,
+              title: 'Later raw step',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+              },
+            },
+            {
+              level: 3,
+              sequence: 2,
+              title: 'First canonical step',
+              activationRules: {
+                ...playTimeRules,
+                evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+              },
+            },
+          ],
+        }),
+      );
+
+      await service.updateBattlePassStepEvaluationPolicy(
+        user,
+        'season-1',
+        '1',
+        {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+          expectedUpdatedAt: isoNow,
+        },
+      );
+
+      expect(prisma.guestGameSeason.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            levels: [
+              expect.objectContaining({
+                title: 'Later raw step',
+                activationRules: expect.objectContaining({
+                  evaluationPolicy: 'LIVE_PRIMARY',
+                }),
+              }),
+              expect.objectContaining({
+                title: 'First canonical step',
+                id: expect.stringMatching(/^bp-step-[a-f0-9]{16}$/),
+                activationRules: expect.objectContaining({
+                  evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+                }),
+              }),
+            ],
+          },
+        }),
+      );
+    });
+
+    it.each([
+      {
+        name: 'legacy step',
+        rules: { ...playTimeRules, schemaVersion: 1 },
+      },
+      {
+        name: 'non play-time step',
+        rules: { ...playTimeRules, taskType: 'CHECK_IN' },
+      },
+    ])('rejects a $name', async ({ rules }) => {
+      const { service, prisma } = createService();
+      prisma.guestGameSeason.findFirst.mockResolvedValue(
+        seasonRow({
+          levels: [{ sequence: 1, activationRules: rules }],
+        }),
+      );
+
+      await expect(
+        service.updateBattlePassStepEvaluationPolicy(user, 'season-1', '1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+          expectedUpdatedAt: isoNow,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.guestGameSeason.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unsupported policy without changing the season', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameSeason.findFirst.mockResolvedValue(
+        seasonRow({
+          levels: [{ sequence: 1, activationRules: playTimeRules }],
+        }),
+      );
+
+      await expect(
+        service.updateBattlePassStepEvaluationPolicy(user, 'season-1', '1', {
+          evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+          expectedUpdatedAt: isoNow,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.guestGameSeason.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects roles outside owner, admin and manager', async () => {
+      const { service, prisma } = createService();
+      const marketer = { ...user, role: UserRole.MARKETER };
+
+      await expect(
+        service.updateBattlePassStepEvaluationPolicy(
+          marketer,
+          'season-1',
+          '1',
+          {
+            evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+            expectedUpdatedAt: isoNow,
+          },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.guestGameSeason.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameSeason.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-operational season status', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameSeason.findFirst.mockResolvedValue(
+        seasonRow({
+          status: 'PAUSED',
+          levels: [{ sequence: 1, activationRules: playTimeRules }],
+        }),
+      );
+
+      await expect(
+        service.updateBattlePassStepEvaluationPolicy(user, 'season-1', '1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+          expectedUpdatedAt: isoNow,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.guestGameSeason.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when expectedUpdatedAt is stale', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameSeason.findFirst.mockResolvedValue(
+        seasonRow({
+          levels: [{ sequence: 1, activationRules: playTimeRules }],
+        }),
+      );
+      prisma.guestGameSeason.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(
+        service.updateBattlePassStepEvaluationPolicy(user, 'season-1', '1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+          expectedUpdatedAt: '2026-06-10T09:59:59.000Z',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.guestGameSeason.findFirstOrThrow).not.toHaveBeenCalled();
+    });
+
+    it('preserves policy only from the uniquely matched persisted step during a normal season save', async () => {
+      const { service, prisma } = createService();
+      const current = seasonRow({
+        status: 'DRAFT',
+        levels: [
+          {
+            id: 'stable-play-step',
+            level: 2,
+            sequence: 1,
+            activationRules: {
+              ...playTimeRules,
+              evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+            },
+          },
+          {
+            id: 'must-not-inherit-by-level',
+            level: 3,
+            sequence: 2,
+            activationRules: {
+              ...playTimeRules,
+              evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+            },
+          },
+        ],
+      });
+      let updatedLevels: unknown = null;
+      prisma.guestGameSeason.findFirst.mockResolvedValue(current);
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+      prisma.guestGameSeason.updateMany.mockImplementation(
+        ({ data }: { data: { levels: unknown } }) => {
+          updatedLevels = data.levels;
+          return Promise.resolve({ count: 1 });
+        },
+      );
+      prisma.guestGameSeason.findFirstOrThrow.mockImplementation(() =>
+        Promise.resolve(seasonRow({ ...current, levels: updatedLevels })),
+      );
+
+      await service.updateSeason(user, 'season-1', {
+        levels: [
+          {
+            id: 'stable-play-step',
+            level: 2,
+            sequence: 1,
+            activationRules: {
+              ...playTimeRules,
+              evaluationPolicy: 'LIVE_PRIMARY',
+              metric: { ...playTimeRules.metric, target: 120 },
+            },
+          },
+          {
+            level: 3,
+            sequence: 2,
+            activationRules: {
+              ...playTimeRules,
+              evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+            },
+          },
+        ],
+      });
+
+      expect(updatedLevels).toEqual([
+        expect.objectContaining({
+          id: 'stable-play-step',
+          activationRules: expect.objectContaining({
+            evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+            metric: expect.objectContaining({ target: 120 }),
+          }),
+        }),
+        expect.objectContaining({
+          activationRules: expect.objectContaining({
+            evaluationPolicy: 'LIVE_PRIMARY',
+          }),
+        }),
+      ]);
+      expect(prisma.guestGameSeason.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'season-1',
+            tenantId: user.tenantId,
+            updatedAt: current.updatedAt,
+          },
+        }),
+      );
+    });
+
+    it('fails closed on ambiguous persisted level identity during a season save', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameSeason.findFirst.mockResolvedValue(
+        seasonRow({
+          status: 'DRAFT',
+          levels: [
+            { level: 2, activationRules: playTimeRules },
+            { level: 2, activationRules: playTimeRules },
+          ],
+        }),
+      );
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1', externalDomain: 'domain-1' },
+      ]);
+
+      await expect(
+        service.updateSeason(user, 'season-1', {
+          levels: [{ level: 2, activationRules: playTimeRules }],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.guestGameSeason.updateMany).not.toHaveBeenCalled();
     });
   });
 

@@ -1,6 +1,10 @@
 # Reward materializer: production rollout
 
-This runbook covers migrations `20260718150000_guest_game_origin_fallback`, `20260718180000_guest_game_effect_postings`, and `20260718190000_guest_game_reward_effect_outbox`.
+This runbook covers the additive reward-materializer migration series from
+`20260718150000_guest_game_origin_fallback` through
+`20260718190100_staff_chat_message_dedupe_index`. Indexes on populated tables
+are deliberately isolated into one-statement migrations so PostgreSQL can run
+each `CREATE INDEX CONCURRENTLY` outside an implicit multi-statement transaction.
 
 ## Runtime semantics
 
@@ -57,8 +61,17 @@ SELECT migration_name, started_at, finished_at, rolled_back_at, applied_steps_co
 FROM "_prisma_migrations"
 WHERE migration_name IN (
   '20260718150000_guest_game_origin_fallback',
+  '20260718150100_guest_game_event_origin_index',
+  '20260718150200_guest_game_reward_idempotency_index',
+  '20260718150300_guest_game_reward_origin_index',
+  '20260718150400_guest_game_rule_decision_origin_index',
+  '20260718150500_guest_game_entitlement_origin_index',
+  '20260718150600_guest_activity_raw_external_source_index',
+  '20260718150700_guest_activity_fact_external_source_index',
+  '20260718150800_guest_activity_fact_fallback_queue_index',
   '20260718180000_guest_game_effect_postings',
-  '20260718190000_guest_game_reward_effect_outbox'
+  '20260718190000_guest_game_reward_effect_outbox',
+  '20260718190100_staff_chat_message_dedupe_index'
 )
    OR (finished_at IS NULL AND rolled_back_at IS NULL)
 ORDER BY started_at;
@@ -96,7 +109,7 @@ WHERE datname = current_database()
 ORDER BY xact_start;
 ```
 
-Do not migrate while long or `idle in transaction` sessions touch the target tables. The migrations use `CREATE INDEX CONCURRENTLY` for indexes on existing hot tables; nullable column additions still require a short `ACCESS EXCLUSIVE` lock.
+Do not migrate while long or `idle in transaction` sessions touch the target tables. Each index on an existing hot table has its own single-statement `CREATE INDEX CONCURRENTLY` migration; do not merge those files. Nullable column additions still require a short `ACCESS EXCLUSIVE` lock.
 
 ## Apply and verify
 
@@ -125,6 +138,12 @@ JOIN pg_class ci ON ci.oid = i.indexrelid
 WHERE ci.relname IN (
   'guest_game_event_origin_uidx',
   'guest_game_reward_idempotency_uidx',
+  'guest_game_reward_origin_idx',
+  'guest_game_rule_decision_origin_idx',
+  'guest_game_entitlement_origin_idx',
+  'guest_activity_raw_external_source_idx',
+  'guest_activity_fact_external_source_idx',
+  'guest_activity_fact_fallback_queue_idx',
   'staff_chat_message_tenant_dedupe_unique',
   'guest_game_xp_posting_idempotency_uidx',
   'guest_game_reward_intent_idempotency_uidx',

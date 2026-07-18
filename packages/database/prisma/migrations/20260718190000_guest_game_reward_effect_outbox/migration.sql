@@ -1,9 +1,6 @@
 ALTER TABLE "StaffChatMessage"
   ADD COLUMN "dedupeKey" TEXT;
 
-CREATE UNIQUE INDEX CONCURRENTLY "staff_chat_message_tenant_dedupe_unique"
-  ON "StaffChatMessage"("tenantId", "dedupeKey");
-
 CREATE TABLE "GuestGameRewardEffect" (
   "id" TEXT NOT NULL,
   "tenantId" TEXT NOT NULL,

@@ -17,49 +17,6 @@ ALTER TABLE "GuestActivityRawRecord"
 ALTER TABLE "GuestActivityFact"
   ADD COLUMN "sourceExternalId" TEXT;
 
-CREATE UNIQUE INDEX CONCURRENTLY "guest_game_event_origin_uidx"
-  ON "GuestGameEvent"("tenantId", "originKey");
-
-CREATE UNIQUE INDEX CONCURRENTLY "guest_game_reward_idempotency_uidx"
-  ON "GuestGameReward"("tenantId", "idempotencyKey");
-
-CREATE INDEX CONCURRENTLY "guest_game_reward_origin_idx"
-  ON "GuestGameReward"("tenantId", "originKey");
-
-CREATE INDEX CONCURRENTLY "guest_game_rule_decision_origin_idx"
-  ON "GuestGameRuleDecision"("tenantId", "originKey", "evaluatedAt");
-
-CREATE INDEX CONCURRENTLY "guest_game_entitlement_origin_idx"
-  ON "GuestGameEntitlement"("tenantId", "originKey");
-
-CREATE INDEX CONCURRENTLY "guest_activity_raw_external_source_idx"
-  ON "GuestActivityRawRecord"(
-    "tenantId",
-    "externalProvider",
-    "externalDomain",
-    "sourceKind",
-    "sourceExternalId"
-  );
-
-CREATE INDEX CONCURRENTLY "guest_activity_fact_external_source_idx"
-  ON "GuestActivityFact"(
-    "tenantId",
-    "externalProvider",
-    "externalDomain",
-    "factType",
-    "sourceExternalId"
-  );
-
-CREATE INDEX CONCURRENTLY "guest_activity_fact_fallback_queue_idx"
-  ON "GuestActivityFact"(
-    "tenantId",
-    "lifecycleStatus",
-    "confidence",
-    "factType",
-    "validFrom",
-    "id"
-  );
-
 CREATE TABLE "GuestGameOriginReceipt" (
   "id" TEXT NOT NULL,
   "tenantId" TEXT NOT NULL,

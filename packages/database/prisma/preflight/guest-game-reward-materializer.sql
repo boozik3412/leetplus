@@ -18,8 +18,17 @@ SELECT
 FROM "_prisma_migrations"
 WHERE migration_name IN (
   '20260718150000_guest_game_origin_fallback',
+  '20260718150100_guest_game_event_origin_index',
+  '20260718150200_guest_game_reward_idempotency_index',
+  '20260718150300_guest_game_reward_origin_index',
+  '20260718150400_guest_game_rule_decision_origin_index',
+  '20260718150500_guest_game_entitlement_origin_index',
+  '20260718150600_guest_activity_raw_external_source_index',
+  '20260718150700_guest_activity_fact_external_source_index',
+  '20260718150800_guest_activity_fact_fallback_queue_index',
   '20260718180000_guest_game_effect_postings',
-  '20260718190000_guest_game_reward_effect_outbox'
+  '20260718190000_guest_game_reward_effect_outbox',
+  '20260718190100_staff_chat_message_dedupe_index'
 )
    OR (finished_at IS NULL AND rolled_back_at IS NULL)
 ORDER BY started_at;
@@ -32,6 +41,13 @@ FROM (
     ('intent_table', to_regclass('public."GuestGameRewardIntent"')),
     ('effect_table', to_regclass('public."GuestGameRewardEffect"')),
     ('event_origin_index', to_regclass('public.guest_game_event_origin_uidx')),
+    ('reward_idempotency_index', to_regclass('public.guest_game_reward_idempotency_uidx')),
+    ('reward_origin_index', to_regclass('public.guest_game_reward_origin_idx')),
+    ('decision_origin_index', to_regclass('public.guest_game_rule_decision_origin_idx')),
+    ('entitlement_origin_index', to_regclass('public.guest_game_entitlement_origin_idx')),
+    ('raw_external_source_index', to_regclass('public.guest_activity_raw_external_source_idx')),
+    ('fact_external_source_index', to_regclass('public.guest_activity_fact_external_source_idx')),
+    ('fact_fallback_queue_index', to_regclass('public.guest_activity_fact_fallback_queue_idx')),
     ('chat_dedupe_index', to_regclass('public.staff_chat_message_tenant_dedupe_unique')),
     ('intent_ready_index', to_regclass('public.guest_game_reward_intent_ready_partial_idx')),
     ('effect_ready_index', to_regclass('public.guest_game_reward_effect_ready_partial_idx'))
@@ -160,8 +176,17 @@ BEGIN
   FROM "_prisma_migrations"
   WHERE migration_name IN (
     '20260718150000_guest_game_origin_fallback',
+    '20260718150100_guest_game_event_origin_index',
+    '20260718150200_guest_game_reward_idempotency_index',
+    '20260718150300_guest_game_reward_origin_index',
+    '20260718150400_guest_game_rule_decision_origin_index',
+    '20260718150500_guest_game_entitlement_origin_index',
+    '20260718150600_guest_activity_raw_external_source_index',
+    '20260718150700_guest_activity_fact_external_source_index',
+    '20260718150800_guest_activity_fact_fallback_queue_index',
     '20260718180000_guest_game_effect_postings',
-    '20260718190000_guest_game_reward_effect_outbox'
+    '20260718190000_guest_game_reward_effect_outbox',
+    '20260718190100_staff_chat_message_dedupe_index'
   )
     AND finished_at IS NOT NULL
     AND rolled_back_at IS NULL;
@@ -175,6 +200,13 @@ BEGIN
       (to_regclass('public."GuestGameRewardIntent"')),
       (to_regclass('public."GuestGameRewardEffect"')),
       (to_regclass('public.guest_game_event_origin_uidx')),
+      (to_regclass('public.guest_game_reward_idempotency_uidx')),
+      (to_regclass('public.guest_game_reward_origin_idx')),
+      (to_regclass('public.guest_game_rule_decision_origin_idx')),
+      (to_regclass('public.guest_game_entitlement_origin_idx')),
+      (to_regclass('public.guest_activity_raw_external_source_idx')),
+      (to_regclass('public.guest_activity_fact_external_source_idx')),
+      (to_regclass('public.guest_activity_fact_fallback_queue_idx')),
       (to_regclass('public.staff_chat_message_tenant_dedupe_unique')),
       (to_regclass('public.guest_game_reward_intent_ready_partial_idx')),
       (to_regclass('public.guest_game_reward_effect_ready_partial_idx'))
@@ -211,15 +243,15 @@ BEGIN
       rollout_columns;
   END IF;
 
-  IF target_migrations NOT IN (0, 3) THEN
+  IF target_migrations NOT IN (0, 12) THEN
     RAISE EXCEPTION
-      'reward materializer rollout is only safe before all migrations or after all migrations; % of 3 are completed',
+      'reward materializer rollout is only safe before all migrations or after all migrations; % of 12 are completed',
       target_migrations;
   END IF;
 
-  IF target_migrations = 3 AND (rollout_objects <> 8 OR rollout_columns <> 8) THEN
+  IF target_migrations = 12 AND (rollout_objects <> 15 OR rollout_columns <> 8) THEN
     RAISE EXCEPTION
-      'reward materializer post-migration schema is incomplete: % of 8 objects and % of 8 columns found',
+      'reward materializer post-migration schema is incomplete: % of 15 objects and % of 8 columns found',
       rollout_objects,
       rollout_columns;
   END IF;
@@ -282,7 +314,7 @@ BEGIN
   END IF;
 
   RAISE NOTICE
-    'reward materializer preflight passed: % of 3 migrations completed, % rollout objects, % rollout columns',
+    'reward materializer preflight passed: % of 12 migrations completed, % rollout objects, % rollout columns',
     target_migrations,
     rollout_objects,
     rollout_columns;

@@ -141,7 +141,10 @@ export type GuestGameBattlePassReplayResult = {
     eligible: boolean;
     status: 'MATCHED' | 'BLOCKED';
     rewardType: string | null;
+    rewardAmount: number | null;
+    rewardLabel: string | null;
     selectedRewardLabel: string | null;
+    manualApprovalRequired: boolean;
     xpDelta: number;
     reasons: string[];
     blockers: string[];
@@ -214,6 +217,9 @@ type PreparedReplay = {
       tenantId: string;
       profileId: string | null;
       seasonId: string | null;
+      rewardType: string;
+      rewardAmount: Prisma.Decimal;
+      rewardLabel: string;
     } | null;
   } | null;
 };
@@ -1440,7 +1446,10 @@ export class GuestGameRuleReplayService {
       routing: replaySeasonRuleRoutingSnapshot(seasonRow.id, ruleRouting),
       eligible: rule.eligible,
       rewardType: rule.rewardType,
+      rewardAmount: rule.rewardAmount,
+      rewardLabel: rule.rewardLabel,
       selectedRewardLabel: rule.selectedRewardLabel,
+      manualApprovalRequired: rule.manualApprovalRequired,
       xpDelta: rule.xpDelta,
       reasons: rule.reasons,
       blockers: rule.blockers,
@@ -1523,6 +1532,8 @@ export class GuestGameRuleReplayService {
     const plan = jsonRecord(intent.plan);
     const rule = jsonRecord(plan.rule);
     const rewardType = normalizedString(rule.rewardType);
+    const rewardAmount = nullableNumber(rule.rewardAmount);
+    const rewardLabel = normalizedString(rule.rewardLabel);
     const expectedSlotKey = `${prepared.step.sequence}:${rewardType ?? 'reward'}`;
     if (
       numberValue(plan.schemaVersion, -1) !== 1 ||
@@ -1545,7 +1556,10 @@ export class GuestGameRuleReplayService {
         (!intent.reward ||
           intent.reward.tenantId !== prepared.tenantId ||
           intent.reward.profileId !== prepared.fact.profileId ||
-          intent.reward.seasonId !== prepared.season.id))
+          intent.reward.seasonId !== prepared.season.id ||
+          intent.reward.rewardType !== rewardType ||
+          Number(intent.reward.rewardAmount) !== rewardAmount ||
+          intent.reward.rewardLabel !== rewardLabel))
     ) {
       throw new ConflictException(
         'Существующий claimKey связан с несовместимым планом награды.',
@@ -1570,7 +1584,14 @@ export class GuestGameRuleReplayService {
         plan: true,
         event: { select: { profileId: true, eventType: true } },
         reward: {
-          select: { tenantId: true, profileId: true, seasonId: true },
+          select: {
+            tenantId: true,
+            profileId: true,
+            seasonId: true,
+            rewardType: true,
+            rewardAmount: true,
+            rewardLabel: true,
+          },
         },
       },
     });
@@ -1629,7 +1650,10 @@ export class GuestGameRuleReplayService {
         eligible: prepared.rule.eligible,
         status: prepared.rule.eligible ? 'MATCHED' : 'BLOCKED',
         rewardType: prepared.rule.rewardType,
+        rewardAmount: prepared.rule.rewardAmount,
+        rewardLabel: prepared.rule.rewardLabel,
         selectedRewardLabel: prepared.rule.selectedRewardLabel,
+        manualApprovalRequired: prepared.rule.manualApprovalRequired,
         xpDelta: prepared.rule.xpDelta,
         reasons: prepared.rule.reasons,
         blockers: prepared.rule.blockers,

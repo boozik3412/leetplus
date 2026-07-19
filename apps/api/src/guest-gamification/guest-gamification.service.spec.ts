@@ -6669,6 +6669,23 @@ describe('GuestGamificationService', () => {
         .mockResolvedValue([]);
     }
 
+    function mockSingleSeasonDryRun(
+      service: GuestGamificationService,
+      season: ReturnType<typeof seasonRow>,
+      progressEvents: Array<Record<string, unknown>> = [],
+    ) {
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([season as never]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue(progressEvents);
+    }
+
     function domainScopedV2Rules() {
       const metric = {
         aggregation: 'duration',
@@ -7017,12 +7034,20 @@ describe('GuestGamificationService', () => {
         seasonRow({
           createdAt: new Date('2026-06-01T00:00:00.000Z'),
           periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          premiumEnabled: true,
+          manualApprovalRequired: false,
           storeIds: [],
           levels: [
             {
               level: 1,
               title: 'Сыграть час',
               freeReward: '100 бонусов',
+              freeRewardDetails: {
+                type: 'BONUS_BALANCE',
+                amount: 100,
+                label: '100 бонусов',
+                delivery: 'AUTO',
+              },
               activationRules: {
                 schemaVersion: 2,
                 taskType: 'PLAY_TIME',
@@ -7059,6 +7084,11 @@ describe('GuestGamificationService', () => {
       expect(result.rules[0]).toMatchObject({
         kind: 'SEASON',
         eligible: true,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 100,
+        rewardLabel: '100 бонусов',
+        selectedRewardLabel: '100 бонусов',
+        manualApprovalRequired: false,
         battlePassStep: 1,
         progress: {
           applicable: true,
@@ -7067,6 +7097,120 @@ describe('GuestGamificationService', () => {
           completed: true,
         },
       });
+      expect(result.summary.estimatedRewardAmount).toBe(100);
+    });
+
+    it('blocks a Battle Pass bonus reward with a non-positive amount', async () => {
+      const { service } = createService();
+      mockSingleSeasonDryRun(
+        service,
+        seasonRow({
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Сыграть час',
+              freeReward: 'Некорректная бонусная награда',
+              freeRewardDetails: {
+                type: 'BONUS_BALANCE',
+                amount: 0,
+                delivery: 'AUTO',
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'PLAY_TIME',
+                triggerKind: 'PLAY_HOUR',
+                evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+                sessionType: 'ANY',
+                metric: {
+                  aggregation: 'duration',
+                  eventTypes: ['PLAY_HOUR'],
+                  target: 60,
+                  unit: 'минут',
+                },
+              },
+            },
+          ],
+        }),
+      );
+
+      const result = await service.dryRun(user, {
+        eventType: 'PLAY_HOUR',
+        occurredAt: isoNow,
+        sessionMinutes: 60,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: false,
+        rewardType: null,
+        rewardAmount: 0,
+        selectedRewardLabel: null,
+        blockers: expect.arrayContaining([
+          expect.stringContaining('сумму больше нуля'),
+        ]),
+      });
+      expect(result.summary).toMatchObject({
+        eligibleRules: 0,
+        estimatedRewardAmount: 0,
+      });
+    });
+
+    it('uses the step delivery and real amount for Battle Pass budget checks', async () => {
+      const { service } = createService();
+      mockSingleSeasonDryRun(
+        service,
+        seasonRow({
+          budgetAmount: 50,
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Сыграть час',
+              freeReward: '100 бонусов',
+              freeRewardDetails: {
+                type: 'BONUS_BALANCE',
+                amount: 100,
+                label: '100 бонусов',
+                delivery: 'ADMIN',
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'PLAY_TIME',
+                triggerKind: 'PLAY_HOUR',
+                evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+                sessionType: 'ANY',
+                metric: {
+                  aggregation: 'duration',
+                  eventTypes: ['PLAY_HOUR'],
+                  target: 60,
+                  unit: 'минут',
+                },
+              },
+            },
+          ],
+        }),
+      );
+
+      const result = await service.dryRun(user, {
+        eventType: 'PLAY_HOUR',
+        occurredAt: isoNow,
+        sessionMinutes: 60,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: false,
+        manualApprovalRequired: true,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 100,
+        selectedRewardLabel: null,
+      });
+      expect(result.rules[0]?.blockers).toEqual(
+        expect.arrayContaining([expect.stringContaining('бюджет')]),
+      );
     });
 
     it('evaluates all selected Battle Pass products across separate purchases', async () => {

@@ -23664,6 +23664,9 @@ function evaluateSeasonDryRun(
   const currentStepPolicy = guestGameEvaluationPolicy(
     dryRunRecord(currentStep?.activationRules).evaluationPolicy,
   );
+  const stepRewardPlan = currentStep
+    ? dryRunSeasonFreeBonusRewardPlan(currentStep, blockers)
+    : null;
   let progress: GuestGameProgressResult | null = null;
 
   appendDryRunProfileCheck(context, blockers, reasons);
@@ -23703,7 +23706,13 @@ function evaluateSeasonDryRun(
     );
   }
 
-  appendDryRunBudgetCheck(rule.budgetAmount, 0, ruleRewards, blockers, reasons);
+  appendDryRunBudgetCheck(
+    rule.budgetAmount,
+    stepRewardPlan?.rewardAmount ?? 0,
+    ruleRewards,
+    blockers,
+    reasons,
+  );
 
   if (rule.premiumEnabled) {
     reasons.push('Есть premium-дорожка');
@@ -23714,7 +23723,7 @@ function evaluateSeasonDryRun(
 
   const selectedRewardLabel =
     currentStep && blockers.length === 0
-      ? dryRunSeasonStepRewardLabel(currentStep)
+      ? (stepRewardPlan?.rewardLabel ?? dryRunSeasonStepRewardLabel(currentStep))
       : null;
 
   return dryRunRuleResult({
@@ -23724,9 +23733,12 @@ function evaluateSeasonDryRun(
     status: rule.status,
     triggerKind: 'BATTLE_PASS',
     evaluationPolicy: currentStepPolicy,
-    manualApprovalRequired: rule.manualApprovalRequired,
-    rewardType: selectedRewardLabel ? 'BATTLE_PASS_REWARD' : null,
-    rewardAmount: 0,
+    manualApprovalRequired:
+      rule.manualApprovalRequired || stepRewardPlan?.delivery === 'ADMIN',
+    rewardType:
+      stepRewardPlan?.rewardType ??
+      (selectedRewardLabel ? 'BATTLE_PASS_REWARD' : null),
+    rewardAmount: stepRewardPlan?.rewardAmount ?? 0,
     rewardLabel: selectedRewardLabel,
     selectedRewardLabel,
     selectedReward: null,
@@ -24552,6 +24564,8 @@ type DryRunSeasonLevel = {
   activationRules: Record<string, unknown>;
   freeReward: string | null;
   premiumReward: string | null;
+  freeRewardDetails: Record<string, unknown>;
+  premiumRewardDetails: Record<string, unknown>;
 };
 
 function dryRunSeasonLevels(value: unknown): DryRunSeasonLevel[] {
@@ -24575,6 +24589,8 @@ function dryRunSeasonLevels(value: unknown): DryRunSeasonLevel[] {
         activationRules: dryRunRecord(record.activationRules),
         freeReward: dryRunString(record.freeReward),
         premiumReward: dryRunString(record.premiumReward),
+        freeRewardDetails: dryRunRecord(record.freeRewardDetails),
+        premiumRewardDetails: dryRunRecord(record.premiumRewardDetails),
       };
     })
     .filter((item): item is DryRunSeasonLevel => Boolean(item))
@@ -24880,6 +24896,61 @@ function dryRunSeasonStepRewardLabel(level: DryRunSeasonLevel) {
     .join(' + ');
 
   return rewardLabel || level.title || `Battle Pass шаг ${level.sequence}`;
+}
+
+type DryRunSeasonFreeBonusRewardPlan = {
+  rewardType: 'BONUS_BALANCE';
+  rewardAmount: number;
+  rewardLabel: string;
+  delivery: 'AUTO' | 'ADMIN';
+};
+
+function dryRunSeasonFreeBonusRewardPlan(
+  level: DryRunSeasonLevel,
+  blockers: string[],
+): DryRunSeasonFreeBonusRewardPlan | null {
+  // Premium eligibility and multi-reward delivery are not represented by the
+  // current season runtime. Keep those steps on the legacy generic path until
+  // completion markers and per-track reward slots are implemented.
+  if (
+    level.premiumReward ||
+    Object.keys(level.premiumRewardDetails).length > 0
+  ) {
+    return null;
+  }
+
+  const rewardType = dryRunString(level.freeRewardDetails.type)?.toUpperCase();
+  if (rewardType !== 'BONUS_BALANCE') {
+    return null;
+  }
+
+  const rewardAmount = dryRunOptionalNumber(level.freeRewardDetails.amount);
+  if (rewardAmount === null || rewardAmount <= 0) {
+    blockers.push(
+      `Для бонусной награды шага ${level.sequence} укажите сумму больше нуля`,
+    );
+    return null;
+  }
+
+  const rawDelivery =
+    dryRunString(level.freeRewardDetails.delivery)?.toUpperCase() ?? 'AUTO';
+  if (rawDelivery !== 'AUTO' && rawDelivery !== 'ADMIN') {
+    blockers.push(
+      `Для бонусной награды шага ${level.sequence} выберите автоматическую выдачу или подтверждение администратора`,
+    );
+    return null;
+  }
+
+  return {
+    rewardType: 'BONUS_BALANCE',
+    rewardAmount,
+    rewardLabel:
+      dryRunString(level.freeRewardDetails.label) ??
+      level.freeReward ??
+      level.title ??
+      `Battle Pass шаг ${level.sequence}`,
+    delivery: rawDelivery,
+  };
 }
 
 function dryRunSeasonRewardCountsAsStep(reward: GuestGameReward) {

@@ -159,6 +159,9 @@ function existingIntent(status = 'APPLIED') {
             tenantId: 'tenant-1',
             profileId: 'profile-0646',
             seasonId: 'season-1',
+            rewardType: 'BATTLE_PASS_REWARD',
+            rewardAmount: 50,
+            rewardLabel: '50 bonuses',
           }
         : null,
   };
@@ -404,7 +407,15 @@ describe('GuestGameRuleReplayService', () => {
       fact: { id: 'fact-270', durationMinutes: 270 },
       target: { stepId: 'step-2', stepSequence: 2 },
       source: { eventId: 'event-1', originReceiptStatus: 'PROCESSED' },
-      decision: { eligible: true, xpDelta: 0 },
+      decision: {
+        eligible: true,
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardAmount: 50,
+        rewardLabel: '50 bonuses',
+        selectedRewardLabel: '50 bonuses',
+        manualApprovalRequired: false,
+        xpDelta: 0,
+      },
     });
     expect(result.confirmationHash).toHaveLength(64);
     expect(gamification.processEvent).not.toHaveBeenCalled();
@@ -525,6 +536,19 @@ describe('GuestGameRuleReplayService', () => {
         timeZone: 'Europe/Moscow',
       },
     ]);
+
+    const second = await service.previewBattlePass(user, target);
+
+    expect(second.confirmationHash).not.toBe(first.confirmationHash);
+  });
+
+  it('binds the replay confirmation hash to the concrete reward plan', async () => {
+    const { service, gamification } = createService();
+    const first = await service.previewBattlePass(user, target);
+    gamification.dryRun.mockResolvedValue({
+      ...dryRun(),
+      rules: [{ ...rule(), rewardAmount: 100 }],
+    });
 
     const second = await service.previewBattlePass(user, target);
 
@@ -691,6 +715,16 @@ describe('GuestGameRuleReplayService', () => {
       rewardIds: ['reward-1'],
     });
     expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when an existing intent points to a different reward plan', async () => {
+    const incompatible = existingIntent();
+    incompatible.reward!.rewardAmount = 0;
+    const { service } = createService({ intent: incompatible });
+
+    await expect(service.previewBattlePass(user, target)).rejects.toThrow(
+      'несовместимым планом награды',
+    );
   });
 
   it('returns idempotent after the applied reward advances the current BP step', async () => {

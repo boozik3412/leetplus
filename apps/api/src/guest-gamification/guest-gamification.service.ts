@@ -2551,6 +2551,14 @@ type GuestGameProcessEventOptions = {
   allowedRuleIds?: Iterable<string>;
   evaluationMode?: GuestGameEvaluationMode;
   evaluatorVersion?: string;
+  ruleDomainTimeZones?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
+  ruleExternalDomains?: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Persist/reconcile reward intents and their side effects. Exact ledger
+   * canonicalization deliberately disables this: it creates only the
+   * physical event and leaves every rule/reward path untouched.
+   */
+  materializeRewards?: boolean;
   originKey?: string | null;
   suppressLedgerShadow?: boolean;
   replayRewardScope?: {
@@ -2566,6 +2574,8 @@ type GuestGameProcessEventOptions = {
 };
 
 type GuestGameDryRunOptions = {
+  ruleDomainTimeZones?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
+  ruleExternalDomains?: ReadonlyMap<string, readonly string[]>;
   rewardScope?: {
     seasonId: string;
     profileId: string;
@@ -10899,6 +10909,8 @@ export class GuestGamificationService {
       missionRewardEntitlements,
       progressEvents,
       audienceMemberIds,
+      ruleDomainTimeZones: options.ruleDomainTimeZones,
+      ruleExternalDomains: options.ruleExternalDomains,
     };
     const targetLootBoxes = lootBoxId
       ? lootBoxes.filter((item) => item.id === lootBoxId)
@@ -11666,6 +11678,24 @@ export class GuestGamificationService {
       dto,
     );
     const processGuestId = nullableId(dto.guestId) ?? profile.guest?.id ?? null;
+    const dryRunOptions =
+      options.ruleDomainTimeZones ||
+      options.ruleExternalDomains ||
+      options.replayRewardScope
+        ? {
+            ruleDomainTimeZones: options.ruleDomainTimeZones,
+            ruleExternalDomains: options.ruleExternalDomains,
+            ...(options.replayRewardScope
+              ? {
+                  rewardScope: {
+                    seasonId: options.replayRewardScope.ruleId,
+                    profileId: profile.id,
+                    guestId: processGuestId,
+                  },
+                }
+              : {}),
+          }
+        : undefined;
     const dryRunResult = await this.dryRun(
       user,
       {
@@ -11673,15 +11703,7 @@ export class GuestGamificationService {
         profileId: profile.id,
         guestId: processGuestId,
       },
-      options.replayRewardScope
-        ? {
-            rewardScope: {
-              seasonId: options.replayRewardScope.ruleId,
-              profileId: profile.id,
-              guestId: processGuestId,
-            },
-          }
-        : undefined,
+      dryRunOptions,
     );
     const activeDryRun = booleanValue(dto.activeRulesOnly)
       ? activeRulesOnlyDryRun(dryRunResult)
@@ -11701,7 +11723,8 @@ export class GuestGamificationService {
     const originKey =
       nullableString(options.originKey) ??
       buildProcessOriginKey(dto, dryRun.eventType);
-    const processPayload = buildProcessPayload(dto, dryRun);
+    const materializeRewards = options.materializeRewards !== false;
+    const processPayload = buildProcessPayload(dto, dryRun, materializeRewards);
     let existingEvent = originKey
       ? await this.findProcessEventByOriginKey(user, originKey)
       : null;
@@ -11759,21 +11782,25 @@ export class GuestGamificationService {
           },
         });
       }
-      const existingRewards = await this.findProcessRewardsByReference(
-        user,
-        eventReference,
-        originKey,
-      );
-      const materialized = await this.materializeProcessRewardIntents(
-        user,
-        dto,
-        dryRun,
-        existingEvent,
-        profile.id,
-        eventReference,
-        originKey,
-        replayIntentIds ? { intentIds: replayIntentIds } : undefined,
-      );
+      const existingRewards = materializeRewards
+        ? await this.findProcessRewardsByReference(
+            user,
+            eventReference,
+            originKey,
+          )
+        : [];
+      const materialized = materializeRewards
+        ? await this.materializeProcessRewardIntents(
+            user,
+            dto,
+            dryRun,
+            existingEvent,
+            profile.id,
+            eventReference,
+            originKey,
+            replayIntentIds ? { intentIds: replayIntentIds } : undefined,
+          )
+        : null;
       const processDryRun = materialized?.dryRun ?? dryRun;
       const processRewards = materialized?.rewards ?? existingRewards;
       const existingRewardIds = new Set(
@@ -11852,7 +11879,7 @@ export class GuestGamificationService {
           externalProvider: eventReference?.externalProvider ?? null,
           externalDomain: eventReference?.externalDomain ?? null,
           externalId: eventReference?.externalId ?? null,
-          xpDelta: dryRun.summary.projectedXpDelta,
+          xpDelta: materializeRewards ? dryRun.summary.projectedXpDelta : 0,
           occurredAt: dryRun.occurredAt,
           payload: processPayload,
           note:
@@ -11885,20 +11912,24 @@ export class GuestGamificationService {
               'Каноническое событие уже связано с другим гостем или типом действия.',
             );
           }
-          const existingRewards = await this.findProcessRewardsByReference(
-            user,
-            eventReference,
-            originKey,
-          );
-          const materialized = await this.materializeProcessRewardIntents(
-            user,
-            dto,
-            dryRun,
-            duplicateEvent,
-            profile.id,
-            eventReference,
-            originKey,
-          );
+          const existingRewards = materializeRewards
+            ? await this.findProcessRewardsByReference(
+                user,
+                eventReference,
+                originKey,
+              )
+            : [];
+          const materialized = materializeRewards
+            ? await this.materializeProcessRewardIntents(
+                user,
+                dto,
+                dryRun,
+                duplicateEvent,
+                profile.id,
+                eventReference,
+                originKey,
+              )
+            : null;
           const processDryRun = materialized?.dryRun ?? dryRun;
           const processRewards = materialized?.rewards ?? existingRewards;
           const existingRewardIds = new Set(
@@ -11955,37 +11986,41 @@ export class GuestGamificationService {
 
       throw error;
     }
-    const materialized = await this.materializeProcessRewardIntents(
-      user,
-      dto,
-      dryRun,
-      event,
-      profile.id,
-      eventReference,
-      originKey,
-    );
+    const materialized = materializeRewards
+      ? await this.materializeProcessRewardIntents(
+          user,
+          dto,
+          dryRun,
+          event,
+          profile.id,
+          eventReference,
+          originKey,
+        )
+      : null;
     const processDryRun = dryRunWithPersistedRewardIntents(
       dryRun,
       materialized?.dryRun ?? null,
     );
     const rewards = materialized?.rewards ?? [];
 
-    await this.recordRuleDecisions(user, processDryRun, {
-      eventId: event.id,
-      originKey,
-      traceId: nullableString(dto.traceId),
-      sourceFactId: nullableString(dto.sourceFactId),
-      sourceFactKind: nullableString(dto.sourceFactKind),
-      evaluationMode: options.evaluationMode,
-      evaluatorVersion: options.evaluatorVersion,
-      suppressLedgerShadow: options.suppressLedgerShadow,
-      excludeSeasonRewardIds: rewards.map((reward) => reward.id),
-      evidence: {
-        idempotent: false,
+    if (materializeRewards) {
+      await this.recordRuleDecisions(user, processDryRun, {
+        eventId: event.id,
         originKey,
-        createdRewardIds: rewards.map((reward) => reward.id),
-      },
-    });
+        traceId: nullableString(dto.traceId),
+        sourceFactId: nullableString(dto.sourceFactId),
+        sourceFactKind: nullableString(dto.sourceFactKind),
+        evaluationMode: options.evaluationMode,
+        evaluatorVersion: options.evaluatorVersion,
+        suppressLedgerShadow: options.suppressLedgerShadow,
+        excludeSeasonRewardIds: rewards.map((reward) => reward.id),
+        evidence: {
+          idempotent: false,
+          originKey,
+          createdRewardIds: rewards.map((reward) => reward.id),
+        },
+      });
+    }
 
     return {
       processed: true,
@@ -22109,6 +22144,7 @@ function pipelineErrorMessage(error: unknown) {
 function buildProcessPayload(
   dto: GuestGameProcessEventDto,
   dryRun: GuestGameDryRunResult,
+  includeRewardMaterialization = true,
 ): Prisma.InputJsonObject {
   const extraPayload = dto.payload ?? null;
 
@@ -22125,16 +22161,20 @@ function buildProcessPayload(
     store: dryRun.store,
     input: dryRun.input,
     summary: dryRun.summary,
-    rules: dryRun.rules.map(processRewardRuleSnapshot),
-    rewardIntents: dryRun.rules
-      .filter(shouldQueueProcessReward)
-      .map((rule) =>
-        processRewardIntentPlan(
-          rule,
-          processRewardQualifiedAt(dto, dryRun, rule),
-          dryRun.profile?.id ?? null,
-        ),
-      ),
+    ...(includeRewardMaterialization
+      ? {
+          rules: dryRun.rules.map(processRewardRuleSnapshot),
+          rewardIntents: dryRun.rules
+            .filter(shouldQueueProcessReward)
+            .map((rule) =>
+              processRewardIntentPlan(
+                rule,
+                processRewardQualifiedAt(dto, dryRun, rule),
+                dryRun.profile?.id ?? null,
+              ),
+            ),
+        }
+      : {}),
   };
 }
 
@@ -23413,6 +23453,8 @@ type DryRunContext = {
   missionRewardEntitlements: DryRunMissionRewardEntitlement[];
   progressEvents: GuestGameProgressEvent[];
   audienceMemberIds: Set<string>;
+  ruleDomainTimeZones?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
+  ruleExternalDomains?: ReadonlyMap<string, readonly string[]>;
 };
 
 type DryRunMissionRewardEntitlement = {
@@ -23441,27 +23483,41 @@ function evaluateLootBoxDryRun(
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
   appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
   appendDryRunAudienceCheck(rule, context, blockers, reasons);
-  appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
-  appendDryRunPeriodRules(
-    rule.periodRules,
-    context.occurredAt,
-    context.timeZone,
-    blockers,
-    reasons,
-  );
-  appendDryRunSessionConditionCheck(
-    rule.sessionType,
+  const scopedContext = appendDryRunStoreCheck(
+    rule.id,
+    rule.storeIds,
+    guestGameStringArray(jsonRecord(rule.periodRules).externalDomains),
     context,
     blockers,
     reasons,
   );
-  appendDryRunTariffConditionCheck(
-    rule.periodRules,
-    context,
-    blockers,
-    reasons,
-  );
-  appendDryRunGuestLogTypeCheck(rule.periodRules, context, blockers, reasons);
+  if (scopedContext) {
+    appendDryRunPeriodRules(
+      rule.periodRules,
+      scopedContext.occurredAt,
+      scopedContext.timeZone,
+      blockers,
+      reasons,
+    );
+    appendDryRunSessionConditionCheck(
+      rule.sessionType,
+      scopedContext,
+      blockers,
+      reasons,
+    );
+    appendDryRunTariffConditionCheck(
+      rule.periodRules,
+      scopedContext,
+      blockers,
+      reasons,
+    );
+    appendDryRunGuestLogTypeCheck(
+      rule.periodRules,
+      scopedContext,
+      blockers,
+      reasons,
+    );
+  }
   appendDryRunBudgetCheck(
     rule.budgetAmount,
     rewardAmount,
@@ -23469,7 +23525,15 @@ function evaluateLootBoxDryRun(
     blockers,
     reasons,
   );
-  appendDryRunLootBoxLimits(rule, context, ruleRewards, blockers, reasons);
+  if (scopedContext) {
+    appendDryRunLootBoxLimits(
+      rule,
+      scopedContext,
+      ruleRewards,
+      blockers,
+      reasons,
+    );
+  }
 
   if (rule.segment) {
     reasons.push(`Сегмент: ${rule.segment}`);
@@ -23519,7 +23583,14 @@ function evaluateMissionDryRun(
   appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
   appendDryRunRuleActivationCheck(rule, context, blockers, reasons);
   appendDryRunAudienceCheck(rule, context, blockers, reasons);
-  appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
+  const scopedContext = appendDryRunStoreCheck(
+    rule.id,
+    rule.storeIds,
+    guestGameStringArray(jsonRecord(rule.conditions).externalDomains),
+    context,
+    blockers,
+    reasons,
+  );
   appendDryRunDateBounds(
     rule.periodFrom,
     rule.periodTo,
@@ -23527,13 +23598,12 @@ function evaluateMissionDryRun(
     blockers,
     reasons,
   );
-  appendDryRunMissionConditions(rule, context, blockers, reasons);
-  const progress = appendDryRunMissionProgress(
-    rule,
-    context,
-    blockers,
-    reasons,
-  );
+  if (scopedContext) {
+    appendDryRunMissionConditions(rule, scopedContext, blockers, reasons);
+  }
+  const progress = scopedContext
+    ? appendDryRunMissionProgress(rule, scopedContext, blockers, reasons)
+    : null;
   appendDryRunBudgetCheck(
     rule.budgetAmount,
     rule.rewardAmount ?? 0,
@@ -23541,14 +23611,16 @@ function evaluateMissionDryRun(
     blockers,
     reasons,
   );
-  appendDryRunMissionLimits(
-    rule,
-    context,
-    ruleRewards,
-    ruleEntitlements,
-    blockers,
-    reasons,
-  );
+  if (scopedContext) {
+    appendDryRunMissionLimits(
+      rule,
+      scopedContext,
+      ruleRewards,
+      ruleEntitlements,
+      blockers,
+      reasons,
+    );
+  }
 
   if (rule.manualApprovalRequired) {
     reasons.push('Выдача требует подтверждения сотрудником');
@@ -23597,7 +23669,14 @@ function evaluateSeasonDryRun(
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
   appendDryRunAudienceCheck(rule, context, blockers, reasons);
-  appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
+  const scopedContext = appendDryRunStoreCheck(
+    rule.id,
+    rule.storeIds,
+    dryRunStringArray(currentStep?.activationRules.externalDomains),
+    context,
+    blockers,
+    reasons,
+  );
   appendDryRunDateBounds(
     rule.periodFrom,
     rule.periodTo,
@@ -23610,15 +23689,15 @@ function evaluateSeasonDryRun(
     blockers.push('В Battle Pass нет настроенных шагов');
   } else if (!currentStep) {
     blockers.push('Все шаги Battle Pass уже выполнены');
-  } else {
+  } else if (scopedContext) {
     reasons.push(
       `Текущий шаг Battle Pass: ${currentStep.sequence}/${levels.length}`,
     );
     progress = appendDryRunSeasonStepActivationCheck(
       rule,
       currentStep,
-      context,
-      dryRunSeasonCurrentStepActivatedAt(rule, ruleRewards, context),
+      scopedContext,
+      dryRunSeasonCurrentStepActivatedAt(rule, ruleRewards, scopedContext),
       blockers,
       reasons,
     );
@@ -23794,27 +23873,61 @@ function ruleMetadataWithActivatedAt(
 }
 
 function appendDryRunStoreCheck(
+  ruleId: string,
   storeIds: string[],
-  storeId: string | null,
+  configuredDomains: string[],
+  context: DryRunContext,
   blockers: string[],
   reasons: string[],
 ) {
   if (!storeIds.length) {
     reasons.push('Доступно для всей сети');
-    return;
+    return context;
   }
-  if (!storeId) {
-    reasons.push(
-      'Правило ограничено клубами, выберите клуб для точной проверки',
-    );
-    return;
-  }
-  if (!storeIds.includes(storeId)) {
-    blockers.push('Выбранный клуб не входит в область правила');
-    return;
+  if (context.storeId) {
+    if (!storeIds.includes(context.storeId)) {
+      blockers.push('Выбранный клуб не входит в область правила');
+      return null;
+    }
+
+    reasons.push('Выбранный клуб входит в область правила');
+    return context;
   }
 
-  reasons.push('Выбранный клуб входит в область правила');
+  const externalDomain = nullableString(context.externalDomain);
+  if (!externalDomain) {
+    blockers.push(
+      'Факт не содержит ни точный клуб, ни домен Langame для проверки области правила',
+    );
+    return null;
+  }
+
+  const allowedDomains = dryRunRuleExternalDomains(
+    ruleId,
+    configuredDomains,
+    context,
+  );
+  if (!allowedDomains.includes(externalDomain)) {
+    blockers.push(
+      'Домен факта Langame не входит в область выбранных клубов правила',
+    );
+    return null;
+  }
+
+  const domainTimeZone = context.ruleDomainTimeZones
+    ?.get(ruleId)
+    ?.get(externalDomain);
+  if (!domainTimeZone) {
+    blockers.push(
+      'Часовой пояс для доменного факта не определён однозначно по выбранным клубам правила',
+    );
+    return null;
+  }
+
+  reasons.push(
+    'Домен факта Langame совпадает с областью выбранных клубов правила',
+  );
+  return { ...context, timeZone: domainTimeZone };
 }
 
 function appendDryRunPeriodRules(
@@ -24142,8 +24255,10 @@ function appendDryRunMissionProgress(
       progressUnit: rule.progressUnit,
       conditions: rule.conditions,
       storeIds: rule.storeIds,
-      externalDomains: guestGameStringArray(
-        jsonRecord(rule.conditions).externalDomains,
+      externalDomains: dryRunRuleExternalDomains(
+        rule.id,
+        guestGameStringArray(jsonRecord(rule.conditions).externalDomains),
+        context,
       ),
       periodFrom: progressFrom,
       periodTo,
@@ -24494,7 +24609,11 @@ function appendDryRunSeasonStepActivationCheck(
         progressUnit: dryRunString(metric.unit),
         conditions: rules,
         storeIds: season.storeIds,
-        externalDomains: dryRunStringArray(rules.externalDomains),
+        externalDomains: dryRunRuleExternalDomains(
+          season.id,
+          dryRunStringArray(rules.externalDomains),
+          context,
+        ),
         periodFrom: activatedAt,
         periodTo: season.periodTo,
         timeZone: context.timeZone,
@@ -24543,6 +24662,15 @@ function appendDryRunSeasonStepActivationCheck(
   );
 
   return null;
+}
+
+function dryRunRuleExternalDomains(
+  ruleId: string,
+  configuredDomains: string[],
+  context: DryRunContext,
+) {
+  const routedDomains = context.ruleExternalDomains?.get(ruleId);
+  return routedDomains === undefined ? configuredDomains : [...routedDomains];
 }
 
 function dryRunSeasonCurrentStepActivatedAt(

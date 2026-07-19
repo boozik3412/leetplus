@@ -8,11 +8,15 @@ import { GuestGamificationController } from './guest-gamification.controller';
 
 type ReplayHandlerName =
   | 'previewBattlePassRuleReplay'
-  | 'applyBattlePassRuleReplay';
+  | 'applyBattlePassRuleReplay'
+  | 'previewExactPlayTimeCanonicalization'
+  | 'applyExactPlayTimeCanonicalization';
 
 const replayHandlerNames: ReplayHandlerName[] = [
   'previewBattlePassRuleReplay',
   'applyBattlePassRuleReplay',
+  'previewExactPlayTimeCanonicalization',
+  'applyExactPlayTimeCanonicalization',
 ];
 
 function replayContext(

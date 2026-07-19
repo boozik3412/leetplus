@@ -202,22 +202,34 @@ export class GuestGameLedgerFallbackService {
     claimLeaseMs: number,
     profileId: string | null,
   ) {
-    const [missions, seasons] = await Promise.all([
+    const [missions, seasons, stores] = await Promise.all([
       this.prisma.guestGameMission.findMany({
         where: {
           tenantId: user.tenantId,
           status: 'ACTIVE',
           evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
         },
-        select: { createdAt: true, conditions: true, periodFrom: true },
+        select: {
+          id: true,
+          createdAt: true,
+          conditions: true,
+          periodFrom: true,
+          storeIds: true,
+        },
       }),
       this.prisma.guestGameSeason.findMany({
         where: { tenantId: user.tenantId, status: 'ACTIVE' },
         select: {
+          id: true,
           createdAt: true,
           periodFrom: true,
           levels: true,
+          storeIds: true,
         },
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId: user.tenantId, isActive: true },
+        select: { id: true, externalDomain: true, timeZone: true },
       }),
     ]);
     const fallbackSeasons = seasons.filter((season) =>
@@ -231,6 +243,14 @@ export class GuestGameLedgerFallbackService {
         'No active rules use LIVE_WITH_LEDGER_FALLBACK.',
       );
     }
+    const ruleExternalDomains = fallbackRuleExternalDomains(
+      [...missions, ...fallbackSeasons],
+      stores,
+    );
+    const ruleDomainTimeZones = fallbackRuleDomainTimeZones(
+      [...missions, ...fallbackSeasons],
+      stores,
+    );
 
     const earliestActivation = [
       ...missions.map((mission) =>
@@ -299,7 +319,10 @@ export class GuestGameLedgerFallbackService {
         let routedDryRun: GuestGameDryRunResult;
         try {
           routedDryRun = routedFallbackDryRun(
-            await this.gamification.dryRun(user, processDto),
+            await this.gamification.dryRun(user, processDto, {
+              ruleDomainTimeZones,
+              ruleExternalDomains,
+            }),
           );
         } catch {
           result.failedFacts += 1;
@@ -324,10 +347,16 @@ export class GuestGameLedgerFallbackService {
             ledgerFirstSeenAt,
             graceUntil: new Date(ledgerFirstSeenAt.getTime() + graceMs),
           },
-          update: {
-            factId: fact.id,
-          },
+          // An origin receipt is an immutable ownership record. In particular,
+          // fallback must never repoint a receipt currently owned by exact
+          // operator canonicalization to a different parser fact.
+          update: {},
         });
+
+        if (receipt.factId && receipt.factId !== fact.id) {
+          result.duplicateFacts += 1;
+          continue;
+        }
 
         if (fallbackReceiptIsTerminal(mode, receipt, ledgerFirstSeenAt)) {
           result.duplicateFacts += 1;
@@ -387,26 +416,117 @@ export class GuestGameLedgerFallbackService {
             select: { id: true },
           });
           if (liveEvent) {
-            const reconciled = await this.gamification.processEvent(
-              user,
-              { ...processDto, activeRulesOnly: true },
-              {
-                evaluationMode: 'LIVE_LEDGER_FALLBACK',
-                evaluatorVersion: 'ledger-fallback-v1',
-                originKey,
-                suppressLedgerShadow: true,
-              },
-            );
-            await this.prisma.guestGameOriginReceipt.updateMany({
-              where: { id: receipt.id },
-              data: {
-                status: 'LIVE_PROCESSED',
-                claimedSource: 'LIVE',
-                eventId: liveEvent.id,
-                claimExpiresAt: null,
-                processedAt: new Date(),
-              },
-            });
+            const liveClaimStartedAt = new Date();
+            const liveClaimAttempt = receipt.attempts + 1;
+            const liveClaim =
+              await this.prisma.guestGameOriginReceipt.updateMany({
+                where: {
+                  id: receipt.id,
+                  attempts: receipt.attempts,
+                  policy: { not: 'EXACT_OPERATOR_CANONICALIZATION' },
+                  OR: [
+                    {
+                      status: {
+                        in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'],
+                      },
+                      OR: [
+                        { claimedSource: null },
+                        {
+                          claimedSource: {
+                            not: 'EXACT_CANONICALIZATION',
+                          },
+                        },
+                      ],
+                    },
+                    {
+                      status: 'PROCESSING',
+                      OR: [
+                        { claimedSource: null },
+                        {
+                          claimedSource: {
+                            not: 'EXACT_CANONICALIZATION',
+                          },
+                        },
+                      ],
+                      AND: [
+                        {
+                          OR: [
+                            { claimExpiresAt: { lte: liveClaimStartedAt } },
+                            { claimExpiresAt: null },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+                data: {
+                  status: 'PROCESSING',
+                  claimedSource: 'LIVE_RECONCILIATION',
+                  attempts: { increment: 1 },
+                  claimExpiresAt: new Date(
+                    liveClaimStartedAt.getTime() + claimLeaseMs,
+                  ),
+                  lastError: null,
+                },
+              });
+            if (liveClaim.count !== 1) {
+              result.checkedFacts += 1;
+              result.duplicateFacts += 1;
+              continue;
+            }
+            let reconciled: Awaited<
+              ReturnType<GuestGamificationService['processEvent']>
+            >;
+            try {
+              reconciled = await this.gamification.processEvent(
+                user,
+                { ...processDto, activeRulesOnly: true },
+                {
+                  evaluationMode: 'LIVE_LEDGER_FALLBACK',
+                  evaluatorVersion: 'ledger-fallback-v1',
+                  originKey,
+                  ruleDomainTimeZones,
+                  ruleExternalDomains,
+                  suppressLedgerShadow: true,
+                },
+              );
+            } catch (error) {
+              await this.prisma.guestGameOriginReceipt.updateMany({
+                where: {
+                  id: receipt.id,
+                  status: 'PROCESSING',
+                  claimedSource: 'LIVE_RECONCILIATION',
+                  attempts: liveClaimAttempt,
+                },
+                data: {
+                  status: 'FAILED',
+                  claimExpiresAt: null,
+                  lastError: safeErrorMessage(error).slice(0, 500),
+                },
+              });
+              throw error;
+            }
+            const liveFinalized =
+              await this.prisma.guestGameOriginReceipt.updateMany({
+                where: {
+                  id: receipt.id,
+                  status: 'PROCESSING',
+                  claimedSource: 'LIVE_RECONCILIATION',
+                  attempts: liveClaimAttempt,
+                },
+                data: {
+                  status: 'LIVE_PROCESSED',
+                  claimedSource: 'LIVE',
+                  eventId: liveEvent.id,
+                  claimExpiresAt: null,
+                  processedAt: new Date(),
+                },
+              });
+            if (liveFinalized.count !== 1) {
+              result.checkedFacts += 1;
+              result.duplicateFacts += 1;
+              continue;
+            }
             result.checkedFacts += 1;
             result.liveHandledFacts += 1;
             result.createdRewards += reconciled.summary.createdRewards;
@@ -422,10 +542,44 @@ export class GuestGameLedgerFallbackService {
             await this.prisma.guestGameOriginReceipt.updateMany({
               where: {
                 id: receipt.id,
-                attempts: { gte: 3 },
-                status: {
-                  in: ['WAITING_LIVE', 'FAILED', 'SHADOWED', 'PROCESSING'],
-                },
+                attempts: { equals: receipt.attempts, gte: 3 },
+                policy: { not: 'EXACT_OPERATOR_CANONICALIZATION' },
+                OR: [
+                  {
+                    status: {
+                      in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'],
+                    },
+                    OR: [
+                      { claimedSource: null },
+                      {
+                        claimedSource: {
+                          not: 'EXACT_CANONICALIZATION',
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    status: 'PROCESSING',
+                    AND: [
+                      {
+                        OR: [
+                          { claimedSource: null },
+                          {
+                            claimedSource: {
+                              not: 'EXACT_CANONICALIZATION',
+                            },
+                          },
+                        ],
+                      },
+                      {
+                        OR: [
+                          { claimExpiresAt: { lte: new Date() } },
+                          { claimExpiresAt: null },
+                        ],
+                      },
+                    ],
+                  },
+                ],
               },
               data: {
                 status: 'DEAD_LETTER',
@@ -450,16 +604,38 @@ export class GuestGameLedgerFallbackService {
           where: {
             id: receipt.id,
             graceUntil: { lte: new Date() },
-            attempts: { lt: 3 },
+            attempts: { equals: receipt.attempts, lt: 3 },
+            policy: { not: 'EXACT_OPERATOR_CANONICALIZATION' },
             OR: [
-              { status: { in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'] } },
               {
-                status: 'PROCESSING',
-                claimExpiresAt: { lte: claimStartedAt },
+                status: { in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'] },
+                OR: [
+                  { claimedSource: null },
+                  {
+                    claimedSource: { not: 'EXACT_CANONICALIZATION' },
+                  },
+                ],
               },
               {
                 status: 'PROCESSING',
-                claimExpiresAt: null,
+                AND: [
+                  {
+                    OR: [
+                      { claimedSource: null },
+                      {
+                        claimedSource: {
+                          not: 'EXACT_CANONICALIZATION',
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    OR: [
+                      { claimExpiresAt: { lte: claimStartedAt } },
+                      { claimExpiresAt: null },
+                    ],
+                  },
+                ],
               },
             ],
           },
@@ -484,6 +660,8 @@ export class GuestGameLedgerFallbackService {
               evaluationMode: 'LIVE_LEDGER_FALLBACK',
               evaluatorVersion: 'ledger-fallback-v1',
               originKey,
+              ruleDomainTimeZones,
+              ruleExternalDomains,
               suppressLedgerShadow: true,
             },
           );
@@ -493,6 +671,7 @@ export class GuestGameLedgerFallbackService {
                 id: receipt.id,
                 status: 'PROCESSING',
                 attempts: claimAttempt,
+                claimedSource: 'LEDGER_FALLBACK',
               },
               data: {
                 status: 'PROCESSED',
@@ -515,6 +694,7 @@ export class GuestGameLedgerFallbackService {
               id: receipt.id,
               status: 'PROCESSING',
               attempts: claimAttempt,
+              claimedSource: 'LEDGER_FALLBACK',
             },
             data: {
               status: 'FAILED',
@@ -538,15 +718,94 @@ export class GuestGameLedgerFallbackService {
   }
 }
 
+function fallbackRuleExternalDomains(
+  rules: Array<{ id: string; storeIds: Prisma.JsonValue }>,
+  stores: Array<{ id: string; externalDomain: string | null }>,
+) {
+  const domainByStoreId = new Map(
+    stores.flatMap((store) => {
+      const domain = normalizedString(store.externalDomain);
+      return domain ? [[store.id, domain] as const] : [];
+    }),
+  );
+
+  return new Map(
+    rules.map((rule) => [
+      rule.id,
+      [
+        ...new Set(
+          jsonStringArray(rule.storeIds)
+            .map((storeId) => domainByStoreId.get(storeId))
+            .filter((domain): domain is string => Boolean(domain)),
+        ),
+      ],
+    ]),
+  );
+}
+
+function fallbackRuleDomainTimeZones(
+  rules: Array<{ id: string; storeIds: Prisma.JsonValue }>,
+  stores: Array<{
+    id: string;
+    externalDomain: string | null;
+    timeZone: string | null;
+  }>,
+) {
+  return new Map(
+    rules.map((rule) => {
+      const selectedStoreIds = new Set(jsonStringArray(rule.storeIds));
+      const scopedStores = selectedStoreIds.size
+        ? stores.filter((store) => selectedStoreIds.has(store.id))
+        : stores;
+      const storesByDomain = new Map<string, typeof scopedStores>();
+
+      for (const store of scopedStores) {
+        const domain = normalizedString(store.externalDomain);
+        if (!domain) continue;
+        const domainStores = storesByDomain.get(domain) ?? [];
+        domainStores.push(store);
+        storesByDomain.set(domain, domainStores);
+      }
+
+      return [
+        rule.id,
+        new Map(
+          [...storesByDomain.entries()].map(([domain, domainStores]) => {
+            const timeZones = new Set(
+              domainStores
+                .map((store) => normalizedString(store.timeZone))
+                .filter((timeZone): timeZone is string => Boolean(timeZone)),
+            );
+            const everyStoreHasTimeZone = domainStores.every((store) =>
+              Boolean(normalizedString(store.timeZone)),
+            );
+            return [
+              domain,
+              everyStoreHasTimeZone && timeZones.size === 1
+                ? [...timeZones][0]
+                : null,
+            ];
+          }),
+        ),
+      ] as const;
+    }),
+  );
+}
+
 function fallbackReceiptIsTerminal(
   mode: Exclude<GuestGameLedgerFallbackMode, 'OFF'>,
   receipt: {
     status: string;
+    policy: string;
+    claimedSource: string | null;
     attempts: number;
     claimExpiresAt: Date | null;
   },
   now: Date,
 ) {
+  if (receipt.policy === 'EXACT_OPERATOR_CANONICALIZATION') {
+    return true;
+  }
   if (mode === 'SHADOW') {
     return [
       'SHADOWED',
@@ -557,6 +816,12 @@ function fallbackReceiptIsTerminal(
     ].includes(receipt.status);
   }
   if (['PROCESSED', 'LIVE_PROCESSED', 'DEAD_LETTER'].includes(receipt.status)) {
+    return true;
+  }
+  if (
+    receipt.status === 'PROCESSING' &&
+    receipt.claimedSource === 'EXACT_CANONICALIZATION'
+  ) {
     return true;
   }
   return (
@@ -793,6 +1058,14 @@ function jsonRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function jsonStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .map(normalizedString)
+        .filter((item): item is string => Boolean(item))
+    : [];
 }
 
 function normalizedString(value: unknown): string | null {

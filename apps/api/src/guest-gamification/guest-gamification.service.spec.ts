@@ -6652,6 +6652,247 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    function mockDomainScopedDryRunRules(
+      service: GuestGamificationService,
+      mission: GuestGameMission,
+      season: ReturnType<typeof seasonRow>,
+    ) {
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([mission]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([season as never]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+    }
+
+    function domainScopedV2Rules() {
+      const metric = {
+        aggregation: 'duration',
+        eventTypes: ['PLAY_HOUR'],
+        target: 60,
+        unit: 'минут',
+      };
+      return {
+        mission: activeMission({
+          storeIds: ['store-1'],
+          triggerKind: 'PLAY_HOUR',
+          definitionVersion: 2,
+          progressTarget: 60,
+          progressUnit: 'минут',
+          conditions: {
+            schemaVersion: 2,
+            taskType: 'PLAY_TIME',
+            metric,
+          },
+        }),
+        season: seasonRow({
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          periodFrom: new Date('2026-06-01T00:00:00.000Z'),
+          storeIds: ['store-1'],
+          levels: [
+            {
+              level: 1,
+              title: 'Сыграть час',
+              freeReward: '100 бонусов',
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'PLAY_TIME',
+                triggerKind: 'PLAY_HOUR',
+                evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+                sessionType: 'ANY',
+                metric,
+              },
+            },
+          ],
+        }),
+      };
+    }
+
+    function domainRoutingOptions(timeZone: string | null) {
+      return {
+        ruleExternalDomains: new Map<string, readonly string[]>([
+          ['mission-1', ['shared-domain']],
+          ['season-1', ['shared-domain']],
+        ]),
+        ruleDomainTimeZones: new Map([
+          ['mission-1', new Map([['shared-domain', timeZone]])],
+          ['season-1', new Map([['shared-domain', timeZone]])],
+        ]),
+      };
+    }
+
+    it('evaluates domain-routed mission and Battle Pass rules in the same domain', async () => {
+      const { service } = createService();
+      const { mission, season } = domainScopedV2Rules();
+      mockDomainScopedDryRunRules(service, mission, season);
+
+      const result = await service.dryRun(
+        user,
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: isoNow,
+          externalDomain: 'shared-domain',
+          sessionMinutes: 60,
+        },
+        domainRoutingOptions('Asia/Yekaterinburg'),
+      );
+
+      expect(result.rules).toEqual([
+        expect.objectContaining({ kind: 'MISSION', eligible: true }),
+        expect.objectContaining({ kind: 'SEASON', eligible: true }),
+      ]);
+    });
+
+    it('blocks domain-routed mission and Battle Pass rules across domains', async () => {
+      const { service } = createService();
+      const { mission, season } = domainScopedV2Rules();
+      mockDomainScopedDryRunRules(service, mission, season);
+
+      const result = await service.dryRun(
+        user,
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: isoNow,
+          externalDomain: 'other-domain',
+          sessionMinutes: 60,
+        },
+        domainRoutingOptions('Asia/Yekaterinburg'),
+      );
+
+      expect(result.rules).toEqual([
+        expect.objectContaining({
+          kind: 'MISSION',
+          eligible: false,
+          progress: null,
+          blockers: expect.arrayContaining([
+            'Домен факта Langame не входит в область выбранных клубов правила',
+          ]),
+        }),
+        expect.objectContaining({
+          kind: 'SEASON',
+          eligible: false,
+          progress: null,
+          blockers: expect.arrayContaining([
+            'Домен факта Langame не входит в область выбранных клубов правила',
+          ]),
+        }),
+      ]);
+    });
+
+    it('keeps the exact store authoritative for mission and Battle Pass rules', async () => {
+      const { service } = createService();
+      const { mission, season } = domainScopedV2Rules();
+      mockDomainScopedDryRunRules(service, mission, season);
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-2',
+        name: 'Other club',
+        externalDomain: 'shared-domain',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+
+      const result = await service.dryRun(
+        user,
+        {
+          eventType: 'PLAY_HOUR',
+          storeId: 'store-2',
+          occurredAt: isoNow,
+          externalDomain: 'shared-domain',
+          sessionMinutes: 60,
+        },
+        domainRoutingOptions('Asia/Yekaterinburg'),
+      );
+
+      expect(result.rules).toEqual([
+        expect.objectContaining({ kind: 'MISSION', eligible: false }),
+        expect.objectContaining({ kind: 'SEASON', eligible: false }),
+      ]);
+      result.rules.forEach((rule) =>
+        expect(rule.blockers).toContain(
+          'Выбранный клуб не входит в область правила',
+        ),
+      );
+    });
+
+    it('blocks legacy mission and Battle Pass rules before legacy activation branching', async () => {
+      const { service } = createService();
+      const mission = activeMission({ storeIds: ['store-1'] });
+      const season = seasonRow({
+        storeIds: ['store-1'],
+        levels: [
+          {
+            level: 1,
+            title: 'Legacy step',
+            freeReward: '100 бонусов',
+            activationRules: {
+              triggerKind: 'SESSION_START',
+              sessionType: 'regular_session',
+            },
+          },
+        ],
+      });
+      mockDomainScopedDryRunRules(service, mission, season);
+
+      const result = await service.dryRun(
+        user,
+        {
+          eventType: 'SESSION_START',
+          occurredAt: isoNow,
+          externalDomain: 'other-domain',
+          sessionType: 'regular_session',
+        },
+        domainRoutingOptions('Asia/Yekaterinburg'),
+      );
+
+      expect(result.rules).toEqual([
+        expect.objectContaining({ kind: 'MISSION', eligible: false }),
+        expect.objectContaining({ kind: 'SEASON', eligible: false }),
+      ]);
+      result.rules.forEach((rule) =>
+        expect(rule.blockers).toContain(
+          'Домен факта Langame не входит в область выбранных клубов правила',
+        ),
+      );
+    });
+
+    it('fails closed when selected clubs have ambiguous domain timezones', async () => {
+      const { service } = createService();
+      const { mission, season } = domainScopedV2Rules();
+      mockDomainScopedDryRunRules(service, mission, season);
+
+      const result = await service.dryRun(
+        user,
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: isoNow,
+          externalDomain: 'shared-domain',
+          sessionMinutes: 60,
+        },
+        domainRoutingOptions(null),
+      );
+
+      expect(result.rules).toEqual([
+        expect.objectContaining({
+          kind: 'MISSION',
+          eligible: false,
+          progress: null,
+        }),
+        expect.objectContaining({
+          kind: 'SEASON',
+          eligible: false,
+          progress: null,
+        }),
+      ]);
+      result.rules.forEach((rule) =>
+        expect(rule.blockers).toContain(
+          'Часовой пояс для доменного факта не определён однозначно по выбранным клубам правила',
+        ),
+      );
+    });
+
     it('evaluates a parameterless Battle Pass app-open step with the v2 contract', async () => {
       const { service } = createService();
 
@@ -9267,6 +9508,235 @@ describe('GuestGamificationService', () => {
         'origin-replay',
         { intentIds: ['intent-selected'] },
       );
+    });
+
+    it('skips rewards and decisions for exact canonicalization of an existing event', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const canonicalEvent = eventResult({
+        id: 'event-exact-existing',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+      });
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          summary: {
+            checkedRules: 0,
+            eligibleRules: 0,
+            blockedRules: 0,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          },
+        }),
+      );
+      prisma.guestGameEvent.findFirst.mockResolvedValue(canonicalEvent);
+      const findRewards = jest.spyOn(
+        service as any,
+        'findProcessRewardsByReference',
+      );
+      const materialize = jest.spyOn(
+        service as any,
+        'materializeProcessRewardIntents',
+      );
+      const recordDecisions = jest.spyOn(service, 'recordRuleDecisions');
+
+      const result = await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          eventType: 'PLAY_HOUR',
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: 'fact-exact-existing',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-exact-existing',
+        },
+        {
+          allowedRuleIds: [],
+          materializeRewards: false,
+          originKey: 'origin-exact-existing',
+          suppressLedgerShadow: true,
+        },
+      );
+
+      expect(result).toMatchObject({
+        rewards: [],
+        summary: {
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          idempotent: true,
+        },
+      });
+      expect(findRewards).not.toHaveBeenCalled();
+      expect(materialize).not.toHaveBeenCalled();
+      expect(recordDecisions).not.toHaveBeenCalled();
+    });
+
+    it('skips rewards and decisions for an exact canonicalization conflict recovery', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const duplicateEvent = eventResult({
+        id: 'event-exact-conflict',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+      });
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          summary: {
+            checkedRules: 0,
+            eligibleRules: 0,
+            blockedRules: 0,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          },
+        }),
+      );
+      prisma.guestGameEvent.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(duplicateEvent);
+      jest
+        .spyOn(service as any, 'createProcessEvent')
+        .mockRejectedValue(new ConflictException('duplicate'));
+      const findRewards = jest.spyOn(
+        service as any,
+        'findProcessRewardsByReference',
+      );
+      const materialize = jest.spyOn(
+        service as any,
+        'materializeProcessRewardIntents',
+      );
+      const recordDecisions = jest.spyOn(service, 'recordRuleDecisions');
+
+      const result = await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          eventType: 'PLAY_HOUR',
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: 'fact-exact-conflict',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-exact-conflict',
+        },
+        {
+          allowedRuleIds: [],
+          materializeRewards: false,
+          originKey: 'origin-exact-conflict',
+          suppressLedgerShadow: true,
+        },
+      );
+
+      expect(result).toMatchObject({
+        event: { id: 'event-exact-conflict' },
+        rewards: [],
+        summary: {
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          idempotent: true,
+        },
+      });
+      expect(findRewards).not.toHaveBeenCalled();
+      expect(materialize).not.toHaveBeenCalled();
+      expect(recordDecisions).not.toHaveBeenCalled();
+    });
+
+    it('skips rewards and decisions when exact canonicalization creates a new event', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const createdEvent = eventResult({
+        id: 'event-exact-new',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+      });
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          summary: {
+            checkedRules: 1,
+            eligibleRules: 1,
+            blockedRules: 0,
+            estimatedRewardAmount: 50,
+            projectedXpDelta: 30,
+          },
+        }),
+      );
+      prisma.guestGameEvent.findFirst.mockResolvedValue(null);
+      const createProcessEvent = jest
+        .spyOn(service as any, 'createProcessEvent')
+        .mockResolvedValue(createdEvent);
+      const findRewards = jest.spyOn(
+        service as any,
+        'findProcessRewardsByReference',
+      );
+      const materialize = jest.spyOn(
+        service as any,
+        'materializeProcessRewardIntents',
+      );
+      const recordDecisions = jest.spyOn(service, 'recordRuleDecisions');
+
+      const result = await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          eventType: 'PLAY_HOUR',
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: 'fact-exact-new',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-exact-new',
+        },
+        {
+          allowedRuleIds: [],
+          materializeRewards: false,
+          originKey: 'origin-exact-new',
+          suppressLedgerShadow: true,
+        },
+      );
+
+      expect(result).toMatchObject({
+        event: { id: 'event-exact-new' },
+        rewards: [],
+        summary: {
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          idempotent: false,
+        },
+      });
+      expect(findRewards).not.toHaveBeenCalled();
+      expect(materialize).not.toHaveBeenCalled();
+      expect(recordDecisions).not.toHaveBeenCalled();
+      expect(prisma.guestGameRewardIntent.upsert).not.toHaveBeenCalled();
+      expect(createProcessEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({ xpDelta: 0 }),
+        'origin-exact-new',
+      );
+      const exactCreateInput = createProcessEvent.mock.calls[0]?.[1] as {
+        payload?: Record<string, unknown>;
+      };
+      expect(exactCreateInput.payload).not.toHaveProperty('rules');
+      expect(exactCreateInput.payload).not.toHaveProperty('rewardIntents');
     });
 
     it('fails closed without writing when replay has no canonical event', async () => {

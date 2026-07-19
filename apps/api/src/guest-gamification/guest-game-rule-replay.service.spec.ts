@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { IntegrationProvider } from '@prisma/client';
+import { buildGuestGameOriginKey } from './guest-game-origin-key';
 import { GuestGameRuleReplayService } from './guest-game-rule-replay.service';
 
 const factUpdatedAt = new Date('2026-07-18T12:00:00.000Z');
@@ -20,6 +21,9 @@ function fact() {
     durationMinutes: 270,
     externalProvider: IntegrationProvider.LANGAME,
     externalDomain: '46.langamepro.ru',
+    externalGuestId: 'lg-guest-0646',
+    sourceKind: 'GUEST_SESSION',
+    sourceHash: 'source-hash-270',
     sourceExternalId: 'session-270',
     sessionExternalId: 'session-270',
     updatedAt: factUpdatedAt,
@@ -32,6 +36,7 @@ function season() {
     tenantId: 'tenant-1',
     name: 'Test season',
     status: 'ACTIVE',
+    storeIds: ['store-1'],
     updatedAt: seasonUpdatedAt,
     levels: [
       {
@@ -173,6 +178,15 @@ function createService(
   const prisma = {
     guestActivityFact: { findFirst: jest.fn().mockResolvedValue(fact()) },
     guestGameSeason: { findFirst: jest.fn().mockResolvedValue(season()) },
+    store: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'store-1',
+          externalDomain: '46.langamepro.ru',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      ]),
+    },
     guestGameOriginReceipt: {
       findUnique: jest.fn().mockResolvedValue({
         factId: 'fact-270',
@@ -217,6 +231,151 @@ function createService(
   };
 }
 
+const canonicalOriginKey = buildGuestGameOriginKey({
+  externalProvider: IntegrationProvider.LANGAME,
+  externalDomain: '46.langamepro.ru',
+  eventType: 'PLAY_HOUR',
+  stableExternalId: 'session-270',
+}) as string;
+const canonicalExternalId = 'guest-game:GUEST_SESSION:PLAY_HOUR:session-270';
+
+function canonicalEvent(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'event-canonical',
+    profileId: 'profile-0646',
+    guestId: 'guest-0646',
+    eventType: 'PLAY_HOUR',
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain: '46.langamepro.ru',
+    externalId: canonicalExternalId,
+    originKey: canonicalOriginKey,
+    xpDelta: 0,
+    occurredAt: new Date('2026-07-17T14:24:00.000Z'),
+    payload: {
+      sourceFactId: 'fact-270',
+      sourceFactKind: 'GUEST_SESSION',
+      store: { id: 'store-1', name: 'Club' },
+      input: {
+        sessionMinutes: 270,
+        sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+        sessionPacket: true,
+      },
+    },
+    ...overrides,
+  };
+}
+
+function canonicalReceipt(
+  status = 'SHADOWED',
+  overrides: Partial<Record<string, unknown>> = {},
+) {
+  return {
+    id: 'receipt-canonical',
+    factId: 'fact-270',
+    eventId: status === 'PROCESSED' ? 'event-canonical' : null,
+    eventType: 'PLAY_HOUR',
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain: '46.langamepro.ru',
+    status,
+    claimedSource: null,
+    attempts: 0,
+    claimExpiresAt: null,
+    updatedAt: new Date('2026-07-18T12:10:00.000Z'),
+    ...overrides,
+  };
+}
+
+function createCanonicalizationService(
+  options: {
+    receipt?: ReturnType<typeof canonicalReceipt> | null;
+    event?: ReturnType<typeof canonicalEvent> | null;
+    processIdempotent?: boolean;
+    claimCount?: number;
+  } = {},
+) {
+  const initialReceipt = options.receipt ?? null;
+  const initialEvent = options.event ?? null;
+  const createdReceipt = canonicalReceipt('WAITING_LIVE');
+  const persistedEvent = initialEvent ?? canonicalEvent();
+  const transactionReceiptUpdate = jest.fn().mockResolvedValue({ count: 1 });
+  const transactionAuditCreate = jest
+    .fn()
+    .mockResolvedValue({ id: 'audit-canonical' });
+  const prisma = {
+    guestActivityFact: { findFirst: jest.fn().mockResolvedValue(fact()) },
+    guestGameProfile: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'profile-0646',
+        guestId: 'guest-0646',
+        guest: {
+          id: 'guest-0646',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '46.langamepro.ru',
+          externalGuestId: 'lg-guest-0646',
+        },
+      }),
+    },
+    guestGameOriginReceipt: {
+      findUnique: jest.fn().mockResolvedValue(initialReceipt),
+      create: jest.fn().mockResolvedValue(createdReceipt),
+      updateMany: jest
+        .fn()
+        .mockResolvedValue({ count: options.claimCount ?? 1 }),
+    },
+    guestGameEvent: {
+      findMany: jest.fn().mockResolvedValue(initialEvent ? [initialEvent] : []),
+      findFirst: jest.fn().mockResolvedValue(persistedEvent),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    guestGameRewardIntent: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    guestGameReward: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    guestGameRewardEffect: {
+      count: jest.fn().mockResolvedValue(0),
+    },
+    guestGameEntitlement: {
+      count: jest.fn().mockResolvedValue(0),
+    },
+    guestGameXpPosting: {
+      count: jest.fn().mockResolvedValue(0),
+    },
+    guestGameRuleDecision: {
+      count: jest.fn().mockResolvedValue(0),
+    },
+    $transaction: jest.fn().mockImplementation(async (operation) =>
+      operation({
+        guestGameOriginReceipt: { updateMany: transactionReceiptUpdate },
+        guestGameAuditEvent: { create: transactionAuditCreate },
+      }),
+    ),
+  };
+  const gamification = {
+    processEvent: jest.fn().mockResolvedValue({
+      event: { id: persistedEvent.id },
+      rewards: [],
+      summary: {
+        appliedXpDelta: 0,
+        createdRewards: 0,
+        idempotent: options.processIdempotent ?? false,
+      },
+    }),
+  };
+  return {
+    service: new GuestGameRuleReplayService(
+      prisma as never,
+      gamification as never,
+    ),
+    prisma,
+    gamification,
+    createdReceipt,
+    transactionReceiptUpdate,
+    transactionAuditCreate,
+  };
+}
+
 const user = {
   id: 'user-1',
   tenantId: 'tenant-1',
@@ -249,6 +408,111 @@ describe('GuestGameRuleReplayService', () => {
     });
     expect(result.confirmationHash).toHaveLength(64);
     expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('routes a storeless replay fact through the selected season domain and timezone', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      storeId: null,
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-unselected',
+        externalDomain: 'other.langamepro.ru',
+        timeZone: 'Europe/Moscow',
+      },
+    ]);
+
+    await expect(
+      service.previewBattlePass(user, target),
+    ).resolves.toMatchObject({ outcome: 'READY' });
+
+    const options = gamification.dryRun.mock.calls[0][2];
+    expect(options.ruleExternalDomains.get('season-1')).toEqual([
+      '46.langamepro.ru',
+    ]);
+    expect(
+      options.ruleDomainTimeZones.get('season-1').get('46.langamepro.ru'),
+    ).toBe('Asia/Yekaterinburg');
+    expect(prisma.store.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        id: { in: ['store-1'] },
+        isActive: true,
+      },
+      select: { id: true, externalDomain: true, timeZone: true },
+    });
+  });
+
+  it('blocks a storeless replay fact from another domain', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      storeId: null,
+      externalDomain: 'other.langamepro.ru',
+    });
+    gamification.dryRun.mockImplementation(async (_user, dto, options) =>
+      dryRun(
+        options.ruleExternalDomains
+          .get('season-1')
+          .includes(dto.externalDomain),
+      ),
+    );
+
+    await expect(
+      service.previewBattlePass(user, target),
+    ).resolves.toMatchObject({
+      outcome: 'BLOCKED',
+      decision: { eligible: false },
+    });
+  });
+
+  it('fails closed when selected clubs on the replay domain have ambiguous timezones', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      storeId: null,
+    });
+    prisma.guestGameSeason.findFirst.mockResolvedValue({
+      ...season(),
+      storeIds: ['store-1', 'store-2'],
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-2',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Europe/Moscow',
+      },
+    ]);
+    gamification.dryRun.mockImplementation(async (_user, _dto, options) =>
+      dryRun(
+        Boolean(
+          options.ruleDomainTimeZones.get('season-1').get('46.langamepro.ru'),
+        ),
+      ),
+    );
+
+    await expect(
+      service.previewBattlePass(user, target),
+    ).resolves.toMatchObject({
+      outcome: 'BLOCKED',
+      decision: { eligible: false },
+    });
+    const options = gamification.dryRun.mock.calls[0][2];
+    expect(
+      options.ruleDomainTimeZones.get('season-1').get('46.langamepro.ru'),
+    ).toBeNull();
   });
 
   it('keeps the canonical sequence when surrounding legacy steps have no stable id', async () => {
@@ -421,5 +685,418 @@ describe('GuestGameRuleReplayService', () => {
       }),
     ).rejects.toThrow('Rule-scoped intent не найден после apply');
     expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
+  const exactTarget = {
+    factId: 'fact-270',
+    profileId: 'profile-0646',
+  };
+
+  it('previews an exact fact without creating a receipt or event', async () => {
+    const { service, prisma, gamification } = createCanonicalizationService();
+
+    const result = await service.previewExactPlayTimeCanonicalization(
+      user,
+      exactTarget,
+    );
+
+    expect(result).toMatchObject({
+      mode: 'PREVIEW',
+      outcome: 'READY',
+      fact: {
+        id: 'fact-270',
+        profileId: 'profile-0646',
+        durationMinutes: 270,
+        confidence: 'EXACT',
+      },
+      canonical: {
+        eventType: 'PLAY_HOUR',
+        originKey: canonicalOriginKey,
+        eventId: null,
+        eventValidated: false,
+      },
+      safety: {
+        xpDelta: 0,
+        allowedRuleIds: [],
+        materializeRewards: false,
+      },
+    });
+    expect(result.confirmationHash).toHaveLength(64);
+    expect(prisma.guestGameOriginReceipt.create).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('creates and finalizes only the canonical event with an atomic safe audit', async () => {
+    const {
+      service,
+      prisma,
+      gamification,
+      transactionReceiptUpdate,
+      transactionAuditCreate,
+    } = createCanonicalizationService();
+    const preview = await service.previewExactPlayTimeCanonicalization(
+      user,
+      exactTarget,
+    );
+
+    const result = await service.applyExactPlayTimeCanonicalization(user, {
+      ...exactTarget,
+      expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+      confirmationHash: preview.confirmationHash,
+      confirmation: 'APPLY_EXACT_CANONICALIZATION',
+    });
+
+    expect(result).toMatchObject({
+      mode: 'APPLY',
+      outcome: 'APPLIED',
+      canonical: { eventId: 'event-canonical', eventValidated: true },
+      receipt: { status: 'PROCESSED', attempts: 1 },
+    });
+    expect(prisma.guestGameOriginReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          factId: 'fact-270',
+          status: 'WAITING_LIVE',
+          originKey: canonicalOriginKey,
+        }),
+      }),
+    );
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'receipt-canonical',
+          factId: 'fact-270',
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              status: {
+                in: expect.arrayContaining([
+                  'SHADOWED',
+                  'WAITING_LIVE',
+                  'FAILED',
+                ]),
+              },
+            }),
+          ]),
+        }),
+        data: expect.objectContaining({
+          status: 'PROCESSING',
+          claimedSource: 'EXACT_CANONICALIZATION',
+          attempts: { increment: 1 },
+        }),
+      }),
+    );
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        profileId: 'profile-0646',
+        eventType: 'PLAY_HOUR',
+        sourceFactId: 'fact-270',
+        sessionMinutes: 270,
+      }),
+      {
+        allowedRuleIds: [],
+        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        evaluatorVersion: 'exact-canonicalization-v1',
+        materializeRewards: false,
+        originKey: canonicalOriginKey,
+        suppressLedgerShadow: true,
+      },
+    );
+    expect(transactionReceiptUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'PROCESSING',
+          attempts: 1,
+          claimedSource: 'EXACT_CANONICALIZATION',
+        }),
+        data: expect.objectContaining({
+          status: 'PROCESSED',
+          eventId: 'event-canonical',
+        }),
+      }),
+    );
+    expect(transactionAuditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'EXACT_FACT_CANONICALIZED',
+        profileId: 'profile-0646',
+        payload: expect.objectContaining({
+          actorUserId: 'user-1',
+          sourceFactId: 'fact-270',
+          eventId: 'event-canonical',
+          durationMinutes: 270,
+        }),
+      }),
+    });
+    const auditPayload = transactionAuditCreate.mock.calls[0][0].data.payload;
+    expect(auditPayload).not.toHaveProperty('evidence');
+    expect(JSON.stringify(auditPayload)).not.toContain('phone');
+    expect(JSON.stringify(auditPayload)).not.toContain('payload');
+  });
+
+  it('recovers a crash-created event and finalizes the receipt idempotently', async () => {
+    const receipt = canonicalReceipt('FAILED', { attempts: 1 });
+    const event = canonicalEvent();
+    const { service, gamification } = createCanonicalizationService({
+      receipt,
+      event,
+      processIdempotent: true,
+    });
+    const preview = await service.previewExactPlayTimeCanonicalization(
+      user,
+      exactTarget,
+    );
+
+    const result = await service.applyExactPlayTimeCanonicalization(user, {
+      ...exactTarget,
+      expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+      confirmationHash: preview.confirmationHash,
+      confirmation: 'APPLY_EXACT_CANONICALIZATION',
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'IDEMPOTENT',
+      canonical: { eventId: 'event-canonical', eventValidated: true },
+      receipt: { status: 'PROCESSED', attempts: 2 },
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reprocess a terminal receipt for the same validated fact', async () => {
+    const { service, gamification } = createCanonicalizationService({
+      receipt: canonicalReceipt('PROCESSED'),
+      event: canonicalEvent(),
+    });
+    const preview = await service.previewExactPlayTimeCanonicalization(
+      user,
+      exactTarget,
+    );
+
+    expect(preview.outcome).toBe('IDEMPOTENT');
+    const result = await service.applyExactPlayTimeCanonicalization(user, {
+      ...exactTarget,
+      expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+      confirmationHash: preview.confirmationHash,
+      confirmation: 'APPLY_EXACT_CANONICALIZATION',
+    });
+    expect(result.outcome).toBe('IDEMPOTENT');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('never repoints a receipt already bound to another fact', async () => {
+    const { service, prisma, gamification } = createCanonicalizationService({
+      receipt: canonicalReceipt('PROCESSED', { factId: 'fact-other' }),
+      event: canonicalEvent(),
+    });
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('already bound to a different fact');
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the canonical event does not match the fact time', async () => {
+    const { service, gamification } = createCanonicalizationService({
+      receipt: canonicalReceipt('SHADOWED'),
+      event: canonicalEvent({
+        occurredAt: new Date('2026-07-17T14:25:00.000Z'),
+      }),
+    });
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('does not exactly match');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not process when another worker wins the receipt claim', async () => {
+    const { service, gamification } = createCanonicalizationService({
+      receipt: canonicalReceipt('SHADOWED'),
+      claimCount: 0,
+    });
+    const preview = await service.previewExactPlayTimeCanonicalization(
+      user,
+      exactTarget,
+    );
+
+    await expect(
+      service.applyExactPlayTimeCanonicalization(user, {
+        ...exactTarget,
+        expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+        confirmationHash: preview.confirmationHash,
+        confirmation: 'APPLY_EXACT_CANONICALIZATION',
+      }),
+    ).rejects.toThrow('claim was lost');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('fails the claimed receipt when the exact fact changes before processEvent', async () => {
+    const { service, prisma, gamification } = createCanonicalizationService();
+    const preview = await service.previewExactPlayTimeCanonicalization(
+      user,
+      exactTarget,
+    );
+    prisma.guestActivityFact.findFirst
+      .mockResolvedValueOnce(fact())
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.applyExactPlayTimeCanonicalization(user, {
+        ...exactTarget,
+        expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+        confirmationHash: preview.confirmationHash,
+        confirmation: 'APPLY_EXACT_CANONICALIZATION',
+      }),
+    ).rejects.toThrow('changed after receipt claim');
+
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+    expect(prisma.guestActivityFact.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'fact-270',
+          tenantId: 'tenant-1',
+          profileId: 'profile-0646',
+          guestId: 'guest-0646',
+          lifecycleStatus: 'ACTIVE',
+          confidence: 'EXACT',
+          supersededAt: null,
+          updatedAt: factUpdatedAt,
+          sourceHash: 'source-hash-270',
+        }),
+      }),
+    );
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'PROCESSING',
+          claimedSource: 'EXACT_CANONICALIZATION',
+          attempts: 1,
+        }),
+        data: expect.objectContaining({
+          status: 'FAILED',
+          lastError: 'EXACT_CANONICALIZATION_FACT_CHANGED_AFTER_CLAIM',
+        }),
+      }),
+    );
+  });
+
+  it('rejects an existing event whose payload contains materialized rules', async () => {
+    const event = canonicalEvent({
+      payload: {
+        ...canonicalEvent().payload,
+        rules: [{ id: 'mission-polluted' }],
+      },
+    });
+    const { service, prisma, gamification } = createCanonicalizationService({
+      receipt: canonicalReceipt('SHADOWED'),
+      event,
+    });
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('payload already contains');
+    expect(prisma.guestGameRewardIntent.findMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects an existing event with persisted reward side effects', async () => {
+    const { service, prisma, gamification } = createCanonicalizationService({
+      receipt: canonicalReceipt('SHADOWED'),
+      event: canonicalEvent(),
+    });
+    prisma.guestGameRewardIntent.findMany.mockResolvedValue([
+      { id: 'intent-polluted', rewardId: 'reward-polluted' },
+    ]);
+    prisma.guestGameReward.findMany.mockResolvedValue([
+      { id: 'reward-polluted' },
+    ]);
+    prisma.guestGameRewardEffect.count.mockResolvedValue(1);
+    prisma.guestGameEntitlement.count.mockResolvedValue(1);
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('already has persisted');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('requires the fact guest and external identity to match the profile', async () => {
+    const { service, prisma, gamification } = createCanonicalizationService();
+    prisma.guestGameProfile.findFirst.mockResolvedValue({
+      id: 'profile-0646',
+      guestId: 'guest-other',
+      guest: {
+        id: 'guest-other',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '46.langamepro.ru',
+        externalGuestId: 'lg-guest-other',
+      },
+    });
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('guestId does not exactly match');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when fact and profile both have no guest binding', async () => {
+    const { service, prisma, gamification } = createCanonicalizationService();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      guestId: null,
+    });
+    prisma.guestGameProfile.findFirst.mockResolvedValue({
+      id: 'profile-0646',
+      guestId: null,
+      guest: null,
+    });
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('requires a non-null fact and profile guest binding');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['event guest', { guestId: 'guest-other' }],
+    [
+      'payload store',
+      {
+        payload: {
+          ...canonicalEvent().payload,
+          store: { id: 'store-other' },
+        },
+      },
+    ],
+  ])('rejects a canonical event with mismatched %s', async (_label, patch) => {
+    const { service, gamification } = createCanonicalizationService({
+      receipt: canonicalReceipt('SHADOWED'),
+      event: canonicalEvent(patch),
+    });
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).rejects.toThrow('does not exactly match');
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('binds guest, store, provider and session fields into the confirmation hash', async () => {
+    const base = createCanonicalizationService();
+    const changed = createCanonicalizationService();
+    changed.prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      storeId: 'store-2',
+    });
+    const [basePreview, changedPreview] = await Promise.all([
+      base.service.previewExactPlayTimeCanonicalization(user, exactTarget),
+      changed.service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ]);
+
+    expect(changedPreview.confirmationHash).not.toBe(
+      basePreview.confirmationHash,
+    );
   });
 });

@@ -569,3 +569,96 @@ describe('guest game progress trigger matching', () => {
     expect(result).toMatchObject({ current: 2, completed: true });
   });
 });
+
+describe('guest game progress domain routing', () => {
+  const rule = {
+    triggerKind: 'PLAY_HOUR',
+    progressTarget: 60,
+    progressUnit: 'minutes',
+    conditions: {
+      metric: { aggregation: 'duration', target: 60 },
+    },
+    storeIds: ['store-1'],
+    externalDomains: ['46.langamepro.ru'],
+  };
+
+  it('matches a store-less event from the selected club domain', () => {
+    expect(
+      evaluateGuestGameProgress(
+        rule,
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-18T12:00:00.000Z'),
+          storeId: null,
+          externalDomain: '46.langamepro.ru',
+          sessionMinutes: 60,
+        },
+        [],
+      ),
+    ).toMatchObject({ current: 60, completed: true, matchedEvents: 1 });
+  });
+
+  it('rejects a store-less event from another domain', () => {
+    expect(
+      evaluateGuestGameProgress(
+        rule,
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-18T12:00:00.000Z'),
+          storeId: null,
+          externalDomain: 'other.langamepro.ru',
+          sessionMinutes: 60,
+        },
+        [],
+      ),
+    ).toMatchObject({ current: 0, completed: false, matchedEvents: 0 });
+  });
+
+  it('allows independent rules for different stores on the same domain', () => {
+    const event: GuestGameProgressEvent = {
+      eventType: 'PLAY_HOUR',
+      occurredAt: new Date('2026-07-18T12:00:00.000Z'),
+      storeId: null,
+      externalDomain: '46.langamepro.ru',
+      sessionMinutes: 60,
+    };
+
+    for (const storeId of ['store-1', 'store-2']) {
+      expect(
+        evaluateGuestGameProgress({ ...rule, storeIds: [storeId] }, event, []),
+      ).toMatchObject({ current: 60, completed: true, matchedEvents: 1 });
+    }
+  });
+
+  it('rejects an event without both store and domain', () => {
+    expect(
+      evaluateGuestGameProgress(
+        rule,
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-18T12:00:00.000Z'),
+          storeId: null,
+          externalDomain: null,
+          sessionMinutes: 60,
+        },
+        [],
+      ),
+    ).toMatchObject({ current: 0, completed: false, matchedEvents: 0 });
+  });
+
+  it('keeps an exact store authoritative over a shared domain', () => {
+    expect(
+      evaluateGuestGameProgress(
+        rule,
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-18T12:00:00.000Z'),
+          storeId: 'store-2',
+          externalDomain: '46.langamepro.ru',
+          sessionMinutes: 60,
+        },
+        [],
+      ),
+    ).toMatchObject({ current: 0, completed: false, matchedEvents: 0 });
+  });
+});

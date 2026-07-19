@@ -212,6 +212,7 @@ function matchesProgressEvent(
       event.storeId && rule.storeIds.includes(event.storeId),
     );
     const matchesDomain = Boolean(
+      !event.storeId &&
       event.externalDomain &&
       rule.externalDomains?.includes(event.externalDomain),
     );

@@ -86,6 +86,42 @@ function dryRun() {
   };
 }
 
+function domainAwareDryRun(
+  dto: { storeId?: string | null; externalDomain?: string | null },
+  options: {
+    ruleExternalDomains?: ReadonlyMap<string, readonly string[]>;
+  },
+  rules: Array<{ id: string; storeIds: string[] }>,
+) {
+  const matchedRules = rules.filter((rule) =>
+    dto.storeId
+      ? rule.storeIds.includes(dto.storeId)
+      : Boolean(
+          dto.externalDomain &&
+          options.ruleExternalDomains
+            ?.get(rule.id)
+            ?.includes(dto.externalDomain),
+        ),
+  );
+  const base = dryRun();
+  const routedRules = matchedRules.map((rule, index) => ({
+    ...base.rules[0],
+    id: rule.id,
+    name: `Rule ${index + 1}`,
+  }));
+
+  return {
+    ...base,
+    rules: routedRules,
+    summary: {
+      ...base.summary,
+      checkedRules: routedRules.length,
+      eligibleRules: routedRules.length,
+      blockedRules: 0,
+    },
+  };
+}
+
 function createService(options?: {
   validFrom?: Date;
   liveEventId?: string | null;
@@ -99,14 +135,25 @@ function createService(options?: {
     guestGameMission: {
       findMany: jest.fn().mockResolvedValue([
         {
+          id: 'mission-1',
           createdAt: new Date('2026-07-01T00:00:00.000Z'),
           conditions: {},
           periodFrom: null,
+          storeIds: ['store-1'],
         },
       ]),
     },
     guestGameSeason: {
       findMany: jest.fn().mockResolvedValue([]),
+    },
+    store: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'store-1',
+          externalDomain: '46.langamepro.ru',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      ]),
     },
     guestActivityFact: {
       findMany: jest.fn().mockResolvedValue([fact(validFrom)]),
@@ -255,6 +302,167 @@ describe('GuestGameLedgerFallbackService', () => {
     );
   });
 
+  it('routes a store-less fact to a rule selected in the same Langame domain', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      { ...fact(new Date(now.getTime() - 60_000)), storeId: null },
+    ]);
+    gamification.dryRun.mockImplementationOnce(
+      (_user: unknown, dto: never, options: never) =>
+        domainAwareDryRun(dto, options, [
+          { id: 'mission-1', storeIds: ['store-1'] },
+        ]),
+    );
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({ shadowFacts: 1 });
+
+    expect(gamification.dryRun).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        storeId: null,
+        externalDomain: '46.langamepro.ru',
+      }),
+      expect.objectContaining({
+        ruleExternalDomains: expect.any(Map),
+      }),
+    );
+  });
+
+  it('rejects a store-less fact from another Langame domain', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      {
+        ...fact(new Date(now.getTime() - 60_000)),
+        storeId: null,
+        externalDomain: 'other.langamepro.ru',
+      },
+    ]);
+    gamification.dryRun.mockImplementationOnce(
+      (_user: unknown, dto: never, options: never) =>
+        domainAwareDryRun(dto, options, [
+          { id: 'mission-1', storeIds: ['store-1'] },
+        ]),
+    );
+
+    await expect(
+      service.runScheduled({ mode: 'SHADOW', tenantId: 'tenant-1' }),
+    ).resolves.toMatchObject({ shadowFacts: 0, checkedFacts: 0 });
+    expect(prisma.guestGameOriginReceipt.upsert).not.toHaveBeenCalled();
+  });
+
+  it('routes independently to multiple rules whose selected clubs share a domain', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameMission.findMany.mockResolvedValueOnce([
+      {
+        id: 'mission-1',
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        conditions: {},
+        periodFrom: null,
+        storeIds: ['store-1'],
+      },
+      {
+        id: 'mission-2',
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        conditions: {},
+        periodFrom: null,
+        storeIds: ['store-2'],
+      },
+    ]);
+    prisma.store.findMany.mockResolvedValueOnce([
+      {
+        id: 'store-1',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-2',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+    ]);
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      { ...fact(new Date(now.getTime() - 60_000)), storeId: null },
+    ]);
+    gamification.dryRun.mockImplementationOnce(
+      (_user: unknown, dto: never, options: never) =>
+        domainAwareDryRun(dto, options, [
+          { id: 'mission-1', storeIds: ['store-1'] },
+          { id: 'mission-2', storeIds: ['store-2'] },
+        ]),
+    );
+
+    await expect(
+      service.runScheduled({ mode: 'SHADOW', tenantId: 'tenant-1' }),
+    ).resolves.toMatchObject({ shadowFacts: 1 });
+    expect(gamification.recordRuleDecisions).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        rules: [
+          expect.objectContaining({ id: 'mission-1' }),
+          expect.objectContaining({ id: 'mission-2' }),
+        ],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('does not route a fact that has neither an exact store nor a domain', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      {
+        ...fact(new Date(now.getTime() - 60_000)),
+        storeId: null,
+        externalDomain: null,
+      },
+    ]);
+
+    await expect(
+      service.runScheduled({ mode: 'SHADOW', tenantId: 'tenant-1' }),
+    ).resolves.toMatchObject({ shadowFacts: 0, checkedFacts: 0 });
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+  });
+
+  it('keeps an exact store authoritative even when another store shares its domain', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameMission.findMany.mockResolvedValueOnce([
+      {
+        id: 'mission-2',
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        conditions: {},
+        periodFrom: null,
+        storeIds: ['store-2'],
+      },
+    ]);
+    prisma.store.findMany.mockResolvedValueOnce([
+      {
+        id: 'store-1',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-2',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+    ]);
+    gamification.dryRun.mockImplementationOnce(
+      (_user: unknown, dto: never, options: never) =>
+        domainAwareDryRun(dto, options, [
+          { id: 'mission-2', storeIds: ['store-2'] },
+        ]),
+    );
+
+    await expect(
+      service.runScheduled({ mode: 'SHADOW', tenantId: 'tenant-1' }),
+    ).resolves.toMatchObject({ shadowFacts: 0, checkedFacts: 0 });
+    expect(prisma.guestGameOriginReceipt.upsert).not.toHaveBeenCalled();
+  });
+
   it('uses the stable session id when Langame omits a generic source id', async () => {
     const { service, prisma, gamification } = createService();
     prisma.guestActivityFact.findMany.mockResolvedValueOnce([
@@ -282,6 +490,9 @@ describe('GuestGameLedgerFallbackService', () => {
       expect.objectContaining({
         eventType: 'PLAY_HOUR',
         externalId: 'session-without-row-id',
+      }),
+      expect.objectContaining({
+        ruleExternalDomains: expect.any(Map),
       }),
     );
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -375,7 +586,7 @@ describe('GuestGameLedgerFallbackService', () => {
       ledgerFirstSeenAt: now,
       graceUntil: new Date(now.getTime() + 15_000),
     });
-    expect(upsertCalls[0]?.[0].update).toEqual({ factId: 'fact-1' });
+    expect(upsertCalls[0]?.[0].update).toEqual({});
   });
 
   it('accepts an existing LIVE event as the authoritative receipt', async () => {
@@ -399,16 +610,21 @@ describe('GuestGameLedgerFallbackService', () => {
       createdEvents: 0,
       createdRewards: 0,
     });
-    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
-      where: { id: 'receipt-1' },
-      data: {
-        status: 'LIVE_PROCESSED',
-        claimedSource: 'LIVE',
-        eventId: 'event-live-1',
-        claimExpiresAt: null,
-        processedAt: now,
-      },
-    });
+    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'receipt-1',
+          status: 'PROCESSING',
+          claimedSource: 'LIVE_RECONCILIATION',
+          attempts: 1,
+        }),
+        data: expect.objectContaining({
+          status: 'LIVE_PROCESSED',
+          claimedSource: 'LIVE',
+          eventId: 'event-live-1',
+        }),
+      }),
+    );
     expect(gamification.processEvent).toHaveBeenCalledTimes(1);
     expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledWith({
       where: {
@@ -488,17 +704,17 @@ describe('GuestGameLedgerFallbackService', () => {
     const claim = updateCalls[0]?.[0];
     expect(claim?.where).toMatchObject({
       id: 'receipt-1',
-      attempts: { lt: 3 },
+      attempts: { equals: 0, lt: 3 },
     });
     expect(claim?.where.OR).toEqual(
       expect.arrayContaining([
-        {
+        expect.objectContaining({
           status: { in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'] },
-        },
+        }),
         expect.objectContaining({ status: 'PROCESSING' }),
-        { status: 'PROCESSING', claimExpiresAt: null },
       ]),
     );
+    expect(JSON.stringify(claim?.where)).toContain('EXACT_CANONICALIZATION');
     expect(claim?.data).toMatchObject({
       status: 'PROCESSING',
       claimedSource: 'LEDGER_FALLBACK',
@@ -739,13 +955,14 @@ describe('GuestGameLedgerFallbackService', () => {
     });
     expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(2);
     expect(gamification.processEvent).toHaveBeenCalledTimes(1);
-    expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
+    const deadLetter = prisma.guestGameOriginReceipt.updateMany.mock.calls.find(
+      ([input]) => input.where.id === 'receipt-exhausted-fact-0',
+    )?.[0];
+    expect(deadLetter).toMatchObject({
       where: {
         id: 'receipt-exhausted-fact-0',
-        attempts: { gte: 3 },
-        status: {
-          in: ['WAITING_LIVE', 'FAILED', 'SHADOWED', 'PROCESSING'],
-        },
+        attempts: { equals: 3, gte: 3 },
+        policy: { not: 'EXACT_OPERATOR_CANONICALIZATION' },
       },
       data: {
         status: 'DEAD_LETTER',
@@ -754,6 +971,9 @@ describe('GuestGameLedgerFallbackService', () => {
         lastError: 'Ledger fallback exhausted the maximum number of attempts.',
       },
     });
+    expect(JSON.stringify(deadLetter?.where)).toContain(
+      'EXACT_CANONICALIZATION',
+    );
   });
 
   it('treats a DEAD_LETTER receipt as terminal on replay', async () => {
@@ -781,6 +1001,112 @@ describe('GuestGameLedgerFallbackService', () => {
     });
     expect(prisma.guestGameEvent.findFirst).not.toHaveBeenCalled();
     expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['active', new Date(now.getTime() + 60_000)],
+    ['expired', new Date(now.getTime() - 60_000)],
+  ])(
+    'never dead-letters or reclaims an %s exact canonicalization lease',
+    async (_label, claimExpiresAt) => {
+      const { service, prisma, gamification } = createService();
+      prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+        id: 'receipt-exact',
+        factId: 'fact-1',
+        policy: 'EXACT_OPERATOR_CANONICALIZATION',
+        status: 'PROCESSING',
+        claimedSource: 'EXACT_CANONICALIZATION',
+        ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+        graceUntil: new Date(now.getTime() - 1_000),
+        attempts: 3,
+        claimExpiresAt,
+      });
+
+      await expect(
+        service.runScheduled({
+          mode: 'LIVE',
+          graceMs: 15_000,
+          tenantId: 'tenant-1',
+        }),
+      ).resolves.toMatchObject({
+        duplicateFacts: 1,
+        failedFacts: 0,
+        fallbackFacts: 0,
+      });
+      expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+      expect(prisma.guestGameEvent.findFirst).not.toHaveBeenCalled();
+      expect(gamification.processEvent).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not repoint or claim an operator-owned exact receipt before its lease starts', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+      id: 'receipt-exact',
+      factId: 'fact-1',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 0,
+      claimExpiresAt: null,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      duplicateFacts: 1,
+      fallbackFacts: 0,
+    });
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls[0][0].update,
+    ).toEqual({});
+    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('claims an existing LIVE event before reconciliation and loses safely to exact canonicalization', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-live-1',
+    });
+    prisma.guestGameOriginReceipt.updateMany.mockResolvedValueOnce({
+      count: 0,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        graceMs: 15_000,
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      duplicateFacts: 1,
+      liveHandledFacts: 0,
+      createdRewards: 0,
+    });
+    const claim = prisma.guestGameOriginReceipt.updateMany.mock.calls[0][0];
+    expect(claim).toMatchObject({
+      where: {
+        id: 'receipt-1',
+        attempts: 0,
+        policy: { not: 'EXACT_OPERATOR_CANONICALIZATION' },
+        OR: expect.arrayContaining([
+          expect.objectContaining({ status: 'PROCESSING' }),
+        ]),
+      },
+      data: expect.objectContaining({
+        status: 'PROCESSING',
+        claimedSource: 'LIVE_RECONCILIATION',
+        attempts: { increment: 1 },
+      }),
+    });
+    expect(JSON.stringify(claim.where)).toContain('EXACT_CANONICALIZATION');
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 

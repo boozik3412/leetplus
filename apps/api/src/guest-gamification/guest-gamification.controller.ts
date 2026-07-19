@@ -50,6 +50,9 @@ import {
   type GuestGameBattlePassReplayApplyDto,
   type GuestGameBattlePassReplayPreviewDto,
   type GuestGameBattlePassReplayResult,
+  type GuestGameExactPlayTimeCanonicalizationApplyDto,
+  type GuestGameExactPlayTimeCanonicalizationPreviewDto,
+  type GuestGameExactPlayTimeCanonicalizationResult,
 } from './guest-game-rule-replay.service';
 import type { GuestGameMissionWizardDto } from './guest-game-mission-contract';
 import {
@@ -242,6 +245,31 @@ export class GuestGamificationController {
     @Body() dto: GuestGameBattlePassReplayApplyDto,
   ): Promise<GuestGameBattlePassReplayResult> {
     return this.ruleReplayService.applyBattlePass(user, dto);
+  }
+
+  @Post('rule-replays/play-time/canonicalization/preview')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  previewExactPlayTimeCanonicalization(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameExactPlayTimeCanonicalizationPreviewDto,
+  ): Promise<GuestGameExactPlayTimeCanonicalizationResult> {
+    return this.ruleReplayService.previewExactPlayTimeCanonicalization(
+      user,
+      dto,
+    );
+  }
+
+  @Post('rule-replays/play-time/canonicalization/apply')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  applyExactPlayTimeCanonicalization(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameExactPlayTimeCanonicalizationApplyDto,
+  ): Promise<GuestGameExactPlayTimeCanonicalizationResult> {
+    return this.ruleReplayService.applyExactPlayTimeCanonicalization(user, dto);
   }
 
   @Get('log/profiles/:profileId')

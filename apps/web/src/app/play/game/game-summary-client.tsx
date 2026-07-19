@@ -4338,7 +4338,7 @@ function PlayerProfilePanel({
                   data={quest.preview}
                   mode="compact"
                   showLabels={false}
-                  className="!mx-2 !w-auto !p-0"
+                  className="!m-0 !w-full !max-w-full !p-0"
                 />
               </button>
             ))
@@ -4427,7 +4427,7 @@ function QuestBoard({
                     data={quest.preview}
                     mode="compact"
                     showLabels={false}
-                    className="!mx-2 !w-auto !p-0"
+                    className="!m-0 !w-full !max-w-full !p-0"
                   />
                 </button>
               ))
@@ -12219,12 +12219,16 @@ const clubHomeCss = `
 .lp-club-side-quest-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
   margin-top: 14px;
 }
 
-.lp-club-side-quest {
+.lp-club-side-quest,
+.lp-club-quest-full-card {
   display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 0;
   border: 0;
   color: inherit;
@@ -12238,6 +12242,8 @@ const clubHomeCss = `
 .lp-club-side-quest > div,
 .lp-club-quest-full-card > div {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   transition:
     filter 180ms ease,
     transform 180ms ease;

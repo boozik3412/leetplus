@@ -241,9 +241,11 @@ export function GuestMissionPreview({
   const palette = missionPreviewPalettes[data.theme ?? "CLASSIC"];
 
   return (
-    <div className={`space-y-5 p-4 text-white ${palette.stage} ${className}`}>
+    <div
+      className={`min-w-0 max-w-full space-y-5 p-4 text-white ${palette.stage} ${className}`}
+    >
       {mode !== "full" ? (
-        <div>
+        <div className="min-w-0">
           {showLabels ? (
             <p
               className={`text-[10px] font-bold uppercase tracking-[0.18em] ${palette.label}`}
@@ -254,7 +256,7 @@ export function GuestMissionPreview({
           <div
             className={`${showLabels ? "mt-2" : ""} rounded-xl border p-3 ${palette.compact}`}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <div
                 className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg border ${palette.badge}`}
                 role="img"

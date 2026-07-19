@@ -12735,28 +12735,35 @@ export class GuestGamificationService {
 
     return this.prisma.$transaction(async (tx) => {
       const [lockedFacts, lockedSeasons] = await Promise.all([
-        tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-          SELECT "id"
+        tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`
+          SELECT "id", "updatedAt"
           FROM "GuestActivityFact"
           WHERE "id" = ${scope.sourceFactId}
             AND "tenantId" = ${user.tenantId}
-            AND "updatedAt" = ${scope.sourceFactUpdatedAt}
             AND "lifecycleStatus" = 'ACTIVE'
             AND "confidence" = 'EXACT'
             AND "supersededAt" IS NULL
           FOR SHARE
         `),
-        tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-          SELECT "id"
+        tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(Prisma.sql`
+          SELECT "id", "updatedAt"
           FROM "GuestGameSeason"
           WHERE "id" = ${scope.ruleId}
             AND "tenantId" = ${user.tenantId}
-            AND "updatedAt" = ${scope.seasonUpdatedAt}
             AND "status" = 'ACTIVE'
           FOR SHARE
         `),
       ]);
-      if (lockedFacts.length !== 1 || lockedSeasons.length !== 1) {
+      const factVersion = lockedFacts[0]?.updatedAt;
+      const seasonVersion = lockedSeasons[0]?.updatedAt;
+      if (
+        lockedFacts.length !== 1 ||
+        lockedSeasons.length !== 1 ||
+        !(factVersion instanceof Date) ||
+        !(seasonVersion instanceof Date) ||
+        factVersion.getTime() !== scope.sourceFactUpdatedAt.getTime() ||
+        seasonVersion.getTime() !== scope.seasonUpdatedAt.getTime()
+      ) {
         throw new ConflictException(
           'Факт или сезон изменились после preview; rule-scoped intent не создан.',
         );
@@ -23723,7 +23730,8 @@ function evaluateSeasonDryRun(
 
   const selectedRewardLabel =
     currentStep && blockers.length === 0
-      ? (stepRewardPlan?.rewardLabel ?? dryRunSeasonStepRewardLabel(currentStep))
+      ? (stepRewardPlan?.rewardLabel ??
+        dryRunSeasonStepRewardLabel(currentStep))
       : null;
 
   return dryRunRuleResult({

@@ -9959,8 +9959,8 @@ describe('GuestGamificationService', () => {
       const transactionClient = {
         $queryRaw: jest
           .fn()
-          .mockResolvedValueOnce([{ id: 'fact-270' }])
-          .mockResolvedValueOnce([{ id: 'season-1' }]),
+          .mockResolvedValueOnce([{ id: 'fact-270', updatedAt: now }])
+          .mockResolvedValueOnce([{ id: 'season-1', updatedAt: now }]),
         guestGameRewardIntent: {
           upsert: jest.fn().mockImplementation(({ create }) =>
             Promise.resolve({
@@ -10039,6 +10039,54 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameAuditEvent.create).not.toHaveBeenCalled();
     });
 
+    it('fails closed before replay writes when a locked source version changed', async () => {
+      const { service, prisma } = createService();
+      const transactionClient = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([
+            { id: 'fact-270', updatedAt: new Date(now.getTime() + 1) },
+          ])
+          .mockResolvedValueOnce([{ id: 'season-1', updatedAt: now }]),
+        guestGameRewardIntent: {
+          upsert: jest.fn(),
+        },
+        guestGameAuditEvent: {
+          create: jest.fn(),
+        },
+      };
+      prisma.$transaction.mockImplementationOnce((operation) =>
+        operation(transactionClient),
+      );
+
+      await expect(
+        (service as any).persistReplayRewardIntent(
+          user,
+          battlePassDryRun(),
+          'event-existing',
+          'profile-1',
+          'origin-replay',
+          {
+            ruleKind: 'SEASON',
+            ruleId: 'season-1',
+            battlePassStep: 2,
+            stepId: 'step-2',
+            sourceFactId: 'fact-270',
+            sourceFactUpdatedAt: now,
+            seasonUpdatedAt: now,
+            confirmationHash: 'confirmation-hash',
+          },
+        ),
+      ).rejects.toThrow('Факт или сезон изменились после preview');
+
+      expect(
+        transactionClient.guestGameRewardIntent.upsert,
+      ).not.toHaveBeenCalled();
+      expect(
+        transactionClient.guestGameAuditEvent.create,
+      ).not.toHaveBeenCalled();
+    });
+
     it('fails closed before materialization when the atomic replay audit write fails', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();
@@ -10052,8 +10100,8 @@ describe('GuestGamificationService', () => {
       const transactionClient = {
         $queryRaw: jest
           .fn()
-          .mockResolvedValueOnce([{ id: 'fact-270' }])
-          .mockResolvedValueOnce([{ id: 'season-1' }]),
+          .mockResolvedValueOnce([{ id: 'fact-270', updatedAt: now }])
+          .mockResolvedValueOnce([{ id: 'season-1', updatedAt: now }]),
         guestGameRewardIntent: {
           upsert: jest.fn().mockImplementation(({ create }) =>
             Promise.resolve({

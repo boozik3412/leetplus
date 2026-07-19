@@ -62,6 +62,9 @@ function createPrismaMock() {
     guestGameRuleDecision: {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
+    guestGameAuditEvent: {
+      create: jest.fn().mockResolvedValue({}),
+    },
     guestGameEntitlement: {
       findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn().mockResolvedValue({}),
@@ -683,6 +686,37 @@ function noRewardDryRunResult(
       estimatedRewardAmount: 0,
       projectedXpDelta: 0,
       ...overrides.summary,
+    },
+  });
+}
+
+function battlePassDryRun(step = 2): GuestGameDryRunResult {
+  return dryRunResult({
+    eventType: 'PLAY_HOUR',
+    rules: [
+      {
+        ...dryRunResult().rules[0],
+        id: 'season-1',
+        kind: 'SEASON',
+        name: 'Club season',
+        triggerKind: 'PLAY_HOUR',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardAmount: 0,
+        rewardLabel: `Step ${step} reward`,
+        selectedRewardLabel: `Step ${step} reward`,
+        xpDelta: 0,
+        battlePassLevel: step,
+        battlePassStep: step,
+        battlePassStepTitle: `Step ${step}`,
+      },
+    ],
+    summary: {
+      checkedRules: 1,
+      eligibleRules: 1,
+      blockedRules: 0,
+      estimatedRewardAmount: 0,
+      projectedXpDelta: 0,
     },
   });
 }
@@ -1826,6 +1860,36 @@ describe('GuestGamificationService', () => {
       ).resolves.toBeNull();
       expect(prisma.guestGameRewardIntent.updateMany).not.toHaveBeenCalled();
       expect(prisma.guestGameRewardIntent.findMany).not.toHaveBeenCalled();
+    });
+
+    it('scopes both SQL and fallback reward-intent claims to the selected intent ids', async () => {
+      const { service, prisma } = createService();
+      prisma.$queryRaw.mockResolvedValue(undefined);
+      prisma.guestGameRewardIntent.findMany.mockResolvedValue([]);
+
+      await expect(
+        (service as any).claimRewardIntents(
+          user.tenantId,
+          'event-1',
+          30,
+          120_000,
+          5,
+          ['intent-selected'],
+        ),
+      ).resolves.toEqual([]);
+
+      const sql = prisma.$queryRaw.mock.calls[0][0] as Prisma.Sql;
+      expect(sql.values).toContain('intent-selected');
+      expect(sql.values).not.toContain('intent-neighbor');
+      expect(prisma.guestGameRewardIntent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: user.tenantId,
+            eventId: 'event-1',
+            id: { in: ['intent-selected'] },
+          }),
+        }),
+      );
     });
 
     it('does not claim intents or effects while the global kill switch is enabled', async () => {
@@ -9129,6 +9193,332 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
     });
 
+    it('reuses the canonical event and materializes only the selected replay intent', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const stepRun = battlePassDryRun();
+      const replayScope = {
+        ruleKind: 'SEASON' as const,
+        ruleId: 'season-1',
+        battlePassStep: 2,
+        stepId: 'step-2',
+        sourceFactId: 'fact-270',
+        sourceFactUpdatedAt: now,
+        seasonUpdatedAt: now,
+        confirmationHash: 'confirmation-hash',
+      };
+      const canonicalEvent = eventResult({
+        id: 'event-existing',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+      });
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(stepRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(canonicalEvent);
+      const persistIntent = jest
+        .spyOn(service as any, 'persistReplayRewardIntent')
+        .mockResolvedValue(['intent-selected']);
+      const materialize = jest
+        .spyOn(service as any, 'materializeProcessRewardIntents')
+        .mockResolvedValue(null);
+      const createEvent = jest.spyOn(service as any, 'createProcessEvent');
+      const dto = {
+        profileId: profile.id,
+        guestId: 'guest-1',
+        eventType: 'PLAY_HOUR',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'fact-270',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-270',
+      };
+
+      await service.processEvent(user, dto, {
+        originKey: 'origin-replay',
+        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        replayRewardScope: replayScope,
+      });
+
+      expect(createEvent).not.toHaveBeenCalled();
+      expect(persistIntent).toHaveBeenCalledWith(
+        user,
+        stepRun,
+        'event-existing',
+        profile.id,
+        'origin-replay',
+        replayScope,
+      );
+      expect(materialize).toHaveBeenCalledWith(
+        user,
+        dto,
+        stepRun,
+        canonicalEvent,
+        profile.id,
+        expect.objectContaining({
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+        }),
+        'origin-replay',
+        { intentIds: ['intent-selected'] },
+      );
+    });
+
+    it('fails closed without writing when replay has no canonical event', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const stepRun = battlePassDryRun();
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(stepRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(null);
+      const createEvent = jest.spyOn(service as any, 'createProcessEvent');
+
+      await expect(
+        service.processEvent(
+          user,
+          {
+            profileId: profile.id,
+            guestId: 'guest-1',
+            eventType: 'PLAY_HOUR',
+            sourceFactKind: 'GUEST_SESSION',
+            sourceFactId: 'fact-270',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalId: 'session-270',
+          },
+          {
+            originKey: 'origin-replay',
+            evaluationMode: 'LIVE_LEDGER_FALLBACK',
+            replayRewardScope: {
+              ruleKind: 'SEASON',
+              ruleId: 'season-1',
+              battlePassStep: 2,
+              stepId: 'step-2',
+              sourceFactId: 'fact-270',
+              sourceFactUpdatedAt: now,
+              seasonUpdatedAt: now,
+              confirmationHash: 'confirmation-hash',
+            },
+          },
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(createEvent).not.toHaveBeenCalled();
+      expect(prisma.guestGameRewardIntent.upsert).not.toHaveBeenCalled();
+    });
+
+    it('persists the replay intent and sanitized audit through the same transaction client', async () => {
+      const { service, prisma } = createService();
+      const transactionClient = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: 'fact-270' }])
+          .mockResolvedValueOnce([{ id: 'season-1' }]),
+        guestGameRewardIntent: {
+          upsert: jest.fn().mockImplementation(({ create }) =>
+            Promise.resolve({
+              id: 'intent-selected',
+              ...create,
+            }),
+          ),
+        },
+        guestGameAuditEvent: {
+          create: jest.fn().mockResolvedValue({ id: 'audit-replay-1' }),
+        },
+      };
+      let transactionCommitted = false;
+      prisma.$transaction.mockImplementationOnce(async (operation) => {
+        const result = await operation(transactionClient);
+        transactionCommitted = true;
+        return result;
+      });
+
+      const result = await (service as any).persistReplayRewardIntent(
+        user,
+        battlePassDryRun(),
+        'event-existing',
+        'profile-1',
+        'origin-replay',
+        {
+          ruleKind: 'SEASON',
+          ruleId: 'season-1',
+          battlePassStep: 2,
+          stepId: 'step-2',
+          sourceFactId: 'fact-270',
+          sourceFactUpdatedAt: now,
+          seasonUpdatedAt: now,
+          confirmationHash: 'confirmation-hash',
+        },
+      );
+
+      expect(result).toEqual(['intent-selected']);
+      expect(transactionCommitted).toBe(true);
+      expect(transactionClient.guestGameRewardIntent.upsert).toHaveBeenCalled();
+      expect(transactionClient.guestGameAuditEvent.create).toHaveBeenCalledWith(
+        {
+          data: {
+            tenantId: user.tenantId,
+            profileId: 'profile-1',
+            guestId: 'guest-1',
+            storeId: null,
+            entityType: 'GUEST_GAME_REWARD_INTENT',
+            entityId: 'intent-selected',
+            action: 'RULE_REPLAY',
+            status: 'INTENT_PERSISTED',
+            reasonCode: 'BATTLE_PASS_STEP_REPLAY',
+            reasonText:
+              'Точечный replay шага Battle Pass подтверждён оператором.',
+            payload: {
+              actorUserId: user.id,
+              sourceFactId: 'fact-270',
+              ruleKind: 'SEASON',
+              ruleId: 'season-1',
+              battlePassStep: 2,
+              stepId: 'step-2',
+              confirmationHash: 'confirmation-hash',
+              eventId: 'event-existing',
+              intentIds: ['intent-selected'],
+            },
+          },
+        },
+      );
+      expect(
+        transactionClient.guestGameRewardIntent.upsert.mock
+          .invocationCallOrder[0],
+      ).toBeLessThan(
+        transactionClient.guestGameAuditEvent.create.mock
+          .invocationCallOrder[0],
+      );
+      expect(prisma.guestGameAuditEvent.create).not.toHaveBeenCalled();
+    });
+
+    it('fails closed before materialization when the atomic replay audit write fails', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const canonicalEvent = eventResult({
+        id: 'event-existing',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+      });
+      const transactionClient = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: 'fact-270' }])
+          .mockResolvedValueOnce([{ id: 'season-1' }]),
+        guestGameRewardIntent: {
+          upsert: jest.fn().mockImplementation(({ create }) =>
+            Promise.resolve({
+              id: 'intent-selected',
+              ...create,
+            }),
+          ),
+        },
+        guestGameAuditEvent: {
+          create: jest.fn().mockRejectedValue(new Error('audit unavailable')),
+        },
+      };
+      let transactionCommitted = false;
+      prisma.$transaction.mockImplementationOnce(async (operation) => {
+        const result = await operation(transactionClient);
+        transactionCommitted = true;
+        return result;
+      });
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(battlePassDryRun());
+      prisma.guestGameEvent.findFirst.mockResolvedValue(canonicalEvent);
+      const materialize = jest.spyOn(
+        service as any,
+        'materializeProcessRewardIntents',
+      );
+      const recordDecisions = jest.spyOn(service, 'recordRuleDecisions');
+
+      await expect(
+        service.processEvent(
+          user,
+          {
+            profileId: profile.id,
+            guestId: 'guest-1',
+            eventType: 'PLAY_HOUR',
+            sourceFactKind: 'GUEST_SESSION',
+            sourceFactId: 'fact-270',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalId: 'session-270',
+          },
+          {
+            originKey: 'origin-replay',
+            evaluationMode: 'LIVE_LEDGER_FALLBACK',
+            replayRewardScope: {
+              ruleKind: 'SEASON',
+              ruleId: 'season-1',
+              battlePassStep: 2,
+              stepId: 'step-2',
+              sourceFactId: 'fact-270',
+              sourceFactUpdatedAt: now,
+              seasonUpdatedAt: now,
+              confirmationHash: 'confirmation-hash',
+            },
+          },
+        ),
+      ).rejects.toThrow('audit unavailable');
+
+      expect(transactionClient.guestGameRewardIntent.upsert).toHaveBeenCalled();
+      expect(transactionClient.guestGameAuditEvent.create).toHaveBeenCalled();
+      expect(transactionCommitted).toBe(false);
+      expect(materialize).not.toHaveBeenCalled();
+      expect(recordDecisions).not.toHaveBeenCalled();
+    });
+
+    it('uses the Battle Pass step slot in reward external ids', async () => {
+      const { service } = createService();
+      const createReward = jest
+        .spyOn(service as any, 'createReward')
+        .mockResolvedValueOnce(rewardResult({ id: 'reward-step-2' }))
+        .mockResolvedValueOnce(rewardResult({ id: 'reward-step-3' }));
+      const eventExternalId = 'guest-game:GUEST_SESSION:PLAY_HOUR:session-270';
+      const eventReference = {
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: eventExternalId,
+      };
+
+      for (const step of [2, 3]) {
+        await (service as any).createProcessRewards(
+          user,
+          {
+            eventType: 'PLAY_HOUR',
+            sourceFactKind: 'GUEST_SESSION',
+            sourceFactId: 'fact-270',
+          },
+          battlePassDryRun(step),
+          'profile-1',
+          eventReference,
+          'origin-replay',
+        );
+      }
+
+      expect(createReward.mock.calls.map((call) => call[1].externalId)).toEqual(
+        [
+          `${eventExternalId}:reward:SEASON:season-1:2:BATTLE_PASS_REWARD`,
+          `${eventExternalId}:reward:SEASON:season-1:3:BATTLE_PASS_REWARD`,
+        ],
+      );
+    });
+
     it('uses the generated idempotency key and keeps Langame writes disabled', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();
@@ -9164,6 +9554,7 @@ describe('GuestGamificationService', () => {
           profileId: profile.id,
           guestId: 'guest-1',
         }),
+        undefined,
       );
       expect((service as any).createProcessEvent).toHaveBeenCalledWith(
         user,

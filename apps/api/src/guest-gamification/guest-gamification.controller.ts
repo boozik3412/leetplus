@@ -17,6 +17,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { StrictRoles } from '../auth/strict-roles.decorator';
+import { StrictRolesGuard } from '../auth/strict-roles.guard';
 import {
   GuestBonusLedgerService,
   type GuestGameBonusLedgerCancelDto,
@@ -43,6 +45,12 @@ import {
   type GuestGameRewardMaterializerQueueSnapshot,
   type GuestGameRewardMaterializerRuntimeStatus,
 } from './guest-game-reward-materializer-scheduler.service';
+import {
+  GuestGameRuleReplayService,
+  type GuestGameBattlePassReplayApplyDto,
+  type GuestGameBattlePassReplayPreviewDto,
+  type GuestGameBattlePassReplayResult,
+} from './guest-game-rule-replay.service';
 import type { GuestGameMissionWizardDto } from './guest-game-mission-contract';
 import {
   GuestGamificationService,
@@ -120,6 +128,7 @@ export class GuestGamificationController {
     private readonly bonusLedgerService: GuestBonusLedgerService,
     private readonly rewardMaterializerScheduler: GuestGameRewardMaterializerSchedulerService,
     private readonly ledgerFallbackScheduler: GuestGameLedgerFallbackSchedulerService,
+    private readonly ruleReplayService: GuestGameRuleReplayService,
   ) {}
 
   @Get('workspace')
@@ -211,6 +220,28 @@ export class GuestGamificationController {
           user.tenantId,
           user.tenantSlug,
         );
+  }
+
+  @Post('rule-replays/battle-pass/preview')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  previewBattlePassRuleReplay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameBattlePassReplayPreviewDto,
+  ): Promise<GuestGameBattlePassReplayResult> {
+    return this.ruleReplayService.previewBattlePass(user, dto);
+  }
+
+  @Post('rule-replays/battle-pass/apply')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  applyBattlePassRuleReplay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameBattlePassReplayApplyDto,
+  ): Promise<GuestGameBattlePassReplayResult> {
+    return this.ruleReplayService.applyBattlePass(user, dto);
   }
 
   @Get('log/profiles/:profileId')

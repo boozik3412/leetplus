@@ -16,6 +16,7 @@ import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.ser
 import { GuestGameQualityMonitoringSchedulerService } from './guest-game-quality-monitoring-scheduler.service';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
 import { GuestGameRewardMaterializerSchedulerService } from './guest-game-reward-materializer-scheduler.service';
+import { GuestGameRuleReplayService } from './guest-game-rule-replay.service';
 import {
   GuestGameMediaController,
   GuestGamePublicMediaController,
@@ -48,6 +49,7 @@ import { GuestGamificationService } from './guest-gamification.service';
     GuestGameMediaService,
     GuestGameQualityMonitoringSchedulerService,
     GuestGameRewardMaterializerSchedulerService,
+    GuestGameRuleReplayService,
     GuestBonusLedgerService,
     GuestBonusLedgerSchedulerService,
   ],

@@ -15,6 +15,7 @@ import {
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
+  type GuestGameRewardIntent,
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -2552,6 +2553,24 @@ type GuestGameProcessEventOptions = {
   evaluatorVersion?: string;
   originKey?: string | null;
   suppressLedgerShadow?: boolean;
+  replayRewardScope?: {
+    ruleKind: 'SEASON';
+    ruleId: string;
+    battlePassStep: number;
+    stepId: string;
+    sourceFactId: string;
+    sourceFactUpdatedAt: Date;
+    seasonUpdatedAt: Date;
+    confirmationHash: string;
+  };
+};
+
+type GuestGameDryRunOptions = {
+  rewardScope?: {
+    seasonId: string;
+    profileId: string;
+    guestId: string | null;
+  };
 };
 
 export type GuestGameCheckInDto = {
@@ -10795,6 +10814,7 @@ export class GuestGamificationService {
   async dryRun(
     user: AuthenticatedUser,
     dto: GuestGameDryRunDto,
+    options: GuestGameDryRunOptions = {},
   ): Promise<GuestGameDryRunResult> {
     const eventType = stringValue(dto.eventType) ?? 'SESSION_START';
     const lootBoxId = nullableId(dto.lootBoxId);
@@ -10824,7 +10844,7 @@ export class GuestGamificationService {
       this.getLootBoxes(user),
       this.getMissions(user),
       this.getSeasons(user),
-      this.getDryRunRewards(user),
+      this.getDryRunRewards(user, options.rewardScope),
     ]);
     const guest =
       profile?.guest ??
@@ -11645,11 +11665,24 @@ export class GuestGamificationService {
       user,
       dto,
     );
-    const dryRunResult = await this.dryRun(user, {
-      ...dto,
-      profileId: profile.id,
-      guestId: nullableId(dto.guestId) ?? profile.guest?.id ?? null,
-    });
+    const processGuestId = nullableId(dto.guestId) ?? profile.guest?.id ?? null;
+    const dryRunResult = await this.dryRun(
+      user,
+      {
+        ...dto,
+        profileId: profile.id,
+        guestId: processGuestId,
+      },
+      options.replayRewardScope
+        ? {
+            rewardScope: {
+              seasonId: options.replayRewardScope.ruleId,
+              profileId: profile.id,
+              guestId: processGuestId,
+            },
+          }
+        : undefined,
+    );
     const activeDryRun = booleanValue(dto.activeRulesOnly)
       ? activeRulesOnlyDryRun(dryRunResult)
       : dryRunResult;
@@ -11693,6 +11726,39 @@ export class GuestGamificationService {
     }
 
     if (existingEvent) {
+      const replayIntentIds = options.replayRewardScope
+        ? await this.persistReplayRewardIntent(
+            user,
+            dryRun,
+            existingEvent.id,
+            profile.id,
+            originKey,
+            options.replayRewardScope,
+          )
+        : undefined;
+      if (options.replayRewardScope && replayIntentIds) {
+        await this.recordRuleDecisions(user, dryRun, {
+          eventId: existingEvent.id,
+          originKey,
+          traceId: nullableString(dto.traceId),
+          sourceFactId: options.replayRewardScope.sourceFactId,
+          sourceFactKind: 'RULE_REPLAY',
+          evaluationMode: 'LIVE_LEDGER_FALLBACK',
+          evaluatorVersion: options.evaluatorVersion ?? 'ledger-rule-replay-v1',
+          suppressLedgerShadow: true,
+          evidence: {
+            ruleReplay: true,
+            actorUserId: user.id,
+            factId: options.replayRewardScope.sourceFactId,
+            seasonId: options.replayRewardScope.ruleId,
+            stepId: options.replayRewardScope.stepId,
+            stepSequence: options.replayRewardScope.battlePassStep,
+            confirmationHash: options.replayRewardScope.confirmationHash,
+            intentIds: replayIntentIds,
+            deliveryStatus: 'INTENT_PERSISTED',
+          },
+        });
+      }
       const existingRewards = await this.findProcessRewardsByReference(
         user,
         eventReference,
@@ -11706,6 +11772,7 @@ export class GuestGamificationService {
         profile.id,
         eventReference,
         originKey,
+        replayIntentIds ? { intentIds: replayIntentIds } : undefined,
       );
       const processDryRun = materialized?.dryRun ?? dryRun;
       const processRewards = materialized?.rewards ?? existingRewards;
@@ -11718,7 +11785,7 @@ export class GuestGamificationService {
 
       // Legacy events do not have an immutable reward intent. Re-evaluating
       // them here could advance another Battle Pass step or reroll a lootbox.
-      if (materialized) {
+      if (materialized && !options.replayRewardScope) {
         await this.recordRuleDecisions(user, processDryRun, {
           eventId: existingEvent.id,
           originKey,
@@ -11759,6 +11826,12 @@ export class GuestGamificationService {
             ? 'Snapshot-событие уже было обработано ранее; LeetPlus восстановил отсутствующие награды без повторного XP или события.'
             : 'Snapshot-событие уже было обработано ранее; повторный запуск не создал XP, события или награды.',
       };
+    }
+
+    if (options.replayRewardScope) {
+      throw new ConflictException(
+        'Точечный replay не создаёт новое физическое событие: каноническое событие исходного факта не найдено.',
+      );
     }
 
     const source: EventSource =
@@ -12583,6 +12656,179 @@ export class GuestGamificationService {
     return row ? mapReward(row) : null;
   }
 
+  private async persistReplayRewardIntent(
+    user: AuthenticatedUser,
+    dryRun: GuestGameDryRunResult,
+    eventId: string,
+    profileId: string,
+    originKey: string | null,
+    scope: NonNullable<GuestGameProcessEventOptions['replayRewardScope']>,
+  ): Promise<string[]> {
+    if (!originKey) {
+      throw new BadRequestException(
+        'Для точечного replay требуется стабильный originKey исходного факта.',
+      );
+    }
+
+    const matchingRules = dryRun.rules.filter(
+      (rule) =>
+        rule.kind === scope.ruleKind &&
+        rule.id === scope.ruleId &&
+        rule.battlePassStep === scope.battlePassStep,
+    );
+    if (matchingRules.length !== 1 || !matchingRules[0]?.eligible) {
+      throw new ConflictException(
+        'Выбранный шаг Battle Pass больше не является единственным подходящим правилом replay.',
+      );
+    }
+
+    const plans = matchingRules
+      .filter(shouldQueueProcessReward)
+      .map((rule) =>
+        processRewardIntentPlan(rule, dryRun.occurredAt, profileId),
+      );
+    if (plans.length !== 1) {
+      throw new ConflictException(
+        'Для выбранного шага Battle Pass не сформирован единственный план награды.',
+      );
+    }
+    if (plans.some((plan) => plan.rule.xpDelta !== 0)) {
+      throw new ConflictException(
+        'Точечный replay пока не поддерживает отдельное начисление XP. Используйте его только для шага Battle Pass без XP.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const [lockedFacts, lockedSeasons] = await Promise.all([
+        tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id"
+          FROM "GuestActivityFact"
+          WHERE "id" = ${scope.sourceFactId}
+            AND "tenantId" = ${user.tenantId}
+            AND "updatedAt" = ${scope.sourceFactUpdatedAt}
+            AND "lifecycleStatus" = 'ACTIVE'
+            AND "confidence" = 'EXACT'
+            AND "supersededAt" IS NULL
+          FOR SHARE
+        `),
+        tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id"
+          FROM "GuestGameSeason"
+          WHERE "id" = ${scope.ruleId}
+            AND "tenantId" = ${user.tenantId}
+            AND "updatedAt" = ${scope.seasonUpdatedAt}
+            AND "status" = 'ACTIVE'
+          FOR SHARE
+        `),
+      ]);
+      if (lockedFacts.length !== 1 || lockedSeasons.length !== 1) {
+        throw new ConflictException(
+          'Факт или сезон изменились после preview; rule-scoped intent не создан.',
+        );
+      }
+      const intentIds: string[] = [];
+      for (const plan of plans) {
+        const idempotencyKey = buildGuestGameRewardIdempotencyKey({
+          originKey,
+          ruleKind: plan.rule.kind,
+          ruleId: plan.rule.id,
+          slot: plan.slotKey,
+        });
+        if (!idempotencyKey) {
+          throw new ConflictException(
+            'Не удалось построить идемпотентность награды для точечного replay.',
+          );
+        }
+        const data = {
+          tenantId: user.tenantId,
+          eventId,
+          profileId,
+          originKey,
+          ruleType: plan.rule.kind,
+          ruleId: plan.rule.id,
+          effectKind: 'REWARD',
+          slotKey: plan.slotKey,
+          idempotencyKey,
+          claimKey: plan.claimKey,
+          status: 'PENDING',
+          plan,
+          qualifiedAt: new Date(plan.qualifiedAt),
+        } satisfies Prisma.GuestGameRewardIntentUncheckedCreateInput;
+
+        const intent: GuestGameRewardIntent = plan.claimKey
+          ? await tx.guestGameRewardIntent.upsert({
+              where: {
+                tenantId_claimKey: {
+                  tenantId: user.tenantId,
+                  claimKey: plan.claimKey,
+                },
+              },
+              create: data,
+              update: {},
+            })
+          : await tx.guestGameRewardIntent.upsert({
+              where: {
+                tenantId_idempotencyKey: {
+                  tenantId: user.tenantId,
+                  idempotencyKey,
+                },
+              },
+              create: data,
+              update: {},
+            });
+        const storedPlan = parseProcessRewardIntentPlan(intent.plan);
+        if (
+          intent.eventId !== eventId ||
+          intent.profileId !== profileId ||
+          intent.originKey !== originKey ||
+          intent.idempotencyKey !== idempotencyKey ||
+          intent.claimKey !== plan.claimKey ||
+          !['PENDING', 'PROCESSING', 'FAILED', 'APPLIED'].includes(
+            intent.status,
+          ) ||
+          !storedPlan ||
+          storedPlan.rule.kind !== scope.ruleKind ||
+          storedPlan.rule.id !== scope.ruleId ||
+          storedPlan.rule.battlePassStep !== scope.battlePassStep ||
+          storedPlan.slotKey !== plan.slotKey
+        ) {
+          throw new ConflictException(
+            'Rule-scoped intent был конкурентно создан с другим событием, профилем или планом; replay остановлен без новой награды.',
+          );
+        }
+        intentIds.push(intent.id);
+      }
+
+      await tx.guestGameAuditEvent.create({
+        data: {
+          tenantId: user.tenantId,
+          profileId,
+          guestId: dryRun.guest?.id ?? null,
+          storeId: dryRun.store?.id ?? null,
+          entityType: 'GUEST_GAME_REWARD_INTENT',
+          entityId: intentIds[0] ?? null,
+          action: 'RULE_REPLAY',
+          status: 'INTENT_PERSISTED',
+          reasonCode: 'BATTLE_PASS_STEP_REPLAY',
+          reasonText:
+            'Точечный replay шага Battle Pass подтверждён оператором.',
+          payload: {
+            actorUserId: user.id,
+            sourceFactId: scope.sourceFactId,
+            ruleKind: scope.ruleKind,
+            ruleId: scope.ruleId,
+            battlePassStep: scope.battlePassStep,
+            stepId: scope.stepId,
+            confirmationHash: scope.confirmationHash,
+            eventId,
+            intentIds,
+          },
+        },
+      });
+      return intentIds;
+    });
+  }
+
   private async materializeProcessRewardIntents(
     user: AuthenticatedUser,
     dto: GuestGameProcessEventDto,
@@ -12606,6 +12852,7 @@ export class GuestGamificationService {
       claimLeaseMs?: number;
       maxAttempts?: number;
       throwOnFailure?: boolean;
+      intentIds?: string[];
     } = {},
   ): Promise<ProcessRewardIntentMaterialization | null> {
     if (!this.rewardMaterializerClaimsAllowed()) {
@@ -12621,10 +12868,15 @@ export class GuestGamificationService {
     const maxAttempts = boundedEffectInteger(options.maxAttempts, 5, 1, 20);
     const stats = emptyEffectMaterializeResult();
     const now = new Date();
+    const intentIds = Array.from(
+      new Set((options.intentIds ?? []).map(nullableId).filter(Boolean)),
+    ) as string[];
+    const intentWhere = intentIds.length ? { id: { in: intentIds } } : {};
     const exhausted = await this.prisma.guestGameRewardIntent.updateMany({
       where: {
         tenantId: user.tenantId,
         eventId: event.id,
+        ...intentWhere,
         status: 'PROCESSING',
         attempts: { gte: maxAttempts },
         OR: [{ claimExpiresAt: { lte: now } }, { claimExpiresAt: null }],
@@ -12638,7 +12890,7 @@ export class GuestGamificationService {
     });
     stats.deadLettered += exhausted.count;
     const intents = await this.prisma.guestGameRewardIntent.findMany({
-      where: { tenantId: user.tenantId, eventId: event.id },
+      where: { tenantId: user.tenantId, eventId: event.id, ...intentWhere },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     if (!intents.length) return null;
@@ -12762,6 +13014,7 @@ export class GuestGamificationService {
       limit,
       claimLeaseMs,
       maxAttempts,
+      intentIds,
     );
     stats.claimed = claims.length;
     const actionable = claims
@@ -12926,7 +13179,11 @@ export class GuestGamificationService {
     limit: number,
     claimLeaseMs: number,
     maxAttempts: number,
+    intentIds: string[] = [],
   ): Promise<ClaimedRewardIntentRow[]> {
+    const intentFilter = intentIds.length
+      ? Prisma.sql`AND intent."id" IN (${Prisma.join(intentIds)})`
+      : Prisma.empty;
     const claimed = await this.prisma.$queryRaw<ClaimedRewardIntentRow[]>(
       Prisma.sql`
         WITH candidates AS (
@@ -12934,6 +13191,7 @@ export class GuestGamificationService {
           FROM "GuestGameRewardIntent" AS intent
           WHERE intent."tenantId" = ${tenantId}
             AND intent."eventId" = ${eventId}
+            ${intentFilter}
             AND intent."attempts" < ${maxAttempts}
             AND (
               (
@@ -12973,6 +13231,7 @@ export class GuestGamificationService {
       where: {
         tenantId,
         eventId,
+        ...(intentIds.length ? { id: { in: intentIds } } : {}),
         attempts: { lt: maxAttempts },
         OR: [
           {
@@ -13072,8 +13331,12 @@ export class GuestGamificationService {
 
     for (const rule of eligibleRules) {
       const link = rewardRuleLink(rule);
+      const externalRewardSlot =
+        rule.kind === 'SEASON'
+          ? `:${rule.battlePassStep ?? 'step'}:${rule.rewardType ?? 'reward'}`
+          : '';
       const externalId = eventReference
-        ? `${eventReference.externalId}:reward:${rule.kind}:${rule.id}`
+        ? `${eventReference.externalId}:reward:${rule.kind}:${rule.id}${externalRewardSlot}`
         : null;
       const idempotencyKey =
         rewardIdempotencyKeys.get(processRewardRuleKey(rule)) ??
@@ -13300,11 +13563,22 @@ export class GuestGamificationService {
 
   private async getDryRunRewards(
     user: AuthenticatedUser,
+    scope: {
+      seasonId?: string | null;
+      profileId?: string | null;
+      guestId?: string | null;
+    } = {},
   ): Promise<GuestGameReward[]> {
+    const owners: Prisma.GuestGameRewardWhereInput[] = [
+      ...(scope.profileId ? [{ profileId: scope.profileId }] : []),
+      ...(scope.guestId ? [{ guestId: scope.guestId }] : []),
+    ];
     const rows = await this.prisma.guestGameReward.findMany({
       where: {
         tenantId: user.tenantId,
         status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+        ...(scope.seasonId ? { seasonId: scope.seasonId } : {}),
+        ...(scope.seasonId && owners.length ? { OR: owners } : {}),
       },
       include: rewardInclude,
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],

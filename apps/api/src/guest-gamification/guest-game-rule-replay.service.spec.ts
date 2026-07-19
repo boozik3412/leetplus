@@ -251,6 +251,24 @@ describe('GuestGameRuleReplayService', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
+  it('keeps the canonical sequence when surrounding legacy steps have no stable id', async () => {
+    const { service, prisma } = createService();
+    const currentSeason = season();
+    prisma.guestGameSeason.findFirst.mockResolvedValue({
+      ...currentSeason,
+      levels: currentSeason.levels.map((item, index) =>
+        index === 1 ? item : { ...item, id: undefined },
+      ),
+    });
+
+    await expect(
+      service.previewBattlePass(user, target),
+    ).resolves.toMatchObject({
+      outcome: 'READY',
+      target: { stepId: 'step-2', stepSequence: 2 },
+    });
+  });
+
   it('marks preview unsupported when the canonical event is absent', async () => {
     const { service } = createService({ event: false });
 

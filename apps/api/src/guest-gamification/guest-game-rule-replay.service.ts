@@ -721,7 +721,7 @@ function canonicalSteps(value: Prisma.JsonValue) {
       const raw = jsonRecord(item);
       const level = numberValue(raw.level, originalIndex + 1);
       const id = normalizedString(raw.id);
-      if (level <= 0 || !id) return null;
+      if (level <= 0) return null;
       return {
         id,
         level,
@@ -732,7 +732,8 @@ function canonicalSteps(value: Prisma.JsonValue) {
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .sort((left, right) => left.level - right.level)
-    .map((item, index) => ({ ...item, sequence: index + 1 }));
+    .map((item, index) => ({ ...item, sequence: index + 1 }))
+    .filter((item): item is typeof item & { id: string } => Boolean(item.id));
 }
 
 function replayRuleFromIntent(

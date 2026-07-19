@@ -9479,14 +9479,38 @@ describe('GuestGamificationService', () => {
         externalDomain: 'club-1',
         externalId: 'session-270',
       };
+      const ruleExternalDomains = new Map<string, readonly string[]>([
+        ['season-1', ['club-1']],
+      ]);
+      const ruleDomainTimeZones = new Map([
+        ['season-1', new Map([['club-1', 'Asia/Yekaterinburg']])],
+      ]);
 
       await service.processEvent(user, dto, {
         originKey: 'origin-replay',
         evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        ruleExternalDomains,
+        ruleDomainTimeZones,
         replayRewardScope: replayScope,
       });
 
       expect(createEvent).not.toHaveBeenCalled();
+      expect(service.dryRun).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          profileId: profile.id,
+          guestId: 'guest-1',
+        }),
+        {
+          ruleExternalDomains,
+          ruleDomainTimeZones,
+          rewardScope: {
+            seasonId: 'season-1',
+            profileId: profile.id,
+            guestId: 'guest-1',
+          },
+        },
+      );
       expect(persistIntent).toHaveBeenCalledWith(
         user,
         stepRun,

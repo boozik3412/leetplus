@@ -186,6 +186,8 @@ type PreparedReplay = {
   };
   rule: GuestGameDryRunRule;
   processDto: GuestGameProcessEventDto;
+  ruleDomainTimeZones: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
+  ruleExternalDomains: ReadonlyMap<string, readonly string[]>;
   originKey: string;
   eventId: string | null;
   originReceiptStatus: string | null;
@@ -624,6 +626,8 @@ export class GuestGameRuleReplayService {
         evaluatorVersion: 'ledger-rule-replay-v1',
         originKey: prepared.originKey,
         suppressLedgerShadow: true,
+        ruleDomainTimeZones: prepared.ruleDomainTimeZones,
+        ruleExternalDomains: prepared.ruleExternalDomains,
         replayRewardScope: {
           ruleKind: 'SEASON',
           ruleId: prepared.season.id,
@@ -1433,6 +1437,7 @@ export class GuestGameRuleReplayService {
       stepId: step.id,
       stepSequence: step.sequence,
       slotKey,
+      routing: replaySeasonRuleRoutingSnapshot(seasonRow.id, ruleRouting),
       eligible: rule.eligible,
       rewardType: rule.rewardType,
       selectedRewardLabel: rule.selectedRewardLabel,
@@ -1466,6 +1471,8 @@ export class GuestGameRuleReplayService {
       step: { id: step.id, sequence: step.sequence, title: step.title },
       rule,
       processDto,
+      ruleDomainTimeZones: ruleRouting.ruleDomainTimeZones,
+      ruleExternalDomains: ruleRouting.ruleExternalDomains,
       originKey,
       eventId,
       originReceiptStatus: originReceipt?.status ?? null,
@@ -1723,6 +1730,27 @@ function replaySeasonRuleRouting(
   return {
     ruleExternalDomains: new Map([[seasonId, domains]]),
     ruleDomainTimeZones: new Map([[seasonId, domainTimeZones]]),
+  };
+}
+
+function replaySeasonRuleRoutingSnapshot(
+  seasonId: string,
+  routing: {
+    ruleExternalDomains: ReadonlyMap<string, readonly string[]>;
+    ruleDomainTimeZones: ReadonlyMap<
+      string,
+      ReadonlyMap<string, string | null>
+    >;
+  },
+) {
+  const domains = [...(routing.ruleExternalDomains.get(seasonId) ?? [])].sort();
+  const domainTimeZones = routing.ruleDomainTimeZones.get(seasonId);
+  return {
+    domains,
+    domainTimeZones: domains.map((domain) => ({
+      domain,
+      timeZone: domainTimeZones?.get(domain) ?? null,
+    })),
   };
 }
 

@@ -515,6 +515,22 @@ describe('GuestGameRuleReplayService', () => {
     ).toBeNull();
   });
 
+  it('binds the replay confirmation hash to the selected season routing', async () => {
+    const { service, prisma } = createService();
+    const first = await service.previewBattlePass(user, target);
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Europe/Moscow',
+      },
+    ]);
+
+    const second = await service.previewBattlePass(user, target);
+
+    expect(second.confirmationHash).not.toBe(first.confirmationHash);
+  });
+
   it('keeps the canonical sequence when surrounding legacy steps have no stable id', async () => {
     const { service, prisma } = createService();
     const currentSeason = season();
@@ -580,6 +596,22 @@ describe('GuestGameRuleReplayService', () => {
 
   it('applies only the selected season step using the existing event', async () => {
     const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      storeId: null,
+    });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-unselected',
+        externalDomain: 'other.langamepro.ru',
+        timeZone: 'Europe/Moscow',
+      },
+    ]);
     const preview = await service.previewBattlePass(user, target);
     prisma.guestGameRewardIntent.findUnique
       .mockResolvedValueOnce(null)
@@ -621,6 +653,25 @@ describe('GuestGameRuleReplayService', () => {
         stepId: 'step-2',
       },
     });
+    const replayOptions = processCall[2] as {
+      ruleExternalDomains: Map<string, string[]>;
+      ruleDomainTimeZones: Map<string, Map<string, string | null>>;
+    };
+    const applyDryRunOptions = gamification.dryRun.mock.calls[1][2];
+    expect(replayOptions.ruleExternalDomains).toBe(
+      applyDryRunOptions.ruleExternalDomains,
+    );
+    expect(replayOptions.ruleDomainTimeZones).toBe(
+      applyDryRunOptions.ruleDomainTimeZones,
+    );
+    expect(replayOptions.ruleExternalDomains.get('season-1')).toEqual([
+      '46.langamepro.ru',
+    ]);
+    expect(
+      replayOptions.ruleDomainTimeZones
+        .get('season-1')
+        ?.get('46.langamepro.ru'),
+    ).toBe('Asia/Yekaterinburg');
   });
 
   it('returns an idempotent result for an existing compatible intent', async () => {

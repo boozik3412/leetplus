@@ -2,6 +2,13 @@ import { IntegrationProvider, TenantLifecycleStatus } from '@prisma/client';
 import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
 
 const now = new Date('2026-07-18T12:00:00.000Z');
+const liveCanaryScope = {
+  tenantId: 'tenant-1',
+  profileId: 'profile-1',
+  seasonId: 'season-1',
+  battlePassStep: 2,
+  liveNotBefore: '2026-07-18T11:55:00.000Z',
+};
 
 function tenant() {
   return {
@@ -81,6 +88,27 @@ function dryRun() {
         reasons: [],
         blockers: [],
       },
+      {
+        id: 'season-1',
+        kind: 'SEASON',
+        name: 'Safe Battle Pass step',
+        status: 'ACTIVE',
+        triggerKind: 'PLAY_HOUR',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        battlePassStep: 2,
+        manualApprovalRequired: false,
+        eligible: true,
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: 50,
+        rewardLabel: '50 bonuses',
+        selectedRewardLabel: null,
+        selectedReward: null,
+        xpDelta: 0,
+        budgetAmount: null,
+        progress: null,
+        reasons: [],
+        blockers: [],
+      },
     ],
     note: '',
   };
@@ -144,7 +172,26 @@ function createService(options?: {
       ]),
     },
     guestGameSeason: {
-      findMany: jest.fn().mockResolvedValue([]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'season-1',
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+          periodFrom: null,
+          storeIds: ['store-1'],
+          levels: [
+            {
+              sequence: 1,
+              activationRules: { evaluationPolicy: 'LIVE_PRIMARY' },
+            },
+            {
+              sequence: 2,
+              activationRules: {
+                evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+              },
+            },
+          ],
+        },
+      ]),
     },
     store: {
       findMany: jest.fn().mockResolvedValue([
@@ -243,6 +290,55 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['profile', { profileId: null }],
+    ['season', { seasonId: null }],
+    ['Battle Pass step', { battlePassStep: null }],
+    ['LIVE cutoff', { liveNotBefore: null }],
+  ])(
+    'fails closed when LIVE has no exact %s scope',
+    async (_label, missing) => {
+      const { service, prisma, gamification } = createService();
+
+      await expect(
+        service.runScheduled({
+          mode: 'LIVE',
+          ...liveCanaryScope,
+          ...missing,
+        }),
+      ).resolves.toMatchObject({
+        mode: 'LIVE',
+        checkedTenants: 0,
+        processedTenants: 0,
+        checkedFacts: 0,
+        createdEvents: 0,
+        createdRewards: 0,
+      });
+      expect(prisma.tenant.findMany).not.toHaveBeenCalled();
+      expect(gamification.dryRun).not.toHaveBeenCalled();
+      expect(gamification.processEvent).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails closed when LIVE is configured for all tenants', async () => {
+    const { service, prisma, gamification } = createService();
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        allowAllTenants: true,
+      }),
+    ).resolves.toMatchObject({
+      checkedTenants: 0,
+      checkedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(prisma.tenant.findMany).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
   it('records SHADOW evidence without creating an event or reward', async () => {
     const { service, prisma, gamification } = createService();
 
@@ -261,11 +357,11 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(gamification.recordRuleDecisions).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({
-        rules: [
+        rules: expect.arrayContaining([
           expect.objectContaining({
             evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
           }),
-        ],
+        ]),
       }),
       expect.any(Object),
     );
@@ -502,7 +598,36 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(JSON.stringify(query?.where)).toContain(
       '"sessionExternalId":{"not":null}',
     );
+    expect(JSON.stringify(query?.where)).toContain(
+      '"durationMinutes":{"gt":0}',
+    );
     expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('prefers the stable session id over a parser-version row id', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      {
+        ...fact(new Date(now.getTime() - 60_000)),
+        sourceExternalId: 'parser-row-v7',
+        sessionExternalId: 'stable-session-42',
+      },
+    ]);
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({ shadowFacts: 1 });
+
+    expect(gamification.dryRun).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        externalId: 'stable-session-42',
+      }),
+      expect.any(Object),
+    );
   });
 
   it('does not substitute a session id for a purchase sale id', async () => {
@@ -558,6 +683,105 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
+  it('applies the LIVE cutoff, exact profile and positive-duration query guards', async () => {
+    const { service, prisma } = createService();
+
+    await service.runScheduled({
+      mode: 'LIVE',
+      ...liveCanaryScope,
+    });
+
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          factType: {
+            in: [
+              'HOURLY_PLAY_TIME_ACCUMULATED',
+              'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+            ],
+          },
+          happenedAt: {
+            gte: new Date('2026-07-18T11:55:00.000Z'),
+          },
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([
+                expect.objectContaining({
+                  durationMinutes: { gt: 0 },
+                }),
+              ]),
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it('never selects purchase facts in LIVE canary mode', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([]);
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        factTypes: ['PRODUCT_PURCHASED'],
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 0,
+      fallbackFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ factType: { in: [] } }),
+      }),
+    );
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a mission', { kind: 'MISSION' }],
+    ['another season', { id: 'season-2' }],
+    ['another step', { battlePassStep: 3 }],
+    ['a non-bonus reward', { rewardType: 'LOOT_BOX' }],
+    ['a zero bonus', { rewardAmount: 0 }],
+    ['an XP side effect', { xpDelta: 10 }],
+    ['manual approval', { manualApprovalRequired: true }],
+  ])(
+    'rejects %s from the LIVE Battle Pass reward gate',
+    async (_label, patch) => {
+      const { service, prisma, gamification } = createService();
+      const unsafeDryRun = dryRun();
+      unsafeDryRun.rules = [
+        {
+          ...unsafeDryRun.rules[1],
+          ...patch,
+        },
+      ];
+      gamification.dryRun.mockResolvedValueOnce(unsafeDryRun);
+
+      await expect(
+        service.runScheduled({
+          mode: 'LIVE',
+          ...liveCanaryScope,
+        }),
+      ).resolves.toMatchObject({
+        checkedFacts: 0,
+        fallbackFacts: 0,
+        createdEvents: 0,
+        createdRewards: 0,
+      });
+      expect(prisma.guestGameOriginReceipt.upsert).not.toHaveBeenCalled();
+      expect(gamification.processEvent).not.toHaveBeenCalled();
+    },
+  );
+
   it('waits for LIVE while the grace period is still open', async () => {
     const { service, prisma, gamification } = createService({
       receiptGraceUntil: new Date(now.getTime() + 10_000),
@@ -566,6 +790,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -601,6 +826,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -662,6 +888,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -682,6 +909,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -734,6 +962,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -746,6 +975,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -772,6 +1002,10 @@ describe('GuestGameLedgerFallbackService', () => {
       evaluationMode: 'LIVE_LEDGER_FALLBACK',
       suppressLedgerShadow: true,
     });
+    expect(processCalls[0]?.[2].allowedRuleIds).toEqual(new Set(['season-1']));
+    expect(processCalls[0]?.[2].allowedBattlePassSteps).toEqual(
+      new Map([['season-1', 2]]),
+    );
     expect(processCalls[0]?.[2].originKey).toMatch(/^ggo:v1:[a-f0-9]{64}$/);
     const receiptUpdates = prisma.guestGameOriginReceipt.updateMany.mock
       .calls as unknown as Array<
@@ -793,6 +1027,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -828,6 +1063,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         limit: 1,
         graceMs: 15_000,
         tenantId: 'tenant-1',
@@ -886,6 +1122,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         limit: 1,
         graceMs: 15_000,
         tenantId: 'tenant-1',
@@ -941,6 +1178,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         limit: 1,
         graceMs: 15_000,
         tenantId: 'tenant-1',
@@ -990,6 +1228,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -1026,6 +1265,7 @@ describe('GuestGameLedgerFallbackService', () => {
       await expect(
         service.runScheduled({
           mode: 'LIVE',
+          ...liveCanaryScope,
           graceMs: 15_000,
           tenantId: 'tenant-1',
         }),
@@ -1057,6 +1297,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -1082,6 +1323,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         graceMs: 15_000,
         tenantId: 'tenant-1',
       }),
@@ -1141,6 +1383,7 @@ describe('GuestGameLedgerFallbackService', () => {
     await expect(
       service.runScheduled({
         mode: 'LIVE',
+        ...liveCanaryScope,
         limit: 1,
         graceMs: 15_000,
         tenantId: 'tenant-1',

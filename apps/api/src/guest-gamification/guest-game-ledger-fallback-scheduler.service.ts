@@ -35,11 +35,15 @@ export type GuestGameLedgerFallbackRuntimeStatus = {
   backgroundReady: boolean;
   running: boolean;
   killSwitchEnabled: boolean;
+  liveCanaryReady: boolean;
+  liveNotBefore: string | null;
   factTypes: AllowedFactType[];
   scope: {
     tenantId: string | null;
     tenantSlug: string | null;
     profileId: string | null;
+    seasonId: string | null;
+    battlePassStep: number | null;
     allowAllTenants: boolean;
     configured: boolean;
   };
@@ -92,12 +96,13 @@ export class GuestGameLedgerFallbackSchedulerService
 
   onModuleInit() {
     const mode = this.mode();
-    const factTypes = this.factTypes();
+    const factTypes = this.factTypes(mode);
     if (
       mode === 'OFF' ||
       this.killSwitchEnabled() ||
       factTypes.length === 0 ||
-      !this.scopeConfigured()
+      !this.scopeConfigured(mode) ||
+      !this.liveCutoffConfigured(mode)
     ) {
       this.logger.log('Guest game ledger fallback scheduler is disabled.');
       return;
@@ -135,12 +140,14 @@ export class GuestGameLedgerFallbackSchedulerService
       );
       return null;
     }
-    const factTypes = this.factTypes();
+    const mode = this.mode();
+    const factTypes = this.factTypes(mode);
     if (
-      this.mode() === 'OFF' ||
+      mode === 'OFF' ||
       this.killSwitchEnabled() ||
       factTypes.length === 0 ||
-      !this.scopeConfigured()
+      !this.scopeConfigured(mode) ||
+      !this.liveCutoffConfigured(mode)
     ) {
       return null;
     }
@@ -190,7 +197,7 @@ export class GuestGameLedgerFallbackSchedulerService
 
   getRuntimeStatus(): GuestGameLedgerFallbackRuntimeStatus {
     const mode = this.mode();
-    const factTypes = this.factTypes();
+    const factTypes = this.factTypes(mode);
     const tenantId = this.optionalString(
       'GUEST_GAME_LEDGER_FALLBACK_TENANT_ID',
     );
@@ -200,9 +207,24 @@ export class GuestGameLedgerFallbackSchedulerService
     const profileId = this.optionalString(
       'GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID',
     );
+    const seasonId = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_SEASON_ID',
+    );
+    const battlePassStep = this.optionalPositiveInteger(
+      'GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP',
+    );
+    const liveNotBefore = this.liveNotBefore();
     const allowAllTenants = this.allowAllTenants();
-    const scopeConfigured = Boolean(tenantId || tenantSlug || allowAllTenants);
+    const scopeConfigured = this.scopeConfigured(mode);
     const killSwitchEnabled = this.killSwitchEnabled();
+    const liveCanaryReady =
+      mode === 'LIVE' &&
+      Boolean(tenantId || tenantSlug) &&
+      Boolean(profileId) &&
+      Boolean(seasonId) &&
+      battlePassStep !== null &&
+      Boolean(liveNotBefore) &&
+      !allowAllTenants;
 
     return {
       mode,
@@ -211,14 +233,19 @@ export class GuestGameLedgerFallbackSchedulerService
         mode !== 'OFF' &&
         !killSwitchEnabled &&
         factTypes.length > 0 &&
-        scopeConfigured,
+        scopeConfigured &&
+        this.liveCutoffConfigured(mode),
       running: this.running,
       killSwitchEnabled,
+      liveCanaryReady,
+      liveNotBefore: liveNotBefore?.toISOString() ?? null,
       factTypes,
       scope: {
         tenantId,
         tenantSlug,
         profileId,
+        seasonId,
+        battlePassStep,
         allowAllTenants,
         configured: scopeConfigured,
       },
@@ -268,8 +295,9 @@ export class GuestGameLedgerFallbackSchedulerService
   }
 
   private runDto(factTypes: AllowedFactType[]): GuestGameLedgerFallbackRunDto {
+    const mode = this.mode();
     const dto: GuestGameLedgerFallbackRunDto = {
-      mode: this.mode(),
+      mode,
       factTypes,
       limit: this.batchSize(),
       graceMs: this.graceMs(),
@@ -284,18 +312,41 @@ export class GuestGameLedgerFallbackSchedulerService
     const profileId = this.optionalString(
       'GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID',
     );
+    const seasonId = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_SEASON_ID',
+    );
+    const battlePassStep = this.optionalPositiveInteger(
+      'GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP',
+    );
+    const liveNotBefore = this.liveNotBefore();
     if (tenantId) dto.tenantId = tenantId;
     if (tenantSlug) dto.tenantSlug = tenantSlug;
     if (profileId) dto.profileId = profileId;
+    if (seasonId) dto.seasonId = seasonId;
+    if (battlePassStep !== null) dto.battlePassStep = battlePassStep;
+    if (mode === 'LIVE' && liveNotBefore) {
+      dto.liveNotBefore = liveNotBefore.toISOString();
+    }
     if (this.allowAllTenants()) dto.allowAllTenants = true;
     return dto;
   }
 
-  private scopeConfigured() {
-    return Boolean(
+  private scopeConfigured(mode: GuestGameLedgerFallbackMode) {
+    const tenantConfigured = Boolean(
       this.optionalString('GUEST_GAME_LEDGER_FALLBACK_TENANT_ID') ||
-      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG') ||
-      this.allowAllTenants(),
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG'),
+    );
+    if (mode !== 'LIVE') {
+      return tenantConfigured || this.allowAllTenants();
+    }
+    return Boolean(
+      tenantConfigured &&
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID') &&
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_SEASON_ID') &&
+      this.optionalPositiveInteger(
+        'GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP',
+      ) !== null &&
+      !this.allowAllTenants(),
     );
   }
 
@@ -310,7 +361,7 @@ export class GuestGameLedgerFallbackSchedulerService
     return value === 'LIVE' || value === 'SHADOW' ? value : 'OFF';
   }
 
-  private factTypes(): AllowedFactType[] {
+  private factTypes(mode: GuestGameLedgerFallbackMode): AllowedFactType[] {
     const configured =
       this.optionalString('GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES') ??
       DEFAULT_FACT_TYPES.join(',');
@@ -320,7 +371,25 @@ export class GuestGameLedgerFallbackSchedulerService
         .map((item) => item.trim().toUpperCase())
         .filter(Boolean),
     );
-    return ALLOWED_FACT_TYPES.filter((factType) => requested.has(factType));
+    const allowed = ALLOWED_FACT_TYPES.filter((factType) =>
+      requested.has(factType),
+    );
+    return mode === 'LIVE'
+      ? allowed.filter((factType) => factType !== 'PRODUCT_PURCHASED')
+      : allowed;
+  }
+
+  private liveCutoffConfigured(mode: GuestGameLedgerFallbackMode) {
+    return mode !== 'LIVE' || this.liveNotBefore() !== null;
+  }
+
+  private liveNotBefore() {
+    const value = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE',
+    );
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
   }
 
   private killSwitchEnabled() {
@@ -382,6 +451,13 @@ export class GuestGameLedgerFallbackSchedulerService
     return Number.isFinite(parsed)
       ? Math.max(min, Math.min(max, Math.trunc(parsed)))
       : fallback;
+  }
+
+  private optionalPositiveInteger(key: string) {
+    const value = this.optionalString(key);
+    if (!value) return null;
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   }
 }
 

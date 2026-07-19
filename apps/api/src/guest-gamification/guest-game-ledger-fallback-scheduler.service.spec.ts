@@ -40,6 +40,15 @@ function createScheduler(values: Record<string, string> = {}) {
   };
 }
 
+const liveCanaryConfig = {
+  GUEST_GAME_LEDGER_FALLBACK_MODE: 'LIVE',
+  GUEST_GAME_LEDGER_FALLBACK_TENANT_ID: 'tenant-1',
+  GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID: 'profile-1',
+  GUEST_GAME_LEDGER_FALLBACK_SEASON_ID: 'season-1',
+  GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP: '2',
+  GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE: '2026-07-18T11:55:00.000Z',
+};
+
 describe('GuestGameLedgerFallbackSchedulerService', () => {
   it('stays OFF by default', async () => {
     const { scheduler, fallbackService } = createScheduler();
@@ -56,6 +65,8 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
         tenantId: null,
         tenantSlug: null,
         profileId: null,
+        seasonId: null,
+        battlePassStep: null,
         allowAllTenants: false,
         configured: false,
       },
@@ -134,7 +145,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
 
   it('honors the emergency kill switch in LIVE mode', async () => {
     const { scheduler, fallbackService } = createScheduler({
-      GUEST_GAME_LEDGER_FALLBACK_MODE: 'LIVE',
+      ...liveCanaryConfig,
       GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH: 'true',
     });
 
@@ -144,12 +155,99 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
 
   it('fails closed when no configured fact type is allowed', async () => {
     const { scheduler, fallbackService } = createScheduler({
-      GUEST_GAME_LEDGER_FALLBACK_MODE: 'LIVE',
+      ...liveCanaryConfig,
       GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES: 'BALANCE_TOPUP,UNKNOWN',
     });
 
     await expect(scheduler.runOnce()).resolves.toBeNull();
     expect(fallbackService.runScheduled).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['tenant', 'GUEST_GAME_LEDGER_FALLBACK_TENANT_ID'],
+    ['profile', 'GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID'],
+    ['season', 'GUEST_GAME_LEDGER_FALLBACK_SEASON_ID'],
+    ['step', 'GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP'],
+    ['cutoff', 'GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE'],
+  ])('fails closed when LIVE has no exact %s scope', async (_label, key) => {
+    const values = { ...liveCanaryConfig } as Record<string, string>;
+    delete values[key];
+    const { scheduler, fallbackService } = createScheduler(values);
+
+    await expect(scheduler.runOnce()).resolves.toBeNull();
+    expect(fallbackService.runScheduled).not.toHaveBeenCalled();
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      mode: 'LIVE',
+      backgroundReady: false,
+      liveCanaryReady: false,
+    });
+  });
+
+  it('fails closed when LIVE cutoff is invalid', async () => {
+    const { scheduler, fallbackService } = createScheduler({
+      ...liveCanaryConfig,
+      GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE: 'not-a-date',
+    });
+
+    await expect(scheduler.runOnce()).resolves.toBeNull();
+    expect(fallbackService.runScheduled).not.toHaveBeenCalled();
+  });
+
+  it('rejects all-tenant scope and purchases in LIVE canary mode', async () => {
+    const { scheduler, fallbackService } = createScheduler({
+      ...liveCanaryConfig,
+      GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS: 'true',
+      GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES:
+        'PRODUCT_PURCHASED,HOURLY_PLAY_TIME_ACCUMULATED',
+    });
+
+    await expect(scheduler.runOnce()).resolves.toBeNull();
+    expect(fallbackService.runScheduled).not.toHaveBeenCalled();
+  });
+
+  it('passes the exact Battle Pass scope and filters purchases from LIVE', async () => {
+    const { scheduler, fallbackService } = createScheduler({
+      ...liveCanaryConfig,
+      GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES:
+        'PRODUCT_PURCHASED,HOURLY_PLAY_TIME_ACCUMULATED,PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    });
+
+    await expect(scheduler.runOnce()).resolves.toMatchObject({
+      mode: 'SHADOW',
+    });
+    expect(fallbackService.runScheduled).toHaveBeenCalledWith({
+      mode: 'LIVE',
+      factTypes: [
+        'HOURLY_PLAY_TIME_ACCUMULATED',
+        'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      ],
+      limit: 30,
+      graceMs: 60_000,
+      claimLeaseMs: 120_000,
+      tenantId: 'tenant-1',
+      profileId: 'profile-1',
+      seasonId: 'season-1',
+      battlePassStep: 2,
+      liveNotBefore: '2026-07-18T11:55:00.000Z',
+    });
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      mode: 'LIVE',
+      backgroundReady: true,
+      liveCanaryReady: true,
+      liveNotBefore: '2026-07-18T11:55:00.000Z',
+      factTypes: [
+        'HOURLY_PLAY_TIME_ACCUMULATED',
+        'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      ],
+      scope: {
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        seasonId: 'season-1',
+        battlePassStep: 2,
+        allowAllTenants: false,
+        configured: true,
+      },
+    });
   });
 
   it('does not overlap scheduler ticks', async () => {
@@ -186,9 +284,8 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
 
   it('exposes a fail-closed scoped runtime status', () => {
     const { scheduler } = createScheduler({
-      GUEST_GAME_LEDGER_FALLBACK_MODE: 'LIVE',
+      ...liveCanaryConfig,
       GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH: 'true',
-      GUEST_GAME_LEDGER_FALLBACK_TENANT_ID: 'tenant-1',
       GUEST_GAME_LEDGER_FALLBACK_BATCH_SIZE: '5',
     });
 
@@ -197,10 +294,15 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
       enabled: true,
       backgroundReady: false,
       killSwitchEnabled: true,
+      liveCanaryReady: true,
+      liveNotBefore: '2026-07-18T11:55:00.000Z',
       batchSize: 5,
       scope: {
         tenantId: 'tenant-1',
         tenantSlug: null,
+        profileId: 'profile-1',
+        seasonId: 'season-1',
+        battlePassStep: 2,
         allowAllTenants: false,
         configured: true,
       },

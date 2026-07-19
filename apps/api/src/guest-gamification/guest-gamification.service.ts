@@ -2549,6 +2549,7 @@ type ProcessRewardIntentMaterialization = {
 
 type GuestGameProcessEventOptions = {
   allowedRuleIds?: Iterable<string>;
+  allowedBattlePassSteps?: ReadonlyMap<string, number>;
   evaluationMode?: GuestGameEvaluationMode;
   evaluatorVersion?: string;
   ruleDomainTimeZones?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
@@ -11713,9 +11714,15 @@ export class GuestGamificationService {
       activeDryRun,
       evaluationMode,
     );
-    const decisionDryRun = options.allowedRuleIds
+    const ruleFilteredDryRun = options.allowedRuleIds
       ? filterDryRunRules(routedDryRun, new Set(options.allowedRuleIds))
       : routedDryRun;
+    const decisionDryRun = options.allowedBattlePassSteps
+      ? filterDryRunBattlePassSteps(
+          ruleFilteredDryRun,
+          options.allowedBattlePassSteps,
+        )
+      : ruleFilteredDryRun;
     const dryRun = booleanValue(dto.suppressLootBoxRewards)
       ? suppressLootBoxRewardsDryRun(decisionDryRun)
       : decisionDryRun;
@@ -22473,6 +22480,21 @@ function filterDryRunRules(
       projectedXpDelta: sum(eligibleRules.map((rule) => rule.xpDelta)),
     },
   };
+}
+
+function filterDryRunBattlePassSteps(
+  dryRun: GuestGameDryRunResult,
+  allowedSteps: ReadonlyMap<string, number>,
+): GuestGameDryRunResult {
+  return dryRunWithRules(
+    dryRun,
+    dryRun.rules.filter(
+      (rule) =>
+        rule.kind !== 'SEASON' ||
+        (rule.battlePassStep != null &&
+          allowedSteps.get(rule.id) === rule.battlePassStep),
+    ),
+  );
 }
 
 function filterDryRunRulesByEvaluationPolicy(

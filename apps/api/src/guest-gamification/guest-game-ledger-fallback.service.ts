@@ -23,6 +23,9 @@ export type GuestGameLedgerFallbackRunDto = {
   tenantId?: string | null;
   tenantSlug?: string | null;
   profileId?: string | null;
+  seasonId?: string | null;
+  battlePassStep?: number | string | null;
+  liveNotBefore?: Date | string | null;
   allowAllTenants?: boolean;
   limit?: number | string | null;
   graceMs?: number | string | null;
@@ -87,7 +90,7 @@ export class GuestGameLedgerFallbackService {
     dto: GuestGameLedgerFallbackRunDto = {},
   ): Promise<GuestGameLedgerFallbackRunResult> {
     const mode = fallbackMode(dto.mode);
-    const factTypes = requestedFallbackFactTypes(dto.factTypes);
+    const factTypes = requestedFallbackFactTypes(dto.factTypes, mode);
     const limit = boundedInteger(dto.limit, 30, 1, 100);
     const graceMs = boundedInteger(dto.graceMs, 60_000, 15_000, 10 * 60_000);
     const claimLeaseMs = boundedInteger(
@@ -99,11 +102,24 @@ export class GuestGameLedgerFallbackService {
     const tenantId = normalizedString(dto.tenantId);
     const tenantSlug = normalizedString(dto.tenantSlug);
     const profileId = normalizedString(dto.profileId);
+    const seasonId = normalizedString(dto.seasonId);
+    const battlePassStep = optionalPositiveInteger(dto.battlePassStep);
+    const liveNotBefore = validDate(dto.liveNotBefore);
     if (
       mode !== 'OFF' &&
       !tenantId &&
       !tenantSlug &&
       dto.allowAllTenants !== true
+    ) {
+      return summarize(mode, []);
+    }
+    if (
+      mode === 'LIVE' &&
+      (dto.allowAllTenants === true ||
+        !profileId ||
+        !seasonId ||
+        battlePassStep === null ||
+        !liveNotBefore)
     ) {
       return summarize(mode, []);
     }
@@ -176,6 +192,9 @@ export class GuestGameLedgerFallbackService {
             graceMs,
             claimLeaseMs,
             profileId,
+            seasonId,
+            battlePassStep,
+            liveNotBefore,
           ),
         );
       } catch (error) {
@@ -201,8 +220,11 @@ export class GuestGameLedgerFallbackService {
     graceMs: number,
     claimLeaseMs: number,
     profileId: string | null,
+    seasonId: string | null,
+    battlePassStep: number | null,
+    liveNotBefore: Date | null,
   ) {
-    const [missions, seasons, stores] = await Promise.all([
+    const [allMissions, allSeasons, stores] = await Promise.all([
       this.prisma.guestGameMission.findMany({
         where: {
           tenantId: user.tenantId,
@@ -232,8 +254,16 @@ export class GuestGameLedgerFallbackService {
         select: { id: true, externalDomain: true, timeZone: true },
       }),
     ]);
+    const missions = mode === 'LIVE' ? [] : allMissions;
+    const seasons =
+      mode === 'LIVE'
+        ? allSeasons.filter((season) => season.id === seasonId)
+        : allSeasons;
     const fallbackSeasons = seasons.filter((season) =>
-      seasonHasFallbackStep(season.levels),
+      seasonHasFallbackStep(
+        season.levels,
+        mode === 'LIVE' ? battlePassStep : null,
+      ),
     );
     if (!missions.length && !fallbackSeasons.length) {
       return emptyTenantResult(
@@ -252,12 +282,16 @@ export class GuestGameLedgerFallbackService {
       stores,
     );
 
-    const earliestActivation = [
+    const earliestRuleActivation = [
       ...missions.map((mission) =>
         guestGameRuleActivationAt(mission.createdAt, mission.conditions),
       ),
       ...fallbackSeasons.map((season) => season.periodFrom ?? season.createdAt),
     ].reduce((earliest, value) => (value < earliest ? value : earliest));
+    const earliestActivation =
+      mode === 'LIVE' && liveNotBefore && liveNotBefore > earliestRuleActivation
+        ? liveNotBefore
+        : earliestRuleActivation;
     const result = emptyTenantResult(
       user.tenantId,
       user.tenantSlug,
@@ -295,6 +329,20 @@ export class GuestGameLedgerFallbackService {
                 },
               ],
             },
+            {
+              OR: [
+                {
+                  factType: {
+                    in: [
+                      'HOURLY_PLAY_TIME_ACCUMULATED',
+                      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+                    ],
+                  },
+                  durationMinutes: { gt: 0 },
+                },
+                { factType: 'PRODUCT_PURCHASED' },
+              ],
+            },
           ],
         },
         orderBy: [{ validFrom: 'asc' }, { id: 'asc' }],
@@ -323,12 +371,28 @@ export class GuestGameLedgerFallbackService {
               ruleDomainTimeZones,
               ruleExternalDomains,
             }),
+            mode === 'LIVE'
+              ? {
+                  seasonId: seasonId!,
+                  battlePassStep: battlePassStep!,
+                }
+              : null,
           );
         } catch {
           result.failedFacts += 1;
           continue;
         }
         if (!routedDryRun.rules.length) continue;
+        const allowedRuleIds = new Set(
+          routedDryRun.rules.map((rule) => rule.id),
+        );
+        const allowedBattlePassSteps = new Map(
+          routedDryRun.rules.flatMap((rule) =>
+            rule.kind === 'SEASON' && rule.battlePassStep != null
+              ? [[rule.id, rule.battlePassStep] as const]
+              : [],
+          ),
+        );
 
         const ledgerFirstSeenAt = new Date();
         const receipt = await this.prisma.guestGameOriginReceipt.upsert({
@@ -487,6 +551,8 @@ export class GuestGameLedgerFallbackService {
                   originKey,
                   ruleDomainTimeZones,
                   ruleExternalDomains,
+                  allowedRuleIds,
+                  allowedBattlePassSteps,
                   suppressLedgerShadow: true,
                 },
               );
@@ -662,6 +728,8 @@ export class GuestGameLedgerFallbackService {
               originKey,
               ruleDomainTimeZones,
               ruleExternalDomains,
+              allowedRuleIds,
+              allowedBattlePassSteps,
               suppressLedgerShadow: true,
             },
           );
@@ -916,18 +984,21 @@ function fallbackStableExternalId(
   fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
 ) {
   const sourceExternalId = normalizedString(fact.sourceExternalId);
-  if (sourceExternalId) return sourceExternalId;
   if (
     fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED' ||
     fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
   ) {
-    return normalizedString(fact.sessionExternalId);
+    return normalizedString(fact.sessionExternalId) ?? sourceExternalId;
   }
-  return null;
+  return sourceExternalId;
 }
 
 function routedFallbackDryRun(
   dryRun: GuestGameDryRunResult,
+  liveBattlePassScope: {
+    seasonId: string;
+    battlePassStep: number;
+  } | null = null,
 ): GuestGameDryRunResult {
   const rules = dryRun.rules.filter(
     (rule) =>
@@ -935,7 +1006,15 @@ function routedFallbackDryRun(
       guestGamePolicyAllowsEvaluation(
         rule.evaluationPolicy,
         'LIVE_LEDGER_FALLBACK',
-      ),
+      ) &&
+      (!liveBattlePassScope ||
+        (rule.kind === 'SEASON' &&
+          rule.id === liveBattlePassScope.seasonId &&
+          rule.battlePassStep === liveBattlePassScope.battlePassStep &&
+          rule.rewardType === 'BONUS_BALANCE' &&
+          (rule.rewardAmount ?? 0) > 0 &&
+          rule.xpDelta === 0 &&
+          !rule.manualApprovalRequired)),
   );
   const eligible = rules.filter((rule) => rule.eligible);
   return {
@@ -954,10 +1033,19 @@ function routedFallbackDryRun(
   };
 }
 
-function seasonHasFallbackStep(value: Prisma.JsonValue) {
+function seasonHasFallbackStep(
+  value: Prisma.JsonValue,
+  expectedStep: number | null = null,
+) {
   if (!Array.isArray(value)) return false;
-  return value.some((level) => {
-    const activationRules = jsonRecord(jsonRecord(level).activationRules);
+  return value.some((level, index) => {
+    const record = jsonRecord(level);
+    const sequence =
+      optionalPositiveInteger(record.sequence) ??
+      optionalPositiveInteger(record.order) ??
+      index + 1;
+    if (expectedStep !== null && sequence !== expectedStep) return false;
+    const activationRules = jsonRecord(record.activationRules);
     return (
       normalizedString(activationRules.evaluationPolicy)?.toUpperCase() ===
       'LIVE_WITH_LEDGER_FALLBACK'
@@ -978,7 +1066,10 @@ function fallbackEvidence(
   };
 }
 
-function requestedFallbackFactTypes(value: unknown): FallbackFactType[] {
+function requestedFallbackFactTypes(
+  value: unknown,
+  mode: GuestGameLedgerFallbackMode,
+): FallbackFactType[] {
   const requested = Array.isArray(value)
     ? value
         .map((item) => normalizedString(item)?.toUpperCase())
@@ -987,12 +1078,32 @@ function requestedFallbackFactTypes(value: unknown): FallbackFactType[] {
   const effective = new Set<string>(
     requested.length ? requested : [...defaultFallbackFactTypes],
   );
-  return fallbackFactTypes.filter((factType) => effective.has(factType));
+  const allowed = fallbackFactTypes.filter((factType) =>
+    effective.has(factType),
+  );
+  return mode === 'LIVE'
+    ? allowed.filter((factType) => factType !== 'PRODUCT_PURCHASED')
+    : allowed;
 }
 
 function fallbackMode(value: unknown): GuestGameLedgerFallbackMode {
   const normalized = normalizedString(value)?.toUpperCase();
   return normalized === 'LIVE' || normalized === 'SHADOW' ? normalized : 'OFF';
+}
+
+function validDate(value: unknown) {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value : null;
+  }
+  const normalized = normalizedString(value);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function optionalPositiveInteger(value: unknown) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function emptyTenantResult(

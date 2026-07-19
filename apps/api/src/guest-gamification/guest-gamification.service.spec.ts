@@ -10205,6 +10205,72 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('fails closed when the scoped Battle Pass step changes before materialization', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const nextStepDryRun = battlePassDryRun(3);
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(nextStepDryRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(null);
+      const createProcessEvent = jest
+        .spyOn(service as any, 'createProcessEvent')
+        .mockResolvedValue(eventResult({ eventType: 'PLAY_HOUR', xpDelta: 0 }));
+      const materialize = jest
+        .spyOn(service as any, 'materializeProcessRewardIntents')
+        .mockImplementation(
+          (
+            _user: unknown,
+            _dto: unknown,
+            scopedDryRun: GuestGameDryRunResult,
+          ) => Promise.resolve({ dryRun: scopedDryRun, rewards: [] }),
+        );
+
+      const result = await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          guestId: 'guest-1',
+          eventType: 'PLAY_HOUR',
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: 'fact-step-race',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-step-race',
+        },
+        {
+          evaluationMode: 'LIVE_LEDGER_FALLBACK',
+          allowedRuleIds: ['season-1'],
+          allowedBattlePassSteps: new Map([['season-1', 2]]),
+          originKey: 'origin-step-race',
+          suppressLedgerShadow: true,
+        },
+      );
+
+      expect(materialize).toHaveBeenCalledWith(
+        user,
+        expect.any(Object),
+        expect.objectContaining({ rules: [] }),
+        expect.any(Object),
+        profile.id,
+        expect.any(Object),
+        'origin-step-race',
+      );
+      expect(createProcessEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({ xpDelta: 0 }),
+        'origin-step-race',
+      );
+      expect(result).toMatchObject({
+        dryRun: { rules: [] },
+        rewards: [],
+        summary: { createdRewards: 0, appliedXpDelta: 0 },
+      });
+    });
+
     it('uses the generated idempotency key and keeps Langame writes disabled', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();

@@ -46,7 +46,7 @@ Scheduler работает внутри `leetplus-api.service`, отдельны
 
 Алгоритм всегда последовательный:
 
-1. Нормализованный факт времени или покупки получает канонический `originKey` и ждёт основной LIVE-контур в течение `GRACE_MS`.
+1. Нормализованный факт игрового времени получает канонический `originKey` и ждёт основной LIVE-контур в течение `GRACE_MS`.
 2. Если LIVE уже создал событие с тем же `originKey`, receipt помечается `LIVE_PROCESSED`, а ledger ничего не создаёт.
 3. Только после grace-window и атомарного захвата receipt режим `LIVE` может передать факт в существующий `processEvent` → reward → bonus-ledger контур.
 4. Повторный tick, replay или рестарт не должны создать второе событие или награду для того же `originKey`.
@@ -55,11 +55,22 @@ Scheduler работает внутри `leetplus-api.service`, отдельны
 
 - `GUEST_GAME_LEDGER_FALLBACK_MODE=OFF|SHADOW|LIVE`; безопасное значение по умолчанию — `OFF`.
 - `GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH=true` немедленно останавливает новые тики независимо от режима.
-- `GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES` фильтруется жёстким allow-list: `HOURLY_PLAY_TIME_ACCUMULATED`, `PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED`, `PRODUCT_PURCHASED`. По умолчанию разрешены только два типа игрового времени. `PRODUCT_PURCHASED` требует отдельного явного opt-in после проверки lifecycle отмен и возвратов по стабильному sale ID.
-- `GUEST_GAME_LEDGER_FALLBACK_GRACE_MS`, `...CLAIM_LEASE_MS`, `...INTERVAL_MS`, `...BATCH_SIZE`, `...TENANT_ID` и `...TENANT_SLUG` задают grace-window, lease для восстановления после рестарта, частоту, пакет и область rollout. Необязательный `GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID` дополнительно ограничивает canary одним точным профилем. Grace-window начинается при первом появлении origin receipt, поэтому исторический re-sync не может немедленно создать fallback-событие.
-- Tenant scope обязателен: без `...TENANT_ID` или `...TENANT_SLUG` scheduler fail-closed. Глобальный запуск возможен только отдельным явным opt-in `GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS=true` после завершения canary.
+- `GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES` фильтруется жёстким allow-list: `HOURLY_PLAY_TIME_ACCUMULATED`, `PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED`, `PRODUCT_PURCHASED`. В `LIVE` допускаются только два точных типа игрового времени. `PRODUCT_PURCHASED` остаётся только в `SHADOW` до отдельной проверки lifecycle отмен и возвратов по стабильному sale ID; добавление его в env не разрешает боевую обработку.
+- `GUEST_GAME_LEDGER_FALLBACK_GRACE_MS`, `...CLAIM_LEASE_MS`, `...INTERVAL_MS` и `...BATCH_SIZE` задают grace-window, lease для восстановления после рестарта, частоту и размер пакета. Grace-window начинается при первом появлении origin receipt.
+- `LIVE` требует одновременно точный tenant (`...TENANT_ID` или `...TENANT_SLUG`), `GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID`, `GUEST_GAME_LEDGER_FALLBACK_SEASON_ID` и положительный `GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP`. Эти значения ограничивают canary одним профилем и одним шагом одного сезона; при отсутствии любого параметра scheduler fail-closed.
+- `GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE` обязателен для `LIVE` и задаётся валидной UTC ISO-датой, например `2026-07-19T16:30:00.000Z`. Факты раньше cutoff не выбираются, поэтому накопленные `SHADOWED` receipts не могут задним числом породить event, XP или reward после переключения режима.
+- `GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS` должен оставаться `false`: режим `LIVE` с `true` запрещён и fail-closed. Глобальный или непрофильный rollout этой очереди текущим контрактом не разрешён.
 
-До отдельного решения о rollout production должен оставаться в `OFF`. Перед additive-миграцией нужно проверить объём затрагиваемых таблиц, отсутствие конфликтующих дублей и допустимое время блокировки обычных `CREATE INDEX`; для крупных production-таблиц подготовить отдельную concurrent/maintenance-window стратегию. После миграции сначала нужно повторно синхронизировать или перенормализовать журнал, подтвердить заполнение стабильного `sourceExternalId` для нужных фактов и только затем включать tenant-scoped `SHADOW`. `sourceExternalId` нельзя заполнять из `sourceHash` или внутреннего ID строки LeetPlus: допускается только стабильный ID операции, полученный повторной нормализацией источника. Факты без стабильного внешнего ID fail-closed и в fallback не участвуют. `SHADOW` пишет только диагностические решения и receipts, но не создаёт event, XP, entitlement или reward. Перевод в `LIVE` допустим только после проверки mismatch, freshness, replay, атомарности XP и отсутствия дублей на выбранном tenant.
+Безопасный rollout выполняется последовательно:
+
+1. Развернуть код с `MODE=OFF` либо оставить действующий tenant/profile-scoped `SHADOW`; проверить health, миграции, freshness, replay и отсутствие дублей.
+2. Заполнить точные tenant, profile, season и Battle Pass step; установить `LIVE_NOT_BEFORE` на текущий момент UTC непосредственно перед canary. Оставить `ALLOW_ALL_TENANTS=false`, только два точных типа игрового времени и небольшой batch.
+3. Сначала запустить `MODE=LIVE` с `KILL_SWITCH=true`, проверить итоговую runtime-конфигурацию, затем снять kill switch. Подтвердить цепочку fact → receipt → event → decision → reward intent/effect → bonus ledger и отсутствие повторов при следующем tick/restart.
+4. Не расширять profile/season/step scope и не включать покупки до отдельного решения по результатам canary.
+
+Rollback не требует удаления данных или отката миграций: немедленно установить `GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH=true` либо вернуть `GUEST_GAME_LEDGER_FALLBACK_MODE=SHADOW`/`OFF` и перезапустить только API. Основной LIVE snapshot-контур продолжает работать. Уже созданные receipts, events и postings сохраняются для аудита и не переигрываются; перед следующим canary задаётся новый `LIVE_NOT_BEFORE`.
+
+Перед additive-миграцией нужно проверить объём затрагиваемых таблиц, отсутствие конфликтующих дублей и допустимое время блокировки обычных `CREATE INDEX`; для крупных production-таблиц подготовить отдельную concurrent/maintenance-window стратегию. После миграции сначала нужно повторно синхронизировать или перенормализовать журнал, подтвердить заполнение стабильного `sourceExternalId` для нужных фактов и только затем включать tenant-scoped `SHADOW`. `sourceExternalId` нельзя заполнять из `sourceHash` или внутреннего ID строки LeetPlus: допускается только стабильный ID операции, полученный повторной нормализацией источника. Факты без стабильного внешнего ID fail-closed и в fallback не участвуют. `SHADOW` пишет только диагностические решения и receipts, но не создаёт event, XP, entitlement или reward. Перевод в scoped `LIVE` допустим только после проверки mismatch, freshness, replay, атомарности XP и отсутствия дублей на выбранном tenant и профиле.
 
 ### P0: атомарность event, XP и плана награды
 

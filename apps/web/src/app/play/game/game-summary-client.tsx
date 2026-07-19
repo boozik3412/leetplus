@@ -5484,6 +5484,9 @@ function gameProgressUnitLabel(unit: string | null) {
     days: "дней",
     purchase: "покупок",
     purchases: "покупок",
+    "check-in": "чекинов",
+    check_in: "чекинов",
+    checkin: "чекинов",
     rub: "рублей",
     rouble: "рублей",
     ruble: "рублей",
@@ -5535,6 +5538,10 @@ function playerQuestCondition(
   mission: GameMission,
   progress: PlayerQuest["progress"],
 ) {
+  if (mission.conditionLabel) {
+    return mission.conditionLabel;
+  }
+
   if (normalizeGameRuleTrigger(mission.triggerKind) === "PLAY_HOUR") {
     const minutes = progress?.total ?? mission.progressTarget ?? 0;
 
@@ -5551,10 +5558,10 @@ function playerQuestCondition(
 }
 
 function missionConditionHint(mission: GameMission) {
-  return `Условие: ${gameRuleConditionLabel(
-    mission.triggerKind,
-    mission.sessionType,
-  )}.`;
+  return `Условие: ${
+    mission.conditionLabel ||
+    gameRuleConditionLabel(mission.triggerKind, mission.sessionType)
+  }.`;
 }
 
 function missionBattlePassDescription(mission: GameMission) {
@@ -7482,7 +7489,7 @@ function gameMissionPreviewData(mission: GameMission): GuestMissionPreviewData {
     xp: mission.xpReward,
     progressCurrent: mission.progressCurrent,
     progressTarget: mission.progressTarget ?? 1,
-    progressUnit: mission.progressUnit ?? "",
+    progressUnit: gameProgressUnitLabel(mission.progressUnit) ?? "",
     actionText: mission.actionText ?? "Подробнее",
     icon: mission.icon,
     theme: mission.theme,

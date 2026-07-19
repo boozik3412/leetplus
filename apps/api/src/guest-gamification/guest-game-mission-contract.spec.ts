@@ -125,6 +125,30 @@ describe('guest mission wizard contract', () => {
     });
   });
 
+  it('keeps the configured single top-up threshold when a legacy amount is stale', () => {
+    const conditions = normalizeMissionWizardConditions({
+      ...common,
+      taskType: 'BALANCE_TOPUP',
+      conditions: {
+        metric: {
+          topupMode: 'SINGLE',
+          amountComparison: 'AT_LEAST',
+          amount: 10,
+          minSpendAmount: 500,
+          target: 10,
+        },
+      },
+    });
+
+    expect(conditions).toMatchObject({
+      metric: {
+        amount: 500,
+        minSpendAmount: 500,
+        target: 1,
+      },
+    });
+  });
+
   it('normalizes check-in streaks and preserves the domain warning', () => {
     const checkIn = normalizeMissionWizardConditions({
       ...common,

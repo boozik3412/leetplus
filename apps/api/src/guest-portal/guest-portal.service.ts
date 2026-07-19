@@ -8866,10 +8866,7 @@ export class GuestPortalService {
     const progress = new Map<string, GuestPortalMissionProgress>();
 
     missions.forEach((mission) => {
-      const target =
-        typeof mission.progressTarget === 'number' && mission.progressTarget > 0
-          ? mission.progressTarget
-          : 1;
+      const target = guestPortalMissionProgressTarget(mission);
       const metricProgress = evaluateGuestGameProgress(
         {
           triggerKind: mission.triggerKind,
@@ -14316,14 +14313,14 @@ function mapMission(
 ): GuestPortalMission {
   const progressCurrent = progress?.current ?? 0;
   const questSteps = missionQuestSteps(row.conditions, progressCurrent);
+  const conditions = jsonRecord(row.conditions);
+  const metric = jsonRecord(conditions.metric);
   const progressTarget = questSteps.length
     ? (questSteps[questSteps.length - 1]?.target ?? questSteps.length)
-    : row.progressTarget;
+    : guestPortalMissionProgressTarget(row);
   const progressPercent = questSteps.length
     ? percent(progressCurrent, progressTarget ?? questSteps.length)
     : (progress?.percent ?? 0);
-  const conditions = jsonRecord(row.conditions);
-  const metric = jsonRecord(conditions.metric);
   const presentation = jsonRecord(conditions.presentation);
   const productRefs = Array.isArray(metric.productRefs)
     ? metric.productRefs.map((item) => jsonRecord(item as Prisma.JsonValue))
@@ -14342,7 +14339,7 @@ function mapMission(
     xpReward: row.xpReward,
     progressCurrent,
     progressTarget,
-    progressUnit: row.progressUnit,
+    progressUnit: guestPortalMissionProgressUnitLabel(row.progressUnit),
     progressPercent,
     questSteps,
     periodTo: iso(row.periodTo),
@@ -14399,7 +14396,58 @@ function guestPortalMissionTheme(value: unknown): GuestPortalMission['theme'] {
     : 'CLASSIC';
 }
 
-function guestPortalMissionConditionLabel(
+export function guestPortalMissionProgressTarget(mission: {
+  conditions: Prisma.JsonValue | null;
+  progressTarget: number | null;
+}) {
+  const metricTarget = numberField(
+    jsonRecord(jsonRecord(mission.conditions).metric).target,
+  );
+
+  if (metricTarget && metricTarget > 0) {
+    return metricTarget;
+  }
+
+  return mission.progressTarget && mission.progressTarget > 0
+    ? mission.progressTarget
+    : 1;
+}
+
+export function guestPortalMissionProgressUnitLabel(
+  value: string | null | undefined,
+) {
+  const unit = stringField(value);
+
+  if (!unit) {
+    return null;
+  }
+
+  const labels: Record<string, string> = {
+    minute: 'минут',
+    minutes: 'минут',
+    min: 'минут',
+    hour: 'часов',
+    hours: 'часов',
+    day: 'дней',
+    days: 'дней',
+    purchase: 'покупок',
+    purchases: 'покупок',
+    checkin: 'чекинов',
+    'check-in': 'чекинов',
+    check_in: 'чекинов',
+    rub: 'рублей',
+    rouble: 'рублей',
+    ruble: 'рублей',
+    visit: 'визитов',
+    visits: 'визитов',
+    step: 'шагов',
+    steps: 'шагов',
+  };
+
+  return labels[unit.toLocaleLowerCase('ru-RU')] ?? unit;
+}
+
+export function guestPortalMissionConditionLabel(
   missionType: string,
   metric: Record<string, unknown>,
   sessionType: string | null,
@@ -14407,6 +14455,7 @@ function guestPortalMissionConditionLabel(
   const target = numberField(metric.target) ?? 1;
   if (missionType === 'PRODUCT_PURCHASE') {
     const mode = stringField(metric.productMatch)?.toUpperCase();
+    const purchaseSource = stringField(metric.purchaseSource)?.toUpperCase();
     const amountMode = stringField(metric.amountMode)?.toUpperCase();
     const amount =
       amountMode === 'PERIOD_TOTAL'
@@ -14414,8 +14463,12 @@ function guestPortalMissionConditionLabel(
         : numberField(metric.minSpendAmount);
     return [
       mode === 'ALL'
-        ? 'Купить все выбранные товары'
-        : 'Купить любой выбранный товар',
+        ? purchaseSource === 'CATEGORY'
+          ? 'Купить товар из каждой выбранной категории'
+          : 'Купить все выбранные товары'
+        : purchaseSource === 'CATEGORY'
+          ? 'Купить товар из любой выбранной категории'
+          : 'Купить любой выбранный товар',
       amountMode === 'SINGLE_MINIMUM' && amount
         ? `одной покупкой не менее чем на ${amount} ₽`
         : amountMode === 'PERIOD_TOTAL' && amount
@@ -14427,18 +14480,25 @@ function guestPortalMissionConditionLabel(
   }
   if (missionType === 'BALANCE_TOPUP') {
     const topupMode = stringField(metric.topupMode)?.toUpperCase();
-    const amount = numberField(metric.amount) ?? 0;
-    const comparison =
-      stringField(metric.amountComparison)?.toUpperCase() === 'EXACT'
-        ? 'ровно'
-        : 'не менее';
+    const isExact =
+      stringField(metric.amountComparison)?.toUpperCase() === 'EXACT';
+    const amount = isExact
+      ? (numberField(metric.exactSpendAmount) ??
+        numberField(metric.amount) ??
+        numberField(metric.minSpendAmount) ??
+        0)
+      : (numberField(metric.minSpendAmount) ??
+        numberField(metric.amount) ??
+        numberField(metric.exactSpendAmount) ??
+        0);
+    const comparison = isExact ? 'ровно на' : 'не менее чем на';
     if (topupMode === 'PERIOD_TOTAL') {
       return `Пополнить баланс суммарно не менее чем на ${target} ₽`;
     }
     if (topupMode === 'COUNT') {
-      return `Пополнить баланс ${target} раз${amount ? `, каждое ${comparison} ${amount} ₽` : ''}`;
+      return `Пополнить баланс ${target} раз${amount ? `, каждый раз ${comparison} ${amount} ₽` : ''}`;
     }
-    return `Пополнить баланс ${comparison} чем на ${amount || target} ₽`;
+    return `Пополнить баланс ${comparison} ${amount || target} ₽`;
   }
   if (missionType === 'CHECK_IN') {
     const mode = stringField(metric.checkInMode)?.toUpperCase();
@@ -14448,13 +14508,25 @@ function guestPortalMissionConditionLabel(
         ? `Сделать ${target} чекинов`
         : 'Сделать чекин в клубе';
   }
+  if (missionType === 'APP_OPEN') {
+    return 'Открыть игровой модуль';
+  }
   const sessionLabel =
     sessionType === 'HOURLY'
-      ? ' в почасовой сессии'
+      ? ' с почасовым тарифом'
       : sessionType === 'PACKAGE_OR_SUBSCRIPTION'
         ? ' по пакету или абонементу'
         : '';
-  return `Провести в игре ${target} минут${sessionLabel}`;
+  const minSessionMinutes = numberField(metric.minSessionMinutes);
+  const action = `${
+    missionType === 'PLAY_TIME' && target === 60
+      ? 'Сыграть один час в игровой сессии'
+      : `Провести в игре ${target} минут`
+  }${sessionLabel}`;
+
+  return minSessionMinutes
+    ? `${action}, минимум ${minSessionMinutes} минут за сессию`
+    : action;
 }
 
 function buildMissionRewardStatus({

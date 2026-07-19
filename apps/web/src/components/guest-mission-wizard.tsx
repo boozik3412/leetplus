@@ -2248,8 +2248,12 @@ function buildPreview(
       ? 1
       : form.taskType === "PLAY_TIME"
       ? form.target
-      : form.taskType === "BALANCE_TOPUP" && form.topupMode === "PERIOD_TOTAL"
-        ? form.totalAmount
+      : form.taskType === "BALANCE_TOPUP"
+        ? form.topupMode === "PERIOD_TOTAL"
+          ? form.totalAmount
+          : form.topupMode === "COUNT"
+            ? form.topupCount
+            : 1
         : form.taskType === "CHECK_IN"
           ? form.checkInMode === "STREAK"
             ? form.checkInDays
@@ -2281,7 +2285,7 @@ function buildPreview(
   return {
     title: form.name || "Новое задание",
     description: form.description || logicSubtitle(form.taskType),
-    condition: previewCondition(form, products, productGroups),
+    condition: previewCondition(form),
     reward,
     xp: form.xpEnabled ? form.xpAmount : 0,
     progressCurrent:
@@ -2305,27 +2309,47 @@ function buildPreview(
       form.amountMode === "SINGLE_MINIMUM" ? form.minimumAmount : null,
   };
 }
-function previewCondition(
-  form: WizardState,
-  products: SelectedProduct[],
-  productGroups: GuestGameMissionProductGroup[],
-) {
-  if (form.taskType === "APP_OPEN") return "Войти в игровой модуль.";
-  if (form.taskType === "PLAY_TIME")
-    return `Провести в игре ${form.target} минут${form.minSessionMinutes ? `, минимум ${form.minSessionMinutes} минут за сессию` : ""}.`;
-  if (form.taskType === "PRODUCT_PURCHASE")
-    return `${form.productMatch === "ALL" ? `Купить ${form.purchaseSource === "CATEGORY" ? "товар из каждой выбранной категории" : "все выбранные товары"}` : `Купить ${form.purchaseSource === "CATEGORY" ? "товар из любой выбранной категории" : "любой выбранный товар"}`}${form.amountMode === "SINGLE_MINIMUM" ? ` не менее чем на ${form.minimumAmount} ₽` : form.amountMode === "PERIOD_TOTAL" ? ` на общую сумму ${form.totalAmount} ₽` : ""}. Выбрано: ${form.purchaseSource === "CATEGORY" ? productGroups.length : products.length}.`;
+function previewCondition(form: WizardState) {
+  if (form.taskType === "APP_OPEN") return "Открыть игровой модуль";
+  if (form.taskType === "PLAY_TIME") {
+    const sessionRequirement =
+      form.sessionType === "HOURLY"
+        ? " с почасовым тарифом"
+        : form.sessionType === "PACKAGE_OR_SUBSCRIPTION"
+          ? " по пакету или абонементу"
+          : "";
+    const action =
+      form.target === 60
+        ? `Сыграть один час в игровой сессии${sessionRequirement}`
+        : `Провести в игре ${form.target} минут${sessionRequirement}`;
+
+    return `${action}${form.minSessionMinutes ? `, минимум ${form.minSessionMinutes} минут за сессию` : ""}`;
+  }
+  if (form.taskType === "PRODUCT_PURCHASE") {
+    const productCondition =
+      form.productMatch === "ALL"
+        ? `Купить ${form.purchaseSource === "CATEGORY" ? "товар из каждой выбранной категории" : "все выбранные товары"}`
+        : `Купить ${form.purchaseSource === "CATEGORY" ? "товар из любой выбранной категории" : "любой выбранный товар"}`;
+    const amountCondition =
+      form.amountMode === "SINGLE_MINIMUM"
+        ? `одной покупкой не менее чем на ${form.minimumAmount} ₽`
+        : form.amountMode === "PERIOD_TOTAL"
+          ? `на общую сумму не менее ${form.totalAmount} ₽ за период`
+          : null;
+
+    return [productCondition, amountCondition].filter(Boolean).join(" · ");
+  }
   if (form.taskType === "BALANCE_TOPUP")
     return form.topupMode === "PERIOD_TOTAL"
-      ? `Пополнить баланс суммарно на ${form.totalAmount} ₽.`
+      ? `Пополнить баланс суммарно не менее чем на ${form.totalAmount} ₽`
       : form.topupMode === "COUNT"
-        ? `Пополнить баланс ${form.topupCount} раз по ${form.topupComparison === "EXACT" ? "ровно" : "не менее"} ${form.topupAmount} ₽.`
-        : `Пополнить баланс ${form.topupComparison === "EXACT" ? "ровно" : "не менее"} чем на ${form.topupAmount} ₽.`;
+        ? `Пополнить баланс ${form.topupCount} раз, каждый раз ${form.topupComparison === "EXACT" ? "ровно на" : "не менее чем на"} ${form.topupAmount} ₽`
+        : `Пополнить баланс ${form.topupComparison === "EXACT" ? "ровно на" : "не менее чем на"} ${form.topupAmount} ₽`;
   return form.checkInMode === "STREAK"
-    ? `Сделать чекин ${form.checkInDays} дней подряд.`
+    ? `Сделать чекин ${form.checkInDays} дней подряд`
     : form.checkInMode === "SINGLE"
-      ? "Сделать чекин в клубе."
-      : `Сделать ${form.checkInCount} чекинов.`;
+      ? "Сделать чекин в клубе"
+      : `Сделать ${form.checkInCount} чекинов`;
 }
 function logicSubtitle(taskType: TaskType) {
   return taskType === "APP_OPEN"

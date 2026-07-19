@@ -167,7 +167,16 @@ export function normalizeMissionWizardConditions(
       ['EXACT', 'AT_LEAST'],
       'AT_LEAST',
     );
-    const amount = numberValue(metric.amount) ?? 0;
+    const amount =
+      amountComparison === 'EXACT'
+        ? (numberValue(metric.exactSpendAmount) ??
+          numberValue(metric.amount) ??
+          numberValue(metric.minSpendAmount) ??
+          0)
+        : (numberValue(metric.minSpendAmount) ??
+          numberValue(metric.amount) ??
+          numberValue(metric.exactSpendAmount) ??
+          0);
     normalizedMetric.topupMode = topupMode;
     normalizedMetric.amountComparison = amountComparison;
     normalizedMetric.aggregation =
@@ -183,6 +192,7 @@ export function normalizeMissionWizardConditions(
           ? (numberValue(metric.count) ?? numberValue(metric.target) ?? 1)
           : 1;
     if (topupMode !== 'PERIOD_TOTAL' && amount > 0) {
+      normalizedMetric.amount = amount;
       if (amountComparison === 'EXACT') {
         normalizedMetric.exactSpendAmount = amount;
         delete normalizedMetric.minSpendAmount;

@@ -3,7 +3,12 @@
 import { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import { createHash, createHmac } from 'node:crypto';
-import { GuestPortalService } from './guest-portal.service';
+import {
+  GuestPortalService,
+  guestPortalMissionConditionLabel,
+  guestPortalMissionProgressTarget,
+  guestPortalMissionProgressUnitLabel,
+} from './guest-portal.service';
 
 function createPrismaMock() {
   const prisma = {
@@ -1072,6 +1077,80 @@ function telegramBotLinkedStoresFixture() {
 }
 
 describe('GuestPortalService', () => {
+  describe('mission display values', () => {
+    it('uses the normalized top-up threshold and metric target', () => {
+      expect(
+        guestPortalMissionConditionLabel(
+          'BALANCE_TOPUP',
+          {
+            topupMode: 'SINGLE',
+            amountComparison: 'AT_LEAST',
+            amount: 10,
+            minSpendAmount: 500,
+            target: 1,
+          },
+          null,
+        ),
+      ).toBe('Пополнить баланс не менее чем на 500 ₽');
+      expect(
+        guestPortalMissionProgressTarget({
+          conditions: { metric: { target: 1 } },
+          progressTarget: 10,
+        }),
+      ).toBe(1);
+      expect(guestPortalMissionProgressUnitLabel('check_in')).toBe('чекинов');
+    });
+
+    it('matches all mission types to their wizard semantics', () => {
+      expect(guestPortalMissionConditionLabel('APP_OPEN', {}, null)).toBe(
+        'Открыть игровой модуль',
+      );
+      expect(
+        guestPortalMissionConditionLabel(
+          'PLAY_TIME',
+          { target: 60, minSessionMinutes: 30 },
+          'HOURLY',
+        ),
+      ).toBe(
+        'Сыграть один час в игровой сессии с почасовым тарифом, минимум 30 минут за сессию',
+      );
+      expect(
+        guestPortalMissionConditionLabel(
+          'PRODUCT_PURCHASE',
+          {
+            productMatch: 'ALL',
+            purchaseSource: 'CATEGORY',
+            amountMode: 'PERIOD_TOTAL',
+            totalAmount: 1_000,
+            target: 1_000,
+          },
+          null,
+        ),
+      ).toBe(
+        'Купить товар из каждой выбранной категории · на общую сумму не менее 1000 ₽ за период',
+      );
+      expect(
+        guestPortalMissionConditionLabel(
+          'BALANCE_TOPUP',
+          {
+            topupMode: 'COUNT',
+            amountComparison: 'EXACT',
+            exactSpendAmount: 500,
+            target: 3,
+          },
+          null,
+        ),
+      ).toBe('Пополнить баланс 3 раз, каждый раз ровно на 500 ₽');
+      expect(
+        guestPortalMissionConditionLabel(
+          'CHECK_IN',
+          { checkInMode: 'STREAK', target: 7 },
+          null,
+        ),
+      ).toBe('Сделать чекин 7 дней подряд');
+    });
+  });
+
   describe('getGameSummary', () => {
     it('returns compact game state from the existing guest session payload', async () => {
       const { prisma, service } = createService({

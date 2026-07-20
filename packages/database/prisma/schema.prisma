@@ -3367,6 +3367,7 @@ model StaffKnowledgeArticle {
   title             String
   summary           String?
   content           String?
+  kind              String    @default("ARTICLE")
   folder            String    @default("РћР±С‰РёРµ")
   category          String    @default("РћР±С‰РёРµ СЃС‚Р°РЅРґР°СЂС‚С‹")
   roleScope         String    @default("ALL_STAFF")
@@ -3393,8 +3394,10 @@ model StaffKnowledgeArticle {
   approvedByUser User?                              @relation("StaffKnowledgeArticleApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   versions       StaffKnowledgeArticleVersion[]
   readReceipts   StaffKnowledgeArticleReadReceipt[]
+  chatMessages   StaffChatMessage[]                 @relation("StaffChatMessageKnowledgeArticle")
 
   @@index([tenantId, status, roleScope], map: "staff_knowledge_status_role_idx")
+  @@index([tenantId, kind, status], map: "staff_knowledge_kind_status_idx")
   @@index([tenantId, folder], map: "staff_knowledge_folder_idx")
   @@index([tenantId, category], map: "staff_knowledge_category_idx")
   @@index([tenantId, requiresReading], map: "staff_knowledge_required_idx")
@@ -3958,6 +3961,7 @@ model StaffChatMessage {
   channelId    String
   authorUserId String?
   storeId      String?
+  knowledgeArticleId String?
   body         String
   kind         String   @default("MESSAGE")
   priority     String   @default("NORMAL")
@@ -3970,6 +3974,7 @@ model StaffChatMessage {
   channel      StaffChatChannel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
   authorUser   User?                        @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
   store        Store?                       @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  knowledgeArticle StaffKnowledgeArticle?   @relation("StaffChatMessageKnowledgeArticle", fields: [knowledgeArticleId], references: [id], onDelete: SetNull)
   attachments  StaffChatMessageAttachment[]
   editHistory  StaffChatMessageEdit[]
   mentions     StaffChatMention[]
@@ -3980,6 +3985,7 @@ model StaffChatMessage {
   @@index([channelId, createdAt], map: "staff_chat_message_channel_created_idx")
   @@index([authorUserId], map: "staff_chat_message_author_idx")
   @@index([storeId], map: "staff_chat_message_store_idx")
+  @@index([knowledgeArticleId], map: "staff_chat_message_knowledge_article_idx")
   @@unique([tenantId, dedupeKey], map: "staff_chat_message_tenant_dedupe_unique")
 }
 

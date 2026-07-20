@@ -16,6 +16,7 @@ import {
   StaffAttachmentUpload,
   type StaffAttachmentUploadResult,
 } from "@/components/staff-attachment-upload";
+import { KnowledgeArticleRichText } from "@/components/staff-knowledge-rich-text";
 import type {
   StaffChatAttachment,
   StaffChatChannel,
@@ -1564,6 +1565,8 @@ function MessageCard({
   const [reportEditBody, setReportEditBody] = useState(visibleMessageBody);
   const [reportEditError, setReportEditError] = useState<string | null>(null);
   const [isReportEditSaving, setIsReportEditSaving] = useState(false);
+  const [isInformationMessageOpen, setIsInformationMessageOpen] =
+    useState(false);
   const [addedReportAttachments, setAddedReportAttachments] = useState<
     StaffChatAttachment[]
   >([]);
@@ -1573,6 +1576,7 @@ function MessageCard({
     message.authorUser?.fullName ?? message.authorUser?.email ?? "LeetPlus";
   const authorInitial = authorName.trim().slice(0, 1).toUpperCase() || "L";
   const messageContent = parseMessageAction(visibleMessageBody);
+  const knowledgeAnnouncement = message.knowledgeAnnouncement;
   const showReportAttachmentUpload =
     isReportEditing && message.canEditBody && !compact;
   const reportAttachments = useMemo(() => {
@@ -1674,6 +1678,18 @@ function MessageCard({
 
   return (
     <article
+      onDoubleClick={(event) => {
+        if (
+          !knowledgeAnnouncement ||
+          compact ||
+          (event.target instanceof Element &&
+            event.target.closest("button, a, input, textarea, select"))
+        ) {
+          return;
+        }
+
+        setIsInformationMessageOpen(true);
+      }}
       className={[
         "border-b px-4 py-4 transition-colors last:border-b-0 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/20",
         message.mentionedMe
@@ -1705,6 +1721,19 @@ function MessageCard({
               </Badge>
             ) : null}
             {message.isPinned ? <Badge tone="emerald">Закреплено</Badge> : null}
+            {knowledgeAnnouncement ? (
+              <Badge
+                tone={
+                  knowledgeAnnouncement.acknowledgedByMe
+                    ? "emerald"
+                    : "amber"
+                }
+              >
+                {knowledgeAnnouncement.acknowledgedByMe
+                  ? "Ознакомлен"
+                  : "Требуется ознакомление"}
+              </Badge>
+            ) : null}
             {message.mentionedMe ? <Badge tone="sky">@ мне</Badge> : null}
             {!forceRead && !message.isReadByMe ? (
               <Badge tone="emerald">Новое</Badge>
@@ -1741,6 +1770,15 @@ function MessageCard({
               className="rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:bg-sky-50 hover:text-sky-700 focus-visible:bg-sky-50 focus-visible:text-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/25 dark:text-zinc-400 dark:hover:bg-sky-500/10 dark:hover:text-sky-200 dark:focus-visible:bg-sky-500/10 dark:focus-visible:text-sky-100"
             >
               Создать задачу
+            </button>
+          ) : null}
+          {knowledgeAnnouncement && !compact ? (
+            <button
+              type="button"
+              onClick={() => setIsInformationMessageOpen(true)}
+              className="rounded-full px-2.5 py-1 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 focus-visible:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/25 dark:text-emerald-200 dark:hover:bg-emerald-500/10 dark:focus-visible:bg-emerald-500/10"
+            >
+              Открыть сообщение
             </button>
           ) : null}
           <button
@@ -2009,6 +2047,12 @@ function MessageCard({
           </div>
         </div>
       ) : null}
+      {knowledgeAnnouncement && isInformationMessageOpen ? (
+        <InformationMessageDialog
+          message={message}
+          onClose={() => setIsInformationMessageOpen(false)}
+        />
+      ) : null}
     </article>
   );
 }
@@ -2062,6 +2106,268 @@ function MessageAttachmentCard({
         </span>
       </span>
     </a>
+  );
+}
+
+type InformationMessageMaterial = {
+  id: string;
+  title: string;
+  type: string;
+  url: string | null;
+  content: string | null;
+  note: string | null;
+};
+
+function informationMessageMaterials(value: unknown[]) {
+  return value.flatMap((item, index): InformationMessageMaterial[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return [];
+    }
+
+    const record = item as Record<string, unknown>;
+    const title = typeof record.title === "string" ? record.title.trim() : "";
+    const url = typeof record.url === "string" ? record.url.trim() : "";
+    const content =
+      typeof record.content === "string" ? record.content.trim() : "";
+
+    if (!title && !url && !content) {
+      return [];
+    }
+
+    return [
+      {
+        id: typeof record.id === "string" ? record.id : `material-${index}`,
+        title: title || `Материал ${index + 1}`,
+        type: typeof record.type === "string" ? record.type : "OTHER",
+        url: url || null,
+        content: content || null,
+        note: typeof record.note === "string" ? record.note : null,
+      },
+    ];
+  });
+}
+
+function InformationMessageDialog({
+  message,
+  onClose,
+}: {
+  message: StaffChatMessage;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [reachedEnd, setReachedEnd] = useState(false);
+  const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const announcement = message.knowledgeAnnouncement;
+
+  useEffect(() => {
+    function updateScrollState() {
+      const element = contentRef.current;
+
+      if (!element) {
+        return;
+      }
+
+      setReachedEnd(
+        element.scrollTop + element.clientHeight >= element.scrollHeight - 24,
+      );
+    }
+
+    const frame = window.requestAnimationFrame(updateScrollState);
+    return () => window.cancelAnimationFrame(frame);
+  }, [announcement?.articleId, announcement?.version]);
+
+  if (!announcement) {
+    return null;
+  }
+
+  const materials = informationMessageMaterials(announcement.materials);
+
+  async function acknowledge() {
+    if (
+      !announcement ||
+      !reachedEnd ||
+      isAcknowledging ||
+      announcement.acknowledgedByMe
+    ) {
+      return;
+    }
+
+    setIsAcknowledging(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `/api/staff/knowledge-base/${encodeURIComponent(
+          announcement.articleId,
+        )}/read-receipts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            note: "Ознакомлен из командного чата",
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { message?: string }
+          | null;
+        throw new Error(payload?.message ?? "Не удалось отметить ознакомление.");
+      }
+
+      onClose();
+      router.refresh();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Ошибка при ознакомлении.",
+      );
+    } finally {
+      setIsAcknowledging(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`information-message-${message.id}`}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="flex max-h-[min(46rem,calc(100vh-2rem))] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+              Информация и объявления
+            </p>
+            <h2
+              id={`information-message-${message.id}`}
+              className="mt-1 text-xl font-semibold"
+            >
+              {announcement.title}
+            </h2>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Версия {announcement.version} · {formatDateTime(message.updatedAt)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            Отмена
+          </button>
+        </header>
+
+        <div
+          ref={contentRef}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            if (
+              element.scrollTop + element.clientHeight >=
+              element.scrollHeight - 24
+            ) {
+              setReachedEnd(true);
+            }
+          }}
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
+        >
+          {announcement.summary ? (
+            <p className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-200">
+              {announcement.summary}
+            </p>
+          ) : null}
+          {announcement.content ? (
+            <KnowledgeArticleRichText
+              value={announcement.content}
+              className="mt-5"
+            />
+          ) : null}
+          {materials.length > 0 ? (
+            <div className="mt-5 space-y-3">
+              {materials.map((material) => (
+                <div
+                  key={material.id}
+                  className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800"
+                >
+                  <p className="text-sm font-semibold">{material.title}</p>
+                  {material.content ? (
+                    <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                      {material.content}
+                    </p>
+                  ) : null}
+                  {material.type === "IMAGE" && material.url ? (
+                    <img
+                      src={material.url}
+                      alt={material.title}
+                      className="mt-3 max-h-[420px] w-full rounded-md border border-zinc-200 object-contain dark:border-zinc-800"
+                    />
+                  ) : null}
+                  {material.url ? (
+                    <a
+                      href={material.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
+                    >
+                      Открыть материал
+                    </a>
+                  ) : null}
+                  {material.note ? (
+                    <p className="mt-2 text-xs text-zinc-500">{material.note}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {announcement.acknowledgedByMe
+              ? "Вы уже подтвердили ознакомление с этой версией."
+              : reachedEnd
+                ? "Текст прочитан до конца. Можно подтвердить ознакомление."
+                : "Прокрутите сообщение до конца, чтобы подтвердить ознакомление."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              onClick={acknowledge}
+              disabled={
+                !reachedEnd || isAcknowledging || announcement.acknowledgedByMe
+              }
+              className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {announcement.acknowledgedByMe
+                ? "Ознакомлен"
+                : isAcknowledging
+                  ? "Отмечаем..."
+                  : "Ознакомлен"}
+            </button>
+          </div>
+          {error ? (
+            <p className="w-full text-sm font-semibold text-red-600 dark:text-red-300">
+              {error}
+            </p>
+          ) : null}
+        </footer>
+      </section>
+    </div>
   );
 }
 

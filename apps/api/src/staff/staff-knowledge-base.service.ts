@@ -16,6 +16,10 @@ const articleStatuses = [
   'PUBLISHED',
   'ARCHIVED',
 ] as const;
+const articleKinds = ['ARTICLE', 'INFORMATION'] as const;
+const INFORMATION_CHANNEL_NAME = 'Информация и объявления';
+const INFORMATION_CHANNEL_DESCRIPTION =
+  'Официальные объявления, регламенты и важные сообщения для всей сети.';
 const roleScopes = [
   'ALL_STAFF',
   'ADMINISTRATOR',
@@ -60,6 +64,7 @@ const DEFAULT_REVISION_SLA_MATERIAL_EXTRA_DAYS = {
 } as const;
 
 export type StaffKnowledgeArticleStatus = (typeof articleStatuses)[number];
+export type StaffKnowledgeArticleKind = (typeof articleKinds)[number];
 export type StaffKnowledgeRoleScope = (typeof roleScopes)[number];
 export type StaffKnowledgeMaterialType = (typeof materialTypes)[number];
 
@@ -88,6 +93,7 @@ export type StaffKnowledgeBaseQuery = {
 };
 
 export type StaffKnowledgeArticleDto = {
+  kind?: StaffKnowledgeArticleKind;
   title?: string;
   summary?: string | null;
   content?: string | null;
@@ -198,6 +204,7 @@ export type StaffKnowledgeArticleSuggestion = {
 
 export type StaffKnowledgeArticleResponse = {
   id: string;
+  kind: StaffKnowledgeArticleKind;
   title: string;
   summary: string | null;
   content: string | null;
@@ -674,8 +681,15 @@ export class StaffKnowledgeBaseService {
     const data = await this.normalizeArticleData(tenantId, dto, {
       requireTitle: true,
     });
-    const status =
-      (data.status as StaffKnowledgeArticleStatus | undefined) ?? 'DRAFT';
+    const kind =
+      (data.kind as StaffKnowledgeArticleKind | undefined) ?? 'ARTICLE';
+    const isInformationMessage = kind === 'INFORMATION';
+    const status = isInformationMessage
+      ? 'PUBLISHED'
+      : ((data.status as StaffKnowledgeArticleStatus | undefined) ?? 'DRAFT');
+    if (isInformationMessage) {
+      this.assertInformationMessageContent(data.content);
+    }
     this.assertKnowledgeWriteAllowed(user, status, { isCreate: true });
     const now = new Date();
     const revisionSlaPolicy = await this.getRevisionSlaPolicy(tenantId);
@@ -700,7 +714,11 @@ export class StaffKnowledgeBaseService {
         data: {
           ...(data as Prisma.StaffKnowledgeArticleUncheckedCreateInput),
           tenantId,
+          kind,
           status,
+          requiresReading: isInformationMessage
+            ? true
+            : this.normalizeBoolean(data.requiresReading, false),
           createdByUserId: user.id,
           reviewRequestedAt: status === 'REVIEW' ? now : null,
           approvedAt: status === 'PUBLISHED' ? now : null,
@@ -716,6 +734,10 @@ export class StaffKnowledgeBaseService {
 
       if (status === 'PUBLISHED') {
         await this.createArticleVersion(tx, article, user.id);
+      }
+
+      if (isInformationMessage) {
+        await this.upsertInformationMessage(tx, tenantId, article, user.id);
       }
 
       return tx.staffKnowledgeArticle.findUniqueOrThrow({
@@ -750,10 +772,12 @@ export class StaffKnowledgeBaseService {
       where: { id, tenantId },
       select: {
         id: true,
+        kind: true,
         status: true,
         publishedAt: true,
         returnedAt: true,
         roleScope: true,
+        content: true,
         materials: true,
         revisionSlaDays: true,
       },
@@ -766,9 +790,24 @@ export class StaffKnowledgeBaseService {
     const data = await this.normalizeArticleData(tenantId, dto, {
       requireTitle: false,
     });
-    const nextStatus =
+    if (data.kind === 'INFORMATION' && current.kind !== 'INFORMATION') {
+      throw new BadRequestException(
+        'Information messages must be created as a separate item',
+      );
+    }
+    const isInformationMessage = current.kind === 'INFORMATION';
+    const requestedStatus =
       (data.status as StaffKnowledgeArticleStatus | undefined) ??
       (current.status as StaffKnowledgeArticleStatus);
+    const nextStatus =
+      isInformationMessage && requestedStatus !== 'ARCHIVED'
+        ? 'PUBLISHED'
+        : requestedStatus;
+    if (isInformationMessage && nextStatus === 'PUBLISHED') {
+      this.assertInformationMessageContent(
+        data.content === undefined ? current.content : data.content,
+      );
+    }
     this.assertKnowledgeWriteAllowed(user, nextStatus);
     const now = new Date();
     const shouldCreateVersion = nextStatus === 'PUBLISHED';
@@ -802,6 +841,8 @@ export class StaffKnowledgeBaseService {
         where: { id: current.id },
         data: {
           ...data,
+          kind: current.kind,
+          ...(isInformationMessage ? { requiresReading: true } : {}),
           reviewRequestedAt: nextStatus === 'REVIEW' ? now : undefined,
           approvedAt: nextStatus === 'PUBLISHED' ? now : undefined,
           returnedAt:
@@ -832,6 +873,10 @@ export class StaffKnowledgeBaseService {
 
       if (shouldCreateVersion) {
         await this.createArticleVersion(tx, article, user.id);
+      }
+
+      if (isInformationMessage && nextStatus === 'PUBLISHED') {
+        await this.upsertInformationMessage(tx, tenantId, article, user.id);
       }
 
       if (nextStatus === 'RETURNED') {
@@ -1379,12 +1424,104 @@ export class StaffKnowledgeBaseService {
     return Math.abs(hash).toString(36);
   }
 
+  private async upsertInformationMessage(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    article: {
+      id: string;
+      title: string;
+      summary: string | null;
+      storeId: string | null;
+    },
+    authorUserId: string,
+  ) {
+    const channel = await tx.staffChatChannel.upsert({
+      where: {
+        tenantId_name: {
+          tenantId,
+          name: INFORMATION_CHANNEL_NAME,
+        },
+      },
+      create: {
+        tenantId,
+        name: INFORMATION_CHANNEL_NAME,
+        description: INFORMATION_CHANNEL_DESCRIPTION,
+        scope: 'NETWORK',
+        isDefault: true,
+      },
+      update: {
+        description: INFORMATION_CHANNEL_DESCRIPTION,
+        scope: 'NETWORK',
+        isDefault: true,
+        isArchived: false,
+        storeId: null,
+        roleScope: null,
+      },
+      select: { id: true },
+    });
+    const body = [`Информационное сообщение: ${article.title}`, article.summary]
+      .filter((part): part is string => Boolean(part))
+      .join('\n')
+      .slice(0, 8_000);
+
+    await tx.staffChatMessage.upsert({
+      where: {
+        tenantId_dedupeKey: {
+          tenantId,
+          dedupeKey: `knowledge-information:${article.id}`,
+        },
+      },
+      create: {
+        tenantId,
+        channelId: channel.id,
+        authorUserId,
+        storeId: article.storeId,
+        knowledgeArticleId: article.id,
+        body,
+        kind: 'ANNOUNCEMENT',
+        priority: 'HIGH',
+        dedupeKey: `knowledge-information:${article.id}`,
+      },
+      update: {
+        channelId: channel.id,
+        authorUserId,
+        storeId: article.storeId,
+        knowledgeArticleId: article.id,
+        body,
+        kind: 'ANNOUNCEMENT',
+        priority: 'HIGH',
+      },
+    });
+
+    await tx.staffChatChannel.update({
+      where: { id: channel.id },
+      data: { updatedAt: new Date() },
+      select: { id: true },
+    });
+  }
+
+  private assertInformationMessageContent(value: unknown) {
+    const content = typeof value === 'string' ? value : '';
+    const text = content
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&(nbsp|#160);/gi, ' ')
+      .trim();
+
+    if (!text) {
+      throw new BadRequestException('Information message content is required');
+    }
+  }
+
   private async normalizeArticleData(
     tenantId: string,
     dto: StaffKnowledgeArticleDto,
     options: { requireTitle: boolean },
   ): Promise<Prisma.StaffKnowledgeArticleUncheckedUpdateInput> {
     const data: Prisma.StaffKnowledgeArticleUncheckedUpdateInput = {};
+
+    if (dto.kind !== undefined || options.requireTitle) {
+      data.kind = this.resolveOne(dto.kind, articleKinds, 'ARTICLE');
+    }
 
     if (dto.title !== undefined || options.requireTitle) {
       data.title = this.normalizeRequiredString(
@@ -1790,6 +1927,7 @@ export class StaffKnowledgeBaseService {
 
     return {
       id: row.id,
+      kind: row.kind as StaffKnowledgeArticleKind,
       title: row.title,
       summary: row.summary,
       content: row.content,

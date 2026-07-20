@@ -16,6 +16,7 @@ import {
 import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import type {
   StaffKnowledgeArticle,
+  StaffKnowledgeArticleKind,
   StaffKnowledgeArticleSuggestion,
   StaffKnowledgeArticleStatus,
   StaffKnowledgeBaseReport,
@@ -102,6 +103,7 @@ const revisionSlaMaterialTypeOrder: StaffKnowledgeMaterialType[] = [
 
 type DraftArticle = {
   id: string | null;
+  kind: StaffKnowledgeArticleKind;
   title: string;
   summary: string;
   content: string;
@@ -120,7 +122,7 @@ type DraftArticle = {
 };
 
 const seedArticles: Array<
-  Omit<DraftArticle, "id" | "storeId" | "revisionSlaDays">
+  Omit<DraftArticle, "id" | "kind" | "storeId" | "revisionSlaDays">
 > = [
   {
     title: "Кассовая дисциплина смены",
@@ -304,6 +306,7 @@ function uid(prefix: string) {
 function defaultDraft(): DraftArticle {
   return {
     id: null,
+    kind: "ARTICLE",
     title: "",
     summary: "",
     content: "",
@@ -325,6 +328,7 @@ function defaultDraft(): DraftArticle {
 function fromArticle(row: StaffKnowledgeArticle): DraftArticle {
   return {
     id: row.id,
+    kind: row.kind,
     title: row.title,
     summary: row.summary ?? "",
     content: row.content ?? "",
@@ -341,6 +345,25 @@ function fromArticle(row: StaffKnowledgeArticle): DraftArticle {
     relatedLinks: row.relatedLinks,
     approvalNote: row.approvalNote ?? "",
   };
+}
+
+function informationMessageDraft(): DraftArticle {
+  return {
+    ...defaultDraft(),
+    kind: "INFORMATION",
+    status: "PUBLISHED",
+    folder: "Информация",
+    category: "Объявления",
+    templateKey: "information-message",
+    requiresReading: true,
+  };
+}
+
+function hasRichTextContent(value: string) {
+  return value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&(nbsp|#160);/gi, " ")
+    .trim().length > 0;
 }
 
 function draftSnapshot(draft: DraftArticle) {
@@ -694,6 +717,7 @@ export function StaffKnowledgeBaseWorkspace({
     report.canEditKnowledge ||
     report.canReviewKnowledge ||
     report.canPublishKnowledge;
+  const isInformationMessage = draft.kind === "INFORMATION";
   function canSaveStatus(status: StaffKnowledgeArticleStatus) {
     if (status === "PUBLISHED" || status === "ARCHIVED") {
       return report.canPublishKnowledge;
@@ -706,7 +730,9 @@ export function StaffKnowledgeBaseWorkspace({
     return canSaveArticle;
   }
 
-  const canSaveCurrentStatus = canSaveStatus(draft.status);
+  const canSaveCurrentStatus = isInformationMessage
+    ? report.canPublishKnowledge
+    : canSaveStatus(draft.status);
   const effectiveRevisionSlaDays = draft.revisionSlaDays.trim()
     ? Number(draft.revisionSlaDays)
     : defaultRevisionSlaDays(
@@ -866,6 +892,15 @@ export function StaffKnowledgeBaseWorkspace({
     }
   }
 
+  function startInformationMessage() {
+    const nextDraft = informationMessageDraft();
+    setDraft(nextDraft);
+    setSavedDraftSnapshot(draftSnapshot(nextDraft));
+    setMessage(null);
+    setError(null);
+    setIsBuilderOpen(true);
+  }
+
   function updateDraft(patch: Partial<DraftArticle>) {
     setDraft((current) => ({ ...current, ...patch }));
     setMessage(null);
@@ -877,9 +912,15 @@ export function StaffKnowledgeBaseWorkspace({
   }
 
   function loadSeed(
-    seed: Omit<DraftArticle, "id" | "storeId" | "revisionSlaDays">,
+    seed: Omit<DraftArticle, "id" | "kind" | "storeId" | "revisionSlaDays">,
   ) {
-    setDraft({ ...seed, id: null, storeId: "", revisionSlaDays: "" });
+    setDraft({
+      ...seed,
+      id: null,
+      kind: "ARTICLE",
+      storeId: "",
+      revisionSlaDays: "",
+    });
     setMessage("Черновик загружен. Проверьте текст и сохраните статью.");
     setError(null);
     setIsBuilderOpen(true);
@@ -888,6 +929,7 @@ export function StaffKnowledgeBaseWorkspace({
   function loadSuggestion(suggestion: StaffKnowledgeArticleSuggestion) {
     setDraft({
       id: null,
+      kind: "ARTICLE",
       title: suggestion.draft.title,
       summary: suggestion.draft.summary,
       content: suggestion.draft.content,
@@ -1036,7 +1078,14 @@ export function StaffKnowledgeBaseWorkspace({
       return false;
     }
 
-    const targetStatus = statusOverride ?? draft.status;
+    if (isInformationMessage && !hasRichTextContent(draft.content)) {
+      setError("Заполните текст информационного сообщения.");
+      return false;
+    }
+
+    const targetStatus = isInformationMessage
+      ? "PUBLISHED"
+      : (statusOverride ?? draft.status);
 
     if (!canSaveStatus(targetStatus)) {
       setError("У вашей роли нет прав на изменение базы знаний.");
@@ -1048,6 +1097,7 @@ export function StaffKnowledgeBaseWorkspace({
     setMessage(null);
 
     const payload = {
+      kind: draft.kind,
       title: draft.title.trim(),
       summary: draft.summary.trim() || null,
       content: draft.content.trim() || null,
@@ -1126,7 +1176,11 @@ export function StaffKnowledgeBaseWorkspace({
       const savedDraft = fromArticle(saved);
       setDraft(savedDraft);
       setSavedDraftSnapshot(draftSnapshot(savedDraft));
-      setMessage("Статья сохранена.");
+      setMessage(
+        saved.kind === "INFORMATION"
+          ? "Информационное сообщение опубликовано в ветке «Информация и объявления»."
+          : "Статья сохранена.",
+      );
       router.refresh();
       return true;
     } catch (caught) {
@@ -1397,7 +1451,7 @@ export function StaffKnowledgeBaseWorkspace({
         </details>
       ) : null}
 
-      {report.canEditKnowledge ? (
+      {report.canEditKnowledge || report.canPublishKnowledge ? (
         <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -1408,13 +1462,24 @@ export function StaffKnowledgeBaseWorkspace({
                 Заготовки для базы знаний
               </h2>
             </div>
-            <button
-              type="button"
-              onClick={() => guardAction(() => loadArticle(null))}
-              className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 shadow-sm transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-            >
-              Новая статья
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => guardAction(() => loadArticle(null))}
+                className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 shadow-sm transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+              >
+                Новая статья
+              </button>
+              {report.canPublishKnowledge ? (
+                <button
+                  type="button"
+                  onClick={() => guardAction(startInformationMessage)}
+                  className="h-10 rounded-md border border-emerald-300 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 transition hover:border-emerald-400 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100 dark:hover:bg-emerald-500/15"
+                >
+                  Новое информационное сообщение
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -1590,7 +1655,13 @@ export function StaffKnowledgeBaseWorkspace({
                     Конструктор
                   </p>
                   <h2 className="mt-1 text-lg font-semibold">
-                    {draft.id ? "Редактирование статьи" : "Новая статья"}
+                    {draft.id
+                      ? isInformationMessage
+                        ? "Редактирование информационного сообщения"
+                        : "Редактирование статьи"
+                      : isInformationMessage
+                        ? "Новое информационное сообщение"
+                        : "Новая статья"}
                   </h2>
                 </div>
                 <span className="rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
@@ -1606,7 +1677,13 @@ export function StaffKnowledgeBaseWorkspace({
                     Конструктор
                   </p>
                   <h2 className="mt-1 text-lg font-semibold">
-                    {draft.id ? "Редактирование статьи" : "Новая статья"}
+                    {draft.id
+                      ? isInformationMessage
+                        ? "Редактирование информационного сообщения"
+                        : "Редактирование статьи"
+                      : isInformationMessage
+                        ? "Новое информационное сообщение"
+                        : "Новая статья"}
                   </h2>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {[
@@ -1686,36 +1763,61 @@ export function StaffKnowledgeBaseWorkspace({
                   />
                 </label>
 
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Статус
-                  </span>
-                  <select
-                    value={draft.status}
-                    onChange={(event) =>
-                      updateDraft({
-                        status: event.target.value as StaffKnowledgeArticleStatus,
-                      })
-                    }
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  >
-                    {statusOptions.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {isInformationMessage ? (
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      Публикация
+                    </span>
+                    <div className="flex h-11 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-100">
+                      Будет опубликовано в «Информация и объявления»
+                    </div>
+                  </div>
+                ) : (
+                  <label className="space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      Статус
+                    </span>
+                    <select
+                      value={draft.status}
+                      onChange={(event) =>
+                        updateDraft({
+                          status: event.target.value as StaffKnowledgeArticleStatus,
+                        })
+                      }
+                      className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                    >
+                      {statusOptions.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
 
               <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
-                <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                  Workflow:
-                </span>{" "}
-                черновики редактируют роли с правом базы знаний, согласование
-                ведут проверяющие, публикация и архив требуют отдельного
-                права публикатора. Публикация создает новую версию, а
-                обязательные статьи попадают в контроль прочтения.
+                {isInformationMessage ? (
+                  <>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      Информационное сообщение:
+                    </span>{" "}
+                    сразу публикуется в ветке «Информация и объявления» и
+                    требует от выбранных сотрудников подтверждения после
+                    полного прочтения. Каждое сохранение новой версии снова
+                    запросит ознакомление.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      Workflow:
+                    </span>{" "}
+                    черновики редактируют роли с правом базы знаний, согласование
+                    ведут проверяющие, публикация и архив требуют отдельного
+                    права публикатора. Публикация создает новую версию, а
+                    обязательные статьи попадают в контроль прочтения.
+                  </>
+                )}
               </div>
 
               <div className="mt-3 grid gap-3 lg:grid-cols-4">
@@ -1815,16 +1917,22 @@ export function StaffKnowledgeBaseWorkspace({
               </div>
 
               <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
-                <label className="inline-flex min-h-11 items-center gap-3 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700">
-                  <input
-                    type="checkbox"
-                    checked={draft.requiresReading}
-                    onChange={(event) =>
-                      updateDraft({ requiresReading: event.target.checked })
-                    }
-                  />
-                  Обязательное прочтение сотрудниками
-                </label>
+                {isInformationMessage ? (
+                  <div className="flex min-h-11 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-100">
+                    Ознакомление сотрудников обязательно
+                  </div>
+                ) : (
+                  <label className="inline-flex min-h-11 items-center gap-3 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={draft.requiresReading}
+                      onChange={(event) =>
+                        updateDraft({ requiresReading: event.target.checked })
+                      }
+                    />
+                    Обязательное прочтение сотрудниками
+                  </label>
+                )}
 
                 <label className="space-y-1">
                   <span className="text-xs font-bold uppercase text-zinc-500">
@@ -2307,6 +2415,11 @@ export function StaffKnowledgeBaseWorkspace({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-base font-semibold">{row.title}</h3>
+                        {row.kind === "INFORMATION" ? (
+                          <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700 dark:bg-sky-500/15 dark:text-sky-200">
+                            Информационное сообщение
+                          </span>
+                        ) : null}
                         {report.canManageKnowledge ? (
                           <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                             {statusLabels[row.status]}

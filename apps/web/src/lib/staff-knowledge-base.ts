@@ -7,6 +7,7 @@ export type StaffKnowledgeArticleStatus =
   | "RETURNED"
   | "PUBLISHED"
   | "ARCHIVED";
+export type StaffKnowledgeArticleKind = "ARTICLE" | "INFORMATION";
 export type StaffKnowledgeRoleScope =
   | "ALL_STAFF"
   | "ADMINISTRATOR"
@@ -124,6 +125,7 @@ export type StaffKnowledgeReadReceipt = {
 
 export type StaffKnowledgeArticle = {
   id: string;
+  kind: StaffKnowledgeArticleKind;
   title: string;
   summary: string | null;
   content: string | null;

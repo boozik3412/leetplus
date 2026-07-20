@@ -73,6 +73,16 @@ export type StaffChatMessage = {
     actorUser: StaffChatUser | null;
   }>;
   mentions: StaffChatUser[];
+  knowledgeAnnouncement: {
+    articleId: string;
+    title: string;
+    summary: string | null;
+    content: string | null;
+    version: number;
+    materials: unknown[];
+    acknowledgedByMe: boolean;
+    acknowledgedAt: string | null;
+  } | null;
 };
 
 export type StaffTeamChatFilters = {

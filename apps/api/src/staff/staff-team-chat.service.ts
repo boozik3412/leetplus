@@ -217,6 +217,17 @@ export type StaffChatMessageEditResponse = {
   actorUser: { id: string; email: string; fullName: string | null } | null;
 };
 
+export type StaffChatKnowledgeAnnouncementResponse = {
+  articleId: string;
+  title: string;
+  summary: string | null;
+  content: string | null;
+  version: number;
+  materials: unknown[];
+  acknowledgedByMe: boolean;
+  acknowledgedAt: string | null;
+};
+
 export type StaffChatMessageResponse = {
   id: string;
   channelId: string;
@@ -237,6 +248,7 @@ export type StaffChatMessageResponse = {
   attachments: StaffChatMessageAttachmentResponse[];
   editHistory: StaffChatMessageEditResponse[];
   mentions: StaffChatUserResponse[];
+  knowledgeAnnouncement: StaffChatKnowledgeAnnouncementResponse | null;
 };
 
 const channelInclude = {
@@ -254,6 +266,17 @@ const messageInclude = {
   channel: { select: { name: true } },
   authorUser: { select: { id: true, email: true, fullName: true } },
   store: { select: { id: true, name: true, isActive: true } },
+  knowledgeArticle: {
+    select: {
+      id: true,
+      kind: true,
+      title: true,
+      summary: true,
+      content: true,
+      version: true,
+      materials: true,
+    },
+  },
   readReceipts: { select: { userId: true } },
   attachments: {
     include: {
@@ -347,22 +370,24 @@ export class StaffTeamChatService {
       await this.reconcileShiftReportMessages(tenantId, activeChannel.id);
     }
 
-    const stats = await this.buildChannelStats(
-      tenantId,
-      user.id,
-      channels.map((channel) => channel.id),
-    );
-
-    const messages = activeChannel
-      ? await this.prisma.staffChatMessage.findMany({
-          where: this.buildMessageWhere(tenantId, activeChannel.id, filters),
+    const audienceWhere = await this.buildMessageAudienceWhere(user, tenantId);
+    const channelIds = channels.map((channel) => channel.id);
+    const messagesPromise = activeChannel
+      ? this.prisma.staffChatMessage.findMany({
+          where: this.buildMessageWhere(
+            tenantId,
+            activeChannel.id,
+            filters,
+            audienceWhere,
+          ),
           include: messageInclude,
           orderBy: { createdAt: 'desc' },
           take: filters.pageSize,
         })
-      : [];
-
-    const [stores, users] = await Promise.all([
+      : Promise.resolve([] as StaffChatMessageRow[]);
+    const [stats, messages, stores, users] = await Promise.all([
+      this.buildChannelStats(tenantId, user.id, channelIds, audienceWhere),
+      messagesPromise,
       this.prisma.store.findMany({
         where: { tenantId },
         select: { id: true, name: true, isActive: true },
@@ -374,6 +399,11 @@ export class StaffTeamChatService {
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),
     ]);
+    const acknowledgementMap = await this.getKnowledgeAnnouncementReceipts(
+      tenantId,
+      user.id,
+      messages,
+    );
 
     const totals = Array.from(stats.values()).reduce(
       (acc, item) => ({
@@ -398,7 +428,7 @@ export class StaffTeamChatService {
         this.toChannelResponse(channel, stats.get(channel.id)),
       ),
       messages: messages.map((message) =>
-        this.toMessageResponse(message, user),
+        this.toMessageResponse(message, user, acknowledgementMap),
       ),
       stores,
       users,
@@ -447,7 +477,13 @@ export class StaffTeamChatService {
     }
 
     const channelIds = channels.map((channel) => channel.id);
-    const stats = await this.buildChannelStats(tenantId, user.id, channelIds);
+    const audienceWhere = await this.buildMessageAudienceWhere(user, tenantId);
+    const stats = await this.buildChannelStats(
+      tenantId,
+      user.id,
+      channelIds,
+      audienceWhere,
+    );
     const totals = Array.from(stats.values()).reduce(
       (acc, item) => ({
         messages: acc.messages + item.messagesCount,
@@ -861,16 +897,29 @@ export class StaffTeamChatService {
       dto.channelId,
     );
 
+    const audienceWhere = await this.buildMessageAudienceWhere(user, tenantId);
     const messageId = this.normalizeOptionalString(dto.messageId);
     const messageIds = messageId
-      ? [await this.resolveMessageId(tenantId, channel.id, messageId)]
+      ? [
+          await this.resolveMessageId(
+            tenantId,
+            channel.id,
+            messageId,
+            audienceWhere,
+          ),
+        ]
       : (
           await this.prisma.staffChatMessage.findMany({
             where: {
-              tenantId,
-              channelId: channel.id,
-              authorUserId: { not: user.id },
-              readReceipts: { none: { userId: user.id } },
+              AND: [
+                {
+                  tenantId,
+                  channelId: channel.id,
+                  authorUserId: { not: user.id },
+                  readReceipts: { none: { userId: user.id } },
+                },
+                audienceWhere,
+              ],
             },
             select: { id: true },
             take: 1000,
@@ -1231,12 +1280,82 @@ export class StaffTeamChatService {
     };
   }
 
+  private async buildMessageAudienceWhere(
+    user: AuthenticatedUser,
+    tenantId: string,
+  ): Promise<Prisma.StaffChatMessageWhereInput> {
+    const articleWhere: Prisma.StaffKnowledgeArticleWhereInput = {
+      tenantId,
+      kind: 'INFORMATION',
+      status: 'PUBLISHED',
+      roleScope: { in: this.visibleKnowledgeRoleScopes(user.role) },
+    };
+
+    if (!this.canSeeAllChannels(user.role)) {
+      const storeIds = await this.getUserStoreIds(user.id);
+      articleWhere.OR =
+        storeIds.length > 0
+          ? [{ storeId: null }, { storeId: { in: storeIds } }]
+          : [{ storeId: null }];
+    }
+
+    return {
+      OR: [
+        { knowledgeArticleId: null },
+        { knowledgeArticle: { is: articleWhere } },
+      ],
+    };
+  }
+
+  private visibleKnowledgeRoleScopes(role: UserRole) {
+    const scopes = ['ALL_STAFF'];
+
+    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
+      scopes.push('ADMINISTRATOR');
+    }
+
+    if (role === UserRole.SENIOR_ADMINISTRATOR) {
+      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR');
+    }
+
+    if (role === UserRole.CLUB_MANAGER) {
+      scopes.push('ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'CLUB_MANAGER');
+    }
+
+    if (
+      role === UserRole.MANAGER ||
+      role === UserRole.OWNER ||
+      role === UserRole.ADMIN
+    ) {
+      scopes.push(
+        'ADMINISTRATOR',
+        'SENIOR_ADMINISTRATOR',
+        'CLUB_MANAGER',
+        'MANAGER',
+        'STANDARDS_MANAGER',
+      );
+    }
+
+    if (role === UserRole.STANDARDS_MANAGER) {
+      scopes.push(
+        'ADMINISTRATOR',
+        'SENIOR_ADMINISTRATOR',
+        'CLUB_MANAGER',
+        'STANDARDS_MANAGER',
+      );
+    }
+
+    return Array.from(new Set(scopes));
+  }
+
   private buildMessageWhere(
     tenantId: string,
     channelId: string,
     filters: StaffTeamChatReport['filters'],
+    audienceWhere: Prisma.StaffChatMessageWhereInput,
   ): Prisma.StaffChatMessageWhereInput {
     const where: Prisma.StaffChatMessageWhereInput = { tenantId, channelId };
+    const and: Prisma.StaffChatMessageWhereInput[] = [audienceWhere];
 
     if (filters.search) {
       where.body = { contains: filters.search, mode: 'insensitive' };
@@ -1264,6 +1383,8 @@ export class StaffTeamChatService {
       where.isPinned = true;
     }
 
+    where.AND = and;
+
     return where;
   }
 
@@ -1271,6 +1392,7 @@ export class StaffTeamChatService {
     tenantId: string,
     userId: string,
     channelIds: string[],
+    audienceWhere: Prisma.StaffChatMessageWhereInput,
   ) {
     const stats = new Map<string, ChannelStats>();
 
@@ -1297,12 +1419,21 @@ export class StaffTeamChatService {
     ] = await Promise.all([
       this.prisma.staffChatMessage.groupBy({
         by: ['channelId'],
-        where: { tenantId, channelId: { in: channelIds } },
+        where: {
+          tenantId,
+          channelId: { in: channelIds },
+          AND: [audienceWhere],
+        },
         _count: { _all: true },
       }),
       this.prisma.staffChatMessage.groupBy({
         by: ['channelId'],
-        where: { tenantId, channelId: { in: channelIds }, isPinned: true },
+        where: {
+          tenantId,
+          channelId: { in: channelIds },
+          isPinned: true,
+          AND: [audienceWhere],
+        },
         _count: { _all: true },
       }),
       this.prisma.staffChatMessage.groupBy({
@@ -1312,6 +1443,7 @@ export class StaffTeamChatService {
           channelId: { in: channelIds },
           OR: [{ authorUserId: null }, { authorUserId: { not: userId } }],
           readReceipts: { none: { userId } },
+          AND: [audienceWhere],
         },
         _count: { _all: true },
       }),
@@ -1324,12 +1456,17 @@ export class StaffTeamChatService {
             channelId: { in: channelIds },
             OR: [{ authorUserId: null }, { authorUserId: { not: userId } }],
             readReceipts: { none: { userId } },
+            AND: [audienceWhere],
           },
         },
         select: { message: { select: { channelId: true } } },
       }),
       this.prisma.staffChatMessage.findMany({
-        where: { tenantId, channelId: { in: channelIds } },
+        where: {
+          tenantId,
+          channelId: { in: channelIds },
+          AND: [audienceWhere],
+        },
         distinct: ['channelId'],
         orderBy: [{ channelId: 'asc' }, { createdAt: 'desc' }],
         select: { channelId: true, createdAt: true },
@@ -2074,9 +2211,15 @@ export class StaffTeamChatService {
     tenantId: string,
     channelId: string,
     messageId: string,
+    audienceWhere?: Prisma.StaffChatMessageWhereInput,
   ) {
     const message = await this.prisma.staffChatMessage.findFirst({
-      where: { id: messageId, tenantId, channelId },
+      where: {
+        AND: [
+          { id: messageId, tenantId, channelId },
+          ...(audienceWhere ? [audienceWhere] : []),
+        ],
+      },
       select: { id: true },
     });
 
@@ -2199,14 +2342,55 @@ export class StaffTeamChatService {
     };
   }
 
+  private async getKnowledgeAnnouncementReceipts(
+    tenantId: string,
+    userId: string,
+    messages: StaffChatMessageRow[],
+  ) {
+    const articleIds = Array.from(
+      new Set(
+        messages
+          .map((message) => message.knowledgeArticle?.id ?? null)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+
+    if (articleIds.length === 0) {
+      return new Map<string, Date>();
+    }
+
+    const receipts =
+      await this.prisma.staffKnowledgeArticleReadReceipt.findMany({
+        where: { tenantId, userId, articleId: { in: articleIds } },
+        select: { articleId: true, version: true, readAt: true },
+      });
+
+    return new Map(
+      receipts.map((receipt) => [
+        `${receipt.articleId}:${receipt.version}`,
+        receipt.readAt,
+      ]),
+    );
+  }
+
   private toMessageResponse(
     message: StaffChatMessageRow,
     user: AuthenticatedUser,
+    acknowledgementMap: Map<string, Date> = new Map(),
   ): StaffChatMessageResponse {
     const isShiftReport = this.isShiftReportMessage(
       message.channel,
       message.body,
     );
+
+    const announcement =
+      message.knowledgeArticle?.kind === 'INFORMATION'
+        ? message.knowledgeArticle
+        : null;
+    const acknowledgedAt = announcement
+      ? (acknowledgementMap.get(`${announcement.id}:${announcement.version}`) ??
+        null)
+      : null;
 
     return {
       id: message.id,
@@ -2249,6 +2433,20 @@ export class StaffTeamChatService {
         actorUser: event.actorUser,
       })),
       mentions: message.mentions.map((mention) => mention.mentionedUser),
+      knowledgeAnnouncement: announcement
+        ? {
+            articleId: announcement.id,
+            title: announcement.title,
+            summary: announcement.summary,
+            content: announcement.content,
+            version: announcement.version,
+            materials: Array.isArray(announcement.materials)
+              ? announcement.materials
+              : [],
+            acknowledgedByMe: Boolean(acknowledgedAt),
+            acknowledgedAt: acknowledgedAt?.toISOString() ?? null,
+          }
+        : null,
     };
   }
 

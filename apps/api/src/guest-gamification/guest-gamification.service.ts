@@ -27972,6 +27972,7 @@ function normalizeSessionType(value: string) {
   if (
     [
       'packet_hours',
+      'package_or_subscription',
       'packet',
       'package',
       'package_hours',
@@ -27986,7 +27987,9 @@ function normalizeSessionType(value: string) {
   }
 
   if (
-    ['regular_session', 'regular', 'common', 'default'].includes(normalized)
+    ['hourly', 'regular_session', 'regular', 'common', 'default'].includes(
+      normalized,
+    )
   ) {
     return 'regular_session';
   }

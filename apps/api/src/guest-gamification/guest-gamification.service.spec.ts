@@ -6601,6 +6601,50 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('maps canonical recovery session classes to legacy lootbox session types', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({ id: 'hourly', sessionType: 'regular_session' }),
+        activeLootBox({
+          id: 'package',
+          sessionType: 'packet_hours',
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const packageResult = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+        sessionPacket: true,
+      });
+      const hourlyResult = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'HOURLY',
+        sessionPacket: false,
+      });
+
+      expect(packageResult.rules).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'package', eligible: true }),
+          expect.objectContaining({ id: 'hourly', eligible: false }),
+        ]),
+      );
+      expect(hourlyResult.rules).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'hourly', eligible: true }),
+          expect.objectContaining({ id: 'package', eligible: false }),
+        ]),
+      );
+    });
+
     it('allows an explicit manual open to evaluate a reward-template lootbox', async () => {
       const { service } = createService();
 

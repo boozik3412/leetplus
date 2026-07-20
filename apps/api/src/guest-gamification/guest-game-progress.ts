@@ -108,19 +108,12 @@ export function evaluateGuestGameProgress(
       eventType: '__REFERENCE__',
       occurredAt: new Date(),
     } satisfies GuestGameProgressEvent);
-  const uniqueHistoryEvents = currentEvent?.sourceFactId
-    ? historyEvents.filter(
-        (event) => event.sourceFactId !== currentEvent.sourceFactId,
-      )
-    : historyEvents;
-  const allEvents = [
-    ...uniqueHistoryEvents,
-    ...(currentEvent ? [currentEvent] : []),
-  ].filter((event) =>
-    matchesProgressEvent(rule, conditions, metric, event, referenceEvent, {
-      eventTypes,
-      windowDays,
-    }),
+  const allEvents = dedupeProgressEvents(currentEvent, historyEvents).filter(
+    (event) =>
+      matchesProgressEvent(rule, conditions, metric, event, referenceEvent, {
+        eventTypes,
+        windowDays,
+      }),
   );
   const current = progressValue(aggregation, allEvents, rule.timeZone);
   const productCoverageComplete = productCoverageMatches(
@@ -140,6 +133,75 @@ export function evaluateGuestGameProgress(
     unit: rule.progressUnit ?? progressString(metric.unit) ?? null,
     windowDays,
   };
+}
+
+function dedupeProgressEvents(
+  currentEvent: GuestGameProgressEvent | null,
+  historyEvents: GuestGameProgressEvent[],
+): GuestGameProgressEvent[] {
+  type ProgressEventCandidate = {
+    event: GuestGameProgressEvent;
+    current: boolean;
+  };
+  const selectedBySourceFact = new Map<string, ProgressEventCandidate>();
+  const eventsWithoutSourceFact: GuestGameProgressEvent[] = [];
+  const candidates: ProgressEventCandidate[] = [
+    ...historyEvents.map((event) => ({ event, current: false })),
+    ...(currentEvent ? [{ event: currentEvent, current: true }] : []),
+  ];
+
+  for (const candidate of candidates) {
+    const sourceFactId = physicalProgressSourceFactId(
+      candidate.event.sourceFactId,
+    );
+    if (!sourceFactId) {
+      eventsWithoutSourceFact.push(candidate.event);
+      continue;
+    }
+
+    const selected = selectedBySourceFact.get(sourceFactId);
+    if (!selected || progressEventPreferred(candidate, selected)) {
+      selectedBySourceFact.set(sourceFactId, candidate);
+    }
+  }
+
+  return [
+    ...Array.from(selectedBySourceFact.values(), ({ event }) => event),
+    ...eventsWithoutSourceFact,
+  ];
+}
+
+function progressEventPreferred(
+  candidate: { event: GuestGameProgressEvent; current: boolean },
+  selected: { event: GuestGameProgressEvent; current: boolean },
+) {
+  if (candidate.current !== selected.current) {
+    return candidate.current;
+  }
+
+  const candidateIsPackage = isPackageProgressClassification(candidate.event);
+  const selectedIsPackage = isPackageProgressClassification(selected.event);
+  if (candidateIsPackage !== selectedIsPackage) {
+    return candidateIsPackage;
+  }
+
+  return candidate.event.occurredAt > selected.event.occurredAt;
+}
+
+function physicalProgressSourceFactId(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+
+  // Older package-correction events briefly used a version suffix in the
+  // source-fact id. It still represents the same physical Langame session.
+  return normalized.replace(/:classification:package(?:[-_]?v)?\d+$/i, '');
+}
+
+function isPackageProgressClassification(event: GuestGameProgressEvent) {
+  return (
+    event.sessionPacket === true ||
+    normalizeProgressSessionType(event.sessionType) === 'packet_hours'
+  );
 }
 
 export function guestGameTriggerMatches(
@@ -328,20 +390,20 @@ function matchesWeekdays(
   timeZone?: string | null,
 ) {
   const weekdays = progressNumberArray(metric.weekdays ?? conditions.weekdays);
+  const weekdayMode = normalizeProgressToken(
+    progressString(metric.weekdayMode ?? conditions.weekdayMode),
+  );
+  const weekdaysOnly =
+    metric.weekdaysOnly === true || conditions.weekdaysOnly === true;
+  const expectedWeekdays =
+    weekdayMode === 'WEEKDAYS' || weekdaysOnly
+      ? [1, 2, 3, 4, 5]
+      : weekdayMode === 'WEEKENDS'
+        ? [0, 6]
+        : weekdays;
   const weekday = localWeekday(occurredAt, timeZone);
 
-  if (weekdays.length && !weekdays.includes(weekday)) {
-    return false;
-  }
-
-  if (
-    (metric.weekdaysOnly === true || conditions.weekdaysOnly === true) &&
-    [0, 6].includes(weekday)
-  ) {
-    return false;
-  }
-
-  return true;
+  return !expectedWeekdays.length || expectedWeekdays.includes(weekday);
 }
 
 function matchesHours(

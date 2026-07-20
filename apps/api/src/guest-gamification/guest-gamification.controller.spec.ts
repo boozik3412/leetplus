@@ -10,13 +10,21 @@ type ReplayHandlerName =
   | 'previewBattlePassRuleReplay'
   | 'applyBattlePassRuleReplay'
   | 'previewExactPlayTimeCanonicalization'
-  | 'applyExactPlayTimeCanonicalization';
+  | 'applyExactPlayTimeCanonicalization'
+  | 'previewLootBoxEntitlementReconciliation'
+  | 'applyLootBoxEntitlementReconciliation'
+  | 'previewLootBoxEntitlementOverLimitRepair'
+  | 'applyLootBoxEntitlementOverLimitRepair';
 
 const replayHandlerNames: ReplayHandlerName[] = [
   'previewBattlePassRuleReplay',
   'applyBattlePassRuleReplay',
   'previewExactPlayTimeCanonicalization',
   'applyExactPlayTimeCanonicalization',
+  'previewLootBoxEntitlementReconciliation',
+  'applyLootBoxEntitlementReconciliation',
+  'previewLootBoxEntitlementOverLimitRepair',
+  'applyLootBoxEntitlementOverLimitRepair',
 ];
 
 function replayContext(

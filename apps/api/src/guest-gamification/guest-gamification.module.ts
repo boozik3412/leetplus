@@ -13,6 +13,8 @@ import { GuestGameDataRetentionSchedulerService } from './guest-game-data-retent
 import { GuestGameDataRetentionService } from './guest-game-data-retention.service';
 import { GuestGameLedgerFallbackSchedulerService } from './guest-game-ledger-fallback-scheduler.service';
 import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
+import { GuestGameLootBoxSessionRecoverySchedulerService } from './guest-game-loot-box-session-recovery-scheduler.service';
+import { GuestGameLootBoxSessionRecoveryService } from './guest-game-loot-box-session-recovery.service';
 import { GuestGameQualityMonitoringSchedulerService } from './guest-game-quality-monitoring-scheduler.service';
 import { GuestGameQualityMonitoringService } from './guest-game-quality-monitoring.service';
 import { GuestGameRewardMaterializerSchedulerService } from './guest-game-reward-materializer-scheduler.service';
@@ -45,6 +47,8 @@ import { GuestGamificationService } from './guest-gamification.service';
     GuestGameDataRetentionSchedulerService,
     GuestGameLedgerFallbackService,
     GuestGameLedgerFallbackSchedulerService,
+    GuestGameLootBoxSessionRecoveryService,
+    GuestGameLootBoxSessionRecoverySchedulerService,
     GuestGameQualityMonitoringService,
     GuestGameMediaService,
     GuestGameQualityMonitoringSchedulerService,

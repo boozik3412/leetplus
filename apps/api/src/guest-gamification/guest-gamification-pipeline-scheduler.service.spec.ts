@@ -96,6 +96,19 @@ describe('GuestGamificationPipelineSchedulerService', () => {
     });
   });
 
+  it('keeps the ordinary scheduler tick active while historical backfill is OFF', async () => {
+    const { gamificationService, service } = createService({
+      GUEST_GAME_PIPELINE_BACKFILL_MODE: 'OFF',
+      GUEST_GAME_PIPELINE_BACKFILL_KILL_SWITCH: 'true',
+    });
+
+    await service.runOnce();
+
+    expect(
+      gamificationService.runSnapshotPipelineScheduled,
+    ).toHaveBeenCalledWith({ dryRunOnly: false, limit: 30 });
+  });
+
   it('skips overlapping ticks', async () => {
     const { gamificationService, service } = createService();
     let resolveRun:

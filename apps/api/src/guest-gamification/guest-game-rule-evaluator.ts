@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client';
 
+import { guestGameTriggerMatches } from './guest-game-progress';
+
 export type GuestGameLedgerRule = {
   type: string;
   id: string;
@@ -13,6 +15,7 @@ export type GuestGameLedgerRule = {
   periodRules: Prisma.JsonValue | null;
   storeIds: string[];
   externalDomains?: string[];
+  domainTimeZones?: Record<string, string>;
   progressTarget: number | null;
   progressUnit: string | null;
 };
@@ -31,10 +34,34 @@ export type GuestGameLedgerFact = {
   durationMinutes: number | null;
   evidence: Prisma.JsonValue | null;
   store: { timeZone: string | null } | null;
+  sourceExternalId?: string | null;
+  sourceHash?: string | null;
+  sessionExternalId?: string | null;
+};
+
+export type GuestGameLedgerEvaluationMode =
+  | 'EVENT_PARITY'
+  | 'HISTORICAL_RECOVERY';
+
+export type GuestGameLedgerEvaluationContext = {
+  mode: GuestGameLedgerEvaluationMode;
+  sourceEventType?: string | null;
+  sourceFactId?: string | null;
+  sourceExternalId?: string | null;
+  sourceOriginKey?: string | null;
+  sourceSessionExternalId?: string | null;
+  occurredAt?: Date | null;
+  correlationWindowMs?: number;
 };
 
 export type GuestGameLedgerProgress = {
-  aggregation: 'count' | 'sum' | 'duration' | 'distinctDays' | 'exists';
+  aggregation:
+    | 'count'
+    | 'sum'
+    | 'duration'
+    | 'distinctDays'
+    | 'exists'
+    | 'streak';
   current: number;
   target: number;
   unit: string | null;
@@ -55,14 +82,28 @@ export function evaluateGuestGameLedgerRule(
   facts: GuestGameLedgerFact[],
   selectedStoreId: string | null,
   evaluatedAt = new Date(),
+  context: GuestGameLedgerEvaluationContext = {
+    mode: 'HISTORICAL_RECOVERY',
+  },
 ): GuestGameLedgerEvaluation {
   const relevantFactTypes = relevantGuestGameFacts(
     rule.triggerKind,
     rule.sessionType,
   );
-  const candidates = facts.filter((fact) =>
+  const relevantCandidates = facts.filter((fact) =>
     relevantFactTypes.includes(fact.factType),
   );
+  const eventParity = prepareEventParityCandidates(
+    rule,
+    relevantCandidates,
+    selectedStoreId,
+    evaluatedAt,
+    context,
+  );
+  if ('evaluation' in eventParity) {
+    return eventParity.evaluation;
+  }
+  const candidates = eventParity.candidates;
 
   if (candidates.length === 0) {
     return {
@@ -80,51 +121,9 @@ export function evaluateGuestGameLedgerRule(
   const insufficient = new Set<string>();
 
   for (const fact of candidates) {
-    const happenedAt = fact.happenedAt ?? fact.createdAt;
-    const factBlockers: string[] = [];
-    const factInsufficient: string[] = [];
-    const domainScopedFact =
-      fact.factType === 'BALANCE_TOPUP' && fact.storeId === null;
-    const ruleExternalDomains = rule.externalDomains ?? [];
-
-    if (happenedAt < rule.activatedAt) {
-      factBlockers.push('факт произошел до активации правила');
-    }
-    if (rule.periodFrom && happenedAt < rule.periodFrom) {
-      factBlockers.push('факт произошел до начала периода правила');
-    }
-    if (rule.periodTo && happenedAt > rule.periodTo) {
-      factBlockers.push('факт произошел после окончания периода правила');
-    }
-    if (selectedStoreId && fact.storeId && fact.storeId !== selectedStoreId) {
-      factBlockers.push('факт относится к другому выбранному клубу');
-    }
-    if (rule.storeIds.length > 0 && !domainScopedFact) {
-      if (!fact.storeId) {
-        factInsufficient.push('у факта не определен клуб');
-      } else if (!rule.storeIds.includes(fact.storeId)) {
-        factBlockers.push('клуб факта не входит в область правила');
-      }
-    }
-    if (domainScopedFact && rule.storeIds.length > 0) {
-      if (ruleExternalDomains.length === 0) {
-        factInsufficient.push('у выбранных клубов не определён домен Langame');
-      } else if (!fact.externalDomain) {
-        factInsufficient.push('у доменного факта не определён домен Langame');
-      } else if (!ruleExternalDomains.includes(fact.externalDomain)) {
-        factBlockers.push(
-          'домен факта не входит в область выбранных клубов правила',
-        );
-      }
-    }
-
-    const periodResult = evaluateGuestGamePeriod(
-      rule.periodRules,
-      happenedAt,
-      fact.store?.timeZone ?? null,
-    );
-    factBlockers.push(...periodResult.blockers);
-    factInsufficient.push(...periodResult.insufficient);
+    const scope = evaluateLedgerFactScope(rule, fact, selectedStoreId);
+    const factBlockers = scope.blockers;
+    const factInsufficient = scope.insufficient;
 
     if (!factBlockers.length && !factInsufficient.length) {
       matched.push(fact);
@@ -190,6 +189,334 @@ export function evaluateGuestGameLedgerRule(
   };
 }
 
+function prepareEventParityCandidates(
+  rule: GuestGameLedgerRule,
+  candidates: GuestGameLedgerFact[],
+  selectedStoreId: string | null,
+  evaluatedAt: Date,
+  context: GuestGameLedgerEvaluationContext,
+):
+  | { candidates: GuestGameLedgerFact[] }
+  | { evaluation: GuestGameLedgerEvaluation } {
+  if (context.mode !== 'EVENT_PARITY') {
+    return { candidates };
+  }
+
+  const sourceEventType = nullableString(context.sourceEventType);
+  if (!sourceEventType) {
+    return {
+      evaluation: ledgerEventParityBlocked('EVENT_PARITY_SOURCE_EVENT_MISSING'),
+    };
+  }
+
+  if (!ledgerTriggerMatchesSourceEvent(rule.triggerKind, sourceEventType)) {
+    return {
+      evaluation: ledgerEventParityBlocked(
+        `EVENT_TRIGGER_MISMATCH: ${sourceEventType} does not satisfy ${rule.triggerKind ?? 'UNKNOWN'}`,
+      ),
+    };
+  }
+
+  if (candidates.length === 0) {
+    return { candidates };
+  }
+
+  const anchors = candidates.filter((fact) =>
+    ledgerFactCorrelatesWithCurrentEvent(fact, context),
+  );
+  if (anchors.length === 0) {
+    return {
+      evaluation: {
+        status: 'NO_MATCH',
+        reason: 'EVENT_PARITY_CURRENT_FACT_NOT_FOUND',
+        reasons: [],
+        blockers: ['EVENT_PARITY_CURRENT_FACT_NOT_FOUND'],
+        facts: [],
+        progress: null,
+      },
+    };
+  }
+
+  const scopedAnchors: GuestGameLedgerFact[] = [];
+  const anchorBlockers = new Set<string>();
+  const anchorInsufficient = new Set<string>();
+  for (const anchor of anchors) {
+    const scope = evaluateLedgerFactScope(rule, anchor, selectedStoreId);
+    const constraints = evaluateEventParityAnchorConstraints(
+      rule,
+      anchor,
+      evaluatedAt,
+    );
+    const blockers = [...scope.blockers, ...constraints.blockers];
+    const insufficient = [...scope.insufficient, ...constraints.insufficient];
+    if (blockers.length === 0 && insufficient.length === 0) {
+      scopedAnchors.push(anchor);
+      continue;
+    }
+    blockers.forEach((reason) => anchorBlockers.add(reason));
+    insufficient.forEach((reason) => anchorInsufficient.add(reason));
+  }
+
+  if (scopedAnchors.length === 0) {
+    const blockers = [...anchorBlockers, ...anchorInsufficient];
+    return {
+      evaluation: {
+        status:
+          anchorBlockers.size === 0 && anchorInsufficient.size > 0
+            ? 'INSUFFICIENT_DATA'
+            : 'BLOCKED',
+        reason: `EVENT_PARITY_CURRENT_FACT_OUT_OF_SCOPE: ${blockers.join('; ')}`,
+        reasons: [],
+        blockers: ['EVENT_PARITY_CURRENT_FACT_OUT_OF_SCOPE', ...blockers],
+        facts: anchors,
+        progress: null,
+      },
+    };
+  }
+
+  // A cumulative condition may use earlier facts, but only after the current
+  // event has been independently observed in the ledger and passed the rule
+  // scope itself. One-shot rules must never be unlocked by an unrelated
+  // historical fact.
+  return {
+    candidates: guestGameLedgerRuleIsCumulative(rule)
+      ? candidates
+      : scopedAnchors,
+  };
+}
+
+function evaluateLedgerFactScope(
+  rule: GuestGameLedgerRule,
+  fact: GuestGameLedgerFact,
+  selectedStoreId: string | null,
+) {
+  const happenedAt = fact.happenedAt ?? fact.createdAt;
+  const blockers: string[] = [];
+  const insufficient: string[] = [];
+  const domainScopedFact =
+    fact.factType === 'BALANCE_TOPUP' && fact.storeId === null;
+  const ruleExternalDomains = rule.externalDomains ?? [];
+
+  if (happenedAt < rule.activatedAt) {
+    blockers.push('факт произошел до активации правила');
+  }
+  if (rule.periodFrom && happenedAt < rule.periodFrom) {
+    blockers.push('факт произошел до начала периода правила');
+  }
+  if (rule.periodTo && happenedAt > rule.periodTo) {
+    blockers.push('факт произошел после окончания периода правила');
+  }
+  if (selectedStoreId && fact.storeId && fact.storeId !== selectedStoreId) {
+    blockers.push('факт относится к другому выбранному клубу');
+  }
+  if (rule.storeIds.length > 0 && !domainScopedFact) {
+    if (!fact.storeId) {
+      insufficient.push('у факта не определен клуб');
+    } else if (!rule.storeIds.includes(fact.storeId)) {
+      blockers.push('клуб факта не входит в область правила');
+    }
+  }
+  if (domainScopedFact && rule.storeIds.length > 0) {
+    if (ruleExternalDomains.length === 0) {
+      insufficient.push('у выбранных клубов не определён домен Langame');
+    } else if (!fact.externalDomain) {
+      insufficient.push('у доменного факта не определён домен Langame');
+    } else if (!ruleExternalDomains.includes(fact.externalDomain)) {
+      blockers.push('домен факта не входит в область выбранных клубов правила');
+    }
+  }
+
+  const periodResult = evaluateGuestGamePeriod(
+    rule.periodRules,
+    happenedAt,
+    ledgerFactTimeZone(rule, fact),
+  );
+  blockers.push(...periodResult.blockers);
+  insufficient.push(...periodResult.insufficient);
+
+  return { blockers, insufficient };
+}
+
+function evaluateEventParityAnchorConstraints(
+  rule: GuestGameLedgerRule,
+  anchor: GuestGameLedgerFact,
+  evaluatedAt: Date,
+) {
+  const conditions = jsonObject(rule.periodRules) ?? {};
+  const metric = jsonObject(conditions.metric) ?? {};
+  const blockers: string[] = [];
+  const insufficient: string[] = [];
+  const happenedAt = anchor.happenedAt ?? anchor.createdAt;
+  const windowDays = numericValue(metric.windowDays ?? conditions.windowDays);
+  if (
+    windowDays !== null &&
+    windowDays > 0 &&
+    happenedAt.getTime() < evaluatedAt.getTime() - windowDays * 86_400_000
+  ) {
+    blockers.push(`current fact is outside the last ${windowDays} days`);
+  }
+
+  const productFilter = filterLedgerProductFacts([anchor], conditions, metric);
+  if (productFilter.status === 'INSUFFICIENT_DATA') {
+    insufficient.push(productFilter.reason);
+  } else if (productFilter.status === 'BLOCKED') {
+    blockers.push(productFilter.reason);
+  }
+
+  const minSessionMinutes = numericValue(
+    metric.minSessionMinutes ?? conditions.minSessionMinutes,
+  );
+  if (
+    minSessionMinutes !== null &&
+    Math.max(0, anchor.durationMinutes ?? 0) < minSessionMinutes
+  ) {
+    blockers.push(
+      `current session is shorter than ${minSessionMinutes} minutes`,
+    );
+  }
+
+  const amountComparison = normalizeLedgerToken(
+    nullableString(metric.amountComparison ?? conditions.amountComparison),
+  );
+  const configuredAmount = numericValue(
+    metric.topupAmount ??
+      conditions.topupAmount ??
+      metric.amount ??
+      conditions.amount,
+  );
+  const exactRequiredAmount =
+    numericValue(metric.exactSpendAmount ?? conditions.exactSpendAmount) ??
+    (anchor.factType === 'BALANCE_TOPUP' &&
+    ['exact', 'equal', 'equals'].includes(amountComparison)
+      ? configuredAmount
+      : null);
+  if (
+    exactRequiredAmount !== null &&
+    Math.abs(decimalNumber(anchor.amount) - exactRequiredAmount) >= 0.005
+  ) {
+    blockers.push(`current fact amount is not exactly ${exactRequiredAmount}`);
+  }
+
+  const minSpendAmount =
+    numericValue(metric.minSpendAmount ?? conditions.minSpendAmount) ??
+    (['at_least', 'minimum', 'min'].includes(amountComparison)
+      ? configuredAmount
+      : null);
+  if (
+    minSpendAmount !== null &&
+    decimalNumber(anchor.amount) < minSpendAmount
+  ) {
+    blockers.push(`current fact amount is below ${minSpendAmount}`);
+  }
+
+  return { blockers, insufficient };
+}
+
+function ledgerTriggerMatchesSourceEvent(
+  triggerKind: string | null,
+  sourceEventType: string,
+) {
+  if (guestGameTriggerMatches(triggerKind, sourceEventType)) {
+    return true;
+  }
+
+  const trigger = normalizeLedgerToken(triggerKind).toUpperCase();
+  const sourceEvent = normalizeLedgerToken(sourceEventType).toUpperCase();
+  return (
+    (trigger.includes('PLAY_TIME') || trigger.includes('TIME_PLAYED')) &&
+    ['PLAY_HOUR', 'SESSION_STOP'].includes(sourceEvent)
+  );
+}
+
+function ledgerFactCorrelatesWithCurrentEvent(
+  fact: GuestGameLedgerFact,
+  context: GuestGameLedgerEvaluationContext,
+) {
+  const sourceIdentifiers = new Set(
+    [
+      context.sourceFactId,
+      context.sourceExternalId,
+      context.sourceSessionExternalId,
+    ]
+      .map(nullableString)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const evidence = jsonObject(fact.evidence) ?? {};
+  const strongFactIdentifiers = [
+    fact.sourceExternalId,
+    fact.sessionExternalId,
+    evidence.sourceFactId,
+    evidence.sourceExternalId,
+    evidence.sessionExternalId,
+    evidence.externalId,
+    evidence.sessionId,
+  ]
+    .map(nullableString)
+    .filter((value): value is string => Boolean(value));
+
+  if (
+    sourceIdentifiers.has(fact.id) ||
+    strongFactIdentifiers.some((value) => sourceIdentifiers.has(value))
+  ) {
+    return true;
+  }
+
+  const sourceOriginKey = nullableString(context.sourceOriginKey);
+  if (
+    sourceOriginKey &&
+    sourceOriginKey === nullableString(evidence.originKey)
+  ) {
+    return true;
+  }
+
+  // Do not override a conflicting stable identity with a timestamp guess.
+  if (strongFactIdentifiers.length > 0) {
+    return false;
+  }
+
+  const occurredAt = context.occurredAt;
+  const factAt = fact.happenedAt ?? fact.createdAt;
+  if (!occurredAt || Number.isNaN(occurredAt.getTime())) {
+    return false;
+  }
+  const correlationWindowMs = Math.max(
+    0,
+    context.correlationWindowMs ?? 90_000,
+  );
+  return (
+    Math.abs(factAt.getTime() - occurredAt.getTime()) <= correlationWindowMs
+  );
+}
+
+function guestGameLedgerRuleIsCumulative(rule: GuestGameLedgerRule) {
+  const conditions = jsonObject(rule.periodRules) ?? {};
+  const metric = jsonObject(conditions.metric) ?? {};
+  const aggregation = normalizeLedgerToken(
+    nullableString(metric.aggregation) ??
+      nullableString(conditions.aggregation),
+  );
+  const target =
+    numericValue(metric.target ?? conditions.progressTarget) ??
+    rule.progressTarget ??
+    null;
+
+  return (
+    ['sum', 'duration', 'distinctdays', 'streak'].includes(aggregation) ||
+    (target !== null && target > 1)
+  );
+}
+
+function ledgerEventParityBlocked(reason: string): GuestGameLedgerEvaluation {
+  return {
+    status: 'BLOCKED',
+    reason,
+    reasons: [],
+    blockers: [reason],
+    facts: [],
+    progress: null,
+  };
+}
+
 function evaluateLedgerProgress(
   rule: GuestGameLedgerRule,
   facts: GuestGameLedgerFact[],
@@ -197,6 +524,11 @@ function evaluateLedgerProgress(
 ): GuestGameLedgerEvaluation {
   const conditions = jsonObject(rule.periodRules) ?? {};
   const metric = jsonObject(conditions.metric) ?? {};
+  const aggregation = ledgerAggregation(
+    nullableString(metric.aggregation) ??
+      nullableString(conditions.aggregation),
+    rule.progressUnit,
+  );
   const windowDays = numericValue(metric.windowDays ?? conditions.windowDays);
   const windowStart =
     windowDays && windowDays > 0
@@ -209,6 +541,8 @@ function evaluateLedgerProgress(
           windowStart.getTime(),
       )
     : facts;
+
+  qualifiedFacts = dedupeLedgerSessionFacts(qualifiedFacts, aggregation);
 
   if (windowStart && qualifiedFacts.length === 0) {
     const blocker = `Нет подходящих фактов за последние ${windowDays} дн.`;
@@ -307,17 +641,27 @@ function evaluateLedgerProgress(
     numericValue(metric.target) ??
     numericValue(conditions.progressTarget) ??
     rule.progressTarget;
-  const aggregation = ledgerAggregation(
-    nullableString(metric.aggregation) ??
-      nullableString(conditions.aggregation),
-    rule.progressUnit,
-  );
   const hasProgressDefinition =
     Object.keys(metric).length > 0 ||
     (explicitTarget !== null && explicitTarget > 1) ||
     ['minute', 'minutes', 'hour', 'hours', 'purchase', 'rub', 'day'].includes(
       normalizeLedgerToken(rule.progressUnit),
     );
+
+  if (
+    ['distinctDays', 'streak'].includes(aggregation) &&
+    qualifiedFacts.some((fact) => !localFactDateKey(rule, fact))
+  ) {
+    return {
+      status: 'INSUFFICIENT_DATA',
+      reason:
+        'Недостаточно данных: у факта не определён корректный часовой пояс клуба',
+      reasons: [],
+      blockers: ['LEDGER_LOCAL_DAY_TIMEZONE_MISSING'],
+      facts: qualifiedFacts,
+      progress: null,
+    };
+  }
 
   if (!hasProgressDefinition) {
     if (productCoverageBlocker) {
@@ -338,7 +682,7 @@ function evaluateLedgerProgress(
   }
 
   const target = ledgerTarget(explicitTarget ?? 1, rule.progressUnit);
-  const current = ledgerProgressValue(aggregation, qualifiedFacts);
+  const current = ledgerProgressValue(aggregation, qualifiedFacts, rule);
   const unit = ledgerProgressUnit(aggregation, rule.progressUnit);
   const progress: GuestGameLedgerProgress = {
     aggregation,
@@ -611,9 +955,14 @@ function ledgerAggregation(
 ): GuestGameLedgerProgress['aggregation'] {
   const value = normalizeLedgerToken(configured);
   if (
-    ['sum', 'duration', 'distinctdays', 'distinct_days', 'exists'].includes(
-      value,
-    )
+    [
+      'sum',
+      'duration',
+      'distinctdays',
+      'distinct_days',
+      'exists',
+      'streak',
+    ].includes(value)
   ) {
     return value === 'distinctdays' || value === 'distinct_days'
       ? 'distinctDays'
@@ -626,9 +975,74 @@ function ledgerAggregation(
   return 'count';
 }
 
+function dedupeLedgerSessionFacts(
+  facts: GuestGameLedgerFact[],
+  aggregation: GuestGameLedgerProgress['aggregation'],
+) {
+  if (!['count', 'duration', 'distinctDays', 'streak'].includes(aggregation)) {
+    return facts;
+  }
+
+  const selected = new Map<string, GuestGameLedgerFact>();
+  const unkeyed: GuestGameLedgerFact[] = [];
+  for (const fact of facts) {
+    if (!ledgerSessionFact(fact)) {
+      unkeyed.push(fact);
+      continue;
+    }
+    const identity =
+      nullableString(fact.sessionExternalId) ??
+      nullableString(fact.sourceExternalId);
+    if (!identity) {
+      unkeyed.push(fact);
+      continue;
+    }
+    const scope =
+      nullableString(fact.externalDomain) ?? nullableString(fact.storeId) ?? '';
+    const key = `${scope}\u0000${identity}`;
+    const current = selected.get(key);
+    if (!current || compareLedgerSessionFacts(fact, current, aggregation) > 0) {
+      selected.set(key, fact);
+    }
+  }
+
+  const retained = new Set([...selected.values(), ...unkeyed]);
+  return facts.filter((fact) => retained.has(fact));
+}
+
+function ledgerSessionFact(fact: GuestGameLedgerFact) {
+  return (
+    fact.factType.includes('SESSION') ||
+    fact.factType.includes('PLAY_TIME') ||
+    fact.factType === 'PACKAGE_OR_SUBSCRIPTION_USED'
+  );
+}
+
+function compareLedgerSessionFacts(
+  left: GuestGameLedgerFact,
+  right: GuestGameLedgerFact,
+  aggregation: GuestGameLedgerProgress['aggregation'],
+) {
+  const score = (fact: GuestGameLedgerFact) => [
+    fact.confidence === 'EXACT' ? 1 : 0,
+    fact.factType === 'SESSION_STARTED' ? 1 : 0,
+    aggregation === 'duration' ? Math.max(0, fact.durationMinutes ?? 0) : 0,
+    (fact.happenedAt ?? fact.createdAt).getTime(),
+    fact.createdAt.getTime(),
+  ];
+  const leftScore = score(left);
+  const rightScore = score(right);
+  for (let index = 0; index < leftScore.length; index += 1) {
+    const difference = leftScore[index] - rightScore[index];
+    if (difference !== 0) return difference;
+  }
+  return left.id.localeCompare(right.id);
+}
+
 function ledgerProgressValue(
   aggregation: GuestGameLedgerProgress['aggregation'],
   facts: GuestGameLedgerFact[],
+  rule: GuestGameLedgerRule,
 ) {
   if (aggregation === 'exists') return facts.length > 0 ? 1 : 0;
   if (aggregation === 'sum') {
@@ -646,11 +1060,12 @@ function ledgerProgressValue(
     );
   }
   if (aggregation === 'distinctDays') {
-    return new Set(
-      facts.map((fact) =>
-        (fact.happenedAt ?? fact.createdAt).toISOString().slice(0, 10),
-      ),
-    ).size;
+    return new Set(facts.map((fact) => localFactDateKey(rule, fact)!)).size;
+  }
+  if (aggregation === 'streak') {
+    return longestLedgerDayStreak(
+      facts.map((fact) => localFactDateKey(rule, fact)!),
+    );
   }
   return facts.length;
 }
@@ -771,6 +1186,47 @@ export function guestGameRuleExternalDomains(
   ];
 }
 
+export function guestGameRuleDomainTimeZones(
+  storeIds: string[],
+  stores: Array<{
+    id: string;
+    externalDomain: string | null;
+    timeZone: string | null;
+  }>,
+) {
+  if (storeIds.length === 0) return {};
+  const selectedStoreIds = new Set(storeIds);
+  const candidates = new Map<
+    string,
+    { timeZones: Set<string>; incomplete: boolean }
+  >();
+  for (const store of stores) {
+    if (!selectedStoreIds.has(store.id)) continue;
+    const domain = nullableString(store.externalDomain);
+    if (!domain) continue;
+    const candidate = candidates.get(domain) ?? {
+      timeZones: new Set<string>(),
+      incomplete: false,
+    };
+    const timeZone = nullableString(store.timeZone);
+    if (timeZone && validLedgerTimeZone(timeZone)) {
+      candidate.timeZones.add(timeZone);
+    } else {
+      candidate.incomplete = true;
+    }
+    candidates.set(domain, candidate);
+  }
+
+  return Object.fromEntries(
+    [...candidates.entries()]
+      .filter(
+        ([, candidate]) =>
+          !candidate.incomplete && candidate.timeZones.size === 1,
+      )
+      .map(([domain, candidate]) => [domain, [...candidate.timeZones][0]]),
+  );
+}
+
 export function guestGameSessionTypeFromConditions(
   conditions: Prisma.JsonValue | null,
 ) {
@@ -818,7 +1274,10 @@ export function relevantGuestGameFacts(
     if (session.includes('HOURLY') || session.includes('REGULAR')) {
       return ['HOURLY_SESSION_STARTED'];
     }
-    return ['SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED'];
+    // The normalizer emits SESSION_STARTED plus a package marker for the same
+    // physical package session. ANY-session rules count the canonical anchor
+    // only, otherwise one session can advance an N-session goal twice.
+    return ['SESSION_STARTED'];
   }
 
   if (
@@ -860,10 +1319,14 @@ function evaluateGuestGamePeriod(
   timeZone: string | null,
 ) {
   const rules = jsonObject(value) ?? {};
-  const weekdayMode = nullableString(rules.weekdayMode)?.toUpperCase();
-  const weekdays = numberValues(rules.weekdays);
-  const hours = guestGameStringArray(rules.hours);
-  const weekdaysOnly = rules.weekdaysOnly === true;
+  const metric = jsonObject(rules.metric) ?? {};
+  const weekdayMode = nullableString(
+    metric.weekdayMode ?? rules.weekdayMode,
+  )?.toUpperCase();
+  const weekdays = numberValues(metric.weekdays ?? rules.weekdays);
+  const hours = guestGameStringArray(metric.hours ?? rules.hours);
+  const weekdaysOnly =
+    metric.weekdaysOnly === true || rules.weekdaysOnly === true;
   const hasWeekdayRestriction =
     weekdays.length > 0 ||
     weekdaysOnly ||
@@ -947,6 +1410,67 @@ function localDateParts(value: Date, timeZone: string) {
     weekday,
     minutesOfDay: Number(part('hour')) * 60 + Number(part('minute')),
   };
+}
+
+function validLedgerTimeZone(timeZone: string) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ledgerFactTimeZone(
+  rule: GuestGameLedgerRule,
+  fact: GuestGameLedgerFact,
+) {
+  const storeTimeZone = nullableString(fact.store?.timeZone);
+  if (storeTimeZone) return storeTimeZone;
+  if (fact.factType !== 'BALANCE_TOPUP' || fact.storeId !== null) return null;
+  const domain = nullableString(fact.externalDomain);
+  return domain ? nullableString(rule.domainTimeZones?.[domain]) : null;
+}
+
+function localFactDateKey(
+  rule: GuestGameLedgerRule,
+  fact: GuestGameLedgerFact,
+) {
+  const timeZone = ledgerFactTimeZone(rule, fact);
+  if (!timeZone) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(fact.happenedAt ?? fact.createdAt);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((item) => item.type === type)?.value ?? '';
+    const year = part('year');
+    const month = part('month');
+    const day = part('day');
+    return year && month && day ? `${year}-${month}-${day}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function longestLedgerDayStreak(keys: string[]) {
+  const days = [...new Set(keys)]
+    .map((key) => Date.parse(`${key}T00:00:00Z`))
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  let longest = 0;
+  let current = 0;
+  let previous: number | null = null;
+  for (const day of days) {
+    current =
+      previous !== null && day - previous === 86_400_000 ? current + 1 : 1;
+    longest = Math.max(longest, current);
+    previous = day;
+  }
+  return longest;
 }
 
 function isWithinTimeWindow(minutesOfDay: number, window: string) {

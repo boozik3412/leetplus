@@ -884,6 +884,98 @@ describe('LIVE and activity-ledger evaluator parity', () => {
   });
 });
 
+describe('standalone SESSION_START case event parity', () => {
+  it.each([
+    {
+      name: 'Weekend accepts a current Sunday session',
+      conditions: { weekdayMode: 'WEEKENDS' },
+      historicalAt: '2026-07-18T05:00:00.000Z',
+      currentAt: '2026-07-19T05:00:00.000Z',
+      expectedMatched: true,
+    },
+    {
+      name: 'Weekend rejects a current Monday session despite old weekend history',
+      conditions: { weekdayMode: 'WEEKENDS' },
+      historicalAt: '2026-07-19T05:00:00.000Z',
+      currentAt: '2026-07-20T05:00:00.000Z',
+      expectedMatched: false,
+    },
+    {
+      name: 'Morning accepts a current session inside 08:00-14:00',
+      conditions: { hours: ['08:00-14:00'] },
+      historicalAt: '2026-07-19T04:00:00.000Z',
+      currentAt: '2026-07-20T03:00:00.000Z',
+      expectedMatched: true,
+    },
+    {
+      name: 'Morning rejects a current session outside 08:00-14:00 despite old morning history',
+      conditions: { hours: ['08:00-14:00'] },
+      historicalAt: '2026-07-19T04:00:00.000Z',
+      currentAt: '2026-07-20T09:01:00.000Z',
+      expectedMatched: false,
+    },
+  ])('$name', ({ conditions, historicalAt, currentAt, expectedMatched }) => {
+    const scenario: ParityScenario = {
+      name: `standalone-case:${currentAt}`,
+      triggerKind: 'SESSION_START',
+      sessionType: 'ANY',
+      progressTarget: 1,
+      progressUnit: 'session',
+      conditions: {
+        ...conditions,
+        metric: {
+          aggregation: 'exists',
+          eventTypes: ['SESSION_START'],
+          target: 1,
+        },
+      },
+      events: [],
+      expectedCompleted: expectedMatched,
+      expectedCurrent: expectedMatched ? 1 : 0,
+    };
+    const historicalEvent: PairedEvent = {
+      id: 'historical-session',
+      liveType: 'SESSION_START',
+      ledgerType: 'SESSION_STARTED',
+      happenedAt: historicalAt,
+      sessionType: 'regular_session',
+    };
+    const currentEvent: PairedEvent = {
+      id: 'current-session',
+      liveType: 'SESSION_START',
+      ledgerType: 'SESSION_STARTED',
+      happenedAt: currentAt,
+      sessionType: 'regular_session',
+    };
+
+    // Standalone case eligibility in LIVE is scoped to the event currently
+    // being processed. Ledger EVENT_PARITY receives history too, but must use
+    // the explicitly correlated current fact for a one-shot SESSION_START.
+    const live = evaluateGuestGameProgress(
+      liveRule(scenario),
+      liveEvent(currentEvent),
+      [],
+    );
+    const ledger = evaluateGuestGameLedgerRule(
+      { ...ledgerRule(scenario), type: 'LOOT_BOX' },
+      [ledgerFact(historicalEvent), ledgerFact(currentEvent)],
+      STORE_ID,
+      new Date(currentAt),
+      {
+        mode: 'EVENT_PARITY',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: currentEvent.id,
+        occurredAt: new Date(currentAt),
+      },
+    );
+
+    expect(live.current).toBe(expectedMatched ? 1 : 0);
+    expect(live.completed).toBe(expectedMatched);
+    expect(ledger.status === 'MATCHED').toBe(expectedMatched);
+    expect(ledger.facts.map((fact) => fact.id)).toEqual(['current-session']);
+  });
+});
+
 describe('ledger readiness gaps that must not be promoted to fallback', () => {
   it('does not treat a generic Langame visit as opening the game module', () => {
     expect(relevantGuestGameFacts('APP_OPEN', null)).toEqual(['APP_OPENED']);

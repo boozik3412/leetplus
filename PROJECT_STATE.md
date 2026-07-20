@@ -1,8 +1,8 @@
 # LeetPlus Project State
 
-## Mission wizard v2 and supplemental ledger layer (15.07.2026)
+## Mission wizard v2 and supplemental ledger layer (20.07.2026)
 
-- Added the embedded mission wizard route `/gamification/missions/wizard` with the three steps `Условия → Награды → Внешнее оформление`, DRAFT-only autosave, backend readiness-check and explicit activation confirmation. The legacy advanced editor remains available.
+- Added the embedded mission wizard route `/gamification/missions/wizard` with the three steps `Условия → Награды → Внешнее оформление`, DRAFT-only autosave, backend readiness-check and explicit activation confirmation. New and existing missions are created and edited through this wizard; the legacy mission editor is no longer exposed.
 - Mission definitions are versioned. Existing v1 missions remain on the current LIVE path; v2 `PLAY_TIME`, `PRODUCT_PURCHASE` and `CHECK_IN` missions use `LIVE_PRIMARY`, while v2 `BALANCE_TOPUP` missions are assigned `LEDGER_SUPPLEMENTAL` exclusively by the backend.
 - Added an isolated supplemental scheduler with `OFF`, `SHADOW` and `LIVE` modes, a kill switch, tenant scope, safe normalized evidence and stable `sourceExternalId` idempotency. Its allowed fact set is currently hard-limited to `BALANCE_TOPUP`.
 - Started a separate sequential `LIVE_WITH_LEDGER_FALLBACK` contour for play-time and later purchases: source-neutral `originKey`, strict execution-lane router, first-seen grace receipt, leased atomic claim and reuse of the existing `processEvent`/reward pipeline are implemented behind `OFF`. Additive migrations and atomic event/XP/reward-intent persistence are deployed; fallback rollout remains OFF. Play-time can use the stable session ID when Langame omits a generic row ID, while purchases still require a stable sale ID and cancellation/return reconciliation.
@@ -12,8 +12,12 @@
 - Category-based purchase missions explicitly select `LANGAME` or `LEETPLUS`. Langame rules match club-scoped `domain:groupId` values; LeetPlus rules match the internal `Category.id`. The wizard, LIVE evaluator and SHADOW ledger never combine the two selector sets implicitly.
 - Guest task cards now open a full modal rendered by the same React preview component used by the wizard. Quest covers use a dedicated tenant-owned media store with JPG/PNG/WebP signature validation and a 2 MB limit.
 - Supplemental production mode remains `OFF` by default. Production rollout must pass `SHADOW` diagnostics before `LIVE` is enabled; the existing LIVE snapshot pipeline is not replaced.
+- Session-start lootboxes now have an isolated Ledger recovery lane behind `OFF|SHADOW|LIVE`. It reuses the LIVE evaluator and the same atomic entitlement writer, and can materialize only an openable entitlement, never a random prize. Exact tenant/profile/cutoff scope and matching entitlement read scope are mandatory in LIVE; replay and parser-version changes are deduplicated by stable source identity.
+- Lootbox availability in `game-summary` can read the entitlement table through `OFF|CANARY|PRIMARY`. Earned daily entitlements remain openable after the source time window/day; period limits control a new entitlement, not the lifetime of an existing one.
+- The ordinary LIVE snapshot window remains the primary path. Historical anti-join recovery for guest-bound sessions and purchases is independently gated by `GUEST_GAME_PIPELINE_BACKFILL_MODE=OFF|SHADOW|LIVE` and defaults to `OFF`, where it executes no anti-join SQL. Every enabled mode requires an exact tenant and an explicitly false kill switch; `LIVE` also requires a timezone-qualified cutoff plus an exact profile unless tenant-wide rollout is explicitly allowed. `SHADOW` records diagnostic decisions only and cannot create event, XP, reward or entitlement. `PLAY_HOUR` is emitted only after a session has stopped, so an intermediate duration cannot seal a stale event before the final 60-minute boundary. The Ledger recovery lane remains secondary and acts only after the primary grace window.
+- Standalone cases, mission-target cases and Battle Pass lootbox rewards share entitlement limits and opening semantics. `STANDALONE` is directly earnable, `REWARD_TEMPLATE` is only granted by a mission or Battle Pass target, and `BOTH` supports both paths. Qualification never selects a random prize; the guest's manual open action does that exactly once.
 
-Last updated: 2026-07-18
+Last updated: 2026-07-20
 
 ## Current Workflow
 

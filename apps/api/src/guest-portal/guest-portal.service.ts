@@ -42,7 +42,6 @@ import {
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
-import { parseLangameDate } from '../integrations/langame-date';
 import type {
   LangameGuestBalancesPortalResult,
   LangameGuestDetailsPortalResult,
@@ -1623,6 +1622,8 @@ type GuestPortalRewardRow = {
 };
 
 type GuestPortalLootBoxUnlockEventRow = {
+  id?: string | null;
+  originKey?: string | null;
   eventType: string;
   occurredAt: Date;
   payload: Prisma.JsonValue | null;
@@ -3863,6 +3864,7 @@ export class GuestPortalService {
         externalId: eventExternalId,
         activeRulesOnly: true,
         suppressLootBoxRewards: true,
+        suppressLootBoxEntitlements: true,
         payload: {
           source: 'guest_portal_app_open',
           sourceFactId,
@@ -4151,45 +4153,13 @@ export class GuestPortalService {
       throw new BadRequestException('Лутбокс недоступен в выбранном клубе.');
     }
 
-    if (!portalLootBoxVisibleInCatalog(lootBox)) {
-      this.recordGameAuditEvent({
-        tenantId: context.tenant.id,
-        profileId: profile.id,
-        guestId: guest?.id ?? profile.guestId ?? null,
-        storeId: context.store.id,
-        entityType: 'LOOT_BOX',
-        entityId: lootBox.id,
-        action: 'LOOT_BOX_OPEN',
-        status: 'BLOCKED',
-        reasonCode: 'reward_template_only',
-        reasonText:
-          'Подарочный лутбокс доступен только как награда в задании или Battle Pass.',
-        traceId,
-        payload: {
-          lootBox: guestGameDebugLootBoxRule(lootBox),
-        },
-      });
-      this.logGuestGameDebug(
-        'open-failed',
-        {
-          traceId,
-          ...this.guestGameDebugPayloadScope(payload),
-          lootBox: guestGameDebugLootBoxRule(lootBox),
-          reason: 'loot_box_reward_template_only',
-        },
-        'warn',
-      );
-      throw new BadRequestException(
-        'Подарочный лутбокс можно получить только как награду в задании или Battle Pass.',
-      );
-    }
-
     const visualLootBoxRefs = await this.getPublishedVisualLootBoxRefs(
       context.tenant.id,
       context.store.id,
     );
 
     if (
+      portalLootBoxVisibleInCatalog(lootBox) &&
       visualLootBoxRefs &&
       !visualLootBoxRefsContain(visualLootBoxRefs, lootBox)
     ) {
@@ -4249,7 +4219,7 @@ export class GuestPortalService {
         this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
       ],
     );
-    const entitlement =
+    let entitlement =
       entitlementReadMode === 'OFF'
         ? null
         : await this.findPortalLootBoxEntitlement(
@@ -4262,23 +4232,78 @@ export class GuestPortalService {
             context.store.timeZone,
             openedAt,
           );
+    if (entitlementReadMode === 'PRIMARY' && !entitlement) {
+      const backfilled = await this.backfillPortalLootBoxEntitlementFromLegacy({
+        tenantId: context.tenant.id,
+        guestId: ownerGuestId,
+        profileId: profile.id,
+        storeId: context.store.id,
+        storeTimeZone: context.store.timeZone,
+        lootBox,
+        unlockEvents,
+        rewards: currentRewards,
+      });
+      entitlement = backfilled?.status === 'AVAILABLE' ? backfilled : null;
+    }
+    if (
+      !portalLootBoxVisibleInCatalog(lootBox) &&
+      !(entitlementReadMode === 'PRIMARY' && entitlement)
+    ) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        guestId: ownerGuestId,
+        storeId: context.store.id,
+        entityType: 'LOOT_BOX',
+        entityId: lootBox.id,
+        action: 'LOOT_BOX_OPEN',
+        status: 'BLOCKED',
+        reasonCode: 'reward_template_entitlement_required',
+        reasonText:
+          'Подарочный лутбокс доступен после выполнения задания или шага Battle Pass.',
+        traceId,
+        payload: {
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          entitlementRollout,
+        },
+      });
+      this.logGuestGameDebug(
+        'open-failed',
+        {
+          traceId,
+          ...this.guestGameDebugPayloadScope(payload),
+          lootBox: guestGameDebugLootBoxRule(lootBox),
+          reason: 'loot_box_reward_template_entitlement_required',
+          entitlementRollout,
+        },
+        'warn',
+      );
+      throw new BadRequestException(
+        'Подарочный лутбокс можно открыть только по выданному праву.',
+      );
+    }
     const entitlementUnlockEvent =
       entitlementReadMode === 'PRIMARY' && entitlement
         ? guestGameEntitlementToUnlockEvent(entitlement)
         : null;
-    const effectiveUnlockEvents = entitlementUnlockEvent
-      ? [entitlementUnlockEvent, ...unlockEvents]
-      : unlockEvents;
     const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
       liveSessionStartResult,
     );
+    const effectiveUnlockEvents =
+      entitlementReadMode === 'PRIMARY'
+        ? entitlementUnlockEvent
+          ? [entitlementUnlockEvent]
+          : []
+        : unlockEvents;
+    const effectiveLiveSessionStartUnlockEvent =
+      entitlementReadMode === 'PRIMARY' ? null : liveSessionStartUnlockEvent;
     const openState = buildLootBoxOpenState(
       lootBox,
       currentRewards,
       effectiveUnlockEvents,
       context.store.id,
       context.store.timeZone,
-      liveSessionStartUnlockEvent,
+      effectiveLiveSessionStartUnlockEvent,
       audienceMemberIds,
     );
     const unlockEvent = findLootBoxUnlockEvent(
@@ -4286,12 +4311,21 @@ export class GuestPortalService {
       effectiveUnlockEvents,
       context.store.id,
       context.store.timeZone,
-      liveSessionStartUnlockEvent,
+      effectiveLiveSessionStartUnlockEvent,
     );
     const unlockInput = unlockEvent
       ? portalEventToProgressEvent(unlockEvent)
       : null;
     const ruleOccurredAt = unlockEvent?.occurredAt ?? openedAt;
+    const entitlementToConsume =
+      entitlementReadMode === 'PRIMARY'
+        ? entitlement
+        : entitlementReadMode === 'SHADOW' &&
+            entitlement &&
+            unlockEvent &&
+            portalEntitlementMatchesUnlockEvent(entitlement, unlockEvent)
+          ? entitlement
+          : null;
 
     this.logGuestGameDebug('open-state', {
       traceId,
@@ -4529,7 +4563,7 @@ export class GuestPortalService {
       actor,
       processDto,
     );
-    if (entitlementReadMode === 'PRIMARY' && entitlement) {
+    if (entitlementToConsume) {
       const rewardId = processResult.rewards[0]?.id;
 
       if (!rewardId) {
@@ -4542,7 +4576,7 @@ export class GuestPortalService {
         tenantId: context.tenant.id,
         profileId: profile.id,
         lootBoxId: lootBox.id,
-        entitlementId: entitlement.id,
+        entitlementId: entitlementToConsume.id,
         rewardId,
         consumedAt: openedAt,
       });
@@ -7934,6 +7968,8 @@ export class GuestPortalService {
         OR: ownerFilters,
       },
       select: {
+        id: true,
+        originKey: true,
         eventType: true,
         occurredAt: true,
         payload: true,
@@ -8030,7 +8066,7 @@ export class GuestPortalService {
     storeId: string,
     lootBoxId: string,
     limits: Prisma.JsonValue | null,
-    storeTimeZone: string | null,
+    _storeTimeZone: string | null,
     now: Date,
   ) {
     const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
@@ -8039,31 +8075,27 @@ export class GuestPortalService {
     ];
     const isDaily =
       lootBoxPeriodicLimitPeriod(jsonRecord(limits).periodicLimit) === 'DAILY';
-    const timeZone = guestGameTimeZone(storeTimeZone);
-    const localDayStart = isDaily
-      ? guestGameLocalDayStart(now, timeZone)
-      : null;
 
-    if (isDaily && localDayStart) {
+    if (isDaily) {
       await this.prisma.guestGameEntitlement.updateMany({
         where: {
           tenantId,
           ruleType: 'LOOT_BOX',
           ruleId: lootBoxId,
-          status: 'AVAILABLE',
-          AND: [
-            { OR: ownerFilters },
-            { OR: [{ storeId: null }, { storeId }] },
-            {
-              OR: [
-                { validUntil: { lte: now } },
-                { validUntil: null, qualifiedAt: { lt: localDayStart } },
-              ],
-            },
-          ],
+          status: 'EXPIRED',
+          consumedAt: null,
+          canceledAt: null,
+          rewardId: null,
+          validUntil: { lte: now },
+          evidence: {
+            path: ['entitlementPeriod', 'kind'],
+            equals: 'DAILY',
+          },
+          AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
         },
         data: {
-          status: 'EXPIRED',
+          status: 'AVAILABLE',
+          validUntil: null,
         },
       });
     }
@@ -8078,8 +8110,232 @@ export class GuestPortalService {
         OR: ownerFilters,
         AND: [
           { OR: [{ storeId: null }, { storeId }] },
-          { OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
-          ...(localDayStart ? [{ qualifiedAt: { gte: localDayStart } }] : []),
+          ...(isDaily
+            ? []
+            : [{ OR: [{ validUntil: null }, { validUntil: { gt: now } }] }]),
+        ],
+      },
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  private async backfillPortalLootBoxEntitlementFromLegacy(input: {
+    tenantId: string;
+    guestId: string | null;
+    profileId: string;
+    storeId: string;
+    storeTimeZone: string | null;
+    lootBox: {
+      id: string;
+      name: string;
+      triggerKind: string;
+      sessionType?: string | null;
+      limits: Prisma.JsonValue | null;
+      periodRules: Prisma.JsonValue | null;
+    };
+    unlockEvents: GuestPortalLootBoxUnlockEventRow[];
+    rewards: GuestPortalRewardRow[];
+  }) {
+    const unlockEvent = portalLegacyLootBoxEntitlementBackfillEvent(
+      input.lootBox,
+      input.unlockEvents,
+      input.storeId,
+      input.storeTimeZone,
+    );
+    if (!unlockEvent?.id) return null;
+
+    const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
+      { profileId: input.profileId },
+      ...(input.guestId ? [{ guestId: input.guestId }] : []),
+    ];
+    const existing = await this.prisma.guestGameEntitlement.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        eventId: unlockEvent.id,
+        ruleType: 'LOOT_BOX',
+        ruleId: input.lootBox.id,
+        OR: ownerFilters,
+        AND: [{ OR: [{ storeId: null }, { storeId: input.storeId }] }],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    if (existing) return existing;
+
+    const limits = jsonRecord(input.lootBox.limits);
+    const periodicLimit = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
+    const eventStore = jsonRecord(jsonRecord(unlockEvent.payload).store);
+    const rawEntitlementTimeZone = eventStore.timeZone;
+    const entitlementTimeZone =
+      typeof rawEntitlementTimeZone === 'string' &&
+      rawEntitlementTimeZone.trim()
+        ? rawEntitlementTimeZone.trim()
+        : null;
+    if (periodicLimit === 'DAILY' && !entitlementTimeZone) return null;
+
+    const periodKey =
+      periodicLimit === 'DAILY' && entitlementTimeZone
+        ? guestGameLocalDateKey(unlockEvent.occurredAt, entitlementTimeZone)
+        : null;
+    const sourceIdentity = unlockEvent.originKey ?? unlockEvent.id;
+    const idempotencyKey =
+      periodicLimit === 'DAILY'
+        ? [
+            'loot-box',
+            input.lootBox.id,
+            'daily',
+            input.profileId,
+            periodKey,
+          ].join(':')
+        : ['loot-box', input.lootBox.id, sourceIdentity].join(':');
+    const consumedReward = input.rewards
+      .filter(
+        (reward) =>
+          reward.lootBoxId === input.lootBox.id &&
+          !['CANCELED', 'VOID', 'REJECTED'].includes(reward.status) &&
+          reward.qualifiedAt.getTime() >= unlockEvent.occurredAt.getTime(),
+      )
+      .sort(
+        (left, right) =>
+          left.qualifiedAt.getTime() - right.qualifiedAt.getTime(),
+      )[0];
+    const payload = jsonRecord(unlockEvent.payload);
+    const rawSourceFactId = payload.sourceFactId;
+    const sourceFactId =
+      typeof rawSourceFactId === 'string' && rawSourceFactId.trim()
+        ? rawSourceFactId.trim()
+        : null;
+    const rawSourceFactKind = payload.sourceFactKind;
+    const sourceFactKind =
+      typeof rawSourceFactKind === 'string' && rawSourceFactKind.trim()
+        ? rawSourceFactKind.trim()
+        : null;
+    const create = {
+      tenantId: input.tenantId,
+      profileId: input.profileId,
+      guestId: input.guestId,
+      storeId: input.storeId,
+      eventId: unlockEvent.id,
+      originKey: unlockEvent.originKey ?? null,
+      evaluationRunId: `legacy-loot-box-entitlement-backfill:${unlockEvent.id}`,
+      ruleType: 'LOOT_BOX',
+      ruleId: input.lootBox.id,
+      ruleName: input.lootBox.name,
+      sourceEventType: unlockEvent.eventType,
+      sourceFactId,
+      sourceFactKind,
+      traceId: null,
+      status: consumedReward ? 'CONSUMED' : 'AVAILABLE',
+      idempotencyKey,
+      qualifiedAt: unlockEvent.occurredAt,
+      validUntil: null,
+      consumedAt: consumedReward?.qualifiedAt ?? null,
+      canceledAt: null,
+      rewardId: consumedReward?.id ?? null,
+      evidence: {
+        evaluationMode: 'LEGACY_ENTITLEMENT_BACKFILL',
+        evaluatorVersion: 'persisted-event-rule-v1',
+        input: payload.input ?? {},
+        sourceEvidence: {
+          eventId: unlockEvent.id,
+          originKey: unlockEvent.originKey ?? null,
+        },
+        entitlementPeriod:
+          periodicLimit === 'DAILY'
+            ? {
+                kind: 'DAILY',
+                key: periodKey,
+                timeZone: entitlementTimeZone,
+              }
+            : null,
+      },
+    } satisfies Prisma.GuestGameEntitlementUncheckedCreateInput;
+
+    try {
+      return await this.prisma.guestGameEntitlement.upsert({
+        where: {
+          tenantId_idempotencyKey: {
+            tenantId: input.tenantId,
+            idempotencyKey,
+          },
+        },
+        create,
+        update: {},
+      });
+    } catch {
+      this.logger.warn(
+        `Legacy loot-box entitlement backfill failed closed for tenant ${input.tenantId}, rule ${input.lootBox.id}.`,
+      );
+      return null;
+    }
+  }
+
+  private async findPortalLootBoxEntitlements(
+    tenantId: string,
+    guestId: string | null,
+    profileId: string | null,
+    storeId: string,
+    lootBoxes: Array<{ id: string; limits: Prisma.JsonValue | null }>,
+    now: Date,
+  ) {
+    const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
+      ...(profileId ? [{ profileId }] : []),
+      ...(guestId ? [{ guestId }] : []),
+    ];
+    if (ownerFilters.length === 0 || lootBoxes.length === 0) {
+      return [];
+    }
+
+    const dailyLootBoxIds = lootBoxes
+      .filter(
+        (lootBox) =>
+          lootBoxPeriodicLimitPeriod(
+            jsonRecord(lootBox.limits).periodicLimit,
+          ) === 'DAILY',
+      )
+      .map((lootBox) => lootBox.id);
+
+    if (dailyLootBoxIds.length > 0) {
+      await this.prisma.guestGameEntitlement.updateMany({
+        where: {
+          tenantId,
+          ruleType: 'LOOT_BOX',
+          ruleId: { in: dailyLootBoxIds },
+          status: 'EXPIRED',
+          consumedAt: null,
+          canceledAt: null,
+          rewardId: null,
+          validUntil: { lte: now },
+          evidence: {
+            path: ['entitlementPeriod', 'kind'],
+            equals: 'DAILY',
+          },
+          AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
+        },
+        data: {
+          status: 'AVAILABLE',
+          validUntil: null,
+        },
+      });
+    }
+
+    const dailyLootBoxIdSet = new Set(dailyLootBoxIds);
+    return this.prisma.guestGameEntitlement.findMany({
+      where: {
+        tenantId,
+        ruleType: 'LOOT_BOX',
+        status: 'AVAILABLE',
+        qualifiedAt: { lte: now },
+        AND: [
+          { OR: ownerFilters },
+          { OR: [{ storeId: null }, { storeId }] },
+          {
+            OR: lootBoxes.map((lootBox) => ({
+              ruleId: lootBox.id,
+              ...(dailyLootBoxIdSet.has(lootBox.id)
+                ? {}
+                : { OR: [{ validUntil: null }, { validUntil: { gt: now } }] }),
+            })),
+          },
         ],
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
@@ -8680,24 +8936,102 @@ export class GuestPortalService {
     const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
       options.liveSessionStartResult,
     );
-    const portalLootBoxes = filterLootBoxesByVisualRefs(
-      lootBoxes
-        .filter(portalLootBoxVisibleInCatalog)
-        .filter((item) => matchesStore(item.storeIds, context.store.id)),
-      publishedVisualLootBoxRefs,
-    )
-      .slice(0, 6)
-      .map((item) =>
-        mapLootBox(
-          item,
-          rewards,
-          lootBoxUnlockEvents,
-          context.store.id,
-          context.store.timeZone,
-          liveSessionStartUnlockEvent,
-          audienceMemberIds,
-        ),
+    const storeLootBoxRows = lootBoxes.filter((item) =>
+      matchesStore(item.storeIds, context.store.id),
+    );
+    const entitlementPrimaryLootBoxes = storeLootBoxRows.filter(
+      (item) =>
+        this.gameEntitlementRollout({
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          profileId: profile?.id ?? '',
+          lootBoxId: item.id,
+        }).effectiveMode === 'PRIMARY',
+    );
+    const entitlementRows = await this.findPortalLootBoxEntitlements(
+      context.tenant.id,
+      guest?.id ?? null,
+      profile?.id ?? null,
+      context.store.id,
+      entitlementPrimaryLootBoxes,
+      new Date(),
+    );
+    if (profile) {
+      const entitledRuleIds = new Set(
+        entitlementRows.map((entitlement) => entitlement.ruleId),
       );
+      const backfilledRows = await Promise.all(
+        entitlementPrimaryLootBoxes
+          .filter((lootBox) => !entitledRuleIds.has(lootBox.id))
+          .map((lootBox) =>
+            this.backfillPortalLootBoxEntitlementFromLegacy({
+              tenantId: context.tenant.id,
+              guestId: guest?.id ?? null,
+              profileId: profile.id,
+              storeId: context.store.id,
+              storeTimeZone: context.store.timeZone,
+              lootBox,
+              unlockEvents: lootBoxUnlockEvents,
+              rewards,
+            }),
+          ),
+      );
+
+      backfilledRows.forEach((entitlement) => {
+        if (
+          entitlement?.status === 'AVAILABLE' &&
+          !entitlementRows.some((row) => row.id === entitlement.id)
+        ) {
+          entitlementRows.push(entitlement);
+        }
+      });
+    }
+    const entitledRuleIds = new Set(
+      entitlementRows.map((entitlement) => entitlement.ruleId),
+    );
+    const visibleCatalogLootBoxes = filterLootBoxesByVisualRefs(
+      storeLootBoxRows.filter(portalLootBoxVisibleInCatalog),
+      publishedVisualLootBoxRefs,
+    );
+    const visibleCatalogLootBoxIds = new Set(
+      visibleCatalogLootBoxes.map((lootBox) => lootBox.id),
+    );
+    const portalLootBoxRows = [
+      ...storeLootBoxRows.filter((lootBox) => entitledRuleIds.has(lootBox.id)),
+      ...visibleCatalogLootBoxes.filter(
+        (lootBox) => !entitledRuleIds.has(lootBox.id),
+      ),
+    ]
+      .filter(
+        (lootBox) =>
+          entitledRuleIds.has(lootBox.id) ||
+          visibleCatalogLootBoxIds.has(lootBox.id),
+      )
+      .slice(0, 6);
+    const portalLootBoxes = portalLootBoxRows.map((item) => {
+      const entitlementReadMode = this.gameEntitlementRollout({
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        profileId: profile?.id ?? '',
+        lootBoxId: item.id,
+      }).effectiveMode;
+      const effectiveUnlockEvents =
+        entitlementReadMode === 'PRIMARY'
+          ? entitlementRows
+              .filter((entitlement) => entitlement.ruleId === item.id)
+              .map(guestGameEntitlementToUnlockEvent)
+          : lootBoxUnlockEvents;
+
+      return mapLootBox(
+        item,
+        rewards,
+        effectiveUnlockEvents,
+        context.store.id,
+        context.store.timeZone,
+        entitlementReadMode === 'PRIMARY' ? null : liveSessionStartUnlockEvent,
+        audienceMemberIds,
+      );
+    });
     const portalMissions = visibleMissions.map((item) =>
       mapMission(item, missionProgress.get(item.id), rewards, bonusLedgerRows),
     );
@@ -13482,10 +13816,22 @@ function liveSessionStartResultToUnlockEvent(
   }
 
   return {
+    id: result.event.id,
+    originKey: result.event.originKey,
     eventType: result.event.eventType,
     occurredAt,
     payload: result.event.payload,
   };
+}
+
+function portalEntitlementMatchesUnlockEvent(
+  entitlement: { eventId: string | null; originKey: string | null },
+  unlockEvent: GuestPortalLootBoxUnlockEventRow,
+) {
+  return Boolean(
+    (entitlement.eventId && entitlement.eventId === unlockEvent.id) ||
+    (entitlement.originKey && entitlement.originKey === unlockEvent.originKey),
+  );
 }
 
 function guestGameEntitlementToUnlockEvent(entitlement: {
@@ -13910,7 +14256,9 @@ function findLootBoxUnlockEvent(
     'DAILY';
   const now = new Date();
   const isInCurrentDailyPeriod = (event: GuestPortalLootBoxUnlockEventRow) =>
-    !isDaily || guestGameSameLocalDay(event.occurredAt, now, timeZone);
+    !isDaily ||
+    jsonRecord(event.payload).sourceFactKind === 'GUEST_GAME_ENTITLEMENT' ||
+    guestGameSameLocalDay(event.occurredAt, now, timeZone);
 
   if (guestGameTriggerMatches(row.triggerKind, 'SESSION_START')) {
     const candidates = [
@@ -13958,6 +14306,54 @@ function findLootBoxUnlockEvent(
         lootBoxUnlockEventMatches(row, event, storeId, restartedAt),
     ) ?? null
   );
+}
+
+function portalLegacyLootBoxEntitlementBackfillEvent(
+  row: {
+    id: string;
+    triggerKind: string;
+    sessionType?: string | null;
+    limits: Prisma.JsonValue | null;
+    periodRules?: Prisma.JsonValue | null;
+  },
+  unlockEvents: GuestPortalLootBoxUnlockEventRow[],
+  storeId: string | null,
+  storeTimeZone: string | null,
+) {
+  const restartedAt = lootBoxRestartedAt(jsonRecord(row.limits));
+  const timeZone = guestGameTimeZone(storeTimeZone);
+
+  return (
+    unlockEvents.find(
+      (event) =>
+        Boolean(event.id) &&
+        portalLegacyLootBoxEventHasExplicitEligibleRule(row.id, event) &&
+        lootBoxUnlockEventMatches(row, event, storeId, restartedAt) &&
+        !lootBoxScheduleBlocker(
+          row.periodRules ?? null,
+          event.occurredAt,
+          timeZone,
+        ),
+    ) ?? null
+  );
+}
+
+function portalLegacyLootBoxEventHasExplicitEligibleRule(
+  ruleId: string,
+  event: GuestPortalLootBoxUnlockEventRow,
+) {
+  const payload = jsonRecord(event.payload);
+  const rules = Array.isArray(payload.rules) ? payload.rules : [];
+
+  return rules.some((item) => {
+    const rule = jsonRecord(item);
+
+    return (
+      stringField(rule.id) === ruleId &&
+      stringField(rule.kind) === 'LOOT_BOX' &&
+      rule.eligible === true
+    );
+  });
 }
 
 function lootBoxUnlockEventMatches(
@@ -17174,15 +17570,6 @@ function guestGameLocalDateParts(value: Date, timeZone: string) {
       day: value.getUTCDate(),
     };
   }
-}
-
-function guestGameLocalDayStart(value: Date, timeZone: string) {
-  const dateKey = guestGameLocalDateKey(value, timeZone);
-
-  return (
-    parseLangameDate(`${dateKey} 00:00:00`, timeZone) ??
-    new Date(`${dateKey}T00:00:00.000Z`)
-  );
 }
 
 function weekdayNumber(value: string | undefined) {

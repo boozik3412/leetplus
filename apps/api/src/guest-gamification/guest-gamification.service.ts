@@ -48,6 +48,7 @@ import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import {
   evaluateGuestGameLedgerRule,
   guestGameRuleActivationAt,
+  guestGameRuleDomainTimeZones,
   guestGameRuleExternalDomains,
   guestGameSessionTypeFromConditions,
   guestGameStringArray,
@@ -165,6 +166,19 @@ const snapshotFactSources = [
   'GUEST_GAME_REFERRAL',
 ] as const;
 const tariffSnapshotFreshMs = 24 * 60 * 60 * 1000;
+const snapshotSessionClassificationGraceMs = 2 * 60 * 1000;
+const snapshotSessionPackageCorrectionVersion = 'package-v1';
+const snapshotPipelineBackfillLookbackDefaultMs = 30 * 24 * 60 * 60 * 1000;
+const snapshotPipelineBackfillLookbackMinMs = 24 * 60 * 60 * 1000;
+const snapshotPipelineBackfillLookbackMaxMs = 90 * 24 * 60 * 60 * 1000;
+type SnapshotPipelineBackfillMode = 'OFF' | 'SHADOW' | 'LIVE';
+type SnapshotPipelineBackfillPolicy = {
+  mode: SnapshotPipelineBackfillMode;
+  enabled: boolean;
+  profileId: string | null;
+  profileGuestId: string | null;
+  liveNotBefore: Date | null;
+};
 const gameEffectWindowDays = 14;
 const defaultGuestGameTimeZone = 'Asia/Yekaterinburg';
 const guestLootBoxOpenSourceKind = 'GUEST_LOOT_BOX_OPEN';
@@ -2401,6 +2415,7 @@ export type GuestGameProcessEventDto = GuestGameDryRunDto & {
   note?: string | null;
   activeRulesOnly?: boolean | string | null;
   suppressLootBoxRewards?: boolean | string | null;
+  suppressLootBoxEntitlements?: boolean | string | null;
 };
 
 export type GuestGameSelectedReward = {
@@ -2440,7 +2455,13 @@ export type GuestGameDryRunRule = {
   battlePassLevel?: number | null;
   battlePassStep?: number | null;
   battlePassStepTitle?: string | null;
+  battlePassRewardTrack?: 'FREE' | 'PREMIUM' | null;
+  rewardLootBoxId?: string | null;
   periodicLimitPeriod?: LootBoxPeriodicLimitPeriod | null;
+  missionDenySameDayRepeat?: boolean;
+  missionPerGuestLimit?: number | null;
+  missionTotalRewardLimit?: number | null;
+  rewardMaterializationSuppressed?: boolean;
   reasons: string[];
   blockers: string[];
 };
@@ -2483,6 +2504,22 @@ export type GuestGameDryRunResult = {
   };
   rules: GuestGameDryRunRule[];
   note: string;
+};
+
+export type GuestGameLootBoxEntitlementWriteOutcome = {
+  ruleId: string;
+  status:
+    | 'PERSISTED'
+    | 'IDEMPOTENT'
+    | 'LIMIT_EXHAUSTED'
+    | 'RULE_INACTIVE'
+    | 'PERSISTENCE_FAILED';
+  entitlementId: string | null;
+  limitCodes: string[];
+};
+
+export type GuestGameRuleDecisionRecordResult = {
+  lootBoxEntitlements: GuestGameLootBoxEntitlementWriteOutcome[];
 };
 
 export type GuestGameProcessEventResult = {
@@ -2630,6 +2667,7 @@ export type GuestGameSnapshotFact = {
   sessionType: string | null;
   sessionPacket: boolean | null;
   sessionMinutes: number | null;
+  sessionClassificationCorrection?: 'PACKAGE_V1' | null;
   spendAmount: number | null;
   tariffGroupId: string | null;
   tariffPeriodId: string | null;
@@ -2791,6 +2829,9 @@ export type GuestGameScheduledPipelineRunResult = {
 
 export type GuestGameSupplementalPipelineMode = 'OFF' | 'SHADOW' | 'LIVE';
 
+const supplementalReceiptClaimLeaseMs = 2 * 60 * 1000;
+const supplementalReceiptMaxAttempts = 3;
+
 export type GuestGameSupplementalPipelineRunDto = {
   mode?: GuestGameSupplementalPipelineMode;
   factTypes?: string[];
@@ -2931,6 +2972,41 @@ function finiteJsonNumber(value: unknown): number | null {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values)].slice(0, 16);
+}
+
+function allUniqueStrings(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function snapshotFactKey(fact: GuestGameSnapshotFact) {
+  return [
+    fact.source,
+    fact.id,
+    fact.eventType,
+    fact.externalProvider ?? '',
+    fact.externalDomain ?? '',
+    fact.externalId ?? '',
+  ].join('\u0000');
+}
+
+function uniqueSnapshotFacts(facts: GuestGameSnapshotFact[]) {
+  return [
+    ...new Map(facts.map((fact) => [snapshotFactKey(fact), fact])).values(),
+  ];
+}
+
+function interleaveSnapshotFacts(groups: GuestGameSnapshotFact[][]) {
+  const result: GuestGameSnapshotFact[] = [];
+  const maxLength = Math.max(0, ...groups.map((group) => group.length));
+
+  for (let index = 0; index < maxLength; index += 1) {
+    for (const group of groups) {
+      const fact = group[index];
+      if (fact) result.push(fact);
+    }
+  }
+
+  return result;
 }
 
 function maxDate(left: Date | null, right: Date | null) {
@@ -5953,6 +6029,519 @@ export class GuestGamificationService {
     };
   }
 
+  private snapshotPipelineBackfillMode(): SnapshotPipelineBackfillMode {
+    const configured = nullableString(
+      this.configService.get<string>('GUEST_GAME_PIPELINE_BACKFILL_MODE'),
+    )?.toUpperCase();
+
+    return configured === 'SHADOW' || configured === 'LIVE'
+      ? configured
+      : 'OFF';
+  }
+
+  private strictConfigBoolean(key: string): boolean | null {
+    const configured = nullableString(
+      this.configService.get<string>(key),
+    )?.toLowerCase();
+
+    if (['1', 'true', 'yes', 'on'].includes(configured ?? '')) {
+      return true;
+    }
+
+    if (['0', 'false', 'no', 'off'].includes(configured ?? '')) {
+      return false;
+    }
+
+    return null;
+  }
+
+  private snapshotPipelineBackfillLiveNotBefore(): {
+    configured: boolean;
+    value: Date | null;
+  } {
+    const configured = nullableString(
+      this.configService.get<string>(
+        'GUEST_GAME_PIPELINE_BACKFILL_LIVE_NOT_BEFORE',
+      ),
+    );
+    if (!configured) {
+      return { configured: false, value: null };
+    }
+
+    // Require an explicit timezone. A server-local timestamp would make a
+    // canary cutoff change meaning between environments.
+    if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(configured)) {
+      return { configured: true, value: null };
+    }
+
+    const parsed = new Date(configured);
+    return {
+      configured: true,
+      value: Number.isFinite(parsed.getTime()) ? parsed : null,
+    };
+  }
+
+  private async snapshotPipelineBackfillPolicy(
+    user: AuthenticatedUser,
+  ): Promise<SnapshotPipelineBackfillPolicy> {
+    const mode = this.snapshotPipelineBackfillMode();
+    const disabled = (
+      profileId: string | null = null,
+      liveNotBefore: Date | null = null,
+    ): SnapshotPipelineBackfillPolicy => ({
+      mode,
+      enabled: false,
+      profileId,
+      profileGuestId: null,
+      liveNotBefore,
+    });
+
+    if (mode === 'OFF') {
+      return disabled();
+    }
+
+    // The historical anti-join is intentionally opt-in twice: a valid mode
+    // plus an explicitly false kill switch. Missing or unknown boolean text
+    // therefore stops the backfill instead of silently enabling it.
+    if (
+      this.strictConfigBoolean('GUEST_GAME_PIPELINE_BACKFILL_KILL_SWITCH') !==
+      false
+    ) {
+      return disabled();
+    }
+
+    const tenantId = nullableString(
+      this.configService.get<string>('GUEST_GAME_PIPELINE_BACKFILL_TENANT_ID'),
+    );
+    const tenantSlug = nullableString(
+      this.configService.get<string>(
+        'GUEST_GAME_PIPELINE_BACKFILL_TENANT_SLUG',
+      ),
+    );
+    const tenantConfigured = Boolean(tenantId || tenantSlug);
+    const tenantMatches =
+      tenantConfigured &&
+      (!tenantId || tenantId === user.tenantId) &&
+      (!tenantSlug ||
+        tenantSlug.toLowerCase() === user.tenantSlug.toLowerCase());
+
+    if (!tenantMatches) {
+      return disabled();
+    }
+
+    const profileId = nullableString(
+      this.configService.get<string>('GUEST_GAME_PIPELINE_BACKFILL_PROFILE_ID'),
+    );
+    const liveCutoff = this.snapshotPipelineBackfillLiveNotBefore();
+    const allowTenantWide =
+      this.strictConfigBoolean(
+        'GUEST_GAME_PIPELINE_BACKFILL_ALLOW_TENANT_WIDE',
+      ) === true;
+
+    if (liveCutoff.configured && !liveCutoff.value) {
+      return disabled(profileId);
+    }
+
+    if (
+      mode === 'LIVE' &&
+      (!liveCutoff.value || (!profileId && !allowTenantWide))
+    ) {
+      return disabled(profileId, liveCutoff.value);
+    }
+
+    if (!profileId) {
+      return {
+        mode,
+        enabled: true,
+        profileId: null,
+        profileGuestId: null,
+        liveNotBefore: liveCutoff.value,
+      };
+    }
+
+    const profile = await this.prisma.guestGameProfile.findFirst({
+      where: { tenantId: user.tenantId, id: profileId },
+      select: { guestId: true },
+    });
+    if (!profile?.guestId) {
+      return disabled(profileId, liveCutoff.value);
+    }
+
+    return {
+      mode,
+      enabled: true,
+      profileId,
+      profileGuestId: profile.guestId,
+      liveNotBefore: liveCutoff.value,
+    };
+  }
+
+  private async loadPendingPrimarySnapshotFacts(
+    user: AuthenticatedUser,
+    limit: number,
+    source: GuestGameSnapshotFact['source'] | null,
+    policy: SnapshotPipelineBackfillPolicy,
+  ): Promise<GuestGameSnapshotFact[]> {
+    if (!policy.enabled || policy.mode === 'OFF') {
+      return [];
+    }
+
+    const includeSessions = !source || source === 'GUEST_SESSION';
+    const includePurchases = !source || source === 'PRODUCT_EXPENSE';
+
+    if (!includeSessions && !includePurchases) {
+      return [];
+    }
+
+    const boundedLookbackCutoff = new Date(
+      Date.now() -
+        this.configMilliseconds(
+          'GUEST_GAME_PIPELINE_BACKFILL_LOOKBACK_MS',
+          snapshotPipelineBackfillLookbackDefaultMs,
+          snapshotPipelineBackfillLookbackMinMs,
+          snapshotPipelineBackfillLookbackMaxMs,
+        ),
+    );
+    const cutoff =
+      policy.liveNotBefore &&
+      policy.liveNotBefore.getTime() > boundedLookbackCutoff.getTime()
+        ? policy.liveNotBefore
+        : boundedLookbackCutoff;
+
+    const [sessionFacts, purchaseFacts] = await Promise.all([
+      includeSessions
+        ? this.loadPendingSessionSnapshotFacts(
+            user,
+            limit,
+            cutoff,
+            policy.profileGuestId,
+          )
+        : Promise.resolve([] as GuestGameSnapshotFact[]),
+      includePurchases
+        ? this.loadPendingProductExpenseSnapshotFacts(
+            user,
+            limit,
+            cutoff,
+            policy.profileGuestId,
+          )
+        : Promise.resolve([] as GuestGameSnapshotFact[]),
+    ]);
+
+    return interleaveSnapshotFacts([sessionFacts, purchaseFacts])
+      .filter((fact) => {
+        if (!policy.liveNotBefore) return true;
+        const occurredAt = new Date(fact.occurredAt);
+        return (
+          Number.isFinite(occurredAt.getTime()) &&
+          occurredAt.getTime() >= policy.liveNotBefore.getTime()
+        );
+      })
+      .slice(0, limit);
+  }
+
+  private async loadPendingSessionSnapshotFacts(
+    user: AuthenticatedUser,
+    limit: number,
+    cutoff: Date,
+    profileGuestId: string | null = null,
+  ): Promise<GuestGameSnapshotFact[]> {
+    const profileScope = profileGuestId
+      ? Prisma.sql`AND session."guestId" = ${profileGuestId}`
+      : Prisma.sql``;
+    const pendingRows =
+      (await this.prisma.$queryRaw<
+        Array<{
+          id: string;
+          needsSessionStart: boolean;
+          needsPlayHour: boolean;
+          needsPackageCorrection: boolean;
+        }>
+      >(Prisma.sql`
+        SELECT
+          session."id",
+          pending."needsSessionStart" AS "needsSessionStart",
+          pending."needsPlayHour" AS "needsPlayHour",
+          pending."needsPackageCorrection" AS "needsPackageCorrection"
+        FROM "GuestSession" session
+        CROSS JOIN LATERAL (
+          SELECT
+            NOT EXISTS (
+              SELECT 1
+              FROM "GuestGameEvent" event
+              WHERE event."tenantId" = session."tenantId"
+                AND event."source" = 'API_IMPORT'
+                AND event."externalProvider" = COALESCE(
+                  session."externalProvider",
+                  'LANGAME'::"IntegrationProvider"
+                )
+                AND event."externalDomain" = COALESCE(
+                  session."externalDomain",
+                  'guest-gamification-snapshot'
+                )
+                AND event."externalId" = CONCAT(
+                  'guest-game:GUEST_SESSION:SESSION_START:',
+                  session."externalSessionId"
+                )
+            ) AS "needsSessionStart",
+            (
+              session."stoppedAt" > session."startedAt"
+              AND NOT EXISTS (
+                SELECT 1
+                FROM "GuestGameEvent" event
+                WHERE event."tenantId" = session."tenantId"
+                  AND event."source" = 'API_IMPORT'
+                  AND event."externalProvider" = COALESCE(
+                    session."externalProvider",
+                    'LANGAME'::"IntegrationProvider"
+                  )
+                  AND event."externalDomain" = COALESCE(
+                    session."externalDomain",
+                    'guest-gamification-snapshot'
+                  )
+                  AND event."externalId" = CONCAT(
+                    'guest-game:GUEST_SESSION:PLAY_HOUR:',
+                    session."externalSessionId"
+                  )
+              )
+            ) AS "needsPlayHour",
+            (
+              session."packet" = true
+              AND EXISTS (
+                SELECT 1
+                FROM "GuestGameEvent" event
+                WHERE event."tenantId" = session."tenantId"
+                  AND event."source" = 'API_IMPORT'
+                  AND event."externalProvider" = COALESCE(
+                    session."externalProvider",
+                    'LANGAME'::"IntegrationProvider"
+                  )
+                  AND event."externalDomain" = COALESCE(
+                    session."externalDomain",
+                    'guest-gamification-snapshot'
+                  )
+                  AND event."externalId" = CONCAT(
+                    'guest-game:GUEST_SESSION:SESSION_START:',
+                    session."externalSessionId"
+                  )
+                  AND (
+                    event."payload" #>> '{input,sessionPacket}' = 'false'
+                    OR LOWER(
+                      COALESCE(
+                        event."payload" #>> '{input,sessionType}',
+                        ''
+                      )
+                    ) = 'regular_session'
+                  )
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM "GuestGameEvent" event
+                WHERE event."tenantId" = session."tenantId"
+                  AND event."source" = 'API_IMPORT'
+                  AND event."externalProvider" = COALESCE(
+                    session."externalProvider",
+                    'LANGAME'::"IntegrationProvider"
+                  )
+                  AND event."externalDomain" = COALESCE(
+                    session."externalDomain",
+                    'guest-gamification-snapshot'
+                  )
+                  AND event."externalId" = CONCAT(
+                    'guest-game:GUEST_SESSION:SESSION_START:',
+                    session."externalSessionId",
+                    ':classification:',
+                    ${snapshotSessionPackageCorrectionVersion}
+                  )
+              )
+            ) AS "needsPackageCorrection"
+        ) pending
+        WHERE session."tenantId" = ${user.tenantId}
+          AND session."guestId" IS NOT NULL
+          AND session."startedAt" IS NOT NULL
+          AND (
+            session."startedAt" >= ${cutoff}
+            OR session."stoppedAt" >= ${cutoff}
+          )
+          ${profileScope}
+          AND (
+            pending."needsSessionStart"
+            OR pending."needsPlayHour"
+            OR pending."needsPackageCorrection"
+          )
+        ORDER BY session."updatedAt" DESC, session."createdAt" DESC, session."id" DESC
+        LIMIT ${limit}
+      `)) ?? [];
+    const ids = allUniqueStrings(pendingRows.map((row) => row.id));
+
+    if (!ids.length) {
+      return [];
+    }
+
+    const rows = await this.prisma.guestSession.findMany({
+      where: { tenantId: user.tenantId, id: { in: ids } },
+      select: snapshotSessionSelect,
+    });
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
+
+    const pendingById = new Map(pendingRows.map((row) => [row.id, row]));
+
+    return ids.flatMap((id) => {
+      const row = rowsById.get(id);
+      const pending = pendingById.get(id);
+      if (!row || !pending) return [];
+
+      // Older unit-test delegates returned only the id. Preserve their
+      // historical all-facts behavior while production uses the explicit
+      // anti-join flags above to avoid spending a batch slot on a duplicate
+      // SESSION_START before the final PLAY_HOUR fact.
+      const hasExplicitFlags =
+        typeof pending.needsSessionStart === 'boolean' &&
+        typeof pending.needsPlayHour === 'boolean' &&
+        typeof pending.needsPackageCorrection === 'boolean';
+      const facts = mapSessionFacts(row).filter(
+        (fact) =>
+          !hasExplicitFlags ||
+          (fact.eventType === 'SESSION_START'
+            ? pending.needsSessionStart
+            : fact.eventType === 'PLAY_HOUR'
+              ? pending.needsPlayHour
+              : false),
+      );
+
+      if (pending.needsPackageCorrection) {
+        facts.push(mapSessionPackageCorrectionFact(row));
+      }
+
+      return facts;
+    });
+  }
+
+  private async loadPendingProductExpenseSnapshotFacts(
+    user: AuthenticatedUser,
+    limit: number,
+    cutoff: Date,
+    profileGuestId: string | null = null,
+  ): Promise<GuestGameSnapshotFact[]> {
+    const profileScope = profileGuestId
+      ? Prisma.sql`AND sale."guestId" = ${profileGuestId}`
+      : Prisma.sql``;
+    const pendingRows =
+      (await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT sale."id"
+        FROM "SalesFact" sale
+        WHERE sale."tenantId" = ${user.tenantId}
+          AND sale."guestId" IS NOT NULL
+          AND sale."isCanceled" = false
+          AND sale."revenue" > 0
+          AND sale."quantity" > 0
+          AND sale."saleDate" >= ${cutoff}
+          ${profileScope}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "GuestGameEvent" event
+            WHERE event."tenantId" = sale."tenantId"
+              AND event."source" = 'API_IMPORT'
+              AND event."externalProvider" = COALESCE(
+                sale."externalProvider",
+                'LANGAME'::"IntegrationProvider"
+              )
+              AND event."externalDomain" = COALESCE(
+                sale."externalDomain",
+                'guest-gamification-snapshot'
+              )
+              AND event."externalId" = CONCAT(
+                'guest-game:PRODUCT_EXPENSE:PRODUCT_PURCHASE:',
+                COALESCE(
+                  sale."externalSaleId",
+                  CONCAT('product-expense:', sale."id")
+                )
+              )
+          )
+        ORDER BY sale."saleDate" DESC, sale."createdAt" DESC, sale."id" DESC
+        LIMIT ${limit}
+      `)) ?? [];
+    const ids = allUniqueStrings(pendingRows.map((row) => row.id));
+
+    if (!ids.length) {
+      return [];
+    }
+
+    const rows = await this.prisma.salesFact.findMany({
+      where: { tenantId: user.tenantId, id: { in: ids } },
+      select: snapshotProductExpenseSelect,
+    });
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
+    const orderedRows = ids
+      .map((id) => rowsById.get(id))
+      .filter((row): row is SnapshotProductExpenseRow => Boolean(row));
+    const productConfigurations = orderedRows.length
+      ? await this.prisma.langameClubProductConfiguration.findMany({
+          where: {
+            tenantId: user.tenantId,
+            isActive: true,
+            storeId: {
+              in: allUniqueStrings(
+                orderedRows.map((row) => row.store?.id ?? ''),
+              ),
+            },
+            externalProductId: {
+              in: allUniqueStrings(
+                orderedRows.map((row) => row.externalProductId ?? ''),
+              ),
+            },
+          },
+          select: {
+            storeId: true,
+            externalDomain: true,
+            externalProductId: true,
+            externalGroupId: true,
+          },
+        })
+      : [];
+    const groupRefs = productConfigurations
+      .filter((row): row is typeof row & { externalGroupId: string } =>
+        Boolean(row.externalGroupId),
+      )
+      .map((row) => ({
+        externalDomain: row.externalDomain,
+        externalGroupId: row.externalGroupId,
+      }));
+    const groupRows = groupRefs.length
+      ? await this.prisma.langameProductGroup.findMany({
+          where: { tenantId: user.tenantId, OR: groupRefs },
+          select: {
+            externalDomain: true,
+            externalGroupId: true,
+            name: true,
+          },
+        })
+      : [];
+    const groupNames = new Map(
+      groupRows.map((row) => [
+        `${row.externalDomain}:${row.externalGroupId}`,
+        row.name,
+      ]),
+    );
+    const categoryMappings = new Map<string, ExternalProductCategoryMapping>();
+
+    productConfigurations.forEach((row) => {
+      if (!row.externalGroupId) return;
+      const externalCategoryKey = `${row.externalDomain}:${row.externalGroupId}`;
+      categoryMappings.set(
+        `${row.storeId}:${row.externalDomain}:${row.externalProductId}`,
+        {
+          externalCategoryKey,
+          externalCategoryId: row.externalGroupId,
+          externalCategoryName: groupNames.get(externalCategoryKey) ?? null,
+        },
+      );
+    });
+
+    return orderedRows.flatMap((row) =>
+      mapProductExpenseFact(row, categoryMappings),
+    );
+  }
+
   async runSnapshotPipeline(
     user: AuthenticatedUser,
     dto: GuestGamePipelineRunDto,
@@ -5960,10 +6549,32 @@ export class GuestGamificationService {
     const source = pipelineSourceValue(dto.source);
     const limit = Math.min(30, Math.max(1, intValue(dto.limit) ?? 20));
     const dryRunOnly = booleanValue(dto.dryRunOnly);
-    const factsResult = await this.getSnapshotFacts(user);
-    const sourceCandidates = factsResult.facts.filter(
-      (fact) => !source || fact.source === source,
+    const [factsResult, backfillPolicy] = await Promise.all([
+      this.getSnapshotFacts(user),
+      this.snapshotPipelineBackfillPolicy(user),
+    ]);
+    const pendingPrimaryFacts = backfillPolicy.enabled
+      ? await this.loadPendingPrimarySnapshotFacts(
+          user,
+          limit,
+          source,
+          backfillPolicy,
+        )
+      : [];
+    const latestSnapshotFactKeys = new Set(
+      factsResult.facts.map(snapshotFactKey),
     );
+    const shadowBackfillOnlyFactKeys = new Set(
+      backfillPolicy.mode === 'SHADOW'
+        ? pendingPrimaryFacts
+            .map(snapshotFactKey)
+            .filter((key) => !latestSnapshotFactKeys.has(key))
+        : [],
+    );
+    const sourceCandidates = uniqueSnapshotFacts([
+      ...pendingPrimaryFacts,
+      ...factsResult.facts,
+    ]).filter((fact) => !source || fact.source === source);
     let orderedCandidates = sourceCandidates;
 
     // Snapshot sources are intentionally bounded. If already processed rows
@@ -6054,10 +6665,28 @@ export class GuestGamificationService {
       orderedCandidates = [...pending, ...processed, ...unbound];
     }
 
-    const candidates = orderedCandidates.slice(0, limit);
+    const candidates =
+      backfillPolicy.mode === 'SHADOW'
+        ? [
+            ...orderedCandidates
+              .filter(
+                (fact) =>
+                  !shadowBackfillOnlyFactKeys.has(snapshotFactKey(fact)),
+              )
+              .slice(0, limit),
+            ...orderedCandidates
+              .filter((fact) =>
+                shadowBackfillOnlyFactKeys.has(snapshotFactKey(fact)),
+              )
+              .slice(0, limit),
+          ]
+        : orderedCandidates.slice(0, limit);
     const facts: GuestGamePipelineFactResult[] = [];
 
     for (const fact of candidates) {
+      const shadowBackfillOnly = shadowBackfillOnlyFactKeys.has(
+        snapshotFactKey(fact),
+      );
       if (!fact.guest?.id && !fact.profileId) {
         facts.push({
           ...pipelineFactBase(fact),
@@ -6073,6 +6702,28 @@ export class GuestGamificationService {
       const processDto = pipelineProcessDtoFromFact(fact);
 
       try {
+        if (
+          fact.sessionClassificationCorrection === 'PACKAGE_V1' &&
+          !shadowBackfillOnly &&
+          !dryRunOnly
+        ) {
+          const process =
+            await this.processSessionPackageClassificationCorrection(
+              user,
+              processDto,
+            );
+          facts.push({
+            ...pipelineFactBase(fact),
+            status: process.summary.idempotent ? 'DUPLICATE' : 'PROCESSED',
+            reason: process.summary.idempotent
+              ? 'РЈС‚РѕС‡РЅРµРЅРёРµ РїР°РєРµС‚РЅРѕР№ СЃРµСЃСЃРёРё СѓР¶Рµ РѕР±СЂР°Р±РѕС‚Р°РЅРѕ.'
+              : `${process.summary.createdRewards} РЅР°РіСЂР°Рґ РІ РѕС‡РµСЂРµРґРё РїРѕСЃР»Рµ СѓС‚РѕС‡РЅРµРЅРёСЏ С‚РёРїР° СЃРµСЃСЃРёРё, XP ${process.summary.appliedXpDelta}.`,
+            dryRun: process.dryRun,
+            process,
+          });
+          continue;
+        }
+
         const dryRun = filterDryRunRulesByEvaluationPolicy(
           await this.dryRun(user, processDto),
           'LIVE',
@@ -6094,21 +6745,43 @@ export class GuestGamificationService {
             rule.progress.matchedEvents > 0,
         );
 
-        if (dryRunOnly) {
+        if (dryRunOnly || shadowBackfillOnly) {
+          if (shadowBackfillOnly) {
+            await this.recordRuleDecisions(user, dryRun, {
+              evaluationMode: 'SHADOW',
+              evaluatorVersion: 'primary-snapshot-backfill-shadow-v1',
+              sourceFactId: fact.id,
+              sourceExternalId: fact.externalId,
+              sourceFactKind: fact.source,
+              suppressLedgerShadow: true,
+              evidence: {
+                source: 'PRIMARY_SNAPSHOT_BACKFILL',
+                mode: 'SHADOW',
+                eventType: fact.eventType,
+                occurredAt: fact.occurredAt,
+              },
+            });
+          }
           facts.push({
             ...pipelineFactBase(fact),
             status: 'DRY_RUN',
-            reason: `${activeEligibleRules.length} активных правил сработает, ${dryRun.summary.blockedRules} правил заблокировано.`,
+            reason: shadowBackfillOnly
+              ? `Historical snapshot fact evaluated in SHADOW: ${activeEligibleRules.length} active rules matched; no event, XP, reward or entitlement was created.`
+              : `${activeEligibleRules.length} активных правил сработает, ${dryRun.summary.blockedRules} правил заблокировано.`,
             dryRun,
             process: null,
           });
           continue;
         }
 
+        const persistCanonicalPrimaryFact =
+          fact.source === 'GUEST_SESSION' || fact.source === 'PRODUCT_EXPENSE';
+
         if (
           !activeEligibleRules.length &&
           activeXpDelta === 0 &&
-          !activeProgressRules.length
+          !activeProgressRules.length &&
+          !persistCanonicalPrimaryFact
         ) {
           facts.push({
             ...pipelineFactBase(fact),
@@ -6121,7 +6794,11 @@ export class GuestGamificationService {
           continue;
         }
 
-        if (nonActiveEligibleRules.length && activeEligibleRules.length === 0) {
+        if (
+          nonActiveEligibleRules.length &&
+          activeEligibleRules.length === 0 &&
+          !persistCanonicalPrimaryFact
+        ) {
           facts.push({
             ...pipelineFactBase(fact),
             status: 'SKIPPED',
@@ -6177,7 +6854,7 @@ export class GuestGamificationService {
     return {
       dryRunOnly,
       langameWrite: false,
-      availableFacts: factsResult.facts.length,
+      availableFacts: sourceCandidates.length,
       checkedFacts: candidates.length,
       processedFacts: processed.length,
       skippedFacts: facts.filter((fact) => fact.status === 'SKIPPED').length,
@@ -6419,6 +7096,7 @@ export class GuestGamificationService {
           periodFrom: true,
           periodTo: true,
           conditions: true,
+          storeIds: true,
         },
       }),
       this.prisma.guestGameSeason.findMany({
@@ -6434,7 +7112,7 @@ export class GuestGamificationService {
       }),
       this.prisma.store.findMany({
         where: { tenantId: user.tenantId, isActive: true },
-        select: { id: true, externalDomain: true },
+        select: { id: true, externalDomain: true, timeZone: true },
       }),
     ]);
     const seasons = (seasonRows ?? []).filter((season) =>
@@ -6468,7 +7146,46 @@ export class GuestGamificationService {
     const candidates: Array<{
       fact: SupplementalActivityFactRow;
       ruleIds: string[];
+      receiptAttempts: number;
     }> = [];
+    const supplementalRules = [
+      ...missions.map((mission) => ({
+        id: mission.id,
+        storeIds: guestGameStringArray(mission.storeIds),
+        configuredDomains: guestGameStringArray(
+          jsonRecord(mission.conditions).externalDomains,
+        ),
+      })),
+      ...seasons.map((season) => ({
+        id: season.id,
+        storeIds: guestGameStringArray(season.storeIds),
+        configuredDomains: [] as string[],
+      })),
+    ];
+    const ruleExternalDomains = new Map<string, readonly string[]>(
+      supplementalRules.map((rule) => [
+        rule.id,
+        supplementalRuleExternalDomains(
+          rule.storeIds,
+          rule.configuredDomains,
+          stores,
+        ),
+      ]),
+    );
+    const ruleDomainTimeZones = new Map<
+      string,
+      ReadonlyMap<string, string | null>
+    >(
+      supplementalRules.map((rule) => [
+        rule.id,
+        new Map(
+          Object.entries(guestGameRuleDomainTimeZones(rule.storeIds, stores)),
+        ),
+      ]),
+    );
+    const staleClaimBefore = new Date(
+      Date.now() - supplementalReceiptClaimLeaseMs,
+    );
     const factPageSize = Math.max(50, limit);
     let factCursor: { id: string } | undefined;
 
@@ -6507,6 +7224,7 @@ export class GuestGamificationService {
             .filter((mission) =>
               supplementalMissionMatchesFact(
                 mission,
+                stores,
                 fact.externalDomain,
                 happenedAt,
               ),
@@ -6549,6 +7267,7 @@ export class GuestGamificationService {
               sourceHash: true,
               status: true,
               attempts: true,
+              updatedAt: true,
             },
           })
         : [];
@@ -6560,12 +7279,39 @@ export class GuestGamificationService {
         const receipt = receiptByKey.get(
           supplementalReceiptKey(candidate.fact),
         );
-        if (receipt && !supplementalReceiptCanBeClaimed(mode, receipt)) {
+        if (
+          receipt &&
+          supplementalReceiptShouldDeadLetter(receipt, staleClaimBefore)
+        ) {
+          await this.prisma.guestGameSupplementalFactReceipt.updateMany({
+            where: {
+              tenantId: user.tenantId,
+              factType: candidate.fact.factType,
+              externalDomain: candidate.fact.externalDomain,
+              sourceHash: candidate.fact.sourceHash,
+              status: { in: ['PENDING', 'PROCESSING', 'FAILED'] },
+              attempts: { gte: supplementalReceiptMaxAttempts },
+              updatedAt: { lt: staleClaimBefore },
+            },
+            data: {
+              status: 'DEAD_LETTER',
+              lastError:
+                'Supplemental fact exhausted the bounded processing retry budget.',
+            },
+          });
+        }
+        if (
+          receipt &&
+          !supplementalReceiptCanBeClaimed(mode, receipt, staleClaimBefore)
+        ) {
           result.duplicateFacts += 1;
           continue;
         }
 
-        candidates.push(candidate);
+        candidates.push({
+          ...candidate,
+          receiptAttempts: receipt?.attempts ?? 0,
+        });
       }
 
       factCursor = { id: facts[facts.length - 1].id };
@@ -6574,7 +7320,7 @@ export class GuestGamificationService {
       }
     }
 
-    for (const { fact, ruleIds } of candidates) {
+    for (const { fact, ruleIds, receiptAttempts } of candidates) {
       if (result.checkedFacts >= limit) {
         break;
       }
@@ -6608,13 +7354,24 @@ export class GuestGamificationService {
         await this.prisma.guestGameSupplementalFactReceipt.updateMany({
           where: {
             ...receiptKey,
-            attempts: { lt: 3 },
-            status: {
-              in:
-                mode === 'LIVE'
-                  ? ['PENDING', 'FAILED', 'SHADOWED']
-                  : ['PENDING', 'FAILED'],
-            },
+            // attempts is the receipt fencing version. A worker can only
+            // acquire the exact version it observed while paging candidates;
+            // reclaim increments it and permanently fences the stale worker.
+            attempts: receiptAttempts,
+            OR: [
+              {
+                status: {
+                  in:
+                    mode === 'LIVE'
+                      ? ['PENDING', 'FAILED', 'SHADOWED']
+                      : ['PENDING', 'FAILED'],
+                },
+              },
+              {
+                status: 'PROCESSING',
+                updatedAt: { lt: staleClaimBefore },
+              },
+            ],
           },
           data: {
             factId: fact.id,
@@ -6628,6 +7385,7 @@ export class GuestGamificationService {
         result.duplicateFacts += 1;
         continue;
       }
+      const claimAttempt = receiptAttempts + 1;
       result.checkedFacts += 1;
 
       try {
@@ -6654,7 +7412,12 @@ export class GuestGamificationService {
         if (mode === 'SHADOW') {
           const dryRun = filterDryRunRules(
             filterDryRunRulesByEvaluationPolicy(
-              activeRulesOnlyDryRun(await this.dryRun(user, processDto)),
+              activeRulesOnlyDryRun(
+                await this.dryRun(user, processDto, {
+                  ruleDomainTimeZones,
+                  ruleExternalDomains,
+                }),
+              ),
               'LIVE_SUPPLEMENTAL',
             ),
             new Set(ruleIds),
@@ -6666,10 +7429,19 @@ export class GuestGamificationService {
             evaluatorVersion: 'ledger-supplemental-v1',
             evidence: supplementalFactEvidence(fact),
           });
-          await this.prisma.guestGameSupplementalFactReceipt.updateMany({
-            where: { ...receiptKey, status: 'PROCESSING' },
-            data: { status: 'SHADOWED', processedAt: new Date() },
-          });
+          const finalized =
+            await this.prisma.guestGameSupplementalFactReceipt.updateMany({
+              where: {
+                ...receiptKey,
+                status: 'PROCESSING',
+                attempts: claimAttempt,
+              },
+              data: { status: 'SHADOWED', processedAt: new Date() },
+            });
+          if (finalized.count === 0) {
+            result.duplicateFacts += 1;
+            continue;
+          }
           result.shadowFacts += 1;
           continue;
         }
@@ -6678,6 +7450,8 @@ export class GuestGamificationService {
           allowedRuleIds: ruleIds,
           evaluationMode: 'LIVE_SUPPLEMENTAL',
           evaluatorVersion: 'ledger-supplemental-v1',
+          ruleDomainTimeZones,
+          ruleExternalDomains,
           originKey: buildGuestGameOriginKey({
             externalProvider: fact.externalProvider,
             externalDomain: fact.externalDomain,
@@ -6686,26 +7460,41 @@ export class GuestGamificationService {
           }),
           suppressLedgerShadow: true,
         });
-        await this.prisma.guestGameSupplementalFactReceipt.updateMany({
-          where: { ...receiptKey, status: 'PROCESSING' },
-          data: {
-            status: 'PROCESSED',
-            eventId: processed.event.id,
-            processedAt: new Date(),
-          },
-        });
+        const finalized =
+          await this.prisma.guestGameSupplementalFactReceipt.updateMany({
+            where: {
+              ...receiptKey,
+              status: 'PROCESSING',
+              attempts: claimAttempt,
+            },
+            data: {
+              status: 'PROCESSED',
+              eventId: processed.event.id,
+              processedAt: new Date(),
+            },
+          });
+        if (finalized.count === 0) {
+          result.duplicateFacts += 1;
+          continue;
+        }
         result.processedFacts += 1;
         result.createdEvents += processed.summary.idempotent ? 0 : 1;
         result.createdRewards += processed.summary.createdRewards;
       } catch (error) {
-        await this.prisma.guestGameSupplementalFactReceipt.updateMany({
-          where: { ...receiptKey, status: 'PROCESSING' },
-          data: {
-            status: 'FAILED',
-            lastError: pipelineErrorMessage(error).slice(0, 500),
-          },
-        });
-        result.failedFacts += 1;
+        const finalized =
+          await this.prisma.guestGameSupplementalFactReceipt.updateMany({
+            where: {
+              ...receiptKey,
+              status: 'PROCESSING',
+              attempts: claimAttempt,
+            },
+            data: {
+              status: 'FAILED',
+              lastError: pipelineErrorMessage(error).slice(0, 500),
+            },
+          });
+        if (finalized.count > 0) result.failedFacts += 1;
+        else result.duplicateFacts += 1;
       }
     }
 
@@ -9339,6 +10128,7 @@ export class GuestGamificationService {
               store.id,
             ),
             item,
+            existingLootBox.limits,
           );
           const row = await this.prisma.guestGameLootBox.update({
             where: { id: lootBox.id },
@@ -10678,10 +11468,18 @@ export class GuestGamificationService {
   ): Promise<GuestGameEvent> {
     const data = await this.buildEventData(user, dto, canonicalIdentity);
     const profileId = nullableId(dto.profileId);
+    const guestId = nullableId(dto.guestId) ?? null;
     const xpDelta = intValue(dto.xpDelta) ?? 0;
     const rewardIntentPlans = processRewardIntentPlans(dto.payload);
+    const missionQualificationRules = processMissionQualificationRules(
+      dto.payload,
+    );
 
-    if ((!profileId || xpDelta === 0) && rewardIntentPlans.length === 0) {
+    if (
+      (!profileId || xpDelta === 0) &&
+      rewardIntentPlans.length === 0 &&
+      missionQualificationRules.length === 0
+    ) {
       const row = await this.prisma.guestGameEvent.create({
         data,
         include: eventInclude,
@@ -10689,137 +11487,417 @@ export class GuestGamificationService {
       return mapEvent(row);
     }
 
-    const row = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.guestGameEvent.create({
-        data: rewardIntentPlans.length > 0 ? { ...data, xpDelta: 0 } : data,
-        include: eventInclude,
-      });
-      let effectiveXpDelta = xpDelta;
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const row = await this.prisma.$transaction(
+          async (tx) => {
+            const qualificationOutcomes = profileId
+              ? await this.atomicMissionQualificationOutcomes(tx, {
+                  tenantId: user.tenantId,
+                  profileId,
+                  guestId,
+                  occurredAt:
+                    data.occurredAt instanceof Date
+                      ? data.occurredAt
+                      : new Date(data.occurredAt as string),
+                  timeZone: processPayloadTimeZone(dto.payload),
+                  rules: missionQualificationRules,
+                })
+              : [];
+            const qualifiedPayload = applyAtomicMissionQualificationOutcomes(
+              dto.payload,
+              qualificationOutcomes,
+            );
+            const qualifiedRewardIntentPlans =
+              processRewardIntentPlans(qualifiedPayload);
+            const deniedMissionRuleIds = new Set(
+              qualificationOutcomes
+                .filter((outcome) => !outcome.allowed)
+                .map((outcome) => outcome.ruleId),
+            );
+            const deniedMissionXp = sum(
+              missionQualificationRules
+                .filter((rule) => deniedMissionRuleIds.has(rule.id))
+                .map((rule) => rule.xpDelta),
+            );
+            const qualifiedXpDelta = xpDelta - deniedMissionXp;
+            const created = await tx.guestGameEvent.create({
+              data: {
+                ...data,
+                payload: jsonValue(qualifiedPayload),
+                xpDelta:
+                  qualifiedRewardIntentPlans.length > 0 ? 0 : qualifiedXpDelta,
+              },
+              include: eventInclude,
+            });
 
-      if (rewardIntentPlans.length > 0) {
-        const persistedPlanKeys = new Set<string>();
-
-        for (const plan of rewardIntentPlans) {
-          const idempotencyKey =
-            buildGuestGameRewardIdempotencyKey({
-              originKey: nullableString(canonicalIdentity.originKey),
-              ruleKind: plan.rule.kind,
-              ruleId: plan.rule.id,
-              slot: plan.slotKey,
-            }) ??
-            [
-              'guest-game-intent',
-              created.id,
-              plan.rule.kind,
-              plan.rule.id,
-              plan.slotKey,
-            ].join(':');
-          const intentData = {
-            tenantId: user.tenantId,
-            eventId: created.id,
-            profileId,
-            originKey: nullableString(canonicalIdentity.originKey),
-            ruleType: plan.rule.kind,
-            ruleId: plan.rule.id,
-            effectKind: 'REWARD',
-            slotKey: plan.slotKey,
-            idempotencyKey,
-            claimKey: plan.claimKey,
-            status: 'PENDING',
-            plan,
-            qualifiedAt: new Date(plan.qualifiedAt),
-          } satisfies Prisma.GuestGameRewardIntentUncheckedCreateInput;
-          const intent = plan.claimKey
-            ? await tx.guestGameRewardIntent.upsert({
-                where: {
-                  tenantId_claimKey: {
-                    tenantId: user.tenantId,
-                    claimKey: plan.claimKey,
-                  },
-                },
-                create: intentData,
-                update: {},
-              })
-            : await tx.guestGameRewardIntent.upsert({
+            for (const outcome of qualificationOutcomes.filter(
+              (item) => item.allowed,
+            )) {
+              const rule = missionQualificationRules.find(
+                (item) => item.id === outcome.ruleId,
+              );
+              if (!rule) continue;
+              const idempotencyKey = [
+                'mission-qualification',
+                created.id,
+                rule.id,
+              ].join(':');
+              await tx.guestGameRewardIntent.upsert({
                 where: {
                   tenantId_idempotencyKey: {
                     tenantId: user.tenantId,
                     idempotencyKey,
                   },
                 },
-                create: intentData,
+                create: {
+                  tenantId: user.tenantId,
+                  eventId: created.id,
+                  profileId,
+                  originKey: nullableString(canonicalIdentity.originKey),
+                  ruleType: 'MISSION',
+                  ruleId: rule.id,
+                  effectKind: 'QUALIFICATION',
+                  slotKey: 'mission-qualification',
+                  idempotencyKey,
+                  claimKey: null,
+                  status: 'APPLIED',
+                  plan: {
+                    schemaVersion: 1,
+                    qualifiedAt: outcome.qualifiedAt,
+                    slotKey: 'mission-qualification',
+                    claimKey: null,
+                    rule,
+                    atomicMissionLimit: {
+                      codes: outcome.codes,
+                      counts: outcome.counts,
+                      isolationLevel: 'SERIALIZABLE',
+                    },
+                  },
+                  qualifiedAt: new Date(outcome.qualifiedAt),
+                  processedAt: new Date(),
+                },
                 update: {},
               });
+            }
 
-          if (intent.eventId === created.id) {
-            persistedPlanKeys.add(processRewardIntentPlanKey(plan));
-          }
-        }
+            let effectiveXpDelta = qualifiedXpDelta;
+            if (qualifiedRewardIntentPlans.length > 0) {
+              const persistedPlanKeys = new Set<string>();
 
-        effectiveXpDelta -= sum(
-          rewardIntentPlans
-            .filter(
-              (plan) =>
-                !persistedPlanKeys.has(processRewardIntentPlanKey(plan)),
-            )
-            .map((plan) => plan.rule.xpDelta),
+              for (const plan of qualifiedRewardIntentPlans) {
+                const idempotencyKey =
+                  buildGuestGameRewardIdempotencyKey({
+                    originKey: nullableString(canonicalIdentity.originKey),
+                    ruleKind: plan.rule.kind,
+                    ruleId: plan.rule.id,
+                    slot: plan.slotKey,
+                  }) ??
+                  [
+                    'guest-game-intent',
+                    created.id,
+                    plan.rule.kind,
+                    plan.rule.id,
+                    plan.slotKey,
+                  ].join(':');
+                const intentData = {
+                  tenantId: user.tenantId,
+                  eventId: created.id,
+                  profileId,
+                  originKey: nullableString(canonicalIdentity.originKey),
+                  ruleType: plan.rule.kind,
+                  ruleId: plan.rule.id,
+                  effectKind: 'REWARD',
+                  slotKey: plan.slotKey,
+                  idempotencyKey,
+                  claimKey: plan.claimKey,
+                  status: 'PENDING',
+                  plan,
+                  qualifiedAt: new Date(plan.qualifiedAt),
+                } satisfies Prisma.GuestGameRewardIntentUncheckedCreateInput;
+                const intent = plan.claimKey
+                  ? await tx.guestGameRewardIntent.upsert({
+                      where: {
+                        tenantId_claimKey: {
+                          tenantId: user.tenantId,
+                          claimKey: plan.claimKey,
+                        },
+                      },
+                      create: intentData,
+                      update: {},
+                    })
+                  : await tx.guestGameRewardIntent.upsert({
+                      where: {
+                        tenantId_idempotencyKey: {
+                          tenantId: user.tenantId,
+                          idempotencyKey,
+                        },
+                      },
+                      create: intentData,
+                      update: {},
+                    });
+
+                if (intent.eventId === created.id) {
+                  persistedPlanKeys.add(processRewardIntentPlanKey(plan));
+                }
+              }
+
+              effectiveXpDelta -= sum(
+                qualifiedRewardIntentPlans
+                  .filter(
+                    (plan) =>
+                      !persistedPlanKeys.has(processRewardIntentPlanKey(plan)),
+                  )
+                  .map((plan) => plan.rule.xpDelta),
+              );
+
+              if (effectiveXpDelta !== 0) {
+                await tx.guestGameEvent.update({
+                  where: { id: created.id },
+                  data: { xpDelta: effectiveXpDelta },
+                });
+              }
+            }
+
+            if (profileId && effectiveXpDelta !== 0) {
+              const incremented = await tx.guestGameProfile.update({
+                where: { id: profileId },
+                data: {
+                  xp: { increment: effectiveXpDelta },
+                  lastActivityAt: new Date(),
+                },
+                select: { xp: true },
+              });
+              const balanceBefore = incremented.xp - effectiveXpDelta;
+              const balanceAfter = Math.max(0, incremented.xp);
+
+              await tx.guestGameProfile.update({
+                where: { id: profileId },
+                data: {
+                  xp: balanceAfter,
+                  level: levelFromXp(balanceAfter),
+                  lastActivityAt: new Date(),
+                },
+              });
+              await tx.guestGameXpPosting.create({
+                data: {
+                  tenantId: user.tenantId,
+                  profileId,
+                  eventId: created.id,
+                  idempotencyKey: `guest-game-xp:${created.id}`,
+                  requestedDelta: effectiveXpDelta,
+                  appliedDelta: balanceAfter - balanceBefore,
+                  balanceBefore,
+                  balanceAfter,
+                  evidence: {
+                    eventType: created.eventType,
+                    originKey: nullableString(canonicalIdentity.originKey),
+                  },
+                },
+              });
+            }
+
+            return (
+              (await tx.guestGameEvent.findUnique({
+                where: { id: created.id },
+                include: eventInclude,
+              })) ?? created
+            );
+          },
+          { isolationLevel: 'Serializable' },
         );
 
-        if (effectiveXpDelta !== 0) {
-          await tx.guestGameEvent.update({
-            where: { id: created.id },
-            data: { xpDelta: effectiveXpDelta },
-          });
+        return mapEvent(row);
+      } catch (error) {
+        if (isSerializationConflictError(error) && attempt < maxAttempts) {
+          continue;
         }
+        throw error;
       }
+    }
 
-      if (profileId && effectiveXpDelta !== 0) {
-        const incremented = await tx.guestGameProfile.update({
-          where: { id: profileId },
-          data: {
-            xp: { increment: effectiveXpDelta },
-            lastActivityAt: new Date(),
-          },
-          select: { xp: true },
-        });
-        const balanceBefore = incremented.xp - effectiveXpDelta;
-        const balanceAfter = Math.max(0, incremented.xp);
+    throw new Error('Mission qualification serialization retry exhausted.');
+  }
 
-        await tx.guestGameProfile.update({
-          where: { id: profileId },
-          data: {
-            xp: balanceAfter,
-            level: levelFromXp(balanceAfter),
-            lastActivityAt: new Date(),
+  private async atomicMissionQualificationOutcomes(
+    tx: Prisma.TransactionClient,
+    input: {
+      tenantId: string;
+      profileId: string;
+      guestId: string | null;
+      occurredAt: Date;
+      timeZone: string;
+      rules: ProcessRewardIntentRuleSnapshot[];
+    },
+  ): Promise<AtomicMissionQualificationOutcome[]> {
+    const rules = [...input.rules].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    if (!rules.length) return [];
+    const ruleIds = rules.map((rule) => rule.id);
+    const missions = new Map<
+      string,
+      {
+        id: string;
+        status: string;
+        conditions: Prisma.JsonValue;
+        antiFraudRules: Prisma.JsonValue | null;
+        perGuestLimit: number | null;
+        totalRewardLimit: number | null;
+        budgetAmount: Prisma.Decimal | null;
+        rewardAmount: Prisma.Decimal | null;
+      } | null
+    >();
+
+    // Lock all participating missions in one deterministic statement. The
+    // SERIALIZABLE transaction then evaluates and reserves every mission
+    // against one consistent history snapshot across API replicas.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id"
+      FROM "GuestGameMission"
+      WHERE "tenantId" = ${input.tenantId}
+        AND "id" IN (${Prisma.join(ruleIds)})
+      ORDER BY "id"
+      FOR UPDATE
+    `);
+    const [missionRows, intentRows, rewardRows, entitlementRows] =
+      await Promise.all([
+        tx.guestGameMission.findMany({
+          where: {
+            tenantId: input.tenantId,
+            id: { in: ruleIds },
           },
-        });
-        await tx.guestGameXpPosting.create({
-          data: {
-            tenantId: user.tenantId,
-            profileId,
-            eventId: created.id,
-            idempotencyKey: `guest-game-xp:${created.id}`,
-            requestedDelta: effectiveXpDelta,
-            appliedDelta: balanceAfter - balanceBefore,
-            balanceBefore,
-            balanceAfter,
-            evidence: {
-              eventType: created.eventType,
-              originKey: nullableString(canonicalIdentity.originKey),
+          select: {
+            id: true,
+            status: true,
+            conditions: true,
+            antiFraudRules: true,
+            perGuestLimit: true,
+            totalRewardLimit: true,
+            budgetAmount: true,
+            rewardAmount: true,
+          },
+        }),
+        tx.guestGameRewardIntent.findMany({
+          where: {
+            tenantId: input.tenantId,
+            ruleType: 'MISSION',
+            ruleId: { in: ruleIds },
+            effectKind: { in: ['QUALIFICATION', 'REWARD'] },
+            status: {
+              in: ['PENDING', 'PROCESSING', 'FAILED', 'APPLIED'],
             },
           },
+          select: {
+            id: true,
+            eventId: true,
+            ruleId: true,
+            effectKind: true,
+            status: true,
+            rewardId: true,
+            profileId: true,
+            qualifiedAt: true,
+            plan: true,
+          },
+        }),
+        tx.guestGameReward.findMany({
+          where: {
+            tenantId: input.tenantId,
+            missionId: { in: ruleIds },
+            status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+          },
+          select: {
+            id: true,
+            missionId: true,
+            profileId: true,
+            guestId: true,
+            qualifiedAt: true,
+            rewardAmount: true,
+          },
+        }),
+        tx.guestGameEntitlement.findMany({
+          where: {
+            tenantId: input.tenantId,
+            ruleType: 'LOOT_BOX',
+            status: { in: ['AVAILABLE', 'CONSUMED'] },
+            OR: ruleIds.map((ruleId) => ({
+              evidence: { path: ['missionId'], equals: ruleId },
+            })),
+          },
+          select: {
+            id: true,
+            eventId: true,
+            rewardId: true,
+            profileId: true,
+            guestId: true,
+            qualifiedAt: true,
+            evidence: true,
+          },
+        }),
+      ]);
+    for (const mission of missionRows) {
+      missions.set(mission.id, mission);
+    }
+
+    const outcomes: AtomicMissionQualificationOutcome[] = [];
+    for (const rule of rules) {
+      const mission = missions.get(rule.id);
+      if (!mission || mission.status !== 'ACTIVE') {
+        outcomes.push({
+          ruleId: rule.id,
+          allowed: false,
+          qualifiedAt: input.occurredAt.toISOString(),
+          codes: ['RULE_INACTIVE'],
+          counts: {},
         });
+        continue;
       }
 
-      return (
-        (await tx.guestGameEvent.findUnique({
-          where: { id: created.id },
-          include: eventInclude,
-        })) ?? created
+      const ruleIntentRows = Array.isArray(intentRows)
+        ? intentRows.filter((row) => row.ruleId === rule.id)
+        : [];
+      const ruleRewardRows = Array.isArray(rewardRows)
+        ? rewardRows.filter((row) => row.missionId === rule.id)
+        : [];
+      const ruleEntitlementRows = Array.isArray(entitlementRows)
+        ? entitlementRows.filter(
+            (row) => nullableId(jsonRecord(row.evidence).missionId) === rule.id,
+          )
+        : [];
+      const issuances = atomicMissionIssuances({
+        ruleId: rule.id,
+        intents: ruleIntentRows,
+        rewards: ruleRewardRows,
+        entitlements: ruleEntitlementRows,
+      });
+      const rewardConfig = dryRunRecord(
+        dryRunRecord(mission.conditions).reward,
       );
-    });
+      const guard = atomicMissionLimitGuard({
+        denySameDayRepeat:
+          dryRunRecord(mission.antiFraudRules).denySameDayRepeat === true,
+        periodicity: lootBoxPeriodicLimitPeriod(rewardConfig.periodicity),
+        perGuestLimit: mission.perGuestLimit,
+        totalRewardLimit: mission.totalRewardLimit,
+        budgetAmount: numberOrNull(mission.budgetAmount),
+        projectedAmount: numberOrNull(mission.rewardAmount) ?? 0,
+        profileId: input.profileId,
+        guestId: input.guestId,
+        qualifiedAt: input.occurredAt,
+        timeZone: input.timeZone,
+        issuances,
+      });
+      outcomes.push({
+        ruleId: rule.id,
+        allowed: !guard.exhausted,
+        qualifiedAt: input.occurredAt.toISOString(),
+        codes: guard.codes,
+        counts: guard.counts,
+      });
+    }
 
-    return mapEvent(row);
+    return outcomes;
   }
 
   async dryRun(
@@ -10850,13 +11928,16 @@ export class GuestGamificationService {
     const quantity = dryRunOptionalNumber(dto.quantity);
     const externalDomain = nullableString(dto.externalDomain) ?? null;
     const sourceFactId = nullableString(dto.sourceFactId) ?? null;
-    const [profile, lootBoxes, missions, seasons, rewards] = await Promise.all([
+    const [profile, lootBoxes, missions, seasons] = await Promise.all([
       this.resolveDryRunProfile(user, dto),
       this.getLootBoxes(user),
       this.getMissions(user),
       this.getSeasons(user),
-      this.getDryRunRewards(user, options.rewardScope),
     ]);
+    const rewards = await this.getDryRunRewards(user, {
+      ...options.rewardScope,
+      missionIds: missions.map((mission) => mission.id),
+    });
     const guest =
       profile?.guest ??
       (dto.guestId
@@ -10866,7 +11947,14 @@ export class GuestGamificationService {
       await this.getDryRunMissionRewardEntitlements(user, {
         profileId: profile?.id ?? null,
         guestId: guest?.id ?? null,
+        missionIds: missions.map((mission) => mission.id),
       });
+    const lootBoxLimitEntitlements =
+      await this.getDryRunLootBoxLimitEntitlements(
+        user,
+        lootBoxes.map((lootBox) => lootBox.id),
+        limitOccurredAt,
+      );
     const store = dto.storeId
       ? await this.assertStore(user, dto.storeId)
       : null;
@@ -10908,6 +11996,17 @@ export class GuestGamificationService {
       quantity,
       rewards,
       missionRewardEntitlements,
+      lootBoxLimitEntitlements,
+      rewardTemplateLootBoxIds: new Set(
+        lootBoxes
+          .filter(
+            (lootBox) =>
+              lootBox.status === 'ACTIVE' &&
+              (lootBox.usageKind === 'REWARD_TEMPLATE' ||
+                lootBox.usageKind === 'BOTH'),
+          )
+          .map((lootBox) => lootBox.id),
+      ),
       progressEvents,
       audienceMemberIds,
       ruleDomainTimeZones: options.ruleDomainTimeZones,
@@ -10915,7 +12014,7 @@ export class GuestGamificationService {
     };
     const targetLootBoxes = lootBoxId
       ? lootBoxes.filter((item) => item.id === lootBoxId)
-      : lootBoxes;
+      : lootBoxes.filter(lootBoxVisibleInCatalog);
 
     if (lootBoxId && !targetLootBoxes.length) {
       throw new NotFoundException('Лутбокс не найден');
@@ -10991,6 +12090,7 @@ export class GuestGamificationService {
       originKey?: string | null;
       traceId?: string | null;
       sourceFactId?: string | null;
+      sourceExternalId?: string | null;
       sourceFactKind?: string | null;
       evaluationRunId?: string;
       evaluationMode?: string;
@@ -10998,10 +12098,11 @@ export class GuestGamificationService {
       excludeSeasonRewardIds?: string[];
       evidence?: Prisma.InputJsonValue;
       suppressLedgerShadow?: boolean;
+      replaceExistingRun?: boolean;
     } = {},
-  ): Promise<void> {
+  ): Promise<GuestGameRuleDecisionRecordResult> {
     if (!dryRun.rules.length) {
-      return;
+      return { lootBoxEntitlements: [] };
     }
 
     const evaluationRunId =
@@ -11011,38 +12112,52 @@ export class GuestGamificationService {
     let decisionsPersisted = false;
 
     try {
-      await this.prisma.guestGameRuleDecision.createMany({
-        data: dryRun.rules.map((rule) => ({
-          tenantId: user.tenantId,
-          profileId: dryRun.profile?.id ?? null,
-          guestId: dryRun.guest?.id ?? null,
+      const decisionRows = dryRun.rules.map((rule) => ({
+        tenantId: user.tenantId,
+        profileId: dryRun.profile?.id ?? null,
+        guestId: dryRun.guest?.id ?? null,
+        storeId: dryRun.store?.id ?? null,
+        eventId: nullableId(options.eventId),
+        originKey: nullableString(options.originKey),
+        evaluationRunId,
+        evaluationMode,
+        evaluatorVersion: options.evaluatorVersion ?? 'legacy-v1',
+        ruleType: rule.kind === 'SEASON' ? 'BATTLE_PASS' : rule.kind,
+        ruleId: rule.id,
+        ruleName: rule.name,
+        ruleStatus: rule.status,
+        triggerKind: rule.triggerKind,
+        sourceEventType: dryRun.eventType,
+        sourceFactId: nullableString(options.sourceFactId),
+        sourceFactKind: nullableString(options.sourceFactKind),
+        traceId: nullableString(options.traceId),
+        status: rule.eligible ? 'MATCHED' : 'BLOCKED',
+        reasons: rule.reasons,
+        blockers: rule.blockers,
+        input: {
+          occurredAt: dryRun.occurredAt,
           storeId: dryRun.store?.id ?? null,
-          eventId: nullableId(options.eventId),
-          originKey: nullableString(options.originKey),
-          evaluationRunId,
-          evaluationMode,
-          evaluatorVersion: options.evaluatorVersion ?? 'legacy-v1',
-          ruleType: rule.kind === 'SEASON' ? 'BATTLE_PASS' : rule.kind,
-          ruleId: rule.id,
-          ruleName: rule.name,
-          ruleStatus: rule.status,
-          triggerKind: rule.triggerKind,
-          sourceEventType: dryRun.eventType,
-          sourceFactId: nullableString(options.sourceFactId),
-          sourceFactKind: nullableString(options.sourceFactKind),
-          traceId: nullableString(options.traceId),
-          status: rule.eligible ? 'MATCHED' : 'BLOCKED',
-          reasons: rule.reasons,
-          blockers: rule.blockers,
-          input: {
-            occurredAt: dryRun.occurredAt,
-            storeId: dryRun.store?.id ?? null,
-            ...dryRun.input,
-          },
-          ...(options.evidence ? { evidence: options.evidence } : {}),
-          evaluatedAt,
-        })),
-      });
+          ...dryRun.input,
+        },
+        ...(options.evidence ? { evidence: options.evidence } : {}),
+        evaluatedAt,
+      }));
+      if (options.replaceExistingRun) {
+        await this.prisma.$transaction([
+          this.prisma.guestGameRuleDecision.deleteMany({
+            where: {
+              tenantId: user.tenantId,
+              evaluationRunId,
+              evaluationMode,
+            },
+          }),
+          this.prisma.guestGameRuleDecision.createMany({ data: decisionRows }),
+        ]);
+      } else {
+        await this.prisma.guestGameRuleDecision.createMany({
+          data: decisionRows,
+        });
+      }
       decisionsPersisted = true;
     } catch (error) {
       this.logger.warn(
@@ -11058,13 +12173,18 @@ export class GuestGamificationService {
       evaluationMode !== 'LIVE_SUPPLEMENTAL' &&
       evaluationMode !== 'LIVE_LEDGER_FALLBACK' &&
       !options.suppressLedgerShadow;
+    let lootBoxEntitlements: GuestGameLootBoxEntitlementWriteOutcome[] = [];
 
     if (isLiveObservation) {
       if (decisionsPersisted) {
-        await this.recordMatchedEntitlements(user, dryRun, {
-          ...options,
-          evaluationRunId,
-        });
+        lootBoxEntitlements = await this.recordMatchedEntitlements(
+          user,
+          dryRun,
+          {
+            ...options,
+            evaluationRunId,
+          },
+        );
       }
       if (decisionsPersisted) {
         await this.recordMatchedMissionRewardEntitlements(user, dryRun, {
@@ -11080,6 +12200,96 @@ export class GuestGamificationService {
         });
       }
     }
+
+    return { lootBoxEntitlements };
+  }
+
+  private async getMissingMatchedLootBoxEntitlementRuleIds(
+    user: AuthenticatedUser,
+    dryRun: GuestGameDryRunResult,
+    eventId: string,
+  ): Promise<string[]> {
+    const ruleIds = uniqueStrings(
+      dryRun.rules
+        .filter((rule) => rule.kind === 'LOOT_BOX' && rule.eligible)
+        .map((rule) => rule.id),
+    );
+    if (!ruleIds.length) return [];
+
+    const existing = await this.prisma.guestGameEntitlement.findMany({
+      where: {
+        tenantId: user.tenantId,
+        eventId,
+        ruleType: 'LOOT_BOX',
+        ruleId: { in: ruleIds },
+      },
+      select: { ruleId: true },
+    });
+    const existingRuleIds = new Set(existing.map((row) => row.ruleId));
+
+    return ruleIds.filter((ruleId) => !existingRuleIds.has(ruleId));
+  }
+
+  private async getMissingMatchedMissionRewardEntitlementRuleIds(
+    user: AuthenticatedUser,
+    dryRun: GuestGameDryRunResult,
+    eventId: string,
+  ): Promise<string[]> {
+    const candidates = dryRun.rules.filter(
+      (rule) =>
+        rule.kind === 'MISSION' &&
+        rule.eligible &&
+        rule.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
+        !rule.manualApprovalRequired,
+    );
+    if (!candidates.length || !dryRun.profile?.id) return [];
+
+    const qualificationRequiredIds = candidates
+      .filter(missionDryRunRuleRequiresAtomicQualification)
+      .map((rule) => rule.id);
+    const qualificationRows = qualificationRequiredIds.length
+      ? await this.prisma.guestGameRewardIntent.findMany({
+          where: {
+            tenantId: user.tenantId,
+            eventId,
+            ruleType: 'MISSION',
+            ruleId: { in: qualificationRequiredIds },
+            effectKind: 'QUALIFICATION',
+            status: 'APPLIED',
+          },
+          select: { ruleId: true },
+        })
+      : [];
+    const qualifiedRuleIds = new Set(
+      qualificationRows.map((row) => row.ruleId),
+    );
+    const recoverableRuleIds = candidates
+      .filter(
+        (rule) =>
+          !missionDryRunRuleRequiresAtomicQualification(rule) ||
+          qualifiedRuleIds.has(rule.id),
+      )
+      .map((rule) => rule.id);
+    if (!recoverableRuleIds.length) return [];
+
+    const existing = await this.prisma.guestGameEntitlement.findMany({
+      where: {
+        tenantId: user.tenantId,
+        eventId,
+        ruleType: 'LOOT_BOX',
+        status: { in: ['AVAILABLE', 'CONSUMED', 'CANCELED'] },
+      },
+      select: { evidence: true },
+    });
+    const existingMissionIds = new Set(
+      existing
+        .map((row) => nullableId(jsonRecord(row.evidence).missionId))
+        .filter((missionId): missionId is string => Boolean(missionId)),
+    );
+
+    return recoverableRuleIds.filter(
+      (ruleId) => !existingMissionIds.has(ruleId),
+    );
   }
 
   private async recordMatchedEntitlements(
@@ -11092,18 +12302,20 @@ export class GuestGamificationService {
       sourceFactId?: string | null;
       sourceFactKind?: string | null;
       evaluationRunId: string;
+      evaluationMode?: string;
+      evaluatorVersion?: string;
       evidence?: Prisma.InputJsonValue;
     },
-  ): Promise<void> {
+  ): Promise<GuestGameLootBoxEntitlementWriteOutcome[]> {
     if (nullableString(options.sourceFactKind) === 'GUEST_LOOT_BOX_OPEN') {
-      return;
+      return [];
     }
 
     const rules = dryRun.rules.filter(
       (rule) => rule.kind === 'LOOT_BOX' && rule.eligible,
     );
     if (!rules.length || !dryRun.profile?.id) {
-      return;
+      return [];
     }
 
     const occurredAt = new Date(dryRun.occurredAt);
@@ -11121,90 +12333,272 @@ export class GuestGamificationService {
         .filter(Boolean)
         .join(':');
 
-    try {
-      await Promise.all(
-        rules.map((rule) => {
-          const periodicLimitPeriod = rule.periodicLimitPeriod ?? null;
-          const isDaily = periodicLimitPeriod === 'DAILY';
-          const entitlementPeriodKey = isDaily
-            ? dryRunLocalDateKey(qualifiedAt, timeZone)
-            : null;
-          const idempotencyKey = isDaily
-            ? [
-                'loot-box',
-                rule.id,
-                'daily',
-                dryRun.profile!.id,
-                entitlementPeriodKey,
-              ].join(':')
-            : [
-                'loot-box',
-                rule.id,
-                sourceIdentity || options.evaluationRunId,
-              ].join(':');
-          const validUntil = isDaily
-            ? dryRunNextLocalDayStart(qualifiedAt, timeZone)
-            : null;
-          const evidence = {
-            evaluationMode: 'LIVE',
-            evaluatorVersion: 'legacy-v1',
-            reasons: rule.reasons,
-            blockers: rule.blockers,
-            input: dryRun.input,
-            sourceEvidence: options.evidence ?? null,
-            entitlementPeriod: isDaily
-              ? {
-                  kind: 'DAILY',
-                  key: entitlementPeriodKey,
-                  timeZone,
-                  validUntil: validUntil?.toISOString() ?? null,
-                }
-              : null,
-          };
+    return Promise.all(
+      rules.map(async (rule) => {
+        const periodicLimitPeriod = rule.periodicLimitPeriod ?? null;
+        const isDaily = periodicLimitPeriod === 'DAILY';
+        const entitlementPeriodKey = isDaily
+          ? dryRunLocalDateKey(qualifiedAt, timeZone)
+          : null;
+        const idempotencyKey = isDaily
+          ? [
+              'loot-box',
+              rule.id,
+              'daily',
+              dryRun.profile!.id,
+              entitlementPeriodKey,
+            ].join(':')
+          : [
+              'loot-box',
+              rule.id,
+              sourceIdentity || options.evaluationRunId,
+            ].join(':');
+        const periodEndsAt = isDaily
+          ? dryRunNextLocalDayStart(qualifiedAt, timeZone)
+          : null;
+        const baseEvidence = {
+          evaluationMode: options.evaluationMode ?? 'LIVE',
+          evaluatorVersion: options.evaluatorVersion ?? 'legacy-v1',
+          reasons: rule.reasons,
+          blockers: rule.blockers,
+          input: dryRun.input,
+          sourceEvidence: options.evidence ?? null,
+          entitlementPeriod: isDaily
+            ? {
+                kind: 'DAILY',
+                key: entitlementPeriodKey,
+                timeZone,
+                periodEndsAt: periodEndsAt?.toISOString() ?? null,
+              }
+            : null,
+        };
 
-          return this.prisma.guestGameEntitlement.upsert({
-            where: {
-              tenantId_idempotencyKey: {
-                tenantId: user.tenantId,
-                idempotencyKey,
-              },
-            },
-            create: {
-              tenantId: user.tenantId,
-              profileId: dryRun.profile?.id ?? null,
-              guestId: dryRun.guest?.id ?? null,
-              storeId: dryRun.store?.id ?? null,
-              eventId: nullableId(options.eventId),
-              originKey: nullableString(options.originKey),
-              evaluationRunId: options.evaluationRunId,
-              ruleType: 'LOOT_BOX',
-              ruleId: rule.id,
-              ruleName: rule.name,
-              sourceEventType: dryRun.eventType,
-              sourceFactId: nullableString(options.sourceFactId),
-              sourceFactKind: nullableString(options.sourceFactKind),
-              traceId: nullableString(options.traceId),
-              status: 'AVAILABLE',
-              idempotencyKey,
-              qualifiedAt,
-              validUntil,
-              evidence,
-            },
-            update: {
-              ruleName: rule.name,
-              evaluationRunId: options.evaluationRunId,
-              traceId: nullableString(options.traceId),
-              validUntil,
-              evidence,
-            },
+        try {
+          return await this.persistMatchedLootBoxEntitlement({
+            tenantId: user.tenantId,
+            profileId: dryRun.profile!.id,
+            guestId: dryRun.guest?.id ?? null,
+            storeId: dryRun.store?.id ?? null,
+            eventId: nullableId(options.eventId) ?? null,
+            originKey: nullableString(options.originKey) ?? null,
+            evaluationRunId: options.evaluationRunId,
+            rule,
+            sourceEventType: dryRun.eventType,
+            sourceFactId: nullableString(options.sourceFactId) ?? null,
+            sourceFactKind: nullableString(options.sourceFactKind) ?? null,
+            traceId: nullableString(options.traceId) ?? null,
+            idempotencyKey,
+            qualifiedAt,
+            timeZone,
+            baseEvidence,
           });
-        }),
-      );
-    } catch (error) {
-      this.logger.warn(
-        `Failed to persist guest game entitlements for tenant ${user.tenantId}: ${this.checkInErrorMessage(error)}`,
-      );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to persist guest game entitlement ${rule.id} for tenant ${user.tenantId}: ${this.checkInErrorMessage(error)}`,
+          );
+          return {
+            ruleId: rule.id,
+            status: 'PERSISTENCE_FAILED' as const,
+            entitlementId: null,
+            limitCodes: [],
+          };
+        }
+      }),
+    );
+  }
+
+  private async persistMatchedLootBoxEntitlement(input: {
+    tenantId: string;
+    profileId: string;
+    guestId: string | null;
+    storeId: string | null;
+    eventId: string | null;
+    originKey: string | null;
+    evaluationRunId: string;
+    rule: GuestGameDryRunRule;
+    sourceEventType: string;
+    sourceFactId: string | null;
+    sourceFactKind: string | null;
+    traceId: string | null;
+    idempotencyKey: string;
+    qualifiedAt: Date;
+    timeZone: string;
+    baseEvidence: Prisma.InputJsonObject;
+  }): Promise<GuestGameLootBoxEntitlementWriteOutcome> {
+    const maxAttempts = 4;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const existing = await tx.guestGameEntitlement.findFirst({
+              where: {
+                tenantId: input.tenantId,
+                idempotencyKey: input.idempotencyKey,
+              },
+              select: { id: true, status: true, evidence: true },
+            });
+            if (existing) {
+              return {
+                ruleId: input.rule.id,
+                status: 'IDEMPOTENT' as const,
+                entitlementId: existing.id,
+                limitCodes: lootBoxLimitCodesFromEvidence(existing.evidence),
+              };
+            }
+
+            const activeRule = await tx.guestGameLootBox.findFirst({
+              where: {
+                tenantId: input.tenantId,
+                id: input.rule.id,
+                status: 'ACTIVE',
+              },
+              select: { id: true, limits: true },
+            });
+            const limits = dryRunRecord(activeRule?.limits);
+            const earliestRelevantAt = lootBoxLimitEarliestRelevantAt(
+              input.qualifiedAt,
+              limits,
+            );
+            const [rewards, entitlements] = activeRule
+              ? await Promise.all([
+                  tx.guestGameReward.findMany({
+                    where: {
+                      tenantId: input.tenantId,
+                      lootBoxId: input.rule.id,
+                      status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+                      qualifiedAt: {
+                        gte: earliestRelevantAt,
+                      },
+                    },
+                    select: {
+                      id: true,
+                      profileId: true,
+                      guestId: true,
+                      qualifiedAt: true,
+                    },
+                  }),
+                  tx.guestGameEntitlement.findMany({
+                    where: {
+                      tenantId: input.tenantId,
+                      ruleType: 'LOOT_BOX',
+                      ruleId: input.rule.id,
+                      status: { in: ['AVAILABLE', 'CONSUMED'] },
+                      qualifiedAt: {
+                        gte: earliestRelevantAt,
+                      },
+                    },
+                    select: {
+                      id: true,
+                      profileId: true,
+                      guestId: true,
+                      rewardId: true,
+                      qualifiedAt: true,
+                    },
+                  }),
+                ])
+              : [[], []];
+            const limitGuard = activeRule
+              ? lootBoxEntitlementLimitGuard({
+                  limits,
+                  profileId: input.profileId,
+                  guestId: input.guestId,
+                  qualifiedAt: input.qualifiedAt,
+                  timeZone: input.timeZone,
+                  rewards,
+                  entitlements,
+                })
+              : {
+                  exhausted: true,
+                  codes: ['RULE_INACTIVE'],
+                  counts: {},
+                };
+            const status = limitGuard.exhausted ? 'CANCELED' : 'AVAILABLE';
+            const evidence = {
+              ...input.baseEvidence,
+              issuanceOutcome: activeRule
+                ? limitGuard.exhausted
+                  ? 'LIMIT_EXHAUSTED'
+                  : 'PERSISTED'
+                : 'RULE_INACTIVE',
+              atomicLimitGuard: {
+                isolationLevel: 'SERIALIZABLE',
+                codes: limitGuard.codes,
+                counts: limitGuard.counts,
+              },
+            };
+            const entitlement = await tx.guestGameEntitlement.upsert({
+              where: {
+                tenantId_idempotencyKey: {
+                  tenantId: input.tenantId,
+                  idempotencyKey: input.idempotencyKey,
+                },
+              },
+              create: {
+                tenantId: input.tenantId,
+                profileId: input.profileId,
+                guestId: input.guestId,
+                storeId: input.storeId,
+                eventId: input.eventId,
+                originKey: input.originKey,
+                evaluationRunId: input.evaluationRunId,
+                ruleType: 'LOOT_BOX',
+                ruleId: input.rule.id,
+                ruleName: input.rule.name,
+                sourceEventType: input.sourceEventType,
+                sourceFactId: input.sourceFactId,
+                sourceFactKind: input.sourceFactKind,
+                traceId: input.traceId,
+                status,
+                idempotencyKey: input.idempotencyKey,
+                qualifiedAt: input.qualifiedAt,
+                validUntil: null,
+                canceledAt: status === 'CANCELED' ? new Date() : null,
+                evidence,
+              },
+              update: {},
+              select: { id: true },
+            });
+
+            return {
+              ruleId: input.rule.id,
+              status: activeRule
+                ? limitGuard.exhausted
+                  ? ('LIMIT_EXHAUSTED' as const)
+                  : ('PERSISTED' as const)
+                : ('RULE_INACTIVE' as const),
+              entitlementId: entitlement.id,
+              limitCodes: limitGuard.codes,
+            };
+          },
+          { isolationLevel: 'Serializable' },
+        );
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          const existing = await this.prisma.guestGameEntitlement.findFirst({
+            where: {
+              tenantId: input.tenantId,
+              idempotencyKey: input.idempotencyKey,
+            },
+            select: { id: true, evidence: true },
+          });
+          if (existing) {
+            return {
+              ruleId: input.rule.id,
+              status: 'IDEMPOTENT',
+              entitlementId: existing.id,
+              limitCodes: lootBoxLimitCodesFromEvidence(existing.evidence),
+            };
+          }
+        }
+        if (isSerializationConflictError(error) && attempt < maxAttempts) {
+          continue;
+        }
+        throw error;
+      }
     }
+
+    throw new Error('Loot-box entitlement serialization retry exhausted.');
   }
 
   private async recordMatchedMissionRewardEntitlements(
@@ -11221,34 +12615,74 @@ export class GuestGamificationService {
       evidence?: Prisma.InputJsonValue;
     },
   ) {
-    const missionRules = dryRun.rules.filter(
+    // A mission reward is authoritative only after processEvent persisted the
+    // canonical source event. Diagnostic LIVE_* evaluations (for example a
+    // blocked guest-portal loot-box open attempt) intentionally have no
+    // eventId and must never materialize a reward entitlement.
+    if (!nullableId(options.eventId)) return;
+
+    const candidateMissionRules = dryRun.rules.filter(
       (rule) =>
         rule.kind === 'MISSION' &&
         rule.eligible &&
         rule.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
         !rule.manualApprovalRequired,
     );
-    if (!missionRules.length || !dryRun.profile?.id) return;
+    if (!candidateMissionRules.length || !dryRun.profile?.id) return;
+
+    const eventId = nullableId(options.eventId)!;
+    const qualificationRequiredIds = candidateMissionRules
+      .filter(missionDryRunRuleRequiresAtomicQualification)
+      .map((rule) => rule.id);
+    const qualificationRows = qualificationRequiredIds.length
+      ? await this.prisma.guestGameRewardIntent.findMany({
+          where: {
+            tenantId: user.tenantId,
+            eventId,
+            ruleType: 'MISSION',
+            ruleId: { in: qualificationRequiredIds },
+            effectKind: 'QUALIFICATION',
+            status: 'APPLIED',
+          },
+          select: { ruleId: true },
+        })
+      : [];
+    const qualifiedRuleIds = new Set(
+      qualificationRows.map((row) => row.ruleId),
+    );
+    const missionRules = candidateMissionRules.filter(
+      (rule) =>
+        !missionDryRunRuleRequiresAtomicQualification(rule) ||
+        qualifiedRuleIds.has(rule.id),
+    );
+    if (!missionRules.length) return;
 
     const missions = await this.prisma.guestGameMission.findMany({
       where: {
         tenantId: user.tenantId,
         id: { in: missionRules.map((rule) => rule.id) },
       },
-      select: { id: true, conditions: true },
+      select: { id: true, conditions: true, antiFraudRules: true },
     });
-    const targetByMission = new Map(
+    const missionConfigById = new Map(
       missions.map((mission) => {
         const reward = jsonRecord(
           jsonRecord(mission.conditions).reward as Prisma.JsonValue,
         );
-        return [mission.id, nullableId(reward.lootBoxId)] as const;
+        return [
+          mission.id,
+          {
+            lootBoxId: nullableId(reward.lootBoxId),
+            denySameDayRepeat:
+              jsonRecord(mission.antiFraudRules).denySameDayRepeat === true,
+          },
+        ] as const;
       }),
     );
     const targetIds = uniqueStrings(
-      [...targetByMission.values()].filter((value): value is string =>
-        Boolean(value),
-      ),
+      [...missionConfigById.values()]
+        .map((value) => value.lootBoxId)
+        .filter((value): value is string => Boolean(value)),
     );
     if (!targetIds.length) return;
 
@@ -11270,17 +12704,33 @@ export class GuestGamificationService {
       nullableString(options.originKey) ??
       nullableId(options.eventId) ??
       [options.sourceFactKind, options.sourceFactId].filter(Boolean).join(':');
+    const timeZone = guestGameTimeZone(dryRun.store?.timeZone ?? null);
 
     await Promise.all(
       missionRules.map(async (rule) => {
-        const targetId = targetByMission.get(rule.id);
+        const missionConfig = missionConfigById.get(rule.id);
+        const targetId = missionConfig?.lootBoxId;
         const target = targetId ? lootBoxById.get(targetId) : null;
-        if (!target) return;
-        const idempotencyKey = [
-          'mission-loot-box',
-          rule.id,
-          sourceIdentity || options.evaluationRunId,
-        ].join(':');
+        if (!target || !missionConfig) return;
+        const entitlementDateKey = missionConfig.denySameDayRepeat
+          ? dryRunLocalDateKey(qualifiedAt, timeZone)
+          : null;
+        // The daily identity is enforced by the database unique key. Two
+        // workers evaluating different facts for the same mission/day can
+        // therefore create at most one automatic reward entitlement.
+        const idempotencyKey = missionConfig.denySameDayRepeat
+          ? [
+              'mission-loot-box',
+              rule.id,
+              'daily',
+              dryRun.profile!.id,
+              entitlementDateKey,
+            ].join(':')
+          : [
+              'mission-loot-box',
+              rule.id,
+              sourceIdentity || options.evaluationRunId,
+            ].join(':');
         await this.prisma.guestGameEntitlement.upsert({
           where: {
             tenantId_idempotencyKey: {
@@ -11311,36 +12761,57 @@ export class GuestGamificationService {
               missionId: rule.id,
               evaluationMode: options.evaluationMode,
               evaluatorVersion: 'mission-wizard-v2',
+              denySameDayRepeat: missionConfig.denySameDayRepeat,
+              entitlementDateKey,
+              timeZone,
               sourceEvidence: options.evidence ?? null,
             },
           },
-          update: {
-            evaluationRunId: options.evaluationRunId,
-            traceId: nullableString(options.traceId),
-          },
+          // AVAILABLE, CONSUMED and CANCELED are all durable outcomes. A
+          // retry must not mutate or reopen any previously issued right.
+          update: {},
         });
       }),
     );
   }
 
-  private async createApprovedMissionLootBoxEntitlement(
+  private async createApprovedRewardLootBoxEntitlement(
     user: AuthenticatedUser,
     reward: RewardRow,
   ) {
     if (
       reward.tenantId !== user.tenantId ||
       reward.rewardType !== 'LOOT_BOX_ENTITLEMENT' ||
-      !reward.mission ||
       !reward.profileId
     ) {
       return;
     }
 
-    const missionReward = jsonRecord(
-      jsonRecord(reward.mission.conditions).reward as Prisma.JsonValue,
+    const rewardEvidence = jsonRecord(reward.evidence);
+    const ruleEvidence = jsonRecord(
+      rewardEvidence.rule as Prisma.JsonValue | null,
     );
-    const lootBoxId = nullableId(missionReward.lootBoxId);
-    if (!lootBoxId) return;
+    const battlePassTrack = processBattlePassRewardTrack(
+      ruleEvidence.battlePassRewardTrack,
+    );
+    const missionReward = reward.mission
+      ? jsonRecord(
+          jsonRecord(reward.mission.conditions).reward as Prisma.JsonValue,
+        )
+      : null;
+    const lootBoxId = reward.mission
+      ? nullableId(missionReward?.lootBoxId)
+      : reward.season && battlePassTrack === 'FREE'
+        ? nullableId(ruleEvidence.rewardLootBoxId)
+        : null;
+    if (!lootBoxId) {
+      if (reward.season) {
+        throw new BadRequestException(
+          'Наградной лутбокс Battle Pass не может быть выдан без подтвержденной FREE-дорожки и сохраненного идентификатора лутбокса.',
+        );
+      }
+      return;
+    }
 
     const lootBox = await this.prisma.guestGameLootBox.findFirst({
       where: {
@@ -11357,7 +12828,10 @@ export class GuestGamificationService {
       );
     }
 
-    const idempotencyKey = `mission-loot-box-approval:${reward.id}`;
+    const isBattlePassReward = Boolean(reward.season);
+    const idempotencyKey = isBattlePassReward
+      ? `battle-pass-loot-box-approval:${reward.id}`
+      : `mission-loot-box-approval:${reward.id}`;
     await this.prisma.guestGameEntitlement.upsert({
       where: {
         tenantId_idempotencyKey: {
@@ -11374,22 +12848,37 @@ export class GuestGamificationService {
         ruleType: 'LOOT_BOX',
         ruleId: lootBox.id,
         ruleName: lootBox.name,
-        sourceEventType: 'MISSION_REWARD_APPROVED',
+        sourceEventType: isBattlePassReward
+          ? 'BATTLE_PASS_REWARD_APPROVED'
+          : 'MISSION_REWARD_APPROVED',
         status: 'AVAILABLE',
         idempotencyKey,
         qualifiedAt: reward.qualifiedAt,
-        evidence: {
-          source: 'mission_reward_admin_approval',
-          missionId: reward.mission.id,
-          rewardId: reward.id,
-          approvedByUserId: user.id,
-          evaluatorVersion: 'mission-wizard-v2',
-        },
+        evidence: isBattlePassReward
+          ? {
+              source: reward.approvedByUser
+                ? 'battle_pass_reward_admin_approval'
+                : 'battle_pass_reward_auto',
+              seasonId: reward.season?.id ?? null,
+              battlePassLevel: intValue(ruleEvidence.battlePassLevel),
+              battlePassStep: intValue(ruleEvidence.battlePassStep),
+              battlePassRewardTrack: battlePassTrack,
+              rewardId: reward.id,
+              approvedByUserId: reward.approvedByUser?.id ?? null,
+              evaluatorVersion: 'battle-pass-rewards-v2',
+            }
+          : {
+              source: 'mission_reward_admin_approval',
+              missionId: reward.mission?.id ?? null,
+              rewardId: reward.id,
+              approvedByUserId: user.id,
+              evaluatorVersion: 'mission-wizard-v2',
+            },
       },
-      update: {
-        status: 'AVAILABLE',
-        canceledAt: null,
-      },
+      // Approval/effect retries are create-only. In particular, a consumed
+      // or canceled entitlement is terminal and must never become AVAILABLE
+      // again merely because the materializer retried the same reward.
+      update: {},
     });
   }
 
@@ -11410,8 +12899,10 @@ export class GuestGamificationService {
     dryRun: GuestGameDryRunResult,
     options: {
       eventId?: string | null;
+      originKey?: string | null;
       traceId?: string | null;
       sourceFactId?: string | null;
+      sourceExternalId?: string | null;
       sourceFactKind?: string | null;
       evaluationRunId: string;
       excludeSeasonRewardIds?: string[];
@@ -11483,7 +12974,7 @@ export class GuestGamificationService {
       const ruleStores =
         (await this.prisma.store.findMany({
           where: { tenantId: user.tenantId, isActive: true },
-          select: { id: true, externalDomain: true },
+          select: { id: true, externalDomain: true, timeZone: true },
         })) ?? [];
       const rules: GuestGameLedgerRule[] = [
         ...lootBoxes.map((rule) => ({
@@ -11500,6 +12991,10 @@ export class GuestGamificationService {
           periodRules: rule.periodRules,
           storeIds: guestGameStringArray(rule.storeIds),
           externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
+          domainTimeZones: guestGameRuleDomainTimeZones(
             guestGameStringArray(rule.storeIds),
             ruleStores,
           ),
@@ -11523,6 +13018,10 @@ export class GuestGamificationService {
           periodRules: rule.conditions,
           storeIds: guestGameStringArray(rule.storeIds),
           externalDomains: guestGameRuleExternalDomains(
+            guestGameStringArray(rule.storeIds),
+            ruleStores,
+          ),
+          domainTimeZones: guestGameRuleDomainTimeZones(
             guestGameStringArray(rule.storeIds),
             ruleStores,
           ),
@@ -11570,6 +13069,10 @@ export class GuestGamificationService {
                     guestGameStringArray(rule.storeIds),
                     ruleStores,
                   ),
+            domainTimeZones: guestGameRuleDomainTimeZones(
+              guestGameStringArray(rule.storeIds),
+              ruleStores,
+            ),
             progressTarget: dryRunOptionalNumber(metric.target),
             progressUnit: dryRunString(metric.unit),
           };
@@ -11614,6 +13117,14 @@ export class GuestGamificationService {
             facts,
             dryRun.store?.id ?? null,
             evaluatedTo,
+            {
+              mode: 'EVENT_PARITY',
+              sourceEventType: dryRun.eventType,
+              sourceFactId: nullableString(options.sourceFactId),
+              sourceExternalId: nullableString(options.sourceExternalId),
+              sourceOriginKey: nullableString(options.originKey),
+              occurredAt: evaluatedTo,
+            },
           );
 
           return {
@@ -11723,9 +13234,12 @@ export class GuestGamificationService {
           options.allowedBattlePassSteps,
         )
       : ruleFilteredDryRun;
-    const dryRun = booleanValue(dto.suppressLootBoxRewards)
+    const rewardDryRun = booleanValue(dto.suppressLootBoxRewards)
       ? suppressLootBoxRewardsDryRun(decisionDryRun)
       : decisionDryRun;
+    const dryRun = booleanValue(dto.suppressLootBoxEntitlements)
+      ? suppressLootBoxEntitlementsDryRun(rewardDryRun)
+      : rewardDryRun;
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
     const originKey =
       nullableString(options.originKey) ??
@@ -11772,6 +13286,7 @@ export class GuestGamificationService {
           originKey,
           traceId: nullableString(dto.traceId),
           sourceFactId: options.replayRewardScope.sourceFactId,
+          sourceExternalId: nullableString(dto.externalId),
           sourceFactKind: 'RULE_REPLAY',
           evaluationMode: 'LIVE_LEDGER_FALLBACK',
           evaluatorVersion: options.evaluatorVersion ?? 'ledger-rule-replay-v1',
@@ -11808,7 +13323,14 @@ export class GuestGamificationService {
             replayIntentIds ? { intentIds: replayIntentIds } : undefined,
           )
         : null;
-      const processDryRun = materialized?.dryRun ?? dryRun;
+      const persistedProcessDryRun = processPersistedEventDryRun(
+        existingEvent,
+        materialized?.dryRun ?? dryRun,
+      );
+      const processDryRun = dryRunWithPersistedRewardIntents(
+        persistedProcessDryRun ?? dryRun,
+        materialized?.dryRun ?? null,
+      );
       const processRewards = materialized?.rewards ?? existingRewards;
       const existingRewardIds = new Set(
         existingRewards.map((reward) => reward.id),
@@ -11816,27 +13338,72 @@ export class GuestGamificationService {
       const createdRewards = processRewards.filter(
         (reward) => !existingRewardIds.has(reward.id),
       );
+      const persistedEntitlementDryRun = !options.replayRewardScope
+        ? processLootBoxEntitlementRecoveryDryRun(existingEvent, processDryRun)
+        : null;
+      const missingLootBoxEntitlementRuleIds = persistedEntitlementDryRun
+        ? await this.getMissingMatchedLootBoxEntitlementRuleIds(
+            user,
+            persistedEntitlementDryRun,
+            existingEvent.id,
+          )
+        : [];
+      const missingMissionEntitlementRuleIds = persistedEntitlementDryRun
+        ? await this.getMissingMatchedMissionRewardEntitlementRuleIds(
+            user,
+            persistedEntitlementDryRun,
+            existingEvent.id,
+          )
+        : [];
+      const missingEntitlementRuleIds = uniqueStrings([
+        ...missingLootBoxEntitlementRuleIds,
+        ...missingMissionEntitlementRuleIds,
+      ]);
+      const entitlementRecoveryDryRun = missingEntitlementRuleIds.length
+        ? filterDryRunRules(
+            persistedEntitlementDryRun!,
+            new Set(missingEntitlementRuleIds),
+          )
+        : null;
 
       // Legacy events do not have an immutable reward intent. Re-evaluating
       // them here could advance another Battle Pass step or reroll a lootbox.
-      if (materialized && !options.replayRewardScope) {
-        await this.recordRuleDecisions(user, processDryRun, {
-          eventId: existingEvent.id,
-          originKey,
-          traceId: nullableString(dto.traceId),
-          sourceFactId: nullableString(dto.sourceFactId),
-          sourceFactKind: nullableString(dto.sourceFactKind),
-          evaluationMode: options.evaluationMode,
-          evaluatorVersion: options.evaluatorVersion,
-          suppressLedgerShadow: options.suppressLedgerShadow,
-          excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
-          evidence: {
-            idempotent: true,
-            recoveredFromPersistedIntent: createdRewards.length > 0,
-            externalId: eventReference?.externalId ?? null,
+      if (
+        !options.replayRewardScope &&
+        (materialized || entitlementRecoveryDryRun)
+      ) {
+        await this.recordRuleDecisions(
+          user,
+          entitlementRecoveryDryRun ?? processDryRun,
+          {
+            eventId: existingEvent.id,
             originKey,
+            traceId: nullableString(dto.traceId),
+            sourceFactId: nullableString(dto.sourceFactId),
+            sourceExternalId: nullableString(dto.externalId),
+            sourceFactKind: nullableString(dto.sourceFactKind),
+            evaluationRunId: entitlementRecoveryDryRun
+              ? `loot-box-entitlement-recovery:${existingEvent.id}`
+              : undefined,
+            evaluationMode:
+              options.evaluationMode ??
+              (entitlementRecoveryDryRun
+                ? 'LIVE_LOOT_BOX_RECOVERY'
+                : undefined),
+            evaluatorVersion: options.evaluatorVersion,
+            suppressLedgerShadow:
+              options.suppressLedgerShadow ??
+              Boolean(entitlementRecoveryDryRun),
+            excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
+            evidence: {
+              idempotent: true,
+              entitlementRecovery: Boolean(entitlementRecoveryDryRun),
+              recoveredFromPersistedIntent: createdRewards.length > 0,
+              externalId: eventReference?.externalId ?? null,
+              originKey,
+            },
           },
-        });
+        );
       }
 
       return {
@@ -11937,7 +13504,14 @@ export class GuestGamificationService {
                 originKey,
               )
             : null;
-          const processDryRun = materialized?.dryRun ?? dryRun;
+          const persistedProcessDryRun = processPersistedEventDryRun(
+            duplicateEvent,
+            materialized?.dryRun ?? dryRun,
+          );
+          const processDryRun = dryRunWithPersistedRewardIntents(
+            persistedProcessDryRun ?? dryRun,
+            materialized?.dryRun ?? null,
+          );
           const processRewards = materialized?.rewards ?? existingRewards;
           const existingRewardIds = new Set(
             existingRewards.map((reward) => reward.id),
@@ -11946,25 +13520,72 @@ export class GuestGamificationService {
             (reward) => !existingRewardIds.has(reward.id),
           );
 
-          if (materialized) {
-            await this.recordRuleDecisions(user, processDryRun, {
-              eventId: duplicateEvent.id,
-              originKey,
-              traceId: nullableString(dto.traceId),
-              sourceFactId: nullableString(dto.sourceFactId),
-              sourceFactKind: nullableString(dto.sourceFactKind),
-              evaluationMode: options.evaluationMode,
-              evaluatorVersion: options.evaluatorVersion,
-              suppressLedgerShadow: options.suppressLedgerShadow,
-              excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
-              evidence: {
-                idempotent: true,
-                conflictRecovered: true,
-                recoveredFromPersistedIntent: createdRewards.length > 0,
-                externalId: eventReference?.externalId ?? null,
+          const persistedEntitlementDryRun =
+            processLootBoxEntitlementRecoveryDryRun(
+              duplicateEvent,
+              processDryRun,
+            );
+          const missingLootBoxEntitlementRuleIds = persistedEntitlementDryRun
+            ? await this.getMissingMatchedLootBoxEntitlementRuleIds(
+                user,
+                persistedEntitlementDryRun,
+                duplicateEvent.id,
+              )
+            : [];
+          const missingMissionEntitlementRuleIds = persistedEntitlementDryRun
+            ? await this.getMissingMatchedMissionRewardEntitlementRuleIds(
+                user,
+                persistedEntitlementDryRun,
+                duplicateEvent.id,
+              )
+            : [];
+          const missingEntitlementRuleIds = uniqueStrings([
+            ...missingLootBoxEntitlementRuleIds,
+            ...missingMissionEntitlementRuleIds,
+          ]);
+          const entitlementRecoveryDryRun = missingEntitlementRuleIds.length
+            ? filterDryRunRules(
+                persistedEntitlementDryRun!,
+                new Set(missingEntitlementRuleIds),
+              )
+            : null;
+
+          if (materialized || entitlementRecoveryDryRun) {
+            await this.recordRuleDecisions(
+              user,
+              entitlementRecoveryDryRun ?? processDryRun,
+              {
+                eventId: duplicateEvent.id,
                 originKey,
+                traceId: nullableString(dto.traceId),
+                sourceFactId: nullableString(dto.sourceFactId),
+                sourceExternalId: nullableString(dto.externalId),
+                sourceFactKind: nullableString(dto.sourceFactKind),
+                evaluationRunId: entitlementRecoveryDryRun
+                  ? `loot-box-entitlement-recovery:${duplicateEvent.id}`
+                  : undefined,
+                evaluationMode:
+                  options.evaluationMode ??
+                  (entitlementRecoveryDryRun
+                    ? 'LIVE_LOOT_BOX_RECOVERY'
+                    : undefined),
+                evaluatorVersion: options.evaluatorVersion,
+                suppressLedgerShadow:
+                  options.suppressLedgerShadow ??
+                  Boolean(entitlementRecoveryDryRun),
+                excludeSeasonRewardIds: processRewards.map(
+                  (reward) => reward.id,
+                ),
+                evidence: {
+                  idempotent: true,
+                  entitlementRecovery: Boolean(entitlementRecoveryDryRun),
+                  conflictRecovered: true,
+                  recoveredFromPersistedIntent: createdRewards.length > 0,
+                  externalId: eventReference?.externalId ?? null,
+                  originKey,
+                },
               },
-            });
+            );
           }
 
           return {
@@ -12004,8 +13625,12 @@ export class GuestGamificationService {
           originKey,
         )
       : null;
+    const persistedProcessDryRun = processPersistedEventDryRun(
+      event,
+      materialized?.dryRun ?? dryRun,
+    );
     const processDryRun = dryRunWithPersistedRewardIntents(
-      dryRun,
+      persistedProcessDryRun ?? dryRun,
       materialized?.dryRun ?? null,
     );
     const rewards = materialized?.rewards ?? [];
@@ -12016,6 +13641,7 @@ export class GuestGamificationService {
         originKey,
         traceId: nullableString(dto.traceId),
         sourceFactId: nullableString(dto.sourceFactId),
+        sourceExternalId: nullableString(dto.externalId),
         sourceFactKind: nullableString(dto.sourceFactKind),
         evaluationMode: options.evaluationMode,
         evaluatorVersion: options.evaluatorVersion,
@@ -12282,6 +13908,7 @@ export class GuestGamificationService {
       liveSession: this.guestGameDebugSession(liveSession),
     });
     const result = await this.syncLiveSessionStartResult(
+      user,
       await this.processEvent(user, processDto),
       processDto,
     );
@@ -12298,6 +13925,7 @@ export class GuestGamificationService {
   }
 
   private async syncLiveSessionStartResult(
+    user: AuthenticatedUser,
     result: GuestGameProcessEventResult,
     dto: GuestGameProcessEventDto,
   ): Promise<GuestGameProcessEventResult> {
@@ -12317,6 +13945,20 @@ export class GuestGamificationService {
       return result;
     }
 
+    const storedWasRegular =
+      nullableBooleanValue(input.sessionPacket) === false ||
+      nullableString(input.sessionType) === 'regular_session';
+    const becamePackage =
+      nextInput.sessionPacket === true ||
+      nextInput.sessionType === 'packet_hours';
+
+    if (storedWasRegular && becamePackage) {
+      // Preserve the original event payload as immutable evidence of the
+      // regular classification. A separate versioned event is scoped to only
+      // rules that become eligible because the package marker arrived later.
+      return this.processSessionPackageClassificationCorrection(user, dto);
+    }
+
     const nextPayload = buildProcessPayload(dto, result.dryRun);
 
     await this.prisma.guestGameEvent.update({
@@ -12333,10 +13975,102 @@ export class GuestGamificationService {
     };
   }
 
+  private async processSessionPackageClassificationCorrection(
+    user: AuthenticatedUser,
+    dto: GuestGameProcessEventDto,
+  ): Promise<GuestGameProcessEventResult> {
+    const originalExternalId = nullableString(dto.externalId);
+    const originalSourceFactId = nullableString(dto.sourceFactId);
+    const correctionSuffix = `:classification:${snapshotSessionPackageCorrectionVersion}`;
+    const correctionExternalId = originalExternalId?.endsWith(correctionSuffix)
+      ? originalExternalId
+      : originalExternalId
+        ? `${originalExternalId}${correctionSuffix}`
+        : null;
+    if (!correctionExternalId || !originalSourceFactId) {
+      throw new BadRequestException(
+        'Р”Р»СЏ СѓС‚РѕС‡РЅРµРЅРёСЏ С‚РёРїР° СЃРµСЃСЃРёРё РЅСѓР¶РµРЅ СЃС‚Р°Р±РёР»СЊРЅС‹Р№ Langame session id.',
+      );
+    }
+
+    const correctionDto: GuestGameProcessEventDto = {
+      ...dto,
+      eventType: 'SESSION_START',
+      sessionType: 'packet_hours',
+      sessionPacket: true,
+      // Keep the physical session identity stable. Progress aggregation uses
+      // sourceFactId to distinguish sessions, while the versioned externalId
+      // below gives the correction event its own idempotency/origin key.
+      sourceFactId: originalSourceFactId,
+      sourceFactKind: 'GUEST_SESSION',
+      externalId: correctionExternalId,
+      activeRulesOnly: true,
+      suppressLootBoxRewards: true,
+      payload: {
+        ...(dto.payload ?? {}),
+        sessionClassificationCorrection: {
+          schemaVersion: 1,
+          from: 'regular_session',
+          to: 'packet_hours',
+          originalExternalId,
+        },
+      },
+    };
+    const regularDto: GuestGameProcessEventDto = {
+      ...correctionDto,
+      sessionType: 'regular_session',
+      sessionPacket: false,
+    };
+    const [packageDryRun, regularDryRun] = await Promise.all([
+      this.dryRun(user, correctionDto),
+      this.dryRun(user, regularDto),
+    ]);
+    const routedPackageDryRun = filterDryRunRulesByEvaluationPolicy(
+      activeRulesOnlyDryRun(packageDryRun),
+      'LIVE',
+    );
+    const routedRegularDryRun = filterDryRunRulesByEvaluationPolicy(
+      activeRulesOnlyDryRun(regularDryRun),
+      'LIVE',
+    );
+    const regularEligibility = new Map(
+      routedRegularDryRun.rules.map((rule) => [
+        sessionClassificationRuleKey(rule),
+        rule.eligible,
+      ]),
+    );
+    const newlyEligible = routedPackageDryRun.rules.filter(
+      (rule) =>
+        rule.status === 'ACTIVE' &&
+        rule.eligible &&
+        regularEligibility.get(sessionClassificationRuleKey(rule)) !== true,
+    );
+    const allowedRuleIds = new Set(newlyEligible.map((rule) => rule.id));
+    const allowedBattlePassSteps = new Map<string, number>();
+    for (const rule of newlyEligible) {
+      if (rule.kind === 'SEASON' && rule.battlePassStep != null) {
+        allowedBattlePassSteps.set(rule.id, rule.battlePassStep);
+      }
+    }
+
+    return this.processEvent(user, correctionDto, {
+      allowedRuleIds,
+      allowedBattlePassSteps,
+      evaluationMode: 'LIVE',
+      evaluatorVersion: 'live-session-package-correction-v1',
+      materializeRewards: newlyEligible.length > 0,
+      suppressLedgerShadow: newlyEligible.length === 0,
+    });
+  }
+
   private async hasActiveSessionStartRules(user: AuthenticatedUser) {
     const [lootBoxes, missions, seasons] = await Promise.all([
       this.prisma.guestGameLootBox.findMany({
-        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        where: {
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+          usageKind: { in: ['STANDALONE', 'BOTH'] },
+        },
         select: { triggerKind: true },
       }),
       this.prisma.guestGameMission.findMany({
@@ -12926,6 +14660,7 @@ export class GuestGamificationService {
         tenantId: user.tenantId,
         eventId: event.id,
         ...intentWhere,
+        effectKind: 'REWARD',
         status: 'PROCESSING',
         attempts: { gte: maxAttempts },
         OR: [{ claimExpiresAt: { lte: now } }, { claimExpiresAt: null }],
@@ -12939,7 +14674,12 @@ export class GuestGamificationService {
     });
     stats.deadLettered += exhausted.count;
     const intents = await this.prisma.guestGameRewardIntent.findMany({
-      where: { tenantId: user.tenantId, eventId: event.id, ...intentWhere },
+      where: {
+        tenantId: user.tenantId,
+        eventId: event.id,
+        ...intentWhere,
+        effectKind: 'REWARD',
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     if (!intents.length) return null;
@@ -13241,6 +14981,7 @@ export class GuestGamificationService {
           WHERE intent."tenantId" = ${tenantId}
             AND intent."eventId" = ${eventId}
             ${intentFilter}
+            AND intent."effectKind" = 'REWARD'
             AND intent."attempts" < ${maxAttempts}
             AND (
               (
@@ -13281,6 +15022,7 @@ export class GuestGamificationService {
         tenantId,
         eventId,
         ...(intentIds.length ? { id: { in: intentIds } } : {}),
+        effectKind: 'REWARD',
         attempts: { lt: maxAttempts },
         OR: [
           {
@@ -13616,52 +15358,112 @@ export class GuestGamificationService {
       seasonId?: string | null;
       profileId?: string | null;
       guestId?: string | null;
+      missionIds?: string[];
     } = {},
   ): Promise<GuestGameReward[]> {
     const owners: Prisma.GuestGameRewardWhereInput[] = [
       ...(scope.profileId ? [{ profileId: scope.profileId }] : []),
       ...(scope.guestId ? [{ guestId: scope.guestId }] : []),
     ];
-    const rows = await this.prisma.guestGameReward.findMany({
-      where: {
-        tenantId: user.tenantId,
-        status: { in: ['PENDING', 'APPROVED', 'PAID'] },
-        ...(scope.seasonId ? { seasonId: scope.seasonId } : {}),
-        ...(scope.seasonId && owners.length ? { OR: owners } : {}),
-      },
-      include: rewardInclude,
-      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
-      take: 1000,
-    });
+    const missionIds = uniqueStrings(scope.missionIds ?? []);
+    const [rows, missionRows] = await Promise.all([
+      this.prisma.guestGameReward.findMany({
+        where: {
+          tenantId: user.tenantId,
+          status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+          ...(scope.seasonId ? { seasonId: scope.seasonId } : {}),
+          ...(scope.seasonId && owners.length ? { OR: owners } : {}),
+        },
+        include: rewardInclude,
+        orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 1000,
+      }),
+      missionIds.length
+        ? this.prisma.guestGameReward.findMany({
+            where: {
+              tenantId: user.tenantId,
+              missionId: { in: missionIds },
+              status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+            },
+            include: rewardInclude,
+            orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+          })
+        : Promise.resolve([]),
+    ]);
+    const uniqueRows = new Map(
+      [...rows, ...missionRows].map((row) => [row.id, row] as const),
+    );
 
-    return rows.map(mapReward);
+    return [...uniqueRows.values()].map(mapReward);
   }
 
   private async getDryRunMissionRewardEntitlements(
     user: AuthenticatedUser,
-    scope: { profileId?: string | null; guestId?: string | null },
+    scope: {
+      profileId?: string | null;
+      guestId?: string | null;
+      missionIds?: string[];
+    },
   ): Promise<DryRunMissionRewardEntitlement[]> {
-    const owners: Prisma.GuestGameEntitlementWhereInput[] = [
-      ...(scope.profileId ? [{ profileId: scope.profileId }] : []),
-      ...(scope.guestId ? [{ guestId: scope.guestId }] : []),
-    ];
-    if (!owners.length) return [];
+    const missionIds = uniqueStrings(scope.missionIds ?? []);
+    if (!missionIds.length) return [];
 
     return this.prisma.guestGameEntitlement.findMany({
       where: {
         tenantId: user.tenantId,
         ruleType: 'LOOT_BOX',
         status: { in: ['AVAILABLE', 'CONSUMED'] },
-        OR: owners,
+        OR: missionIds.map((missionId) => ({
+          evidence: { path: ['missionId'], equals: missionId },
+        })),
       },
       select: {
+        id: true,
+        ruleId: true,
+        status: true,
+        rewardId: true,
         profileId: true,
         guestId: true,
         qualifiedAt: true,
         evidence: true,
       },
       orderBy: { qualifiedAt: 'desc' },
-      take: 1000,
+    });
+  }
+
+  private async getDryRunLootBoxLimitEntitlements(
+    user: AuthenticatedUser,
+    ruleIds: string[],
+    occurredAt: Date,
+  ): Promise<DryRunMissionRewardEntitlement[]> {
+    if (!ruleIds.length) return [];
+
+    const earliestRelevantAt = new Date(
+      occurredAt.getTime() - 40 * 24 * 60 * 60 * 1000,
+    );
+
+    return this.prisma.guestGameEntitlement.findMany({
+      where: {
+        tenantId: user.tenantId,
+        ruleType: 'LOOT_BOX',
+        ruleId: { in: ruleIds },
+        status: { in: ['AVAILABLE', 'CONSUMED'] },
+        qualifiedAt: {
+          gte: earliestRelevantAt,
+          lte: occurredAt,
+        },
+      },
+      select: {
+        id: true,
+        ruleId: true,
+        status: true,
+        rewardId: true,
+        profileId: true,
+        guestId: true,
+        qualifiedAt: true,
+        evidence: true,
+      },
+      orderBy: { qualifiedAt: 'desc' },
     });
   }
 
@@ -15387,6 +17189,7 @@ export class GuestGamificationService {
       where: {
         tenantId: user.tenantId,
         ...(eventId ? { eventId } : {}),
+        effectKind: 'REWARD',
         status: 'PROCESSING',
         attempts: { gte: maxAttempts },
         OR: [{ claimExpiresAt: { lte: now } }, { claimExpiresAt: null }],
@@ -15404,6 +17207,7 @@ export class GuestGamificationService {
       where: {
         tenantId: user.tenantId,
         ...(eventId ? { eventId } : {}),
+        effectKind: 'REWARD',
         attempts: { lt: maxAttempts },
         OR: [
           {
@@ -15440,6 +17244,7 @@ export class GuestGamificationService {
           where: {
             tenantId: user.tenantId,
             eventId: candidate.eventId,
+            effectKind: 'REWARD',
             status: { in: ['PENDING', 'FAILED', 'PROCESSING'] },
           },
           data: {
@@ -15609,7 +17414,7 @@ export class GuestGamificationService {
         if (claim.effectKind === 'STAFF_APPROVAL_NOTIFICATION') {
           await this.notifyRewardApprovalRequired(row);
         } else if (claim.effectKind === 'LOOT_BOX_ENTITLEMENT') {
-          await this.createApprovedMissionLootBoxEntitlement(user, row);
+          await this.createApprovedRewardLootBoxEntitlement(user, row);
         } else if (claim.effectKind === 'BONUS_LEDGER_QUEUE') {
           await this.bonusLedgerService.queueApprovedRewards(user, {
             rewardId: row.id,
@@ -21295,15 +23100,27 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
     return [];
   }
 
-  const sessionMinutes =
-    row.durationMinutes ??
-    durationMinutes(row.startedAt, row.stoppedAt) ??
-    null;
+  // Completed sessions use the raw timestamp interval as the authority. The
+  // synchronized integer can be rounded by an upstream source (59:30 -> 60),
+  // which must never satisfy a 60-minute rule. Active sessions keep the
+  // synchronized estimate for diagnostics only; no PLAY_HOUR is emitted until
+  // the terminal stop timestamp is present.
+  const completedMinutes = durationMinutes(row.startedAt, row.stoppedAt);
+  const sessionMinutes = row.stoppedAt
+    ? completedMinutes
+    : (row.durationMinutes ?? null);
   const sessionPacket = row.packet ?? null;
   const sessionType = sessionPacket ? 'packet_hours' : 'regular_session';
   const guestName = snapshotGuestName(row.guest, row.externalGuestId);
-  const facts: GuestGameSnapshotFact[] = [
-    {
+  const facts: GuestGameSnapshotFact[] = [];
+  const sessionClassificationStable =
+    row.packet === true ||
+    Boolean(row.stoppedAt) ||
+    Date.now() - row.startedAt.getTime() >=
+      snapshotSessionClassificationGraceMs;
+
+  if (sessionClassificationStable) {
+    facts.push({
       id: `session:${row.id}:start`,
       source: 'GUEST_SESSION',
       eventType: 'SESSION_START',
@@ -21329,10 +23146,14 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       ]
         .filter(Boolean)
         .join(' · '),
-    },
-  ];
+    });
+  }
 
-  if (sessionMinutes && sessionMinutes >= 30) {
+  // Session duration is mutable until Langame reports a stop. Persisting a
+  // PLAY_HOUR event for an active session would make the later final duration
+  // idempotent against stale 30/60-minute data.
+  if (row.stoppedAt && row.stoppedAt.getTime() > row.startedAt.getTime()) {
+    const terminalSessionMinutes = sessionMinutes ?? 0;
     facts.push({
       id: `session:${row.id}:play`,
       source: 'GUEST_SESSION',
@@ -21345,7 +23166,7 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       store: mapSnapshotStore(row.store),
       sessionType,
       sessionPacket,
-      sessionMinutes,
+      sessionMinutes: terminalSessionMinutes,
       spendAmount: null,
       tariffGroupId: null,
       tariffPeriodId: null,
@@ -21353,7 +23174,7 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       label: `Игровое время: ${guestName}`,
       details: [
         row.store?.name,
-        `${Math.round((sessionMinutes / 60) * 10) / 10} ч`,
+        `${Math.round((terminalSessionMinutes / 60) * 10) / 10} ч`,
       ]
         .filter(Boolean)
         .join(' · '),
@@ -21361,6 +23182,49 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
   }
 
   return facts;
+}
+
+function mapSessionPackageCorrectionFact(
+  row: SnapshotSessionRow,
+): GuestGameSnapshotFact {
+  if (!row.startedAt) {
+    throw new Error('Package classification correction requires startedAt.');
+  }
+
+  const guestName = snapshotGuestName(row.guest, row.externalGuestId);
+  const externalId = [
+    row.externalSessionId,
+    'classification',
+    snapshotSessionPackageCorrectionVersion,
+  ].join(':');
+
+  return {
+    // The correction is a new canonical event, not a second physical session.
+    // Keep the same source-fact identity as the initial SESSION_START so
+    // ANY/count aggregations cannot count both classifications.
+    id: `session:${row.id}:start`,
+    source: 'GUEST_SESSION',
+    eventType: 'SESSION_START',
+    occurredAt: row.startedAt.toISOString(),
+    externalProvider: row.externalProvider,
+    externalDomain: row.externalDomain,
+    externalId,
+    guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+    store: mapSnapshotStore(row.store),
+    sessionType: 'packet_hours',
+    sessionPacket: true,
+    sessionMinutes: row.stoppedAt
+      ? durationMinutes(row.startedAt, row.stoppedAt)
+      : (row.durationMinutes ?? null),
+    sessionClassificationCorrection: 'PACKAGE_V1',
+    spendAmount: null,
+    tariffGroupId: null,
+    tariffPeriodId: null,
+    tariffTypeId: null,
+    label: `РЈС‚РѕС‡РЅРµРЅРёРµ С‚РёРїР° СЃРµСЃСЃРёРё: ${guestName}`,
+    details:
+      'РџР°РєРµС‚ РёР»Рё Р°Р±РѕРЅРµРјРµРЅС‚ РїРѕРґС‚РІРµСЂР¶РґС‘РЅ РїРѕСЃР»Рµ РїРµСЂРІРёС‡РЅРѕР№ РїРѕС‡Р°СЃРѕРІРѕР№ РєР»Р°СЃСЃРёС„РёРєР°С†РёРё.',
+  };
 }
 
 function mapLogFact(row: SnapshotLogRow): GuestGameSnapshotFact[] {
@@ -21793,11 +23657,11 @@ function durationMinutes(startedAt: Date | null, stoppedAt: Date | null) {
     return null;
   }
 
-  const minutes = Math.round(
+  const minutes = Math.floor(
     (stoppedAt.getTime() - startedAt.getTime()) / 60_000,
   );
 
-  return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes : null;
 }
 
 function guestLogEventType(type: string | null) {
@@ -22200,6 +24064,7 @@ type ProcessRewardIntentRuleSnapshot = {
   triggerKind: string | null;
   evaluationPolicy: string;
   manualApprovalRequired: boolean;
+  rewardMaterializationSuppressed: boolean;
   eligible: boolean;
   rewardType: string | null;
   rewardAmount: number | null;
@@ -22211,7 +24076,12 @@ type ProcessRewardIntentRuleSnapshot = {
   battlePassLevel: number | null;
   battlePassStep: number | null;
   battlePassStepTitle: string | null;
+  battlePassRewardTrack: 'FREE' | 'PREMIUM' | null;
+  rewardLootBoxId: string | null;
   periodicLimitPeriod: LootBoxPeriodicLimitPeriod | null;
+  missionDenySameDayRepeat: boolean;
+  missionPerGuestLimit: number | null;
+  missionTotalRewardLimit: number | null;
   reasons: string[];
   blockers: string[];
 };
@@ -22222,6 +24092,22 @@ type ProcessRewardIntentPlan = {
   slotKey: string;
   claimKey: string | null;
   rule: ProcessRewardIntentRuleSnapshot;
+};
+
+type AtomicMissionQualificationOutcome = {
+  ruleId: string;
+  allowed: boolean;
+  qualifiedAt: string;
+  codes: string[];
+  counts: Record<string, number | string | null>;
+};
+
+type AtomicMissionIssuance = {
+  key: string;
+  profileId: string | null;
+  guestId: string | null;
+  qualifiedAt: Date;
+  amount: number;
 };
 
 function processRewardRuleSnapshot(
@@ -22235,6 +24121,8 @@ function processRewardRuleSnapshot(
     triggerKind: rule.triggerKind,
     evaluationPolicy: rule.evaluationPolicy,
     manualApprovalRequired: rule.manualApprovalRequired,
+    rewardMaterializationSuppressed:
+      rule.rewardMaterializationSuppressed ?? false,
     eligible: rule.eligible,
     rewardType: rule.rewardType,
     rewardAmount: rule.rewardAmount,
@@ -22246,7 +24134,12 @@ function processRewardRuleSnapshot(
     battlePassLevel: rule.battlePassLevel ?? null,
     battlePassStep: rule.battlePassStep ?? null,
     battlePassStepTitle: rule.battlePassStepTitle ?? null,
+    battlePassRewardTrack: rule.battlePassRewardTrack ?? null,
+    rewardLootBoxId: rule.rewardLootBoxId ?? null,
     periodicLimitPeriod: rule.periodicLimitPeriod ?? null,
+    missionDenySameDayRepeat: rule.missionDenySameDayRepeat ?? false,
+    missionPerGuestLimit: rule.missionPerGuestLimit ?? null,
+    missionTotalRewardLimit: rule.missionTotalRewardLimit ?? null,
     reasons: rule.reasons,
     blockers: rule.blockers,
   };
@@ -22324,6 +24217,106 @@ function processRewardStoreSnapshot(
   };
 }
 
+type PersistedProcessEventEvidence = {
+  eventType: string;
+  occurredAt: Date | string;
+  payload: Prisma.JsonValue | null;
+  profileId?: string | null;
+  guestId?: string | null;
+  profile?: { id: string } | null;
+  guest?: { id: string } | null;
+};
+
+function processPersistedEventDryRun(
+  event: PersistedProcessEventEvidence,
+  identityDryRun: GuestGameDryRunResult,
+): GuestGameDryRunResult | null {
+  const payload = jsonRecord(event.payload ?? null);
+  if (
+    intValue(payload.processSchemaVersion) !== 2 ||
+    nullableString(payload.source) !== 'guest_gamification_process_event' ||
+    !isRecord(payload.input) ||
+    !Object.keys(payload.input).length ||
+    !isRecord(payload.store) ||
+    !Array.isArray(payload.rules)
+  ) {
+    return null;
+  }
+
+  const store = processRewardStoreSnapshot(payload.store, null);
+  if (!store) return null;
+
+  const rules = payload.rules
+    .map<GuestGameDryRunRule | null>((value) => {
+      const rule = parseProcessRewardIntentRule(value);
+      return rule ? { ...rule, progress: null } : null;
+    })
+    .filter((rule): rule is GuestGameDryRunRule => Boolean(rule));
+  if (!rules.length) return null;
+
+  const occurredAt =
+    event.occurredAt instanceof Date
+      ? event.occurredAt
+      : dateValue(event.occurredAt);
+  if (!occurredAt || Number.isNaN(occurredAt.getTime())) return null;
+  const eventProfileId =
+    nullableId(event.profileId) ?? event.profile?.id ?? null;
+  const eventGuestId = nullableId(event.guestId) ?? event.guest?.id ?? null;
+
+  return dryRunWithRules(
+    {
+      ...identityDryRun,
+      eventType: event.eventType,
+      occurredAt: occurredAt.toISOString(),
+      profile:
+        identityDryRun.profile?.id === eventProfileId
+          ? identityDryRun.profile
+          : null,
+      guest:
+        identityDryRun.guest?.id === eventGuestId ? identityDryRun.guest : null,
+      store,
+      input: processRewardInputSnapshot(payload.input, identityDryRun.input),
+      note: 'Loot-box entitlement is reconstructed from immutable persisted event evidence.',
+    },
+    rules,
+  );
+}
+
+function processLootBoxEntitlementRecoveryDryRun(
+  event: PersistedProcessEventEvidence,
+  identityDryRun: GuestGameDryRunResult,
+): GuestGameDryRunResult | null {
+  const persisted = processPersistedEventDryRun(event, identityDryRun);
+  if (!persisted) return null;
+  const rawRules = dryRunArray(jsonRecord(event.payload).rules);
+  const hasExplicitPeriodField = new Set(
+    rawRules
+      .filter(
+        (value): value is Record<string, unknown> =>
+          isRecord(value) &&
+          Object.prototype.hasOwnProperty.call(value, 'periodicLimitPeriod') ===
+            true,
+      )
+      .map((value) => nullableId(value.id))
+      .filter((ruleId): ruleId is string => Boolean(ruleId)),
+  );
+  const rules = persisted.rules.filter((rule) => {
+    if (!rule.eligible) return false;
+    const standaloneLootBox =
+      rule.kind === 'LOOT_BOX' && hasExplicitPeriodField.has(rule.id);
+    const automaticMissionLootBox =
+      rule.kind === 'MISSION' &&
+      rule.rewardType === 'LOOT_BOX_ENTITLEMENT' &&
+      !rule.manualApprovalRequired;
+    return (
+      (standaloneLootBox || automaticMissionLootBox) &&
+      !(rule.periodicLimitPeriod === 'DAILY' && !persisted.store?.timeZone)
+    );
+  });
+
+  return rules.length ? dryRunWithRules(persisted, rules) : null;
+}
+
 function processRewardIntentPlans(value: unknown): ProcessRewardIntentPlan[] {
   if (!isRecord(value) || intValue(value.processSchemaVersion) !== 2) {
     return [];
@@ -22333,6 +24326,327 @@ function processRewardIntentPlans(value: unknown): ProcessRewardIntentPlan[] {
   return value.rewardIntents
     .map(parseProcessRewardIntentPlan)
     .filter((item): item is ProcessRewardIntentPlan => Boolean(item));
+}
+
+function processMissionQualificationRules(
+  value: unknown,
+): ProcessRewardIntentRuleSnapshot[] {
+  if (!isRecord(value) || intValue(value.processSchemaVersion) !== 2) {
+    return [];
+  }
+  if (!Array.isArray(value.rules)) return [];
+
+  return value.rules
+    .map(parseProcessRewardIntentRule)
+    .filter((rule): rule is ProcessRewardIntentRuleSnapshot => {
+      if (!rule || rule.kind !== 'MISSION' || !rule.eligible) return false;
+      const hasIssuableEffect =
+        rule.xpDelta !== 0 ||
+        rule.rewardType === 'LOOT_BOX_ENTITLEMENT' ||
+        Boolean(rule.rewardLabel) ||
+        (rule.rewardAmount ?? 0) > 0;
+
+      return (
+        missionDryRunRuleRequiresAtomicQualification(rule) && hasIssuableEffect
+      );
+    });
+}
+
+function missionDryRunRuleRequiresAtomicQualification(
+  rule: Pick<
+    GuestGameDryRunRule,
+    | 'missionDenySameDayRepeat'
+    | 'periodicLimitPeriod'
+    | 'missionPerGuestLimit'
+    | 'missionTotalRewardLimit'
+    | 'budgetAmount'
+    | 'rewardAmount'
+  >,
+) {
+  return Boolean(
+    rule.missionDenySameDayRepeat ||
+    rule.periodicLimitPeriod != null ||
+    rule.missionPerGuestLimit != null ||
+    rule.missionTotalRewardLimit != null ||
+    (rule.budgetAmount != null && (rule.rewardAmount ?? 0) > 0),
+  );
+}
+
+function processPayloadTimeZone(value: unknown) {
+  const payload = isRecord(value) ? value : {};
+  const store = isRecord(payload.store) ? payload.store : {};
+  return guestGameTimeZone(nullableString(store.timeZone));
+}
+
+function applyAtomicMissionQualificationOutcomes(
+  value: unknown,
+  outcomes: AtomicMissionQualificationOutcome[],
+): Prisma.InputJsonObject | null {
+  if (!isRecord(value)) return null;
+  if (!outcomes.length) return safeInputJsonObject(value);
+
+  const outcomeByRuleId = new Map(
+    outcomes.map((outcome) => [outcome.ruleId, outcome] as const),
+  );
+  const deniedRuleIds = new Set(
+    outcomes
+      .filter((outcome) => !outcome.allowed)
+      .map((outcome) => outcome.ruleId),
+  );
+  const rules = dryRunArray(value.rules).map((rawRule) => {
+    if (!isRecord(rawRule)) return rawRule;
+    const ruleId = nullableString(rawRule.id);
+    const outcome = ruleId ? outcomeByRuleId.get(ruleId) : null;
+    if (!outcome) return rawRule;
+    const blockers = processStringArray(rawRule.blockers);
+
+    return {
+      ...rawRule,
+      eligible: outcome.allowed ? booleanValue(rawRule.eligible) : false,
+      blockers: outcome.allowed
+        ? blockers
+        : [
+            ...blockers,
+            `Atomic mission limit exhausted: ${outcome.codes.join(', ') || 'UNKNOWN_LIMIT'}.`,
+          ],
+      atomicMissionQualification: {
+        allowed: outcome.allowed,
+        qualifiedAt: outcome.qualifiedAt,
+        codes: outcome.codes,
+        counts: outcome.counts,
+        isolationLevel: 'SERIALIZABLE',
+      },
+    };
+  });
+  const rewardIntents = dryRunArray(value.rewardIntents).filter((rawPlan) => {
+    const plan = parseProcessRewardIntentPlan(rawPlan);
+    return !(plan?.rule.kind === 'MISSION' && deniedRuleIds.has(plan.rule.id));
+  });
+
+  return safeInputJsonObject({
+    ...value,
+    rules,
+    rewardIntents,
+    atomicMissionQualifications: outcomes.map((outcome) => ({
+      ruleId: outcome.ruleId,
+      allowed: outcome.allowed,
+      qualifiedAt: outcome.qualifiedAt,
+      codes: outcome.codes,
+      counts: outcome.counts,
+    })),
+  });
+}
+
+function safeInputJsonObject(
+  value: Record<string, unknown>,
+): Prisma.InputJsonObject {
+  const result: Record<string, Prisma.InputJsonValue | null> = {};
+
+  for (const [key, item] of Object.entries(value)) {
+    const normalized = safeInputJsonValue(item);
+    if (normalized !== undefined) {
+      result[key] = normalized;
+    }
+  }
+
+  return result;
+}
+
+function safeInputJsonValue(
+  value: unknown,
+): Prisma.InputJsonValue | null | undefined {
+  if (value === null) return null;
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => safeInputJsonValue(item) ?? null);
+  }
+  if (isRecord(value)) return safeInputJsonObject(value);
+
+  return undefined;
+}
+
+function atomicMissionIssuances(input: {
+  ruleId: string;
+  intents: Array<{
+    eventId: string;
+    effectKind: string;
+    status: string;
+    rewardId: string | null;
+    profileId: string | null;
+    qualifiedAt: Date;
+    plan: Prisma.JsonValue;
+  }>;
+  rewards: Array<{
+    id: string;
+    profileId: string | null;
+    guestId: string | null;
+    qualifiedAt: Date;
+    rewardAmount: Prisma.Decimal;
+  }>;
+  entitlements: Array<{
+    id: string;
+    eventId: string | null;
+    rewardId: string | null;
+    profileId: string | null;
+    guestId: string | null;
+    qualifiedAt: Date;
+    evidence: Prisma.JsonValue | null;
+  }>;
+}): AtomicMissionIssuance[] {
+  const result = new Map<string, AtomicMissionIssuance>();
+  const rewardEventKeys = new Map<string, string>();
+  const add = (key: string, value: Omit<AtomicMissionIssuance, 'key'>) => {
+    const previous = result.get(key);
+    if (!previous) {
+      result.set(key, { key, ...value });
+      return;
+    }
+    result.set(key, {
+      key,
+      profileId: previous.profileId ?? value.profileId,
+      guestId: previous.guestId ?? value.guestId,
+      qualifiedAt:
+        previous.qualifiedAt.getTime() <= value.qualifiedAt.getTime()
+          ? previous.qualifiedAt
+          : value.qualifiedAt,
+      amount: Math.max(previous.amount, value.amount),
+    });
+  };
+
+  for (const intent of input.intents) {
+    const qualifiedAt = dryRunDateOrNull(intent.qualifiedAt);
+    const isQualification =
+      intent.effectKind === 'QUALIFICATION' && intent.status === 'APPLIED';
+    const isRewardReservation =
+      intent.effectKind === 'REWARD' &&
+      ['PENDING', 'PROCESSING', 'FAILED', 'APPLIED'].includes(intent.status);
+    if (!qualifiedAt || (!isQualification && !isRewardReservation)) continue;
+    const key = `event:${intent.eventId}`;
+    if (intent.rewardId) rewardEventKeys.set(intent.rewardId, key);
+    add(key, {
+      profileId: intent.profileId,
+      guestId: null,
+      qualifiedAt,
+      amount: parseProcessRewardIntentPlan(intent.plan)?.rule.rewardAmount ?? 0,
+    });
+  }
+
+  for (const reward of input.rewards) {
+    const qualifiedAt = dryRunDateOrNull(reward.qualifiedAt);
+    if (!qualifiedAt) continue;
+    const key = rewardEventKeys.get(reward.id) ?? `reward:${reward.id}`;
+    add(key, {
+      profileId: reward.profileId,
+      guestId: reward.guestId,
+      qualifiedAt,
+      amount: Number(reward.rewardAmount),
+    });
+  }
+
+  for (const entitlement of input.entitlements) {
+    const evidence = jsonRecord(entitlement.evidence);
+    if (nullableId(evidence.missionId) !== input.ruleId) continue;
+    const qualifiedAt = dryRunDateOrNull(entitlement.qualifiedAt);
+    if (!qualifiedAt) continue;
+    const key = entitlement.eventId
+      ? `event:${entitlement.eventId}`
+      : entitlement.rewardId
+        ? (rewardEventKeys.get(entitlement.rewardId) ??
+          `reward:${entitlement.rewardId}`)
+        : `entitlement:${entitlement.id}`;
+    add(key, {
+      profileId: entitlement.profileId,
+      guestId: entitlement.guestId,
+      qualifiedAt,
+      amount: 0,
+    });
+  }
+
+  return [...result.values()];
+}
+
+function atomicMissionLimitGuard(input: {
+  denySameDayRepeat: boolean;
+  periodicity: LootBoxPeriodicLimitPeriod | null;
+  perGuestLimit: number | null;
+  totalRewardLimit: number | null;
+  budgetAmount: number | null;
+  projectedAmount: number;
+  profileId: string | null;
+  guestId: string | null;
+  qualifiedAt: Date;
+  timeZone: string;
+  issuances: AtomicMissionIssuance[];
+}) {
+  const matchesGuest = (issuance: AtomicMissionIssuance) =>
+    (input.profileId != null && issuance.profileId === input.profileId) ||
+    (input.guestId != null && issuance.guestId === input.guestId);
+  const guestIssuances = input.issuances.filter(matchesGuest);
+  const codes: string[] = [];
+  const spentAmount = sum(input.issuances.map((issuance) => issuance.amount));
+  const counts: Record<string, number | string | null> = {
+    totalCount: input.issuances.length,
+    guestCount: guestIssuances.length,
+    spentAmount,
+  };
+  const needsGuest =
+    input.denySameDayRepeat ||
+    input.periodicity != null ||
+    input.perGuestLimit != null;
+
+  if (needsGuest && !input.profileId && !input.guestId) {
+    codes.push('GUEST_IDENTITY_MISSING');
+  }
+  if (input.denySameDayRepeat && (input.profileId || input.guestId)) {
+    const sameDayCount = guestIssuances.filter((issuance) =>
+      dryRunIsSameDay(issuance.qualifiedAt, input.qualifiedAt, input.timeZone),
+    ).length;
+    counts.sameDayCount = sameDayCount;
+    counts.sameDayLimit = 1;
+    if (sameDayCount >= 1) codes.push('SAME_DAY_REPEAT_EXHAUSTED');
+  }
+  if (input.periodicity && (input.profileId || input.guestId)) {
+    const periodicCount = guestIssuances.filter((issuance) =>
+      dryRunIsWithinLootBoxPeriod(
+        issuance.qualifiedAt,
+        input.qualifiedAt,
+        input.periodicity!,
+        input.timeZone,
+      ),
+    ).length;
+    counts.periodicCount = periodicCount;
+    counts.periodicLimit = 1;
+    counts.periodicLimitPeriod = input.periodicity;
+    if (periodicCount >= 1) codes.push('PERIODIC_LIMIT_EXHAUSTED');
+  }
+  if (input.perGuestLimit != null && (input.profileId || input.guestId)) {
+    counts.perGuestLimit = input.perGuestLimit;
+    if (guestIssuances.length >= input.perGuestLimit) {
+      codes.push('PER_GUEST_LIMIT_EXHAUSTED');
+    }
+  }
+  if (input.totalRewardLimit != null) {
+    counts.totalRewardLimit = input.totalRewardLimit;
+    if (input.issuances.length >= input.totalRewardLimit) {
+      codes.push('TOTAL_REWARD_LIMIT_EXHAUSTED');
+    }
+  }
+  if (input.budgetAmount != null) {
+    counts.budgetAmount = input.budgetAmount;
+    counts.projectedAmount = input.projectedAmount;
+    if (
+      spentAmount >= input.budgetAmount ||
+      (input.projectedAmount > 0 &&
+        spentAmount + input.projectedAmount > input.budgetAmount)
+    ) {
+      codes.push('BUDGET_EXHAUSTED');
+    }
+  }
+
+  return { exhausted: codes.length > 0, codes, counts };
 }
 
 function parseProcessRewardIntentPlan(
@@ -22376,6 +24690,15 @@ function parseProcessRewardIntentRule(
     triggerKind: nullableString(value.triggerKind) ?? null,
     evaluationPolicy: nullableString(value.evaluationPolicy) ?? 'LIVE_PRIMARY',
     manualApprovalRequired: booleanValue(value.manualApprovalRequired),
+    rewardMaterializationSuppressed:
+      Object.prototype.hasOwnProperty.call(
+        value,
+        'rewardMaterializationSuppressed',
+      ) === true
+        ? booleanValue(value.rewardMaterializationSuppressed)
+        : kind === 'LOOT_BOX' &&
+          Object.prototype.hasOwnProperty.call(value, 'periodicLimitPeriod') ===
+            true,
     eligible: booleanValue(value.eligible),
     rewardType: nullableString(value.rewardType) ?? null,
     rewardAmount: finiteJsonNumber(value.rewardAmount) ?? null,
@@ -22387,10 +24710,24 @@ function parseProcessRewardIntentRule(
     battlePassLevel: intValue(value.battlePassLevel) ?? null,
     battlePassStep: intValue(value.battlePassStep) ?? null,
     battlePassStepTitle: nullableString(value.battlePassStepTitle) ?? null,
+    battlePassRewardTrack: processBattlePassRewardTrack(
+      value.battlePassRewardTrack,
+    ),
+    rewardLootBoxId: nullableId(value.rewardLootBoxId) ?? null,
     periodicLimitPeriod: processPeriodicLimitPeriod(value.periodicLimitPeriod),
+    missionDenySameDayRepeat: booleanValue(value.missionDenySameDayRepeat),
+    missionPerGuestLimit: intValue(value.missionPerGuestLimit) ?? null,
+    missionTotalRewardLimit: intValue(value.missionTotalRewardLimit) ?? null,
     reasons: processStringArray(value.reasons),
     blockers: processStringArray(value.blockers),
   };
+}
+
+function processBattlePassRewardTrack(
+  value: unknown,
+): 'FREE' | 'PREMIUM' | null {
+  const normalized = nullableString(value)?.toUpperCase();
+  return normalized === 'FREE' || normalized === 'PREMIUM' ? normalized : null;
 }
 
 function parseProcessSelectedReward(
@@ -22544,16 +24881,36 @@ function supplementalReceiptKey(value: {
 
 function supplementalReceiptCanBeClaimed(
   mode: Exclude<GuestGameSupplementalPipelineMode, 'OFF'>,
-  receipt: { status: string; attempts: number },
+  receipt: { status: string; attempts: number; updatedAt?: Date | null },
+  staleClaimBefore: Date,
 ) {
-  if (receipt.attempts >= 3) {
+  if (receipt.attempts >= supplementalReceiptMaxAttempts) {
     return false;
+  }
+
+  if (receipt.status === 'PROCESSING') {
+    return Boolean(
+      receipt.updatedAt &&
+      receipt.updatedAt.getTime() < staleClaimBefore.getTime(),
+    );
   }
 
   return (
     receipt.status === 'PENDING' ||
     receipt.status === 'FAILED' ||
     (mode === 'LIVE' && receipt.status === 'SHADOWED')
+  );
+}
+
+function supplementalReceiptShouldDeadLetter(
+  receipt: { status: string; attempts: number; updatedAt?: Date | null },
+  staleClaimBefore: Date,
+) {
+  return Boolean(
+    ['PENDING', 'PROCESSING', 'FAILED'].includes(receipt.status) &&
+    receipt.attempts >= supplementalReceiptMaxAttempts &&
+    receipt.updatedAt &&
+    receipt.updatedAt.getTime() < staleClaimBefore.getTime(),
   );
 }
 
@@ -22612,12 +24969,22 @@ function supplementalMissionMatchesFact(
     periodFrom: Date | null;
     periodTo: Date | null;
     conditions: Prisma.JsonValue | null;
+    storeIds: Prisma.JsonValue;
   },
+  stores: Array<{
+    id: string;
+    externalDomain: string | null;
+    timeZone: string | null;
+  }>,
   externalDomain: string,
   happenedAt: Date,
 ) {
   const conditions = jsonRecord(mission.conditions);
-  const domains = guestGameStringArray(conditions.externalDomains);
+  const domains = supplementalRuleExternalDomains(
+    guestGameStringArray(mission.storeIds),
+    guestGameStringArray(conditions.externalDomains),
+    stores,
+  );
   const activatedAt = guestGameRuleActivationAt(
     mission.createdAt,
     mission.conditions,
@@ -22629,6 +24996,20 @@ function supplementalMissionMatchesFact(
     (!mission.periodFrom || happenedAt >= mission.periodFrom) &&
     (!mission.periodTo || happenedAt <= mission.periodTo)
   );
+}
+
+function supplementalRuleExternalDomains(
+  storeIds: string[],
+  configuredDomains: string[],
+  stores: Array<{ id: string; externalDomain: string | null }>,
+) {
+  if (storeIds.length) {
+    return guestGameRuleExternalDomains(storeIds, stores);
+  }
+
+  return configuredDomains.length
+    ? uniqueStrings(configuredDomains)
+    : uniqueStrings(stores.map((store) => store.externalDomain ?? ''));
 }
 
 function seasonHasSupplementalBattlePassStep(
@@ -22704,10 +25085,31 @@ function suppressLootBoxRewardsDryRun(
 
     return {
       ...rule,
+      rewardMaterializationSuppressed: true,
+      reasons: [
+        ...rule.reasons,
+        'Условие лутбокса выполнено: создано только право на ручное открытие.',
+      ],
+    };
+  });
+
+  return dryRunWithRules(dryRun, rules);
+}
+
+function suppressLootBoxEntitlementsDryRun(
+  dryRun: GuestGameDryRunResult,
+): GuestGameDryRunResult {
+  const rules = dryRun.rules.map((rule) => {
+    if (!rule.eligible || rule.kind !== 'LOOT_BOX') {
+      return rule;
+    }
+
+    return {
+      ...rule,
       eligible: false,
       blockers: [
         ...rule.blockers,
-        'Лутбокс разблокирован: награда создается только при открытии гостем.',
+        'Для этого технического события создание права на открытие отключено.',
       ],
     };
   });
@@ -22772,8 +25174,17 @@ function processRewardRuleKey(rule: GuestGameDryRunRule) {
   return `${rule.kind}:${rule.id}:${slotKey}`;
 }
 
+function sessionClassificationRuleKey(rule: GuestGameDryRunRule) {
+  return [
+    rule.kind,
+    rule.id,
+    rule.battlePassStep ?? '',
+    rule.battlePassRewardTrack ?? '',
+  ].join(':');
+}
+
 function shouldQueueProcessReward(rule: GuestGameDryRunRule) {
-  if (!rule.eligible) {
+  if (!rule.eligible || rule.rewardMaterializationSuppressed) {
     return false;
   }
 
@@ -23316,6 +25727,25 @@ function isUniqueConstraintError(error: unknown) {
   );
 }
 
+function isSerializationConflictError(error: unknown) {
+  return (
+    (error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2034') ||
+    (typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'P2034')
+  );
+}
+
+function lootBoxLimitCodesFromEvidence(value: unknown) {
+  const evidence = jsonRecord(value ?? null);
+  const guard = jsonRecord(evidence.atomicLimitGuard ?? null);
+  return uniqueStrings(
+    (Array.isArray(guard.codes) ? guard.codes : []).map((code) => String(code)),
+  );
+}
+
 function mapUser(
   row: { id: string; fullName: string | null; email: string } | null,
 ): GuestGameUser | null {
@@ -23480,6 +25910,8 @@ type DryRunContext = {
   quantity: number | null;
   rewards: GuestGameReward[];
   missionRewardEntitlements: DryRunMissionRewardEntitlement[];
+  lootBoxLimitEntitlements: DryRunMissionRewardEntitlement[];
+  rewardTemplateLootBoxIds: Set<string>;
   progressEvents: GuestGameProgressEvent[];
   audienceMemberIds: Set<string>;
   ruleDomainTimeZones?: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
@@ -23487,10 +25919,35 @@ type DryRunContext = {
 };
 
 type DryRunMissionRewardEntitlement = {
+  id: string;
+  ruleId: string;
+  status: string;
+  rewardId: string | null;
   profileId: string | null;
   guestId: string | null;
   qualifiedAt: Date;
   evidence: Prisma.JsonValue | null;
+};
+
+type LootBoxAtomicLimitReward = {
+  id: string;
+  profileId: string | null;
+  guestId: string | null;
+  qualifiedAt: Date;
+};
+
+type LootBoxAtomicLimitEntitlement = {
+  id: string;
+  profileId: string | null;
+  guestId: string | null;
+  rewardId: string | null;
+  qualifiedAt: Date;
+};
+
+type LootBoxAtomicLimitGuard = {
+  exhausted: boolean;
+  codes: string[];
+  counts: Record<string, number | string | null>;
 };
 
 function evaluateLootBoxDryRun(
@@ -23534,6 +25991,13 @@ function evaluateLootBoxDryRun(
       blockers,
       reasons,
     );
+    appendDryRunLootBoxSessionDurationCheck(
+      rule.triggerKind,
+      rule.periodRules,
+      scopedContext,
+      blockers,
+      reasons,
+    );
     appendDryRunTariffConditionCheck(
       rule.periodRules,
       scopedContext,
@@ -23559,6 +26023,9 @@ function evaluateLootBoxDryRun(
       rule,
       scopedContext,
       ruleRewards,
+      context.lootBoxLimitEntitlements.filter(
+        (entitlement) => entitlement.ruleId === rule.id,
+      ),
       blockers,
       reasons,
     );
@@ -23671,6 +26138,13 @@ function evaluateMissionDryRun(
     xpDelta: rule.xpReward,
     budgetAmount: rule.budgetAmount,
     progress,
+    periodicLimitPeriod: lootBoxPeriodicLimitPeriod(
+      dryRunRecord(dryRunRecord(rule.conditions).reward).periodicity,
+    ),
+    missionDenySameDayRepeat:
+      dryRunRecord(rule.antiFraudRules).denySameDayRepeat === true,
+    missionPerGuestLimit: rule.perGuestLimit,
+    missionTotalRewardLimit: rule.totalRewardLimit,
     reasons,
     blockers,
   });
@@ -23694,7 +26168,7 @@ function evaluateSeasonDryRun(
     dryRunRecord(currentStep?.activationRules).evaluationPolicy,
   );
   const stepRewardPlan = currentStep
-    ? dryRunSeasonFreeBonusRewardPlan(currentStep, blockers)
+    ? dryRunSeasonFreeRewardPlan(currentStep, context, blockers, reasons)
     : null;
   let progress: GuestGameProgressResult | null = null;
 
@@ -23778,6 +26252,8 @@ function evaluateSeasonDryRun(
     battlePassLevel: currentStep?.level ?? null,
     battlePassStep: currentStep?.sequence ?? null,
     battlePassStepTitle: currentStep?.title ?? null,
+    battlePassRewardTrack: stepRewardPlan?.rewardTrack ?? null,
+    rewardLootBoxId: stepRewardPlan?.rewardLootBoxId ?? null,
     reasons,
     blockers,
   });
@@ -23980,20 +26456,29 @@ function appendDryRunPeriodRules(
   reasons: string[],
 ) {
   const rules = dryRunRecord(value);
-  const weekdays = dryRunNumberArray(rules.weekdays);
+  const metric = dryRunRecord(rules.metric ?? rules.progressMetric);
+  const weekdayMode = (
+    nullableString(metric.weekdayMode ?? rules.weekdayMode) ?? 'ANY'
+  ).toUpperCase();
+  const weekdays = dryRunNumberArray(metric.weekdays ?? rules.weekdays);
   const localTime = dryRunLocalTimeParts(occurredAt, timeZone);
   const weekday = localTime.weekday;
-  const weekdaysOnly = rules.weekdaysOnly === true;
+  const weekdaysOnly =
+    metric.weekdaysOnly === true || rules.weekdaysOnly === true;
+  const expectedWeekdays =
+    weekdayMode === 'WEEKDAYS' || weekdaysOnly
+      ? [1, 2, 3, 4, 5]
+      : weekdayMode === 'WEEKENDS'
+        ? [0, 6]
+        : weekdays;
 
-  if (weekdays.length && !weekdays.includes(weekday)) {
+  if (expectedWeekdays.length && !expectedWeekdays.includes(weekday)) {
     blockers.push('День недели не входит в период правила');
-  } else if (weekdaysOnly && (weekday === 0 || weekday === 6)) {
-    blockers.push('Правило доступно только по будням');
-  } else if (weekdays.length || weekdaysOnly) {
+  } else if (expectedWeekdays.length) {
     reasons.push('День недели подходит');
   }
 
-  const hours = dryRunStringArray(rules.hours);
+  const hours = dryRunStringArray(metric.hours ?? rules.hours);
   if (!hours.length) {
     return;
   }
@@ -24031,6 +26516,38 @@ function appendDryRunSessionConditionCheck(
   } else if (expectedType) {
     reasons.push(`Тип сессии правила: ${expectedType}`);
   }
+}
+
+function appendDryRunLootBoxSessionDurationCheck(
+  triggerKind: string,
+  value: unknown,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const rules = dryRunRecord(value);
+  const metric = dryRunRecord(rules.metric ?? rules.progressMetric);
+  const configuredMinimum = dryRunOptionalNumber(
+    metric.minSessionMinutes ?? rules.minSessionMinutes,
+  );
+  const minimum =
+    configuredMinimum ??
+    (triggerKind.trim().toUpperCase() === 'PLAY_HOUR' ? 60 : null);
+
+  if (minimum === null) {
+    return;
+  }
+
+  if (context.sessionMinutes < minimum) {
+    blockers.push(
+      `Сессия короче условия кейса: ${context.sessionMinutes}/${minimum} мин`,
+    );
+    return;
+  }
+
+  reasons.push(
+    `Длительность сессии подходит для кейса: ${context.sessionMinutes} мин`,
+  );
 }
 
 function appendDryRunTariffConditionCheck(
@@ -24358,9 +26875,17 @@ function appendDryRunLootBoxLimits(
   rule: GuestGameLootBox,
   context: DryRunContext,
   rewards: GuestGameReward[],
+  entitlements: DryRunMissionRewardEntitlement[],
   blockers: string[],
   reasons: string[],
 ) {
+  if (context.sourceFactId?.startsWith('guest-game-entitlement:')) {
+    reasons.push(
+      'Лимиты проверены при выдаче права на открытие и не применяются повторно при его использовании',
+    );
+    return;
+  }
+
   const limits = dryRunRecord(rule.limits);
   const periodicLimit = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
   const perGuestPerWeek = dryRunOptionalNumber(limits.perGuestPerWeek);
@@ -24372,17 +26897,51 @@ function appendDryRunLootBoxLimits(
           new Date(reward.qualifiedAt).getTime() >= restartedAt.getTime(),
       )
     : rewards;
+  const limitEntitlements = restartedAt
+    ? entitlements.filter(
+        (entitlement) => entitlement.qualifiedAt >= restartedAt,
+      )
+    : entitlements;
   const needsGuest = periodicLimit != null || perGuestPerWeek != null;
   const guestRewards = needsGuest
     ? limitRewards.filter((reward) => dryRunRewardMatchesGuest(reward, context))
     : [];
+  const guestEntitlements = needsGuest
+    ? limitEntitlements.filter(
+        (entitlement) =>
+          (context.profile && entitlement.profileId === context.profile.id) ||
+          (context.guest && entitlement.guestId === context.guest.id),
+      )
+    : [];
+  const entitlementRewardIds = new Set(
+    guestEntitlements
+      .map((entitlement) => entitlement.rewardId)
+      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+  );
+  const guestIssuanceTimes: Array<string | Date> = [
+    ...guestRewards
+      .filter((reward) => !entitlementRewardIds.has(reward.id))
+      .map((reward) => reward.qualifiedAt),
+    ...guestEntitlements.map((entitlement) => entitlement.qualifiedAt),
+  ];
+  const allEntitlementRewardIds = new Set(
+    limitEntitlements
+      .map((entitlement) => entitlement.rewardId)
+      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+  );
+  const allIssuanceTimes: Array<string | Date> = [
+    ...limitRewards
+      .filter((reward) => !allEntitlementRewardIds.has(reward.id))
+      .map((reward) => reward.qualifiedAt),
+    ...limitEntitlements.map((entitlement) => entitlement.qualifiedAt),
+  ];
 
   if (needsGuest && !context.profile && !context.guest) {
     blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
   } else if (periodicLimit != null) {
-    const periodicCount = guestRewards.filter((reward) =>
+    const periodicCount = guestIssuanceTimes.filter((qualifiedAt) =>
       dryRunIsWithinLootBoxPeriod(
-        reward.qualifiedAt,
+        qualifiedAt,
         context.limitOccurredAt,
         periodicLimit,
         context.timeZone,
@@ -24390,8 +26949,8 @@ function appendDryRunLootBoxLimits(
     ).length;
 
     if (periodicCount >= 1) {
-      const latestRewardAt = dryRunLatestRewardAt(
-        guestRewards,
+      const latestRewardAt = dryRunLatestLootBoxIssuanceAt(
+        guestIssuanceTimes,
         periodicLimit,
         context,
       );
@@ -24420,8 +26979,8 @@ function appendDryRunLootBoxLimits(
     perGuestPerWeek != null &&
     (!needsGuest || context.profile || context.guest)
   ) {
-    const weeklyCount = guestRewards.filter((reward) =>
-      dryRunIsWithinLastDays(reward.qualifiedAt, context.occurredAt, 7),
+    const weeklyCount = guestIssuanceTimes.filter((qualifiedAt) =>
+      dryRunIsWithinLastDays(qualifiedAt, context.occurredAt, 7),
     ).length;
 
     if (weeklyCount >= perGuestPerWeek) {
@@ -24436,12 +26995,8 @@ function appendDryRunLootBoxLimits(
   }
 
   if (totalPerDay != null) {
-    const dayCount = limitRewards.filter((reward) =>
-      dryRunIsSameDay(
-        reward.qualifiedAt,
-        context.limitOccurredAt,
-        context.timeZone,
-      ),
+    const dayCount = allIssuanceTimes.filter((qualifiedAt) =>
+      dryRunIsSameDay(qualifiedAt, context.limitOccurredAt, context.timeZone),
     ).length;
 
     if (dayCount >= totalPerDay) {
@@ -24452,6 +27007,119 @@ function appendDryRunLootBoxLimits(
       reasons.push(`Дневной лимит лутбокса: ${dayCount}/${totalPerDay}`);
     }
   }
+}
+
+function lootBoxLimitEarliestRelevantAt(
+  qualifiedAt: Date,
+  limits: Record<string, unknown>,
+) {
+  const defaultFrom = new Date(
+    qualifiedAt.getTime() - 40 * 24 * 60 * 60 * 1000,
+  );
+  const restartedAt = dryRunDateOrNull(limits.restartedAt);
+
+  return restartedAt && restartedAt > defaultFrom ? restartedAt : defaultFrom;
+}
+
+function lootBoxEntitlementLimitGuard(input: {
+  limits: Record<string, unknown>;
+  profileId: string | null;
+  guestId: string | null;
+  qualifiedAt: Date;
+  timeZone: string;
+  rewards: LootBoxAtomicLimitReward[];
+  entitlements: LootBoxAtomicLimitEntitlement[];
+}): LootBoxAtomicLimitGuard {
+  const periodicLimit = lootBoxPeriodicLimitPeriod(input.limits.periodicLimit);
+  const perGuestPerWeek = dryRunOptionalNumber(input.limits.perGuestPerWeek);
+  const totalPerDay = dryRunOptionalNumber(input.limits.totalPerDay);
+  const restartedAt = dryRunDateOrNull(input.limits.restartedAt);
+  const rewards = restartedAt
+    ? input.rewards.filter(
+        (reward) => reward.qualifiedAt.getTime() >= restartedAt.getTime(),
+      )
+    : input.rewards;
+  const entitlements = restartedAt
+    ? input.entitlements.filter(
+        (entitlement) =>
+          entitlement.qualifiedAt.getTime() >= restartedAt.getTime(),
+      )
+    : input.entitlements;
+  const matchesGuest = (row: {
+    profileId: string | null;
+    guestId: string | null;
+  }) =>
+    (input.profileId != null && row.profileId === input.profileId) ||
+    (input.guestId != null && row.guestId === input.guestId);
+  const guestEntitlements = entitlements.filter(matchesGuest);
+  const guestEntitlementRewardIds = new Set(
+    guestEntitlements
+      .map((entitlement) => entitlement.rewardId)
+      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+  );
+  const guestIssuanceTimes: Date[] = [
+    ...rewards
+      .filter(
+        (reward) =>
+          matchesGuest(reward) && !guestEntitlementRewardIds.has(reward.id),
+      )
+      .map((reward) => reward.qualifiedAt),
+    ...guestEntitlements.map((entitlement) => entitlement.qualifiedAt),
+  ];
+  const allEntitlementRewardIds = new Set(
+    entitlements
+      .map((entitlement) => entitlement.rewardId)
+      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+  );
+  const allIssuanceTimes: Date[] = [
+    ...rewards
+      .filter((reward) => !allEntitlementRewardIds.has(reward.id))
+      .map((reward) => reward.qualifiedAt),
+    ...entitlements.map((entitlement) => entitlement.qualifiedAt),
+  ];
+  const codes: string[] = [];
+  const counts: Record<string, number | string | null> = {};
+  const needsGuest = periodicLimit != null || perGuestPerWeek != null;
+
+  if (needsGuest && !input.profileId && !input.guestId) {
+    codes.push('GUEST_IDENTITY_MISSING');
+  }
+  if (periodicLimit != null && (input.profileId || input.guestId)) {
+    const periodicCount = guestIssuanceTimes.filter((issuedAt) =>
+      dryRunIsWithinLootBoxPeriod(
+        issuedAt,
+        input.qualifiedAt,
+        periodicLimit,
+        input.timeZone,
+      ),
+    ).length;
+    counts.periodicCount = periodicCount;
+    counts.periodicLimit = 1;
+    counts.periodicLimitPeriod = periodicLimit;
+    if (periodicCount >= 1) codes.push('PERIODIC_LIMIT_EXHAUSTED');
+  }
+  if (perGuestPerWeek != null && (input.profileId || input.guestId)) {
+    const weeklyCount = guestIssuanceTimes.filter((issuedAt) =>
+      dryRunIsWithinLastDays(issuedAt, input.qualifiedAt, 7),
+    ).length;
+    counts.perGuestWeeklyCount = weeklyCount;
+    counts.perGuestWeeklyLimit = perGuestPerWeek;
+    if (weeklyCount >= perGuestPerWeek) {
+      codes.push('PER_GUEST_WEEKLY_LIMIT_EXHAUSTED');
+    }
+  }
+  if (totalPerDay != null) {
+    const dayCount = allIssuanceTimes.filter((issuedAt) =>
+      dryRunIsSameDay(issuedAt, input.qualifiedAt, input.timeZone),
+    ).length;
+    counts.totalDailyCount = dayCount;
+    counts.totalDailyLimit = totalPerDay;
+    if (dayCount >= totalPerDay) {
+      codes.push('TOTAL_DAILY_LIMIT_EXHAUSTED');
+    }
+  }
+
+  return { exhausted: codes.length > 0, codes, counts };
 }
 
 function appendDryRunMissionLimits(
@@ -24474,8 +27142,24 @@ function appendDryRunMissionLimits(
       (context.profile && entitlement.profileId === context.profile.id) ||
       (context.guest && entitlement.guestId === context.guest.id),
   );
+  const guestEntitlementRewardIds = new Set(
+    guestEntitlements
+      .map((entitlement) => entitlement.rewardId)
+      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+  );
+  const allEntitlementRewardIds = new Set(
+    entitlements
+      .map((entitlement) => entitlement.rewardId)
+      .filter((rewardId): rewardId is string => Boolean(rewardId)),
+  );
+  const distinctGuestRewards = guestRewards.filter(
+    (reward) => !guestEntitlementRewardIds.has(reward.id),
+  );
+  const distinctRewards = rewards.filter(
+    (reward) => !allEntitlementRewardIds.has(reward.id),
+  );
   const qualifiedAtValues = [
-    ...guestRewards.map((reward) => reward.qualifiedAt),
+    ...distinctGuestRewards.map((reward) => reward.qualifiedAt),
     ...guestEntitlements.map((entitlement) => entitlement.qualifiedAt),
   ];
 
@@ -24485,12 +27169,8 @@ function appendDryRunMissionLimits(
         'Для проверки повтора задания в календарный день выберите профиль или гостя',
       );
     } else {
-      const dailyCount = guestRewards.filter((reward) =>
-        dryRunIsSameDay(
-          reward.qualifiedAt,
-          context.limitOccurredAt,
-          context.timeZone,
-        ),
+      const dailyCount = qualifiedAtValues.filter((qualifiedAt) =>
+        dryRunIsSameDay(qualifiedAt, context.limitOccurredAt, context.timeZone),
       ).length;
 
       if (dailyCount >= 1) {
@@ -24530,7 +27210,7 @@ function appendDryRunMissionLimits(
   }
 
   if (rule.perGuestLimit != null) {
-    const guestCount = guestRewards.length + guestEntitlements.length;
+    const guestCount = distinctGuestRewards.length + guestEntitlements.length;
 
     if (!context.profile && !context.guest) {
       blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
@@ -24546,7 +27226,7 @@ function appendDryRunMissionLimits(
   }
 
   if (rule.totalRewardLimit != null) {
-    const totalIssued = rewards.length + entitlements.length;
+    const totalIssued = distinctRewards.length + entitlements.length;
     if (totalIssued >= rule.totalRewardLimit) {
       blockers.push(
         `Общий лимит наград задания исчерпан: ${totalIssued}/${rule.totalRewardLimit}`,
@@ -24928,37 +27608,42 @@ function dryRunSeasonStepRewardLabel(level: DryRunSeasonLevel) {
   return rewardLabel || level.title || `Battle Pass шаг ${level.sequence}`;
 }
 
-type DryRunSeasonFreeBonusRewardPlan = {
-  rewardType: 'BONUS_BALANCE';
+type DryRunSeasonFreeRewardPlan = {
+  rewardType: 'BONUS_BALANCE' | 'LOOT_BOX_ENTITLEMENT';
   rewardAmount: number;
   rewardLabel: string;
   delivery: 'AUTO' | 'ADMIN';
+  rewardTrack: 'FREE';
+  rewardLootBoxId: string | null;
 };
 
-function dryRunSeasonFreeBonusRewardPlan(
+function dryRunSeasonFreeRewardPlan(
   level: DryRunSeasonLevel,
+  context: DryRunContext,
   blockers: string[],
-): DryRunSeasonFreeBonusRewardPlan | null {
+  reasons: string[],
+): DryRunSeasonFreeRewardPlan | null {
+  const premiumRewardConfigured = Boolean(
+    level.premiumReward || Object.keys(level.premiumRewardDetails).length > 0,
+  );
+  const rewardType = dryRunString(level.freeRewardDetails.type)?.toUpperCase();
+  const premiumRewardType = dryRunString(
+    level.premiumRewardDetails.type,
+  )?.toUpperCase();
+
   // Premium eligibility and multi-reward delivery are not represented by the
   // current season runtime. Keep those steps on the legacy generic path until
   // completion markers and per-track reward slots are implemented.
-  if (
-    level.premiumReward ||
-    Object.keys(level.premiumRewardDetails).length > 0
-  ) {
+  if (rewardType === 'BONUS_BALANCE' && premiumRewardConfigured) {
     return null;
   }
 
-  const rewardType = dryRunString(level.freeRewardDetails.type)?.toUpperCase();
-  if (rewardType !== 'BONUS_BALANCE') {
-    return null;
-  }
-
-  const rewardAmount = dryRunOptionalNumber(level.freeRewardDetails.amount);
-  if (rewardAmount === null || rewardAmount <= 0) {
-    blockers.push(
-      `Для бонусной награды шага ${level.sequence} укажите сумму больше нуля`,
-    );
+  if (rewardType !== 'BONUS_BALANCE' && rewardType !== 'LOOT_BOX') {
+    if (premiumRewardType === 'LOOT_BOX') {
+      blockers.push(
+        `Premium-награда шага ${level.sequence} не может быть выдана: источник premium-статуса гостя пока не подключен`,
+      );
+    }
     return null;
   }
 
@@ -24966,7 +27651,54 @@ function dryRunSeasonFreeBonusRewardPlan(
     dryRunString(level.freeRewardDetails.delivery)?.toUpperCase() ?? 'AUTO';
   if (rawDelivery !== 'AUTO' && rawDelivery !== 'ADMIN') {
     blockers.push(
-      `Для бонусной награды шага ${level.sequence} выберите автоматическую выдачу или подтверждение администратора`,
+      `Для награды шага ${level.sequence} выберите автоматическую выдачу или подтверждение администратора`,
+    );
+    return null;
+  }
+
+  if (rewardType === 'LOOT_BOX') {
+    const lootBox = dryRunRecord(level.freeRewardDetails.lootBox);
+    const rewardLootBoxId =
+      nullableId(lootBox.id) ??
+      nullableId(level.freeRewardDetails.lootBoxId) ??
+      null;
+    if (!rewardLootBoxId) {
+      blockers.push(
+        `Для награды шага ${level.sequence} выберите конкретный наградной лутбокс`,
+      );
+      return null;
+    }
+    if (!context.rewardTemplateLootBoxIds.has(rewardLootBoxId)) {
+      blockers.push(
+        `Наградной лутбокс шага ${level.sequence} не опубликован или имеет режим STANDALONE`,
+      );
+      return null;
+    }
+    if (premiumRewardConfigured) {
+      reasons.push(
+        `Premium-награда шага ${level.sequence} не оценивалась: источник premium-статуса гостя пока не подключен`,
+      );
+    }
+
+    return {
+      rewardType: 'LOOT_BOX_ENTITLEMENT',
+      rewardAmount: 0,
+      rewardLabel:
+        dryRunString(level.freeRewardDetails.label) ??
+        dryRunString(lootBox.name) ??
+        level.freeReward ??
+        level.title ??
+        `Battle Pass шаг ${level.sequence}`,
+      delivery: rawDelivery,
+      rewardTrack: 'FREE',
+      rewardLootBoxId,
+    };
+  }
+
+  const rewardAmount = dryRunOptionalNumber(level.freeRewardDetails.amount);
+  if (rewardAmount === null || rewardAmount <= 0) {
+    blockers.push(
+      `Для бонусной награды шага ${level.sequence} укажите сумму больше нуля`,
     );
     return null;
   }
@@ -24980,6 +27712,8 @@ function dryRunSeasonFreeBonusRewardPlan(
       level.title ??
       `Battle Pass шаг ${level.sequence}`,
     delivery: rawDelivery,
+    rewardTrack: 'FREE',
+    rewardLootBoxId: null,
   };
 }
 
@@ -25490,21 +28224,25 @@ function dryRunIsWithinLootBoxPeriod(
   return dryRunIsWithinLastDays(value, reference, 7);
 }
 
-function dryRunLatestRewardAt(
-  rewards: GuestGameReward[],
+function dryRunLatestLootBoxIssuanceAt(
+  qualifiedAtValues: Array<string | Date>,
   period: LootBoxPeriodicLimitPeriod,
   context: DryRunContext,
 ) {
-  const latest = rewards
-    .filter((reward) =>
+  const latest = qualifiedAtValues
+    .filter((qualifiedAt) =>
       dryRunIsWithinLootBoxPeriod(
-        reward.qualifiedAt,
+        qualifiedAt,
         context.limitOccurredAt,
         period,
         context.timeZone,
       ),
     )
-    .map((reward) => new Date(reward.qualifiedAt))
+    .map((qualifiedAt) =>
+      qualifiedAt instanceof Date
+        ? new Date(qualifiedAt.getTime())
+        : new Date(qualifiedAt),
+    )
     .filter((date) => !Number.isNaN(date.getTime()))
     .sort((left, right) => right.getTime() - left.getTime())[0];
 
@@ -26483,7 +29221,17 @@ function buildVisualLootBoxData(
   user: AuthenticatedUser,
   storeIds: string[],
   item: GuestGameVisualEditorLootBox,
+  currentLimits: Prisma.JsonValue | null = null,
 ) {
+  const preservedOperationalLimits = { ...jsonRecord(currentLimits) };
+  delete preservedOperationalLimits.source;
+  delete preservedOperationalLimits.periodicLimit;
+  delete preservedOperationalLimits.perGuest;
+  delete preservedOperationalLimits.perGuestPerWeek;
+  const hasActivationBoundary = Boolean(
+    dryRunDateOrNull(preservedOperationalLimits.restartedAt) ??
+    dryRunDateOrNull(preservedOperationalLimits.activatedAt),
+  );
   const rewardType = canonicalLootBoxRewardType(item.rewardType);
   const prizes = visualLootBoxPrizes({
     rewardType,
@@ -26525,7 +29273,11 @@ function buildVisualLootBoxData(
       ...buildVisualLootBoxPeriodRules(item),
     },
     limits: {
+      ...preservedOperationalLimits,
       source: 'visual_editor',
+      ...(item.status === 'ACTIVE' && !hasActivationBoundary
+        ? { activatedAt: new Date().toISOString() }
+        : {}),
       ...(item.periodicLimitEnabled
         ? { periodicLimit: item.periodicLimitPeriod }
         : {}),

@@ -6,6 +6,23 @@ import { GuestGameRuleReplayService } from './guest-game-rule-replay.service';
 const factUpdatedAt = new Date('2026-07-18T12:00:00.000Z');
 const seasonUpdatedAt = new Date('2026-07-18T12:05:00.000Z');
 
+type ReplayDryRunDto = {
+  externalDomain: string;
+};
+
+type ReplayDryRunOptions = {
+  ruleExternalDomains: Map<string, string[]>;
+  ruleDomainTimeZones: Map<string, Map<string, string | null>>;
+};
+
+type ReplayDryRun = typeof dryRun;
+
+const matchesObject = (value: Record<string, unknown>): unknown =>
+  expect.objectContaining(value) as unknown;
+
+const matchesArray = (value: unknown[]): unknown =>
+  expect.arrayContaining(value) as unknown;
+
 function fact() {
   return {
     id: 'fact-270',
@@ -216,8 +233,13 @@ function createService(
       findUnique: jest.fn().mockResolvedValue(intent),
     },
   };
+  const dryRunMock = jest.fn<
+    Promise<ReturnType<ReplayDryRun>>,
+    [unknown, ReplayDryRunDto, ReplayDryRunOptions]
+  >();
+  dryRunMock.mockResolvedValue(dryRun(options.eligible ?? true));
   const gamification = {
-    dryRun: jest.fn().mockResolvedValue(dryRun(options.eligible ?? true)),
+    dryRun: dryRunMock,
     processEvent: jest.fn().mockResolvedValue({
       event: { id: 'event-1' },
       rewards: [{ id: 'reward-1' }],
@@ -304,6 +326,10 @@ function createCanonicalizationService(
   const transactionAuditCreate = jest
     .fn()
     .mockResolvedValue({ id: 'audit-canonical' });
+  const transactionClient = {
+    guestGameOriginReceipt: { updateMany: transactionReceiptUpdate },
+    guestGameAuditEvent: { create: transactionAuditCreate },
+  };
   const prisma = {
     guestActivityFact: { findFirst: jest.fn().mockResolvedValue(fact()) },
     guestGameProfile: {
@@ -348,12 +374,12 @@ function createCanonicalizationService(
     guestGameRuleDecision: {
       count: jest.fn().mockResolvedValue(0),
     },
-    $transaction: jest.fn().mockImplementation(async (operation) =>
-      operation({
-        guestGameOriginReceipt: { updateMany: transactionReceiptUpdate },
-        guestGameAuditEvent: { create: transactionAuditCreate },
-      }),
-    ),
+    $transaction: jest
+      .fn()
+      .mockImplementation(
+        (operation: (client: typeof transactionClient) => Promise<unknown>) =>
+          operation(transactionClient),
+      ),
   };
   const gamification = {
     processEvent: jest.fn().mockResolvedValue({
@@ -468,11 +494,13 @@ describe('GuestGameRuleReplayService', () => {
       storeId: null,
       externalDomain: 'other.langamepro.ru',
     });
-    gamification.dryRun.mockImplementation(async (_user, dto, options) =>
-      dryRun(
-        options.ruleExternalDomains
-          .get('season-1')
-          .includes(dto.externalDomain),
+    gamification.dryRun.mockImplementation((_user, dto, options) =>
+      Promise.resolve(
+        dryRun(
+          (options.ruleExternalDomains.get('season-1') ?? []).includes(
+            dto.externalDomain,
+          ),
+        ),
       ),
     );
 
@@ -506,10 +534,14 @@ describe('GuestGameRuleReplayService', () => {
         timeZone: 'Europe/Moscow',
       },
     ]);
-    gamification.dryRun.mockImplementation(async (_user, _dto, options) =>
-      dryRun(
-        Boolean(
-          options.ruleDomainTimeZones.get('season-1').get('46.langamepro.ru'),
+    gamification.dryRun.mockImplementation((_user, _dto, options) =>
+      Promise.resolve(
+        dryRun(
+          Boolean(
+            options.ruleDomainTimeZones
+              .get('season-1')
+              ?.get('46.langamepro.ru'),
+          ),
         ),
       ),
     );
@@ -842,7 +874,7 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     });
     expect(prisma.guestGameOriginReceipt.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
+        data: matchesObject({
           factId: 'fact-270',
           status: 'WAITING_LIVE',
           originKey: canonicalOriginKey,
@@ -852,22 +884,18 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        where: expect.objectContaining({
+        where: matchesObject({
           id: 'receipt-canonical',
           factId: 'fact-270',
-          OR: expect.arrayContaining([
-            expect.objectContaining({
+          OR: matchesArray([
+            matchesObject({
               status: {
-                in: expect.arrayContaining([
-                  'SHADOWED',
-                  'WAITING_LIVE',
-                  'FAILED',
-                ]),
+                in: matchesArray(['SHADOWED', 'WAITING_LIVE', 'FAILED']),
               },
             }),
           ]),
         }),
-        data: expect.objectContaining({
+        data: matchesObject({
           status: 'PROCESSING',
           claimedSource: 'EXACT_CANONICALIZATION',
           attempts: { increment: 1 },
@@ -893,22 +921,22 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     );
     expect(transactionReceiptUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
+        where: matchesObject({
           status: 'PROCESSING',
           attempts: 1,
           claimedSource: 'EXACT_CANONICALIZATION',
         }),
-        data: expect.objectContaining({
+        data: matchesObject({
           status: 'PROCESSED',
           eventId: 'event-canonical',
         }),
       }),
     );
     expect(transactionAuditCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+      data: matchesObject({
         action: 'EXACT_FACT_CANONICALIZED',
         profileId: 'profile-0646',
-        payload: expect.objectContaining({
+        payload: matchesObject({
           actorUserId: 'user-1',
           sourceFactId: 'fact-270',
           eventId: 'event-canonical',
@@ -916,7 +944,10 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
         }),
       }),
     });
-    const auditPayload = transactionAuditCreate.mock.calls[0][0].data.payload;
+    const [auditCall] = transactionAuditCreate.mock.calls as unknown as [
+      [{ data: { payload: Record<string, unknown> } }],
+    ];
+    const auditPayload = auditCall[0].data.payload;
     expect(auditPayload).not.toHaveProperty('evidence');
     expect(JSON.stringify(auditPayload)).not.toContain('phone');
     expect(JSON.stringify(auditPayload)).not.toContain('payload');
@@ -1041,7 +1072,7 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
     expect(prisma.guestActivityFact.findFirst).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
+        where: matchesObject({
           id: 'fact-270',
           tenantId: 'tenant-1',
           profileId: 'profile-0646',
@@ -1056,12 +1087,12 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     );
     expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
+        where: matchesObject({
           status: 'PROCESSING',
           claimedSource: 'EXACT_CANONICALIZATION',
           attempts: 1,
         }),
-        data: expect.objectContaining({
+        data: matchesObject({
           status: 'FAILED',
           lastError: 'EXACT_CANONICALIZATION_FACT_CHANGED_AFTER_CLAIM',
         }),
@@ -1183,5 +1214,409 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     expect(changedPreview.confirmationHash).not.toBe(
       basePreview.confirmationHash,
     );
+  });
+});
+
+describe('GuestGameRuleReplayService loot-box entitlement maintenance', () => {
+  const exactRows = [
+    {
+      entitlementId: 'entitlement-open-1',
+      rewardId: 'reward-open-1',
+      ruleId: 'loot-box-1',
+      profileId: 'profile-0646',
+      guestId: 'guest-0646',
+      storeId: 'store-1',
+      rewardQualifiedAt: new Date('2026-07-10T10:05:00.000Z'),
+    },
+  ];
+
+  function maintenanceService(queryRows: unknown[]) {
+    const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue(queryRows),
+    };
+    return {
+      service: new GuestGameRuleReplayService(prisma as never, {} as never),
+      prisma,
+    };
+  }
+
+  it('previews only safe IDs for exact legacy open reconciliation', async () => {
+    const { service, prisma } = maintenanceService(exactRows);
+
+    const result = await service.previewLootBoxEntitlementReconciliation(
+      user,
+      {},
+    );
+
+    expect(result).toMatchObject({
+      mode: 'PREVIEW',
+      outcome: 'READY',
+      count: 1,
+      updatedCount: 0,
+      candidateIds: [
+        {
+          entitlementId: 'entitlement-open-1',
+          rewardId: 'reward-open-1',
+          ruleId: 'loot-box-1',
+        },
+      ],
+    });
+    expect(result.digest).toHaveLength(64);
+    expect(result).not.toHaveProperty('profileId');
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks and atomically binds an exact legacy open', async () => {
+    const previewService = maintenanceService(exactRows);
+    const preview =
+      await previewService.service.previewLootBoxEntitlementReconciliation(
+        user,
+        {},
+      );
+    const auditCreate = jest.fn().mockResolvedValue({ id: 'audit-1' });
+    const tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(exactRows),
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      guestGameAuditEvent: { create: auditCreate },
+    };
+    const prisma = {
+      $transaction: jest
+        .fn()
+        .mockImplementation(
+          (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+        ),
+    };
+    const service = new GuestGameRuleReplayService(
+      prisma as never,
+      {} as never,
+    );
+
+    const result = await service.applyLootBoxEntitlementReconciliation(user, {
+      expectedCount: preview.count,
+      expectedDigest: preview.digest,
+      confirmation: 'APPLY_LOOT_BOX_ENTITLEMENT_RECONCILIATION',
+    });
+
+    expect(result).toMatchObject({
+      mode: 'APPLY',
+      outcome: 'APPLIED',
+      count: 1,
+      updatedCount: 1,
+    });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(auditCreate.mock.calls)).toContain(
+      'LOOT_BOX_ENTITLEMENT_RECONCILED',
+    );
+    expect(JSON.stringify(auditCreate.mock.calls)).toContain(
+      'entitlement-open-1',
+    );
+    expect(JSON.stringify(auditCreate.mock.calls)).toContain('profile-0646');
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'Serializable',
+    });
+  });
+
+  it('fails closed when the exact reconciliation set drifts after preview', async () => {
+    const previewService = maintenanceService(exactRows);
+    const preview =
+      await previewService.service.previewLootBoxEntitlementReconciliation(
+        user,
+        {},
+      );
+    const tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]),
+      $executeRaw: jest.fn(),
+      guestGameAuditEvent: { create: jest.fn() },
+    };
+    const service = new GuestGameRuleReplayService(
+      {
+        $transaction: jest
+          .fn()
+          .mockImplementation(
+            (operation: (client: typeof tx) => Promise<unknown>) =>
+              operation(tx),
+          ),
+      } as never,
+      {} as never,
+    );
+
+    await expect(
+      service.applyLootBoxEntitlementReconciliation(user, {
+        expectedCount: preview.count,
+        expectedDigest: preview.digest,
+        confirmation: 'APPLY_LOOT_BOX_ENTITLEMENT_RECONCILIATION',
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('treats an empty exact reconciliation preview as an idempotent apply', async () => {
+    const previewService = maintenanceService([]);
+    const preview =
+      await previewService.service.previewLootBoxEntitlementReconciliation(
+        user,
+        {},
+      );
+    const tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]),
+      $executeRaw: jest.fn(),
+      guestGameAuditEvent: { create: jest.fn() },
+    };
+    const service = new GuestGameRuleReplayService(
+      {
+        $transaction: jest
+          .fn()
+          .mockImplementation(
+            (operation: (client: typeof tx) => Promise<unknown>) =>
+              operation(tx),
+          ),
+      } as never,
+      {} as never,
+    );
+
+    await expect(
+      service.applyLootBoxEntitlementReconciliation(user, {
+        expectedCount: 0,
+        expectedDigest: preview.digest,
+        confirmation: 'APPLY_LOOT_BOX_ENTITLEMENT_RECONCILIATION',
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'IDEMPOTENT',
+      count: 0,
+      updatedCount: 0,
+    });
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+    expect(tx.guestGameAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('uses a stable greedy rolling-seven-day sequence and never cancels consumed rows', async () => {
+    const day = (offset: number) =>
+      new Date(Date.parse('2026-07-01T00:00:00.000Z') + offset * 86_400_000);
+    const rows = [
+      {
+        entitlementId: 'entitlement-1',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'AVAILABLE',
+        qualifiedAt: day(0),
+      },
+      {
+        entitlementId: 'entitlement-2',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'AVAILABLE',
+        qualifiedAt: day(6),
+      },
+      {
+        entitlementId: 'entitlement-3',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'AVAILABLE',
+        qualifiedAt: day(7),
+      },
+      {
+        entitlementId: 'entitlement-4',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'CONSUMED',
+        qualifiedAt: day(8),
+      },
+      {
+        entitlementId: 'entitlement-5',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'AVAILABLE',
+        qualifiedAt: day(14),
+      },
+      {
+        entitlementId: 'entitlement-6',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'AVAILABLE',
+        qualifiedAt: day(15),
+      },
+    ];
+    const { service } = maintenanceService(rows);
+
+    const result = await service.previewLootBoxEntitlementOverLimitRepair(
+      user,
+      {},
+    );
+
+    expect(result.candidateIds).toEqual([
+      {
+        entitlementId: 'entitlement-2',
+        ruleId: 'comeback',
+        preservedEntitlementId: 'entitlement-1',
+      },
+      {
+        entitlementId: 'entitlement-5',
+        ruleId: 'comeback',
+        preservedEntitlementId: 'entitlement-4',
+      },
+    ]);
+    expect(result.candidateIds).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entitlementId: 'entitlement-4' }),
+      ]),
+    );
+  });
+
+  it('excludes reward-template lootboxes from over-limit repair candidates', async () => {
+    const { service, prisma } = maintenanceService([]);
+
+    await service.previewLootBoxEntitlementOverLimitRepair(user, {});
+
+    const [queryCall] = prisma.$queryRaw.mock.calls as unknown as [
+      [{ strings?: readonly string[] }],
+    ];
+    const query = queryCall[0];
+    expect(query.strings?.join('')).toContain(
+      `l."usageKind" IN ('STANDALONE', 'BOTH')`,
+    );
+  });
+
+  it('cancels only the previewed AVAILABLE rolling-window excess set', async () => {
+    const rows = [
+      {
+        entitlementId: 'entitlement-preserved',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'AVAILABLE',
+        qualifiedAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+      {
+        entitlementId: 'entitlement-excess',
+        ruleId: 'comeback',
+        profileId: 'profile-0646',
+        guestId: 'guest-0646',
+        storeId: 'store-1',
+        status: 'AVAILABLE',
+        qualifiedAt: new Date('2026-07-02T00:00:00.000Z'),
+      },
+    ];
+    const previewService = maintenanceService(rows);
+    const preview =
+      await previewService.service.previewLootBoxEntitlementOverLimitRepair(
+        user,
+        {},
+      );
+    const auditCreateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(rows)
+        .mockResolvedValueOnce([{ id: 'entitlement-excess' }]),
+      guestGameAuditEvent: { createMany: auditCreateMany },
+    };
+    const service = new GuestGameRuleReplayService(
+      {
+        $transaction: jest
+          .fn()
+          .mockImplementation(
+            (operation: (client: typeof tx) => Promise<unknown>) =>
+              operation(tx),
+          ),
+      } as never,
+      {} as never,
+    );
+
+    const result = await service.applyLootBoxEntitlementOverLimitRepair(user, {
+      expectedCount: preview.count,
+      expectedDigest: preview.digest,
+      confirmation: 'APPLY_LOOT_BOX_ENTITLEMENT_OVER_LIMIT_REPAIR',
+    });
+
+    expect(result).toMatchObject({
+      mode: 'APPLY',
+      outcome: 'APPLIED',
+      count: 1,
+      updatedCount: 1,
+      candidateIds: [
+        {
+          entitlementId: 'entitlement-excess',
+          preservedEntitlementId: 'entitlement-preserved',
+        },
+      ],
+    });
+    expect(auditCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          action: 'LOOT_BOX_ENTITLEMENT_OVER_LIMIT_CANCELED',
+          entityId: 'entitlement-excess',
+          profileId: 'profile-0646',
+        }),
+      ],
+    });
+  });
+
+  it('is idempotent after the rolling-window repair reaches zero candidates', async () => {
+    const previewService = maintenanceService([]);
+    const preview =
+      await previewService.service.previewLootBoxEntitlementOverLimitRepair(
+        user,
+        {},
+      );
+    const tx = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]),
+      guestGameAuditEvent: { createMany: jest.fn() },
+    };
+    const service = new GuestGameRuleReplayService(
+      {
+        $transaction: jest
+          .fn()
+          .mockImplementation(
+            (operation: (client: typeof tx) => Promise<unknown>) =>
+              operation(tx),
+          ),
+      } as never,
+      {} as never,
+    );
+
+    await expect(
+      service.applyLootBoxEntitlementOverLimitRepair(user, {
+        expectedCount: 0,
+        expectedDigest: preview.digest,
+        confirmation: 'APPLY_LOOT_BOX_ENTITLEMENT_OVER_LIMIT_REPAIR',
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'IDEMPOTENT',
+      count: 0,
+      updatedCount: 0,
+    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(tx.guestGameAuditEvent.createMany).not.toHaveBeenCalled();
   });
 });

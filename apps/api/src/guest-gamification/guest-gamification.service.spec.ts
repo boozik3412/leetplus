@@ -61,11 +61,13 @@ function createPrismaMock() {
     },
     guestGameRuleDecision: {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     guestGameAuditEvent: {
       create: jest.fn().mockResolvedValue({}),
     },
     guestGameEntitlement: {
+      findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn().mockResolvedValue({}),
     },
@@ -165,6 +167,12 @@ function createPrismaMock() {
     },
     guestGroup: {
       findMany: jest.fn(),
+    },
+    langameClubProductConfiguration: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    langameProductGroup: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
     guestGameLootBox: {
       findMany: jest.fn(),
@@ -290,6 +298,86 @@ function createService(
       staffTeamChatService as any,
     ),
   };
+}
+
+function enablePrimarySnapshotBackfill(
+  fixture: ReturnType<typeof createService>,
+  overrides: Record<string, string | undefined> = {},
+) {
+  const values: Record<string, string | undefined> = {
+    GUEST_GAME_PIPELINE_BACKFILL_MODE: 'LIVE',
+    GUEST_GAME_PIPELINE_BACKFILL_KILL_SWITCH: 'false',
+    GUEST_GAME_PIPELINE_BACKFILL_TENANT_ID: user.tenantId,
+    GUEST_GAME_PIPELINE_BACKFILL_PROFILE_ID: 'profile-1',
+    GUEST_GAME_PIPELINE_BACKFILL_LIVE_NOT_BEFORE: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+  fixture.configService.get.mockImplementation((key: string) => values[key]);
+  fixture.prisma.guestGameProfile.findFirst.mockResolvedValue({
+    guestId: 'guest-1',
+  });
+}
+
+function installAtomicLootBoxEntitlementStore(
+  prisma: ReturnType<typeof createPrismaMock>,
+  input: {
+    ruleId: string;
+    limits: Record<string, unknown>;
+    rewards?: Array<Record<string, unknown>>;
+  },
+) {
+  const entitlements: Array<Record<string, any>> = [];
+  const rewards = input.rewards ?? [];
+  let sequence = 0;
+  let tail: Promise<unknown> = Promise.resolve();
+
+  prisma.guestGameLootBox.findFirst.mockImplementation(({ where }) =>
+    where?.id === input.ruleId && where?.status === 'ACTIVE'
+      ? Promise.resolve({ id: input.ruleId, limits: input.limits })
+      : Promise.resolve(null),
+  );
+  prisma.guestGameReward.findMany.mockImplementation(() =>
+    Promise.resolve(rewards),
+  );
+  prisma.guestGameEntitlement.findFirst.mockImplementation(({ where }) =>
+    Promise.resolve(
+      entitlements.find(
+        (row) =>
+          row.tenantId === where?.tenantId &&
+          row.idempotencyKey === where?.idempotencyKey,
+      ) ?? null,
+    ),
+  );
+  prisma.guestGameEntitlement.findMany.mockImplementation(({ where }) =>
+    Promise.resolve(
+      entitlements.filter(
+        (row) =>
+          row.tenantId === where?.tenantId &&
+          row.ruleId === where?.ruleId &&
+          ['AVAILABLE', 'CONSUMED'].includes(row.status),
+      ),
+    ),
+  );
+  prisma.guestGameEntitlement.upsert.mockImplementation(({ where, create }) => {
+    const key = where.tenantId_idempotencyKey;
+    const existing = entitlements.find(
+      (row) =>
+        row.tenantId === key.tenantId &&
+        row.idempotencyKey === key.idempotencyKey,
+    );
+    if (existing) return Promise.resolve(existing);
+    const row = { id: `entitlement-${++sequence}`, ...create };
+    entitlements.push(row);
+    return Promise.resolve(row);
+  });
+  prisma.$transaction.mockImplementation((operation) => {
+    if (typeof operation !== 'function') return Promise.all(operation);
+    const current = tail.then(() => operation(prisma));
+    tail = current.catch(() => undefined);
+    return current;
+  });
+
+  return entitlements;
 }
 
 function profileFixture(
@@ -419,6 +507,7 @@ function activeLootBox(
     id: 'loot-box-1',
     name: 'Prize lootbox',
     status: 'ACTIVE',
+    usageKind: 'STANDALONE',
     rewardType: 'BONUS_BALANCE',
     rewardAmount: 50,
     rewardLabel: '50 бонусов',
@@ -1113,6 +1202,25 @@ function snapshotFact(
     label: id,
     details: null,
     ...overrides,
+  };
+}
+
+function snapshotFactsResult(facts: GuestGameSnapshotFact[] = []) {
+  return {
+    facts,
+    summary: {
+      sessions: facts.filter((fact) => fact.source === 'GUEST_SESSION').length,
+      logs: 0,
+      transactions: 0,
+      operationLogs: 0,
+      balances: 0,
+      bonusBalances: 0,
+      loyaltyGroups: 0,
+      productExpenses: facts.filter((fact) => fact.source === 'PRODUCT_EXPENSE')
+        .length,
+      referrals: 0,
+      latestAt: facts[0]?.occurredAt ?? null,
+    },
   };
 }
 
@@ -4512,6 +4620,95 @@ describe('GuestGamificationService', () => {
         }),
       );
     });
+
+    it('preserves operational activation metadata when publishing an existing visual lootbox', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const payload = visualEditorPayload({
+        battlePass: {
+          id: null,
+          enabled: false,
+          title: 'Club season',
+          status: 'DRAFT',
+          levelCount: 4,
+          xpPerLevel: 250,
+          mainPrize: null,
+          levelRewards: [],
+        },
+        lootBoxes: [
+          {
+            id: 'loot-existing',
+            title: 'Existing case',
+            status: 'ACTIVE',
+            triggerKind: 'SESSION_START',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 50,
+            rewardLabel: '50 bonuses',
+            prizes: [],
+            condition: 'Start a session',
+            limitPerGuest: 2,
+            periodicLimitEnabled: false,
+            periodicLimitPeriod: 'DAILY',
+            timeWindowMode: 'ANY',
+            weekdayMode: 'ANY',
+            weekdays: [1, 2, 3, 4, 5, 6, 0],
+            hourFrom: '10:00',
+            hourTo: '16:00',
+          },
+        ],
+      });
+      const existing = {
+        ...activeLootBox({
+          id: 'loot-existing',
+          name: 'Existing case',
+          status: 'ACTIVE',
+          storeIds: [store.id],
+          limits: {
+            source: 'advanced_editor',
+            activatedAt: '2026-07-18T10:00:00.000Z',
+            restartedAt: '2026-07-19T10:00:00.000Z',
+            evaluationPolicy: 'LIVE_PRIMARY',
+            totalPerDay: 5,
+            perGuestPerWeek: 1,
+          },
+        }),
+        tenantId: user.tenantId,
+        createdAt: now,
+        updatedAt: now,
+        createdByUser: null,
+      };
+
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValue(
+        visualDraftRow({ store, payload }),
+      );
+      prisma.guestGameLootBox.findFirst.mockResolvedValue(existing);
+      prisma.guestGameLootBox.update.mockImplementation(({ data }) =>
+        Promise.resolve({ ...existing, ...data, updatedAt: now }),
+      );
+      prisma.guestGameMission.findMany.mockResolvedValue([]);
+      prisma.guestGameVisualDraft.update.mockResolvedValue(
+        visualDraftRow({ store, payload, status: 'PUBLISHED' }),
+      );
+
+      await service.publishVisualEditorDraft(user, { id: 'draft-1' });
+
+      expect(prisma.guestGameLootBox.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'loot-existing' },
+          data: expect.objectContaining({
+            limits: expect.objectContaining({
+              source: 'visual_editor',
+              activatedAt: '2026-07-18T10:00:00.000Z',
+              restartedAt: '2026-07-19T10:00:00.000Z',
+              evaluationPolicy: 'LIVE_PRIMARY',
+              totalPerDay: 5,
+              perGuest: 2,
+              perGuestPerWeek: 2,
+            }),
+          }),
+        }),
+      );
+    });
   });
 
   describe('active mission wizard migration', () => {
@@ -5090,7 +5287,7 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it.each([
+    it.each<[string, string, number]>([
       {
         name: 'legacy step',
         rules: { ...playTimeRules, schemaVersion: 1 },
@@ -5878,7 +6075,9 @@ describe('GuestGamificationService', () => {
         { originKey: 'origin-xp-1' },
       );
 
-      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
       expect(prisma.guestGameEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -5978,7 +6177,9 @@ describe('GuestGamificationService', () => {
         ),
       ).rejects.toBe(postingFailure);
 
-      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
       expect(prisma.guestGameEvent.create).toHaveBeenCalledTimes(1);
       expect(prisma.guestGameXpPosting.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -6150,6 +6351,179 @@ describe('GuestGamificationService', () => {
         xpDelta: 30,
       });
     });
+
+    it('atomically reserves one limited mission qualification, reward and XP posting across concurrent events', async () => {
+      const { service, prisma } = createService();
+      const missionRule = {
+        ...dryRunResult().rules[0],
+        missionPerGuestLimit: 1,
+        missionTotalRewardLimit: 1,
+        budgetAmount: 50,
+        periodicLimitPeriod: null,
+        missionDenySameDayRepeat: false,
+      };
+      const rewardIntent = {
+        schemaVersion: 1,
+        qualifiedAt: isoNow,
+        slotKey: 'BONUS',
+        claimKey: null,
+        rule: missionRule,
+      };
+      const payload = {
+        processSchemaVersion: 2,
+        source: 'guest_gamification_process_event',
+        store: {
+          id: 'store-1',
+          name: 'Club',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+        input: dryRunResult().input,
+        rules: [missionRule],
+        rewardIntents: [rewardIntent],
+      };
+      const events: Array<Record<string, any>> = [];
+      const intents: Array<Record<string, any>> = [];
+      const postings: Array<Record<string, any>> = [];
+      let eventSequence = 0;
+      let intentSequence = 0;
+      let profileXp = 120;
+      let transactionTail: Promise<unknown> = Promise.resolve();
+
+      jest
+        .spyOn(service as any, 'buildEventData')
+        .mockImplementation((_user, dto, identity) =>
+          Promise.resolve({
+            tenantId: user.tenantId,
+            profileId: dto.profileId,
+            guestId: dto.guestId,
+            eventType: dto.eventType,
+            source: dto.source,
+            externalProvider: dto.externalProvider,
+            externalDomain: dto.externalDomain,
+            externalId: dto.externalId,
+            originKey: identity.originKey,
+            xpDelta: dto.xpDelta,
+            occurredAt: new Date(dto.occurredAt),
+            payload: dto.payload,
+            note: null,
+          }),
+        );
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: missionRule.id,
+          status: 'ACTIVE',
+          conditions: { reward: {} },
+          antiFraudRules: null,
+          perGuestLimit: 1,
+          totalRewardLimit: 1,
+          budgetAmount: new Prisma.Decimal(50),
+          rewardAmount: new Prisma.Decimal(50),
+        },
+      ]);
+      prisma.guestGameRewardIntent.findMany.mockImplementation(() =>
+        Promise.resolve(intents),
+      );
+      prisma.guestGameReward.findMany.mockResolvedValue([]);
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([]);
+      prisma.guestGameEvent.create.mockImplementation(({ data }) => {
+        const row = {
+          id: `event-atomic-mission-${++eventSequence}`,
+          ...data,
+          createdAt: now,
+          profile: {
+            id: 'profile-1',
+            displayName: 'Guest One',
+            contactMasked: '+7 *** **-11',
+            xp: profileXp,
+            level: 1,
+          },
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'lg-guest-1',
+            fullNameMasked: 'Guest One',
+            phoneMasked: '+7 *** **-11',
+          },
+          lootBox: null,
+          mission: null,
+          season: null,
+          createdByUser: null,
+        };
+        events.push(row);
+        return Promise.resolve(row);
+      });
+      prisma.guestGameEvent.update.mockImplementation(({ where, data }) => {
+        const row = events.find((item) => item.id === where.id)!;
+        Object.assign(row, data);
+        return Promise.resolve(row);
+      });
+      prisma.guestGameEvent.findUnique.mockImplementation(({ where }) =>
+        Promise.resolve(events.find((item) => item.id === where.id) ?? null),
+      );
+      prisma.guestGameRewardIntent.upsert.mockImplementation(
+        ({ where, create }) => {
+          const idempotencyKey = where.tenantId_idempotencyKey?.idempotencyKey;
+          const existing = intents.find(
+            (item) => item.idempotencyKey === idempotencyKey,
+          );
+          if (existing) return Promise.resolve(existing);
+          const row = { id: `intent-${++intentSequence}`, ...create };
+          intents.push(row);
+          return Promise.resolve(row);
+        },
+      );
+      prisma.guestGameProfile.update.mockImplementation(({ data }) => {
+        if (data.xp?.increment) profileXp += data.xp.increment;
+        else if (typeof data.xp === 'number') profileXp = data.xp;
+        return Promise.resolve({ xp: profileXp });
+      });
+      prisma.guestGameXpPosting.create.mockImplementation(({ data }) => {
+        postings.push(data);
+        return Promise.resolve(data);
+      });
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.$transaction.mockImplementation((operation) => {
+        if (typeof operation !== 'function') return Promise.all(operation);
+        const current = transactionTail.then(() => operation(prisma));
+        transactionTail = current.catch(() => undefined);
+        return current;
+      });
+
+      const results = await Promise.all(
+        ['one', 'two'].map((suffix) =>
+          service.createEvent(
+            user,
+            {
+              profileId: 'profile-1',
+              guestId: 'guest-1',
+              eventType: 'SESSION_START',
+              source: 'API_IMPORT',
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: 'club-1',
+              externalId: `session-atomic-${suffix}`,
+              xpDelta: 30,
+              occurredAt: isoNow,
+              payload,
+            } as any,
+            { originKey: `origin-atomic-${suffix}` },
+          ),
+        ),
+      );
+
+      expect(
+        intents.filter((intent) => intent.effectKind === 'QUALIFICATION'),
+      ).toHaveLength(1);
+      expect(
+        intents.filter((intent) => intent.effectKind === 'REWARD'),
+      ).toHaveLength(1);
+      expect(postings).toHaveLength(1);
+      expect(events.map((event) => event.xpDelta).sort()).toEqual([0, 30]);
+      expect(results.map((event) => event.xpDelta).sort()).toEqual([0, 30]);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
+    });
   });
 
   describe('dryRun', () => {
@@ -6189,6 +6563,74 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameEvent.create).not.toHaveBeenCalled();
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
       expect(langameClient.postEndpoint).not.toHaveBeenCalled();
+    });
+
+    it('does not self-unlock reward-template lootboxes on generic events but still evaluates BOTH', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          id: 'reward-template',
+          usageKind: 'REWARD_TEMPLATE',
+        }),
+        activeLootBox({ id: 'both', usageKind: 'BOTH' }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules).toEqual([
+        expect.objectContaining({
+          id: 'both',
+          kind: 'LOOT_BOX',
+          eligible: true,
+        }),
+      ]);
+      expect(result.summary).toMatchObject({
+        checkedRules: 1,
+        eligibleRules: 1,
+      });
+    });
+
+    it('allows an explicit manual open to evaluate a reward-template lootbox', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          id: 'reward-template',
+          usageKind: 'REWARD_TEMPLATE',
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        lootBoxId: 'reward-template',
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules).toEqual([
+        expect.objectContaining({
+          id: 'reward-template',
+          kind: 'LOOT_BOX',
+          eligible: true,
+        }),
+      ]);
     });
 
     it('checks mission weekday limits in the selected club timezone', async () => {
@@ -6269,6 +6711,93 @@ describe('GuestGamificationService', () => {
         id: 'mission-1',
         kind: 'MISSION',
         eligible: true,
+      });
+    });
+
+    it('enforces a lootbox WEEKENDS mode without materialized weekdays', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337 Pushkinskaya',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          storeIds: ['store-1'],
+          periodRules: { weekdayMode: 'WEEKENDS' },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const friday = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        storeId: 'store-1',
+        occurredAt: '2026-06-12T10:00:00.000Z',
+        sessionType: 'regular_session',
+      });
+      const saturday = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        storeId: 'store-1',
+        occurredAt: '2026-06-13T10:00:00.000Z',
+        sessionType: 'regular_session',
+      });
+
+      expect(friday.summary).toMatchObject({
+        eligibleRules: 0,
+        blockedRules: 1,
+      });
+      expect(saturday.summary).toMatchObject({
+        eligibleRules: 1,
+        blockedRules: 0,
+      });
+    });
+
+    it('enforces nested mission period rules without materialized weekdays', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337 Pushkinskaya',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          definitionVersion: 2,
+          progressTarget: 1,
+          storeIds: ['store-1'],
+          conditions: {
+            metric: {
+              aggregation: 'exists',
+              eventTypes: ['SESSION_START'],
+              weekdayMode: 'WEEKDAYS',
+              target: 1,
+            },
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        storeId: 'store-1',
+        occurredAt: '2026-06-13T10:00:00.000Z',
+        sessionType: 'regular_session',
+      });
+
+      expect(result.summary).toMatchObject({
+        eligibleRules: 0,
+        blockedRules: 1,
       });
     });
 
@@ -6388,6 +6917,229 @@ describe('GuestGamificationService', () => {
         blockers: expect.arrayContaining([
           'Событие произошло раньше активации правила',
         ]),
+      });
+    });
+
+    it('counts an outstanding entitlement toward a periodic lootbox limit', async () => {
+      const { service, prisma } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          limits: { periodicLimit: 'DAILY' },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([
+        {
+          ruleId: 'loot-box-1',
+          status: 'AVAILABLE',
+          rewardId: null,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: new Date('2026-06-10T08:00:00.000Z'),
+          evidence: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        eligible: false,
+        periodicLimitPeriod: 'DAILY',
+        blockers: expect.arrayContaining([
+          expect.stringContaining('календарный день клуба'),
+        ]),
+      });
+    });
+
+    it('counts a consumed entitlement once when its reward is also present', async () => {
+      const { service, prisma } = createService();
+      const linkedReward = rewardResult({
+        id: 'reward-from-entitlement',
+        qualifiedAt: '2026-06-09T10:00:00.000Z',
+        lootBox: {
+          id: 'loot-box-1',
+          name: 'Prize lootbox',
+          status: 'ACTIVE',
+        },
+      });
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          limits: { perGuestPerWeek: 1 },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunRewards')
+        .mockResolvedValue([linkedReward]);
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([
+        {
+          ruleId: 'loot-box-1',
+          status: 'CONSUMED',
+          rewardId: linkedReward.id,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: new Date(linkedReward.qualifiedAt),
+          evidence: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        eligible: false,
+        blockers: expect.arrayContaining([expect.stringContaining('1/1')]),
+      });
+      expect(result.rules[0].blockers.join(' ')).not.toContain('2/1');
+    });
+
+    it('counts an outstanding entitlement toward the per-guest weekly limit', async () => {
+      const { service, prisma } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          limits: { perGuestPerWeek: 1 },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([
+        {
+          ruleId: 'loot-box-1',
+          status: 'AVAILABLE',
+          rewardId: null,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: new Date('2026-06-09T10:00:00.000Z'),
+          evidence: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        eligible: false,
+        blockers: expect.arrayContaining([expect.stringContaining('1/1')]),
+      });
+    });
+
+    it('does not reapply issuance limits while consuming an existing entitlement', async () => {
+      const { service, prisma } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          limits: { perGuestPerWeek: 1 },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([
+        {
+          ruleId: 'loot-box-1',
+          status: 'AVAILABLE',
+          rewardId: null,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: new Date('2026-06-09T10:00:00.000Z'),
+          evidence: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sourceFactId: 'guest-game-entitlement:entitlement-1',
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        eligible: true,
+        blockers: [],
+        reasons: expect.arrayContaining([
+          expect.stringContaining('не применяются повторно'),
+        ]),
+      });
+    });
+
+    it('counts entitlements toward the global daily lootbox limit', async () => {
+      const { service, prisma } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          limits: { totalPerDay: 2 },
+        }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([
+        {
+          ruleId: 'loot-box-1',
+          status: 'AVAILABLE',
+          rewardId: null,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: new Date('2026-06-10T08:00:00.000Z'),
+          evidence: null,
+        },
+        {
+          ruleId: 'loot-box-1',
+          status: 'CONSUMED',
+          rewardId: null,
+          profileId: 'profile-2',
+          guestId: 'guest-2',
+          qualifiedAt: new Date('2026-06-10T09:00:00.000Z'),
+          evidence: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'regular_session',
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        id: 'loot-box-1',
+        eligible: false,
+        blockers: expect.arrayContaining([expect.stringContaining('2/2')]),
       });
     });
 
@@ -7157,6 +7909,282 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it.each([
+      ['REWARD_TEMPLATE', 'AUTO', false],
+      ['BOTH', 'AUTO', false],
+      ['REWARD_TEMPLATE', 'ADMIN', true],
+    ] as const)(
+      'qualifies a FREE Battle Pass lootbox backed by an active %s template with %s delivery',
+      async (usageKind, delivery, manualApprovalRequired) => {
+        const { service } = createService();
+        const rewardLootBox = activeLootBox({
+          id: 'battle-pass-lootbox',
+          name: 'Сезонный контейнер',
+          usageKind,
+        });
+        jest
+          .spyOn(service as any, 'resolveDryRunProfile')
+          .mockResolvedValue(profileFixture());
+        jest.spyOn(service, 'getLootBoxes').mockResolvedValue([rewardLootBox]);
+        jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+        jest.spyOn(service, 'getSeasons').mockResolvedValue([
+          seasonRow({
+            manualApprovalRequired: false,
+            storeIds: [],
+            levels: [
+              {
+                level: 1,
+                title: 'Открыть сезонный контейнер',
+                freeReward: 'Сезонный контейнер',
+                freeRewardDetails: {
+                  type: 'LOOT_BOX',
+                  label: 'Сезонный контейнер',
+                  delivery,
+                  lootBox: {
+                    id: rewardLootBox.id,
+                    name: rewardLootBox.name,
+                  },
+                },
+                activationRules: {
+                  schemaVersion: 2,
+                  taskType: 'APP_OPEN',
+                  triggerKind: 'APP_OPEN',
+                  evaluationPolicy: 'LIVE_PRIMARY',
+                  metric: {
+                    aggregation: 'exists',
+                    eventTypes: ['APP_OPEN'],
+                    target: 1,
+                  },
+                },
+              },
+            ],
+          }) as never,
+        ]);
+        jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+        jest
+          .spyOn(service as any, 'getDryRunProgressEvents')
+          .mockResolvedValue([]);
+
+        const result = await service.dryRun(user, {
+          eventType: 'APP_OPEN',
+          occurredAt: isoNow,
+        });
+        const seasonRule = result.rules.find((rule) => rule.kind === 'SEASON');
+
+        expect(seasonRule).toMatchObject({
+          eligible: true,
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          rewardAmount: 0,
+          rewardLabel: 'Сезонный контейнер',
+          selectedRewardLabel: 'Сезонный контейнер',
+          battlePassRewardTrack: 'FREE',
+          rewardLootBoxId: 'battle-pass-lootbox',
+          manualApprovalRequired,
+        });
+      },
+    );
+
+    it('fails closed for a PREMIUM-only Battle Pass lootbox without profile premium eligibility', async () => {
+      const { service } = createService();
+      const rewardLootBox = activeLootBox({
+        id: 'premium-lootbox',
+        usageKind: 'REWARD_TEMPLATE',
+      });
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([rewardLootBox]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          premiumEnabled: true,
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Premium контейнер',
+              premiumReward: 'Premium контейнер',
+              premiumRewardDetails: {
+                type: 'LOOT_BOX',
+                label: 'Premium контейнер',
+                delivery: 'AUTO',
+                lootBox: { id: rewardLootBox.id },
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                metric: {
+                  aggregation: 'exists',
+                  eventTypes: ['APP_OPEN'],
+                  target: 1,
+                },
+              },
+            },
+          ],
+        }) as never,
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+      const seasonRule = result.rules.find((rule) => rule.kind === 'SEASON');
+
+      expect(seasonRule).toMatchObject({
+        eligible: false,
+        rewardType: null,
+        selectedRewardLabel: null,
+        battlePassRewardTrack: null,
+        rewardLootBoxId: null,
+        blockers: expect.arrayContaining([
+          expect.stringContaining('источник premium-статуса'),
+        ]),
+      });
+    });
+
+    it('awards only the FREE Battle Pass lootbox when a premium reward is also configured', async () => {
+      const { service } = createService();
+      const freeLootBox = activeLootBox({
+        id: 'free-lootbox',
+        name: 'Бесплатный контейнер',
+        usageKind: 'REWARD_TEMPLATE',
+      });
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([freeLootBox]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          premiumEnabled: true,
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Два контейнера',
+              freeReward: 'Бесплатный контейнер',
+              premiumReward: 'Premium контейнер',
+              freeRewardDetails: {
+                type: 'LOOT_BOX',
+                label: 'Бесплатный контейнер',
+                delivery: 'AUTO',
+                lootBox: { id: freeLootBox.id },
+              },
+              premiumRewardDetails: {
+                type: 'LOOT_BOX',
+                label: 'Premium контейнер',
+                delivery: 'AUTO',
+                lootBox: { id: 'premium-lootbox' },
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                metric: {
+                  aggregation: 'exists',
+                  eventTypes: ['APP_OPEN'],
+                  target: 1,
+                },
+              },
+            },
+          ],
+        }) as never,
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+      const seasonRule = result.rules.find((rule) => rule.kind === 'SEASON');
+
+      expect(seasonRule).toMatchObject({
+        eligible: true,
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        battlePassRewardTrack: 'FREE',
+        rewardLootBoxId: 'free-lootbox',
+        reasons: expect.arrayContaining([
+          expect.stringContaining('Premium-награда'),
+          expect.stringContaining('не оценивалась'),
+        ]),
+      });
+    });
+
+    it('blocks a Battle Pass reward that points to a STANDALONE lootbox', async () => {
+      const { service } = createService();
+      const standaloneLootBox = activeLootBox({
+        id: 'standalone-lootbox',
+        usageKind: 'STANDALONE',
+      });
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest
+        .spyOn(service, 'getLootBoxes')
+        .mockResolvedValue([standaloneLootBox]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([
+        seasonRow({
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Недопустимый контейнер',
+              freeReward: 'Недопустимый контейнер',
+              freeRewardDetails: {
+                type: 'LOOT_BOX',
+                delivery: 'AUTO',
+                lootBox: { id: standaloneLootBox.id },
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                metric: {
+                  aggregation: 'exists',
+                  eventTypes: ['APP_OPEN'],
+                  target: 1,
+                },
+              },
+            },
+          ],
+        }) as never,
+      ]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest
+        .spyOn(service as any, 'getDryRunProgressEvents')
+        .mockResolvedValue([]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+      const seasonRule = result.rules.find((rule) => rule.kind === 'SEASON');
+
+      expect(seasonRule).toMatchObject({
+        eligible: false,
+        rewardType: null,
+        selectedRewardLabel: null,
+        blockers: expect.arrayContaining([
+          expect.stringContaining('STANDALONE'),
+        ]),
+      });
+    });
+
     it('uses the step delivery and real amount for Battle Pass budget checks', async () => {
       const { service } = createService();
       mockSingleSeasonDryRun(
@@ -7816,6 +8844,28 @@ describe('GuestGamificationService', () => {
   });
 
   describe('processLiveSessionStart', () => {
+    it('checks only standalone-capable lootboxes while preserving mission session-start detection', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        { triggerKind: 'SESSION_START' },
+      ]);
+      prisma.guestGameSeason.findMany.mockResolvedValue([]);
+
+      await expect(
+        (service as any).hasActiveSessionStartRules(user),
+      ).resolves.toBe(true);
+      expect(prisma.guestGameLootBox.findMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+          usageKind: { in: ['STANDALONE', 'BOTH'] },
+        },
+        select: { triggerKind: true },
+      });
+    });
+
     it('processes the open Langame session as SESSION_START with snapshot-compatible idempotency', async () => {
       const { service } = createService();
       const processResult = {
@@ -8767,7 +9817,7 @@ describe('GuestGamificationService', () => {
       expect(second).toBe(first);
     });
 
-    it('refreshes an idempotent live session payload when the same session becomes packet hours', async () => {
+    it('creates a scoped correction when the same live session becomes packet hours', async () => {
       const { service, prisma } = createService();
 
       jest.spyOn(service as any, 'getTenantGuest').mockResolvedValue({
@@ -8869,6 +9919,30 @@ describe('GuestGamificationService', () => {
           },
           note: 'idempotent',
         });
+      const correctionResult = processResult({
+        dryRun: dryRunResult({
+          input: {
+            sessionType: 'packet_hours',
+            sessionPacket: true,
+            sessionMinutes: 15,
+          },
+        }),
+        event: eventResult({
+          externalId:
+            'guest-game:GUEST_SESSION:SESSION_START:session-1:classification:package-v1',
+          payload: {
+            sourceFactId: 'session-1',
+            input: {
+              sessionType: 'packet_hours',
+              sessionPacket: true,
+              sessionMinutes: 15,
+            },
+          },
+        }),
+      });
+      const correctionSpy = jest
+        .spyOn(service as any, 'processSessionPackageClassificationCorrection')
+        .mockResolvedValue(correctionResult);
 
       await service.processLiveSessionStart(user, {
         profileId: 'profile-1',
@@ -8883,24 +9957,137 @@ describe('GuestGamificationService', () => {
 
       expect(findActiveSessionSpy).toHaveBeenCalledTimes(2);
       expect(processEventSpy).toHaveBeenCalledTimes(2);
-      expect(prisma.guestGameEvent.update).toHaveBeenCalledWith({
-        where: { id: 'event-1' },
-        data: {
-          payload: expect.objectContaining({
-            input: expect.objectContaining({
-              sessionType: 'packet_hours',
-              sessionPacket: true,
-              sessionMinutes: 15,
-            }),
-          }),
-        },
-      });
+      expect(prisma.guestGameEvent.update).not.toHaveBeenCalled();
+      expect(correctionSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'session-1',
+          externalId: 'session-1',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+        }),
+      );
       expect(refreshed?.event.payload).toMatchObject({
+        sourceFactId: 'session-1',
         input: {
           sessionType: 'packet_hours',
           sessionPacket: true,
           sessionMinutes: 15,
         },
+      });
+    });
+
+    it('scopes a late package marker to newly eligible rules without counting a second session', async () => {
+      const { service } = createService();
+      const baseRule = dryRunResult().rules[0];
+      const packageRules = [
+        {
+          ...baseRule,
+          id: 'mission-any',
+          name: 'Any session count',
+          eligible: true,
+          xpDelta: 10,
+        },
+        {
+          ...baseRule,
+          id: 'mission-hourly',
+          name: 'Hourly only',
+          eligible: false,
+          xpDelta: 0,
+        },
+        {
+          ...baseRule,
+          id: 'mission-package',
+          name: 'Package only',
+          eligible: true,
+          xpDelta: 20,
+        },
+        {
+          ...baseRule,
+          id: 'loot-box-package',
+          kind: 'LOOT_BOX' as const,
+          name: 'Package case',
+          eligible: true,
+          xpDelta: 0,
+        },
+        {
+          ...baseRule,
+          id: 'season-package',
+          kind: 'SEASON' as const,
+          name: 'Package battle pass step',
+          eligible: true,
+          xpDelta: 0,
+          battlePassStep: 2,
+          battlePassRewardTrack: 'FREE' as const,
+        },
+      ];
+      const regularRules = packageRules.map((rule) => ({
+        ...rule,
+        eligible: rule.id === 'mission-any' || rule.id === 'mission-hourly',
+      }));
+      const packageDryRun = dryRunResult({
+        input: {
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+        },
+        rules: packageRules,
+      });
+      const regularDryRun = dryRunResult({
+        input: {
+          sessionType: 'regular_session',
+          sessionPacket: false,
+        },
+        rules: regularRules,
+      });
+      jest
+        .spyOn(service, 'dryRun')
+        .mockImplementation((_user, dto) =>
+          Promise.resolve(
+            dto.sessionPacket === true ? packageDryRun : regularDryRun,
+          ),
+        );
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue(processResult({ dryRun: packageDryRun }));
+
+      await (service as any).processSessionPackageClassificationCorrection(
+        user,
+        {
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          storeId: 'store-1',
+          eventType: 'SESSION_START',
+          occurredAt: '2026-06-10T09:45:00.000Z',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sessionMinutes: 15,
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: 'session:db-session-1:start',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-1',
+        },
+      );
+
+      expect(processEventSpy).toHaveBeenCalledTimes(1);
+      const [, correctionDto, options] = processEventSpy.mock.calls[0];
+      expect(correctionDto).toMatchObject({
+        sourceFactId: 'session:db-session-1:start',
+        externalId: 'session-1:classification:package-v1',
+        sessionType: 'packet_hours',
+        sessionPacket: true,
+      });
+      expect(Array.from(options?.allowedRuleIds ?? [])).toEqual([
+        'mission-package',
+        'loot-box-package',
+        'season-package',
+      ]);
+      expect(options?.allowedBattlePassSteps?.get('season-package')).toBe(2);
+      expect(options).toMatchObject({
+        evaluationMode: 'LIVE',
+        evaluatorVersion: 'live-session-package-correction-v1',
+        materializeRewards: true,
+        suppressLedgerShadow: false,
       });
     });
 
@@ -8947,6 +10134,27 @@ describe('GuestGamificationService', () => {
   });
 
   describe('processEvent', () => {
+    it('atomically replaces a deterministic recovery decision run on retry', async () => {
+      const { service, prisma } = createService();
+
+      await service.recordRuleDecisions(user, dryRunResult(), {
+        evaluationRunId: 'loot-box-session-recovery:receipt-1:shadow',
+        evaluationMode: 'SHADOW_LOOT_BOX_RECOVERY',
+        replaceExistingRun: true,
+        suppressLedgerShadow: true,
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array));
+      expect(prisma.guestGameRuleDecision.deleteMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: 'tenant-1',
+          evaluationRunId: 'loot-box-session-recovery:receipt-1:shadow',
+          evaluationMode: 'SHADOW_LOOT_BOX_RECOVERY',
+        },
+      });
+      expect(prisma.guestGameRuleDecision.createMany).toHaveBeenCalledTimes(1);
+    });
+
     it('persists paired live and ledger shadow decisions without changing rewards', async () => {
       const { service, prisma, configService } = createService();
       configService.get.mockImplementation((key: string) =>
@@ -9007,6 +10215,169 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+    });
+
+    it('passes a stable external id to ledger parity when the batch fact id is synthetic', async () => {
+      const { service, prisma, configService } = createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: 'mission-1',
+          name: 'Play for 60 minutes',
+          triggerKind: 'PLAY_HOUR',
+          conditions: {
+            sessionType: 'regular_session',
+            metric: { aggregation: 'duration', target: 60 },
+          },
+          progressTarget: 60,
+          progressUnit: 'minute',
+          storeIds: [],
+          periodFrom: null,
+          periodTo: null,
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ]);
+      prisma.guestActivityFact.findMany.mockResolvedValue([
+        {
+          id: 'ledger-play-time-fact',
+          factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+          confidence: 'EXACT',
+          happenedAt: now,
+          createdAt: now,
+          storeId: null,
+          externalDomain: 'club-1',
+          sourceExternalId: 'langame-session-strong-1',
+          sessionExternalId: 'langame-session-strong-1',
+          tariffName: null,
+          tariffType: null,
+          amount: null,
+          durationMinutes: 75,
+          evidence: null,
+          store: null,
+        },
+      ]);
+      const baseRule = dryRunResult().rules[0];
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          rules: [
+            {
+              ...baseRule,
+              name: 'Play for 60 minutes',
+              triggerKind: 'PLAY_HOUR',
+            },
+          ],
+        }),
+        {
+          eventId: 'event-play-time-1',
+          sourceFactId: 'session:database-row-1:play-time',
+          sourceExternalId: 'langame-session-strong-1',
+          sourceFactKind: 'GUEST_SESSION',
+        },
+      );
+
+      const shadowDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[1][0].data[0];
+      expect(shadowDecision).toMatchObject({
+        evaluationMode: 'SHADOW',
+        evaluatorVersion: 'ledger-v2',
+        status: 'MATCHED',
+      });
+      expect(shadowDecision.evidence).toEqual(
+        expect.objectContaining({
+          facts: [expect.objectContaining({ id: 'ledger-play-time-fact' })],
+        }),
+      );
+    });
+
+    it('resolves a domain-scoped topup timezone from selected rule stores for ledger parity', async () => {
+      const { service, prisma, configService } = createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: 'mission-domain-topup',
+          name: 'Morning topup',
+          triggerKind: 'BALANCE_TOPUP',
+          conditions: {
+            hours: ['14:00-16:00'],
+            weekdays: [3],
+            metric: { aggregation: 'count', target: 1 },
+          },
+          progressTarget: 1,
+          progressUnit: 'topup',
+          storeIds: ['store-1'],
+          periodFrom: null,
+          periodTo: null,
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ]);
+      prisma.store.findMany.mockResolvedValue([
+        {
+          id: 'store-1',
+          externalDomain: 'club-1',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      ]);
+      prisma.guestActivityFact.findMany.mockResolvedValue([
+        {
+          id: 'ledger-domain-topup',
+          factType: 'BALANCE_TOPUP',
+          confidence: 'EXACT',
+          happenedAt: now,
+          createdAt: now,
+          storeId: null,
+          externalDomain: 'club-1',
+          sourceExternalId: 'balance-operation-1',
+          sessionExternalId: null,
+          tariffName: null,
+          tariffType: null,
+          amount: new Prisma.Decimal(500),
+          durationMinutes: null,
+          evidence: null,
+          store: null,
+        },
+      ]);
+      const baseRule = dryRunResult().rules[0];
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          eventType: 'BALANCE_TOPUP',
+          rules: [
+            {
+              ...baseRule,
+              id: 'mission-domain-topup',
+              name: 'Morning topup',
+              triggerKind: 'BALANCE_TOPUP',
+            },
+          ],
+        }),
+        {
+          eventId: 'event-domain-topup',
+          sourceFactId: 'balance:synthetic-1',
+          sourceExternalId: 'balance-operation-1',
+          sourceFactKind: 'BALANCE_LIST',
+        },
+      );
+
+      expect(prisma.store.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: { id: true, externalDomain: true, timeZone: true },
+        }),
+      );
+      const shadowDecision =
+        prisma.guestGameRuleDecision.createMany.mock.calls[1][0].data[0];
+      expect(shadowDecision).toMatchObject({
+        evaluationMode: 'SHADOW',
+        evaluatorVersion: 'ledger-v2',
+        status: 'MATCHED',
+      });
     });
 
     it('does not let a ledger fact from a completed Battle Pass step satisfy the next step', async () => {
@@ -9216,6 +10587,8 @@ describe('GuestGamificationService', () => {
       await service.recordRuleDecisions(
         user,
         dryRunResult({
+          eventType: 'PLAY_HOUR',
+          occurredAt: currentEventAt.toISOString(),
           rules: [
             {
               ...baseRule,
@@ -9239,6 +10612,7 @@ describe('GuestGamificationService', () => {
         }),
         {
           eventId: 'event-step-2',
+          sourceFactId: 'play-time-current-event-half',
           excludeSeasonRewardIds: ['reward-step-2-current-event'],
         },
       );
@@ -9328,6 +10702,10 @@ describe('GuestGamificationService', () => {
     it('upserts one available entitlement for the same matched lootbox event', async () => {
       const { service, prisma } = createService();
       const baseRule = dryRunResult().rules[0];
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-box-1',
+        limits: {},
+      });
       const lootBoxRun = dryRunResult({
         rules: [
           {
@@ -9374,6 +10752,136 @@ describe('GuestGamificationService', () => {
       expect(second.update).not.toHaveProperty('consumedAt');
     });
 
+    it('atomically reserves one global daily entitlement for concurrent distinct events', async () => {
+      const { service, prisma } = createService();
+      const baseRule = dryRunResult().rules[0];
+      const rule = {
+        ...baseRule,
+        id: 'loot-box-atomic-day',
+        kind: 'LOOT_BOX' as const,
+        name: 'Atomic daily case',
+        xpDelta: 0,
+      };
+      const stored = installAtomicLootBoxEntitlementStore(prisma, {
+        ruleId: rule.id,
+        limits: { totalPerDay: 1 },
+      });
+
+      const [first, second] = await Promise.all([
+        service.recordRuleDecisions(user, dryRunResult({ rules: [rule] }), {
+          eventId: 'event-atomic-day-1',
+        }),
+        service.recordRuleDecisions(
+          user,
+          dryRunResult({
+            profile: {
+              ...dryRunResult().profile!,
+              id: 'profile-2',
+            },
+            guest: {
+              ...dryRunResult().guest!,
+              id: 'guest-2',
+            },
+            rules: [rule],
+          }),
+          { eventId: 'event-atomic-day-2' },
+        ),
+      ]);
+
+      expect(stored.filter((row) => row.status === 'AVAILABLE')).toHaveLength(
+        1,
+      );
+      expect(stored.filter((row) => row.status === 'CANCELED')).toHaveLength(1);
+      expect(
+        [...first.lootBoxEntitlements, ...second.lootBoxEntitlements].map(
+          (outcome) => outcome.status,
+        ),
+      ).toEqual(expect.arrayContaining(['PERSISTED', 'LIMIT_EXHAUSTED']));
+      expect(stored.find((row) => row.status === 'CANCELED')?.evidence).toEqual(
+        expect.objectContaining({
+          issuanceOutcome: 'LIMIT_EXHAUSTED',
+          atomicLimitGuard: expect.objectContaining({
+            codes: ['TOTAL_DAILY_LIMIT_EXHAUSTED'],
+          }),
+        }),
+      );
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
+    });
+
+    it('atomically enforces the rolling per-guest weekly limit', async () => {
+      const { service, prisma } = createService();
+      const baseRule = dryRunResult().rules[0];
+      const rule = {
+        ...baseRule,
+        id: 'loot-box-atomic-week',
+        kind: 'LOOT_BOX' as const,
+        name: 'Atomic weekly case',
+        xpDelta: 0,
+      };
+      const stored = installAtomicLootBoxEntitlementStore(prisma, {
+        ruleId: rule.id,
+        limits: { perGuestPerWeek: 1 },
+      });
+
+      const results = await Promise.all([
+        service.recordRuleDecisions(user, dryRunResult({ rules: [rule] }), {
+          eventId: 'event-atomic-week-1',
+        }),
+        service.recordRuleDecisions(user, dryRunResult({ rules: [rule] }), {
+          eventId: 'event-atomic-week-2',
+        }),
+      ]);
+
+      expect(stored.filter((row) => row.status === 'AVAILABLE')).toHaveLength(
+        1,
+      );
+      expect(stored.filter((row) => row.status === 'CANCELED')).toHaveLength(1);
+      expect(results.flatMap((result) => result.lootBoxEntitlements)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ status: 'PERSISTED' }),
+          expect.objectContaining({
+            status: 'LIMIT_EXHAUSTED',
+            limitCodes: ['PER_GUEST_WEEKLY_LIMIT_EXHAUSTED'],
+          }),
+        ]),
+      );
+    });
+
+    it('treats concurrent writes for the same source as one idempotent entitlement', async () => {
+      const { service, prisma } = createService();
+      const baseRule = dryRunResult().rules[0];
+      const rule = {
+        ...baseRule,
+        id: 'loot-box-atomic-idempotent',
+        kind: 'LOOT_BOX' as const,
+        name: 'Atomic idempotent case',
+        xpDelta: 0,
+      };
+      const stored = installAtomicLootBoxEntitlementStore(prisma, {
+        ruleId: rule.id,
+        limits: { totalPerDay: 1, perGuestPerWeek: 1 },
+      });
+
+      const results = await Promise.all([
+        service.recordRuleDecisions(user, dryRunResult({ rules: [rule] }), {
+          eventId: 'event-atomic-same',
+        }),
+        service.recordRuleDecisions(user, dryRunResult({ rules: [rule] }), {
+          eventId: 'event-atomic-same',
+        }),
+      ]);
+
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({ status: 'AVAILABLE' });
+      expect(
+        results
+          .flatMap((result) => result.lootBoxEntitlements)
+          .map((outcome) => outcome.status),
+      ).toEqual(expect.arrayContaining(['PERSISTED', 'IDEMPOTENT']));
+    });
+
     it('creates a mission reward lootbox entitlement without creating a prize', async () => {
       const { service, prisma } = createService();
       const missionRun = dryRunResult({
@@ -9405,6 +10913,15 @@ describe('GuestGamificationService', () => {
       });
 
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.findMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: user.tenantId,
+          id: { in: ['reward-lootbox'] },
+          status: 'ACTIVE',
+          usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
+        },
+        select: { id: true, name: true },
+      });
       expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
@@ -9423,6 +10940,30 @@ describe('GuestGamificationService', () => {
           }),
         }),
       );
+    });
+
+    it('does not grant a mission lootbox entitlement from a diagnostic live evaluation without a canonical event', async () => {
+      const { service, prisma } = createService();
+      const missionRun = dryRunResult({
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'mission-lootbox-open-attempt',
+            kind: 'MISSION',
+            rewardType: 'LOOT_BOX_ENTITLEMENT',
+            rewardAmount: 0,
+            manualApprovalRequired: false,
+          },
+        ],
+      });
+
+      await service.recordRuleDecisions(user, missionRun, {
+        evaluationMode: 'LIVE_OPEN_ATTEMPT',
+        sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+      });
+
+      expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
     });
 
     it('waits for administrator approval before creating a mission lootbox entitlement', async () => {
@@ -9451,7 +10992,7 @@ describe('GuestGamificationService', () => {
         id: 'reward-lootbox',
         name: 'Ежедневный шанс',
       });
-      await (service as any).createApprovedMissionLootBoxEntitlement(user, {
+      await (service as any).createApprovedRewardLootBoxEntitlement(user, {
         id: 'pending-reward-1',
         tenantId: user.tenantId,
         profileId: 'profile-1',
@@ -9477,13 +11018,250 @@ describe('GuestGamificationService', () => {
             rewardId: 'pending-reward-1',
             status: 'AVAILABLE',
           }),
+          update: {},
         }),
       );
     });
 
-    it('scopes daily lootbox entitlements to the local calendar day of the club', async () => {
+    it.each(['CONSUMED', 'CANCELED'])(
+      'never reopens a terminal %s approved-reward entitlement on retry',
+      async (terminalStatus) => {
+        const { service, prisma } = createService();
+        prisma.guestGameLootBox.findFirst.mockResolvedValue({
+          id: 'reward-lootbox',
+          name: 'Terminal reward lootbox',
+        });
+        prisma.guestGameEntitlement.upsert.mockResolvedValue({
+          id: 'terminal-entitlement',
+          status: terminalStatus,
+        });
+        const reward = rewardRow({
+          id: `terminal-reward-${terminalStatus.toLowerCase()}`,
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          missionId: 'mission-lootbox-manual',
+          mission: {
+            id: 'mission-lootbox-manual',
+            name: 'Mission',
+            conditions: { reward: { lootBoxId: 'reward-lootbox' } },
+          },
+        });
+
+        await (service as any).createApprovedRewardLootBoxEntitlement(
+          user,
+          reward,
+        );
+        await (service as any).createApprovedRewardLootBoxEntitlement(
+          user,
+          reward,
+        );
+
+        expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledTimes(2);
+        for (const [call] of prisma.guestGameEntitlement.upsert.mock.calls) {
+          expect(call).toEqual(
+            expect.objectContaining({
+              create: expect.objectContaining({ status: 'AVAILABLE' }),
+              update: {},
+            }),
+          );
+          expect(call.update).not.toEqual(
+            expect.objectContaining({ status: 'AVAILABLE' }),
+          );
+        }
+      },
+    );
+
+    it('uses one atomic local-day identity for automatic mission lootbox rewards', async () => {
+      const { service, prisma } = createService();
+      const missionRule = {
+        ...dryRunResult().rules[0],
+        id: 'mission-daily-lootbox',
+        kind: 'MISSION' as const,
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        rewardAmount: 0,
+        manualApprovalRequired: false,
+      };
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: missionRule.id,
+          conditions: { reward: { lootBoxId: 'reward-lootbox' } },
+          antiFraudRules: { denySameDayRepeat: true },
+        },
+      ]);
+      prisma.guestGameLootBox.findMany.mockResolvedValue([
+        { id: 'reward-lootbox', name: 'Daily reward lootbox' },
+      ]);
+      const run = dryRunResult({
+        occurredAt: '2026-06-10T18:55:00.000Z',
+        store: {
+          id: 'store-1',
+          name: 'Club',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+        rules: [missionRule],
+      });
+
+      await Promise.all([
+        service.recordRuleDecisions(user, run, {
+          eventId: 'mission-daily-event-1',
+          evaluationMode: 'LIVE',
+        }),
+        service.recordRuleDecisions(user, run, {
+          eventId: 'mission-daily-event-2',
+          evaluationMode: 'LIVE',
+        }),
+      ]);
+
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledTimes(2);
+      const calls = prisma.guestGameEntitlement.upsert.mock.calls.map(
+        ([call]) => call,
+      );
+      expect(
+        calls.map((call) => call.where.tenantId_idempotencyKey.idempotencyKey),
+      ).toEqual([
+        'mission-loot-box:mission-daily-lootbox:daily:profile-1:2026-06-10',
+        'mission-loot-box:mission-daily-lootbox:daily:profile-1:2026-06-10',
+      ]);
+      for (const call of calls) {
+        expect(call).toEqual(
+          expect.objectContaining({
+            create: expect.objectContaining({
+              evidence: expect.objectContaining({
+                denySameDayRepeat: true,
+                entitlementDateKey: '2026-06-10',
+              }),
+            }),
+            update: {},
+          }),
+        );
+      }
+    });
+
+    it('materializes exactly one reusable FREE Battle Pass entitlement without selecting a prize', async () => {
+      const { service, prisma, bonusLedgerService } = createService();
+      const randomSpy = jest.spyOn(Math, 'random');
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'battle-pass-lootbox',
+        name: 'Сезонный контейнер',
+      });
+      const seasonReward = rewardRow({
+        id: 'battle-pass-reward-1',
+        rewardType: 'LOOT_BOX_ENTITLEMENT',
+        rewardAmount: new Prisma.Decimal(0),
+        rewardLabel: 'Сезонный контейнер',
+        seasonId: 'season-1',
+        season: {
+          id: 'season-1',
+          name: 'Тестовый сезон',
+        },
+        evidence: {
+          source: 'guest_gamification_process_event',
+          rule: {
+            kind: 'SEASON',
+            id: 'season-1',
+            battlePassLevel: 2,
+            battlePassStep: 2,
+            battlePassRewardTrack: 'FREE',
+            rewardLootBoxId: 'battle-pass-lootbox',
+          },
+        },
+      });
+
+      await (service as any).createApprovedRewardLootBoxEntitlement(
+        user,
+        seasonReward,
+      );
+      await (service as any).createApprovedRewardLootBoxEntitlement(
+        user,
+        seasonReward,
+      );
+
+      expect(prisma.guestGameLootBox.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: 'battle-pass-lootbox',
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+          usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
+        },
+        select: { id: true, name: true },
+      });
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledTimes(2);
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          where: {
+            tenantId_idempotencyKey: {
+              tenantId: user.tenantId,
+              idempotencyKey:
+                'battle-pass-loot-box-approval:battle-pass-reward-1',
+            },
+          },
+          create: expect.objectContaining({
+            rewardId: 'battle-pass-reward-1',
+            ruleId: 'battle-pass-lootbox',
+            sourceEventType: 'BATTLE_PASS_REWARD_APPROVED',
+            status: 'AVAILABLE',
+            evidence: expect.objectContaining({
+              source: 'battle_pass_reward_auto',
+              seasonId: 'season-1',
+              battlePassStep: 2,
+              battlePassRewardTrack: 'FREE',
+            }),
+          }),
+        }),
+      );
+      expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+      expect(bonusLedgerService.queueApprovedRewards).not.toHaveBeenCalled();
+      expect(randomSpy).not.toHaveBeenCalled();
+    });
+
+    it('records administrator approval when materializing a Battle Pass lootbox entitlement', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'battle-pass-lootbox',
+        name: 'Сезонный контейнер',
+      });
+
+      await (service as any).createApprovedRewardLootBoxEntitlement(
+        user,
+        rewardRow({
+          id: 'battle-pass-reward-manual',
+          rewardType: 'LOOT_BOX_ENTITLEMENT',
+          seasonId: 'season-1',
+          season: { id: 'season-1', name: 'Тестовый сезон' },
+          approvedByUser: { id: 'approver-1' },
+          evidence: {
+            rule: {
+              kind: 'SEASON',
+              id: 'season-1',
+              battlePassLevel: 3,
+              battlePassStep: 3,
+              battlePassRewardTrack: 'FREE',
+              rewardLootBoxId: 'battle-pass-lootbox',
+            },
+          },
+        }),
+      );
+
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            evidence: expect.objectContaining({
+              source: 'battle_pass_reward_admin_approval',
+              approvedByUserId: 'approver-1',
+              battlePassStep: 3,
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('scopes daily lootbox entitlement issuance without expiring the unlocked right', async () => {
       const { service, prisma } = createService();
       const baseRule = dryRunResult().rules[0];
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-box-daily',
+        limits: { periodicLimit: 'DAILY' },
+      });
       const dailyRule = {
         ...baseRule,
         id: 'loot-box-daily',
@@ -9504,6 +11282,8 @@ describe('GuestGamificationService', () => {
 
       await service.recordRuleDecisions(user, lateEveningRun, {
         eventId: 'event-before-midnight',
+        evaluationMode: 'LIVE_LOOT_BOX_RECOVERY',
+        evaluatorVersion: 'ledger-v2',
       });
       await service.recordRuleDecisions(user, lateEveningRun, {
         eventId: 'event-before-midnight-repeat',
@@ -9521,7 +11301,16 @@ describe('GuestGamificationService', () => {
         },
         create: {
           qualifiedAt: new Date('2026-06-10T18:55:00.000Z'),
-          validUntil: new Date('2026-06-10T19:00:00.000Z'),
+          validUntil: null,
+          evidence: expect.objectContaining({
+            evaluationMode: 'LIVE_LOOT_BOX_RECOVERY',
+            evaluatorVersion: 'ledger-v2',
+            entitlementPeriod: expect.objectContaining({
+              kind: 'DAILY',
+              key: '2026-06-10',
+              periodEndsAt: '2026-06-10T19:00:00.000Z',
+            }),
+          }),
         },
       });
       expect(repeated.where).toEqual(first.where);
@@ -9546,7 +11335,13 @@ describe('GuestGamificationService', () => {
             },
           },
           create: {
-            validUntil: new Date('2026-06-11T19:00:00.000Z'),
+            validUntil: null,
+            evidence: expect.objectContaining({
+              entitlementPeriod: expect.objectContaining({
+                key: '2026-06-11',
+                periodEndsAt: '2026-06-11T19:00:00.000Z',
+              }),
+            }),
           },
         },
       );
@@ -10422,8 +12217,12 @@ describe('GuestGamificationService', () => {
     });
 
     it('records session-start unlocks without queuing lootbox rewards when suppressed', async () => {
-      const { service } = createService();
+      const { prisma, service } = createService();
       const profile = profileFixture();
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-box-1',
+        limits: {},
+      });
       const lootBoxDryRun = dryRunResult({
         summary: {
           checkedRules: 1,
@@ -10480,24 +12279,37 @@ describe('GuestGamificationService', () => {
           payload: expect.objectContaining({
             rewardIntents: [],
             summary: expect.objectContaining({
-              eligibleRules: 0,
-              blockedRules: 1,
-              estimatedRewardAmount: 0,
+              eligibleRules: 1,
+              blockedRules: 0,
+              estimatedRewardAmount: 100,
               projectedXpDelta: 0,
             }),
             rules: [
               expect.objectContaining({
                 id: 'loot-box-1',
                 kind: 'LOOT_BOX',
-                eligible: false,
-                blockers: expect.arrayContaining([
-                  'Лутбокс разблокирован: награда создается только при открытии гостем.',
+                eligible: true,
+                blockers: [],
+                reasons: expect.arrayContaining([
+                  'Условие лутбокса выполнено: создано только право на ручное открытие.',
                 ]),
               }),
             ],
           }),
         }),
         sessionOriginKey,
+      );
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            eventId: 'event-1',
+            profileId: profile.id,
+            ruleId: 'loot-box-1',
+            ruleType: 'LOOT_BOX',
+            status: 'AVAILABLE',
+            validUntil: null,
+          }),
+        }),
       );
       expect(result).toMatchObject({
         rewards: [],
@@ -10508,11 +12320,213 @@ describe('GuestGamificationService', () => {
         },
         dryRun: {
           summary: {
-            eligibleRules: 0,
-            blockedRules: 1,
-            estimatedRewardAmount: 0,
+            eligibleRules: 1,
+            blockedRules: 0,
+            estimatedRewardAmount: 100,
           },
+          rules: [
+            expect.objectContaining({
+              id: 'loot-box-1',
+              eligible: true,
+              rewardMaterializationSuppressed: true,
+            }),
+          ],
         },
+      });
+    });
+
+    it('recovers a daily entitlement once using the immutable canonical event period', async () => {
+      const { prisma, service } = createService();
+      const profile = profileFixture();
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-box-1',
+        limits: { periodicLimit: 'DAILY' },
+      });
+      const canonicalOccurredAt = new Date('2026-06-10T18:55:00.000Z');
+      const lootBoxDryRun = dryRunResult({
+        occurredAt: '2026-06-10T19:05:00.000Z',
+        store: {
+          id: 'store-1',
+          name: 'Club',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'loot-box-1',
+            kind: 'LOOT_BOX',
+            name: 'Session lootbox',
+            rewardType: 'BONUS_BALANCE',
+            rewardAmount: 100,
+            rewardLabel: '100 bonuses',
+            selectedRewardLabel: '100 bonuses',
+            manualApprovalRequired: false,
+            xpDelta: 0,
+            periodicLimitPeriod: 'DAILY',
+          },
+        ],
+      });
+      const existingEvent = {
+        ...eventResult({
+          id: 'event-existing',
+          payload: {
+            processSchemaVersion: 2,
+            source: 'guest_gamification_process_event',
+            store: lootBoxDryRun.store,
+            input: lootBoxDryRun.input,
+            rules: lootBoxDryRun.rules,
+          },
+        }),
+        profileId: profile.id,
+        guestId: 'guest-1',
+        occurredAt: canonicalOccurredAt,
+        createdAt: now,
+      } as any;
+      const createEventSpy = jest.spyOn(service as any, 'createProcessEvent');
+      const createRewardsSpy = jest.spyOn(
+        service as any,
+        'createProcessRewards',
+      );
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(lootBoxDryRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue(existingEvent);
+      prisma.guestGameEntitlement.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ ruleId: 'loot-box-1' }]);
+
+      const dto = {
+        profileId: profile.id,
+        guestId: 'guest-1',
+        eventType: 'SESSION_START',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'session-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-1',
+        suppressLootBoxRewards: true,
+      } as const;
+      const result = await service.processEvent(user, dto);
+      const repeated = await service.processEvent(user, dto);
+
+      expect(createEventSpy).not.toHaveBeenCalled();
+      expect(createRewardsSpy).not.toHaveBeenCalled();
+      expect(prisma.guestGameRuleDecision.createMany).toHaveBeenCalledTimes(1);
+      expect(
+        prisma.guestGameRuleDecision.createMany.mock.calls[0][0].data[0],
+      ).toMatchObject({
+        eventId: existingEvent.id,
+        evaluationRunId: `loot-box-entitlement-recovery:${existingEvent.id}`,
+        evaluationMode: 'LIVE_LOOT_BOX_RECOVERY',
+        input: expect.objectContaining({
+          occurredAt: canonicalOccurredAt.toISOString(),
+        }),
+      });
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            tenantId_idempotencyKey: {
+              tenantId: user.tenantId,
+              idempotencyKey: 'loot-box:loot-box-1:daily:profile-1:2026-06-10',
+            },
+          },
+          create: expect.objectContaining({
+            eventId: existingEvent.id,
+            profileId: profile.id,
+            ruleId: 'loot-box-1',
+            status: 'AVAILABLE',
+            qualifiedAt: canonicalOccurredAt,
+            evidence: expect.objectContaining({
+              evaluationMode: 'LIVE_LOOT_BOX_RECOVERY',
+              entitlementPeriod: expect.objectContaining({
+                key: '2026-06-10',
+                periodEndsAt: '2026-06-10T19:00:00.000Z',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        rewards: [],
+        summary: {
+          idempotent: true,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+        },
+        dryRun: {
+          rules: [
+            expect.objectContaining({
+              id: 'loot-box-1',
+              eligible: true,
+              rewardMaterializationSuppressed: true,
+            }),
+          ],
+        },
+      });
+      expect(repeated.summary).toMatchObject({
+        idempotent: true,
+        createdRewards: 0,
+      });
+    });
+
+    it('fails closed when an existing event has no immutable matched lootbox evidence', async () => {
+      const { prisma, service } = createService();
+      const profile = profileFixture();
+      const retryDryRun = dryRunResult({
+        occurredAt: '2026-06-11T08:00:00.000Z',
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'loot-box-changed',
+            kind: 'LOOT_BOX',
+            eligible: true,
+            periodicLimitPeriod: 'DAILY',
+          },
+        ],
+      });
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(retryDryRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValue({
+        ...eventResult({
+          id: 'event-without-rule-snapshot',
+          payload: {
+            processSchemaVersion: 2,
+            source: 'guest_gamification_process_event',
+            store: retryDryRun.store,
+            input: retryDryRun.input,
+          },
+        }),
+        occurredAt: new Date('2026-06-10T08:00:00.000Z'),
+        createdAt: now,
+      });
+
+      const result = await service.processEvent(user, {
+        profileId: profile.id,
+        guestId: 'guest-1',
+        eventType: 'SESSION_START',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'session-changed',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-changed',
+        suppressLootBoxRewards: true,
+      });
+
+      expect(prisma.guestGameEntitlement.findMany).not.toHaveBeenCalled();
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
+      expect(prisma.guestGameRuleDecision.createMany).not.toHaveBeenCalled();
+      expect(result.summary).toMatchObject({
+        idempotent: true,
+        createdRewards: 0,
       });
     });
 
@@ -11517,6 +13531,206 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('does not expose mutable play-time facts before a session is stopped', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestSession.findMany.mockResolvedValue([
+        {
+          id: 'active-session-60',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalSessionId: 'active-session-60',
+          externalGuestId: 'guest-external-1',
+          startedAt: now,
+          stoppedAt: null,
+          durationMinutes: 60,
+          normalStop: null,
+          packet: false,
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+        },
+      ]);
+      prisma.guestLog.findMany.mockResolvedValue([]);
+      prisma.guestTransaction.findMany.mockResolvedValue([]);
+      prisma.guestOperationLog.findMany.mockResolvedValue([]);
+      prisma.guestBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guest.findMany.mockResolvedValue([]);
+      prisma.guestGroup.findMany.mockResolvedValue([]);
+      prisma.salesFact.findMany.mockResolvedValue([]);
+      prisma.guestGameEvent.findMany.mockResolvedValue([]);
+
+      const result = await service.getSnapshotFacts(user);
+
+      expect(result.facts.map((fact) => fact.eventType)).toEqual([
+        'SESSION_START',
+      ]);
+    });
+
+    it('waits briefly for a late package marker before canonicalizing session start', async () => {
+      const { service, prisma } = createService();
+      const recentStart = new Date();
+      const session = {
+        id: 'late-package-session',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalSessionId: 'late-package-session',
+        externalGuestId: 'guest-external-1',
+        startedAt: recentStart,
+        stoppedAt: null,
+        durationMinutes: null,
+        normalStop: null,
+        packet: false,
+        guest: {
+          id: 'guest-1',
+          externalDomain: 'club-1',
+          externalGuestId: 'guest-external-1',
+          fullNameMasked: 'Guest',
+          phoneMasked: '***0646',
+          emailMasked: null,
+        },
+        store: { id: 'store-1', name: 'Club 1' },
+      };
+
+      prisma.guestSession.findMany.mockResolvedValue([session]);
+      prisma.guestLog.findMany.mockResolvedValue([]);
+      prisma.guestTransaction.findMany.mockResolvedValue([]);
+      prisma.guestOperationLog.findMany.mockResolvedValue([]);
+      prisma.guestBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guest.findMany.mockResolvedValue([]);
+      prisma.guestGroup.findMany.mockResolvedValue([]);
+      prisma.salesFact.findMany.mockResolvedValue([]);
+      prisma.guestGameEvent.findMany.mockResolvedValue([]);
+
+      const beforeMarker = await service.getSnapshotFacts(user);
+      prisma.guestSession.findMany.mockResolvedValue([
+        { ...session, packet: true },
+      ]);
+      const afterMarker = await service.getSnapshotFacts(user);
+
+      expect(beforeMarker.facts).toEqual([]);
+      expect(afterMarker.facts).toEqual([
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          sessionPacket: true,
+          sessionType: 'packet_hours',
+        }),
+      ]);
+    });
+
+    it('exposes final play time after a 30-minute session is stopped', async () => {
+      const { service, prisma } = createService();
+      const stoppedAt = new Date(now.getTime() + 30 * 60_000);
+
+      prisma.guestSession.findMany.mockResolvedValue([
+        {
+          id: 'completed-session-30',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalSessionId: 'completed-session-30',
+          externalGuestId: 'guest-external-1',
+          startedAt: now,
+          stoppedAt,
+          durationMinutes: 30,
+          normalStop: true,
+          packet: false,
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+        },
+      ]);
+      prisma.guestLog.findMany.mockResolvedValue([]);
+      prisma.guestTransaction.findMany.mockResolvedValue([]);
+      prisma.guestOperationLog.findMany.mockResolvedValue([]);
+      prisma.guestBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guest.findMany.mockResolvedValue([]);
+      prisma.guestGroup.findMany.mockResolvedValue([]);
+      prisma.salesFact.findMany.mockResolvedValue([]);
+      prisma.guestGameEvent.findMany.mockResolvedValue([]);
+
+      const result = await service.getSnapshotFacts(user);
+
+      expect(result.facts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'session:completed-session-30:play',
+            eventType: 'PLAY_HOUR',
+            sessionMinutes: 30,
+          }),
+        ]),
+      );
+    });
+
+    it.each([
+      ['59 minutes 30 seconds', 59 * 60_000 + 30_000, 60, 59],
+      ['30 seconds', 30_000, 1, 0],
+    ])(
+      'emits terminal play time for %s from the floored raw interval',
+      async (_label, elapsedMs, synchronizedMinutes, expectedMinutes) => {
+        const { service, prisma } = createService();
+
+        prisma.guestSession.findMany.mockResolvedValue([
+          {
+            id: 'completed-session-boundary',
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalSessionId: 'completed-session-boundary',
+            externalGuestId: 'guest-external-1',
+            startedAt: now,
+            stoppedAt: new Date(now.getTime() + elapsedMs),
+            durationMinutes: synchronizedMinutes,
+            normalStop: true,
+            packet: false,
+            guest: {
+              id: 'guest-1',
+              externalDomain: 'club-1',
+              externalGuestId: 'guest-external-1',
+              fullNameMasked: 'Guest',
+              phoneMasked: '***0646',
+              emailMasked: null,
+            },
+            store: { id: 'store-1', name: 'Club 1' },
+          },
+        ]);
+        prisma.guestLog.findMany.mockResolvedValue([]);
+        prisma.guestTransaction.findMany.mockResolvedValue([]);
+        prisma.guestOperationLog.findMany.mockResolvedValue([]);
+        prisma.guestBalanceSnapshot.findMany.mockResolvedValue([]);
+        prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([]);
+        prisma.guest.findMany.mockResolvedValue([]);
+        prisma.guestGroup.findMany.mockResolvedValue([]);
+        prisma.salesFact.findMany.mockResolvedValue([]);
+        prisma.guestGameEvent.findMany.mockResolvedValue([]);
+
+        const result = await service.getSnapshotFacts(user);
+
+        expect(result.facts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: 'session:completed-session-boundary:play',
+              eventType: 'PLAY_HOUR',
+              sessionMinutes: expectedMinutes,
+            }),
+          ]),
+        );
+      },
+    );
+
     it('exposes eligible referral registrations as profile-linked facts', async () => {
       const { service, prisma } = createService();
 
@@ -11604,6 +13818,173 @@ describe('GuestGamificationService', () => {
   });
 
   describe('runSnapshotPipeline', () => {
+    it('does not execute historical anti-join queries when backfill mode is OFF by default', async () => {
+      const { service, prisma } = createService();
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult());
+
+      await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, 'definitely'])(
+      'fails closed without an explicitly false backfill kill switch (%s)',
+      async (killSwitch) => {
+        const fixture = createService();
+        const { service, prisma } = fixture;
+        enablePrimarySnapshotBackfill(fixture, {
+          GUEST_GAME_PIPELINE_BACKFILL_KILL_SWITCH: killSwitch,
+        });
+        jest
+          .spyOn(service, 'getSnapshotFacts')
+          .mockResolvedValue(snapshotFactsResult());
+
+        await service.runSnapshotPipeline(user, { limit: 10 });
+
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+        expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['missing exact profile', undefined, 'false'],
+      ['invalid UTC cutoff', 'profile-1', 'false'],
+    ])(
+      'fails closed in LIVE with %s',
+      async (_label, profileId, allowTenantWide) => {
+        const fixture = createService();
+        const { service, prisma } = fixture;
+        enablePrimarySnapshotBackfill(fixture, {
+          GUEST_GAME_PIPELINE_BACKFILL_PROFILE_ID: profileId,
+          GUEST_GAME_PIPELINE_BACKFILL_ALLOW_TENANT_WIDE: allowTenantWide,
+          GUEST_GAME_PIPELINE_BACKFILL_LIVE_NOT_BEFORE: profileId
+            ? '2026-07-20 10:00:00'
+            : '2026-07-20T10:00:00.000Z',
+        });
+        jest
+          .spyOn(service, 'getSnapshotFacts')
+          .mockResolvedValue(snapshotFactsResult());
+
+        await service.runSnapshotPipeline(user, { limit: 10 });
+
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      },
+    );
+
+    it('allows an explicitly tenant-wide LIVE backfill only inside the exact tenant and cutoff', async () => {
+      const fixture = createService();
+      const { service, prisma } = fixture;
+      enablePrimarySnapshotBackfill(fixture, {
+        GUEST_GAME_PIPELINE_BACKFILL_PROFILE_ID: undefined,
+        GUEST_GAME_PIPELINE_BACKFILL_ALLOW_TENANT_WIDE: 'true',
+      });
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult());
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await service.runSnapshotPipeline(user, {
+        source: 'GUEST_SESSION',
+        limit: 10,
+      });
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('does not run a scoped backfill for another tenant', async () => {
+      const fixture = createService();
+      const { service, prisma } = fixture;
+      enablePrimarySnapshotBackfill(fixture, {
+        GUEST_GAME_PIPELINE_BACKFILL_TENANT_ID: 'tenant-other',
+      });
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult());
+
+      await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('evaluates historical facts in SHADOW without creating canonical effects', async () => {
+      const fixture = createService();
+      const { service } = fixture;
+      enablePrimarySnapshotBackfill(fixture, {
+        GUEST_GAME_PIPELINE_BACKFILL_MODE: 'SHADOW',
+        GUEST_GAME_PIPELINE_BACKFILL_PROFILE_ID: undefined,
+        GUEST_GAME_PIPELINE_BACKFILL_LIVE_NOT_BEFORE: undefined,
+      });
+      const historicalFact = snapshotFact('historical-shadow-fact');
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult());
+      jest
+        .spyOn(service as any, 'loadPendingPrimarySnapshotFacts')
+        .mockResolvedValue([historicalFact]);
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      const decisionSpy = jest
+        .spyOn(service, 'recordRuleDecisions')
+        .mockResolvedValue({ lootBoxEntitlements: [] });
+      const processSpy = jest.spyOn(service, 'processEvent');
+
+      const result = await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(result).toMatchObject({
+        checkedFacts: 1,
+        processedFacts: 0,
+        queuedRewards: 0,
+        appliedXpDelta: 0,
+      });
+      expect(result.facts).toEqual([
+        expect.objectContaining({
+          factId: historicalFact.id,
+          status: 'DRY_RUN',
+          process: null,
+        }),
+      ]);
+      expect(processSpy).not.toHaveBeenCalled();
+      expect(decisionSpy).toHaveBeenCalledWith(
+        user,
+        expect.any(Object),
+        expect.objectContaining({
+          evaluationMode: 'SHADOW',
+          evaluatorVersion: 'primary-snapshot-backfill-shadow-v1',
+          suppressLedgerShadow: true,
+        }),
+      );
+    });
+
+    it('keeps an ordinary latest fact live when SHADOW also discovers it', async () => {
+      const fixture = createService();
+      const { service } = fixture;
+      enablePrimarySnapshotBackfill(fixture, {
+        GUEST_GAME_PIPELINE_BACKFILL_MODE: 'SHADOW',
+        GUEST_GAME_PIPELINE_BACKFILL_PROFILE_ID: undefined,
+        GUEST_GAME_PIPELINE_BACKFILL_LIVE_NOT_BEFORE: undefined,
+      });
+      const currentFact = snapshotFact('current-and-shadow-fact');
+      jest
+        .spyOn(service, 'getSnapshotFacts')
+        .mockResolvedValue(snapshotFactsResult([currentFact]));
+      jest
+        .spyOn(service as any, 'loadPendingPrimarySnapshotFacts')
+        .mockResolvedValue([currentFact]);
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      const processSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(result.processedFacts).toBe(1);
+      expect(processSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('stores matching intermediate progress facts without issuing a reward', async () => {
       const { service } = createService();
       const progressDryRun = dryRunResult({
@@ -11689,6 +14070,79 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('keeps a package correction beside the ordinary snapshot of the same session', async () => {
+      const fixture = createService();
+      const { service } = fixture;
+      enablePrimarySnapshotBackfill(fixture);
+      const ordinaryFact = snapshotFact('session:db-session-1:start', {
+        externalId: 'external-session-1',
+        sessionType: 'packet_hours',
+        sessionPacket: true,
+      });
+      const correctionFact = snapshotFact('session:db-session-1:start', {
+        externalId: 'external-session-1:classification:package-v1',
+        sessionType: 'packet_hours',
+        sessionPacket: true,
+        sessionClassificationCorrection: 'PACKAGE_V1',
+      });
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: [ordinaryFact],
+        summary: {
+          sessions: 1,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      jest
+        .spyOn(service as any, 'loadPendingPrimarySnapshotFacts')
+        .mockResolvedValue([correctionFact]);
+      const correctionSpy = jest
+        .spyOn(service as any, 'processSessionPackageClassificationCorrection')
+        .mockResolvedValue(processResult());
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      const processEventSpy = jest
+        .spyOn(service, 'processEvent')
+        .mockResolvedValue(
+          processResult({
+            summary: {
+              profileCreated: false,
+              appliedXpDelta: 0,
+              createdRewards: 0,
+              queuedRewardAmount: 0,
+              idempotencyKey:
+                'guest-game:GUEST_SESSION:SESSION_START:external-session-1',
+              idempotent: true,
+              langameWrite: false,
+            },
+          }),
+        );
+
+      const result = await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(result.availableFacts).toBe(2);
+      expect(correctionSpy).toHaveBeenCalledTimes(1);
+      expect(correctionSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'session:db-session-1:start',
+          externalId: 'external-session-1:classification:package-v1',
+        }),
+      );
+      expect(processEventSpy).toHaveBeenCalledTimes(1);
+      expect(processEventSpy).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({ externalId: 'external-session-1' }),
+      );
+    });
+
     it('skips facts without guests, skips non-active eligible rules, and marks duplicates', async () => {
       const { service } = createService();
       const activeDryRun = dryRunResult();
@@ -11706,7 +14160,7 @@ describe('GuestGamificationService', () => {
       jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
         facts: [
           snapshotFact('fact-without-guest', { guest: null }),
-          snapshotFact('fact-draft'),
+          snapshotFact('fact-draft', { source: 'GUEST_LOG' }),
           snapshotFact('fact-processed'),
           snapshotFact('fact-duplicate'),
         ],
@@ -11828,6 +14282,64 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('persists a terminal primary fact when only a draft rule matches', async () => {
+      const { service } = createService();
+      const draftDryRun = dryRunResult({
+        rules: [
+          {
+            ...dryRunResult().rules[0],
+            id: 'mission-draft',
+            status: 'DRAFT',
+            eligible: true,
+          },
+        ],
+      });
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: [snapshotFact('terminal-session-with-draft')],
+        summary: {
+          sessions: 1,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(draftDryRun);
+      jest.spyOn(service, 'processEvent').mockResolvedValue(
+        processResult({
+          dryRun: { ...draftDryRun, rules: [] },
+          rewards: [],
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: 0,
+            createdRewards: 0,
+            queuedRewardAmount: 0,
+            idempotencyKey:
+              'guest-game:GUEST_SESSION:SESSION_START:terminal-session-with-draft',
+            idempotent: false,
+            langameWrite: false,
+          },
+        }),
+      );
+
+      const result = await service.runSnapshotPipeline(user, { limit: 1 });
+
+      expect(result).toMatchObject({ processedFacts: 1, skippedFacts: 0 });
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'terminal-session-with-draft',
+          activeRulesOnly: true,
+        }),
+      );
+    });
+
     it('prioritizes an unprocessed fact ahead of processed rows before applying the batch limit', async () => {
       const { service, prisma } = createService();
       const activeDryRun = dryRunResult();
@@ -11875,6 +14387,328 @@ describe('GuestGamificationService', () => {
       expect(service.processEvent).toHaveBeenCalledWith(
         user,
         expect.objectContaining({ sourceFactId: 'fact-pending' }),
+      );
+    });
+
+    it('loads a pending session below a burst of more than 30 recent snapshot facts', async () => {
+      const fixture = createService();
+      const { service, prisma } = fixture;
+      enablePrimarySnapshotBackfill(fixture);
+      const recentFacts = Array.from({ length: 31 }, (_, index) =>
+        snapshotFact(`recent-session-${index}`),
+      );
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: recentFacts,
+        summary: {
+          sessions: 31,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      prisma.$queryRaw.mockResolvedValue([{ id: 'older-session-32' }]);
+      prisma.guestSession.findMany.mockResolvedValue([
+        {
+          id: 'older-session-32',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalSessionId: 'older-session-32',
+          externalGuestId: 'guest-external-1',
+          startedAt: now,
+          stoppedAt: null,
+          durationMinutes: null,
+          normalStop: null,
+          packet: false,
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+        },
+      ]);
+      prisma.guestGameEvent.findMany.mockResolvedValue(
+        recentFacts.map((fact) => ({
+          externalProvider: fact.externalProvider,
+          externalDomain: fact.externalDomain,
+          externalId: `guest-game:GUEST_SESSION:SESSION_START:${fact.externalId}`,
+        })),
+      );
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, {
+        source: 'GUEST_SESSION',
+        limit: 1,
+      });
+
+      expect(result).toMatchObject({ checkedFacts: 1, processedFacts: 1 });
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'session:older-session-32:start',
+        }),
+      );
+      const query = prisma.$queryRaw.mock.calls[0]?.[0] as {
+        values: unknown[];
+      };
+      const cutoff = query.values.find(
+        (value): value is Date => value instanceof Date,
+      );
+      expect(cutoff).toBeDefined();
+      expect(Date.now() - (cutoff?.getTime() ?? 0)).toBeGreaterThanOrEqual(
+        30 * 24 * 60 * 60 * 1000,
+      );
+      expect(Date.now() - (cutoff?.getTime() ?? 0)).toBeLessThan(
+        30 * 24 * 60 * 60 * 1000 + 5_000,
+      );
+    });
+
+    it('loads only the missing terminal fact when session start is already canonical', async () => {
+      const { service, prisma } = createService();
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          id: 'completed-session-1',
+          needsSessionStart: false,
+          needsPlayHour: true,
+          needsPackageCorrection: false,
+        },
+      ]);
+      prisma.guestSession.findMany.mockResolvedValue([
+        {
+          id: 'completed-session-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalSessionId: 'external-session-1',
+          externalGuestId: 'guest-external-1',
+          startedAt: now,
+          stoppedAt: new Date(now.getTime() + 60 * 60_000),
+          durationMinutes: 60,
+          normalStop: true,
+          packet: false,
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+        },
+      ]);
+
+      const facts = await (service as any).loadPendingSessionSnapshotFacts(
+        user,
+        10,
+        new Date(now.getTime() - 24 * 60 * 60_000),
+      );
+
+      expect(facts).toEqual([
+        expect.objectContaining({
+          id: 'session:completed-session-1:play',
+          eventType: 'PLAY_HOUR',
+          sessionMinutes: 60,
+        }),
+      ]);
+    });
+
+    it('loads a versioned package correction with the original session fact identity', async () => {
+      const { service, prisma } = createService();
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          id: 'package-session-1',
+          needsSessionStart: false,
+          needsPlayHour: false,
+          needsPackageCorrection: true,
+        },
+      ]);
+      prisma.guestSession.findMany.mockResolvedValue([
+        {
+          id: 'package-session-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalSessionId: 'external-package-session-1',
+          externalGuestId: 'guest-external-1',
+          startedAt: now,
+          stoppedAt: null,
+          durationMinutes: 15,
+          normalStop: null,
+          packet: true,
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+        },
+      ]);
+
+      const facts = await (service as any).loadPendingSessionSnapshotFacts(
+        user,
+        10,
+        new Date(now.getTime() - 24 * 60 * 60_000),
+      );
+
+      expect(facts).toEqual([
+        expect.objectContaining({
+          id: 'session:package-session-1:start',
+          externalId: 'external-package-session-1:classification:package-v1',
+          eventType: 'SESSION_START',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+          sessionClassificationCorrection: 'PACKAGE_V1',
+        }),
+      ]);
+    });
+
+    it.each([
+      ['minimum', '1', 24 * 60 * 60 * 1000],
+      ['maximum', String(365 * 24 * 60 * 60 * 1000), 90 * 24 * 60 * 60 * 1000],
+    ])(
+      'clamps the primary snapshot backfill cutoff to the %s bound',
+      async (_label, configured, expectedLookbackMs) => {
+        const fixture = createService();
+        const { service, prisma } = fixture;
+
+        enablePrimarySnapshotBackfill(fixture, {
+          GUEST_GAME_PIPELINE_BACKFILL_LOOKBACK_MS: configured,
+        });
+        jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+          facts: [],
+          summary: {
+            sessions: 0,
+            logs: 0,
+            transactions: 0,
+            operationLogs: 0,
+            balances: 0,
+            bonusBalances: 0,
+            loyaltyGroups: 0,
+            productExpenses: 0,
+            referrals: 0,
+            latestAt: null,
+          },
+        });
+        prisma.$queryRaw.mockResolvedValue([]);
+
+        await service.runSnapshotPipeline(user, {
+          source: 'GUEST_SESSION',
+          limit: 1,
+        });
+
+        const query = prisma.$queryRaw.mock.calls[0]?.[0] as {
+          values: unknown[];
+        };
+        const cutoff = query.values.find(
+          (value): value is Date => value instanceof Date,
+        );
+        const actualLookbackMs = Date.now() - (cutoff?.getTime() ?? 0);
+
+        expect(cutoff).toBeDefined();
+        expect(actualLookbackMs).toBeGreaterThanOrEqual(expectedLookbackMs);
+        expect(actualLookbackMs).toBeLessThan(expectedLookbackMs + 5_000);
+      },
+    );
+
+    it('loads a pending purchase below a burst of more than 30 recent snapshot facts', async () => {
+      const fixture = createService();
+      const { service, prisma } = fixture;
+      enablePrimarySnapshotBackfill(fixture);
+      const recentFacts = Array.from({ length: 31 }, (_, index) =>
+        snapshotFact(`recent-purchase-${index}`, {
+          source: 'PRODUCT_EXPENSE',
+          eventType: 'PRODUCT_PURCHASE',
+          sessionType: null,
+          sessionPacket: null,
+          sessionMinutes: null,
+          spendAmount: 100,
+        }),
+      );
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: recentFacts,
+        summary: {
+          sessions: 0,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 31,
+          referrals: 0,
+          latestAt: isoNow,
+        },
+      });
+      prisma.$queryRaw.mockResolvedValue([{ id: 'older-sale-32' }]);
+      prisma.salesFact.findMany.mockResolvedValue([
+        {
+          id: 'older-sale-32',
+          productId: 'product-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalSaleId: 'older-sale-32',
+          externalProductId: 'external-product-1',
+          externalGuestId: 'guest-external-1',
+          saleDate: now,
+          quantity: 1,
+          revenue: 100,
+          cost: 50,
+          productNameAtSale: 'Product',
+          storeNameAtSale: 'Club 1',
+          guest: {
+            id: 'guest-1',
+            externalDomain: 'club-1',
+            externalGuestId: 'guest-external-1',
+            fullNameMasked: 'Guest',
+            phoneMasked: '***0646',
+            emailMasked: null,
+          },
+          store: { id: 'store-1', name: 'Club 1' },
+          product: {
+            id: 'product-1',
+            article: 'P-1',
+            name: 'Product',
+            category: null,
+            supplier: null,
+          },
+        },
+      ]);
+      prisma.langameClubProductConfiguration.findMany.mockResolvedValue([]);
+      prisma.guestGameEvent.findMany.mockResolvedValue(
+        recentFacts.map((fact) => ({
+          externalProvider: fact.externalProvider,
+          externalDomain: fact.externalDomain,
+          externalId: `guest-game:PRODUCT_EXPENSE:PRODUCT_PURCHASE:${fact.externalId}`,
+        })),
+      );
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
+
+      const result = await service.runSnapshotPipeline(user, {
+        source: 'PRODUCT_EXPENSE',
+        limit: 1,
+      });
+
+      expect(result).toMatchObject({ checkedFacts: 1, processedFacts: 1 });
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          sourceFactId: 'product-expense:older-sale-32',
+        }),
       );
     });
 
@@ -13054,6 +15888,91 @@ describe('GuestGamificationService', () => {
   });
 });
 
+describe('GuestGamificationService standalone PLAY_HOUR boundary', () => {
+  it('keeps the standalone case blocked at 59 minutes and unlocks it at 60', async () => {
+    const { service } = createService();
+    jest
+      .spyOn(service as any, 'resolveDryRunProfile')
+      .mockResolvedValue(profileFixture());
+    jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+      activeLootBox({
+        triggerKind: 'PLAY_HOUR',
+        periodRules: {},
+      }),
+    ]);
+    jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+    jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+    jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+    const at59 = await service.dryRun(user, {
+      eventType: 'PLAY_HOUR',
+      occurredAt: isoNow,
+      sessionType: 'regular_session',
+      sessionMinutes: 59,
+    });
+    const at60 = await service.dryRun(user, {
+      eventType: 'PLAY_HOUR',
+      occurredAt: isoNow,
+      sessionType: 'regular_session',
+      sessionMinutes: 60,
+    });
+
+    expect(at59.rules[0]).toMatchObject({
+      eligible: false,
+      blockers: expect.arrayContaining([expect.stringContaining('59/60')]),
+    });
+    expect(at60.rules[0]).toMatchObject({ eligible: true, blockers: [] });
+  });
+
+  it('still lets a 30-minute PLAY_TIME mission use the shared duration observation', async () => {
+    const { service } = createService();
+    jest
+      .spyOn(service as any, 'resolveDryRunProfile')
+      .mockResolvedValue(profileFixture());
+    jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+    jest.spyOn(service, 'getMissions').mockResolvedValue([
+      activeMission({
+        definitionVersion: 2,
+        missionType: 'PLAY_TIME',
+        triggerKind: 'PLAY_HOUR',
+        rewardType: 'NONE',
+        rewardAmount: null,
+        rewardLabel: null,
+        xpReward: 0,
+        progressTarget: 30,
+        progressUnit: 'минут',
+        conditions: {
+          schemaVersion: 2,
+          taskType: 'PLAY_TIME',
+          activatedAt: isoNow,
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+            target: 30,
+            unit: 'минут',
+          },
+        },
+      }),
+    ]);
+    jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+    jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+    const result = await service.dryRun(user, {
+      eventType: 'PLAY_HOUR',
+      occurredAt: isoNow,
+      sessionType: 'regular_session',
+      sessionMinutes: 30,
+      sourceFactId: 'session:30-minute:play',
+    });
+
+    expect(result.rules[0]).toMatchObject({
+      kind: 'MISSION',
+      eligible: true,
+      progress: expect.objectContaining({ current: 30, target: 30 }),
+    });
+  });
+});
+
 describe('GuestGamificationService supplemental pipeline', () => {
   const supplementalMission = {
     id: 'mission-topup-1',
@@ -13064,6 +15983,7 @@ describe('GuestGamificationService supplemental pipeline', () => {
       activatedAt: '2026-07-14T00:00:00.000Z',
       externalDomains: ['46.langamepro.ru'],
     },
+    storeIds: [],
   };
   const supplementalFact = {
     id: 'fact-version-2',
@@ -13098,6 +16018,142 @@ describe('GuestGamificationService supplemental pipeline', () => {
     updatedAt: new Date('2026-07-15T10:00:00.000Z'),
     rawRecordId: 'raw-1',
   };
+
+  it('evaluates a selected-club domain top-up and fails closed for another domain', async () => {
+    const { service } = createService();
+    const mission = activeMission({
+      id: supplementalMission.id,
+      name: 'Domain top-up',
+      definitionVersion: 2,
+      missionType: 'BALANCE_TOPUP',
+      triggerKind: 'BALANCE_TOPUP',
+      evaluationPolicy: 'LEDGER_SUPPLEMENTAL',
+      storeIds: ['store-topup'],
+      rewardType: 'NONE',
+      rewardAmount: null,
+      rewardLabel: null,
+      xpReward: 0,
+      progressTarget: 1,
+      progressUnit: 'пополнение',
+      conditions: {
+        schemaVersion: 2,
+        taskType: 'BALANCE_TOPUP',
+        activatedAt: '2026-07-14T00:00:00.000Z',
+        externalDomains: ['46.langamepro.ru'],
+        domainScoped: true,
+        metric: {
+          aggregation: 'count',
+          eventTypes: ['BALANCE_TOPUP'],
+          target: 1,
+        },
+      },
+    });
+    const ruleDomainTimeZones = new Map([
+      [
+        mission.id,
+        new Map<string, string | null>([
+          ['46.langamepro.ru', 'Asia/Yekaterinburg'],
+        ]),
+      ],
+    ]);
+    const ruleExternalDomains = new Map<string, readonly string[]>([
+      [mission.id, ['46.langamepro.ru']],
+    ]);
+    jest
+      .spyOn(service as any, 'resolveDryRunProfile')
+      .mockResolvedValue(profileFixture());
+    jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+    jest.spyOn(service, 'getMissions').mockResolvedValue([mission]);
+    jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+    jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+    const matching = await service.dryRun(
+      user,
+      {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        eventType: 'BALANCE_TOPUP',
+        occurredAt: supplementalFact.happenedAt.toISOString(),
+        spendAmount: 500,
+        sourceFactId: supplementalFact.id,
+        externalDomain: '46.langamepro.ru',
+      },
+      { ruleDomainTimeZones, ruleExternalDomains },
+    );
+    const otherDomain = await service.dryRun(
+      user,
+      {
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        eventType: 'BALANCE_TOPUP',
+        occurredAt: supplementalFact.happenedAt.toISOString(),
+        spendAmount: 500,
+        sourceFactId: 'fact-other-domain',
+        externalDomain: 'other.langamepro.ru',
+      },
+      { ruleDomainTimeZones, ruleExternalDomains },
+    );
+
+    expect(matching.rules[0]).toMatchObject({
+      id: mission.id,
+      eligible: true,
+      progress: expect.objectContaining({ current: 1, completed: true }),
+    });
+    expect(otherDomain.rules[0]).toMatchObject({
+      id: mission.id,
+      eligible: false,
+      blockers: expect.arrayContaining([
+        expect.stringContaining('Домен факта Langame не входит'),
+      ]),
+    });
+  });
+
+  it('routes selected-club domain and timezone maps into LIVE supplemental processing', async () => {
+    const { service, prisma } = createService();
+    const selectedMission = {
+      ...supplementalMission,
+      storeIds: ['store-topup'],
+    };
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([selectedMission]);
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-topup',
+        externalDomain: '46.langamepro.ru',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+      {
+        id: 'store-other',
+        externalDomain: 'other.langamepro.ru',
+        timeZone: 'Europe/Moscow',
+      },
+    ]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    const process = jest
+      .spyOn(service, 'processEvent')
+      .mockResolvedValue(processResult());
+
+    await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    const options = process.mock.calls[0]?.[2];
+    expect(options?.ruleExternalDomains?.get(selectedMission.id)).toEqual([
+      '46.langamepro.ru',
+    ]);
+    expect(
+      options?.ruleDomainTimeZones
+        ?.get(selectedMission.id)
+        ?.get('46.langamepro.ru'),
+    ).toBe('Asia/Yekaterinburg');
+    expect(
+      options?.ruleDomainTimeZones
+        ?.get(selectedMission.id)
+        ?.has('other.langamepro.ru'),
+    ).toBe(false);
+  });
 
   it('records SHADOW decisions without creating an event or reward', async () => {
     const { service, prisma } = createService();
@@ -13223,7 +16279,11 @@ describe('GuestGamificationService supplemental pipeline', () => {
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          status: { in: ['PENDING', 'FAILED', 'SHADOWED'] },
+          OR: expect.arrayContaining([
+            {
+              status: { in: ['PENDING', 'FAILED', 'SHADOWED'] },
+            },
+          ]),
         }),
       }),
     );
@@ -13358,6 +16418,172 @@ describe('GuestGamificationService supplemental pipeline', () => {
       createdEvents: 0,
       createdRewards: 0,
     });
+    expect(process).not.toHaveBeenCalled();
+  });
+
+  it('reclaims a stale PROCESSING receipt within the bounded retry budget', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    prisma.guestGameSupplementalFactReceipt.findMany.mockResolvedValue([
+      {
+        factType: supplementalFact.factType,
+        externalDomain: supplementalFact.externalDomain,
+        sourceHash: supplementalFact.sourceHash,
+        status: 'PROCESSING',
+        attempts: 1,
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000),
+      },
+    ]);
+    const process = jest
+      .spyOn(service, 'processEvent')
+      .mockResolvedValue(processResult());
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ processedFacts: 1, duplicateFacts: 0 });
+    expect(process).toHaveBeenCalledTimes(1);
+    expect(
+      prisma.guestGameSupplementalFactReceipt.updateMany,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              status: 'PROCESSING',
+              updatedAt: expect.any(Object),
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it('does not steal a fresh PROCESSING receipt from another worker', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    prisma.guestGameSupplementalFactReceipt.findMany.mockResolvedValue([
+      {
+        factType: supplementalFact.factType,
+        externalDomain: supplementalFact.externalDomain,
+        sourceHash: supplementalFact.sourceHash,
+        status: 'PROCESSING',
+        attempts: 1,
+        updatedAt: new Date(),
+      },
+    ]);
+    const process = jest.spyOn(service, 'processEvent');
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ processedFacts: 0, duplicateFacts: 1 });
+    expect(process).not.toHaveBeenCalled();
+  });
+
+  it('fences a stale supplemental worker from finalizing a reclaimed receipt', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    prisma.guestGameSupplementalFactReceipt.findMany.mockResolvedValue([
+      {
+        factType: supplementalFact.factType,
+        externalDomain: supplementalFact.externalDomain,
+        sourceHash: supplementalFact.sourceHash,
+        status: 'PROCESSING',
+        attempts: 1,
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000),
+      },
+    ]);
+    // Claim version 1 -> 2 succeeds. Before this worker finalizes, another
+    // worker has reclaimed version 2 -> 3, so the version-2 finalization is
+    // rejected by the database predicate.
+    prisma.guestGameSupplementalFactReceipt.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    jest.spyOn(service, 'processEvent').mockResolvedValue(processResult());
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({
+      checkedFacts: 1,
+      processedFacts: 0,
+      duplicateFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+    expect(
+      prisma.guestGameSupplementalFactReceipt.updateMany,
+    ).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({ attempts: 1 }),
+        data: expect.objectContaining({
+          status: 'PROCESSING',
+          attempts: { increment: 1 },
+        }),
+      }),
+    );
+    expect(
+      prisma.guestGameSupplementalFactReceipt.updateMany,
+    ).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'PROCESSING',
+          attempts: 2,
+        }),
+        data: expect.objectContaining({ status: 'PROCESSED' }),
+      }),
+    );
+  });
+
+  it('dead-letters a stale receipt after the bounded retry budget is exhausted', async () => {
+    const { service, prisma } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    prisma.guestGameMission.findMany.mockResolvedValue([supplementalMission]);
+    prisma.guestActivityFact.findMany.mockResolvedValue([supplementalFact]);
+    prisma.guestGameSupplementalFactReceipt.findMany.mockResolvedValue([
+      {
+        factType: supplementalFact.factType,
+        externalDomain: supplementalFact.externalDomain,
+        sourceHash: supplementalFact.sourceHash,
+        status: 'PROCESSING',
+        attempts: 3,
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000),
+      },
+    ]);
+    const process = jest.spyOn(service, 'processEvent');
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ processedFacts: 0, duplicateFacts: 1 });
+    expect(
+      prisma.guestGameSupplementalFactReceipt.updateMany,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'DEAD_LETTER' }),
+      }),
+    );
     expect(process).not.toHaveBeenCalled();
   });
 });

@@ -154,6 +154,42 @@ describe('guest game progress trigger matching', () => {
     });
   });
 
+  it('enforces nested WEEKENDS mode without a materialized weekdays array', () => {
+    const rule = {
+      triggerKind: 'SESSION_START',
+      progressTarget: 1,
+      timeZone: 'Asia/Yekaterinburg',
+      conditions: {
+        metric: {
+          aggregation: 'exists',
+          eventTypes: ['SESSION_START'],
+          weekdayMode: 'WEEKENDS',
+          target: 1,
+        },
+      },
+    };
+
+    const friday = evaluateGuestGameProgress(
+      rule,
+      {
+        eventType: 'SESSION_START',
+        occurredAt: new Date('2026-06-12T10:00:00.000Z'),
+      },
+      [],
+    );
+    const saturday = evaluateGuestGameProgress(
+      rule,
+      {
+        eventType: 'SESSION_START',
+        occurredAt: new Date('2026-06-13T10:00:00.000Z'),
+      },
+      [],
+    );
+
+    expect(friday).toMatchObject({ current: 0, completed: false });
+    expect(saturday).toMatchObject({ current: 1, completed: true });
+  });
+
   it('matches a domain-scoped top-up without pretending it belongs to a club', () => {
     const result = evaluateGuestGameProgress(
       {
@@ -332,6 +368,52 @@ describe('guest game progress trigger matching', () => {
     expect(result).toMatchObject({
       current: 1,
       matchedEvents: 1,
+      completed: false,
+    });
+  });
+
+  it('counts a regular session, its package correction and a later session as two physical sessions', () => {
+    const occurredAt = new Date('2026-07-15T10:00:00.000Z');
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'SESSION_START',
+        progressTarget: 3,
+        conditions: {
+          metric: {
+            aggregation: 'count',
+            eventTypes: ['SESSION_START'],
+            target: 3,
+          },
+        },
+      },
+      {
+        eventType: 'SESSION_START',
+        occurredAt: new Date('2026-07-16T10:00:00.000Z'),
+        sourceFactId: 'session-2',
+        sessionType: 'regular_session',
+        sessionPacket: false,
+      },
+      [
+        {
+          eventType: 'SESSION_START',
+          occurredAt,
+          sourceFactId: 'session-1',
+          sessionType: 'regular_session',
+          sessionPacket: false,
+        },
+        {
+          eventType: 'SESSION_START',
+          occurredAt,
+          sourceFactId: 'session-1:classification:PACKAGE_V1',
+          sessionType: 'packet_hours',
+          sessionPacket: true,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 2,
+      matchedEvents: 2,
       completed: false,
     });
   });

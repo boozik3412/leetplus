@@ -106,6 +106,8 @@ function createPrismaMock() {
     },
     guestGameEntitlement: {
       findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+      upsert: jest.fn(),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     guestSession: {
@@ -1889,10 +1891,11 @@ describe('GuestPortalService', () => {
         tenantId: 'tenant-1',
         name: 'Entitled session lootbox',
         status: 'ACTIVE',
+        usageKind: 'REWARD_TEMPLATE',
         storeIds: [portal.store.id],
         triggerKind: 'SESSION_START',
         sessionType: 'packet_hours',
-        limits: { perGuestPerWeek: 2 },
+        limits: { periodicLimit: 'DAILY' },
         periodRules: {},
       });
       prisma.guestGameEvent.findMany.mockResolvedValue([]);
@@ -1914,7 +1917,7 @@ describe('GuestPortalService', () => {
         status: 'AVAILABLE',
         idempotencyKey: 'loot-box:loot-entitled:unlock-event-1',
         qualifiedAt: new Date('2026-07-05T01:49:00.000Z'),
-        validUntil: null,
+        validUntil: new Date('2026-07-05T19:00:00.000Z'),
         consumedAt: null,
         canceledAt: null,
         rewardId: null,
@@ -2004,7 +2007,152 @@ describe('GuestPortalService', () => {
       expect(result).toMatchObject({ processed: true, createdRewards: 1 });
     });
 
-    it('expires an unused daily entitlement when the club calendar day changes', async () => {
+    it('consumes the dual-written entitlement in shadow mode before promotion to primary', async () => {
+      const configValues: Record<string, string> = {
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+        GUEST_GAME_ENTITLEMENT_READ_MODE: 'SHADOW',
+      };
+      const { guestGamificationService, prisma, service } =
+        createService(configValues);
+      const portal = portalPayloadFixture();
+      mockGameSummarySession(service, portal);
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: portal.store.id,
+          publicSlug: portal.store.publicSlug,
+          name: portal.store.name,
+          address: portal.store.address,
+          externalDomain: null,
+          integrationSourceId: null,
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: portal.profile.id,
+        guestId: 'guest-1',
+      });
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'loot-entitled',
+        tenantId: 'tenant-1',
+        name: 'Entitled session lootbox',
+        status: 'ACTIVE',
+        storeIds: [portal.store.id],
+        triggerKind: 'SESSION_START',
+        sessionType: 'packet_hours',
+        limits: {},
+        periodRules: {},
+      });
+      const legacyUnlockEvent = {
+        id: 'unlock-event-1',
+        originKey: 'session-origin-1',
+        eventType: 'SESSION_START',
+        occurredAt: new Date('2026-07-05T01:49:00.000Z'),
+        payload: {
+          store: {
+            id: portal.store.id,
+            timeZone: 'Asia/Yekaterinburg',
+          },
+          input: {
+            sessionType: 'packet_hours',
+            sessionPacket: true,
+            sessionMinutes: 180,
+          },
+          rules: [
+            {
+              id: 'loot-entitled',
+              kind: 'LOOT_BOX',
+              eligible: true,
+              blockers: [],
+            },
+          ],
+        },
+      };
+      prisma.guestGameEvent.findMany.mockResolvedValue([legacyUnlockEvent]);
+      const availableEntitlement = {
+        id: 'entitlement-1',
+        tenantId: 'tenant-1',
+        profileId: portal.profile.id,
+        guestId: 'guest-1',
+        storeId: portal.store.id,
+        eventId: legacyUnlockEvent.id,
+        evaluationRunId: 'run-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-entitled',
+        ruleName: 'Entitled session lootbox',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: 'session-1',
+        sourceFactKind: 'GUEST_SESSION',
+        traceId: 'trace-1',
+        status: 'AVAILABLE',
+        idempotencyKey: 'loot-box:loot-entitled:unlock-event-1',
+        qualifiedAt: legacyUnlockEvent.occurredAt,
+        validUntil: null,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: { input: legacyUnlockEvent.payload.input },
+        createdAt: legacyUnlockEvent.occurredAt,
+        updatedAt: legacyUnlockEvent.occurredAt,
+      };
+      const consumedEntitlement = {
+        ...availableEntitlement,
+        status: 'CONSUMED',
+        consumedAt: new Date('2026-07-05T02:00:00.000Z'),
+        rewardId: 'reward-1',
+      };
+      prisma.guestGameEntitlement.findFirst
+        .mockResolvedValueOnce(availableEntitlement)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(consumedEntitlement);
+      prisma.guestGameReward.findMany.mockResolvedValue([]);
+      prisma.guestGameReward.findFirst.mockResolvedValue({ id: 'reward-1' });
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 1 });
+      guestGamificationService.dryRun.mockResolvedValue({
+        rules: [
+          {
+            kind: 'LOOT_BOX',
+            id: 'loot-entitled',
+            eligible: true,
+            blockers: [],
+          },
+        ],
+      });
+      guestGamificationService.processEvent.mockResolvedValue({
+        summary: {
+          idempotent: false,
+          createdRewards: 1,
+          queuedRewardAmount: 200,
+        },
+        rewards: [
+          { id: 'reward-1', rewardLabel: '200 bonuses', rewardType: 'BONUS' },
+        ],
+      });
+
+      await expect(
+        service.openLootBox('Bearer guest-token', 'loot-entitled'),
+      ).resolves.toMatchObject({ processed: true, createdRewards: 1 });
+      configValues.GUEST_GAME_ENTITLEMENT_READ_MODE = 'PRIMARY';
+      await expect(
+        service.openLootBox('Bearer guest-token', 'loot-entitled'),
+      ).rejects.toThrow();
+
+      expect(guestGamificationService.dryRun).toHaveBeenCalledTimes(1);
+      expect(guestGamificationService.processEvent).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 'entitlement-1' }),
+          data: expect.objectContaining({ status: 'CONSUMED' }),
+        }),
+      );
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
+    });
+
+    it('keeps an unused daily entitlement available after the club calendar day changes', async () => {
       const { prisma, service } = createService();
       const now = new Date('2026-06-10T19:01:00.000Z');
 
@@ -2019,35 +2167,40 @@ describe('GuestPortalService', () => {
         now,
       );
 
-      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith(
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: 'tenant-1',
+          ruleType: 'LOOT_BOX',
+          ruleId: 'loot-daily',
+          status: 'EXPIRED',
+          consumedAt: null,
+          canceledAt: null,
+          rewardId: null,
+          validUntil: { lte: now },
+          evidence: {
+            path: ['entitlementPeriod', 'kind'],
+            equals: 'DAILY',
+          },
+          AND: [
+            {
+              OR: [{ profileId: 'profile-1' }, { guestId: 'guest-1' }],
+            },
+            { OR: [{ storeId: null }, { storeId: 'store-1' }] },
+          ],
+        },
+        data: {
+          status: 'AVAILABLE',
+          validUntil: null,
+        },
+      });
+      expect(prisma.guestGameEntitlement.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             tenantId: 'tenant-1',
             ruleId: 'loot-daily',
             status: 'AVAILABLE',
-            AND: expect.arrayContaining([
-              expect.objectContaining({
-                OR: expect.arrayContaining([
-                  expect.objectContaining({ validUntil: { lte: now } }),
-                  expect.objectContaining({
-                    validUntil: null,
-                    qualifiedAt: {
-                      lt: new Date('2026-06-10T19:00:00.000Z'),
-                    },
-                  }),
-                ]),
-              }),
-            ]),
-          }),
-          data: { status: 'EXPIRED' },
-        }),
-      );
-      expect(prisma.guestGameEntitlement.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            AND: expect.arrayContaining([
-              { qualifiedAt: { gte: new Date('2026-06-10T19:00:00.000Z') } },
-            ]),
+            qualifiedAt: { lte: now },
+            AND: [{ OR: [{ storeId: null }, { storeId: 'store-1' }] }],
           }),
         }),
       );
@@ -6836,6 +6989,170 @@ describe('GuestPortalService', () => {
         openBlocker: 'Лутбокс доступен другой аудитории гостей.',
       });
     });
+    it('shows an entitled reward template and hides it again after consumption in primary mode', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_ENTITLEMENT_READ_MODE: 'PRIMARY',
+      });
+      jest.spyOn(service as any, 'getTenantStoreByIds').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'LeetPlus', slug: 'demo' },
+        store: {
+          id: 'store-1',
+          publicSlug: 'pushkinskaya',
+          name: '1337-Pushkinskaya',
+          address: 'Pushkinskaya, 217',
+          timeZone: 'Asia/Yekaterinburg',
+          externalDomain: '46.langamepro.ru',
+          externalClubId: '1',
+          integrationSourceId: null,
+        },
+      });
+      jest.spyOn(service as any, 'findGuest').mockResolvedValue(null);
+      jest.spyOn(service as any, 'findProfile').mockResolvedValue({
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        guestId: null,
+        leadId: null,
+        displayName: 'Guest One',
+        contactMasked: '***0646',
+        phoneHash: 'phone-hash',
+        phoneEncrypted: null,
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentSource: 'telegram',
+        phoneConsentAt: new Date('2026-07-20T08:00:00.000Z'),
+        telegramIdentity: null,
+        maxIdentity: null,
+        unsubscribedAt: null,
+        xp: 0,
+        level: 1,
+        status: 'ACTIVE',
+        isStaffTest: false,
+        staffTestReason: null,
+        staffTestMatchedAt: null,
+        lastActivityAt: null,
+      });
+      prisma.guestGameLootBox.findMany.mockResolvedValue([
+        {
+          id: 'loot-weekend',
+          tenantId: 'tenant-1',
+          name: 'Weekend case',
+          status: 'ACTIVE',
+          usageKind: 'REWARD_TEMPLATE',
+          rewardType: 'BONUS_BALANCE',
+          rewardLabel: '50 bonuses',
+          manualApprovalRequired: false,
+          note: null,
+          storeIds: ['store-1'],
+          audienceId: null,
+          triggerKind: 'SESSION_START',
+          sessionType: 'packet_hours',
+          limits: { periodicLimit: 'DAILY' },
+          periodRules: { weekdayMode: 'WEEKENDS', weekdays: [0, 6] },
+          probabilityRules: {},
+        },
+      ]);
+      const legacyUnlockEvent = {
+        id: 'event-weekend',
+        originKey: 'origin-weekend',
+        eventType: 'SESSION_START',
+        occurredAt: new Date('2026-07-19T12:50:00.000Z'),
+        payload: {
+          store: { id: 'store-1', timeZone: 'Asia/Yekaterinburg' },
+          input: {
+            sessionType: 'packet_hours',
+            sessionPacket: true,
+          },
+          rules: [
+            {
+              id: 'loot-weekend',
+              kind: 'LOOT_BOX',
+              eligible: true,
+              blockers: [],
+            },
+          ],
+        },
+      };
+      const availableEntitlement = {
+        id: 'entitlement-weekend',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: null,
+        storeId: 'store-1',
+        eventId: legacyUnlockEvent.id,
+        evaluationRunId: 'run-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekend',
+        ruleName: 'Weekend case',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: 'session-weekend',
+        sourceFactKind: 'GUEST_ACTIVITY_FACT',
+        traceId: 'trace-1',
+        status: 'AVAILABLE',
+        idempotencyKey: 'loot-weekend:session-weekend',
+        originKey: 'origin-weekend',
+        qualifiedAt: legacyUnlockEvent.occurredAt,
+        validUntil: null,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: {
+          input: legacyUnlockEvent.payload.input,
+          entitlementPeriod: { kind: 'DAILY' },
+        },
+        createdAt: legacyUnlockEvent.occurredAt,
+        updatedAt: legacyUnlockEvent.occurredAt,
+      };
+      prisma.guestGameEvent.findMany.mockResolvedValue([legacyUnlockEvent]);
+      prisma.guestGameEntitlement.findMany
+        .mockResolvedValueOnce([availableEntitlement])
+        .mockResolvedValueOnce([]);
+      prisma.guestGameEntitlement.findFirst.mockResolvedValue({
+        ...availableEntitlement,
+        status: 'CONSUMED',
+        consumedAt: new Date('2026-07-19T13:00:00.000Z'),
+        rewardId: 'reward-weekend',
+      });
+
+      const portal = await (service as any).buildPortalPayload({
+        sub: 'profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash',
+      });
+
+      expect(portal.gamification.lootBoxes).toHaveLength(1);
+      expect(portal.gamification.lootBoxes[0]).toMatchObject({
+        id: 'loot-weekend',
+        openState: 'OPENABLE',
+        openable: true,
+        openBlocker: null,
+      });
+      expect(prisma.guestGameEntitlement.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            ruleType: 'LOOT_BOX',
+            status: 'AVAILABLE',
+          }),
+        }),
+      );
+
+      const portalAfterConsumption = await (service as any).buildPortalPayload({
+        sub: 'profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash',
+      });
+
+      expect(portalAfterConsumption.gamification.lootBoxes).toEqual([]);
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
+    });
+
     it('does not count old battle pass rewards before the active season window', async () => {
       const { prisma, service } = createService();
 

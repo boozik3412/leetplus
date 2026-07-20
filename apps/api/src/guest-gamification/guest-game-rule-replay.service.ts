@@ -70,6 +70,56 @@ export type GuestGameExactPlayTimeCanonicalizationApplyDto =
     confirmation?: string | null;
   };
 
+export type GuestGameLootBoxEntitlementReconciliationPreviewDto = Record<
+  string,
+  never
+>;
+
+export type GuestGameLootBoxEntitlementReconciliationApplyDto = {
+  expectedCount?: number | string | null;
+  expectedDigest?: string | null;
+  confirmation?: string | null;
+};
+
+export type GuestGameLootBoxEntitlementReconciliationResult = {
+  mode: 'PREVIEW' | 'APPLY';
+  outcome: 'READY' | 'APPLIED' | 'IDEMPOTENT';
+  count: number;
+  digest: string;
+  candidateIds: Array<{
+    entitlementId: string;
+    rewardId: string;
+    ruleId: string;
+  }>;
+  updatedCount: number;
+  note: string;
+};
+
+export type GuestGameLootBoxEntitlementOverLimitRepairPreviewDto = Record<
+  string,
+  never
+>;
+
+export type GuestGameLootBoxEntitlementOverLimitRepairApplyDto = {
+  expectedCount?: number | string | null;
+  expectedDigest?: string | null;
+  confirmation?: string | null;
+};
+
+export type GuestGameLootBoxEntitlementOverLimitRepairResult = {
+  mode: 'PREVIEW' | 'APPLY';
+  outcome: 'READY' | 'APPLIED' | 'IDEMPOTENT';
+  count: number;
+  digest: string;
+  candidateIds: Array<{
+    entitlementId: string;
+    ruleId: string;
+    preservedEntitlementId: string;
+  }>;
+  updatedCount: number;
+  note: string;
+};
+
 export type GuestGameExactPlayTimeCanonicalizationResult = {
   mode: 'PREVIEW' | 'APPLY';
   outcome: 'READY' | 'BUSY' | 'BLOCKED' | 'APPLIED' | 'IDEMPOTENT';
@@ -286,12 +336,414 @@ type PreparedExactCanonicalization = {
   confirmationHash: string;
 };
 
+type ExactEntitlementReconciliationCandidateRow = {
+  entitlementId: string;
+  rewardId: string;
+  ruleId: string;
+  profileId: string;
+  guestId: string | null;
+  storeId: string | null;
+  rewardQualifiedAt: Date;
+};
+
+type ExactEntitlementReconciliationCandidateId = Pick<
+  ExactEntitlementReconciliationCandidateRow,
+  'entitlementId' | 'rewardId' | 'ruleId'
+>;
+
+type LootBoxEntitlementLimitRow = {
+  entitlementId: string;
+  ruleId: string;
+  profileId: string;
+  guestId: string | null;
+  storeId: string | null;
+  status: string;
+  qualifiedAt: Date;
+};
+
+type LootBoxEntitlementOverLimitCandidate = LootBoxEntitlementLimitRow & {
+  preservedEntitlementId: string;
+};
+
+type LootBoxEntitlementOverLimitCandidateId = Pick<
+  LootBoxEntitlementOverLimitCandidate,
+  'entitlementId' | 'ruleId' | 'preservedEntitlementId'
+>;
+
 @Injectable()
 export class GuestGameRuleReplayService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gamification: GuestGamificationService,
   ) {}
+
+  async previewLootBoxEntitlementReconciliation(
+    user: AuthenticatedUser,
+    _dto: GuestGameLootBoxEntitlementReconciliationPreviewDto = {},
+  ): Promise<GuestGameLootBoxEntitlementReconciliationResult> {
+    void _dto;
+    const candidates = await this.findExactEntitlementReconciliationCandidates(
+      this.prisma,
+      user.tenantId,
+    );
+    const candidateIds = exactEntitlementReconciliationCandidateIds(candidates);
+
+    return {
+      mode: 'PREVIEW',
+      outcome: 'READY',
+      count: candidateIds.length,
+      digest: exactEntitlementReconciliationDigest(candidateIds),
+      candidateIds,
+      updatedCount: 0,
+      note: 'Preview is read-only. Only one-to-one legacy guest loot-box opens inside an entitlement qualification window are included.',
+    };
+  }
+
+  async applyLootBoxEntitlementReconciliation(
+    user: AuthenticatedUser,
+    dto: GuestGameLootBoxEntitlementReconciliationApplyDto,
+  ): Promise<GuestGameLootBoxEntitlementReconciliationResult> {
+    const expectedCount = nonNegativeInteger(dto.expectedCount);
+    const expectedDigest = normalizedString(dto.expectedDigest)?.toLowerCase();
+    if (expectedCount === null) {
+      throw new BadRequestException(
+        'For apply pass the non-negative integer expectedCount from preview.',
+      );
+    }
+    if (!expectedDigest || !/^[a-f0-9]{64}$/.test(expectedDigest)) {
+      throw new BadRequestException(
+        'For apply pass the expectedDigest SHA-256 value from preview.',
+      );
+    }
+    if (
+      normalizedString(dto.confirmation) !==
+      'APPLY_LOOT_BOX_ENTITLEMENT_RECONCILIATION'
+    ) {
+      throw new BadRequestException(
+        'For apply pass confirmation=APPLY_LOOT_BOX_ENTITLEMENT_RECONCILIATION.',
+      );
+    }
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Lock the rows that form both sides of the reconciliation window. The
+        // SERIALIZABLE transaction also fails closed if a concurrent insert
+        // changes the candidate predicate before commit.
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT e."id"
+          FROM "GuestGameEntitlement" e
+          WHERE e."tenantId" = ${user.tenantId}
+            AND e."ruleType" = 'LOOT_BOX'
+          ORDER BY e."id"
+          FOR UPDATE
+        `);
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT r."id"
+          FROM "GuestGameReward" r
+          WHERE r."tenantId" = ${user.tenantId}
+            AND r."source" = 'API_IMPORT'
+            AND r."evidence"->>'sourceFactKind' = 'GUEST_LOOT_BOX_OPEN'
+          ORDER BY r."id"
+          FOR UPDATE
+        `);
+
+        const candidates =
+          await this.findExactEntitlementReconciliationCandidates(
+            tx,
+            user.tenantId,
+          );
+        const candidateIds =
+          exactEntitlementReconciliationCandidateIds(candidates);
+        const digest = exactEntitlementReconciliationDigest(candidateIds);
+        if (
+          candidateIds.length !== expectedCount ||
+          digest !== expectedDigest
+        ) {
+          throw new ConflictException(
+            'The reconciliation candidate set changed after preview. Run preview again and confirm the new count and digest.',
+          );
+        }
+
+        const reconciledAt = new Date();
+        let updatedCount = 0;
+        for (const candidate of candidates) {
+          const updated = await tx.$executeRaw(Prisma.sql`
+            UPDATE "GuestGameEntitlement" e
+            SET "status" = 'CONSUMED',
+                "consumedAt" = ${candidate.rewardQualifiedAt},
+                "rewardId" = ${candidate.rewardId},
+                "updatedAt" = ${reconciledAt},
+                "evidence" = COALESCE(e."evidence", '{}'::jsonb) ||
+                  jsonb_build_object(
+                    'reconciliation',
+                    jsonb_build_object(
+                      'kind', 'OFF_TO_PRIMARY_EXACT_REWARD_BINDING_V1',
+                      'reconciledAt', ${reconciledAt.toISOString()},
+                      'actorUserId', ${user.id},
+                      'rewardId', ${candidate.rewardId},
+                      'candidateDigest', ${digest}
+                    )
+                  )
+            WHERE e."id" = ${candidate.entitlementId}
+              AND e."tenantId" = ${user.tenantId}
+              AND e."ruleType" = 'LOOT_BOX'
+              AND e."ruleId" = ${candidate.ruleId}
+              AND e."profileId" = ${candidate.profileId}
+              AND e."status" = 'AVAILABLE'
+              AND e."consumedAt" IS NULL
+              AND e."canceledAt" IS NULL
+              AND e."rewardId" IS NULL
+              AND EXISTS (
+                SELECT 1
+                FROM "GuestGameReward" r
+                WHERE r."id" = ${candidate.rewardId}
+                  AND r."tenantId" = e."tenantId"
+                  AND r."profileId" = e."profileId"
+                  AND r."lootBoxId" = e."ruleId"
+                  AND r."storeId" IS NOT DISTINCT FROM e."storeId"
+                  AND r."status" NOT IN ('CANCELED', 'VOID', 'REJECTED')
+                  AND r."source" = 'API_IMPORT'
+                  AND r."evidence"->>'sourceFactKind' = 'GUEST_LOOT_BOX_OPEN'
+              )
+          `);
+          if (updated !== 1) {
+            throw new ConflictException(
+              'An entitlement or reward changed during reconciliation. No changes were committed.',
+            );
+          }
+
+          await tx.guestGameAuditEvent.create({
+            data: {
+              tenantId: user.tenantId,
+              profileId: candidate.profileId,
+              guestId: candidate.guestId,
+              storeId: candidate.storeId,
+              entityType: 'LOOT_BOX_ENTITLEMENT',
+              entityId: candidate.entitlementId,
+              action: 'LOOT_BOX_ENTITLEMENT_RECONCILED',
+              status: 'PROCESSED',
+              reasonCode: 'OFF_TO_PRIMARY_EXACT_REWARD_BINDING_V1',
+              reasonText:
+                'An exact historical guest loot-box open was bound to its previously unconsumed entitlement before read-mode promotion.',
+              payload: {
+                actorUserId: user.id,
+                entitlementId: candidate.entitlementId,
+                rewardId: candidate.rewardId,
+                ruleId: candidate.ruleId,
+                candidateDigest: digest,
+                reconciledAt: reconciledAt.toISOString(),
+              },
+            },
+          });
+          updatedCount += 1;
+        }
+
+        return {
+          mode: 'APPLY' as const,
+          outcome:
+            updatedCount === 0 ? ('IDEMPOTENT' as const) : ('APPLIED' as const),
+          count: candidateIds.length,
+          digest,
+          candidateIds,
+          updatedCount,
+          note:
+            updatedCount === 0
+              ? 'No exact historical entitlement bindings remain.'
+              : 'Exact historical guest loot-box opens were bound atomically. Re-run preview; it must return zero candidates before read-mode promotion.',
+        };
+      },
+      { isolationLevel: 'Serializable' },
+    );
+  }
+
+  async previewLootBoxEntitlementOverLimitRepair(
+    user: AuthenticatedUser,
+    _dto: GuestGameLootBoxEntitlementOverLimitRepairPreviewDto = {},
+  ): Promise<GuestGameLootBoxEntitlementOverLimitRepairResult> {
+    void _dto;
+    const candidates = await this.findLootBoxEntitlementOverLimitCandidates(
+      this.prisma,
+      user.tenantId,
+    );
+    const candidateIds = lootBoxEntitlementOverLimitCandidateIds(candidates);
+
+    return {
+      mode: 'PREVIEW',
+      outcome: 'READY',
+      count: candidateIds.length,
+      digest: lootBoxEntitlementOverLimitDigest(candidateIds),
+      candidateIds,
+      updatedCount: 0,
+      note: 'Preview is read-only. It keeps the earliest accepted entitlement in each rolling seven-day sequence and selects only later AVAILABLE excess entitlements for cancellation.',
+    };
+  }
+
+  async applyLootBoxEntitlementOverLimitRepair(
+    user: AuthenticatedUser,
+    dto: GuestGameLootBoxEntitlementOverLimitRepairApplyDto,
+  ): Promise<GuestGameLootBoxEntitlementOverLimitRepairResult> {
+    const expectedCount = nonNegativeInteger(dto.expectedCount);
+    const expectedDigest = normalizedString(dto.expectedDigest)?.toLowerCase();
+    if (expectedCount === null) {
+      throw new BadRequestException(
+        'For apply pass the non-negative integer expectedCount from preview.',
+      );
+    }
+    if (!expectedDigest || !/^[a-f0-9]{64}$/.test(expectedDigest)) {
+      throw new BadRequestException(
+        'For apply pass the expectedDigest SHA-256 value from preview.',
+      );
+    }
+    if (
+      normalizedString(dto.confirmation) !==
+      'APPLY_LOOT_BOX_ENTITLEMENT_OVER_LIMIT_REPAIR'
+    ) {
+      throw new BadRequestException(
+        'For apply pass confirmation=APPLY_LOOT_BOX_ENTITLEMENT_OVER_LIMIT_REPAIR.',
+      );
+    }
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Lock configuration first and entitlements second in stable ID order.
+        // The transaction contains no external work and stays intentionally
+        // short, so production issuance is blocked only for the update itself.
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT l."id"
+          FROM "GuestGameLootBox" l
+          WHERE l."tenantId" = ${user.tenantId}
+            AND l."status" = 'ACTIVE'
+            AND l."usageKind" IN ('STANDALONE', 'BOTH')
+            AND l."limits"->>'perGuestPerWeek' = '1'
+          ORDER BY l."id"
+          FOR UPDATE
+        `);
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT e."id"
+          FROM "GuestGameEntitlement" e
+          INNER JOIN "GuestGameLootBox" l
+            ON l."tenantId" = e."tenantId"
+           AND l."id" = e."ruleId"
+          WHERE e."tenantId" = ${user.tenantId}
+            AND e."ruleType" = 'LOOT_BOX'
+            AND e."profileId" IS NOT NULL
+            AND (
+              (
+                e."status" = 'AVAILABLE'
+                AND e."consumedAt" IS NULL
+                AND e."rewardId" IS NULL
+              )
+              OR e."status" = 'CONSUMED'
+            )
+            AND e."canceledAt" IS NULL
+            AND l."status" = 'ACTIVE'
+            AND l."usageKind" IN ('STANDALONE', 'BOTH')
+            AND l."limits"->>'perGuestPerWeek' = '1'
+          ORDER BY e."id"
+          FOR UPDATE OF e
+        `);
+
+        const candidates = await this.findLootBoxEntitlementOverLimitCandidates(
+          tx,
+          user.tenantId,
+        );
+        const candidateIds =
+          lootBoxEntitlementOverLimitCandidateIds(candidates);
+        const digest = lootBoxEntitlementOverLimitDigest(candidateIds);
+        if (
+          candidateIds.length !== expectedCount ||
+          digest !== expectedDigest
+        ) {
+          throw new ConflictException(
+            'The over-limit candidate set changed after preview. Run preview again and confirm the new count and digest.',
+          );
+        }
+
+        if (candidates.length === 0) {
+          return {
+            mode: 'APPLY' as const,
+            outcome: 'IDEMPOTENT' as const,
+            count: 0,
+            digest,
+            candidateIds,
+            updatedCount: 0,
+            note: 'No rolling seven-day AVAILABLE excess entitlements remain.',
+          };
+        }
+
+        const canceledAt = new Date();
+        const candidateEntitlementIds = candidates.map(
+          (candidate) => candidate.entitlementId,
+        );
+        const updatedRows = await tx.$queryRaw<Array<{ id: string }>>(
+          Prisma.sql`
+            UPDATE "GuestGameEntitlement" e
+            SET "status" = 'CANCELED',
+                "canceledAt" = ${canceledAt},
+                "updatedAt" = ${canceledAt},
+                "evidence" = COALESCE(e."evidence", '{}'::jsonb) ||
+                  jsonb_build_object(
+                    'overLimitRepair',
+                    jsonb_build_object(
+                      'kind', 'ROLLING_7_DAY_GREEDY_REPAIR_V1',
+                      'canceledAt', ${canceledAt.toISOString()},
+                      'actorUserId', ${user.id},
+                      'candidateDigest', ${digest}
+                    )
+                  )
+            WHERE e."tenantId" = ${user.tenantId}
+              AND e."id" IN (${Prisma.join(candidateEntitlementIds)})
+              AND e."ruleType" = 'LOOT_BOX'
+              AND e."status" = 'AVAILABLE'
+              AND e."consumedAt" IS NULL
+              AND e."canceledAt" IS NULL
+              AND e."rewardId" IS NULL
+            RETURNING e."id"
+          `,
+        );
+        if (updatedRows.length !== candidates.length) {
+          throw new ConflictException(
+            'An entitlement changed during the over-limit repair. No changes were committed.',
+          );
+        }
+
+        await tx.guestGameAuditEvent.createMany({
+          data: candidates.map((candidate) => ({
+            tenantId: user.tenantId,
+            profileId: candidate.profileId,
+            guestId: candidate.guestId,
+            storeId: candidate.storeId,
+            entityType: 'LOOT_BOX_ENTITLEMENT',
+            entityId: candidate.entitlementId,
+            action: 'LOOT_BOX_ENTITLEMENT_OVER_LIMIT_CANCELED',
+            status: 'PROCESSED',
+            reasonCode: 'ROLLING_7_DAY_GREEDY_REPAIR_V1',
+            reasonText:
+              'A later AVAILABLE entitlement inside the protected rolling seven-day window was canceled before entitlement read-mode promotion.',
+            payload: {
+              actorUserId: user.id,
+              entitlementId: candidate.entitlementId,
+              preservedEntitlementId: candidate.preservedEntitlementId,
+              ruleId: candidate.ruleId,
+              candidateDigest: digest,
+              canceledAt: canceledAt.toISOString(),
+            },
+          })),
+        });
+
+        return {
+          mode: 'APPLY' as const,
+          outcome: 'APPLIED' as const,
+          count: candidateIds.length,
+          digest,
+          candidateIds,
+          updatedCount: updatedRows.length,
+          note: 'Rolling seven-day AVAILABLE excess entitlements were canceled atomically. CONSUMED entitlements were never changed. Re-run preview; it must return zero candidates before read-mode promotion.',
+        };
+      },
+      { isolationLevel: 'Serializable' },
+    );
+  }
 
   async previewExactPlayTimeCanonicalization(
     user: AuthenticatedUser,
@@ -673,6 +1125,138 @@ export class GuestGameRuleReplayService {
     );
   }
 
+  private async findExactEntitlementReconciliationCandidates(
+    client: PrismaService | Prisma.TransactionClient,
+    tenantId: string,
+  ) {
+    return client.$queryRaw<ExactEntitlementReconciliationCandidateRow[]>(
+      Prisma.sql`
+        WITH ordered_entitlements AS (
+          SELECT
+            e."id",
+            e."tenantId",
+            e."profileId",
+            e."guestId",
+            e."storeId",
+            e."ruleId",
+            e."status",
+            e."qualifiedAt",
+            e."consumedAt",
+            e."canceledAt",
+            e."rewardId",
+            LEAD(e."qualifiedAt") OVER (
+              PARTITION BY e."tenantId", e."profileId", e."ruleId"
+              ORDER BY e."qualifiedAt", e."id"
+            ) AS "nextQualifiedAt"
+          FROM "GuestGameEntitlement" e
+          WHERE e."tenantId" = ${tenantId}
+            AND e."ruleType" = 'LOOT_BOX'
+            AND e."profileId" IS NOT NULL
+        ),
+        candidate_pairs AS (
+          SELECT
+            e."id" AS "entitlementId",
+            r."id" AS "rewardId",
+            e."ruleId" AS "ruleId",
+            e."profileId" AS "profileId",
+            e."guestId" AS "guestId",
+            e."storeId" AS "storeId",
+            r."qualifiedAt" AS "rewardQualifiedAt"
+          FROM ordered_entitlements e
+          INNER JOIN "GuestGameReward" r
+            ON r."tenantId" = e."tenantId"
+           AND r."profileId" = e."profileId"
+           AND r."lootBoxId" = e."ruleId"
+           AND r."storeId" IS NOT DISTINCT FROM e."storeId"
+           AND r."qualifiedAt" >= e."qualifiedAt"
+           AND (
+             e."nextQualifiedAt" IS NULL
+             OR r."qualifiedAt" < e."nextQualifiedAt"
+           )
+          WHERE e."status" = 'AVAILABLE'
+            AND e."consumedAt" IS NULL
+            AND e."canceledAt" IS NULL
+            AND e."rewardId" IS NULL
+            AND r."status" NOT IN ('CANCELED', 'VOID', 'REJECTED')
+            AND r."source" = 'API_IMPORT'
+            AND r."evidence"->>'sourceFactKind' = 'GUEST_LOOT_BOX_OPEN'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "GuestGameEntitlement" bound
+              WHERE bound."tenantId" = e."tenantId"
+                AND bound."rewardId" = r."id"
+            )
+        ),
+        exact_pairs AS (
+          SELECT
+            pairs.*,
+            COUNT(*) OVER (
+              PARTITION BY pairs."entitlementId"
+            ) AS "rewardCountForEntitlement",
+            COUNT(*) OVER (
+              PARTITION BY pairs."rewardId"
+            ) AS "entitlementCountForReward"
+          FROM candidate_pairs pairs
+        )
+        SELECT
+          exact."entitlementId",
+          exact."rewardId",
+          exact."ruleId",
+          exact."profileId",
+          exact."guestId",
+          exact."storeId",
+          exact."rewardQualifiedAt"
+        FROM exact_pairs exact
+        WHERE exact."rewardCountForEntitlement" = 1
+          AND exact."entitlementCountForReward" = 1
+        ORDER BY exact."entitlementId", exact."rewardId"
+      `,
+    );
+  }
+
+  private async findLootBoxEntitlementOverLimitCandidates(
+    client: PrismaService | Prisma.TransactionClient,
+    tenantId: string,
+  ) {
+    const rows = await client.$queryRaw<LootBoxEntitlementLimitRow[]>(
+      Prisma.sql`
+        SELECT
+          e."id" AS "entitlementId",
+          e."ruleId" AS "ruleId",
+          e."profileId" AS "profileId",
+          e."guestId" AS "guestId",
+          e."storeId" AS "storeId",
+          e."status" AS "status",
+          e."qualifiedAt" AS "qualifiedAt"
+        FROM "GuestGameEntitlement" e
+        INNER JOIN "GuestGameLootBox" l
+          ON l."tenantId" = e."tenantId"
+         AND l."id" = e."ruleId"
+        WHERE e."tenantId" = ${tenantId}
+          AND e."ruleType" = 'LOOT_BOX'
+          AND e."profileId" IS NOT NULL
+          AND (
+            (
+              e."status" = 'AVAILABLE'
+              AND e."consumedAt" IS NULL
+              AND e."rewardId" IS NULL
+            )
+            OR e."status" = 'CONSUMED'
+          )
+          AND e."canceledAt" IS NULL
+          AND l."status" = 'ACTIVE'
+          AND l."usageKind" IN ('STANDALONE', 'BOTH')
+          AND l."limits"->>'perGuestPerWeek' = '1'
+        ORDER BY
+          e."profileId",
+          e."ruleId",
+          e."qualifiedAt",
+          e."id"
+      `,
+    );
+    return rollingSevenDayOverLimitCandidates(rows);
+  }
+
   private async prepareExactCanonicalization(
     user: AuthenticatedUser,
     dto: GuestGameExactPlayTimeCanonicalizationPreviewDto,
@@ -821,9 +1405,7 @@ export class GuestGameRuleReplayService {
         take: 3,
       }),
     ]);
-    const uniqueEvents = new Map(
-      events.map((event) => [event.id, event as ExactCanonicalEventRow]),
-    );
+    const uniqueEvents = new Map(events.map((event) => [event.id, event]));
     if (uniqueEvents.size > 1) {
       throw new ConflictException(
         'originKey and external reference resolve to different canonical events.',
@@ -859,7 +1441,7 @@ export class GuestGameRuleReplayService {
       originKey,
       externalEventId,
       expectedSessionType,
-      receipt: receipt as ExactCanonicalReceiptRow | null,
+      receipt: receipt,
       event,
       confirmationHash: '',
     };
@@ -1051,7 +1633,7 @@ export class GuestGameRuleReplayService {
   ): Promise<ExactCanonicalReceiptRow> {
     if (prepared.receipt) return prepared.receipt;
     try {
-      return (await this.prisma.guestGameOriginReceipt.create({
+      return await this.prisma.guestGameOriginReceipt.create({
         data: {
           tenantId: prepared.tenantId,
           originKey: prepared.originKey,
@@ -1066,7 +1648,7 @@ export class GuestGameRuleReplayService {
           graceUntil: new Date(0),
         },
         select: exactCanonicalReceiptSelect,
-      })) as ExactCanonicalReceiptRow;
+      });
     } catch {
       const concurrent = await this.prisma.guestGameOriginReceipt.findUnique({
         where: {
@@ -1078,7 +1660,7 @@ export class GuestGameRuleReplayService {
         select: exactCanonicalReceiptSelect,
       });
       if (!concurrent) throw new ConflictException('Receipt creation failed.');
-      return concurrent as ExactCanonicalReceiptRow;
+      return concurrent;
     }
   }
 
@@ -1102,10 +1684,10 @@ export class GuestGameRuleReplayService {
     prepared: PreparedExactCanonicalization,
     eventId: string,
   ): Promise<ExactCanonicalEventRow> {
-    let event = (await this.prisma.guestGameEvent.findFirst({
+    let event = await this.prisma.guestGameEvent.findFirst({
       where: { id: eventId, tenantId: prepared.tenantId },
       select: exactCanonicalEventSelect,
-    })) as ExactCanonicalEventRow | null;
+    });
     if (!event) {
       throw new ConflictException('The canonical event was not persisted.');
     }
@@ -1133,10 +1715,10 @@ export class GuestGameRuleReplayService {
           'Could not reconcile the canonical event originKey safely.',
         );
       }
-      event = (await this.prisma.guestGameEvent.findFirst({
+      event = await this.prisma.guestGameEvent.findFirst({
         where: { id: event.id, tenantId: prepared.tenantId },
         select: exactCanonicalEventSelect,
-      })) as ExactCanonicalEventRow | null;
+      });
       if (!event) {
         throw new ConflictException(
           'The reconciled canonical event disappeared.',
@@ -1912,10 +2494,112 @@ function replayRuleFromIntent(
   };
 }
 
+function exactEntitlementReconciliationCandidateIds(
+  candidates: ExactEntitlementReconciliationCandidateRow[],
+): ExactEntitlementReconciliationCandidateId[] {
+  return candidates
+    .map(({ entitlementId, rewardId, ruleId }) => ({
+      entitlementId,
+      rewardId,
+      ruleId,
+    }))
+    .sort((left, right) =>
+      `${left.entitlementId}:${left.rewardId}:${left.ruleId}`.localeCompare(
+        `${right.entitlementId}:${right.rewardId}:${right.ruleId}`,
+      ),
+    );
+}
+
+function exactEntitlementReconciliationDigest(
+  candidates: ExactEntitlementReconciliationCandidateId[],
+) {
+  return sha256(candidates);
+}
+
+function rollingSevenDayOverLimitCandidates(
+  input: LootBoxEntitlementLimitRow[],
+): LootBoxEntitlementOverLimitCandidate[] {
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1_000;
+  const sorted = [...input].sort((left, right) => {
+    const scopeOrder = `${left.profileId}:${left.ruleId}`.localeCompare(
+      `${right.profileId}:${right.ruleId}`,
+    );
+    if (scopeOrder !== 0) return scopeOrder;
+    const timeOrder = left.qualifiedAt.getTime() - right.qualifiedAt.getTime();
+    return timeOrder !== 0
+      ? timeOrder
+      : left.entitlementId.localeCompare(right.entitlementId);
+  });
+  const lastAcceptedByScope = new Map<string, LootBoxEntitlementLimitRow>();
+  const candidates: LootBoxEntitlementOverLimitCandidate[] = [];
+
+  for (const entitlement of sorted) {
+    const scope = `${entitlement.profileId}:${entitlement.ruleId}`;
+    const lastAccepted = lastAcceptedByScope.get(scope);
+    if (
+      !lastAccepted ||
+      entitlement.qualifiedAt.getTime() >=
+        lastAccepted.qualifiedAt.getTime() + sevenDaysMs
+    ) {
+      lastAcceptedByScope.set(scope, entitlement);
+      continue;
+    }
+
+    if (entitlement.status === 'AVAILABLE') {
+      candidates.push({
+        ...entitlement,
+        preservedEntitlementId: lastAccepted.entitlementId,
+      });
+      continue;
+    }
+
+    // A consumed entitlement is immutable. Keep it and make it the new
+    // protected anchor so no later AVAILABLE row is kept inside its window.
+    if (entitlement.status === 'CONSUMED') {
+      lastAcceptedByScope.set(scope, entitlement);
+    }
+  }
+
+  return candidates;
+}
+
+function lootBoxEntitlementOverLimitCandidateIds(
+  candidates: LootBoxEntitlementOverLimitCandidate[],
+): LootBoxEntitlementOverLimitCandidateId[] {
+  return candidates
+    .map(({ entitlementId, ruleId, preservedEntitlementId }) => ({
+      entitlementId,
+      ruleId,
+      preservedEntitlementId,
+    }))
+    .sort((left, right) =>
+      `${left.entitlementId}:${left.ruleId}:${left.preservedEntitlementId}`.localeCompare(
+        `${right.entitlementId}:${right.ruleId}:${right.preservedEntitlementId}`,
+      ),
+    );
+}
+
+function lootBoxEntitlementOverLimitDigest(
+  candidates: LootBoxEntitlementOverLimitCandidateId[],
+) {
+  return sha256(candidates);
+}
+
 function requiredId(value: unknown, field: string) {
   const id = normalizedString(value);
   if (!id) throw new BadRequestException(`Укажите ${field}.`);
   return id;
+}
+
+function nonNegativeInteger(value: unknown) {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    (typeof value === 'string' && value.trim() === '')
+  ) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function positiveInteger(value: unknown, field: string) {

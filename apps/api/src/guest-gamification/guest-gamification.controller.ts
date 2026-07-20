@@ -53,6 +53,12 @@ import {
   type GuestGameExactPlayTimeCanonicalizationApplyDto,
   type GuestGameExactPlayTimeCanonicalizationPreviewDto,
   type GuestGameExactPlayTimeCanonicalizationResult,
+  type GuestGameLootBoxEntitlementOverLimitRepairApplyDto,
+  type GuestGameLootBoxEntitlementOverLimitRepairPreviewDto,
+  type GuestGameLootBoxEntitlementOverLimitRepairResult,
+  type GuestGameLootBoxEntitlementReconciliationApplyDto,
+  type GuestGameLootBoxEntitlementReconciliationPreviewDto,
+  type GuestGameLootBoxEntitlementReconciliationResult,
 } from './guest-game-rule-replay.service';
 import type { GuestGameMissionWizardDto } from './guest-game-mission-contract';
 import {
@@ -270,6 +276,62 @@ export class GuestGamificationController {
     @Body() dto: GuestGameExactPlayTimeCanonicalizationApplyDto,
   ): Promise<GuestGameExactPlayTimeCanonicalizationResult> {
     return this.ruleReplayService.applyExactPlayTimeCanonicalization(user, dto);
+  }
+
+  @Post('rule-replays/loot-box-entitlements/reconciliation/preview')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  previewLootBoxEntitlementReconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameLootBoxEntitlementReconciliationPreviewDto,
+  ): Promise<GuestGameLootBoxEntitlementReconciliationResult> {
+    return this.ruleReplayService.previewLootBoxEntitlementReconciliation(
+      user,
+      dto,
+    );
+  }
+
+  @Post('rule-replays/loot-box-entitlements/reconciliation/apply')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  applyLootBoxEntitlementReconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameLootBoxEntitlementReconciliationApplyDto,
+  ): Promise<GuestGameLootBoxEntitlementReconciliationResult> {
+    return this.ruleReplayService.applyLootBoxEntitlementReconciliation(
+      user,
+      dto,
+    );
+  }
+
+  @Post('rule-replays/loot-box-entitlements/over-limit/preview')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  previewLootBoxEntitlementOverLimitRepair(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameLootBoxEntitlementOverLimitRepairPreviewDto,
+  ): Promise<GuestGameLootBoxEntitlementOverLimitRepairResult> {
+    return this.ruleReplayService.previewLootBoxEntitlementOverLimitRepair(
+      user,
+      dto,
+    );
+  }
+
+  @Post('rule-replays/loot-box-entitlements/over-limit/apply')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  applyLootBoxEntitlementOverLimitRepair(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameLootBoxEntitlementOverLimitRepairApplyDto,
+  ): Promise<GuestGameLootBoxEntitlementOverLimitRepairResult> {
+    return this.ruleReplayService.applyLootBoxEntitlementOverLimitRepair(
+      user,
+      dto,
+    );
   }
 
   @Get('log/profiles/:profileId')

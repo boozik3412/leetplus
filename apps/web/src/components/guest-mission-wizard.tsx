@@ -616,7 +616,8 @@ export function GuestMissionWizard({
             <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
               <h2 className="font-black">Предпросмотр</h2>
               <p className="mt-1 text-xs text-zinc-500">
-                Компактная карточка и модальное окно обновляются в live-режиме.
+                Демонстрация внешнего вида обновляется в live-режиме. Показанный
+                прогресс — пример, а не данные конкретного гостя.
               </p>
             </div>
             <GuestMissionPreview data={preview} />

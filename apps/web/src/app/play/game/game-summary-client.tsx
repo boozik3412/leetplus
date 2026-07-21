@@ -290,7 +290,7 @@ const REWARD_HISTORY_SOURCE_ORDER: RewardHistorySource[] = [
 ];
 const REWARD_HISTORY_SOURCE_LABELS: Record<RewardHistorySource, string> = {
   lootbox: "Лутбоксы",
-  battlepass: "Баттлпасс",
+  battlepass: "Боевой пропуск",
   quest: "Квесты",
   promo: "Промокоды",
 };
@@ -1134,14 +1134,6 @@ function ReadyGameView({
     setQuestDetails(null);
   }
 
-  function focusPlayerProfile() {
-    setMenuOpen(false);
-    document.querySelector(".lp-club-profile-panel")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }
-
   async function handleCheckIn() {
     if (checkInPending) {
       return;
@@ -1642,14 +1634,6 @@ function ReadyGameView({
             aria-label="Меню игрового модуля"
             hidden={!menuOpen}
           >
-            <button type="button" onClick={focusPlayerProfile}>
-              <ProfileIcon />
-              <span>Профиль</span>
-            </button>
-            <Link href="/game/clubs" onClick={() => setMenuOpen(false)}>
-              <ClubIcon />
-              <span>Сменить клуб</span>
-            </Link>
             <button type="button" onClick={handleLogout}>
               <ExitIcon />
               <span>Выйти</span>
@@ -2756,11 +2740,11 @@ function HomeBattlePass({
       id="battlePass"
       ref={sectionRef}
       className="lp-club-panel lp-club-battlepass"
-      aria-label="Баттлпасс"
+      aria-label="Боевой пропуск"
     >
       <div className="lp-club-battlepass-head">
         <span className="lp-club-battlepass-title">
-          <h2>Баттлпасс клуба</h2>
+          <h2>Боевой пропуск</h2>
           <p>Премиальная сезонная карта наград для гостей клуба.</p>
         </span>
         <button
@@ -2823,7 +2807,7 @@ function HomeBattlePass({
 
       <div
         className="lp-club-battlepass-track"
-        aria-label="Очередь наград Battle Pass"
+        aria-label="Очередь наград боевого пропуска"
       >
         <div
           ref={trackRef}
@@ -3323,13 +3307,13 @@ function BattlePassHelpModal({
         <button
           type="button"
           className="lp-quest-complete-close"
-          aria-label="Закрыть пояснение Battle Pass"
+          aria-label="Закрыть пояснение боевого пропуска"
           onClick={onClose}
         >
           ×
         </button>
         <span className="lp-quest-complete-kicker">Как работает</span>
-        <h3 id="battlePassHelpTitle">Баттлпасс клуба</h3>
+        <h3 id="battlePassHelpTitle">Боевой пропуск</h3>
         <p className="lp-battlepass-detail-season">
           {seasonName} · шаг {formatNumber(currentLevel)} из{" "}
           {formatNumber(totalLevels)}
@@ -3348,7 +3332,7 @@ function BattlePassHelpModal({
         <div className="lp-battlepass-detail-block">
           <span>Что это</span>
           <p>
-            Баттлпасс собирает цепочку клубных заданий и наград. Выполняйте
+            Боевой пропуск собирает цепочку клубных заданий и наград. Выполняйте
             текущую задачу, чтобы продвигаться по этапам сезона.
           </p>
         </div>
@@ -3376,7 +3360,7 @@ function BattlePassHelpModal({
 
         {!battlePass ? (
           <p className="lp-battlepass-help-note">
-            Сезон пока не запущен. Когда клуб опубликует Battle Pass, здесь
+            Сезон пока не запущен. Когда клуб опубликует боевой пропуск, здесь
             появятся этапы, условия и награды.
           </p>
         ) : null}
@@ -3515,6 +3499,12 @@ function BattlePassQuestModal({
             <strong>{fallbackRewardLabel}</strong>
             <p>{fallbackRewardStatus?.label}</p>
             {receivedAt ? <small>{formatDate(receivedAt)}</small> : null}
+            <Link
+              href="/game/rewards"
+              className="lp-battlepass-reward-history-link"
+            >
+              Открыть историю наград
+            </Link>
           </div>
         ) : reward.status === "claimed" ? (
           <div className="lp-battlepass-received-card">
@@ -3523,6 +3513,12 @@ function BattlePassQuestModal({
               Награда уже засчитана, но детальный результат не найден в текущем
               кошельке.
             </p>
+            <Link
+              href="/game/rewards"
+              className="lp-battlepass-reward-history-link"
+            >
+              Открыть историю наград
+            </Link>
           </div>
         ) : null}
 
@@ -3580,6 +3576,9 @@ function BattlePassReceivedRewardCard({
       ) : null}
       {readyCode ? <em>Код кассиру: {readyCode}</em> : null}
       <small>{walletStateHint(reward.walletState)}</small>
+      <Link href="/game/rewards" className="lp-battlepass-reward-history-link">
+        Открыть историю наград
+      </Link>
     </div>
   );
 }
@@ -3875,7 +3874,7 @@ function battlePassRewardFromLevel(
     level.freeReward ??
     level.premiumReward ??
     level.title ??
-    `Battle Pass шаг ${formatNumber(level.level)}`;
+    `Боевой пропуск, шаг ${formatNumber(level.level)}`;
   const title = level.title ?? rewardLabel;
   const rarity = inferBattlePassRewardRarity(rewardLabel);
   const type = inferBattlePassRewardType(rewardLabel);
@@ -4603,7 +4602,7 @@ function buildHomeBanners(
     {
       id: "battlepass",
       label: "Сезон",
-      title: summary.battlePass.active?.name ?? "Баттлпасс клуба",
+      title: summary.battlePass.active?.name ?? "Боевой пропуск",
       description:
         summary.battlePass.active?.nextRewardLabel ??
         summary.referral.channelHint ??
@@ -7862,7 +7861,7 @@ function BattlePassPanel({
       className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
     >
       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
-        Battle Pass
+        Боевой пропуск
       </p>
       {battlePass ? (
         <>
@@ -7903,7 +7902,7 @@ function BattlePassPanel({
             <div className="mt-5">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-black text-white">
-                  Шаги Battle Pass
+                  Шаги боевого пропуска
                 </h3>
                 <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-bold text-zinc-300">
                   {formatNumber(battlePass.levels.length)} рядом
@@ -7974,7 +7973,7 @@ function BattlePassPanel({
         </>
       ) : (
         <p className="mt-4 text-sm leading-6 text-zinc-300">
-          Сезон пока не запущен. Когда клуб включит Battle Pass, прогресс
+          Сезон пока не запущен. Когда клуб включит боевой пропуск, прогресс
           появится здесь.
         </p>
       )}
@@ -8092,7 +8091,7 @@ function rewardSourceKindLabel(
   const labels = {
     LOOT_BOX: "лутбокс",
     MISSION: "квест",
-    BATTLE_PASS: "Battle Pass",
+    BATTLE_PASS: "боевой пропуск",
     MANUAL: "ручная награда",
   } satisfies Record<
     GuestPortalGameSummary["rewards"]["recent"][number]["sourceKind"],
@@ -8817,7 +8816,7 @@ const clubHomeCss = `
 .lp-club-brand {
   gap: 12px;
   color: var(--text);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 820;
   letter-spacing: 0.14em;
 }
@@ -10310,6 +10309,23 @@ const clubHomeCss = `
   font-style: normal;
   font-weight: 860;
   overflow-wrap: anywhere;
+}
+
+.lp-battlepass-reward-history-link {
+  width: fit-content;
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 820;
+  line-height: 1.35;
+  text-decoration: underline;
+  text-decoration-color: rgba(131, 228, 236, 0.54);
+  text-underline-offset: 3px;
+}
+
+.lp-battlepass-reward-history-link:hover,
+.lp-battlepass-reward-history-link:focus-visible {
+  color: var(--text);
+  text-decoration-color: currentColor;
 }
 
 .lp-lootbox-overlay {
@@ -13758,7 +13774,7 @@ const clubHomeCss = `
 
   .lp-club-brand {
     gap: 9px;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.08em;
   }
 

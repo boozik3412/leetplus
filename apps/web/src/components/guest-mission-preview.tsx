@@ -265,7 +265,9 @@ export function GuestMissionPreview({
                 <GuestMissionIcon icon={data.icon} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-black">{data.title}</p>
+                <p className="truncate text-xs font-black leading-tight">
+                  {data.title}
+                </p>
                 <p className={`mt-1 text-xs ${palette.muted}`}>{progress}</p>
                 <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
                   <div

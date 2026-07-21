@@ -622,6 +622,117 @@ describe('guest game progress trigger matching', () => {
     expect(result).toMatchObject({ current: 3, completed: true });
   });
 
+  it('restarts an unfinished check-in streak after a missed local day', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'CHECK_IN',
+        progressTarget: 7,
+        timeZone: 'Asia/Yekaterinburg',
+        conditions: {
+          metric: {
+            aggregation: 'streak',
+            eventTypes: ['CHECK_IN'],
+            target: 7,
+          },
+        },
+      },
+      {
+        eventType: 'CHECK_IN',
+        occurredAt: new Date('2026-07-19T10:00:00.000Z'),
+      },
+      [
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-14T10:00:00.000Z'),
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-16T10:00:00.000Z'),
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({ current: 1, completed: false });
+  });
+
+  it('shows zero for an unfinished streak that ended before yesterday', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'CHECK_IN',
+        progressTarget: 7,
+        timeZone: 'Asia/Yekaterinburg',
+        conditions: {
+          metric: {
+            aggregation: 'streak',
+            eventTypes: ['CHECK_IN'],
+            target: 7,
+          },
+        },
+      },
+      {
+        eventType: 'APP_OPEN',
+        occurredAt: new Date('2026-07-19T10:00:00.000Z'),
+      },
+      [
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-14T10:00:00.000Z'),
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-16T10:00:00.000Z'),
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({ current: 0, completed: false });
+  });
+
+  it('keeps a previously completed streak eligible for recovery', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'CHECK_IN',
+        progressTarget: 3,
+        timeZone: 'Asia/Yekaterinburg',
+        conditions: {
+          metric: {
+            aggregation: 'streak',
+            eventTypes: ['CHECK_IN'],
+            target: 3,
+          },
+        },
+      },
+      {
+        eventType: 'APP_OPEN',
+        occurredAt: new Date('2026-07-20T10:00:00.000Z'),
+      },
+      [
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-14T10:00:00.000Z'),
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-07-16T10:00:00.000Z'),
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({ current: 3, completed: true });
+  });
+
   it('keeps a daily streak across a DST transition', () => {
     const result = evaluateGuestGameProgress(
       {

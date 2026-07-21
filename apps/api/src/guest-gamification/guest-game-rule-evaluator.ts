@@ -682,7 +682,13 @@ function evaluateLedgerProgress(
   }
 
   const target = ledgerTarget(explicitTarget ?? 1, rule.progressUnit);
-  const current = ledgerProgressValue(aggregation, qualifiedFacts, rule);
+  const current = ledgerProgressValue(
+    aggregation,
+    qualifiedFacts,
+    rule,
+    target,
+    evaluatedAt,
+  );
   const unit = ledgerProgressUnit(aggregation, rule.progressUnit);
   const progress: GuestGameLedgerProgress = {
     aggregation,
@@ -1043,6 +1049,8 @@ function ledgerProgressValue(
   aggregation: GuestGameLedgerProgress['aggregation'],
   facts: GuestGameLedgerFact[],
   rule: GuestGameLedgerRule,
+  target: number,
+  evaluatedAt: Date,
 ) {
   if (aggregation === 'exists') return facts.length > 0 ? 1 : 0;
   if (aggregation === 'sum') {
@@ -1063,8 +1071,10 @@ function ledgerProgressValue(
     return new Set(facts.map((fact) => localFactDateKey(rule, fact)!)).size;
   }
   if (aggregation === 'streak') {
-    return longestLedgerDayStreak(
+    return activeLedgerDayStreak(
       facts.map((fact) => localFactDateKey(rule, fact)!),
+      target,
+      ledgerReferenceDateKey(rule, facts, evaluatedAt),
     );
   }
   return facts.length;
@@ -1456,7 +1466,49 @@ function localFactDateKey(
   }
 }
 
-function longestLedgerDayStreak(keys: string[]) {
+function ledgerReferenceDateKey(
+  rule: GuestGameLedgerRule,
+  facts: GuestGameLedgerFact[],
+  evaluatedAt: Date,
+) {
+  const latestFact = facts.reduce<GuestGameLedgerFact | null>(
+    (latest, fact) => {
+      if (!latest) return fact;
+      return (fact.happenedAt ?? fact.createdAt) >
+        (latest.happenedAt ?? latest.createdAt)
+        ? fact
+        : latest;
+    },
+    null,
+  );
+  const timeZone = latestFact ? ledgerFactTimeZone(rule, latestFact) : null;
+  return timeZone ? localDateKey(evaluatedAt, timeZone) : null;
+}
+
+function localDateKey(value: Date, timeZone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((item) => item.type === type)?.value ?? '';
+    const year = part('year');
+    const month = part('month');
+    const day = part('day');
+    return year && month && day ? `${year}-${month}-${day}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function activeLedgerDayStreak(
+  keys: string[],
+  target: number,
+  referenceDateKey: string | null,
+) {
   const days = [...new Set(keys)]
     .map((key) => Date.parse(`${key}T00:00:00Z`))
     .filter(Number.isFinite)
@@ -1470,7 +1522,24 @@ function longestLedgerDayStreak(keys: string[]) {
     longest = Math.max(longest, current);
     previous = day;
   }
-  return longest;
+
+  if (longest >= target) {
+    return longest;
+  }
+
+  const latest = days.at(-1);
+  const reference = referenceDateKey
+    ? Date.parse(`${referenceDateKey}T00:00:00Z`)
+    : Number.NaN;
+  if (
+    latest === undefined ||
+    !Number.isFinite(reference) ||
+    reference - latest > 86_400_000
+  ) {
+    return 0;
+  }
+
+  return current;
 }
 
 function isWithinTimeWindow(minutesOfDay: number, window: string) {

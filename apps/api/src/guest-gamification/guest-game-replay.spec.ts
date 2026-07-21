@@ -1221,6 +1221,7 @@ describe('ledger event parity and historical recovery', () => {
       }),
       checkIns,
       STORE_ID,
+      new Date('2026-07-03T09:30:00.000Z'),
     );
     const streak = evaluateGuestGameLedgerRule(
       rule({
@@ -1229,6 +1230,7 @@ describe('ledger event parity and historical recovery', () => {
       }),
       checkIns,
       STORE_ID,
+      new Date('2026-07-03T09:30:00.000Z'),
     );
 
     expect(distinctDays.status).toBe('BLOCKED');
@@ -1241,6 +1243,94 @@ describe('ledger event parity and historical recovery', () => {
     expect(streak.progress).toMatchObject({
       aggregation: 'streak',
       current: 2,
+      target: 3,
+    });
+  });
+
+  it('restarts the ledger streak after a missed local day', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'CHECK_IN',
+        sessionType: null,
+        progressTarget: 7,
+        progressUnit: 'day',
+        periodRules: {
+          metric: { aggregation: 'streak', target: 7 },
+        },
+      }),
+      [
+        fact('CHECK_IN_PERFORMED', '2026-07-14T10:00:00.000Z'),
+        fact('CHECK_IN_PERFORMED', '2026-07-15T10:00:00.000Z'),
+        fact('CHECK_IN_PERFORMED', '2026-07-16T10:00:00.000Z'),
+        fact('CHECK_IN_PERFORMED', '2026-07-19T10:00:00.000Z'),
+      ],
+      STORE_ID,
+      new Date('2026-07-19T10:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('BLOCKED');
+    expect(result.progress).toMatchObject({
+      aggregation: 'streak',
+      current: 1,
+      target: 7,
+    });
+  });
+
+  it('shows zero for a stale unfinished ledger streak', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'CHECK_IN',
+        sessionType: null,
+        progressTarget: 7,
+        progressUnit: 'day',
+        periodRules: {
+          metric: { aggregation: 'streak', target: 7 },
+        },
+      }),
+      [
+        fact('CHECK_IN_PERFORMED', '2026-07-14T10:00:00.000Z'),
+        fact('CHECK_IN_PERFORMED', '2026-07-15T10:00:00.000Z'),
+        fact('CHECK_IN_PERFORMED', '2026-07-16T10:00:00.000Z'),
+      ],
+      STORE_ID,
+      new Date('2026-07-19T10:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('BLOCKED');
+    expect(result.progress).toMatchObject({
+      aggregation: 'streak',
+      current: 0,
+      target: 7,
+    });
+  });
+
+  it('keeps a completed ledger streak eligible for recovery', () => {
+    const result = evaluateGuestGameLedgerRule(
+      rule({
+        type: 'MISSION',
+        triggerKind: 'CHECK_IN',
+        sessionType: null,
+        progressTarget: 3,
+        progressUnit: 'day',
+        periodRules: {
+          metric: { aggregation: 'streak', target: 3 },
+        },
+      }),
+      [
+        fact('CHECK_IN_PERFORMED', '2026-07-14T10:00:00.000Z'),
+        fact('CHECK_IN_PERFORMED', '2026-07-15T10:00:00.000Z'),
+        fact('CHECK_IN_PERFORMED', '2026-07-16T10:00:00.000Z'),
+      ],
+      STORE_ID,
+      new Date('2026-07-20T10:00:00.000Z'),
+    );
+
+    expect(result.status).toBe('MATCHED');
+    expect(result.progress).toMatchObject({
+      aggregation: 'streak',
+      current: 3,
       target: 3,
     });
   });

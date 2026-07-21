@@ -115,7 +115,13 @@ export function evaluateGuestGameProgress(
         windowDays,
       }),
   );
-  const current = progressValue(aggregation, allEvents, rule.timeZone);
+  const current = progressValue(
+    aggregation,
+    allEvents,
+    rule.timeZone,
+    resolvedTarget,
+    localDateKey(referenceEvent.occurredAt, rule.timeZone),
+  );
   const productCoverageComplete = productCoverageMatches(
     conditions,
     metric,
@@ -345,6 +351,8 @@ function progressValue(
   aggregation: GuestGameProgressAggregation,
   events: GuestGameProgressEvent[],
   timeZone?: string | null,
+  target?: number,
+  referenceDateKey?: string,
 ) {
   if (aggregation === 'exists') {
     return events.length > 0 ? 1 : 0;
@@ -375,8 +383,10 @@ function progressValue(
   }
 
   if (aggregation === 'streak') {
-    return longestDayStreak(
+    return activeDayStreak(
       events.map((event) => localDateKey(event.occurredAt, timeZone)),
+      target ?? 1,
+      referenceDateKey,
     );
   }
 
@@ -710,6 +720,8 @@ function progressAggregation(
       return 'distinctDays';
     case 'exists':
       return 'exists';
+    case 'streak':
+      return 'streak';
     default:
       return 'count';
   }
@@ -845,7 +857,11 @@ function localTimeMinutes(value: Date, timeZone?: string | null) {
   return part('hour') * 60 + part('minute');
 }
 
-function longestDayStreak(keys: string[]) {
+function activeDayStreak(
+  keys: string[],
+  target: number,
+  referenceDateKey?: string,
+) {
   const days = [...new Set(keys)]
     .map((key) => Date.parse(`${key}T00:00:00Z`))
     .filter(Number.isFinite)
@@ -859,7 +875,24 @@ function longestDayStreak(keys: string[]) {
     longest = Math.max(longest, current);
     previous = day;
   }
-  return longest;
+
+  if (longest >= target) {
+    return longest;
+  }
+
+  const latest = days.at(-1);
+  const reference = referenceDateKey
+    ? Date.parse(`${referenceDateKey}T00:00:00Z`)
+    : (latest ?? Number.NaN);
+  if (
+    latest === undefined ||
+    !Number.isFinite(reference) ||
+    reference - latest > 86_400_000
+  ) {
+    return 0;
+  }
+
+  return current;
 }
 
 function timeToMinutes(value: string | undefined) {

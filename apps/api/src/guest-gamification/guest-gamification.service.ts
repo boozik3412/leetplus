@@ -64,6 +64,7 @@ import {
   guestGameMissionDefinitionVersion,
   missionEvaluationPolicy,
   missionTaskType,
+  missionTaskTypeFromConditions,
   missionWizardTrigger,
   normalizeMissionWizardConditions,
   validateMissionWizard,
@@ -8632,6 +8633,16 @@ export class GuestGamificationService {
       });
     }
     const missionConditions = jsonRecord(mission.conditions);
+    const normalizedDefinitionConditions =
+      normalizeMissionWizardConditions(wizardDto);
+    const normalizedMetric = jsonRecord(
+      normalizedDefinitionConditions.metric as Prisma.JsonValue | null,
+    );
+    const normalizedConditions = {
+      ...missionConditions,
+      ...normalizedDefinitionConditions,
+      metric: normalizedMetric,
+    } as Prisma.InputJsonObject;
     const reward = jsonRecord(
       missionConditions.reward as Prisma.JsonValue | null,
     );
@@ -8683,11 +8694,16 @@ export class GuestGamificationService {
       where: { id },
       data: {
         status: 'ACTIVE',
+        evaluationPolicy: readiness.evaluationPolicy,
+        missionType: readiness.taskType,
+        triggerKind: missionWizardTrigger(readiness.taskType),
+        progressTarget: intValue(normalizedMetric.target) ?? 1,
+        progressUnit: nullableString(normalizedMetric.unit),
         ...(missionConditions.indefinite === true
           ? { periodFrom: activatedAt, periodTo: null }
           : {}),
         conditions: ruleMetadataWithActivatedAt(
-          mission.conditions,
+          normalizedConditions,
           activatedAt,
         ),
       },
@@ -19676,19 +19692,39 @@ function mapLootBox(row: LootBoxRow): GuestGameLootBox {
 }
 
 function mapMission(row: MissionRow): GuestGameMission {
+  const rawConditions = jsonRecord(row.conditions);
+  const effectiveTaskType = missionTaskTypeFromConditions(
+    rawConditions,
+    row.missionType,
+  );
+  const effectiveMissionType = effectiveTaskType ?? row.missionType;
+  const conditions =
+    effectiveTaskType === 'BALANCE_TOPUP'
+      ? normalizeMissionWizardConditions({
+          taskType: 'BALANCE_TOPUP',
+          conditions: rawConditions,
+        })
+      : rawConditions;
+  const metric = jsonRecord(conditions.metric as Prisma.JsonValue | null);
+  const effectiveProgressTarget =
+    positiveMissionNumber(metric.target) ?? row.progressTarget;
+  const effectiveProgressUnit = nullableString(metric.unit) ?? row.progressUnit;
+
   return {
     id: row.id,
     name: row.name,
     status: row.status as StatusValue,
-    missionType: row.missionType,
-    triggerKind: row.triggerKind,
+    missionType: effectiveMissionType,
+    triggerKind: effectiveTaskType
+      ? missionWizardTrigger(effectiveTaskType)
+      : row.triggerKind,
     rewardType: row.rewardType,
     rewardAmount: numberOrNull(row.rewardAmount),
     rewardLabel: row.rewardLabel,
     xpReward: row.xpReward,
-    progressTarget: row.progressTarget,
-    progressUnit: row.progressUnit,
-    conditions: row.conditions,
+    progressTarget: effectiveProgressTarget,
+    progressUnit: effectiveProgressUnit,
+    conditions: conditions as Prisma.JsonValue,
     storeIds: stringArray(row.storeIds),
     periodFrom: iso(row.periodFrom),
     periodTo: iso(row.periodTo),

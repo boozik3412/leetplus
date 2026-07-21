@@ -4857,6 +4857,46 @@ describe('GuestGamificationService', () => {
   });
 
   describe('mission wizard activation', () => {
+    it('projects the nested top-up definition over stale display columns', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        missionRow({
+          missionType: 'PACKAGE_OR_SUBSCRIPTION',
+          triggerKind: 'SESSION_START',
+          progressTarget: 10,
+          conditions: {
+            schemaVersion: 2,
+            taskType: 'BALANCE_TOPUP',
+            sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+            metric: {
+              eventTypes: ['BALANCE_TOPUP'],
+              topupMode: 'SINGLE',
+              amountComparison: 'AT_LEAST',
+              amount: 10,
+              minSpendAmount: 500,
+              target: 10,
+            },
+          },
+        }),
+      ]);
+
+      const [mission] = await service.getMissions(user);
+
+      expect(mission).toMatchObject({
+        missionType: 'BALANCE_TOPUP',
+        triggerKind: 'BALANCE_TOPUP',
+        progressTarget: 1,
+        conditions: {
+          taskType: 'BALANCE_TOPUP',
+          sessionType: 'ANY',
+          metric: {
+            target: 1,
+            minSpendAmount: 500,
+          },
+        },
+      });
+    });
+
     it('loads a v2 mission into the wizard without changing its active state', async () => {
       const { service, prisma } = createService();
       const active = missionRow({ status: 'ACTIVE' });
@@ -4892,6 +4932,9 @@ describe('GuestGamificationService', () => {
         prisma.guestGameMission.update.mock.calls[0][0].data;
 
       expect(activationData.status).toBe('ACTIVE');
+      expect(activationData.missionType).toBe('APP_OPEN');
+      expect(activationData.triggerKind).toBe('APP_OPEN');
+      expect(activationData.progressTarget).toBe(1);
       expect(activationData.periodFrom).toBeInstanceOf(Date);
       expect(activationData.periodTo).toBeNull();
       expect(activationData.conditions).toMatchObject({

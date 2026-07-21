@@ -1,5 +1,6 @@
 import {
   missionEvaluationPolicy,
+  missionTaskTypeFromConditions,
   normalizeMissionWizardConditions,
   validateMissionWizard,
 } from './guest-game-mission-contract';
@@ -123,6 +124,22 @@ describe('guest mission wizard contract', () => {
         exactSpendAmount: 500,
       },
     });
+  });
+
+  it('uses the nested task marker when a denormalized mission type is stale', () => {
+    expect(
+      missionTaskTypeFromConditions(
+        {
+          taskType: 'BALANCE_TOPUP',
+          metric: {
+            eventTypes: ['BALANCE_TOPUP'],
+            topupMode: 'SINGLE',
+            target: 1,
+          },
+        },
+        'PACKAGE_OR_SUBSCRIPTION',
+      ),
+    ).toBe('BALANCE_TOPUP');
   });
 
   it('keeps the configured single top-up threshold when a legacy amount is stale', () => {

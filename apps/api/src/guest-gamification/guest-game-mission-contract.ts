@@ -57,6 +57,50 @@ export function missionTaskType(value: unknown): GuestGameMissionTaskType {
   return normalized as GuestGameMissionTaskType;
 }
 
+/**
+ * Resolve the task type from the persisted v2 condition contract.
+ *
+ * Mission rows historically kept a denormalized `missionType` column.  The
+ * wizard definition is the source of truth, so readers must prefer the
+ * nested task type/event marker when the legacy column is stale.
+ */
+export function missionTaskTypeFromConditions(
+  conditions: unknown,
+  fallback?: unknown,
+): GuestGameMissionTaskType | null {
+  const source = objectValue(conditions);
+  const metric = objectValue(source.metric);
+  const candidates = [
+    source.taskType,
+    ...stringArray(source.eventTypes),
+    ...stringArray(metric.eventTypes),
+    fallback,
+  ];
+
+  const aliases: Record<string, GuestGameMissionTaskType> = {
+    APP_OPEN: 'APP_OPEN',
+    PLAY_TIME: 'PLAY_TIME',
+    PLAY_HOUR: 'PLAY_TIME',
+    SESSION_STOP: 'PLAY_TIME',
+    PRODUCT_PURCHASE: 'PRODUCT_PURCHASE',
+    PURCHASE: 'PRODUCT_PURCHASE',
+    BAR_PURCHASE: 'PRODUCT_PURCHASE',
+    BALANCE_TOPUP: 'BALANCE_TOPUP',
+    BALANCE_TOP_UP: 'BALANCE_TOPUP',
+    CHECK_IN: 'CHECK_IN',
+    CHECKIN: 'CHECK_IN',
+  };
+
+  for (const candidate of candidates) {
+    const normalized = stringValue(candidate)?.toUpperCase();
+    if (normalized && aliases[normalized]) {
+      return aliases[normalized];
+    }
+  }
+
+  return null;
+}
+
 export function missionEvaluationPolicy(
   taskType: GuestGameMissionTaskType,
 ): GuestGameMissionEvaluationPolicy {
@@ -185,6 +229,7 @@ export function normalizeMissionWizardConditions(
         : topupMode === 'SINGLE'
           ? 'exists'
           : 'count';
+    normalizedMetric.unit = stringValue(metric.unit) ?? 'пополнений';
     normalizedMetric.target =
       topupMode === 'PERIOD_TOTAL'
         ? (numberValue(metric.totalAmount) ?? numberValue(metric.target) ?? 1)
@@ -230,7 +275,10 @@ export function normalizeMissionWizardConditions(
       stringValue(dto.visibility)?.toUpperCase() === 'HIDDEN'
         ? 'HIDDEN'
         : 'VISIBLE',
-    sessionType: taskType === 'APP_OPEN' ? 'ANY' : sessionType,
+    sessionType:
+      taskType === 'APP_OPEN' || taskType === 'BALANCE_TOPUP'
+        ? 'ANY'
+        : sessionType,
     ...(taskType === 'PRODUCT_PURCHASE'
       ? {
           purchaseSource,

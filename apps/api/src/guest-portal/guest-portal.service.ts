@@ -41,6 +41,10 @@ import {
   guestGameTriggerMatches,
   type GuestGameProgressEvent,
 } from '../guest-gamification/guest-game-progress';
+import {
+  missionTaskTypeFromConditions,
+  normalizeMissionWizardConditions,
+} from '../guest-gamification/guest-game-mission-contract';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestBalancesPortalResult,
@@ -14709,11 +14713,33 @@ function mapMission(
 ): GuestPortalMission {
   const progressCurrent = progress?.current ?? 0;
   const questSteps = missionQuestSteps(row.conditions, progressCurrent);
-  const conditions = jsonRecord(row.conditions);
+  const rawConditions = jsonRecord(row.conditions);
+  const effectiveMissionType =
+    missionTaskTypeFromConditions(rawConditions, row.missionType) ??
+    row.missionType;
+  const conditions =
+    effectiveMissionType === 'BALANCE_TOPUP'
+      ? normalizeMissionWizardConditions({
+          taskType: 'BALANCE_TOPUP',
+          conditions: rawConditions,
+        })
+      : rawConditions;
   const metric = jsonRecord(conditions.metric);
+  const effectiveTriggerKind =
+    effectiveMissionType === 'BALANCE_TOPUP'
+      ? 'BALANCE_TOPUP'
+      : row.triggerKind;
+  const effectiveSessionType =
+    effectiveMissionType === 'BALANCE_TOPUP'
+      ? 'ANY'
+      : stringField(conditions.sessionType);
+  const effectiveProgressUnit = stringField(metric.unit) ?? row.progressUnit;
+  const normalizedMetricTarget = numberField(metric.target);
   const progressTarget = questSteps.length
     ? (questSteps[questSteps.length - 1]?.target ?? questSteps.length)
-    : guestPortalMissionProgressTarget(row);
+    : normalizedMetricTarget && normalizedMetricTarget > 0
+      ? normalizedMetricTarget
+      : guestPortalMissionProgressTarget(row);
   const progressPercent = questSteps.length
     ? percent(progressCurrent, progressTarget ?? questSteps.length)
     : (progress?.percent ?? 0);
@@ -14728,14 +14754,14 @@ function mapMission(
   return {
     id: row.id,
     name: row.name,
-    triggerKind: row.triggerKind,
-    sessionType: stringField(conditions.sessionType),
-    missionType: row.missionType,
+    triggerKind: effectiveTriggerKind,
+    sessionType: effectiveSessionType,
+    missionType: effectiveMissionType,
     rewardLabel: row.rewardLabel,
     xpReward: row.xpReward,
     progressCurrent,
     progressTarget,
-    progressUnit: guestPortalMissionProgressUnitLabel(row.progressUnit),
+    progressUnit: guestPortalMissionProgressUnitLabel(effectiveProgressUnit),
     progressPercent,
     questSteps,
     periodTo: iso(row.periodTo),
@@ -14753,15 +14779,15 @@ function mapMission(
     theme: guestPortalMissionTheme(presentation.theme),
     coverUrl: guestPortalMissionCoverUrl(presentation.coverUrl),
     conditionLabel: guestPortalMissionConditionLabel(
-      row.missionType,
+      effectiveMissionType,
       metric,
-      stringField(conditions.sessionType),
+      effectiveSessionType,
     ),
     productNames,
     productMode:
       stringField(metric.productMatch)?.toUpperCase() === 'ALL'
         ? 'ALL'
-        : row.missionType === 'PRODUCT_PURCHASE'
+        : effectiveMissionType === 'PRODUCT_PURCHASE'
           ? 'ANY'
           : null,
     minimumAmount:

@@ -70,6 +70,11 @@ function createPrismaMock() {
       findMany: jest.fn(),
       updateMany: jest.fn(),
     },
+    guestGameCompletionNotification: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
     guestGameVisualDraft: {
       findFirst: jest.fn(),
     },
@@ -237,6 +242,11 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameProfile.update.mockResolvedValue(null);
   prisma.guestGameReward.count.mockResolvedValue(0);
   prisma.guestGameReward.findMany.mockResolvedValue([]);
+  prisma.guestGameCompletionNotification.findFirst.mockResolvedValue(null);
+  prisma.guestGameCompletionNotification.findMany.mockResolvedValue([]);
+  prisma.guestGameCompletionNotification.updateMany.mockResolvedValue({
+    count: 0,
+  });
   prisma.guestGameVisualDraft.findFirst.mockResolvedValue(null);
   prisma.guestGameLootBox.findFirst.mockResolvedValue(null);
   prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue(null);
@@ -1168,6 +1178,53 @@ describe('GuestPortalService', () => {
       prisma.guestGameEvent.findFirst.mockResolvedValueOnce({
         occurredAt: new Date('2026-06-15T09:30:00.000Z'),
       });
+      prisma.guestGameCompletionNotification.findMany.mockResolvedValue([
+        {
+          id: 'completion-1',
+          kind: 'MISSION',
+          createdAt: new Date('2026-06-15T09:45:00.000Z'),
+          reward: {
+            status: 'APPROVED',
+            rewardLabel: '100 бонусов',
+            qualifiedAt: new Date('2026-06-15T09:45:00.000Z'),
+            expiresAt: null,
+            evidence: { missionId: 'mission-2' },
+            mission: { id: 'mission-2', name: 'Visit twice' },
+            season: null,
+          },
+        },
+        {
+          id: 'completion-2',
+          kind: 'BATTLE_PASS',
+          createdAt: new Date('2026-06-15T10:00:00.000Z'),
+          reward: {
+            status: 'APPROVED',
+            rewardLabel: '50 бонусов',
+            qualifiedAt: new Date('2026-06-15T10:00:00.000Z'),
+            expiresAt: null,
+            evidence: { rule: { battlePassLevel: 1 } },
+            mission: null,
+            season: {
+              id: 'season-1',
+              name: 'Тестовый сезон',
+              levels: [
+                {
+                  level: 1,
+                  title: 'Старт сезона',
+                  condition: 'Войти в игровой модуль',
+                  freeReward: '50 бонусов',
+                },
+                {
+                  level: 2,
+                  title: 'Камбэк',
+                  condition: 'Начать игровую сессию',
+                  freeReward: '100 бонусов',
+                },
+              ],
+            },
+          },
+        },
+      ]);
 
       const summary = await service.getGameSummary('Bearer guest-token');
 
@@ -1223,6 +1280,29 @@ describe('GuestPortalService', () => {
             summary: portal.gamification.bonusHistory.summary,
             items: portal.gamification.bonusHistory.items,
           },
+        },
+        completionNotifications: {
+          pending: [
+            expect.objectContaining({
+              id: 'completion-1',
+              kind: 'MISSION',
+              sourceId: 'mission-2',
+              title: 'Visit twice',
+              rewardLabel: '100 бонусов',
+              statusLabel: 'Награда добавлена в историю',
+            }),
+            expect.objectContaining({
+              id: 'completion-2',
+              kind: 'BATTLE_PASS',
+              sourceId: 'season-1',
+              completedLevel: 1,
+              completedTitle: 'Старт сезона',
+              nextLevel: 2,
+              nextTitle: 'Камбэк',
+              nextCondition: 'Начать игровую сессию',
+              rewardLabel: '50 бонусов',
+            }),
+          ],
         },
         lootBoxes: {
           total: 1,
@@ -1856,6 +1936,47 @@ describe('GuestPortalService', () => {
         idempotent: false,
         createdRewards: 1,
         queuedRewardAmount: 200,
+      });
+    });
+
+    it('acknowledges a completion notification only for the current profile', async () => {
+      const { prisma, service } = createService();
+      jest.spyOn(service as any, 'verifyGuestToken').mockResolvedValue({
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+      });
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValue({ id: 'guest-1' });
+      jest
+        .spyOn(service as any, 'findProfile')
+        .mockResolvedValue({ id: 'profile-1' });
+      prisma.guestGameCompletionNotification.findFirst.mockResolvedValue({
+        id: 'completion-1',
+        acknowledgedAt: null,
+      });
+
+      const result = await service.acknowledgeCompletionNotification(
+        'Bearer guest-token',
+        'completion-1',
+      );
+
+      expect(result).toMatchObject({
+        id: 'completion-1',
+        acknowledged: true,
+      });
+      expect(
+        prisma.guestGameCompletionNotification.updateMany,
+      ).toHaveBeenCalledWith({
+        where: {
+          id: 'completion-1',
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          acknowledgedAt: null,
+        },
+        data: { acknowledgedAt: expect.any(Date) },
       });
     });
 

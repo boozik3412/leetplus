@@ -411,12 +411,14 @@ type CompletionDialogQueueItem =
       key: string;
       kind: "QUEST";
       occurredAt: string;
+      notificationId?: string;
       completion: QuestCompletionDialog;
     }
   | {
       key: string;
       kind: "BATTLE_PASS";
       occurredAt: string;
+      notificationId?: string;
       completion: BattlePassLevelCompletionDialog;
     };
 type UnavailableLootboxMessage = string | null;
@@ -770,6 +772,11 @@ function ReadyGameView({
   const [completionDialogQueue, setCompletionDialogQueue] = useState<
     CompletionDialogQueueItem[]
   >([]);
+  const [completionDialogAcknowledging, setCompletionDialogAcknowledging] =
+    useState(false);
+  const [completionDialogError, setCompletionDialogError] = useState<
+    string | null
+  >(null);
   const homeBanners = buildHomeBanners(
     summary,
     primaryAction,
@@ -944,12 +951,15 @@ function ReadyGameView({
 
   const enqueueCompletionDialogs = useCallback(
     (items: CompletionDialogQueueItem[]) => {
-      const newItems = items.filter(
-        (item) => !seenCompletionDialogKeysRef.current.has(item.key),
-      );
+      const newItems: CompletionDialogQueueItem[] = [];
 
-      newItems.forEach((item) => {
+      items.forEach((item) => {
+        if (seenCompletionDialogKeysRef.current.has(item.key)) {
+          return;
+        }
+
         seenCompletionDialogKeysRef.current.add(item.key);
+        newItems.push(item);
       });
 
       if (newItems.length > 0) {
@@ -961,6 +971,12 @@ function ReadyGameView({
     },
     [setCompletionDialogQueue],
   );
+
+  useEffect(() => {
+    enqueueCompletionDialogs(
+      completionDialogsFromPendingNotifications(summary),
+    );
+  }, [enqueueCompletionDialogs, summary]);
 
   useEffect(() => {
     const previousSummary = latestSummaryRef.current;
@@ -981,6 +997,7 @@ function ReadyGameView({
   ) {
     const previousSummary = latestSummaryRef.current;
     const completions = sortCompletionDialogs([
+      ...completionDialogsFromPendingNotifications(nextSummary),
       ...additionalCompletions,
       ...findNewCompletionDialogs(previousSummary, nextSummary),
     ]);
@@ -993,6 +1010,48 @@ function ReadyGameView({
 
   function closeActiveCompletionDialog() {
     setCompletionDialogQueue((currentQueue) => currentQueue.slice(1));
+    setCompletionDialogError(null);
+  }
+
+  async function acknowledgeActiveCompletionDialog(openRewards: boolean) {
+    if (!activeCompletionDialog || completionDialogAcknowledging) {
+      return;
+    }
+
+    if (
+      activeCompletionDialog.kind === "CHECK_IN" ||
+      !activeCompletionDialog.notificationId
+    ) {
+      closeActiveCompletionDialog();
+
+      if (openRewards) {
+        router.push("/game/rewards");
+      }
+      return;
+    }
+
+    setCompletionDialogAcknowledging(true);
+    setCompletionDialogError(null);
+
+    try {
+      await acknowledgeGameCompletionNotification(
+        activeCompletionDialog.notificationId,
+      );
+      closeActiveCompletionDialog();
+
+      if (openRewards) {
+        router.push("/game/rewards");
+      }
+    } catch (error) {
+      setCompletionDialogError(
+        getErrorMessage(
+          error,
+          "Не удалось сохранить подтверждение. Попробуйте ещё раз.",
+        ),
+      );
+    } finally {
+      setCompletionDialogAcknowledging(false);
+    }
   }
 
   async function refreshGameSummary({
@@ -1722,7 +1781,9 @@ function ReadyGameView({
       {activeCompletionDialog?.kind === "BATTLE_PASS" ? (
         <BattlePassLevelCompletionModal
           completion={activeCompletionDialog.completion}
-          onClose={closeActiveCompletionDialog}
+          acknowledging={completionDialogAcknowledging}
+          errorMessage={completionDialogError}
+          onAcknowledge={acknowledgeActiveCompletionDialog}
         />
       ) : null}
 
@@ -1736,7 +1797,9 @@ function ReadyGameView({
       {activeCompletionDialog?.kind === "QUEST" ? (
         <QuestCompletionModal
           completion={activeCompletionDialog.completion}
-          onClose={closeActiveCompletionDialog}
+          acknowledging={completionDialogAcknowledging}
+          errorMessage={completionDialogError}
+          onAcknowledge={acknowledgeActiveCompletionDialog}
         />
       ) : null}
     </div>
@@ -1829,10 +1892,14 @@ function LootboxUnavailableModal({
 
 function QuestCompletionModal({
   completion,
-  onClose,
+  acknowledging,
+  errorMessage,
+  onAcknowledge,
 }: {
   completion: QuestCompletionDialog;
-  onClose: () => void;
+  acknowledging: boolean;
+  errorMessage: string | null;
+  onAcknowledge: (openRewards: boolean) => void;
 }) {
   return (
     <div
@@ -1842,14 +1909,6 @@ function QuestCompletionModal({
       aria-labelledby="questCompleteTitle"
     >
       <div className="lp-quest-complete-dialog">
-        <button
-          type="button"
-          className="lp-quest-complete-close"
-          aria-label="Закрыть поздравление"
-          onClick={onClose}
-        >
-          ×
-        </button>
         <span className="lp-quest-complete-kicker">Квест выполнен</span>
         <h3 id="questCompleteTitle">{completion.title}</h3>
         <div className="lp-quest-complete-reward">
@@ -1860,13 +1919,29 @@ function QuestCompletionModal({
           <span>{completion.statusLabel}</span>
           <span>{formatDate(completion.receivedAt)}</span>
         </div>
-        <button
-          type="button"
-          className="lp-quest-complete-action"
-          onClick={onClose}
-        >
-          Отлично
-        </button>
+        {errorMessage ? (
+          <p className="lp-completion-ack-error" role="alert">
+            {errorMessage}
+          </p>
+        ) : null}
+        <div className="lp-completion-ack-actions">
+          <button
+            type="button"
+            className="lp-completion-ack-secondary"
+            onClick={() => onAcknowledge(true)}
+            disabled={acknowledging}
+          >
+            Посмотреть награды
+          </button>
+          <button
+            type="button"
+            className="lp-quest-complete-action"
+            onClick={() => onAcknowledge(false)}
+            disabled={acknowledging}
+          >
+            {acknowledging ? "Сохраняем..." : "Отлично"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -3119,23 +3194,15 @@ function formatSeasonRewardValue(value: number, unit: string) {
 
 function BattlePassLevelCompletionModal({
   completion,
-  onClose,
+  acknowledging,
+  errorMessage,
+  onAcknowledge,
 }: {
   completion: BattlePassLevelCompletionDialog;
-  onClose: () => void;
+  acknowledging: boolean;
+  errorMessage: string | null;
+  onAcknowledge: (openRewards: boolean) => void;
 }) {
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const hasNextLevel = completion.nextLevel !== null;
 
   return (
@@ -3144,22 +3211,8 @@ function BattlePassLevelCompletionModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="battlePassLevelCompleteTitle"
-      onMouseDown={(event) => {
-        if (event.currentTarget === event.target) {
-          onClose();
-        }
-      }}
     >
       <div className="lp-quest-complete-dialog lp-battlepass-detail-dialog lp-battlepass-level-complete-dialog">
-        <button
-          type="button"
-          className="lp-quest-complete-close"
-          aria-label="Закрыть поздравление"
-          onClick={onClose}
-        >
-          ×
-        </button>
-
         <span className="lp-quest-complete-kicker">Уровень пройден</span>
         <span className="lp-battlepass-level-complete-mark" aria-hidden="true">
           {formatNumber(completion.completedLevel)}
@@ -3199,14 +3252,33 @@ function BattlePassLevelCompletionModal({
             </div>
           )}
         </div>
-
-        <button
-          type="button"
-          className="lp-quest-complete-action"
-          onClick={onClose}
-        >
-          {hasNextLevel ? "К следующему уровню" : "Отлично"}
-        </button>
+        {errorMessage ? (
+          <p className="lp-completion-ack-error" role="alert">
+            {errorMessage}
+          </p>
+        ) : null}
+        <div className="lp-completion-ack-actions">
+          <button
+            type="button"
+            className="lp-completion-ack-secondary"
+            onClick={() => onAcknowledge(true)}
+            disabled={acknowledging}
+          >
+            Посмотреть награды
+          </button>
+          <button
+            type="button"
+            className="lp-quest-complete-action"
+            onClick={() => onAcknowledge(false)}
+            disabled={acknowledging}
+          >
+            {acknowledging
+              ? "Сохраняем..."
+              : hasNextLevel
+                ? "К следующему уровню"
+                : "Отлично"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -5186,6 +5258,55 @@ function isAlreadyCountedCheckInMessage(message: string) {
   return (
     normalizedMessage.includes("чекин") &&
     normalizedMessage.includes("уже был сделан сегодня")
+  );
+}
+
+function completionDialogsFromPendingNotifications(
+  summary: GuestPortalGameSummary,
+): CompletionDialogQueueItem[] {
+  return sortCompletionDialogs(
+    (
+      summary.completionNotifications?.pending ?? []
+    ).flatMap<CompletionDialogQueueItem>((notification) => {
+      if (notification.kind === "MISSION") {
+        return [
+          {
+            key: `quest:${notification.sourceId}:${notification.occurredAt}`,
+            kind: "QUEST" as const,
+            occurredAt: notification.occurredAt,
+            notificationId: notification.id,
+            completion: {
+              id: notification.sourceId,
+              title: notification.title,
+              rewardLabel: notification.rewardLabel,
+              statusLabel: notification.statusLabel,
+              receivedAt: notification.occurredAt,
+            },
+          },
+        ];
+      }
+
+      const completedLevel = notification.completedLevel ?? 1;
+
+      return [
+        {
+          key: `battle-pass:${notification.sourceId}:${completedLevel}`,
+          kind: "BATTLE_PASS" as const,
+          occurredAt: notification.occurredAt,
+          notificationId: notification.id,
+          completion: {
+            seasonId: notification.seasonId ?? notification.sourceId,
+            seasonName: notification.seasonName ?? notification.title,
+            completedLevel,
+            completedTitle: notification.completedTitle ?? "",
+            rewardLabel: notification.rewardLabel,
+            nextLevel: notification.nextLevel,
+            nextTitle: notification.nextTitle,
+            nextCondition: notification.nextCondition,
+          },
+        },
+      ];
+    }),
   );
 }
 
@@ -9499,6 +9620,51 @@ const clubHomeCss = `
   cursor: pointer;
 }
 
+.lp-quest-complete-action:disabled,
+.lp-completion-ack-secondary:disabled {
+  cursor: progress;
+  opacity: 0.58;
+}
+
+.lp-completion-ack-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.lp-completion-ack-actions .lp-quest-complete-action {
+  width: 100%;
+}
+
+.lp-completion-ack-secondary {
+  min-height: 42px;
+  border: 1px solid rgba(131, 228, 236, 0.34);
+  border-radius: 7px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.06);
+  font-size: 12px;
+  font-weight: 860;
+  cursor: pointer;
+}
+
+.lp-completion-ack-secondary:hover,
+.lp-completion-ack-secondary:focus-visible {
+  border-color: rgba(131, 228, 236, 0.62);
+  color: var(--text);
+  outline: none;
+}
+
+.lp-completion-ack-error {
+  margin: 0;
+  border: 1px solid rgba(255, 122, 122, 0.26);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #ffd2d2;
+  background: rgba(255, 122, 122, 0.08);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .lp-lootbox-unavailable-dialog,
 .lp-quest-details-dialog {
   width: min(500px, 100%);
@@ -13779,6 +13945,29 @@ async function loadGameSummary() {
   debugGuestGame("api-summary-data", debugSummarySnapshot(summary));
 
   return summary;
+}
+
+async function acknowledgeGameCompletionNotification(notificationId: string) {
+  const response = await fetch(
+    `/api/guest-portal/session/completion-notifications/${encodeURIComponent(notificationId)}/acknowledge`,
+    {
+      method: "POST",
+      cache: "no-store",
+    },
+  );
+
+  if (response.status === 401) {
+    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(
+        response,
+        "Не удалось сохранить подтверждение просмотра.",
+      ),
+    );
+  }
 }
 
 async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {

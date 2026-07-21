@@ -11255,6 +11255,33 @@ export class GuestGamificationService {
         data,
         include: rewardInclude,
       });
+      const completionNotificationKind =
+        created.status === 'CANCELED' || !created.profileId
+          ? null
+          : created.missionId
+            ? 'MISSION'
+            : created.seasonId
+              ? 'BATTLE_PASS'
+              : null;
+      const completionProfileId = created.profileId;
+
+      if (completionNotificationKind && completionProfileId) {
+        await tx.guestGameCompletionNotification.upsert({
+          where: {
+            tenantId_rewardId: {
+              tenantId: created.tenantId,
+              rewardId: created.id,
+            },
+          },
+          create: {
+            tenantId: created.tenantId,
+            profileId: completionProfileId,
+            rewardId: created.id,
+            kind: completionNotificationKind,
+          },
+          update: {},
+        });
+      }
       await tx.guestGameEvent.create({
         data: {
           tenantId: user.tenantId,
@@ -29651,6 +29678,9 @@ function buildVisualEditorPreviewSummary(
         },
         items: [],
       },
+    },
+    completionNotifications: {
+      pending: [],
     },
     promoCards: {
       total: payload.promoCards.length,

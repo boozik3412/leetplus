@@ -599,6 +599,23 @@ export type GuestPortalGameJourney = {
   }>;
 };
 
+export type GuestPortalCompletionNotification = {
+  id: string;
+  kind: "MISSION" | "BATTLE_PASS";
+  sourceId: string;
+  occurredAt: string;
+  title: string;
+  rewardLabel: string;
+  statusLabel: string;
+  seasonId: string | null;
+  seasonName: string | null;
+  completedLevel: number | null;
+  completedTitle: string | null;
+  nextLevel: number | null;
+  nextTitle: string | null;
+  nextCondition: string | null;
+};
+
 export type GuestPortalGameSummary = {
   generatedAt: string;
   tenant: GuestPortalPayload["tenant"];
@@ -661,6 +678,9 @@ export type GuestPortalGameSummary = {
       summary: GuestPortalPayload["gamification"]["bonusHistory"]["summary"];
       items: GuestPortalPayload["gamification"]["bonusHistory"]["items"];
     };
+  };
+  completionNotifications: {
+    pending: GuestPortalCompletionNotification[];
   };
   lootBoxes: {
     total: number;

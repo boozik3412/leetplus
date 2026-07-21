@@ -114,6 +114,9 @@ function createPrismaMock() {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    guestGameCompletionNotification: {
+      upsert: jest.fn().mockResolvedValue({}),
+    },
     guestGameDelivery: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -1492,6 +1495,112 @@ describe('GuestGamificationService', () => {
   });
 
   describe('reward approval chat', () => {
+    it('persists a guest acknowledgement notification with a mission reward', async () => {
+      const { service, prisma } = createService();
+      const missionReward = rewardRow({
+        id: 'reward-mission-completion',
+        missionId: 'mission-1',
+        seasonId: null,
+        profileId: 'profile-1',
+        status: 'APPROVED',
+      });
+      jest.spyOn(service as any, 'buildRewardData').mockResolvedValue({
+        tenantId: user.tenantId,
+        profileId: 'profile-1',
+        missionId: 'mission-1',
+        seasonId: null,
+        status: 'APPROVED',
+        rewardType: 'BONUS',
+        rewardLabel: '100 bonus points',
+        rewardAmount: 100,
+      });
+      jest
+        .spyOn(service as any, 'reconcileCreatedRewardSideEffects')
+        .mockResolvedValue(undefined);
+      prisma.guestGameReward.create.mockResolvedValue(missionReward);
+      prisma.guestGameEvent.create.mockResolvedValue({ id: 'event-1' });
+
+      await service.createReward(user, {
+        profileId: 'profile-1',
+        missionId: 'mission-1',
+        rewardType: 'BONUS',
+        rewardLabel: '100 bonus points',
+        rewardAmount: 100,
+        status: 'APPROVED',
+      });
+
+      expect(
+        prisma.guestGameCompletionNotification.upsert,
+      ).toHaveBeenCalledWith({
+        where: {
+          tenantId_rewardId: {
+            tenantId: user.tenantId,
+            rewardId: 'reward-mission-completion',
+          },
+        },
+        create: {
+          tenantId: user.tenantId,
+          profileId: 'profile-1',
+          rewardId: 'reward-mission-completion',
+          kind: 'MISSION',
+        },
+        update: {},
+      });
+    });
+
+    it('persists a guest acknowledgement notification with a Battle Pass reward', async () => {
+      const { service, prisma } = createService();
+      const seasonReward = rewardRow({
+        id: 'reward-battle-pass-completion',
+        missionId: null,
+        seasonId: 'season-1',
+        profileId: 'profile-1',
+        status: 'APPROVED',
+      });
+      jest.spyOn(service as any, 'buildRewardData').mockResolvedValue({
+        tenantId: user.tenantId,
+        profileId: 'profile-1',
+        missionId: null,
+        seasonId: 'season-1',
+        status: 'APPROVED',
+        rewardType: 'BONUS',
+        rewardLabel: 'Награда первого уровня',
+        rewardAmount: 50,
+      });
+      jest
+        .spyOn(service as any, 'reconcileCreatedRewardSideEffects')
+        .mockResolvedValue(undefined);
+      prisma.guestGameReward.create.mockResolvedValue(seasonReward);
+      prisma.guestGameEvent.create.mockResolvedValue({ id: 'event-1' });
+
+      await service.createReward(user, {
+        profileId: 'profile-1',
+        seasonId: 'season-1',
+        rewardType: 'BONUS',
+        rewardLabel: 'Награда первого уровня',
+        rewardAmount: 50,
+        status: 'APPROVED',
+      });
+
+      expect(
+        prisma.guestGameCompletionNotification.upsert,
+      ).toHaveBeenCalledWith({
+        where: {
+          tenantId_rewardId: {
+            tenantId: user.tenantId,
+            rewardId: 'reward-battle-pass-completion',
+          },
+        },
+        create: {
+          tenantId: user.tenantId,
+          profileId: 'profile-1',
+          rewardId: 'reward-battle-pass-completion',
+          kind: 'BATTLE_PASS',
+        },
+        update: {},
+      });
+    });
+
     it('rolls back reward qualification when the transactional event write fails', async () => {
       const prisma = createPrismaMock();
       const staffTeamChatService = {

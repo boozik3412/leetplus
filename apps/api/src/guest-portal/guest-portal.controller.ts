@@ -12,6 +12,7 @@ import {
   type GuestPortalCheckInResponse,
   type GuestPortalClubSelectResponse,
   type GuestPortalCommunicationPreferenceResponse,
+  type GuestPortalCompletionNotificationAcknowledgeResponse,
   type GuestPortalGamificationClubDirectory,
   type GuestPortalGameSummary,
   type GuestPortalIncomingCallLast4StartResponse,
@@ -172,6 +173,17 @@ export class GuestPortalController {
     @Body() dto: { surface?: unknown },
   ): Promise<GuestPortalAppOpenResponse> {
     return this.guestPortalService.recordAppOpen(authorization, dto);
+  }
+
+  @Post('session/completion-notifications/:notificationId/acknowledge')
+  acknowledgeCompletionNotification(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('notificationId') notificationId: string,
+  ): Promise<GuestPortalCompletionNotificationAcknowledgeResponse> {
+    return this.guestPortalService.acknowledgeCompletionNotification(
+      authorization,
+      notificationId,
+    );
   }
 
   @Post('session/profile')

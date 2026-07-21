@@ -190,6 +190,7 @@ model Tenant {
   guestGameMissions                    GuestGameMission[]
   guestGameSeasons                     GuestGameSeason[]
   guestGameRewards                     GuestGameReward[]
+  guestGameCompletionNotifications     GuestGameCompletionNotification[]
   guestGameDeliveries                  GuestGameDelivery[]
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
   guestGameEvents                      GuestGameEvent[]
@@ -1659,6 +1660,7 @@ model GuestGameProfile {
   lead                     GuestCrmLead?                    @relation(fields: [leadId], references: [id], onDelete: SetNull)
   createdByUser            User?                            @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards                  GuestGameReward[]
+  completionNotifications  GuestGameCompletionNotification[]
   bonusLedgerEntries       GuestBonusLedgerEntry[]
   deliveries               GuestGameDelivery[]
   events                   GuestGameEvent[]
@@ -1900,6 +1902,7 @@ model GuestGameReward {
   entitlements       GuestGameEntitlement[]
   rewardIntents      GuestGameRewardIntent[]
   rewardEffects      GuestGameRewardEffect[]
+  completionNotifications GuestGameCompletionNotification[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
   @@unique([tenantId, idempotencyKey], map: "guest_game_reward_idempotency_uidx")
@@ -1913,6 +1916,24 @@ model GuestGameReward {
   @@index([storeId], map: "guest_game_reward_store_idx")
   @@index([createdByUserId], map: "guest_game_reward_created_by_idx")
   @@index([approvedByUserId], map: "guest_game_reward_approved_by_idx")
+}
+
+model GuestGameCompletionNotification {
+  id             String    @id @default(uuid())
+  tenantId       String
+  profileId      String
+  rewardId       String
+  kind           String
+  acknowledgedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id])
+  profile GuestGameProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  reward  GuestGameReward  @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, rewardId], map: "guest_game_completion_notification_reward_uidx")
+  @@index([tenantId, profileId, acknowledgedAt, createdAt], map: "guest_game_completion_notification_pending_idx")
 }
 
 model GuestGameDelivery {

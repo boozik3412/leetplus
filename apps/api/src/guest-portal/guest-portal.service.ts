@@ -853,6 +853,29 @@ export type GuestPortalPromoCard = {
   periodTo: string | null;
 };
 
+export type GuestPortalCompletionNotification = {
+  id: string;
+  kind: 'MISSION' | 'BATTLE_PASS';
+  sourceId: string;
+  occurredAt: string;
+  title: string;
+  rewardLabel: string;
+  statusLabel: string;
+  seasonId: string | null;
+  seasonName: string | null;
+  completedLevel: number | null;
+  completedTitle: string | null;
+  nextLevel: number | null;
+  nextTitle: string | null;
+  nextCondition: string | null;
+};
+
+export type GuestPortalCompletionNotificationAcknowledgeResponse = {
+  id: string;
+  acknowledged: true;
+  acknowledgedAt: string;
+};
+
 export type GuestPortalGameSummary = {
   generatedAt: string;
   tenant: GuestPortalPayload['tenant'];
@@ -909,6 +932,9 @@ export type GuestPortalGameSummary = {
       summary: GuestPortalBonusHistory['summary'];
       items: GuestPortalBonusHistoryItem[];
     };
+  };
+  completionNotifications: {
+    pending: GuestPortalCompletionNotification[];
   };
   lootBoxes: {
     total: number;
@@ -3684,15 +3710,19 @@ export class GuestPortalService {
       portal.profile.id,
       'GAME_SUMMARY',
     );
-    const referralStats = await this.getGameReferralStats(
-      payload.tenantId,
-      portal.profile.id,
-    );
+    const [referralStats, completionNotifications] = await Promise.all([
+      this.getGameReferralStats(payload.tenantId, portal.profile.id),
+      this.getPendingCompletionNotifications(
+        payload.tenantId,
+        portal.profile.id,
+      ),
+    ]);
 
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
+      completionNotifications,
     });
 
     this.logGuestGameDebug('summary-result', {
@@ -3732,6 +3762,163 @@ export class GuestPortalService {
     });
 
     return summary;
+  }
+
+  async acknowledgeCompletionNotification(
+    authorization: string | undefined,
+    notificationId: string,
+  ): Promise<GuestPortalCompletionNotificationAcknowledgeResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile) {
+      throw new BadRequestException(
+        'Игровой профиль гостя не найден. Сначала подтвердите телефон и выберите клуб.',
+      );
+    }
+
+    const id = notificationId.trim();
+
+    if (!id) {
+      throw new BadRequestException('Не указано уведомление о награде.');
+    }
+
+    const notification =
+      await this.prisma.guestGameCompletionNotification.findFirst({
+        where: {
+          id,
+          tenantId: payload.tenantId,
+          profileId: profile.id,
+        },
+        select: {
+          id: true,
+          acknowledgedAt: true,
+        },
+      });
+
+    if (!notification) {
+      throw new NotFoundException('Уведомление о награде не найдено.');
+    }
+
+    const acknowledgedAt = notification.acknowledgedAt ?? new Date();
+
+    if (!notification.acknowledgedAt) {
+      await this.prisma.guestGameCompletionNotification.updateMany({
+        where: {
+          id: notification.id,
+          tenantId: payload.tenantId,
+          profileId: profile.id,
+          acknowledgedAt: null,
+        },
+        data: { acknowledgedAt },
+      });
+    }
+
+    return {
+      id: notification.id,
+      acknowledged: true,
+      acknowledgedAt: acknowledgedAt.toISOString(),
+    };
+  }
+
+  private async getPendingCompletionNotifications(
+    tenantId: string,
+    profileId: string | null,
+  ): Promise<GuestPortalCompletionNotification[]> {
+    if (!profileId) {
+      return [];
+    }
+
+    const rows = await this.prisma.guestGameCompletionNotification.findMany({
+      where: {
+        tenantId,
+        profileId,
+        acknowledgedAt: null,
+      },
+      include: {
+        reward: {
+          select: {
+            status: true,
+            rewardLabel: true,
+            qualifiedAt: true,
+            expiresAt: true,
+            evidence: true,
+            mission: { select: { id: true, name: true } },
+            season: { select: { id: true, name: true, levels: true } },
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: 20,
+    });
+
+    return rows.flatMap<GuestPortalCompletionNotification>((row) => {
+      const state = rewardWalletState(row.reward.status, row.reward.expiresAt);
+      const statusLabel = completionNotificationRewardStatusLabel(state);
+
+      if (row.kind === 'MISSION' && row.reward.mission) {
+        return [
+          {
+            id: row.id,
+            kind: 'MISSION' as const,
+            sourceId: row.reward.mission.id,
+            occurredAt: row.reward.qualifiedAt.toISOString(),
+            title: row.reward.mission.name,
+            rewardLabel: row.reward.rewardLabel,
+            statusLabel,
+            seasonId: null,
+            seasonName: null,
+            completedLevel: null,
+            completedTitle: null,
+            nextLevel: null,
+            nextTitle: null,
+            nextCondition: null,
+          },
+        ];
+      }
+
+      if (row.kind === 'BATTLE_PASS' && row.reward.season) {
+        const levels = seasonLevels(row.reward.season.levels);
+        const completedLevelNumber =
+          seasonRewardLevelFromEvidence(row.reward.evidence) ??
+          seasonLevelByRewardLabel(
+            levels,
+            row.reward.rewardLabel,
+            new Set<number>(),
+          )?.level ??
+          null;
+        const completedLevel =
+          levels.find((level) => level.level === completedLevelNumber) ?? null;
+        const nextLevel =
+          completedLevelNumber === null
+            ? null
+            : (levels.find((level) => level.level > completedLevelNumber) ??
+              null);
+
+        return [
+          {
+            id: row.id,
+            kind: 'BATTLE_PASS' as const,
+            sourceId: row.reward.season.id,
+            occurredAt: row.reward.qualifiedAt.toISOString(),
+            title: row.reward.season.name,
+            rewardLabel: row.reward.rewardLabel,
+            statusLabel,
+            seasonId: row.reward.season.id,
+            seasonName: row.reward.season.name,
+            completedLevel: completedLevelNumber,
+            completedTitle: completedLevel?.title ?? null,
+            nextLevel: nextLevel?.level ?? null,
+            nextTitle: nextLevel?.title ?? null,
+            nextCondition:
+              nextLevel?.condition ?? nextLevel?.description ?? null,
+          },
+        ];
+      }
+
+      return [];
+    });
   }
 
   async updateProfile(
@@ -3780,14 +3967,18 @@ export class GuestPortalService {
       profileId: profile.id,
     };
     const portal = await this.buildPortalPayload(nextPayload);
-    const referralStats = await this.getGameReferralStats(
-      nextPayload.tenantId,
-      portal.profile.id,
-    );
+    const [referralStats, completionNotifications] = await Promise.all([
+      this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
+      this.getPendingCompletionNotifications(
+        nextPayload.tenantId,
+        portal.profile.id,
+      ),
+    ]);
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
+      completionNotifications,
     });
 
     return {
@@ -3820,14 +4011,20 @@ export class GuestPortalService {
       guestId: guest?.id ?? profile.guestId ?? null,
       profileId: profile.id,
     };
-    const [previousPortal, referralStats] = await Promise.all([
-      this.buildPortalPayload(nextPayload),
-      this.getGameReferralStats(nextPayload.tenantId, profile.id),
-    ]);
+    const [previousPortal, referralStats, previousCompletionNotifications] =
+      await Promise.all([
+        this.buildPortalPayload(nextPayload),
+        this.getGameReferralStats(nextPayload.tenantId, profile.id),
+        this.getPendingCompletionNotifications(
+          nextPayload.tenantId,
+          profile.id,
+        ),
+      ]);
     const previousSummary = buildGameSummaryFromPortal(previousPortal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
+      completionNotifications: previousCompletionNotifications,
     });
 
     const liveSessionStartResult =
@@ -3886,10 +4083,16 @@ export class GuestPortalService {
     const portal = await this.buildPortalPayload(nextPayload, {
       liveSessionStartResult,
     });
+    const completionNotifications =
+      await this.getPendingCompletionNotifications(
+        nextPayload.tenantId,
+        profile.id,
+      );
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
+      completionNotifications,
     });
 
     this.recordGameAuditEvent({
@@ -4593,14 +4796,18 @@ export class GuestPortalService {
     const portal = await this.buildPortalPayload(nextPayload, {
       liveSessionStartResult,
     });
-    const referralStats = await this.getGameReferralStats(
-      nextPayload.tenantId,
-      portal.profile.id,
-    );
+    const [referralStats, completionNotifications] = await Promise.all([
+      this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
+      this.getPendingCompletionNotifications(
+        nextPayload.tenantId,
+        portal.profile.id,
+      ),
+    ]);
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
+      completionNotifications,
     });
 
     this.logGuestGameDebug('open-success', {
@@ -4773,14 +4980,18 @@ export class GuestPortalService {
     };
     const token = await this.signGuestPortalToken(nextPayload);
     const portal = await this.buildPortalPayload(nextPayload);
-    const referralStats = await this.getGameReferralStats(
-      nextPayload.tenantId,
-      portal.profile.id,
-    );
+    const [referralStats, completionNotifications] = await Promise.all([
+      this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
+      this.getPendingCompletionNotifications(
+        nextPayload.tenantId,
+        portal.profile.id,
+      ),
+    ]);
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
+      completionNotifications,
     });
     const clubId = `${context.tenant.slug}:${
       context.store.publicSlug ?? context.store.id
@@ -11629,6 +11840,7 @@ function buildGameSummaryFromPortal(
     referralSecret: string;
     webUrl: string;
     referralStats: GuestPortalReferralStats;
+    completionNotifications?: GuestPortalCompletionNotification[];
   },
 ): GuestPortalGameSummary {
   const recentRewards = [...portal.gamification.rewards]
@@ -11735,6 +11947,9 @@ function buildGameSummaryFromPortal(
         summary: portal.gamification.bonusHistory.summary,
         items: portal.gamification.bonusHistory.items.slice(0, 5),
       },
+    },
+    completionNotifications: {
+      pending: options.completionNotifications ?? [],
     },
     lootBoxes: {
       total: portal.gamification.lootBoxes.length,
@@ -16735,6 +16950,20 @@ function rewardWalletState(
   }
 
   return 'WAITING_APPROVAL';
+}
+
+function completionNotificationRewardStatusLabel(
+  state: GuestPortalReward['walletState'],
+) {
+  const labels: Record<GuestPortalReward['walletState'], string> = {
+    WAITING_APPROVAL: 'Награда ожидает подтверждения',
+    READY: 'Награда добавлена в историю',
+    REDEEMED: 'Награда получена',
+    EXPIRED: 'Срок награды истёк',
+    CANCELED: 'Награда отменена',
+  };
+
+  return labels[state];
 }
 
 function buildRewardClaimPayload(rewardId: string, rewardCode: string) {

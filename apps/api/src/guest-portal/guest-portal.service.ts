@@ -4439,7 +4439,17 @@ export class GuestPortalService {
             context.store.timeZone,
             openedAt,
           );
-    if (entitlementReadMode === 'PRIMARY' && !entitlement) {
+    if (
+      entitlement &&
+      !portalLootBoxEntitlementMatchesUsage(lootBox, entitlement)
+    ) {
+      entitlement = null;
+    }
+    if (
+      entitlementReadMode === 'PRIMARY' &&
+      !entitlement &&
+      portalLootBoxVisibleInCatalog(lootBox)
+    ) {
       const backfilled = await this.backfillPortalLootBoxEntitlementFromLegacy({
         tenantId: context.tenant.id,
         guestId: ownerGuestId,
@@ -9163,7 +9173,7 @@ export class GuestPortalService {
           lootBoxId: item.id,
         }).effectiveMode === 'PRIMARY',
     );
-    const entitlementRows = await this.findPortalLootBoxEntitlements(
+    const rawEntitlementRows = await this.findPortalLootBoxEntitlements(
       context.tenant.id,
       guest?.id ?? null,
       profile?.id ?? null,
@@ -9171,12 +9181,23 @@ export class GuestPortalService {
       entitlementPrimaryLootBoxes,
       new Date(),
     );
+    const lootBoxById = new Map(
+      storeLootBoxRows.map((lootBox) => [lootBox.id, lootBox]),
+    );
+    const entitlementRows = rawEntitlementRows.filter((entitlement) => {
+      const lootBox = lootBoxById.get(entitlement.ruleId);
+
+      return (
+        !!lootBox && portalLootBoxEntitlementMatchesUsage(lootBox, entitlement)
+      );
+    });
     if (profile) {
       const entitledRuleIds = new Set(
         entitlementRows.map((entitlement) => entitlement.ruleId),
       );
       const backfilledRows = await Promise.all(
         entitlementPrimaryLootBoxes
+          .filter(portalLootBoxVisibleInCatalog)
           .filter((lootBox) => !entitledRuleIds.has(lootBox.id))
           .map((lootBox) =>
             this.backfillPortalLootBoxEntitlementFromLegacy({
@@ -13974,6 +13995,33 @@ function portalLootBoxVisibleInCatalog(rule: { usageKind?: string | null }) {
   const usageKind = rule.usageKind ?? 'STANDALONE';
 
   return usageKind === 'STANDALONE' || usageKind === 'BOTH';
+}
+
+function portalLootBoxEntitlementMatchesUsage(
+  rule: { usageKind?: string | null },
+  entitlement: {
+    evidence?: Prisma.JsonValue | null;
+    sourceEventType?: string | null;
+  },
+) {
+  if (portalLootBoxVisibleInCatalog(rule)) {
+    return true;
+  }
+
+  const evidence = jsonRecord(entitlement.evidence);
+  const source = stringField(evidence.source);
+  const sourceEventType = stringField(entitlement.sourceEventType);
+
+  return (
+    source === 'mission_reward' ||
+    source === 'mission_reward_admin_approval' ||
+    source === 'battle_pass_reward_auto' ||
+    source === 'battle_pass_reward_admin_approval' ||
+    sourceEventType === 'MISSION_REWARD_APPROVED' ||
+    sourceEventType === 'BATTLE_PASS_REWARD_APPROVED' ||
+    Boolean(stringField(evidence.missionId)) ||
+    Boolean(stringField(evidence.seasonId))
+  );
 }
 
 function filterLootBoxesByVisualRefs<T extends { id: string; name: string }>(

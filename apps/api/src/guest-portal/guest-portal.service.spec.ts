@@ -2043,6 +2043,8 @@ describe('GuestPortalService', () => {
         canceledAt: null,
         rewardId: null,
         evidence: {
+          source: 'mission_reward',
+          missionId: 'mission-1',
           input: {
             sessionType: 'packet_hours',
             sessionPacket: true,
@@ -7110,7 +7112,7 @@ describe('GuestPortalService', () => {
         openBlocker: 'Лутбокс доступен другой аудитории гостей.',
       });
     });
-    it('shows an entitled reward template and hides it again after consumption in primary mode', async () => {
+    it('shows only genuinely granted reward templates and hides them again after consumption in primary mode', async () => {
       const { prisma, service } = createService({
         GUEST_GAME_ENTITLEMENT_READ_MODE: 'PRIMARY',
       });
@@ -7216,6 +7218,8 @@ describe('GuestPortalService', () => {
         canceledAt: null,
         rewardId: null,
         evidence: {
+          source: 'mission_reward',
+          missionId: 'mission-1',
           input: legacyUnlockEvent.payload.input,
           entitlementPeriod: { kind: 'DAILY' },
         },
@@ -7224,6 +7228,15 @@ describe('GuestPortalService', () => {
       };
       prisma.guestGameEvent.findMany.mockResolvedValue([legacyUnlockEvent]);
       prisma.guestGameEntitlement.findMany
+        .mockResolvedValueOnce([
+          {
+            ...availableEntitlement,
+            id: 'entitlement-legacy-backfill',
+            evidence: {
+              evaluationMode: 'LEGACY_ENTITLEMENT_BACKFILL',
+            },
+          },
+        ])
         .mockResolvedValueOnce([availableEntitlement])
         .mockResolvedValueOnce([]);
       prisma.guestGameEntitlement.findFirst.mockResolvedValue({
@@ -7232,6 +7245,23 @@ describe('GuestPortalService', () => {
         consumedAt: new Date('2026-07-19T13:00:00.000Z'),
         rewardId: 'reward-weekend',
       });
+
+      const portalWithSyntheticLegacyEntitlement = await (
+        service as any
+      ).buildPortalPayload({
+        sub: 'profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash',
+      });
+
+      expect(
+        portalWithSyntheticLegacyEntitlement.gamification.lootBoxes,
+      ).toEqual([]);
+      expect(prisma.guestGameEntitlement.upsert).not.toHaveBeenCalled();
 
       const portal = await (service as any).buildPortalPayload({
         sub: 'profile-1',

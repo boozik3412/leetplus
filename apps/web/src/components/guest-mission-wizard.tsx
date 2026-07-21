@@ -149,6 +149,8 @@ export function GuestMissionWizard({
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [activated, setActivated] = useState(false);
+  const [activationConfirmationOpen, setActivationConfirmationOpen] =
+    useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const autosaveReady = useRef(false);
@@ -394,7 +396,7 @@ export function GuestMissionWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activated, draftId, dto]);
 
-  async function saveDraft(automatic = false) {
+  async function saveDraft(automatic = false): Promise<string | null> {
     if (!automatic) setMessage(null);
     setSaveState("saving");
     try {
@@ -419,44 +421,67 @@ export function GuestMissionWizard({
         setMessage(
           "Черновик сохранён. Дальше изменения сохраняются автоматически.",
         );
+      return saved.mission.id;
     } catch (error) {
       setSaveState("error");
       setMessage(
         error instanceof Error ? error.message : "Не удалось сохранить",
       );
+      return null;
     }
   }
 
-  async function activate() {
-    if (!draftId) {
-      await saveDraft(false);
+  async function activate(missionId: string | null = draftId) {
+    if (!missionId) {
       setMessage(
-        "Черновик создан. Проверьте готовность и подтвердите активацию ещё раз.",
+        "Новое задание ещё не сохранено. Выберите «Да, сохранить и активировать».",
       );
-      return;
-    }
-    if (
-      !window.confirm(
-        "Активировать задание? После этого оно попадёт в боевой контур.",
-      )
-    ) {
-      return;
+      return false;
     }
     setSaveState("saving");
     const response = await fetch(
-      `/api/guests/gamification/missions/wizard/${draftId}/activate`,
+      `/api/guests/gamification/missions/wizard/${missionId}/activate`,
       { method: "POST" },
     );
     if (!response.ok) {
       setSaveState("error");
       setMessage(await responseMessage(response));
-      return;
+      return false;
     }
     const saved = (await response.json()) as GuestGameMissionWizardSaveResult;
     setReadiness(saved.readiness);
     setSaveState("saved");
     setActivated(true);
     setMessage(null);
+    return true;
+  }
+
+  async function handleActivationChoice(saveChanges: boolean) {
+    setActivationConfirmationOpen(false);
+
+    if (saveChanges) {
+      const savedMissionId = await saveDraft(false);
+      if (savedMissionId) {
+        await activate(savedMissionId);
+      }
+      return;
+    }
+
+    if (!draftId) {
+      setMessage(
+        "Новое задание ещё не сохранено. Без сохранения его нельзя активировать.",
+      );
+      return;
+    }
+
+    if (loadedMissionStatus === "ACTIVE") {
+      setMessage(
+        "Продолжили без сохранения. Осталась активной предыдущая версия задания.",
+      );
+      return;
+    }
+
+    await activate(draftId);
   }
 
   async function uploadCover(file: File | null) {
@@ -652,7 +677,7 @@ export function GuestMissionWizard({
               </button>
               <button
                 type="button"
-                onClick={() => void activate()}
+                onClick={() => setActivationConfirmationOpen(true)}
                 disabled={saveState === "saving" || readiness?.ready === false}
                 className="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 dark:bg-emerald-400 dark:text-zinc-950"
               >
@@ -662,6 +687,48 @@ export function GuestMissionWizard({
           )}
         </div>
       </div>
+
+      {activationConfirmationOpen ? (
+        <div
+          role="presentation"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 p-4 backdrop-blur-sm"
+          onClick={() => setActivationConfirmationOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="activation-confirmation-title"
+            className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-950 p-6 text-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2
+              id="activation-confirmation-title"
+              className="text-xl font-black"
+            >
+              Сохранить изменения перед активацией?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">
+              Выберите, какую версию задания отправить в игровой контур.
+            </p>
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => void handleActivationChoice(false)}
+                className="rounded-lg border border-zinc-600 px-4 py-2.5 text-sm font-semibold text-zinc-200 transition hover:border-zinc-400 hover:bg-zinc-900"
+              >
+                Нет, продолжить без сохранения
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleActivationChoice(true)}
+                className="rounded-lg bg-emerald-400 px-4 py-2.5 text-sm font-bold text-zinc-950 transition hover:bg-emerald-300"
+              >
+                Да, сохранить и активировать
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

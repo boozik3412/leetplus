@@ -478,6 +478,49 @@ describe('GuestIdentityResolverService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('chunks large profile hash lookups below the PostgreSQL bind limit', async () => {
+    const phoneHashes = Array.from(
+      { length: 10_001 },
+      (_, index) => `phone-hash-${index}`,
+    );
+
+    const result = await service.reconcileDomainSnapshot({
+      tenantId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain,
+      syncedAt: verifiedAt,
+      complete: true,
+      candidates: [
+        {
+          guestId: 'guest-large-snapshot',
+          externalGuestId: 'external-large-snapshot',
+          phoneHashes,
+          phoneMasked: '***0646',
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      candidates: 1,
+      profiles: 0,
+      linked: 0,
+    });
+    expect(prisma.guestGameProfile.findMany).toHaveBeenCalledTimes(2);
+
+    for (
+      let callIndex = 0;
+      callIndex < prisma.guestGameProfile.findMany.mock.calls.length;
+      callIndex += 1
+    ) {
+      const query = callArgument(
+        prisma.guestGameProfile.findMany,
+        callIndex,
+        0,
+      ) as { where: { phoneHash: { in: unknown[] } } };
+      expect(query.where.phoneHash.in.length).toBeLessThanOrEqual(10_000);
+    }
+  });
+
   it('supersedes a pending rebind when the next complete snapshot no longer confirms it', async () => {
     tx.guestGameProfileIdentityLink.findMany.mockResolvedValue([
       {

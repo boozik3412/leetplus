@@ -8,6 +8,9 @@ const SUPERSEDED_LINK_STATUS = 'SUPERSEDED';
 const CONFLICT_LINK_STATUS = 'CONFLICT';
 const IDENTITY_LINK_EVENT_TYPE = 'GAME_PROFILE_IDENTITY_LINKED';
 const IDENTITY_LINK_EVENT_SOURCE = 'IDENTITY_RESOLVER';
+// PostgreSQL accepts at most 32767 bind variables per prepared statement.
+// Keep enough headroom for the tenant/status predicates and future filters.
+const PROFILE_PHONE_HASH_BATCH_SIZE = 10_000;
 
 export type GuestIdentityBackfillSummary = {
   rewards: number;
@@ -119,14 +122,10 @@ export class GuestIdentityResolverService {
       return result;
     }
 
-    const profiles = await this.prisma.guestGameProfile.findMany({
-      where: {
-        tenantId: input.tenantId,
-        status: 'ACTIVE',
-        phoneHash: { in: phoneHashes },
-      },
-      select: { id: true, phoneHash: true },
-    });
+    const profiles = await this.findActiveProfilesByPhoneHashes(
+      input.tenantId,
+      phoneHashes,
+    );
     result.profiles = profiles.length;
 
     const profileIdsByPhoneHash = new Map<string, Set<string>>();
@@ -260,6 +259,35 @@ export class GuestIdentityResolverService {
     }
 
     return result;
+  }
+
+  private async findActiveProfilesByPhoneHashes(
+    tenantId: string,
+    phoneHashes: string[],
+  ) {
+    const profiles: Array<{ id: string; phoneHash: string | null }> = [];
+
+    for (
+      let offset = 0;
+      offset < phoneHashes.length;
+      offset += PROFILE_PHONE_HASH_BATCH_SIZE
+    ) {
+      const batch = phoneHashes.slice(
+        offset,
+        offset + PROFILE_PHONE_HASH_BATCH_SIZE,
+      );
+      const batchProfiles = await this.prisma.guestGameProfile.findMany({
+        where: {
+          tenantId,
+          status: 'ACTIVE',
+          phoneHash: { in: batch },
+        },
+        select: { id: true, phoneHash: true },
+      });
+      profiles.push(...batchProfiles);
+    }
+
+    return profiles;
   }
 
   async resolveExactMatch(

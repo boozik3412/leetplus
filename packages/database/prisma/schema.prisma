@@ -186,6 +186,7 @@ model Tenant {
   guestCrmTasks                        GuestCrmTask[]
   guestCrmContactEvents                GuestCrmContactEvent[]
   guestGameProfiles                    GuestGameProfile[]
+  guestGameProfileIdentityLinks        GuestGameProfileIdentityLink[]
   guestGameLootBoxes                   GuestGameLootBox[]
   guestGameMissions                    GuestGameMission[]
   guestGameSeasons                     GuestGameSeason[]
@@ -1288,6 +1289,7 @@ model Guest {
   audienceMembers            GuestAudienceMember[]
   marketingMissionRewards    MarketingMissionReward[]
   gameProfiles               GuestGameProfile[]
+  gameProfileIdentityLinks   GuestGameProfileIdentityLink[]
   gameRewards                GuestGameReward[]
   gameDeliveries             GuestGameDelivery[]
   gameEvents                 GuestGameEvent[]
@@ -1676,6 +1678,7 @@ model GuestGameProfile {
   activitySyncJobs         GuestActivitySyncJob[]
   telegramLinkChallenges   GuestGameTelegramLinkChallenge[]
   portalOtpChallenges      GuestPortalOtpChallenge[]
+  identityLinks            GuestGameProfileIdentityLink[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
@@ -1684,6 +1687,35 @@ model GuestGameProfile {
   @@index([tenantId, phoneHash], map: "guest_game_profile_phone_idx")
   @@index([tenantId, level], map: "guest_game_profile_level_idx")
   @@index([createdByUserId], map: "guest_game_profile_created_by_idx")
+}
+
+model GuestGameProfileIdentityLink {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  profileId           String
+  guestId             String
+  externalProvider    IntegrationProvider
+  externalDomain      String
+  externalGuestId     String
+  status              String              @default("ACTIVE")
+  matchSource         String
+  confidence          String              @default("EXACT")
+  consecutiveMatches  Int                 @default(1)
+  verifiedAt          DateTime
+  lastSeenAt          DateTime
+  supersededAt        DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id])
+  profile GuestGameProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  guest   Guest            @relation(fields: [guestId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, profileId, externalProvider, externalDomain, guestId], map: "guest_game_profile_identity_link_uidx")
+  @@index([tenantId, profileId, status, externalProvider, externalDomain], map: "guest_game_profile_identity_link_profile_idx")
+  @@index([guestId, status], map: "guest_game_profile_identity_link_guest_idx")
+  @@index([tenantId, status, verifiedAt], map: "guest_game_profile_identity_link_status_idx")
+  @@index([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_game_profile_identity_link_external_idx")
 }
 
 model GuestGameLootBox {

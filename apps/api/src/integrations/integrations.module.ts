@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { BusinessSnapshotService } from './business-snapshot.service';
 import { GuestDataFoundationService } from './guest-data-foundation.service';
+import { GuestIdentityResolverService } from './guest-identity-resolver.service';
 import { LangameClient } from './langame.client';
 import { LangameController } from './langame.controller';
 import { LangameDailySyncService } from './langame-daily-sync.service';
@@ -20,6 +21,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
     LangameClient,
     BusinessSnapshotService,
     GuestDataFoundationService,
+    GuestIdentityResolverService,
     LangameDailySyncService,
     LangameSettingsService,
     LangameSyncService,
@@ -28,6 +30,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
   exports: [
     LangameClient,
     GuestDataFoundationService,
+    GuestIdentityResolverService,
     BusinessSnapshotService,
     LangameDailySyncService,
     LangameSettingsService,

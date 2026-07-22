@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { IntegrationProvider } from '@prisma/client';
+import type { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import type { LangameClient } from '../integrations/langame.client';
 import type { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -145,6 +146,11 @@ describe('GuestActivityLedgerService', () => {
     listBalanceTopups: jest.MockedFunction<LangameClient['listBalanceTopups']>;
     listGoods: jest.MockedFunction<LangameClient['listGoods']>;
   };
+  type MockGuestIdentityResolverService = {
+    findActiveGuestForProfileDomain: jest.MockedFunction<
+      GuestIdentityResolverService['findActiveGuestForProfileDomain']
+    >;
+  };
 
   let rawRecords: Map<string, LedgerRow>;
   let facts: Map<string, LedgerRow>;
@@ -154,6 +160,7 @@ describe('GuestActivityLedgerService', () => {
   let syncJobs: Map<string, Record<string, any>>;
   let prisma: PrismaService;
   let langameClient: MockLangameClient;
+  let guestIdentityResolver: MockGuestIdentityResolverService;
   let service: GuestActivityLedgerService;
 
   const selectFields = (row: LedgerRow, select?: SelectShape) => {
@@ -648,11 +655,136 @@ describe('GuestActivityLedgerService', () => {
           sources: [source],
         }),
     };
+    guestIdentityResolver = {
+      findActiveGuestForProfileDomain: jest
+        .fn<GuestIdentityResolverService['findActiveGuestForProfileDomain']>()
+        .mockResolvedValue(null),
+    };
     service = new GuestActivityLedgerService(
       prisma,
       langameSettingsService as unknown as LangameSettingsService,
       langameClient as unknown as LangameClient,
+      guestIdentityResolver as unknown as GuestIdentityResolverService,
     );
+  });
+
+  it('prefers the active identity link for the selected store domain', async () => {
+    const domainGuestId = 'guest-domain-1';
+    const domainExternalGuestId = '7331';
+    guestIdentityResolver.findActiveGuestForProfileDomain.mockResolvedValue({
+      id: domainGuestId,
+      phoneHash: 'domain-phone-hash',
+      phoneMasked: '***0000',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: source.domain,
+      externalGuestId: domainExternalGuestId,
+    });
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'DOMAIN_IDENTITY_LINK',
+    });
+
+    expect(result.status).toBe('SUCCESS');
+    expect(
+      guestIdentityResolver.findActiveGuestForProfileDomain,
+    ).toHaveBeenCalledWith({
+      tenantId,
+      profileId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: source.domain,
+    });
+    expect(langameClient.listGuestLogs).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ guestId: domainExternalGuestId }),
+    );
+    expect(langameClient.listGuestLogs).not.toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ guestId: externalGuestId }),
+    );
+  });
+
+  it('does not use an identity link from another domain', async () => {
+    guestIdentityResolver.findActiveGuestForProfileDomain.mockImplementation(
+      ({ externalDomain }) =>
+        externalDomain === 'other.langame'
+          ? {
+              id: 'guest-other-domain',
+              phoneHash: 'other-phone-hash',
+              phoneMasked: '***0000',
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: 'other.langame',
+              externalGuestId: '9999',
+            }
+          : null,
+    );
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'IGNORE_OTHER_DOMAIN_LINK',
+    });
+
+    expect(result.status).toBe('SUCCESS');
+    expect(
+      guestIdentityResolver.findActiveGuestForProfileDomain,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      guestIdentityResolver.findActiveGuestForProfileDomain,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ externalDomain: source.domain }),
+    );
+    expect(langameClient.listGuestLogs).toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ guestId: externalGuestId }),
+    );
+    expect(langameClient.listGuestLogs).not.toHaveBeenCalledWith(
+      source.baseUrl,
+      'api-key',
+      expect.objectContaining({ guestId: '9999' }),
+    );
+  });
+
+  it('fails closed when both explicit and legacy guests belong to another selected store domain', async () => {
+    prisma.guestGameProfile.findFirst.mockResolvedValue({
+      id: profileId,
+      guestId,
+      phoneHash: 'phone-hash',
+      guest: {
+        id: guestId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'legacy.langame.ru',
+        externalGuestId,
+      },
+    });
+    prisma.guest.findFirst.mockResolvedValue(null);
+
+    const result = await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      guestId: 'explicit-other-domain-guest',
+      reason: 'DOMAIN_SCOPE_FAIL_CLOSED',
+    });
+
+    expect(result.status).toBe('SKIPPED');
+    expect(prisma.guest.findFirst.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'explicit-other-domain-guest',
+            externalDomain: source.domain,
+          }),
+        }),
+      ],
+    ]);
+    expect(langameClient.listGuestLogs.mock.calls).toHaveLength(0);
   });
 
   it('syncs guest logs from the earliest active rule minus one day', async () => {

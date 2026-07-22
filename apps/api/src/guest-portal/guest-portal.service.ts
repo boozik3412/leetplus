@@ -35,6 +35,7 @@ import {
   type GuestGameProcessEventResult,
 } from '../guest-gamification/guest-gamification.service';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
+import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   evaluateGuestGameProgress,
@@ -103,10 +104,9 @@ const GAME_COMMUNICATION_CONSENT_EVENT_TYPE =
 const GAME_CONSENT_VERSION = 'guest-game-v1-2026-06-15';
 const GAME_PROFILE_CONSENT_SOURCE = 'guest_portal_game_consent';
 const TELEGRAM_AUTH_CONSENT_SOURCE = 'telegram_auth_contact_share';
-const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
-const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
 const GAME_PROFILE_LANGAME_AUTO_MATCH_EVENT_TYPE =
   'GAME_PROFILE_LANGAME_AUTO_MATCH';
+const GAME_PROFILE_LANGAME_AUTO_MATCH_CACHE_MS = 15 * 60 * 1000;
 const GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE =
   'GUEST_PORTAL_LANGAME_AUTO_MATCH';
 const GAME_SUMMARY_MISSION_LIMIT = 10;
@@ -1676,6 +1676,7 @@ export class GuestPortalService {
     private readonly guestGamificationService: GuestGamificationService,
     private readonly guestActivityLedgerService: GuestActivityLedgerService,
     private readonly secretEncryptionService: SecretEncryptionService,
+    private readonly guestIdentityResolver: GuestIdentityResolverService,
   ) {}
 
   private gameDebugTraceId(prefix: string) {
@@ -7305,10 +7306,63 @@ export class GuestPortalService {
     phone: GuestPortalPhoneIdentity,
     source: string,
   ): Promise<GuestPortalLangameMatchResponse> {
-    const [localGuest, localProfile] = await Promise.all([
-      this.findGuest(payload),
-      this.findProfile(payload, payload.guestId),
-    ]);
+    const localProfile = await this.findProfile(payload, payload.guestId);
+    const domainLinkedGuest =
+      localProfile?.id && context.store.externalDomain
+        ? await this.guestIdentityResolver.findActiveGuestForProfileDomain({
+            tenantId: payload.tenantId,
+            profileId: localProfile.id,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: context.store.externalDomain,
+          })
+        : null;
+    const scopedLocalMatch = domainLinkedGuest
+      ? { guest: domainLinkedGuest, ambiguous: false }
+      : await this.findUniqueScopedGuest(payload, context.store, localProfile);
+    const localGuest = scopedLocalMatch.guest;
+
+    if (scopedLocalMatch.ambiguous) {
+      const checkedAt = new Date().toISOString();
+      const status: GuestPortalLangameMatchResponse['status'] = 'MATCHED_LOCAL';
+      const linkResult = {
+        status: 'CONFLICT',
+        guestId: null,
+        profileId: localProfile?.id ?? payload.profileId,
+        linkedNow: false,
+        backfilled: emptyGameProfileBackfillSummary(),
+      } satisfies GuestPortalGameProfileLinkResult;
+
+      await this.recordLangameAutoMatchEvent({
+        payload,
+        context,
+        phoneMasked: phone.masked,
+        status,
+        linkResult,
+        sources: [],
+        source,
+        checkedAt,
+      });
+
+      return {
+        checkedAt,
+        queryField: 'phone',
+        phoneMasked: phone.masked,
+        status,
+        localGuestFound: false,
+        localGuestId: null,
+        profileId: linkResult.profileId,
+        linkStatus: linkResult.status,
+        linkedGuestId: null,
+        linkedProfileId: linkResult.profileId,
+        backfilled: linkResult.backfilled,
+        nextAction: guestPortalLangameMatchNextAction(
+          status,
+          linkResult.status,
+        ),
+        portal: null,
+        sources: [],
+      };
+    }
 
     if (localGuest) {
       const checkedAt = new Date().toISOString();
@@ -7436,11 +7490,16 @@ export class GuestPortalService {
         };
       }),
     }));
-    const firstMappedGuestId =
+    const selectedDomain = context.store.externalDomain?.trim() || null;
+    const mappedGuestIds = uniqueStrings(
       sources
-        .flatMap((source) => source.results)
-        .find((result) => result.localGuestId)?.localGuestId ?? null;
-    const localGuestId = firstMappedGuestId;
+        .filter((source) => !selectedDomain || source.domain === selectedDomain)
+        .flatMap((source) =>
+          source.results.map((result) => result.localGuestId),
+        ),
+    );
+    const ambiguousLocalGuests = mappedGuestIds.length > 1;
+    const localGuestId = mappedGuestIds.length === 1 ? mappedGuestIds[0] : null;
     const localGuestFound = Boolean(localGuestId);
     const foundInLangame = sources.some((source) => source.resultsCount > 0);
     const anySuccess = sources.some((source) => source.status === 'SUCCESS');
@@ -7451,21 +7510,29 @@ export class GuestPortalService {
         : anySuccess
           ? 'NOT_FOUND'
           : 'FAILED';
-    const linkResult = localGuestId
-      ? await this.linkGameProfileToLocalGuest(
-          payload,
-          localProfile?.id ?? payload.profileId,
-          localGuestId,
-          phone.masked,
-          source,
-        )
-      : ({
-          status: foundInLangame ? 'WAITING_FOR_SYNC' : 'NOT_LINKED',
+    const linkResult = ambiguousLocalGuests
+      ? ({
+          status: 'CONFLICT',
           guestId: null,
           profileId: localProfile?.id ?? payload.profileId,
           linkedNow: false,
           backfilled: emptyGameProfileBackfillSummary(),
-        } satisfies GuestPortalGameProfileLinkResult);
+        } satisfies GuestPortalGameProfileLinkResult)
+      : localGuestId
+        ? await this.linkGameProfileToLocalGuest(
+            payload,
+            localProfile?.id ?? payload.profileId,
+            localGuestId,
+            phone.masked,
+            source,
+          )
+        : ({
+            status: foundInLangame ? 'WAITING_FOR_SYNC' : 'NOT_LINKED',
+            guestId: null,
+            profileId: localProfile?.id ?? payload.profileId,
+            linkedNow: false,
+            backfilled: emptyGameProfileBackfillSummary(),
+          } satisfies GuestPortalGameProfileLinkResult);
     const refreshedPayload =
       linkResult.linkedNow || linkResult.status === 'ALREADY_LINKED'
         ? await this.buildPortalPayload({
@@ -7541,6 +7608,9 @@ export class GuestPortalService {
         eventType: GAME_PROFILE_LANGAME_AUTO_MATCH_EVENT_TYPE,
         source: GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE,
         externalId,
+        occurredAt: {
+          gte: new Date(Date.now() - GAME_PROFILE_LANGAME_AUTO_MATCH_CACHE_MS),
+        },
       },
       orderBy: { occurredAt: 'desc' },
       select: {
@@ -7594,24 +7664,38 @@ export class GuestPortalService {
       sources: input.sources,
     } satisfies Prisma.InputJsonObject;
 
-    await this.prisma.guestGameEvent.createMany({
-      data: [
-        {
+    const externalDomain = this.langameAutoMatchExternalDomain(input.context);
+
+    await this.prisma.guestGameEvent.upsert({
+      where: {
+        tenantId_source_externalProvider_externalDomain_externalId: {
           tenantId: input.payload.tenantId,
-          profileId,
-          guestId: input.linkResult.guestId,
-          eventType: GAME_PROFILE_LANGAME_AUTO_MATCH_EVENT_TYPE,
           source: GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE,
           externalProvider: IntegrationProvider.LANGAME,
-          externalDomain: this.langameAutoMatchExternalDomain(input.context),
+          externalDomain,
           externalId,
-          occurredAt,
-          payload: eventPayload,
-          note: 'Одноразовая клубная автосверка игрового профиля с Langame по подтвержденному телефону.',
-          createdAt: occurredAt,
         },
-      ],
-      skipDuplicates: true,
+      },
+      create: {
+        tenantId: input.payload.tenantId,
+        profileId,
+        guestId: input.linkResult.guestId,
+        eventType: GAME_PROFILE_LANGAME_AUTO_MATCH_EVENT_TYPE,
+        source: GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain,
+        externalId,
+        occurredAt,
+        payload: eventPayload,
+        note: 'Одноразовая клубная автосверка игрового профиля с Langame по подтвержденному телефону.',
+        createdAt: occurredAt,
+      },
+      update: {
+        profileId,
+        guestId: input.linkResult.guestId,
+        occurredAt,
+        payload: eventPayload,
+      },
     });
   }
 
@@ -7712,34 +7796,49 @@ export class GuestPortalService {
     },
   ): Promise<GuestPortalLocalGameProfileMatch> {
     const checkedAt = new Date().toISOString();
-    const localGuest = await this.prisma.guest.findFirst({
-      where: {
-        tenantId: payload.tenantId,
-        phoneHash: payload.phoneHash,
-        isDisabled: false,
-        ...(payload.guestId ? { id: payload.guestId } : {}),
-      },
-      orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
-      select: { id: true },
-    });
+    const [context, localProfile] = await Promise.all([
+      this.getTenantStoreByIds(payload.tenantId, payload.storeId),
+      this.findProfile(payload, payload.guestId),
+    ]);
+    const domainLinkedGuest =
+      localProfile?.id && context.store.externalDomain
+        ? await this.guestIdentityResolver.findActiveGuestForProfileDomain({
+            tenantId: payload.tenantId,
+            profileId: localProfile.id,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: context.store.externalDomain,
+          })
+        : null;
+    const scopedLocalMatch = domainLinkedGuest
+      ? { guest: domainLinkedGuest, ambiguous: false }
+      : await this.findUniqueScopedGuest(payload, context.store, localProfile);
+    const localGuest = scopedLocalMatch.guest;
 
-    const linkResult = localGuest
-      ? await this.linkGameProfileToLocalGuest(
-          payload,
-          payload.profileId,
-          localGuest.id,
-          options.phoneMasked ?? null,
-          options.source,
-        )
-      : ({
-          status: payload.profileId ? 'WAITING_FOR_SYNC' : 'NOT_LINKED',
+    const linkResult = scopedLocalMatch.ambiguous
+      ? ({
+          status: 'CONFLICT',
           guestId: null,
-          profileId: payload.profileId,
+          profileId: localProfile?.id ?? payload.profileId,
           linkedNow: false,
           backfilled: emptyGameProfileBackfillSummary(),
-        } satisfies GuestPortalGameProfileLinkResult);
+        } satisfies GuestPortalGameProfileLinkResult)
+      : localGuest
+        ? await this.linkGameProfileToLocalGuest(
+            payload,
+            localProfile?.id ?? payload.profileId,
+            localGuest.id,
+            options.phoneMasked ?? null,
+            options.source,
+          )
+        : ({
+            status: payload.profileId ? 'WAITING_FOR_SYNC' : 'NOT_LINKED',
+            guestId: null,
+            profileId: localProfile?.id ?? payload.profileId,
+            linkedNow: false,
+            backfilled: emptyGameProfileBackfillSummary(),
+          } satisfies GuestPortalGameProfileLinkResult);
 
-    if (!localGuest) {
+    if (!localGuest && !scopedLocalMatch.ambiguous) {
       const cachedEvent = await this.findLangameAutoMatchEvent(payload);
       const cachedMatch = cachedEvent
         ? this.buildLocalMatchFromAutoMatchEvent(cachedEvent, payload)
@@ -7750,18 +7849,22 @@ export class GuestPortalService {
       }
     }
 
-    const status: GuestPortalLocalGameProfileMatchStatus = localGuest
-      ? linkResult.status === 'CONFLICT' || linkResult.status === 'NOT_LINKED'
-        ? linkResult.status
-        : 'MATCHED_LOCAL'
-      : payload.profileId
-        ? 'WAITING_FOR_SYNC'
-        : 'NOT_LINKED';
+    const status: GuestPortalLocalGameProfileMatchStatus =
+      scopedLocalMatch.ambiguous
+        ? 'CONFLICT'
+        : localGuest
+          ? linkResult.status === 'CONFLICT' ||
+            linkResult.status === 'NOT_LINKED'
+            ? linkResult.status
+            : 'MATCHED_LOCAL'
+          : payload.profileId
+            ? 'WAITING_FOR_SYNC'
+            : 'NOT_LINKED';
 
     return {
       checkedAt,
       status,
-      localGuestFound: Boolean(localGuest),
+      localGuestFound: Boolean(localGuest) && !scopedLocalMatch.ambiguous,
       localGuestId: localGuest?.id ?? null,
       profileId: linkResult.profileId ?? payload.profileId,
       linkStatus: linkResult.status,
@@ -7792,224 +7895,79 @@ export class GuestPortalService {
       };
     }
 
-    const now = new Date();
-
-    return this.prisma.$transaction(async (tx) => {
-      const [profile, guest, existingLinkedProfile] = await Promise.all([
-        tx.guestGameProfile.findFirst({
-          where: {
-            id: profileId,
-            tenantId: payload.tenantId,
-            status: 'ACTIVE',
-          },
-          select: {
-            id: true,
-            guestId: true,
-            phoneHash: true,
-            contactMasked: true,
-            displayName: true,
-          },
-        }),
-        tx.guest.findFirst({
-          where: {
-            id: guestId,
-            tenantId: payload.tenantId,
-            isDisabled: false,
-            phoneHash: payload.phoneHash,
-          },
-          select: {
-            id: true,
-            externalProvider: true,
-            externalDomain: true,
-            externalGuestId: true,
-            phoneMasked: true,
-            emailMasked: true,
-            fullNameMasked: true,
-          },
-        }),
-        tx.guestGameProfile.findFirst({
-          where: {
-            tenantId: payload.tenantId,
-            guestId,
-            status: 'ACTIVE',
-          },
-          select: { id: true },
-        }),
-      ]);
-
-      if (!profile || !guest) {
-        return {
-          status: 'NOT_LINKED',
-          guestId,
-          profileId: profile?.id ?? profileId,
-          linkedNow: false,
-          backfilled: emptyGameProfileBackfillSummary(),
-        };
-      }
-
-      if (profile.guestId === guest.id) {
-        const backfilled = await this.backfillGameProfileGuestLinks(
-          tx,
-          payload.tenantId,
-          profile.id,
-          guest.id,
-        );
-        await this.createGameProfileLinkedEvent(tx, {
+    const [profile, guest] = await Promise.all([
+      this.prisma.guestGameProfile.findFirst({
+        where: { id: profileId, tenantId: payload.tenantId, status: 'ACTIVE' },
+        select: { id: true, phoneHash: true, phoneEncrypted: true },
+      }),
+      this.prisma.guest.findFirst({
+        where: {
+          id: guestId,
           tenantId: payload.tenantId,
-          profileId: profile.id,
-          guestId: guest.id,
-          externalProvider: guest.externalProvider,
-          externalDomain: guest.externalDomain,
-          externalGuestId: guest.externalGuestId,
-          phoneMasked: phoneMasked ?? guest.phoneMasked,
-          source,
-          backfilled,
-          occurredAt: now,
-        });
-
-        return {
-          status: 'ALREADY_LINKED',
-          guestId: guest.id,
-          profileId: profile.id,
-          linkedNow: false,
-          backfilled,
-        };
-      }
-
-      if (
-        (profile.guestId && profile.guestId !== guest.id) ||
-        (existingLinkedProfile && existingLinkedProfile.id !== profile.id)
-      ) {
-        return {
-          status: 'CONFLICT',
-          guestId: guest.id,
-          profileId: profile.id,
-          linkedNow: false,
-          backfilled: emptyGameProfileBackfillSummary(),
-        };
-      }
-
-      await tx.guestGameProfile.update({
-        where: { id: profile.id },
-        data: {
-          guestId: guest.id,
-          phoneHash: profile.phoneHash ?? payload.phoneHash,
-          contactMasked:
-            profile.contactMasked ??
-            guest.phoneMasked ??
-            guest.emailMasked ??
-            phoneMasked,
-          displayName:
-            profile.displayName ??
-            guest.fullNameMasked ??
-            guest.externalGuestId ??
-            'Гость клуба',
-          lastActivityAt: now,
+          isDisabled: false,
         },
-      });
-      const backfilled = await this.backfillGameProfileGuestLinks(
-        tx,
-        payload.tenantId,
-        profile.id,
-        guest.id,
-      );
-      await this.createGameProfileLinkedEvent(tx, {
-        tenantId: payload.tenantId,
-        profileId: profile.id,
-        guestId: guest.id,
-        externalProvider: guest.externalProvider,
-        externalDomain: guest.externalDomain,
-        externalGuestId: guest.externalGuestId,
-        phoneMasked: phoneMasked ?? guest.phoneMasked,
-        source,
-        backfilled,
-        occurredAt: now,
-      });
+        select: {
+          id: true,
+          phoneHash: true,
+          externalProvider: true,
+          externalDomain: true,
+          externalGuestId: true,
+        },
+      }),
+    ]);
 
+    if (
+      !profile ||
+      !guest?.phoneHash ||
+      !guest.externalProvider ||
+      !guest.externalDomain
+    ) {
       return {
-        status: 'LINKED',
-        guestId: guest.id,
-        profileId: profile.id,
-        linkedNow: true,
-        backfilled,
+        status: 'NOT_LINKED',
+        guestId: guest?.id ?? guestId,
+        profileId: profile?.id ?? profileId,
+        linkedNow: false,
+        backfilled: emptyGameProfileBackfillSummary(),
       };
-    });
-  }
+    }
 
-  private async backfillGameProfileGuestLinks(
-    tx: Prisma.TransactionClient,
-    tenantId: string,
-    profileId: string,
-    guestId: string,
-  ) {
-    const [rewards, events, deliveries, bonusLedgerEntries] = await Promise.all(
-      [
-        tx.guestGameReward.updateMany({
-          where: { tenantId, profileId, guestId: null },
-          data: { guestId },
-        }),
-        tx.guestGameEvent.updateMany({
-          where: { tenantId, profileId, guestId: null },
-          data: { guestId },
-        }),
-        tx.guestGameDelivery.updateMany({
-          where: { tenantId, profileId, guestId: null },
-          data: { guestId },
-        }),
-        tx.guestBonusLedgerEntry.updateMany({
-          where: { tenantId, profileId, guestId: null },
-          data: { guestId },
-        }),
-      ],
-    );
+    const resolution = await this.guestIdentityResolver.resolveExactMatch({
+      tenantId: payload.tenantId,
+      profileId: profile.id,
+      guestId: guest.id,
+      externalProvider: guest.externalProvider,
+      externalDomain: guest.externalDomain,
+      externalGuestId: guest.externalGuestId,
+      acceptedPhoneHashes: this.guestPhoneHashCandidates(payload.phoneHash, {
+        phoneHash: profile.phoneHash,
+        phoneEncrypted: profile.phoneEncrypted,
+      }),
+      phoneMasked,
+      matchSource: source,
+      requiredRebindConfirmations: 1,
+    });
+
+    const status: GuestPortalGameProfileLinkStatus =
+      resolution.status === 'LINKED' || resolution.status === 'REBOUND'
+        ? 'LINKED'
+        : resolution.status === 'ALREADY_LINKED'
+          ? 'ALREADY_LINKED'
+          : resolution.status === 'PENDING_REBIND'
+            ? 'WAITING_FOR_SYNC'
+            : resolution.status;
 
     return {
-      rewards: rewards.count,
-      events: events.count,
-      deliveries: deliveries.count,
-      bonusLedgerEntries: bonusLedgerEntries.count,
+      status,
+      guestId: resolution.guestId,
+      profileId: resolution.profileId,
+      linkedNow: resolution.linkedNow,
+      backfilled: {
+        rewards: resolution.backfilled.rewards,
+        events: resolution.backfilled.events,
+        deliveries: resolution.backfilled.deliveries,
+        bonusLedgerEntries: resolution.backfilled.bonusLedgerEntries,
+      },
     };
-  }
-
-  private async createGameProfileLinkedEvent(
-    tx: Prisma.TransactionClient,
-    input: {
-      tenantId: string;
-      profileId: string;
-      guestId: string;
-      externalProvider: IntegrationProvider | null;
-      externalDomain: string | null;
-      externalGuestId: string;
-      phoneMasked: string | null;
-      source: string;
-      backfilled: GuestPortalGameProfileBackfillSummary;
-      occurredAt: Date;
-    },
-  ) {
-    await tx.guestGameEvent.createMany({
-      data: [
-        {
-          tenantId: input.tenantId,
-          profileId: input.profileId,
-          guestId: input.guestId,
-          eventType: GAME_PROFILE_LINKED_EVENT_TYPE,
-          source: GAME_PROFILE_LINK_SOURCE,
-          externalProvider: input.externalProvider,
-          externalDomain: input.externalDomain,
-          externalId: `game-profile-link:${input.profileId}:${input.guestId}`,
-          occurredAt: input.occurredAt,
-          payload: {
-            source: input.source,
-            phoneMasked: input.phoneMasked,
-            externalGuestId: input.externalGuestId,
-            backfilled: input.backfilled,
-          },
-          note: 'Игровой профиль участника геймификации безопасно связан с синхронизированным гостем Langame.',
-          createdAt: input.occurredAt,
-        },
-      ],
-      skipDuplicates: true,
-    });
   }
 
   async getLangameGuestDetails(
@@ -9738,12 +9696,63 @@ export class GuestPortalService {
     return !storeDomain || !guestDomain || guestDomain === storeDomain;
   }
 
+  private async findUniqueScopedGuest(
+    payload: GuestPortalTokenPayload,
+    store: Pick<TenantStoreContext['store'], 'externalDomain'>,
+    profile?: {
+      phoneHash?: string | null;
+      phoneEncrypted?: string | null;
+    } | null,
+  ) {
+    const externalDomain = store.externalDomain?.trim() || null;
+    const phoneHashes = this.guestPhoneHashCandidates(
+      payload.phoneHash,
+      profile,
+    );
+    const candidates = await this.prisma.guest.findMany({
+      where: {
+        tenantId: payload.tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        phoneHash:
+          phoneHashes.length === 1 ? phoneHashes[0] : { in: phoneHashes },
+        ...(externalDomain ? { externalDomain } : {}),
+        isDisabled: false,
+      },
+      orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+      take: 2,
+    });
+
+    return {
+      guest: candidates.length === 1 ? candidates[0] : null,
+      ambiguous: candidates.length > 1,
+    };
+  }
+
   private async findGuest(
     payload: GuestPortalTokenPayload,
     store?: Pick<TenantStoreContext['store'], 'externalDomain'> | null,
-    profile?: { phoneEncrypted?: string | null } | null,
+    profile?: {
+      id?: string;
+      phoneHash?: string | null;
+      phoneEncrypted?: string | null;
+    } | null,
   ) {
     const preferredExternalDomain = store?.externalDomain?.trim() || null;
+    const profileId = profile?.id ?? payload.profileId;
+
+    if (preferredExternalDomain && profileId) {
+      const domainLinkedGuest =
+        await this.guestIdentityResolver.findActiveGuestForProfileDomain({
+          tenantId: payload.tenantId,
+          profileId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: preferredExternalDomain,
+        });
+
+      if (domainLinkedGuest) {
+        return domainLinkedGuest;
+      }
+    }
 
     if (payload.guestId) {
       const guest = await this.prisma.guest.findFirst({
@@ -9763,9 +9772,25 @@ export class GuestPortalService {
       }
     }
 
+    const authoritativeProfile =
+      profile ??
+      (profileId
+        ? await this.prisma.guestGameProfile.findFirst({
+            where: {
+              id: profileId,
+              tenantId: payload.tenantId,
+              status: 'ACTIVE',
+            },
+            select: {
+              id: true,
+              phoneHash: true,
+              phoneEncrypted: true,
+            },
+          })
+        : null);
     const phoneHashes = this.guestPhoneHashCandidates(
       payload.phoneHash,
-      profile?.phoneEncrypted ?? null,
+      authoritativeProfile,
     );
     const phoneHashWhere =
       phoneHashes.length === 1
@@ -9786,6 +9811,11 @@ export class GuestPortalService {
       if (scopedGuest) {
         return scopedGuest;
       }
+
+      // A selected club/domain is an identity boundary. Falling through to a
+      // guest from another Langame domain would silently revive a stale legacy
+      // binding and attribute activity to the wrong account.
+      return null;
     }
 
     return this.prisma.guest.findFirst({
@@ -10040,14 +10070,31 @@ export class GuestPortalService {
   }
 
   private guestPhoneHashCandidates(
-    primaryPhoneHash: string,
-    phoneEncrypted: string | null,
+    tokenPhoneHash: string,
+    profile?: {
+      phoneHash?: string | null;
+      phoneEncrypted?: string | null;
+    } | null,
   ) {
-    const hashes = new Set([primaryPhoneHash]);
-    const phone = this.phoneIdentityFromEncrypted(phoneEncrypted);
+    const profilePhoneHash = profile?.phoneHash?.trim() || null;
+    const profilePhoneEncrypted = profile?.phoneEncrypted?.trim() || null;
+    const hasProfilePhoneIdentity = Boolean(
+      profilePhoneHash || profilePhoneEncrypted,
+    );
+    const hashes = new Set<string>();
+
+    if (profilePhoneHash) {
+      hashes.add(profilePhoneHash);
+    }
+
+    const phone = this.phoneIdentityFromEncrypted(profilePhoneEncrypted);
 
     if (!phone) {
-      return [...hashes];
+      return hashes.size > 0
+        ? [...hashes]
+        : hasProfilePhoneIdentity
+          ? []
+          : [tokenPhoneHash];
     }
 
     const variants = new Set([phone.normalized]);
@@ -10055,7 +10102,10 @@ export class GuestPortalService {
       phone.normalized.length === 11 &&
       ['7', '8'].includes(phone.normalized[0])
     ) {
-      variants.add(phone.normalized.slice(1));
+      const localNumber = phone.normalized.slice(1);
+      variants.add(localNumber);
+      variants.add(`7${localNumber}`);
+      variants.add(`8${localNumber}`);
     }
 
     if (phone.normalized.length === 10) {
@@ -10069,7 +10119,7 @@ export class GuestPortalService {
       );
     }
 
-    return [...hashes];
+    return hashes.size > 0 ? [...hashes] : [tokenPhoneHash];
   }
 
   private async resolveStaffTestMatch(

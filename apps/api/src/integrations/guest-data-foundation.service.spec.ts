@@ -245,6 +245,9 @@ describe('GuestDataFoundationService', () => {
   const configService = {
     get: jest.fn(),
   };
+  const guestIdentityResolver = {
+    reconcileDomainSnapshot: jest.fn(),
+  };
 
   let service: GuestDataFoundationService;
 
@@ -269,6 +272,16 @@ describe('GuestDataFoundationService', () => {
     configService.get.mockImplementation((key: string) =>
       key === 'APP_ENCRYPTION_KEY' ? 'local-secret' : undefined,
     );
+    guestIdentityResolver.reconcileDomainSnapshot.mockResolvedValue({
+      candidates: 0,
+      profiles: 0,
+      linked: 0,
+      rebound: 0,
+      pendingRebind: 0,
+      alreadyLinked: 0,
+      conflicts: 0,
+      ambiguous: 0,
+    });
 
     prisma.guestDataProfileRun.create.mockResolvedValue({ id: 'run-1' });
     prisma.guestDataProfileRun.findFirst.mockResolvedValue(null);
@@ -412,6 +425,7 @@ describe('GuestDataFoundationService', () => {
       langameClient as never,
       langameSettingsService as never,
       configService as never,
+      guestIdentityResolver as never,
     );
   });
 
@@ -589,127 +603,54 @@ describe('GuestDataFoundationService', () => {
     expect(shiftUpsert.update.message).toBeNull();
   });
 
-  it('links a phone-only game profile to a synced Langame guest by phone hash', async () => {
-    const phoneHash = createHmac('sha256', 'local-secret')
-      .update('79991112233')
-      .digest('hex');
-    prisma.guestGameProfile.findFirst
-      .mockResolvedValueOnce({
-        id: 'profile-1',
-        guestId: null,
-        contactMasked: null,
-      })
-      .mockResolvedValueOnce(null);
+  it('reconciles a complete guest snapshot through the identity resolver', async () => {
+    const hashPhone = (value: string) =>
+      createHmac('sha256', 'local-secret').update(value).digest('hex');
 
     await service.syncTenant(user, {
       dateFrom: '2026-05-01',
       dateTo: '2026-05-01',
     });
 
-    expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledWith({
-      where: {
-        tenantId: 'tenant-1',
-        phoneHash,
-        status: 'ACTIVE',
-        OR: [{ guestId: null }, { guestId: 'guest-1' }],
-      },
-      select: {
-        id: true,
-        guestId: true,
-        contactMasked: true,
-      },
-      orderBy: [{ guestId: 'desc' }, { updatedAt: 'desc' }],
-    });
-    const gameProfileUpdateCalls = prisma.guestGameProfile.update.mock
-      .calls as Array<
-      [
-        {
-          where: { id: string };
-          data: {
-            guestId: string;
-            contactMasked: string | null;
-            lastActivityAt: Date;
-          };
-        },
-      ]
-    >;
-    const gameProfileUpdate = gameProfileUpdateCalls[0]?.[0];
-    expect(gameProfileUpdate).toBeDefined();
-    if (!gameProfileUpdate) {
-      throw new Error('Game profile update was not called');
-    }
-    expect(gameProfileUpdate.where).toEqual({ id: 'profile-1' });
-    expect(gameProfileUpdate.data.guestId).toBe('guest-1');
-    expect(gameProfileUpdate.data.contactMasked).toBe('***2233');
-    expect(gameProfileUpdate.data.lastActivityAt).toBeInstanceOf(Date);
-    expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith({
-      where: {
-        tenantId: 'tenant-1',
-        profileId: 'profile-1',
-        guestId: null,
-      },
-      data: { guestId: 'guest-1' },
-    });
-    expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
-      where: {
-        tenantId: 'tenant-1',
-        profileId: 'profile-1',
-        guestId: null,
-      },
-      data: { guestId: 'guest-1' },
-    });
-    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
-      where: {
-        tenantId: 'tenant-1',
-        profileId: 'profile-1',
-        guestId: null,
-      },
-      data: { guestId: 'guest-1' },
-    });
-    const gameEventCreateManyCalls = prisma.guestGameEvent.createMany.mock
-      .calls as Array<
-      [
-        {
-          data: Array<{
-            tenantId: string;
-            profileId: string;
-            guestId: string;
-            eventType: string;
-            source: string;
-            externalProvider: IntegrationProvider;
-            externalDomain: string;
-            externalId: string;
-            payload: {
-              source: string;
-              phoneMasked: string | null;
-              externalGuestId: string;
-            };
-          }>;
-          skipDuplicates: boolean;
-        },
-      ]
-    >;
-    const linkEventCreateMany = gameEventCreateManyCalls[0]?.[0];
-    expect(linkEventCreateMany).toBeDefined();
-    if (!linkEventCreateMany) {
-      throw new Error('Game profile link event was not created');
-    }
-    expect(linkEventCreateMany.skipDuplicates).toBe(true);
-    expect(linkEventCreateMany.data[0]).toMatchObject({
+    expect(guestIdentityResolver.reconcileDomainSnapshot).toHaveBeenCalledWith({
       tenantId: 'tenant-1',
-      profileId: 'profile-1',
-      guestId: 'guest-1',
-      eventType: 'GAME_PROFILE_LINKED',
-      source: 'FOUNDATION_SYNC_PROFILE_LINK',
       externalProvider: IntegrationProvider.LANGAME,
       externalDomain: 'club.example',
-      externalId: 'game-profile-link:profile-1:guest-1',
-      payload: {
-        source: 'guest_foundation_sync',
-        phoneMasked: '***2233',
-        externalGuestId: '42',
-      },
+      candidates: [
+        expect.objectContaining({
+          guestId: 'guest-1',
+          externalGuestId: '42',
+          phoneHashes: expect.arrayContaining([
+            hashPhone('79991112233'),
+            hashPhone('89991112233'),
+            hashPhone('9991112233'),
+          ]) as string[],
+          phoneMasked: '***2233',
+        }),
+      ],
+      syncedAt: expect.any(Date) as Date,
+      complete: true,
     });
+  });
+
+  it('does not treat a failed guests endpoint as a complete identity snapshot', async () => {
+    langameClient.listGuests.mockRejectedValueOnce(
+      new Error('guest directory unavailable'),
+    );
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(guestIdentityResolver.reconcileDomainSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        externalDomain: 'club.example',
+        candidates: [],
+        complete: false,
+      }),
+    );
   });
 
   it('loads guest logs only when explicitly requested', async () => {

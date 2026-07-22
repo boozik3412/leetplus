@@ -163,6 +163,7 @@ function createPrismaMock() {
       findMany: jest.fn(),
     },
     guest: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     guestAudienceMember: {
@@ -283,6 +284,10 @@ function createService(
   const configService = {
     get: jest.fn(),
   };
+  const guestIdentityResolver = {
+    findActiveGuestForProfileDomain: jest.fn().mockResolvedValue(null),
+    listActiveGuestIds: jest.fn().mockResolvedValue([]),
+  };
 
   return {
     prisma,
@@ -291,6 +296,7 @@ function createService(
     configService,
     bonusLedgerSchedulerService,
     bonusLedgerService,
+    guestIdentityResolver,
     service: new GuestGamificationService(
       prisma,
       langameSettingsService as any,
@@ -298,6 +304,7 @@ function createService(
       configService as any,
       bonusLedgerSchedulerService as any,
       bonusLedgerService as any,
+      guestIdentityResolver as any,
       staffTeamChatService as any,
     ),
   };
@@ -10330,6 +10337,35 @@ describe('GuestGamificationService', () => {
   });
 
   describe('processEvent', () => {
+    it('resolves a profile by any active identity link when the legacy guest differs', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameProfile.findFirst.mockResolvedValue(null);
+
+      await (service as any).resolveDryRunProfile(user, {
+        guestId: 'guest-linked-domain',
+      });
+
+      expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            tenantId: user.tenantId,
+            OR: [
+              { guestId: 'guest-linked-domain' },
+              {
+                identityLinks: {
+                  some: {
+                    tenantId: user.tenantId,
+                    guestId: 'guest-linked-domain',
+                    status: 'ACTIVE',
+                  },
+                },
+              },
+            ],
+          },
+        }),
+      );
+    });
+
     it('atomically replaces a deterministic recovery decision run on retry', async () => {
       const { service, prisma } = createService();
 
@@ -10411,6 +10447,68 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+    });
+
+    it('uses the active domain identity when loading ledger shadow facts', async () => {
+      const { service, prisma, configService, guestIdentityResolver } =
+        createService();
+      configService.get.mockImplementation((key: string) =>
+        key === 'GUEST_GAME_LEDGER_EVALUATOR_MODE' ? 'SHADOW' : undefined,
+      );
+      guestIdentityResolver.findActiveGuestForProfileDomain.mockResolvedValue({
+        id: 'guest-domain-2',
+      });
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          id: 'mission-1',
+          name: 'Visit mission',
+          triggerKind: 'SESSION_START',
+          conditions: {},
+          storeIds: ['store-2'],
+          periodFrom: null,
+          periodTo: null,
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+      ]);
+      prisma.store.findMany.mockResolvedValue([
+        {
+          id: 'store-2',
+          externalDomain: 'club-2',
+          timeZone: 'Asia/Yekaterinburg',
+        },
+      ]);
+
+      await service.recordRuleDecisions(
+        user,
+        dryRunResult({
+          store: {
+            id: 'store-2',
+            name: 'Club 2',
+            timeZone: 'Asia/Yekaterinburg',
+            externalDomain: 'club-2',
+          },
+        }),
+        { eventId: 'event-domain-2' },
+      );
+
+      expect(
+        guestIdentityResolver.findActiveGuestForProfileDomain,
+      ).toHaveBeenCalledWith({
+        tenantId: user.tenantId,
+        profileId: 'profile-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-2',
+      });
+      expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: [
+              { profileId: 'profile-1' },
+              { guestId: { in: ['guest-domain-2'] } },
+            ],
+          }),
+        }),
+      );
     });
 
     it('passes a stable external id to ledger parity when the batch fact id is synthetic', async () => {
@@ -14014,6 +14112,41 @@ describe('GuestGamificationService', () => {
   });
 
   describe('runSnapshotPipeline', () => {
+    it('scopes profile backfill to the legacy guest and every active identity link', async () => {
+      const fixture = createService();
+      const { service, prisma, guestIdentityResolver } = fixture;
+      enablePrimarySnapshotBackfill(fixture);
+      guestIdentityResolver.listActiveGuestIds.mockResolvedValue([
+        'guest-domain-2',
+        'guest-domain-3',
+      ]);
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      const policy = await (service as any).snapshotPipelineBackfillPolicy(
+        user,
+      );
+      await (service as any).loadPendingSessionSnapshotFacts(
+        user,
+        10,
+        new Date('2026-06-01T00:00:00.000Z'),
+        policy.profileGuestIds,
+      );
+
+      expect(policy).toMatchObject({
+        enabled: true,
+        profileId: 'profile-1',
+        profileGuestIds: ['guest-1', 'guest-domain-2', 'guest-domain-3'],
+      });
+      expect(guestIdentityResolver.listActiveGuestIds).toHaveBeenCalledWith(
+        user.tenantId,
+        'profile-1',
+      );
+      const query = prisma.$queryRaw.mock.calls[0][0];
+      expect(query.values).toEqual(
+        expect.arrayContaining(['guest-1', 'guest-domain-2', 'guest-domain-3']),
+      );
+    });
+
     it('does not execute historical anti-join queries when backfill mode is OFF by default', async () => {
       const { service, prisma } = createService();
       jest
@@ -16216,7 +16349,14 @@ describe('GuestGamificationService supplemental pipeline', () => {
   };
 
   it('evaluates a selected-club domain top-up and fails closed for another domain', async () => {
-    const { service } = createService();
+    const { service, prisma } = createService();
+    prisma.guest.findFirst.mockResolvedValue({
+      id: 'guest-1',
+      name: 'Guest',
+      phone: '***0000',
+      externalDomain: '46.langamepro.ru',
+      externalClubId: null,
+    });
     const mission = activeMission({
       id: supplementalMission.id,
       name: 'Domain top-up',

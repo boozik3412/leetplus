@@ -19,6 +19,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { LangameClient } from '../integrations/langame.client';
 import { parseLangameDate } from '../integrations/langame-date';
 import {
@@ -177,7 +178,7 @@ type SnapshotPipelineBackfillPolicy = {
   mode: SnapshotPipelineBackfillMode;
   enabled: boolean;
   profileId: string | null;
-  profileGuestId: string | null;
+  profileGuestIds: string[];
   liveNotBefore: Date | null;
 };
 const gameEffectWindowDays = 14;
@@ -2476,7 +2477,12 @@ export type GuestGameDryRunResult = {
     'id' | 'displayName' | 'contactMasked' | 'xp' | 'level' | 'status'
   > | null;
   guest: GuestGameProfile['guest'];
-  store: { id: string; name: string; timeZone?: string | null } | null;
+  store: {
+    id: string;
+    name: string;
+    timeZone?: string | null;
+    externalDomain?: string | null;
+  } | null;
   input: {
     sessionType: string | null;
     sessionPacket: boolean | null;
@@ -3726,9 +3732,55 @@ export class GuestGamificationService {
     private readonly configService: ConfigService,
     private readonly bonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
+    private readonly guestIdentityResolver: GuestIdentityResolverService,
     @Optional()
     private readonly staffTeamChatService?: StaffTeamChatService,
   ) {}
+
+  private async resolveProfileIdentityGuestIds(
+    user: AuthenticatedUser,
+    input: {
+      profileId?: string | null;
+      legacyGuestId?: string | null;
+      legacyExternalDomain?: string | null;
+      externalDomain?: string | null;
+    },
+  ): Promise<string[]> {
+    const profileId = nullableId(input.profileId);
+    const legacyGuestId = nullableId(input.legacyGuestId);
+    const externalDomain = nullableString(input.externalDomain);
+
+    if (!profileId) {
+      return legacyGuestId ? [legacyGuestId] : [];
+    }
+
+    if (externalDomain) {
+      const domainGuest =
+        await this.guestIdentityResolver.findActiveGuestForProfileDomain({
+          tenantId: user.tenantId,
+          profileId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain,
+        });
+      if (domainGuest?.id) {
+        return [domainGuest.id];
+      }
+
+      return legacyGuestId &&
+        nullableString(input.legacyExternalDomain) === externalDomain
+        ? [legacyGuestId]
+        : [];
+    }
+
+    const linkedGuestIds = await this.guestIdentityResolver.listActiveGuestIds(
+      user.tenantId,
+      profileId,
+    );
+    return uniqueStrings([
+      ...(legacyGuestId ? [legacyGuestId] : []),
+      ...linkedGuestIds,
+    ]);
+  }
 
   private logGuestGameDebug(
     stage: string,
@@ -6093,7 +6145,7 @@ export class GuestGamificationService {
       mode,
       enabled: false,
       profileId,
-      profileGuestId: null,
+      profileGuestIds: [],
       liveNotBefore,
     });
 
@@ -6155,7 +6207,7 @@ export class GuestGamificationService {
         mode,
         enabled: true,
         profileId: null,
-        profileGuestId: null,
+        profileGuestIds: [],
         liveNotBefore: liveCutoff.value,
       };
     }
@@ -6164,7 +6216,14 @@ export class GuestGamificationService {
       where: { tenantId: user.tenantId, id: profileId },
       select: { guestId: true },
     });
-    if (!profile?.guestId) {
+    if (!profile) {
+      return disabled(profileId, liveCutoff.value);
+    }
+    const profileGuestIds = await this.resolveProfileIdentityGuestIds(user, {
+      profileId,
+      legacyGuestId: profile.guestId,
+    });
+    if (!profileGuestIds.length) {
       return disabled(profileId, liveCutoff.value);
     }
 
@@ -6172,7 +6231,7 @@ export class GuestGamificationService {
       mode,
       enabled: true,
       profileId,
-      profileGuestId: profile.guestId,
+      profileGuestIds,
       liveNotBefore: liveCutoff.value,
     };
   }
@@ -6215,7 +6274,7 @@ export class GuestGamificationService {
             user,
             limit,
             cutoff,
-            policy.profileGuestId,
+            policy.profileGuestIds,
           )
         : Promise.resolve([] as GuestGameSnapshotFact[]),
       includePurchases
@@ -6223,7 +6282,7 @@ export class GuestGamificationService {
             user,
             limit,
             cutoff,
-            policy.profileGuestId,
+            policy.profileGuestIds,
           )
         : Promise.resolve([] as GuestGameSnapshotFact[]),
     ]);
@@ -6244,10 +6303,11 @@ export class GuestGamificationService {
     user: AuthenticatedUser,
     limit: number,
     cutoff: Date,
-    profileGuestId: string | null = null,
+    profileGuestIds: string[] = [],
   ): Promise<GuestGameSnapshotFact[]> {
-    const profileScope = profileGuestId
-      ? Prisma.sql`AND session."guestId" = ${profileGuestId}`
+    const scopedGuestIds = uniqueStrings(profileGuestIds);
+    const profileScope = scopedGuestIds.length
+      ? Prisma.sql`AND session."guestId" IN (${Prisma.join(scopedGuestIds)})`
       : Prisma.sql``;
     const pendingRows =
       (await this.prisma.$queryRaw<
@@ -6421,10 +6481,11 @@ export class GuestGamificationService {
     user: AuthenticatedUser,
     limit: number,
     cutoff: Date,
-    profileGuestId: string | null = null,
+    profileGuestIds: string[] = [],
   ): Promise<GuestGameSnapshotFact[]> {
-    const profileScope = profileGuestId
-      ? Prisma.sql`AND sale."guestId" = ${profileGuestId}`
+    const scopedGuestIds = uniqueStrings(profileGuestIds);
+    const profileScope = scopedGuestIds.length
+      ? Prisma.sql`AND sale."guestId" IN (${Prisma.join(scopedGuestIds)})`
       : Prisma.sql``;
     const pendingRows =
       (await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -11971,21 +12032,44 @@ export class GuestGamificationService {
     const quantity = dryRunOptionalNumber(dto.quantity);
     const externalDomain = nullableString(dto.externalDomain) ?? null;
     const sourceFactId = nullableString(dto.sourceFactId) ?? null;
-    const [profile, lootBoxes, missions, seasons] = await Promise.all([
+    const [profile, lootBoxes, missions, seasons, store] = await Promise.all([
       this.resolveDryRunProfile(user, dto),
       this.getLootBoxes(user),
       this.getMissions(user),
       this.getSeasons(user),
+      dto.storeId ? this.assertStore(user, dto.storeId) : Promise.resolve(null),
     ]);
+    const selectedExternalDomain =
+      nullableString(store?.externalDomain) ?? externalDomain;
+    const identityGuestIds = await this.resolveProfileIdentityGuestIds(user, {
+      profileId: profile?.id,
+      legacyGuestId: profile?.guest?.id,
+      legacyExternalDomain: profile?.guest?.externalDomain,
+      externalDomain: selectedExternalDomain,
+    });
+    const selectedIdentityGuestId = identityGuestIds[0] ?? null;
     const rewards = await this.getDryRunRewards(user, {
       ...options.rewardScope,
       missionIds: missions.map((mission) => mission.id),
     });
-    const guest =
-      profile?.guest ??
-      (dto.guestId
-        ? dryRunGuestSummary(await this.getTenantGuest(user, dto.guestId))
-        : null);
+    const explicitGuestId = nullableId(dto.guestId);
+    const explicitGuest = explicitGuestId
+      ? dryRunGuestSummary(await this.getTenantGuest(user, explicitGuestId))
+      : null;
+    const scopedExplicitGuest =
+      !selectedExternalDomain ||
+      nullableString(explicitGuest?.externalDomain) === selectedExternalDomain
+        ? explicitGuest
+        : null;
+    const guestId = scopedExplicitGuest?.id ?? selectedIdentityGuestId;
+    const guest = guestId
+      ? profile?.guest?.id === guestId
+        ? profile.guest
+        : (scopedExplicitGuest ??
+          dryRunGuestSummary(await this.getTenantGuest(user, guestId)))
+      : selectedExternalDomain
+        ? null
+        : (profile?.guest ?? null);
     const missionRewardEntitlements =
       await this.getDryRunMissionRewardEntitlements(user, {
         profileId: profile?.id ?? null,
@@ -11998,17 +12082,18 @@ export class GuestGamificationService {
         lootBoxes.map((lootBox) => lootBox.id),
         limitOccurredAt,
       );
-    const store = dto.storeId
-      ? await this.assertStore(user, dto.storeId)
-      : null;
     const timeZone = guestGameTimeZone(store?.timeZone ?? null);
     const progressEvents = await this.getDryRunProgressEvents(user, {
       profileId: profile?.id ?? null,
-      guestId: guest?.id ?? null,
+      guestIds: uniqueStrings([
+        ...identityGuestIds,
+        ...(guest?.id ? [guest.id] : []),
+      ]),
     });
     const audienceMemberIds = await this.getDryRunAudienceMemberIds(
       user,
       guest,
+      identityGuestIds,
     );
     const context: DryRunContext = {
       eventType,
@@ -12018,7 +12103,7 @@ export class GuestGamificationService {
       profile,
       guest,
       storeId: store?.id ?? null,
-      externalDomain: store?.externalDomain ?? externalDomain,
+      externalDomain: selectedExternalDomain,
       timeZone,
       sessionType,
       sessionPacket,
@@ -12090,7 +12175,12 @@ export class GuestGamificationService {
         : null,
       guest,
       store: store
-        ? { id: store.id, name: store.name, timeZone: store.timeZone }
+        ? {
+            id: store.id,
+            name: store.name,
+            timeZone: store.timeZone,
+            externalDomain: store.externalDomain,
+          }
         : null,
       input: {
         sessionType,
@@ -12970,6 +13060,18 @@ export class GuestGamificationService {
       const seasonIds = dryRun.rules
         .filter((rule) => rule.kind === 'SEASON')
         .map((rule) => rule.id);
+      const identityGuestIds = await this.resolveProfileIdentityGuestIds(user, {
+        profileId: dryRun.profile?.id,
+        legacyGuestId: dryRun.guest?.id,
+        legacyExternalDomain: dryRun.guest?.externalDomain,
+        externalDomain: dryRun.store?.externalDomain,
+      });
+      const identityOwners: Prisma.GuestGameRewardWhereInput[] = [
+        ...(dryRun.profile?.id ? [{ profileId: dryRun.profile.id }] : []),
+        ...(identityGuestIds.length
+          ? [{ guestId: { in: identityGuestIds } }]
+          : []),
+      ];
       const lootBoxes = lootBoxIds.length
         ? await this.prisma.guestGameLootBox.findMany({
             where: { tenantId: user.tenantId, id: { in: lootBoxIds } },
@@ -12994,12 +13096,7 @@ export class GuestGamificationService {
               ...(options.excludeSeasonRewardIds?.length
                 ? { id: { notIn: options.excludeSeasonRewardIds } }
                 : {}),
-              OR: [
-                ...(dryRun.profile?.id
-                  ? [{ profileId: dryRun.profile.id }]
-                  : []),
-                ...(dryRun.guest?.id ? [{ guestId: dryRun.guest.id }] : []),
-              ],
+              OR: identityOwners,
             },
             select: {
               id: true,
@@ -13141,7 +13238,9 @@ export class GuestGamificationService {
           lifecycleStatus: 'ACTIVE',
           OR: [
             ...(dryRun.profile?.id ? [{ profileId: dryRun.profile.id }] : []),
-            ...(dryRun.guest?.id ? [{ guestId: dryRun.guest.id }] : []),
+            ...(identityGuestIds.length
+              ? [{ guestId: { in: identityGuestIds } }]
+              : []),
           ],
           happenedAt: { gte: evaluatedFrom, lte: evaluatedTo },
         },
@@ -13232,7 +13331,46 @@ export class GuestGamificationService {
       user,
       dto,
     );
-    const processGuestId = nullableId(dto.guestId) ?? profile.guest?.id ?? null;
+    const requestedGuestId = nullableId(dto.guestId);
+    const requestedStoreId = nullableId(dto.storeId);
+    const requestedExternalDomain = nullableString(dto.externalDomain);
+    const processStore =
+      !requestedExternalDomain && requestedStoreId
+        ? await this.prisma.store.findFirst({
+            where: { id: requestedStoreId, tenantId: user.tenantId },
+            select: { externalDomain: true },
+          })
+        : null;
+    const processExternalDomain =
+      requestedExternalDomain ?? nullableString(processStore?.externalDomain);
+    const scopedRequestedGuestId =
+      requestedGuestId && processExternalDomain
+        ? ((
+            await this.prisma.guest.findFirst({
+              where: {
+                id: requestedGuestId,
+                tenantId: user.tenantId,
+                externalDomain: processExternalDomain,
+                isDisabled: false,
+              },
+              select: { id: true },
+            })
+          )?.id ?? null)
+        : requestedGuestId;
+    const processIdentityGuestIds = await this.resolveProfileIdentityGuestIds(
+      user,
+      {
+        profileId: profile.id,
+        legacyGuestId: profile.guest?.id,
+        legacyExternalDomain: profile.guest?.externalDomain,
+        externalDomain: processExternalDomain,
+      },
+    );
+    const processGuestId =
+      scopedRequestedGuestId ??
+      processIdentityGuestIds[0] ??
+      (processExternalDomain ? null : (profile.guest?.id ?? null)) ??
+      null;
     const dryRunOptions =
       options.ruleDomainTimeZones ||
       options.ruleExternalDomains ||
@@ -13489,7 +13627,7 @@ export class GuestGamificationService {
         user,
         {
           profileId: profile.id,
-          guestId: profile.guest?.id ?? dryRun.guest?.id ?? null,
+          guestId: processGuestId,
           lootBoxId: nullableId(dto.lootBoxId),
           eventType: dryRun.eventType,
           source,
@@ -15383,7 +15521,20 @@ export class GuestGamificationService {
         tenantId: user.tenantId,
         ...(dto.profileId
           ? { id: dto.profileId }
-          : { guestId: dto.guestId ?? undefined }),
+          : {
+              OR: [
+                { guestId: dto.guestId ?? undefined },
+                {
+                  identityLinks: {
+                    some: {
+                      tenantId: user.tenantId,
+                      guestId: dto.guestId ?? undefined,
+                      status: 'ACTIVE',
+                    },
+                  },
+                },
+              ],
+            }),
       },
       include: gameProfileInclude,
     });
@@ -15512,11 +15663,12 @@ export class GuestGamificationService {
 
   private async getDryRunProgressEvents(
     user: AuthenticatedUser,
-    scope: { profileId?: string | null; guestId?: string | null },
+    scope: { profileId?: string | null; guestIds?: string[] },
   ): Promise<GuestGameProgressEvent[]> {
+    const guestIds = uniqueStrings(scope.guestIds ?? []);
     const conditions: Prisma.GuestGameEventWhereInput[] = [
       ...(scope.profileId ? [{ profileId: scope.profileId }] : []),
-      ...(scope.guestId ? [{ guestId: scope.guestId }] : []),
+      ...(guestIds.length ? [{ guestId: { in: guestIds } }] : []),
     ];
 
     if (!conditions.length) {
@@ -15548,17 +15700,51 @@ export class GuestGamificationService {
   private async getDryRunAudienceMemberIds(
     user: AuthenticatedUser,
     guest: GuestGameProfile['guest'],
+    identityGuestIds: string[] = [],
   ): Promise<Set<string>> {
+    const guestIds = uniqueStrings([
+      ...identityGuestIds,
+      ...(guest?.id ? [guest.id] : []),
+    ]);
+    const linkedGuests = guestIds.length
+      ? ((await this.prisma.guest.findMany({
+          where: { tenantId: user.tenantId, id: { in: guestIds } },
+          select: {
+            id: true,
+            externalDomain: true,
+            externalGuestId: true,
+          },
+        })) ?? [])
+      : [];
+    const externalOwners = new Map<
+      string,
+      { externalDomain: string; externalGuestId: string }
+    >();
+    if (guest?.externalGuestId) {
+      externalOwners.set(
+        `${guest.externalDomain ?? ''}:${guest.externalGuestId}`,
+        {
+          externalDomain: guest.externalDomain ?? '',
+          externalGuestId: guest.externalGuestId,
+        },
+      );
+    }
+    for (const linkedGuest of linkedGuests) {
+      externalOwners.set(
+        `${linkedGuest.externalDomain ?? ''}:${linkedGuest.externalGuestId}`,
+        {
+          externalDomain: linkedGuest.externalDomain ?? '',
+          externalGuestId: linkedGuest.externalGuestId,
+        },
+      );
+    }
     const ownerFilters: Prisma.GuestAudienceMemberWhereInput[] = [
-      ...(guest?.id ? [{ guestId: guest.id }] : []),
-      ...(guest?.externalGuestId
-        ? [
-            {
-              externalDomain: guest.externalDomain ?? '',
-              externalGuestId: guest.externalGuestId,
-            },
-          ]
-        : []),
+      ...(guestIds.length === 1
+        ? [{ guestId: guestIds[0] }]
+        : guestIds.length > 1
+          ? [{ guestId: { in: guestIds } }]
+          : []),
+      ...externalOwners.values(),
     ];
 
     if (!ownerFilters.length) {

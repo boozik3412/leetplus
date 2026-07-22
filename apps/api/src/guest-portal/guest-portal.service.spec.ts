@@ -104,6 +104,7 @@ function createPrismaMock() {
       createMany: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      upsert: jest.fn(),
       updateMany: jest.fn(),
     },
     guestGameAuditEvent: {
@@ -178,6 +179,23 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     encrypt: jest.fn((value: string) => `encrypted:${value}`),
     decrypt: jest.fn(),
   };
+  const guestIdentityResolver = {
+    findActiveGuestForProfileDomain: jest.fn().mockResolvedValue(null),
+    resolveExactMatch: jest.fn().mockImplementation((input: any) =>
+      Promise.resolve({
+        status: 'LINKED',
+        profileId: input.profileId,
+        guestId: input.guestId,
+        linkedNow: true,
+        backfilled: {
+          rewards: 0,
+          events: 0,
+          deliveries: 0,
+          bonusLedgerEntries: 0,
+        },
+      }),
+    ),
+  };
   const service = new GuestPortalService(
     prisma,
     configService,
@@ -186,6 +204,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     guestGamificationService as any,
     guestActivityLedgerService as any,
     secretEncryptionService as any,
+    guestIdentityResolver as any,
   );
 
   prisma.tenant.findFirst.mockResolvedValue(null);
@@ -289,6 +308,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   );
   prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameEvent.createMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameEvent.upsert.mockResolvedValue({});
   prisma.guestGameEvent.count.mockResolvedValue(0);
   prisma.guestGameEvent.aggregate.mockResolvedValue({
     _count: { id: 0 },
@@ -364,6 +384,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   return {
     guestGamificationService,
     guestActivityLedgerService,
+    guestIdentityResolver,
     jwtService,
     langameSettingsService,
     prisma,
@@ -6898,6 +6919,79 @@ describe('GuestPortalService', () => {
   });
 
   describe('buildPortalPayload guest matching', () => {
+    it('does not union a stale token phone hash with the current profile identity during scoped lookup', async () => {
+      const { prisma, secretEncryptionService, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+      const staleTokenHash = 'stale-token-phone-hash';
+      const currentProfileHash = createHmac('sha256', 'test-secret')
+        .update('79990001122')
+        .digest('hex');
+
+      secretEncryptionService.decrypt.mockReturnValue('79990001122');
+      prisma.guest.findMany.mockResolvedValue([]);
+
+      await (service as any).findUniqueScopedGuest(
+        {
+          tenantId: 'tenant-1',
+          phoneHash: staleTokenHash,
+        },
+        { externalDomain: 'current.langame.ru' },
+        {
+          phoneHash: currentProfileHash,
+          phoneEncrypted: 'encrypted-current-phone',
+        },
+      );
+
+      const phoneHashFilter =
+        prisma.guest.findMany.mock.calls[0][0].where.phoneHash.in;
+      expect(phoneHashFilter).toContain(currentProfileHash);
+      expect(phoneHashFilter).not.toContain(staleTokenHash);
+    });
+
+    it('does not fall back to a legacy guest from another selected store domain', async () => {
+      const { guestIdentityResolver, prisma, service } = createService();
+      const legacyGuest = {
+        id: 'legacy-guest',
+        externalDomain: 'legacy.langame.ru',
+      };
+      guestIdentityResolver.findActiveGuestForProfileDomain.mockResolvedValue(
+        null,
+      );
+      prisma.guest.findFirst.mockImplementation(({ where }: any) => {
+        if (where.id === 'legacy-guest') {
+          return Promise.resolve(legacyGuest);
+        }
+
+        if (where.externalDomain === 'current.langame.ru') {
+          return Promise.resolve(null);
+        }
+
+        return Promise.resolve(legacyGuest);
+      });
+
+      const result = await (service as any).findGuest(
+        {
+          tenantId: 'tenant-1',
+          guestId: 'legacy-guest',
+          profileId: 'profile-1',
+          phoneHash: 'profile-phone-hash',
+        },
+        { externalDomain: 'current.langame.ru' },
+        { id: 'profile-1', phoneHash: 'profile-phone-hash' },
+      );
+
+      expect(result).toBeNull();
+      expect(prisma.guest.findFirst).toHaveBeenCalledTimes(2);
+      expect(prisma.guest.findFirst.mock.calls[1][0]).toEqual(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            externalDomain: 'current.langame.ru',
+          }),
+        }),
+      );
+    });
+
     it('matches a scoped Langame guest by local RU phone hash variant', async () => {
       const {
         langameSettingsService,
@@ -6931,22 +7025,19 @@ describe('GuestPortalService', () => {
           },
         ],
       });
-      prisma.guest.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({
-          id: 'guest-pushkinskaya',
-          tenantId: 'tenant-1',
-          externalProvider: IntegrationProvider.LANGAME,
-          externalDomain: '46.langamepro.ru',
-          externalGuestTypeId: null,
-          externalGuestId: '633280',
-          phoneHash: phoneHashLocal,
-          phoneMasked: '***9799',
-          currentCountHours: null,
-          lastSyncedAt: new Date('2026-06-24T23:51:58.104Z'),
-          isDisabled: false,
-        });
+      prisma.guest.findFirst.mockResolvedValue({
+        id: 'guest-pushkinskaya',
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '46.langamepro.ru',
+        externalGuestTypeId: null,
+        externalGuestId: '633280',
+        phoneHash: phoneHashLocal,
+        phoneMasked: '***9799',
+        currentCountHours: null,
+        lastSyncedAt: new Date('2026-06-24T23:51:58.104Z'),
+        isDisabled: false,
+      });
       prisma.guestGameProfile.findFirst.mockResolvedValue({
         id: 'profile-telegram',
         tenantId: 'tenant-1',
@@ -7875,11 +7966,58 @@ describe('GuestPortalService', () => {
   });
 
   describe('matchLangameGuest', () => {
+    it('uses the current profile phone identity for exact linking instead of a stale token hash', async () => {
+      const {
+        guestIdentityResolver,
+        prisma,
+        secretEncryptionService,
+        service,
+      } = createService({ APP_ENCRYPTION_KEY: 'test-secret' });
+      const staleTokenHash = 'stale-token-phone-hash';
+      const currentProfileHash = createHmac('sha256', 'test-secret')
+        .update('79990001122')
+        .digest('hex');
+
+      secretEncryptionService.decrypt.mockReturnValue('79990001122');
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        phoneHash: currentProfileHash,
+        phoneEncrypted: 'encrypted-current-phone',
+      });
+      prisma.guest.findFirst.mockResolvedValue({
+        id: 'guest-1',
+        phoneHash: currentProfileHash,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'current.langame.ru',
+        externalGuestId: 'external-1',
+      });
+
+      await (service as any).linkGameProfileToLocalGuest(
+        {
+          tenantId: 'tenant-1',
+          phoneHash: staleTokenHash,
+        },
+        'profile-1',
+        'guest-1',
+        '***1122',
+      );
+
+      const exactMatchInput =
+        guestIdentityResolver.resolveExactMatch.mock.calls[0][0];
+      expect(exactMatchInput.acceptedPhoneHashes).toContain(currentProfileHash);
+      expect(exactMatchInput.acceptedPhoneHashes).not.toContain(staleTokenHash);
+    });
+
     it('links a phone-only game profile to a synced Langame guest', async () => {
-      const { jwtService, langameSettingsService, prisma, service } =
-        createService({
-          APP_ENCRYPTION_KEY: 'test-secret',
-        });
+      const {
+        guestIdentityResolver,
+        jwtService,
+        langameSettingsService,
+        prisma,
+        service,
+      } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
       const phone = '+7 999 111-22-33';
       const phoneHash = createHmac('sha256', 'test-secret')
         .update('79991112233')
@@ -7981,6 +8119,18 @@ describe('GuestPortalService', () => {
       prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 3 });
       prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 1 });
       prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 4 });
+      guestIdentityResolver.resolveExactMatch.mockResolvedValue({
+        status: 'LINKED',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        linkedNow: true,
+        backfilled: {
+          rewards: 2,
+          events: 3,
+          deliveries: 1,
+          bonusLedgerEntries: 4,
+        },
+      });
 
       const result = await service.matchLangameGuest('Bearer guest-token', {
         phone,
@@ -7997,82 +8147,30 @@ describe('GuestPortalService', () => {
         bonusLedgerEntries: 4,
       });
       expect(result.portal).toBe(portalPayload);
-      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
+      expect(guestIdentityResolver.resolveExactMatch).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'profile-1' },
-          data: expect.objectContaining({
-            guestId: 'guest-1',
-            phoneHash,
-          }),
-        }),
-      );
-      expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith({
-        where: {
           tenantId: 'tenant-1',
           profileId: 'profile-1',
-          guestId: null,
-        },
-        data: { guestId: 'guest-1' },
-      });
-      expect(prisma.guestGameEvent.updateMany).toHaveBeenCalledWith({
-        where: {
-          tenantId: 'tenant-1',
-          profileId: 'profile-1',
-          guestId: null,
-        },
-        data: { guestId: 'guest-1' },
-      });
-      expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
-        where: {
-          tenantId: 'tenant-1',
-          profileId: 'profile-1',
-          guestId: null,
-        },
-        data: { guestId: 'guest-1' },
-      });
-      expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
-        where: {
-          tenantId: 'tenant-1',
-          profileId: 'profile-1',
-          guestId: null,
-        },
-        data: { guestId: 'guest-1' },
-      });
-      expect(prisma.guestGameEvent.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: [
-            expect.objectContaining({
-              tenantId: 'tenant-1',
-              profileId: 'profile-1',
-              guestId: 'guest-1',
-              eventType: 'GAME_PROFILE_LINKED',
-              source: 'GUEST_PORTAL_PROFILE_LINK',
-              externalProvider: IntegrationProvider.LANGAME,
-              externalDomain: '1337.langame.ru',
-              externalId: 'game-profile-link:profile-1:guest-1',
-              payload: expect.objectContaining({
-                source: 'guest_portal_langame_match',
-                phoneMasked: '***2233',
-                externalGuestId: '42',
-                backfilled: {
-                  rewards: 2,
-                  events: 3,
-                  deliveries: 1,
-                  bonusLedgerEntries: 4,
-                },
-              }),
-            }),
-          ],
-          skipDuplicates: true,
+          guestId: 'guest-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '1337.langame.ru',
+          externalGuestId: '42',
+          matchSource: 'guest_portal_langame_match',
+          requiredRebindConfirmations: 1,
         }),
       );
     });
 
     it('backfills profile-only game records when the profile is already linked locally', async () => {
-      const { jwtService, langameSettingsService, prisma, service } =
-        createService({
-          APP_ENCRYPTION_KEY: 'test-secret',
-        });
+      const {
+        guestIdentityResolver,
+        jwtService,
+        langameSettingsService,
+        prisma,
+        service,
+      } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
       const phone = '+7 999 111-22-33';
       const phoneHash = createHmac('sha256', 'test-secret')
         .update('79991112233')
@@ -8103,6 +8201,8 @@ describe('GuestPortalService', () => {
             id: 'store-1',
             publicSlug: 'club-1337',
             name: '1337',
+            externalDomain: '1337.langame.ru',
+            integrationSourceId: 'source-1',
             address: 'ул. Ленина, 1',
           },
         ],
@@ -8135,6 +8235,7 @@ describe('GuestPortalService', () => {
       prisma.guest.findFirst
         .mockResolvedValueOnce(guest)
         .mockResolvedValueOnce(guest);
+      prisma.guest.findMany.mockResolvedValue([guest]);
       prisma.guestGameProfile.findFirst
         .mockResolvedValueOnce(profile)
         .mockResolvedValueOnce(profile)
@@ -8143,6 +8244,21 @@ describe('GuestPortalService', () => {
       prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 2 });
       prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 3 });
       prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 4 });
+      guestIdentityResolver.findActiveGuestForProfileDomain.mockResolvedValue(
+        guest,
+      );
+      guestIdentityResolver.resolveExactMatch.mockResolvedValue({
+        status: 'ALREADY_LINKED',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        linkedNow: false,
+        backfilled: {
+          rewards: 1,
+          events: 2,
+          deliveries: 3,
+          bonusLedgerEntries: 4,
+        },
+      });
 
       const result = await service.matchLangameGuest('Bearer guest-token', {
         phone,
@@ -8161,37 +8277,171 @@ describe('GuestPortalService', () => {
         },
         portal: portalPayload,
       });
-      expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith({
-        where: {
+      expect(
+        guestIdentityResolver.findActiveGuestForProfileDomain,
+      ).toHaveBeenCalledWith({
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '1337.langame.ru',
+      });
+      expect(prisma.guest.findMany).not.toHaveBeenCalled();
+      expect(guestIdentityResolver.resolveExactMatch).toHaveBeenCalledWith(
+        expect.objectContaining({
           tenantId: 'tenant-1',
           profileId: 'profile-1',
-          guestId: null,
-        },
-        data: { guestId: 'guest-1' },
-      });
-      expect(prisma.guestGameEvent.createMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: [
-            expect.objectContaining({
-              tenantId: 'tenant-1',
-              profileId: 'profile-1',
-              guestId: 'guest-1',
-              eventType: 'GAME_PROFILE_LINKED',
-              source: 'GUEST_PORTAL_PROFILE_LINK',
-              payload: expect.objectContaining({
-                source: 'guest_portal_langame_match',
-                backfilled: {
-                  rewards: 1,
-                  events: 2,
-                  deliveries: 3,
-                  bonusLedgerEntries: 4,
-                },
-              }),
-            }),
-          ],
-          skipDuplicates: true,
+          guestId: 'guest-1',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '1337.langame.ru',
+          externalGuestId: '42',
+          requiredRebindConfirmations: 1,
         }),
       );
+    });
+
+    it('does not link an ambiguous local phone match inside one domain', async () => {
+      const {
+        guestIdentityResolver,
+        jwtService,
+        langameSettingsService,
+        prisma,
+        service,
+      } = createService({ APP_ENCRYPTION_KEY: 'test-secret' });
+      const phone = '+7 999 111-22-33';
+      const phoneHash = createHmac('sha256', 'test-secret')
+        .update('79991112233')
+        .digest('hex');
+
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'challenge-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash,
+      });
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: null,
+            externalDomain: '1337.langame.ru',
+            integrationSourceId: 'source-1',
+          },
+        ],
+      });
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        phoneEncrypted: null,
+      });
+      prisma.guest.findMany.mockResolvedValue([
+        { id: 'guest-1' },
+        { id: 'guest-2' },
+      ]);
+
+      const result = await service.matchLangameGuest('Bearer guest-token', {
+        phone,
+      });
+
+      expect(result).toMatchObject({
+        status: 'MATCHED_LOCAL',
+        localGuestFound: false,
+        localGuestId: null,
+        linkStatus: 'CONFLICT',
+        linkedGuestId: null,
+      });
+      expect(guestIdentityResolver.resolveExactMatch).not.toHaveBeenCalled();
+      expect(
+        langameSettingsService.searchGuestByPhoneForPortal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not choose the first of multiple remote matches in one domain', async () => {
+      const {
+        guestIdentityResolver,
+        jwtService,
+        langameSettingsService,
+        prisma,
+        service,
+      } = createService({ APP_ENCRYPTION_KEY: 'test-secret' });
+      const phone = '+7 999 111-22-33';
+      const phoneHash = createHmac('sha256', 'test-secret')
+        .update('79991112233')
+        .digest('hex');
+
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'challenge-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash,
+      });
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: null,
+            externalDomain: '1337.langame.ru',
+            integrationSourceId: 'source-1',
+          },
+        ],
+      });
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        phoneEncrypted: null,
+      });
+      prisma.guest.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          id: 'guest-1',
+          externalDomain: '1337.langame.ru',
+          externalGuestId: '42',
+        },
+        {
+          id: 'guest-2',
+          externalDomain: '1337.langame.ru',
+          externalGuestId: '43',
+        },
+      ]);
+      langameSettingsService.searchGuestByPhoneForPortal.mockResolvedValue({
+        checkedAt: '2026-07-22T08:00:00.000Z',
+        sources: [
+          {
+            id: 'source-1',
+            name: 'Langame 1337',
+            domain: '1337.langame.ru',
+            status: 'SUCCESS',
+            resultsCount: 2,
+            errorMessage: null,
+            results: [{ externalGuestId: '42' }, { externalGuestId: '43' }],
+          },
+        ],
+      });
+
+      const result = await service.matchLangameGuest('Bearer guest-token', {
+        phone,
+      });
+
+      expect(result).toMatchObject({
+        status: 'FOUND_IN_LANGAME',
+        localGuestFound: false,
+        localGuestId: null,
+        linkStatus: 'CONFLICT',
+        linkedGuestId: null,
+      });
+      expect(guestIdentityResolver.resolveExactMatch).not.toHaveBeenCalled();
     });
 
     it('runs a club-scoped Langame auto-match once and stores the result', async () => {
@@ -8274,26 +8524,36 @@ describe('GuestPortalService', () => {
         sourceDomain: '1337.langame.ru',
         sourceId: 'source-1',
       });
-      expect(prisma.guestGameEvent.createMany).toHaveBeenCalledWith(
+      expect(prisma.guestGameEvent.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: [
-            expect.objectContaining({
+          where: {
+            tenantId_source_externalProvider_externalDomain_externalId: {
               tenantId: 'tenant-1',
-              profileId: 'profile-1',
-              eventType: 'GAME_PROFILE_LANGAME_AUTO_MATCH',
               source: 'GUEST_PORTAL_LANGAME_AUTO_MATCH',
+              externalProvider: IntegrationProvider.LANGAME,
               externalDomain: '1337.langame.ru',
               externalId: 'game-profile-langame-auto-match:profile-1:store-1',
-              payload: expect.objectContaining({
-                matchStatus: 'FOUND_IN_LANGAME',
-                localStatus: 'FOUND_IN_LANGAME',
-                sourceDomain: '1337.langame.ru',
-                sourceId: 'source-1',
-                phoneMasked: '***2233',
-              }),
+            },
+          },
+          create: expect.objectContaining({
+            tenantId: 'tenant-1',
+            profileId: 'profile-1',
+            eventType: 'GAME_PROFILE_LANGAME_AUTO_MATCH',
+            source: 'GUEST_PORTAL_LANGAME_AUTO_MATCH',
+            externalDomain: '1337.langame.ru',
+            externalId: 'game-profile-langame-auto-match:profile-1:store-1',
+            payload: expect.objectContaining({
+              matchStatus: 'FOUND_IN_LANGAME',
+              localStatus: 'FOUND_IN_LANGAME',
+              sourceDomain: '1337.langame.ru',
+              sourceId: 'source-1',
+              phoneMasked: '***2233',
             }),
-          ],
-          skipDuplicates: true,
+          }),
+          update: expect.objectContaining({
+            profileId: 'profile-1',
+            occurredAt: new Date('2026-06-15T08:00:00.000Z'),
+          }),
         }),
       );
     });
@@ -8344,7 +8604,7 @@ describe('GuestPortalService', () => {
         id: 'event-1',
         profileId: 'profile-1',
         guestId: null,
-        occurredAt: new Date('2026-06-15T08:00:00.000Z'),
+        occurredAt: new Date(),
         payload: {
           checkedAt: '2026-06-15T08:00:00.000Z',
           phoneMasked: '+7 999 ***-**-33',
@@ -8373,15 +8633,14 @@ describe('GuestPortalService', () => {
       expect(
         langameSettingsService.searchGuestByPhoneForPortal,
       ).not.toHaveBeenCalled();
-      expect(prisma.guestGameEvent.createMany).not.toHaveBeenCalledWith(
+      expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: [
-            expect.objectContaining({
-              eventType: 'GAME_PROFILE_LANGAME_AUTO_MATCH',
-            }),
-          ],
+          where: expect.objectContaining({
+            occurredAt: { gte: expect.any(Date) },
+          }),
         }),
       );
+      expect(prisma.guestGameEvent.upsert).not.toHaveBeenCalled();
     });
   });
 });

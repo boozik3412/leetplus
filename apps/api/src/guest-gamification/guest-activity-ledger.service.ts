@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { LangameClient } from '../integrations/langame.client';
 import { parseLangameDate } from '../integrations/langame-date';
 import {
@@ -218,6 +219,7 @@ export class GuestActivityLedgerService {
     private readonly prisma: PrismaService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
+    private readonly guestIdentityResolver: GuestIdentityResolverService,
   ) {}
 
   scheduleProfileSync(input: LedgerSyncInput): void {
@@ -819,28 +821,69 @@ export class GuestActivityLedgerService {
   private async resolveContext(
     input: LedgerSyncInput,
   ): Promise<LedgerSyncContext | null> {
-    const profile = await this.prisma.guestGameProfile.findFirst({
-      where: { id: input.profileId, tenantId: input.tenantId },
-      select: {
-        id: true,
-        guestId: true,
-        phoneHash: true,
-        guest: {
+    const [profile, store] = await Promise.all([
+      this.prisma.guestGameProfile.findFirst({
+        where: { id: input.profileId, tenantId: input.tenantId },
+        select: {
+          id: true,
+          guestId: true,
+          phoneHash: true,
+          guest: {
+            select: {
+              id: true,
+              externalProvider: true,
+              externalDomain: true,
+              externalGuestId: true,
+            },
+          },
+        },
+      }),
+      input.storeId
+        ? this.prisma.store.findFirst({
+            where: { id: input.storeId, tenantId: input.tenantId },
+            select: {
+              id: true,
+              name: true,
+              externalDomain: true,
+              externalClubId: true,
+              integrationSourceId: true,
+              timeZone: true,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (!profile) {
+      return null;
+    }
+
+    const storeDomain = nullableString(store?.externalDomain);
+    const explicitGuestId = nullableString(input.guestId);
+    const explicitGuest = explicitGuestId
+      ? await this.prisma.guest.findFirst({
+          where: {
+            id: explicitGuestId,
+            tenantId: input.tenantId,
+            ...(storeDomain ? { externalDomain: storeDomain } : {}),
+            isDisabled: false,
+          },
           select: {
             id: true,
             externalProvider: true,
             externalDomain: true,
             externalGuestId: true,
           },
-        },
-      },
-    });
-
-    if (!profile) {
-      return null;
-    }
-
-    const guest =
+        })
+      : null;
+    const linkedGuest = storeDomain
+      ? await this.guestIdentityResolver.findActiveGuestForProfileDomain({
+          tenantId: input.tenantId,
+          profileId: profile.id,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: storeDomain,
+        })
+      : null;
+    const legacyGuest =
       profile.guest ??
       (profile.guestId
         ? await this.prisma.guest.findFirst({
@@ -853,29 +896,22 @@ export class GuestActivityLedgerService {
             },
           })
         : null);
+    const scopedLegacyGuest =
+      !storeDomain ||
+      nullableString(legacyGuest?.externalDomain) === storeDomain
+        ? legacyGuest
+        : null;
+    const guest = explicitGuest ?? linkedGuest ?? scopedLegacyGuest;
     const externalGuestId = nullableString(guest?.externalGuestId);
 
     if (!guest || !externalGuestId) {
       return null;
     }
 
-    const store = input.storeId
-      ? await this.prisma.store.findFirst({
-          where: { id: input.storeId, tenantId: input.tenantId },
-          select: {
-            id: true,
-            name: true,
-            externalDomain: true,
-            externalClubId: true,
-            integrationSourceId: true,
-            timeZone: true,
-          },
-        })
-      : null;
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(input.tenantId);
     const externalDomain =
-      nullableString(store?.externalDomain) ??
+      storeDomain ??
       nullableString(guest.externalDomain) ??
       nullableString(sources[0]?.domain);
     const source =

@@ -12031,6 +12031,7 @@ export class GuestGamificationService {
     const supplierName = nullableString(dto.supplierName) ?? null;
     const quantity = dryRunOptionalNumber(dto.quantity);
     const externalDomain = nullableString(dto.externalDomain) ?? null;
+    const sourceFactKind = nullableString(dto.sourceFactKind) ?? null;
     const sourceFactId = nullableString(dto.sourceFactId) ?? null;
     const [profile, lootBoxes, missions, seasons, store] = await Promise.all([
       this.resolveDryRunProfile(user, dto),
@@ -12099,6 +12100,7 @@ export class GuestGamificationService {
       eventType,
       occurredAt,
       limitOccurredAt,
+      sourceFactKind,
       sourceFactId,
       profile,
       guest,
@@ -17214,7 +17216,10 @@ export class GuestGamificationService {
             taskType,
             triggerKind: missionWizardTrigger(taskType),
             evaluationPolicy:
-              persistedEvaluationPolicy ?? missionEvaluationPolicy(taskType),
+              persistedEvaluationPolicy ??
+              (taskType === 'PLAY_TIME'
+                ? 'LIVE_PRIMARY'
+                : missionEvaluationPolicy(taskType)),
             periodicity: 'NONE',
             ...(taskType === 'BALANCE_TOPUP'
               ? { domainScoped: true, externalDomains }
@@ -26134,6 +26139,7 @@ type DryRunContext = {
   eventType: string;
   occurredAt: Date;
   limitOccurredAt: Date;
+  sourceFactKind: string | null;
   sourceFactId: string | null;
   profile: GuestGameProfile | null;
   guest: GuestGameProfile['guest'];
@@ -27128,7 +27134,10 @@ function appendDryRunLootBoxLimits(
   blockers: string[],
   reasons: string[],
 ) {
-  if (context.sourceFactId?.startsWith('guest-game-entitlement:')) {
+  if (
+    context.sourceFactKind === guestLootBoxOpenSourceKind ||
+    context.sourceFactId?.startsWith('guest-game-entitlement:')
+  ) {
     reasons.push(
       'Лимиты проверены при выдаче права на открытие и не применяются повторно при его использовании',
     );

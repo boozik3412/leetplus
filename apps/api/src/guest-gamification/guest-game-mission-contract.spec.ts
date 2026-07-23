@@ -14,12 +14,14 @@ const common = {
 };
 
 describe('guest mission wizard contract', () => {
-  it('assigns supplemental policy only to balance top-ups', () => {
+  it('assigns the source policy that belongs to each mission type', () => {
     expect(missionEvaluationPolicy('BALANCE_TOPUP')).toBe(
       'LEDGER_SUPPLEMENTAL',
     );
     expect(missionEvaluationPolicy('APP_OPEN')).toBe('LIVE_PRIMARY');
-    expect(missionEvaluationPolicy('PLAY_TIME')).toBe('LIVE_PRIMARY');
+    expect(missionEvaluationPolicy('PLAY_TIME')).toBe(
+      'LIVE_WITH_LEDGER_FALLBACK',
+    );
     expect(missionEvaluationPolicy('PRODUCT_PURCHASE')).toBe('LIVE_PRIMARY');
     expect(missionEvaluationPolicy('CHECK_IN')).toBe('LIVE_PRIMARY');
   });
@@ -214,6 +216,24 @@ describe('guest mission wizard contract', () => {
 
     expect(category.ready).toBe(true);
     expect(tariff.ready).toBe(false);
+  });
+
+  it('labels play-time readiness as LIVE with a ledger fallback', () => {
+    const readiness = validateMissionWizard({
+      ...common,
+      taskType: 'PLAY_TIME',
+      conditions: {
+        sessionType: 'ANY',
+        metric: { target: 600, minSessionMinutes: 60 },
+      },
+    });
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+      source: 'LIVE',
+      sourceLabel: expect.stringContaining('резервным слоем'),
+    });
   });
 
   it('keeps the selected category catalog explicit in the v2 contract', () => {

@@ -104,7 +104,9 @@ export function missionTaskTypeFromConditions(
 export function missionEvaluationPolicy(
   taskType: GuestGameMissionTaskType,
 ): GuestGameMissionEvaluationPolicy {
-  return taskType === 'BALANCE_TOPUP' ? 'LEDGER_SUPPLEMENTAL' : 'LIVE_PRIMARY';
+  if (taskType === 'BALANCE_TOPUP') return 'LEDGER_SUPPLEMENTAL';
+  if (taskType === 'PLAY_TIME') return 'LIVE_WITH_LEDGER_FALLBACK';
+  return 'LIVE_PRIMARY';
 }
 
 export function missionWizardTrigger(taskType: GuestGameMissionTaskType) {
@@ -385,6 +387,8 @@ export function validateMissionWizard(
     sourceLabel:
       evaluationPolicy === 'LEDGER_SUPPLEMENTAL'
         ? 'Игровой журнал, второй боевой слой'
+        : evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK'
+          ? 'Боевой pipeline с резервным слоем игрового журнала'
         : 'Текущий боевой pipeline',
     blockers,
     warnings,

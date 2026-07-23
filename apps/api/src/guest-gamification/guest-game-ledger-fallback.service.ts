@@ -27,6 +27,7 @@ export type GuestGameLedgerFallbackRunDto = {
   battlePassStep?: number | string | null;
   liveNotBefore?: Date | string | null;
   allowAllTenants?: boolean;
+  missionsAllowAllProfiles?: boolean;
   limit?: number | string | null;
   graceMs?: number | string | null;
   claimLeaseMs?: number | string | null;
@@ -105,6 +106,7 @@ export class GuestGameLedgerFallbackService {
     const seasonId = normalizedString(dto.seasonId);
     const battlePassStep = optionalPositiveInteger(dto.battlePassStep);
     const liveNotBefore = validDate(dto.liveNotBefore);
+    const missionsAllowAllProfiles = dto.missionsAllowAllProfiles === true;
     if (
       mode !== 'OFF' &&
       !tenantId &&
@@ -195,6 +197,7 @@ export class GuestGameLedgerFallbackService {
             seasonId,
             battlePassStep,
             liveNotBefore,
+            missionsAllowAllProfiles,
           ),
         );
       } catch (error) {
@@ -223,6 +226,7 @@ export class GuestGameLedgerFallbackService {
     seasonId: string | null,
     battlePassStep: number | null,
     liveNotBefore: Date | null,
+    missionsAllowAllProfiles: boolean,
   ) {
     const [allMissions, allSeasons, stores] = await Promise.all([
       this.prisma.guestGameMission.findMany({
@@ -254,7 +258,12 @@ export class GuestGameLedgerFallbackService {
         select: { id: true, externalDomain: true, timeZone: true },
       }),
     ]);
-    const missions = mode === 'LIVE' ? [] : allMissions;
+    const missions =
+      mode === 'LIVE'
+        ? missionsAllowAllProfiles
+          ? allMissions
+          : []
+        : allMissions;
     const seasons =
       mode === 'LIVE'
         ? allSeasons.filter((season) => season.id === seasonId)
@@ -305,7 +314,10 @@ export class GuestGameLedgerFallbackService {
       const facts = await this.prisma.guestActivityFact.findMany({
         where: {
           tenantId: user.tenantId,
-          profileId: profileId ?? undefined,
+          profileId:
+            mode === 'LIVE' && missionsAllowAllProfiles
+              ? undefined
+              : (profileId ?? undefined),
           factType: { in: factTypes },
           lifecycleStatus: 'ACTIVE',
           confidence: 'EXACT',
@@ -373,8 +385,11 @@ export class GuestGameLedgerFallbackService {
             }),
             mode === 'LIVE'
               ? {
+                  profileId: profileId!,
+                  factProfileId: fact.profileId,
                   seasonId: seasonId!,
                   battlePassStep: battlePassStep!,
+                  missionsAllowAllProfiles,
                 }
               : null,
           );
@@ -996,8 +1011,11 @@ function fallbackStableExternalId(
 function routedFallbackDryRun(
   dryRun: GuestGameDryRunResult,
   liveBattlePassScope: {
+    profileId: string;
+    factProfileId: string | null;
     seasonId: string;
     battlePassStep: number;
+    missionsAllowAllProfiles: boolean;
   } | null = null,
 ): GuestGameDryRunResult {
   const rules = dryRun.rules.filter(
@@ -1008,7 +1026,10 @@ function routedFallbackDryRun(
         'LIVE_LEDGER_FALLBACK',
       ) &&
       (!liveBattlePassScope ||
+        (rule.kind === 'MISSION' &&
+          liveBattlePassScope.missionsAllowAllProfiles) ||
         (rule.kind === 'SEASON' &&
+          liveBattlePassScope.factProfileId === liveBattlePassScope.profileId &&
           rule.id === liveBattlePassScope.seasonId &&
           rule.battlePassStep === liveBattlePassScope.battlePassStep &&
           rule.rewardType === 'BONUS_BALANCE' &&

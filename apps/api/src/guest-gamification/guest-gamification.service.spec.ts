@@ -4877,7 +4877,7 @@ describe('GuestGamificationService', () => {
       const update = prisma.guestGameMission.update.mock.calls[0][0];
       expect(update.data).toMatchObject({
         definitionVersion: 2,
-        evaluationPolicy: 'LIVE_PRIMARY',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
         missionType: 'PLAY_TIME',
         triggerKind: 'PLAY_HOUR',
         rewardType: 'BONUS_BALANCE',
@@ -7255,7 +7255,7 @@ describe('GuestGamificationService', () => {
       });
     });
 
-    it('does not reapply issuance limits while consuming an existing entitlement', async () => {
+    it('does not reapply daily issuance limits while manually opening an existing entitlement', async () => {
       const { service, prisma } = createService();
 
       jest
@@ -7263,7 +7263,7 @@ describe('GuestGamificationService', () => {
         .mockResolvedValue(profileFixture());
       jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
         activeLootBox({
-          limits: { perGuestPerWeek: 1 },
+          limits: { periodicLimit: 'DAILY' },
         }),
       ]);
       jest.spyOn(service, 'getMissions').mockResolvedValue([]);
@@ -7276,7 +7276,7 @@ describe('GuestGamificationService', () => {
           rewardId: null,
           profileId: 'profile-1',
           guestId: 'guest-1',
-          qualifiedAt: new Date('2026-06-09T10:00:00.000Z'),
+          qualifiedAt: new Date('2026-06-10T08:00:00.000Z'),
           evidence: null,
         },
       ]);
@@ -7284,7 +7284,8 @@ describe('GuestGamificationService', () => {
       const result = await service.dryRun(user, {
         eventType: 'SESSION_START',
         occurredAt: isoNow,
-        sourceFactId: 'guest-game-entitlement:entitlement-1',
+        sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+        sourceFactId: 'loot-box:loot-box-1:daily:profile-1:2026-06-10',
         sessionType: 'regular_session',
       });
 

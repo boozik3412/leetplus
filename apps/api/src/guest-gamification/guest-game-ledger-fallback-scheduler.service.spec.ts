@@ -68,6 +68,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
         seasonId: null,
         battlePassStep: null,
         allowAllTenants: false,
+        missionsAllowAllProfiles: false,
         configured: false,
       },
       lastResult: null,
@@ -246,6 +247,35 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
         battlePassStep: 2,
         allowAllTenants: false,
         configured: true,
+      },
+    });
+  });
+
+  it('explicitly enables LIVE fallback missions for every profile without widening the Battle Pass canary', async () => {
+    const { scheduler, fallbackService } = createScheduler({
+      ...liveCanaryConfig,
+      GUEST_GAME_LEDGER_FALLBACK_MISSIONS_ALLOW_ALL_PROFILES: 'true',
+    });
+
+    await scheduler.runOnce();
+
+    expect(fallbackService.runScheduled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'LIVE',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        seasonId: 'season-1',
+        battlePassStep: 2,
+        missionsAllowAllProfiles: true,
+      }),
+    );
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      liveCanaryReady: true,
+      scope: {
+        profileId: 'profile-1',
+        seasonId: 'season-1',
+        battlePassStep: 2,
+        missionsAllowAllProfiles: true,
       },
     });
   });

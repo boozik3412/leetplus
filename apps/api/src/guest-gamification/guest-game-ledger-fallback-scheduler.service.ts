@@ -45,6 +45,7 @@ export type GuestGameLedgerFallbackRuntimeStatus = {
     seasonId: string | null;
     battlePassStep: number | null;
     allowAllTenants: boolean;
+    missionsAllowAllProfiles: boolean;
     configured: boolean;
   };
   intervalMs: number;
@@ -215,6 +216,7 @@ export class GuestGameLedgerFallbackSchedulerService
     );
     const liveNotBefore = this.liveNotBefore();
     const allowAllTenants = this.allowAllTenants();
+    const missionsAllowAllProfiles = this.missionsAllowAllProfiles();
     const scopeConfigured = this.scopeConfigured(mode);
     const killSwitchEnabled = this.killSwitchEnabled();
     const liveCanaryReady =
@@ -247,6 +249,7 @@ export class GuestGameLedgerFallbackSchedulerService
         seasonId,
         battlePassStep,
         allowAllTenants,
+        missionsAllowAllProfiles,
         configured: scopeConfigured,
       },
       intervalMs: this.intervalMs(),
@@ -328,6 +331,9 @@ export class GuestGameLedgerFallbackSchedulerService
       dto.liveNotBefore = liveNotBefore.toISOString();
     }
     if (this.allowAllTenants()) dto.allowAllTenants = true;
+    if (this.missionsAllowAllProfiles()) {
+      dto.missionsAllowAllProfiles = true;
+    }
     return dto;
   }
 
@@ -352,6 +358,12 @@ export class GuestGameLedgerFallbackSchedulerService
 
   private allowAllTenants() {
     return this.optionalBoolean('GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS');
+  }
+
+  private missionsAllowAllProfiles() {
+    return this.optionalBoolean(
+      'GUEST_GAME_LEDGER_FALLBACK_MISSIONS_ALLOW_ALL_PROFILES',
+    );
   }
 
   private mode(): GuestGameLedgerFallbackMode {

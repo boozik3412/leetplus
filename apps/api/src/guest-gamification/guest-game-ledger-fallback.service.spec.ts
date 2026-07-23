@@ -719,6 +719,69 @@ describe('GuestGameLedgerFallbackService', () => {
     );
   });
 
+  it('routes LIVE fallback missions across profiles while keeping Battle Pass on the exact canary profile', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      {
+        ...fact(new Date(now.getTime() - 60_000)),
+        profileId: 'profile-2',
+      },
+    ]);
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        missionsAllowAllProfiles: true,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 'tenant-1',
+          profileId: undefined,
+        }),
+      }),
+    );
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        profileId: 'profile-2',
+        eventType: 'PLAY_HOUR',
+      }),
+      expect.objectContaining({
+        allowedRuleIds: new Set(['mission-1']),
+        allowedBattlePassSteps: new Map(),
+      }),
+    );
+  });
+
+  it('keeps the configured Battle Pass canary alongside LIVE fallback missions for the canary profile', async () => {
+    const { service, gamification } = createService();
+
+    await service.runScheduled({
+      mode: 'LIVE',
+      ...liveCanaryScope,
+      missionsAllowAllProfiles: true,
+      graceMs: 15_000,
+    });
+
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        allowedRuleIds: new Set(['mission-1', 'season-1']),
+        allowedBattlePassSteps: new Map([['season-1', 2]]),
+      }),
+    );
+  });
+
   it('never selects purchase facts in LIVE canary mode', async () => {
     const { service, prisma, gamification } = createService();
     prisma.guestActivityFact.findMany.mockResolvedValueOnce([]);

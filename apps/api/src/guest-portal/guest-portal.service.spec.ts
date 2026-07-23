@@ -1110,6 +1110,37 @@ function telegramBotLinkedStoresFixture() {
 }
 
 describe('GuestPortalService', () => {
+  it('keeps Battle Pass rewards visible after switching to another season club', async () => {
+    const { prisma, service } = createService();
+
+    await (service as any).findPortalRewards(
+      'tenant-1',
+      'store-current',
+      'guest-1',
+      'profile-1',
+    );
+
+    expect(prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId: 'tenant-1',
+          AND: [
+            {
+              OR: [{ guestId: 'guest-1' }, { profileId: 'profile-1' }],
+            },
+            {
+              OR: [
+                { seasonId: { not: null } },
+                { storeId: null },
+                { storeId: 'store-current' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+  });
+
   describe('mission display values', () => {
     it('uses the normalized top-up threshold and metric target', () => {
       expect(

@@ -8152,7 +8152,7 @@ export class GuestPortalService {
         AND: [
           { OR: ownerFilters },
           {
-            OR: [{ storeId: null }, { storeId }],
+            OR: [{ seasonId: { not: null } }, { storeId: null }, { storeId }],
           },
         ],
       },

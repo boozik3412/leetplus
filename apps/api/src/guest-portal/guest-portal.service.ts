@@ -6129,11 +6129,14 @@ export class GuestPortalService {
       };
     });
 
+    let returnContext: TenantStoreContext | null = null;
+
     try {
       const context = await this.getTenantStoreByIds(
         challenge.tenantId,
         challenge.storeId,
       );
+      returnContext = context;
       await this.matchLangamePhoneForPortal(
         {
           sub: `telegram-auth:${challenge.id}`,
@@ -6162,6 +6165,13 @@ export class GuestPortalService {
       reply: this.telegramWebhookPostAuthChoiceReply(
         telegramIdentityMasked,
         'Готово: телефон подтвержден. Вернитесь на сайт LeetPlus, чтобы продолжить там, или выберите Mini App/бот как отдельный игровой интерфейс.',
+        returnContext
+          ? {
+              challengeId: challenge.id,
+              tenantSlug: returnContext.tenant.slug,
+              storeId: returnContext.store.publicSlug ?? returnContext.store.id,
+            }
+          : undefined,
       ),
     };
   }
@@ -6208,9 +6218,23 @@ export class GuestPortalService {
   private telegramWebhookPostAuthChoiceReply(
     chatIdMasked: string | null,
     text: string,
+    handoff?: {
+      challengeId: string;
+      tenantSlug: string;
+      storeId: string;
+    },
   ): GuestPortalTelegramWebhookResponse['reply'] {
     const miniAppUrl = this.telegramMiniAppUrl();
-    const webReturnUrl = `${this.publicWebUrl().replace(/\/$/, '')}/game/clubs`;
+    const webReturnUrl = new URL(
+      `${this.publicWebUrl().replace(/\/$/, '')}/game/clubs`,
+    );
+
+    if (handoff) {
+      webReturnUrl.searchParams.set('telegramChallenge', handoff.challengeId);
+      webReturnUrl.searchParams.set('telegramTenant', handoff.tenantSlug);
+      webReturnUrl.searchParams.set('telegramStore', handoff.storeId);
+    }
+
     const botUsername = this.telegramBotUsername();
     const botUrl = botUsername ? `https://t.me/${botUsername}` : undefined;
     const inlineKeyboard: NonNullable<
@@ -6220,7 +6244,7 @@ export class GuestPortalService {
         [
           {
             text: 'Вернуться на сайт LeetPlus',
-            url: webReturnUrl,
+            url: webReturnUrl.toString(),
           },
         ],
         [

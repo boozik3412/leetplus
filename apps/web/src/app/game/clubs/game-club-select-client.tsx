@@ -9,6 +9,7 @@ import type {
   GuestPortalGameSummary,
   GuestPortalGamificationClub,
   GuestPortalGamificationClubDirectory,
+  GuestPortalTelegramAuthStatusResponse,
 } from "@/lib/guest-portal";
 
 type SessionState = "loading" | "ready" | "auth-required" | "error";
@@ -16,6 +17,11 @@ type SessionState = "loading" | "ready" | "auth-required" | "error";
 type GameClubSelectClientProps = {
   initialDirectory: GuestPortalGamificationClubDirectory;
   loadError: string | null;
+  telegramHandoff: {
+    challengeId: string;
+    tenantSlug: string;
+    storeId: string;
+  } | null;
 };
 
 type YandexPlacemarkInstance = {
@@ -61,6 +67,7 @@ let yandexMapsApiPromise: Promise<YandexMapsApi> | null = null;
 export function GameClubSelectClient({
   initialDirectory,
   loadError,
+  telegramHandoff,
 }: GameClubSelectClientProps) {
   const router = useRouter();
   const [directory] = useState(initialDirectory);
@@ -76,6 +83,7 @@ export function GameClubSelectClient({
     useState(false);
   const [submittingClubId, setSubmittingClubId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [isAuthExpiredModalOpen, setAuthExpiredModalOpen] = useState(false);
 
   const showToast = useCallback((nextMessage: string) => {
     setToast(nextMessage);
@@ -103,8 +111,56 @@ export function GameClubSelectClient({
         }
 
         if (response.status === 401) {
+          if (telegramHandoff) {
+            const handoffResponse = await fetch(
+              telegramAuthStatusPath(
+                telegramHandoff.tenantSlug,
+                telegramHandoff.storeId,
+              ),
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  challengeId: telegramHandoff.challengeId,
+                }),
+              },
+            );
+
+            if (handoffResponse.ok) {
+              const handoff =
+                (await handoffResponse.json()) as GuestPortalTelegramAuthStatusResponse;
+
+              if (handoff.status === "CONFIRMED" && handoff.token) {
+                const summaryResponse = await fetch(
+                  "/api/guest-portal/session/game-summary",
+                  { cache: "no-store" },
+                );
+
+                if (summaryResponse.ok) {
+                  const data =
+                    (await summaryResponse.json()) as GuestPortalGameSummary;
+                  setSummary(data);
+                  setSelectedClubId(null);
+                  setCurrentClubId(null);
+                  setHasExplicitClubSelection(false);
+                  setSessionState("ready");
+                  setMessage(null);
+                  window.history.replaceState(null, "", "/game/clubs");
+                  return;
+                }
+              }
+
+              setMessage(handoff.message);
+            }
+          }
+
           setSessionState("auth-required");
-          setMessage("Подтвердите телефон, чтобы выбрать клуб для игры.");
+          setMessage(
+            telegramHandoff
+              ? "Ссылка из Telegram больше не действует. Подтвердите телефон заново."
+              : "Подтвердите телефон, чтобы выбрать клуб для игры.",
+          );
+          setAuthExpiredModalOpen(Boolean(telegramHandoff));
           return;
         }
 
@@ -138,7 +194,7 @@ export function GameClubSelectClient({
     return () => {
       active = false;
     };
-  }, [loadError]);
+  }, [loadError, telegramHandoff]);
 
   const cities = useMemo(
     () => directory.cities.filter(Boolean).slice(0, 6),
@@ -182,6 +238,7 @@ export function GameClubSelectClient({
 
       if (response.status === 401) {
         setSessionState("auth-required");
+        setAuthExpiredModalOpen(true);
         throw new Error("Сессия входа истекла. Подтвердите телефон заново.");
       }
 
@@ -423,6 +480,10 @@ export function GameClubSelectClient({
         </section>
       </div>
 
+      <SessionExpiredModal
+        open={isAuthExpiredModalOpen}
+        onClose={() => setAuthExpiredModalOpen(false)}
+      />
       <Toast message={toast} />
       <ClubSelectStyles />
     </main>
@@ -461,6 +522,46 @@ function StatePanel({
         </Link>
       ) : null}
     </section>
+  );
+}
+
+function SessionExpiredModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="lp-club-modal-backdrop" role="presentation">
+      <section
+        aria-describedby="session-expired-description"
+        aria-labelledby="session-expired-title"
+        aria-modal="true"
+        className="lp-club-modal"
+        role="dialog"
+      >
+        <div className="lp-club-modal-kicker">Сессия входа</div>
+        <h2 id="session-expired-title">Время авторизации истекло</h2>
+        <p id="session-expired-description">
+          Подтверждение телефона больше не действительно. Вернитесь на страницу
+          авторизации и подтвердите номер заново, чтобы выбрать клуб.
+        </p>
+        <div className="lp-club-modal-actions">
+          <Link className="lp-club-primary" href="/game/auth">
+            Вернуться к авторизации
+            <ArrowRightIcon />
+          </Link>
+          <button className="lp-club-secondary" type="button" onClick={onClose}>
+            Остаться на странице
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -764,6 +865,12 @@ function clubSearchText(club: GuestPortalGamificationClub) {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function telegramAuthStatusPath(tenantSlug: string, storeId: string) {
+  return `/api/guest-portal/${encodeURIComponent(
+    tenantSlug,
+  )}/${encodeURIComponent(storeId)}/telegram-auth/status`;
 }
 
 function normalizeSearch(value: string | null | undefined) {
@@ -1699,6 +1806,55 @@ function ClubSelectStyles() {
 .lp-club-toast.is-visible {
   opacity: 1;
   transform: translateY(0);
+}
+.lp-club-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, .78);
+  backdrop-filter: blur(14px);
+}
+.lp-club-modal {
+  width: min(100%, 480px);
+  padding: 26px;
+  border: 1px solid rgba(131, 228, 236, .28);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(131, 228, 236, .14), transparent 42%),
+    #071014;
+  box-shadow: 0 32px 120px rgba(0, 0, 0, .62);
+}
+.lp-club-modal-kicker {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.lp-club-modal h2 {
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: clamp(24px, 4vw, 32px);
+  line-height: 1.05;
+}
+.lp-club-modal p {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.lp-club-modal-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+.lp-club-modal-actions .lp-club-secondary {
+  width: 100%;
+  background: transparent;
+  cursor: pointer;
 }
 @media (max-width: 940px) {
   .lp-club-hero,

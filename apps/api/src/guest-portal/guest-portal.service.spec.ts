@@ -4698,7 +4698,7 @@ describe('GuestPortalService', () => {
               [
                 {
                   text: 'Вернуться на сайт LeetPlus',
-                  url: 'http://localhost:3000/game/clubs',
+                  url: 'http://localhost:3000/game/clubs?telegramChallenge=telegram-auth-1&telegramTenant=leet&telegramStore=club-1337',
                 },
               ],
               [

@@ -639,11 +639,18 @@ export function PlayRegistrationClient({
 
     let isActive = true;
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let pollInFlight = false;
 
     async function pollUserCallAuth() {
       if (!authenticationContextClub || !userCallAuth) {
         return;
       }
+
+      if (pollInFlight) {
+        return;
+      }
+
+      pollInFlight = true;
 
       setPollingUserCallAuth(true);
 
@@ -696,6 +703,7 @@ export function PlayRegistrationClient({
             : "Не удалось проверить вход по звонку.",
         );
       } finally {
+        pollInFlight = false;
         if (isActive) {
           setPollingUserCallAuth(false);
         }
@@ -2287,7 +2295,12 @@ function UserCallAuthPanel({
             onClick={onStart}
             type="button"
           >
-            {isStarting ? "Создаем..." : "Создать вход по звонку"}
+            {isStarting
+              ? "Создаем..."
+              : userCallAuthStatus?.status === "FAILED" ||
+                  userCallAuthStatus?.status === "EXPIRED"
+                ? "Повторить вход по звонку"
+                : "Создать вход по звонку"}
           </button>
         )}
       </div>

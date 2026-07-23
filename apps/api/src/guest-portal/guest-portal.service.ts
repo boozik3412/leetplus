@@ -203,7 +203,13 @@ type SmsRuCallcheckStatusResponse = {
   status?: string;
   status_code?: string | number;
   check_status?: string | number;
+  check_status_text?: string;
   status_text?: string;
+};
+type SmsRuCallcheckProviderStatus = {
+  status: 'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'FAILED';
+  code: string | null;
+  text: string | null;
 };
 
 type GuestPortalTokenPayload = {
@@ -2699,10 +2705,7 @@ export class GuestPortalService {
       status: challenge.status === 'EXPIRED' ? 'EXPIRED' : 'FAILED',
       profileId: challenge.profileId,
       phoneMasked: challenge.phoneMasked,
-      message:
-        challenge.status === 'EXPIRED'
-          ? 'Срок ожидания звонка истек.'
-          : 'Звонок не может быть завершен в текущем статусе.',
+      message: userCallAuthTerminalMessage(challenge),
     };
   }
 
@@ -10732,8 +10735,12 @@ export class GuestPortalService {
         config,
         challenge.providerChallengeId,
       );
+      const providerStatusData = {
+        providerStatusCode: providerStatus.code,
+        providerStatusText: providerStatus.text,
+      };
 
-      if (providerStatus === 'CONFIRMED') {
+      if (providerStatus.status === 'CONFIRMED') {
         const confirmedAt = new Date();
         const confirmedChallenge =
           await this.prisma.guestPortalOtpChallenge.update({
@@ -10742,17 +10749,18 @@ export class GuestPortalService {
               status: USER_CALL_AUTH_CONFIRMED_STATUS,
               deliveredAt: confirmedAt,
               verifiedAt: confirmedAt,
+              ...providerStatusData,
             },
           });
 
         return { challenge: confirmedChallenge };
       }
 
-      if (providerStatus === 'EXPIRED') {
+      if (providerStatus.status === 'EXPIRED') {
         const expiredChallenge =
           await this.prisma.guestPortalOtpChallenge.update({
             where: { id: challenge.id },
-            data: { status: 'EXPIRED' },
+            data: { status: 'EXPIRED', ...providerStatusData },
           });
 
         return {
@@ -10761,21 +10769,31 @@ export class GuestPortalService {
         };
       }
 
-      if (providerStatus === 'FAILED') {
+      if (providerStatus.status === 'FAILED') {
         const failedChallenge =
           await this.prisma.guestPortalOtpChallenge.update({
             where: { id: challenge.id },
-            data: { status: 'FAILED' },
+            data: { status: 'FAILED', ...providerStatusData },
           });
 
         return {
           challenge: failedChallenge,
-          message: 'Не удалось подтвердить звонок для этого номера.',
+          message: userCallAuthTerminalMessage(failedChallenge),
         };
       }
 
+      const providerStatusChanged =
+        challenge.providerStatusCode !== providerStatusData.providerStatusCode ||
+        challenge.providerStatusText !== providerStatusData.providerStatusText;
+      const pendingChallenge = providerStatusChanged
+        ? await this.prisma.guestPortalOtpChallenge.update({
+            where: { id: challenge.id },
+            data: providerStatusData,
+          })
+        : challenge;
+
       return {
-        challenge,
+        challenge: pendingChallenge,
         message:
           'Ожидаем звонок на выданный номер. Страница проверяет статус автоматически.',
       };
@@ -10791,7 +10809,7 @@ export class GuestPortalService {
   private async readSmsRuCallcheckStatus(
     config: GuestPortalUserCallConfig,
     checkId: string,
-  ): Promise<'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'FAILED'> {
+  ): Promise<SmsRuCallcheckProviderStatus> {
     if (!config.smsRu.apiId) {
       throw new ServiceUnavailableException('Провайдер звонка не настроен.');
     }
@@ -10810,6 +10828,11 @@ export class GuestPortalService {
     )) as SmsRuCallcheckStatusResponse | null;
     const statusCode = smsRuResponseString(payload?.status_code);
     const checkStatus = smsRuResponseString(payload?.check_status);
+    const code = checkStatus || statusCode || null;
+    const text =
+      smsRuResponseString(payload?.check_status_text) ||
+      smsRuResponseString(payload?.status_text) ||
+      null;
 
     if (!response.ok || payload?.status !== 'OK') {
       throw new ServiceUnavailableException(
@@ -10819,17 +10842,20 @@ export class GuestPortalService {
       );
     }
 
-    switch (checkStatus || statusCode) {
+    switch (code) {
       case '401':
-        return 'CONFIRMED';
+        return { status: 'CONFIRMED', code, text };
       case '400':
-        return 'PENDING';
+        return { status: 'PENDING', code, text };
       case '402':
-        return 'EXPIRED';
+        return { status: 'EXPIRED', code, text };
       case '202':
-        return 'FAILED';
+        return { status: 'FAILED', code, text };
       default:
-        return 'FAILED';
+        // SMS.ru can add status metadata without changing the successful
+        // response envelope. Never turn an unknown successful code into a
+        // terminal failure; keep the challenge retryable until it expires.
+        return { status: 'PENDING', code, text };
     }
   }
 
@@ -12958,6 +12984,25 @@ function normalizeUserCallProvider(value: string): GuestPortalUserCallProvider {
   }
 
   return USER_CALL_PROVIDER_MANUAL;
+}
+
+function userCallAuthTerminalMessage(challenge: Pick<
+  GuestPortalOtpChallenge,
+  'status' | 'providerName' | 'providerStatusCode'
+>) {
+  if (challenge.status === 'EXPIRED' || challenge.providerStatusCode === '402') {
+    return 'Срок ожидания звонка истек. Создайте новый вход по звонку и повторите попытку.';
+  }
+
+  if (challenge.providerStatusCode === '202') {
+    return 'Номер телефона не принят провайдером. Проверьте номер и создайте новый вход по звонку.';
+  }
+
+  if (challenge.providerName === USER_CALL_PROVIDER_SMS_RU_CALLCHECK) {
+    return 'Проверка звонка не завершена. Позвоните на выданный номер с того же телефона и создайте новый вход по звонку.';
+  }
+
+  return 'Вход по звонку не завершен. Создайте новый вход по звонку и повторите попытку.';
 }
 
 function phoneTelHref(value: string) {

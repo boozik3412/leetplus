@@ -2266,6 +2266,8 @@ model GuestPortalOtpChallenge {
   deliveryChannel       String    @default("DEV")
   providerName          String?
   providerChallengeId   String?
+  providerStatusCode    String?
+  providerStatusText    String?
   attempts              Int       @default(0)
   expiresAt             DateTime
   deliveredAt           DateTime?

@@ -6246,6 +6246,103 @@ describe('GuestPortalService', () => {
       expect(JSON.stringify(result)).not.toContain('79999999999');
     });
 
+    it('keeps an unknown successful SMS.ru status pending instead of failing the login', async () => {
+      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: 'OK',
+            status_code: 100,
+            check_status: 499,
+            check_status_text: 'Проверка еще обрабатывается',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+      const { prisma, service } = createService({
+        GUEST_PORTAL_USER_CALL_PROVIDER: 'SMS_RU_CALLCHECK',
+        GUEST_PORTAL_USER_CALL_SMS_RU_API_ID: 'smsru-api-id',
+      });
+      mockLeetTenant(prisma);
+      const challenge = {
+        id: 'call-auth-unknown-status',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'PENDING',
+        deliveryChannel: 'USER_CALL',
+        providerName: 'SMS_RU_CALLCHECK',
+        providerChallengeId: 'smsru-check-unknown',
+        providerStatusCode: null,
+        providerStatusText: null,
+        expiresAt: new Date(Date.now() + 60_000),
+      };
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(challenge);
+      prisma.guestPortalOtpChallenge.update.mockResolvedValue({
+        ...challenge,
+        providerStatusCode: '499',
+        providerStatusText: 'Проверка еще обрабатывается',
+      });
+
+      try {
+        const status = await service.getUserCallAuthStatus(
+          'leet',
+          'club-1337',
+          { challengeId: challenge.id },
+        );
+
+        expect(status).toMatchObject({
+          status: 'PENDING',
+          message: 'Ожидаем звонок на выданный номер. Страница проверяет статус автоматически.',
+        });
+        expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              providerStatusCode: '499',
+              providerStatusText: 'Проверка еще обрабатывается',
+            }),
+          }),
+        );
+      } finally {
+        fetchMock.mockRestore();
+      }
+    });
+
+    it('returns an actionable message for a persisted provider failure', async () => {
+      const { prisma, service } = createService();
+      mockLeetTenant(prisma);
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-invalid-phone',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'FAILED',
+        deliveryChannel: 'USER_CALL',
+        providerName: 'SMS_RU_CALLCHECK',
+        providerChallengeId: 'smsru-check-invalid',
+        providerStatusCode: '202',
+        providerStatusText: 'Номер телефона пользователя указан неверно',
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      const status = await service.getUserCallAuthStatus(
+        'leet',
+        'club-1337',
+        { challengeId: 'call-auth-invalid-phone' },
+      );
+
+      expect(status).toMatchObject({
+        status: 'FAILED',
+        message:
+          'Номер телефона не принят провайдером. Проверьте номер и создайте новый вход по звонку.',
+      });
+    });
+
     it('issues a guest token when SMS.ru callcheck is confirmed by polling', async () => {
       const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
         new Response(

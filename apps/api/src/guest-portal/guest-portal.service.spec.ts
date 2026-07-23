@@ -4735,6 +4735,53 @@ describe('GuestPortalService', () => {
       });
     });
 
+    it('resumes a verified Telegram auth after the original challenge expires', async () => {
+      const { jwtService, prisma, service } = createService();
+      mockLeetTenant(prisma);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        phoneHash: 'phone-hash-1',
+        status: 'AUTH_VERIFIED',
+        expiresAt: new Date(Date.now() - 60_000),
+        profile: {
+          id: 'profile-1',
+          guestId: 'guest-1',
+          phoneHash: 'phone-hash-1',
+          telegramIdentity: 'chat:123456',
+          contactMasked: '***2233',
+        },
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const status = await service.getTelegramAuthStatus('leet', 'club-1337', {
+        challengeId: 'telegram-auth-1',
+      });
+
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+      });
+      expect(prisma.guestGameTelegramLinkChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'telegram-auth-1' },
+          data: expect.objectContaining({
+            status: 'AUTH_SESSION_ISSUED',
+            guestId: 'guest-1',
+            profileId: 'profile-1',
+          }),
+        }),
+      );
+    });
+
     it('answers Telegram /start without auth payload with safe club-selection guidance', async () => {
       const { prisma, service } = createService({
         GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
@@ -6295,7 +6342,8 @@ describe('GuestPortalService', () => {
 
         expect(status).toMatchObject({
           status: 'PENDING',
-          message: 'Ожидаем звонок на выданный номер. Страница проверяет статус автоматически.',
+          message:
+            'Ожидаем звонок на выданный номер. Страница проверяет статус автоматически.',
         });
         expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -6330,11 +6378,9 @@ describe('GuestPortalService', () => {
         expiresAt: new Date(Date.now() + 60_000),
       });
 
-      const status = await service.getUserCallAuthStatus(
-        'leet',
-        'club-1337',
-        { challengeId: 'call-auth-invalid-phone' },
-      );
+      const status = await service.getUserCallAuthStatus('leet', 'club-1337', {
+        challengeId: 'call-auth-invalid-phone',
+      });
 
       expect(status).toMatchObject({
         status: 'FAILED',
@@ -6568,11 +6614,9 @@ describe('GuestPortalService', () => {
       });
       jwtService.signAsync.mockResolvedValue('guest-token');
 
-      const status = await service.getUserCallAuthStatus(
-        'leet',
-        'club-1337',
-        { challengeId: 'call-auth-recoverable' },
-      );
+      const status = await service.getUserCallAuthStatus('leet', 'club-1337', {
+        challengeId: 'call-auth-recoverable',
+      });
 
       expect(prisma.guestGameProfile.create).not.toHaveBeenCalled();
       expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(

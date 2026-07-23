@@ -309,12 +309,12 @@ export class GuestIdentityResolverService {
           input.externalDomain,
         ].join(':');
         await tx.$queryRaw`
-          SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
+          SELECT pg_advisory_xact_lock(hashtext(${lockKey}))::text
         `;
 
         const guestLockKey = [input.tenantId, 'guest', input.guestId].join(':');
         await tx.$queryRaw`
-          SELECT pg_advisory_xact_lock(hashtext(${guestLockKey}))
+          SELECT pg_advisory_xact_lock(hashtext(${guestLockKey}))::text
         `;
 
         await tx.guestGameProfileIdentityLink.updateMany({

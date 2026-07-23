@@ -6543,6 +6543,56 @@ describe('GuestPortalService', () => {
       });
     });
 
+    it('resumes session issuance after registration was persisted as VERIFIED', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+      mockLeetTenant(prisma);
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-recoverable',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'VERIFIED',
+        deliveryChannel: 'USER_CALL',
+        providerName: 'SMS_RU_CALLCHECK',
+        providerChallengeId: 'smsru-check-recoverable',
+        providerStatusCode: '401',
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const status = await service.getUserCallAuthStatus(
+        'leet',
+        'club-1337',
+        { challengeId: 'call-auth-recoverable' },
+      );
+
+      expect(prisma.guestGameProfile.create).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'call-auth-recoverable' },
+          data: expect.objectContaining({
+            status: 'CALL_SESSION_ISSUED',
+            guestId: 'guest-1',
+            profileId: 'profile-1',
+          }),
+        }),
+      );
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+        phoneMasked: '***9999',
+      });
+    });
+
     it('records referral attribution when the user-call fallback issues the game session', async () => {
       const { jwtService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',

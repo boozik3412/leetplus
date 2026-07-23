@@ -2611,12 +2611,21 @@ export class GuestPortalService {
       }
     }
 
-    if (challenge.status === USER_CALL_AUTH_CONFIRMED_STATUS) {
-      const profile = await this.completeOtpRegistration(challenge, context, {
-        code: referralCode,
-        channel: 'USER_CALL',
-        externalId: `user-call:${challenge.id}:referral`,
-      });
+    if (
+      challenge.status === USER_CALL_AUTH_CONFIRMED_STATUS ||
+      challenge.status === 'VERIFIED'
+    ) {
+      const profile =
+        challenge.status === 'VERIFIED' && challenge.profileId
+          ? {
+              id: challenge.profileId,
+              guestId: challenge.guestId,
+            }
+          : await this.completeOtpRegistration(challenge, context, {
+              code: referralCode,
+              channel: 'USER_CALL',
+              externalId: `user-call:${challenge.id}:referral`,
+            });
       const basePayload: GuestPortalTokenPayload = {
         sub: `user-call:${challenge.id}`,
         purpose: GUEST_PORTAL_PURPOSE,

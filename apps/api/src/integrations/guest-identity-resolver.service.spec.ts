@@ -146,6 +146,25 @@ describe('GuestIdentityResolverService', () => {
     prisma.guestGameProfile.findMany.mockResolvedValue([]);
   });
 
+  it('casts advisory lock results to a Prisma-supported type', async () => {
+    await service.resolveExactMatch({
+      tenantId,
+      profileId,
+      guestId,
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain,
+      externalGuestId: 'external-guest-1',
+      acceptedPhoneHashes: [phoneHash],
+      matchSource: 'TEST',
+      verifiedAt,
+    });
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    for (const [query] of tx.$queryRaw.mock.calls) {
+      expect((query as readonly string[]).join('')).toContain('::text');
+    }
+  });
+
   it('creates the first domain-scoped link and backfills only exact external activity identity', async () => {
     tx.guestActivityFact.updateMany.mockResolvedValue({ count: 3 });
 

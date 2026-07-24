@@ -207,6 +207,7 @@ export function LangameSettingsForm({
                     ? new Intl.DateTimeFormat("ru-RU", {
                         dateStyle: "short",
                         timeStyle: "short",
+                        timeZone: "UTC",
                       }).format(new Date(source.lastSyncedAt))
                     : "ещё не было"}
                 </p>

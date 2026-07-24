@@ -29,18 +29,27 @@ export function SettingsWorkspace() {
 
   useEffect(() => {
     let mounted = true;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      controller.abort();
+    const slowTimeout = window.setTimeout(() => {
+      if (!mounted) {
+        return;
+      }
+
+      setState((current) =>
+        current.isLoading
+          ? {
+              ...current,
+              brandingError: getSlowApiMessage(),
+              langameError: getSlowApiMessage(),
+              isLoading: false,
+            }
+          : current,
+      );
     }, SETTINGS_TIMEOUT_MS);
 
     async function loadSettings() {
       const [langameResult, brandingResult] = await Promise.allSettled([
-        loadJson<LangameSettings>(
-          "/api/integrations/langame/settings",
-          controller.signal,
-        ),
-        loadJson<BrandingSettings>("/api/settings/branding", controller.signal),
+        loadJson<LangameSettings>("/api/integrations/langame/settings"),
+        loadJson<BrandingSettings>("/api/settings/branding"),
       ]);
 
       if (!mounted) {
@@ -65,13 +74,12 @@ export function SettingsWorkspace() {
     }
 
     void loadSettings().finally(() => {
-      window.clearTimeout(timeout);
+      window.clearTimeout(slowTimeout);
     });
 
     return () => {
       mounted = false;
-      controller.abort();
-      window.clearTimeout(timeout);
+      window.clearTimeout(slowTimeout);
     };
   }, []);
 
@@ -118,10 +126,9 @@ export function SettingsWorkspace() {
   );
 }
 
-async function loadJson<T>(url: string, signal: AbortSignal): Promise<T> {
+async function loadJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     cache: "no-store",
-    signal,
   });
 
   if (!response.ok) {
@@ -149,15 +156,15 @@ async function readApiError(response: Response) {
 }
 
 function getLoadErrorMessage(error: unknown) {
-  if (error instanceof Error && error.name === "AbortError") {
-    return `API не ответил за ${Math.round(SETTINGS_TIMEOUT_MS / 1000)} секунд`;
-  }
-
   if (error instanceof Error) {
     return error.message;
   }
 
   return "Неизвестная ошибка загрузки настроек";
+}
+
+function getSlowApiMessage() {
+  return `API отвечает дольше ${Math.round(SETTINGS_TIMEOUT_MS / 1000)} секунд`;
 }
 
 function SettingsSectionError({

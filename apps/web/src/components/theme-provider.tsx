@@ -28,19 +28,7 @@ function applyTheme(theme: ThemeMode) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeMode>(() => {
-    if (typeof window === "undefined") {
-      return "system";
-    }
-
-    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-
-    return savedTheme === "light" ||
-      savedTheme === "dark" ||
-      savedTheme === "system"
-      ? savedTheme
-      : "system";
-  });
+  const [theme, setThemeState] = useState<ThemeMode>("system");
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -50,6 +38,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         : "system";
 
     applyTheme(currentTheme);
+    const frame = window.requestAnimationFrame(() => {
+      setThemeState(currentTheme);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {

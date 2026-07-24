@@ -5,6 +5,8 @@ import { getBrandingSettings } from "@/lib/branding-settings";
 import { getLangameSettings } from "@/lib/langame-settings";
 import { can } from "@/lib/permissions";
 
+const SETTINGS_DATA_TIMEOUT_MS = 15_000;
+
 export default async function SettingsPage() {
   const user = await requireCurrentUser();
 
@@ -62,10 +64,19 @@ export default async function SettingsPage() {
 }
 
 async function loadSettingsWorkspaceData() {
+  const startedAt = Date.now();
+  console.warn("[settings] data load start");
+
   const [langameResult, brandingResult] = await Promise.allSettled([
-    getLangameSettings(),
-    getBrandingSettings(),
+    withSettingsDataTimeout("langame", getLangameSettings(), startedAt),
+    withSettingsDataTimeout("branding", getBrandingSettings(), startedAt),
   ]);
+
+  console.warn("[settings] data load settled", {
+    brandingStatus: brandingResult.status,
+    elapsedMs: Date.now() - startedAt,
+    langameStatus: langameResult.status,
+  });
 
   return {
     brandingSettings:
@@ -81,6 +92,46 @@ async function loadSettingsWorkspaceData() {
         ? getSettingsErrorMessage(langameResult.reason)
         : null,
   };
+}
+
+async function withSettingsDataTimeout<T>(
+  label: string,
+  promise: Promise<T>,
+  startedAt: number,
+) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise.then((value) => {
+        console.warn(`[settings] ${label} loaded`, {
+          elapsedMs: Date.now() - startedAt,
+        });
+        return value;
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            new Error(
+              `${label} settings timed out after ${Math.round(
+                SETTINGS_DATA_TIMEOUT_MS / 1000,
+              )}s`,
+            ),
+          );
+        }, SETTINGS_DATA_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    console.warn(`[settings] ${label} failed`, {
+      elapsedMs: Date.now() - startedAt,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 function getSettingsErrorMessage(error: unknown) {

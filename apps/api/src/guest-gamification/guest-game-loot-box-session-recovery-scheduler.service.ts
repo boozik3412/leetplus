@@ -20,6 +20,20 @@ const DEFAULT_CLAIM_LEASE_MS = 120_000;
 const DEFAULT_RETRY_BATCH_SIZE = 30;
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_LOOKBACK_MS = 24 * 60 * 60_000;
+const SESSION_START_FALLBACK_FACT_TYPES = new Set([
+  'SESSION_STARTED',
+  'HOURLY_SESSION_STARTED',
+  'PACKAGE_OR_SUBSCRIPTION_USED',
+]);
+const LEDGER_FALLBACK_LIVE_CONFLICT_REASON =
+  'Generic guest game ledger fallback is LIVE for session-start facts in an overlapping scope. Disable the dedicated loot-box recovery pipeline.';
+
+export type GuestGameLootBoxSessionRecoverySchedulerRuntimeStatus = {
+  mode: GuestGameLootBoxSessionRecoveryMode;
+  backgroundReady: boolean;
+  disabledReason: string | null;
+  blockedByLedgerFallback: boolean;
+};
 
 @Injectable()
 export class GuestGameLootBoxSessionRecoverySchedulerService
@@ -37,8 +51,11 @@ export class GuestGameLootBoxSessionRecoverySchedulerService
   ) {}
 
   onModuleInit() {
-    if (!this.backgroundReady()) {
-      this.logger.log('Guest loot-box session recovery scheduler is disabled.');
+    const readiness = this.readiness();
+    if (!readiness.ready) {
+      this.logger.log(
+        `Guest loot-box session recovery scheduler is disabled: ${readiness.disabledReason}`,
+      );
       return;
     }
     const intervalMs = this.intervalMs();
@@ -104,6 +121,16 @@ export class GuestGameLootBoxSessionRecoverySchedulerService
     }
   }
 
+  getRuntimeStatus(): GuestGameLootBoxSessionRecoverySchedulerRuntimeStatus {
+    const readiness = this.readiness();
+    return {
+      mode: this.mode(),
+      backgroundReady: readiness.ready,
+      disabledReason: readiness.disabledReason,
+      blockedByLedgerFallback: readiness.blockedByLedgerFallback,
+    };
+  }
+
   private runDto(): GuestGameLootBoxSessionRecoveryRunDto {
     const dto: GuestGameLootBoxSessionRecoveryRunDto = {
       mode: this.mode(),
@@ -135,22 +162,191 @@ export class GuestGameLootBoxSessionRecoverySchedulerService
   }
 
   private backgroundReady() {
+    return this.readiness().ready;
+  }
+
+  private readiness(): {
+    ready: boolean;
+    disabledReason: string | null;
+    blockedByLedgerFallback: boolean;
+  } {
     const mode = this.mode();
-    if (mode === 'OFF' || this.killSwitchEnabled()) return false;
+    if (mode === 'OFF') {
+      return this.disabledReadiness('Recovery mode is OFF.');
+    }
+    if (this.killSwitchEnabled()) {
+      return this.disabledReadiness(
+        'The dedicated recovery kill switch is enabled or not explicitly false.',
+      );
+    }
     const tenantConfigured = Boolean(
       this.optionalString('GUEST_GAME_LOOT_BOX_RECOVERY_TENANT_ID') ||
       this.optionalString('GUEST_GAME_LOOT_BOX_RECOVERY_TENANT_SLUG'),
     );
     if (mode === 'SHADOW') {
-      return tenantConfigured || this.allowAllTenants();
+      return tenantConfigured || this.allowAllTenants()
+        ? this.readyReadiness()
+        : this.disabledReadiness(
+            'SHADOW mode requires a tenant scope or allow-all-tenants.',
+          );
     }
+    if (!tenantConfigured) {
+      return this.disabledReadiness('LIVE mode requires a tenant scope.');
+    }
+    if (!this.optionalString('GUEST_GAME_LOOT_BOX_RECOVERY_PROFILE_ID')) {
+      return this.disabledReadiness('LIVE mode requires a profile scope.');
+    }
+    if (!this.liveNotBefore()) {
+      return this.disabledReadiness('LIVE mode requires a valid cutoff.');
+    }
+    if (this.allowAllTenants()) {
+      return this.disabledReadiness('LIVE mode cannot use allow-all-tenants.');
+    }
+    if (!this.entitlementReadReady()) {
+      return this.disabledReadiness(
+        'LIVE mode requires entitlement reads for the exact canary scope.',
+      );
+    }
+    if (this.overlapsLiveLedgerSessionStartFallback()) {
+      return this.disabledReadiness(LEDGER_FALLBACK_LIVE_CONFLICT_REASON, true);
+    }
+    return this.readyReadiness();
+  }
+
+  private readyReadiness() {
+    return {
+      ready: true,
+      disabledReason: null,
+      blockedByLedgerFallback: false,
+    };
+  }
+
+  private disabledReadiness(
+    disabledReason: string,
+    blockedByLedgerFallback = false,
+  ) {
+    return {
+      ready: false,
+      disabledReason,
+      blockedByLedgerFallback,
+    };
+  }
+
+  private overlapsLiveLedgerSessionStartFallback() {
+    if (
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_MODE')?.toUpperCase() !==
+        'LIVE' ||
+      this.optionalBoolean('GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH') ||
+      !this.ledgerFallbackHasSessionStartFacts() ||
+      !this.ledgerFallbackLiveReady()
+    ) {
+      return false;
+    }
+
+    return (
+      this.ledgerFallbackTenantScopeOverlaps() &&
+      this.ledgerFallbackProfileScopeOverlaps()
+    );
+  }
+
+  private ledgerFallbackHasSessionStartFacts() {
+    const configured = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES',
+    );
+    // The generic scheduler's safe default contains duration facts only.
+    // Missing/empty configuration therefore cannot overlap this dedicated
+    // session-start recovery worker.
+    if (!configured) return false;
+    return configured
+      .split(',')
+      .map((factType) => factType.trim().toUpperCase())
+      .some((factType) => SESSION_START_FALLBACK_FACT_TYPES.has(factType));
+  }
+
+  private ledgerFallbackLiveReady() {
+    const tenantConfigured = Boolean(
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_TENANT_ID') ||
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG'),
+    );
+    const canaryConfigured = Boolean(
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID') &&
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_SEASON_ID') &&
+      this.optionalPositiveInteger(
+        'GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP',
+      ) !== null,
+    );
     return Boolean(
       tenantConfigured &&
-      this.optionalString('GUEST_GAME_LOOT_BOX_RECOVERY_PROFILE_ID') &&
-      this.liveNotBefore() &&
-      !this.allowAllTenants() &&
-      this.entitlementReadReady(),
+      (this.optionalBoolean(
+        'GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES',
+      ) ||
+        canaryConfigured) &&
+      !this.optionalBoolean('GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS') &&
+      this.validDate(
+        this.optionalString('GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE'),
+      ),
     );
+  }
+
+  private ledgerFallbackTenantScopeOverlaps() {
+    const recoveryTenantId = this.optionalString(
+      'GUEST_GAME_LOOT_BOX_RECOVERY_TENANT_ID',
+    );
+    const fallbackTenantId = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_TENANT_ID',
+    );
+    if (
+      recoveryTenantId &&
+      fallbackTenantId &&
+      recoveryTenantId !== fallbackTenantId
+    ) {
+      return false;
+    }
+
+    const recoveryTenantSlug = this.optionalString(
+      'GUEST_GAME_LOOT_BOX_RECOVERY_TENANT_SLUG',
+    )?.toLowerCase();
+    const fallbackTenantSlug = this.optionalString(
+      'GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG',
+    )?.toLowerCase();
+    if (
+      recoveryTenantSlug &&
+      fallbackTenantSlug &&
+      recoveryTenantSlug !== fallbackTenantSlug
+    ) {
+      return false;
+    }
+
+    // An ID-only scope cannot be proven disjoint from a slug-only scope using
+    // static configuration. Treat the ambiguous case as overlapping.
+    return true;
+  }
+
+  private ledgerFallbackProfileScopeOverlaps() {
+    if (
+      this.optionalBoolean(
+        'GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES',
+      )
+    ) {
+      return true;
+    }
+    return (
+      this.optionalString('GUEST_GAME_LOOT_BOX_RECOVERY_PROFILE_ID') ===
+      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID')
+    );
+  }
+
+  private optionalPositiveInteger(key: string) {
+    const value = this.optionalString(key);
+    if (!value) return null;
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  private validDate(value: string | null) {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
   }
 
   /**

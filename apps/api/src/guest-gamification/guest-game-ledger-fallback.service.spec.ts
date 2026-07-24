@@ -56,6 +56,22 @@ function fact(validFrom: Date) {
   };
 }
 
+function sessionStartFact(
+  validFrom: Date,
+  factType:
+    | 'SESSION_STARTED'
+    | 'HOURLY_SESSION_STARTED'
+    | 'PACKAGE_OR_SUBSCRIPTION_USED' = 'SESSION_STARTED',
+) {
+  return {
+    ...fact(validFrom),
+    id: `fact-${factType.toLowerCase()}`,
+    sourceExternalId: `parser-row-${factType.toLowerCase()}`,
+    factType,
+    durationMinutes: null,
+  };
+}
+
 function processedExactReceipt(
   id: string,
   factId: string,
@@ -190,6 +206,35 @@ function dryRun() {
   };
 }
 
+function sessionStartDryRun() {
+  const base = dryRun();
+  const rules = [
+    {
+      ...base.rules[1],
+      id: 'loot-box-start',
+      name: 'Session-start entitlement',
+      triggerKind: 'SESSION_START',
+    },
+    {
+      ...base.rules[2],
+      id: 'season-1',
+      name: 'Session-start Battle Pass step',
+      triggerKind: 'SESSION_START',
+      battlePassStep: 2,
+    },
+  ];
+  return {
+    ...base,
+    eventType: 'SESSION_START',
+    rules,
+    summary: {
+      ...base.summary,
+      checkedRules: rules.length,
+      eligibleRules: rules.length,
+    },
+  };
+}
+
 function domainAwareDryRun(
   dto: { storeId?: string | null; externalDomain?: string | null },
   options: {
@@ -303,6 +348,7 @@ function createService(options?: {
     },
     guestActivityFact: {
       findMany: jest.fn().mockResolvedValue([fact(validFrom)]),
+      findUnique: jest.fn().mockResolvedValue(null),
     },
     guestGameOriginReceipt: {
       findUnique: jest.fn().mockResolvedValue(null),
@@ -345,6 +391,40 @@ function createService(options?: {
     prisma,
     gamification,
   };
+}
+
+function configureSessionStartRules(harness: ReturnType<typeof createService>) {
+  harness.prisma.guestGameLootBox.findMany.mockResolvedValue([
+    {
+      id: 'loot-box-start',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+      triggerKind: 'SESSION_START',
+      periodRules: { evaluationPolicy: 'LIVE_PRIMARY' },
+      limits: {},
+      storeIds: ['store-1'],
+    },
+  ]);
+  harness.prisma.guestGameSeason.findMany.mockResolvedValue([
+    {
+      id: 'season-1',
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+      periodFrom: null,
+      storeIds: ['store-1'],
+      levels: [
+        {
+          sequence: 2,
+          activationRules: {
+            schemaVersion: 2,
+            taskType: 'SESSION_START',
+            evaluationPolicy: 'LIVE_PRIMARY',
+          },
+        },
+      ],
+    },
+  ]);
+  harness.gamification.dryRun.mockResolvedValue(sessionStartDryRun());
 }
 
 describe('GuestGameLedgerFallbackService', () => {
@@ -781,6 +861,343 @@ describe('GuestGameLedgerFallbackService', () => {
     },
   );
 
+  it.each([
+    ['any', 'SESSION_STARTED', null, false],
+    ['hourly', 'HOURLY_SESSION_STARTED', 'HOURLY', false],
+    [
+      'package or subscription',
+      'PACKAGE_OR_SUBSCRIPTION_USED',
+      'PACKAGE_OR_SUBSCRIPTION',
+      true,
+    ],
+  ] as const)(
+    'maps an exact %s start fact to the canonical SESSION_START DTO',
+    async (_label, factType, sessionType, sessionPacket) => {
+      const harness = createService();
+      configureSessionStartRules(harness);
+      const startFact = sessionStartFact(
+        new Date(now.getTime() - 60_000),
+        factType,
+      );
+      harness.prisma.guestActivityFact.findMany.mockResolvedValue([startFact]);
+
+      const mappedResult = await harness.service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: [factType],
+      });
+      expect(mappedResult).toMatchObject({
+        checkedFacts: 1,
+        shadowFacts: 1,
+        createdEvents: 0,
+        createdRewards: 0,
+      });
+
+      expect(harness.gamification.dryRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          eventType: 'SESSION_START',
+          externalId: 'session-42',
+          sessionType,
+          sessionPacket,
+          sourceFactKind: 'GUEST_SESSION',
+          suppressLootBoxRewards: true,
+        }),
+        expect.any(Object),
+      );
+    },
+  );
+
+  it('selects a legacy SESSION_START mission from its denormalized trigger', async () => {
+    const harness = createService();
+    const startFact = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'SESSION_STARTED',
+    );
+    harness.prisma.guestActivityFact.findMany.mockResolvedValue([startFact]);
+    harness.prisma.guestGameMission.findMany.mockResolvedValue([
+      {
+        id: 'legacy-start-mission',
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+        definitionVersion: 1,
+        missionType: 'CUSTOM',
+        triggerKind: 'SESSION_START',
+        evaluationPolicy: 'LIVE_PRIMARY',
+        conditions: {},
+        periodFrom: null,
+        storeIds: ['store-1'],
+      },
+    ]);
+    harness.prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+    harness.prisma.guestGameSeason.findMany.mockResolvedValue([]);
+    const base = sessionStartDryRun();
+    const missionRule = {
+      ...base.rules[0],
+      id: 'legacy-start-mission',
+      kind: 'MISSION',
+      name: 'Legacy session-start mission',
+    };
+    harness.gamification.dryRun.mockResolvedValue({
+      ...base,
+      rules: [missionRule],
+      summary: {
+        ...base.summary,
+        checkedRules: 1,
+        eligibleRules: 1,
+      },
+    });
+
+    await expect(
+      harness.service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: ['SESSION_STARTED'],
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      shadowFacts: 1,
+    });
+
+    expect(harness.prisma.guestGameMission.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ triggerKind: true }),
+      }),
+    );
+    expect(harness.gamification.dryRun).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'SESSION_START',
+        sessionType: null,
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('prefers the typed start marker over its neutral anchor so ANY and typed rules share one event', async () => {
+    const harness = createService();
+    configureSessionStartRules(harness);
+    const neutral = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'SESSION_STARTED',
+    );
+    const hourly = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    harness.prisma.guestActivityFact.findMany.mockResolvedValue([
+      neutral,
+      hourly,
+    ]);
+    const startResult = sessionStartDryRun();
+    startResult.rules = [
+      { ...startResult.rules[0], id: 'loot-box-start', name: 'Any start' },
+      { ...startResult.rules[1], id: 'season-1', name: 'Hourly start' },
+    ];
+    harness.gamification.dryRun.mockResolvedValue(startResult);
+
+    await expect(
+      harness.service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: ['SESSION_STARTED', 'HOURLY_SESSION_STARTED'],
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      shadowFacts: 1,
+    });
+
+    expect(harness.gamification.dryRun).toHaveBeenCalledTimes(1);
+    expect(harness.gamification.dryRun).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'SESSION_START',
+        sessionType: 'HOURLY',
+        externalId: 'session-42',
+      }),
+      expect.any(Object),
+    );
+    expect(harness.gamification.recordRuleDecisions).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        rules: [
+          expect.objectContaining({ id: 'loot-box-start', name: 'Any start' }),
+          expect.objectContaining({ id: 'season-1', name: 'Hourly start' }),
+        ],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('fails closed when one session has contradictory typed start markers', async () => {
+    const harness = createService();
+    configureSessionStartRules(harness);
+    const neutral = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'SESSION_STARTED',
+    );
+    const hourly = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    const packet = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'PACKAGE_OR_SUBSCRIPTION_USED',
+    );
+    harness.prisma.guestActivityFact.findMany.mockResolvedValue([
+      neutral,
+      hourly,
+      packet,
+    ]);
+
+    await expect(
+      harness.service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: [
+          'SESSION_STARTED',
+          'HOURLY_SESSION_STARTED',
+          'PACKAGE_OR_SUBSCRIPTION_USED',
+        ],
+      }),
+    ).resolves.toMatchObject({
+      shadowFacts: 0,
+      failedFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(harness.gamification.dryRun).not.toHaveBeenCalled();
+    expect(harness.prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          eventType: 'SESSION_START',
+          status: 'FAILED',
+          lastError:
+            'Conflicting exact session-start classifications for one session.',
+        }),
+      }),
+    );
+  });
+
+  it('detects contradictory typed start markers even when rollout requests only one start type', async () => {
+    const harness = createService();
+    configureSessionStartRules(harness);
+    const hourly = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    const packet = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'PACKAGE_OR_SUBSCRIPTION_USED',
+    );
+    const startFacts = [hourly, packet];
+    harness.prisma.guestActivityFact.findMany.mockImplementation(
+      (input: {
+        where?: {
+          factType?: { in?: string[] };
+        };
+      }) => {
+        const selectedFactTypes = input.where?.factType?.in;
+        return Promise.resolve(
+          selectedFactTypes
+            ? startFacts.filter((item) =>
+                selectedFactTypes.includes(item.factType),
+              )
+            : startFacts,
+        );
+      },
+    );
+
+    await expect(
+      harness.service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: ['HOURLY_SESSION_STARTED'],
+      }),
+    ).resolves.toMatchObject({
+      shadowFacts: 0,
+      failedFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(harness.gamification.dryRun).not.toHaveBeenCalled();
+    expect(harness.prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          eventType: 'SESSION_START',
+          status: 'FAILED',
+          lastError:
+            'Conflicting exact session-start classifications for one session.',
+        }),
+      }),
+    );
+  });
+
+  it('keeps identical session ids isolated across physical sources and owners', async () => {
+    const harness = createService();
+    configureSessionStartRules(harness);
+    const firstStart = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    const secondStart = {
+      ...sessionStartFact(
+        new Date(now.getTime() - 30_000),
+        'HOURLY_SESSION_STARTED',
+      ),
+      id: 'fact-hourly-second-owner',
+      profileId: 'profile-2',
+      guestId: 'guest-2',
+      sourceKind: 'LANGAME_SESSION_LEDGER',
+      sourceExternalId: 'parser-row-hourly-second-owner',
+    };
+    const startFacts = [firstStart, secondStart];
+    harness.prisma.guestActivityFact.findMany.mockImplementation(
+      (input: {
+        where?: {
+          factType?: { in?: string[] };
+        };
+      }) => {
+        const selectedFactTypes = input.where?.factType?.in;
+        return Promise.resolve(
+          selectedFactTypes
+            ? startFacts.filter((item) =>
+                selectedFactTypes.includes(item.factType),
+              )
+            : startFacts,
+        );
+      },
+    );
+
+    await expect(
+      harness.service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+        factTypes: ['HOURLY_SESSION_STARTED'],
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 2,
+      shadowFacts: 2,
+      failedFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(harness.gamification.dryRun).toHaveBeenCalledTimes(2);
+    expect(
+      harness.gamification.dryRun.mock.calls.map(([, dto]) => dto.profileId),
+    ).toEqual(expect.arrayContaining(['profile-1', 'profile-2']));
+    const startReceiptOriginKeys =
+      harness.prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .filter((input) => input.create?.eventType === 'SESSION_START')
+        .map((input) => input.where?.tenantId_originKey?.originKey);
+    expect(startReceiptOriginKeys).toHaveLength(2);
+    expect(new Set(startReceiptOriginKeys).size).toBe(2);
+  });
+
   it('routes neutral exact play time as PLAY_HOUR with no tariff so an ANY condition can match', async () => {
     const { service, prisma, gamification } = createService();
     const neutralFact = {
@@ -1071,12 +1488,37 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
-  it('applies the LIVE cutoff and excludes superseded or non-positive play-time facts', async () => {
+  it('defaults runScheduled without factTypes to duration facts only', async () => {
+    const { service, prisma } = createService();
+
+    await service.runScheduled({
+      mode: 'SHADOW',
+      tenantId: 'tenant-1',
+    });
+
+    expect(
+      prisma.guestActivityFact.findMany.mock.calls[0]?.[0].where.factType.in,
+    ).toEqual([
+      'SESSION_PLAY_TIME_ACCUMULATED',
+      'HOURLY_PLAY_TIME_ACCUMULATED',
+      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    ]);
+  });
+
+  it('applies the LIVE cutoff and excludes invalid canonical session facts', async () => {
     const { service, prisma } = createService();
 
     await service.runScheduled({
       mode: 'LIVE',
       ...liveCanaryScope,
+      factTypes: [
+        'SESSION_STARTED',
+        'HOURLY_SESSION_STARTED',
+        'PACKAGE_OR_SUBSCRIPTION_USED',
+        'SESSION_PLAY_TIME_ACCUMULATED',
+        'HOURLY_PLAY_TIME_ACCUMULATED',
+        'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      ],
     });
 
     expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
@@ -1089,6 +1531,9 @@ describe('GuestGameLedgerFallbackService', () => {
           supersededAt: null,
           factType: {
             in: [
+              'SESSION_STARTED',
+              'HOURLY_SESSION_STARTED',
+              'PACKAGE_OR_SUBSCRIPTION_USED',
               'SESSION_PLAY_TIME_ACCUMULATED',
               'HOURLY_PLAY_TIME_ACCUMULATED',
               'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
@@ -1330,6 +1775,313 @@ describe('GuestGameLedgerFallbackService', () => {
     );
   });
 
+  it('routes one canonical session start to Battle Pass and lootbox exactly once across retries', async () => {
+    const harness = createService();
+    configureSessionStartRules(harness);
+    const hourly = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    harness.prisma.guestActivityFact.findMany.mockResolvedValue([hourly]);
+    const waitingReceipt = {
+      id: 'receipt-session-start',
+      factId: hourly.id,
+      eventId: null,
+      eventType: 'SESSION_START',
+      policy: 'LIVE_WITH_LEDGER_FALLBACK',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 0,
+      claimExpiresAt: null,
+    };
+    harness.prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(waitingReceipt)
+      .mockResolvedValueOnce({
+        id: 'receipt-watermark',
+        factId: hourly.id,
+        status: 'PROCESSED',
+      })
+      .mockResolvedValueOnce({
+        ...waitingReceipt,
+        status: 'PROCESSED',
+        claimedSource: 'LEDGER_FALLBACK',
+        attempts: 1,
+      })
+      .mockResolvedValueOnce({
+        id: 'receipt-watermark',
+        factId: hourly.id,
+        status: 'PROCESSED',
+      });
+
+    const scope = {
+      mode: 'LIVE' as const,
+      tenantId: liveCanaryScope.tenantId,
+      liveNotBefore: liveCanaryScope.liveNotBefore,
+      playTimeAllowAllProfiles: true,
+      factTypes: ['HOURLY_SESSION_STARTED'],
+      graceMs: 15_000,
+    };
+    await expect(harness.service.runScheduled(scope)).resolves.toMatchObject({
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    await expect(harness.service.runScheduled(scope)).resolves.toMatchObject({
+      fallbackFacts: 0,
+      duplicateFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(harness.gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(harness.gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'SESSION_START',
+        sessionType: 'HOURLY',
+        activeRulesOnly: true,
+        suppressLootBoxRewards: true,
+      }),
+      expect.objectContaining({
+        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        suppressLedgerShadow: true,
+        allowedRuleIds: new Set(['loot-box-start', 'season-1']),
+        allowedBattlePassSteps: new Map([['season-1', 2]]),
+      }),
+    );
+  });
+
+  it('upgrades an unclaimed generic start receipt when a delayed typed marker arrives', async () => {
+    const harness = createService({
+      receiptGraceUntil: new Date(now.getTime() + 60_000),
+    });
+    configureSessionStartRules(harness);
+    const neutral = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'SESSION_STARTED',
+    );
+    const hourly = sessionStartFact(
+      new Date(now.getTime() - 30_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    hourly.happenedAt = neutral.happenedAt;
+    harness.prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce([neutral])
+      .mockResolvedValueOnce([neutral])
+      .mockResolvedValueOnce([neutral, hourly])
+      .mockResolvedValueOnce([neutral, hourly]);
+    const waitingReceipt = {
+      id: 'receipt-delayed-start',
+      factId: neutral.id,
+      eventId: null,
+      eventType: 'SESSION_START',
+      policy: 'LIVE_WITH_LEDGER_FALLBACK',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: now,
+      graceUntil: new Date(now.getTime() + 60_000),
+      attempts: 0,
+      claimExpiresAt: null,
+    };
+    harness.prisma.guestGameOriginReceipt.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(waitingReceipt);
+    harness.prisma.guestGameOriginReceipt.upsert.mockResolvedValue(
+      waitingReceipt,
+    );
+
+    const scope = {
+      mode: 'LIVE' as const,
+      tenantId: liveCanaryScope.tenantId,
+      liveNotBefore: liveCanaryScope.liveNotBefore,
+      playTimeAllowAllProfiles: true,
+      factTypes: ['SESSION_STARTED', 'HOURLY_SESSION_STARTED'],
+      graceMs: 15_000,
+    };
+    await expect(harness.service.runScheduled(scope)).resolves.toMatchObject({
+      deferredFacts: 1,
+      fallbackFacts: 0,
+    });
+    await expect(harness.service.runScheduled(scope)).resolves.toMatchObject({
+      deferredFacts: 1,
+      fallbackFacts: 0,
+    });
+
+    expect(harness.gamification.dryRun).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'SESSION_START',
+        sessionType: 'HOURLY',
+      }),
+      expect.any(Object),
+    );
+    expect(
+      harness.prisma.guestGameOriginReceipt.updateMany,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: waitingReceipt.id,
+          factId: neutral.id,
+          claimedSource: null,
+          eventId: null,
+          status: { in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'] },
+        }),
+        data: expect.objectContaining({
+          factId: hourly.id,
+          status: 'WAITING_LIVE',
+          claimedSource: null,
+          attempts: 0,
+        }),
+      }),
+    );
+    expect(harness.gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('reconciles a processed generic start when its delayed typed marker arrives', async () => {
+    const harness = createService({
+      liveEventId: 'event-session-start',
+    });
+    configureSessionStartRules(harness);
+    const neutral = sessionStartFact(
+      new Date(now.getTime() - 60_000),
+      'SESSION_STARTED',
+    );
+    const hourly = sessionStartFact(
+      new Date(now.getTime() - 30_000),
+      'HOURLY_SESSION_STARTED',
+    );
+    hourly.happenedAt = neutral.happenedAt;
+    harness.prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce([hourly])
+      .mockResolvedValueOnce([neutral, hourly]);
+    harness.prisma.guestActivityFact.findUnique.mockResolvedValueOnce({
+      factType: neutral.factType,
+      profileId: neutral.profileId,
+      guestId: neutral.guestId,
+      externalProvider: neutral.externalProvider,
+      externalDomain: neutral.externalDomain,
+      sourceKind: neutral.sourceKind,
+      sessionExternalId: neutral.sessionExternalId,
+      happenedAt: neutral.happenedAt,
+    });
+    harness.prisma.guestGameEvent.findFirst.mockResolvedValueOnce({
+      id: 'event-session-start',
+      eventType: 'SESSION_START',
+      payload: {
+        processSchemaVersion: 2,
+        source: 'guest_gamification_process_event',
+        sourceFactId: neutral.id,
+        externalProvider: neutral.externalProvider,
+        externalDomain: neutral.externalDomain,
+        sourceKind: neutral.sourceKind,
+        sessionExternalId: neutral.sessionExternalId,
+        input: { sessionType: null },
+        rules: sessionStartDryRun().rules,
+      },
+    });
+    const processedReceipt = {
+      id: 'receipt-processed-generic-start',
+      originKey: 'generic-session-start-origin',
+      factId: neutral.id,
+      eventId: 'event-session-start',
+      eventType: 'SESSION_START',
+      policy: 'LIVE_WITH_LEDGER_FALLBACK',
+      status: 'LIVE_PROCESSED',
+      claimedSource: 'LIVE',
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 45_000),
+      attempts: 1,
+      claimExpiresAt: null,
+      processedAt: new Date(now.getTime() - 45_000),
+      lastError: null,
+    };
+    harness.prisma.guestGameOriginReceipt.findFirst.mockResolvedValue(
+      processedReceipt,
+    );
+    harness.gamification.processEvent.mockResolvedValueOnce({
+      event: { id: 'event-session-start' },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          waitingForDelivery: false,
+          deadLetterIntentCount: 0,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      harness.service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        factTypes: ['SESSION_STARTED', 'HOURLY_SESSION_STARTED'],
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      liveHandledFacts: 1,
+      deferredFacts: 0,
+      createdRewards: 1,
+    });
+
+    expect(
+      harness.prisma.guestGameOriginReceipt.updateMany,
+    ).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: {
+          id: processedReceipt.id,
+          factId: neutral.id,
+          policy: 'LIVE_WITH_LEDGER_FALLBACK',
+          status: 'LIVE_PROCESSED',
+          claimedSource: 'LIVE',
+          eventId: 'event-session-start',
+        },
+        data: expect.objectContaining({
+          factId: hourly.id,
+          status: 'WAITING_LIVE',
+          claimedSource: null,
+          graceUntil: now,
+          processedAt: null,
+        }),
+      }),
+    );
+    expect(harness.gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'SESSION_START',
+        sessionType: 'HOURLY',
+        activeRulesOnly: true,
+      }),
+      expect.objectContaining({
+        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        allowedRuleIds: new Set(['loot-box-start', 'season-1']),
+        allowedBattlePassSteps: new Map([['season-1', 2]]),
+        sessionStartReclassificationScope: expect.objectContaining({
+          sourceFactId: hourly.id,
+          rules: expect.arrayContaining([
+            expect.objectContaining({
+              ruleKind: 'LOOT_BOX',
+              ruleId: 'loot-box-start',
+            }),
+            expect.objectContaining({
+              ruleKind: 'SEASON',
+              ruleId: 'season-1',
+              battlePassStep: 2,
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
   it('never selects purchase facts in LIVE canary mode', async () => {
     const { service, prisma, gamification } = createService();
     prisma.guestActivityFact.findMany.mockResolvedValueOnce([]);
@@ -1468,9 +2220,16 @@ describe('GuestGameLedgerFallbackService', () => {
         tenantId: 'tenant-1',
         OR: [
           {
-            originKey: expect.stringMatching(
-              /^ggo:v2:[a-f0-9]{64}$/,
-            ) as unknown as string,
+            originKey: {
+              in: [
+                expect.stringMatching(
+                  /^ggo:v2:[a-f0-9]{64}$/,
+                ) as unknown as string,
+                expect.stringMatching(
+                  /^ggo:v1:[a-f0-9]{64}$/,
+                ) as unknown as string,
+              ],
+            },
           },
           {
             externalProvider: IntegrationProvider.LANGAME,
@@ -1479,7 +2238,7 @@ describe('GuestGameLedgerFallbackService', () => {
           },
         ],
       },
-      select: { id: true },
+      select: { id: true, eventType: true, payload: true },
     });
   });
 

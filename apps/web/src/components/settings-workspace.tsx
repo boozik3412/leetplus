@@ -1,100 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { BrandingSettingsForm } from "@/components/branding-settings-form";
 import { LangameSettingsForm } from "@/components/langame-settings-form";
 import type { BrandingSettings } from "@/lib/branding-settings";
 import type { LangameSettings } from "@/lib/langame-settings";
 
-const SETTINGS_TIMEOUT_MS = 15_000;
-
-type SettingsWorkspaceState = {
+type SettingsWorkspaceProps = {
   brandingSettings: BrandingSettings | null;
   langameSettings: LangameSettings | null;
   brandingError: string | null;
   langameError: string | null;
-  isLoading: boolean;
 };
 
-const initialState: SettingsWorkspaceState = {
-  brandingSettings: null,
-  langameSettings: null,
-  brandingError: null,
-  langameError: null,
-  isLoading: true,
-};
-
-export function SettingsWorkspace() {
-  const [state, setState] = useState(initialState);
-
-  useEffect(() => {
-    let mounted = true;
-    const slowTimeout = window.setTimeout(() => {
-      if (!mounted) {
-        return;
-      }
-
-      setState((current) =>
-        current.isLoading
-          ? {
-              ...current,
-              brandingError: getSlowApiMessage(),
-              langameError: getSlowApiMessage(),
-              isLoading: false,
-            }
-          : current,
-      );
-    }, SETTINGS_TIMEOUT_MS);
-
-    async function loadSettings() {
-      const [langameResult, brandingResult] = await Promise.allSettled([
-        loadJson<LangameSettings>("/api/integrations/langame/settings"),
-        loadJson<BrandingSettings>("/api/settings/branding"),
-      ]);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState({
-        langameSettings:
-          langameResult.status === "fulfilled" ? langameResult.value : null,
-        brandingSettings:
-          brandingResult.status === "fulfilled" ? brandingResult.value : null,
-        langameError:
-          langameResult.status === "rejected"
-            ? getLoadErrorMessage(langameResult.reason)
-            : null,
-        brandingError:
-          brandingResult.status === "rejected"
-            ? getLoadErrorMessage(brandingResult.reason)
-            : null,
-        isLoading: false,
-      });
-    }
-
-    void loadSettings().finally(() => {
-      window.clearTimeout(slowTimeout);
-    });
-
-    return () => {
-      mounted = false;
-      window.clearTimeout(slowTimeout);
-    };
-  }, []);
-
-  if (state.isLoading) {
-    return (
-      <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-500 dark:border-emerald-950 dark:border-t-emerald-400" />
-          <span>Загружаем настройки...</span>
-        </div>
-      </section>
-    );
-  }
-
-  const hasLoadError = Boolean(state.langameError) || Boolean(state.brandingError);
+export function SettingsWorkspace({
+  brandingSettings,
+  langameSettings,
+  brandingError,
+  langameError,
+}: SettingsWorkspaceProps) {
+  const hasLoadError = Boolean(langameError) || Boolean(brandingError);
 
   return (
     <>
@@ -105,66 +29,25 @@ export function SettingsWorkspace() {
         </section>
       ) : null}
 
-      {state.brandingSettings ? (
-        <BrandingSettingsForm initialSettings={state.brandingSettings} />
+      {brandingSettings ? (
+        <BrandingSettingsForm initialSettings={brandingSettings} />
       ) : (
         <SettingsSectionError
-          message={state.brandingError}
+          message={brandingError}
           title="Брендинг не загрузился"
         />
       )}
 
-      {state.langameSettings ? (
-        <LangameSettingsForm initialSettings={state.langameSettings} />
+      {langameSettings ? (
+        <LangameSettingsForm initialSettings={langameSettings} />
       ) : (
         <SettingsSectionError
-          message={state.langameError}
+          message={langameError}
           title="Langame не загрузился"
         />
       )}
     </>
   );
-}
-
-async function loadJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return response.json() as Promise<T>;
-}
-
-async function readApiError(response: Response) {
-  try {
-    const data = (await response.json()) as {
-      message?: string | string[];
-      error?: string;
-    };
-
-    if (Array.isArray(data.message)) {
-      return data.message.join(", ");
-    }
-
-    return data.message ?? data.error ?? "Ошибка запроса";
-  } catch {
-    return "Ошибка запроса";
-  }
-}
-
-function getLoadErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Неизвестная ошибка загрузки настроек";
-}
-
-function getSlowApiMessage() {
-  return `API отвечает дольше ${Math.round(SETTINGS_TIMEOUT_MS / 1000)} секунд`;
 }
 
 function SettingsSectionError({

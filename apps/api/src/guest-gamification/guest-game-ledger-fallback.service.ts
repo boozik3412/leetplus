@@ -11,9 +11,23 @@ import {
   type GuestGameDryRunResult,
   type GuestGameProcessEventDto,
 } from './guest-gamification.service';
+import { guestGameTriggerMatches } from './guest-game-progress';
 import { guestGameRuleActivationAt } from './guest-game-rule-evaluator';
-import { buildGuestGameOriginKey } from './guest-game-origin-key';
-import { guestGamePolicyAllowsEvaluation } from './guest-game-source-policy';
+import {
+  buildGuestGameOriginKey,
+  buildGuestGamePhysicalProgressIdentity,
+  buildGuestGamePlayTimeOriginKey,
+} from './guest-game-origin-key';
+import {
+  guestGameBattlePassStepEvaluationPolicy,
+  guestGameLootBoxEvaluationPolicy,
+  guestGameMissionEvaluationPolicy,
+  guestGamePolicyAllowsEvaluation,
+} from './guest-game-source-policy';
+import {
+  EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
+  reconcileExactCanonicalEventOwner,
+} from './guest-game-exact-owner-reconciler';
 
 export type GuestGameLedgerFallbackMode = 'OFF' | 'SHADOW' | 'LIVE';
 
@@ -28,6 +42,7 @@ export type GuestGameLedgerFallbackRunDto = {
   liveNotBefore?: Date | string | null;
   allowAllTenants?: boolean;
   missionsAllowAllProfiles?: boolean;
+  playTimeAllowAllProfiles?: boolean;
   limit?: number | string | null;
   graceMs?: number | string | null;
   claimLeaseMs?: number | string | null;
@@ -68,12 +83,14 @@ export type GuestGameLedgerFallbackRunResult = {
 };
 
 const fallbackFactTypes = [
+  'SESSION_PLAY_TIME_ACCUMULATED',
   'HOURLY_PLAY_TIME_ACCUMULATED',
   'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
   'PRODUCT_PURCHASED',
 ] as const;
 
 const defaultFallbackFactTypes = [
+  'SESSION_PLAY_TIME_ACCUMULATED',
   'HOURLY_PLAY_TIME_ACCUMULATED',
   'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
 ] as const;
@@ -107,6 +124,7 @@ export class GuestGameLedgerFallbackService {
     const battlePassStep = optionalPositiveInteger(dto.battlePassStep);
     const liveNotBefore = validDate(dto.liveNotBefore);
     const missionsAllowAllProfiles = dto.missionsAllowAllProfiles === true;
+    const playTimeAllowAllProfiles = dto.playTimeAllowAllProfiles === true;
     if (
       mode !== 'OFF' &&
       !tenantId &&
@@ -118,9 +136,8 @@ export class GuestGameLedgerFallbackService {
     if (
       mode === 'LIVE' &&
       (dto.allowAllTenants === true ||
-        !profileId ||
-        !seasonId ||
-        battlePassStep === null ||
+        (!playTimeAllowAllProfiles &&
+          (!profileId || !seasonId || battlePassStep === null)) ||
         !liveNotBefore)
     ) {
       return summarize(mode, []);
@@ -198,6 +215,7 @@ export class GuestGameLedgerFallbackService {
             battlePassStep,
             liveNotBefore,
             missionsAllowAllProfiles,
+            playTimeAllowAllProfiles,
           ),
         );
       } catch (error) {
@@ -227,17 +245,21 @@ export class GuestGameLedgerFallbackService {
     battlePassStep: number | null,
     liveNotBefore: Date | null,
     missionsAllowAllProfiles: boolean,
+    playTimeAllowAllProfiles: boolean,
   ) {
-    const [allMissions, allSeasons, stores] = await Promise.all([
+    const [allMissions, allSeasons, allLootBoxes, stores] = await Promise.all([
       this.prisma.guestGameMission.findMany({
         where: {
           tenantId: user.tenantId,
           status: 'ACTIVE',
-          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
         },
         select: {
           id: true,
           createdAt: true,
+          updatedAt: true,
+          definitionVersion: true,
+          missionType: true,
+          evaluationPolicy: true,
           conditions: true,
           periodFrom: true,
           storeIds: true,
@@ -248,8 +270,24 @@ export class GuestGameLedgerFallbackService {
         select: {
           id: true,
           createdAt: true,
+          updatedAt: true,
           periodFrom: true,
           levels: true,
+          storeIds: true,
+        },
+      }),
+      this.prisma.guestGameLootBox.findMany({
+        where: {
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+        },
+        select: {
+          id: true,
+          createdAt: true,
+          updatedAt: true,
+          triggerKind: true,
+          periodRules: true,
+          limits: true,
           storeIds: true,
         },
       }),
@@ -258,23 +296,57 @@ export class GuestGameLedgerFallbackService {
         select: { id: true, externalDomain: true, timeZone: true },
       }),
     ]);
+    const fallbackMissions = allMissions.filter((mission) =>
+      guestGamePolicyAllowsEvaluation(
+        guestGameMissionEvaluationPolicy(
+          mission.definitionVersion,
+          mission.conditions,
+          mission.missionType,
+          mission.evaluationPolicy,
+        ),
+        'LIVE_LEDGER_FALLBACK',
+      ),
+    );
     const missions =
       mode === 'LIVE'
-        ? missionsAllowAllProfiles
-          ? allMissions
+        ? missionsAllowAllProfiles || playTimeAllowAllProfiles
+          ? fallbackMissions
           : []
-        : allMissions;
+        : fallbackMissions;
     const seasons =
       mode === 'LIVE'
-        ? allSeasons.filter((season) => season.id === seasonId)
+        ? playTimeAllowAllProfiles
+          ? allSeasons
+          : allSeasons.filter((season) => season.id === seasonId)
         : allSeasons;
+    const fallbackLootBoxes =
+      mode === 'LIVE' && !playTimeAllowAllProfiles
+        ? []
+        : allLootBoxes.filter((lootBox) => {
+            const triggerKind = normalizedString(lootBox.triggerKind);
+            return (
+              Boolean(triggerKind) &&
+              guestGameTriggerMatches(triggerKind, 'PLAY_HOUR') &&
+              guestGamePolicyAllowsEvaluation(
+                guestGameLootBoxEvaluationPolicy(
+                  triggerKind,
+                  lootBox.periodRules,
+                ),
+                'LIVE_LEDGER_FALLBACK',
+              )
+            );
+          });
     const fallbackSeasons = seasons.filter((season) =>
       seasonHasFallbackStep(
         season.levels,
-        mode === 'LIVE' ? battlePassStep : null,
+        mode === 'LIVE' && !playTimeAllowAllProfiles ? battlePassStep : null,
       ),
     );
-    if (!missions.length && !fallbackSeasons.length) {
+    if (
+      !missions.length &&
+      !fallbackSeasons.length &&
+      !fallbackLootBoxes.length
+    ) {
       return emptyTenantResult(
         user.tenantId,
         user.tenantSlug,
@@ -283,19 +355,33 @@ export class GuestGameLedgerFallbackService {
       );
     }
     const ruleExternalDomains = fallbackRuleExternalDomains(
-      [...missions, ...fallbackSeasons],
+      [...missions, ...fallbackSeasons, ...fallbackLootBoxes],
       stores,
     );
     const ruleDomainTimeZones = fallbackRuleDomainTimeZones(
-      [...missions, ...fallbackSeasons],
+      [...missions, ...fallbackSeasons, ...fallbackLootBoxes],
       stores,
     );
+    const fallbackRuleVersions = new Map([
+      ...missions.map(
+        (rule) => [`MISSION:${rule.id}`, rule.updatedAt] as const,
+      ),
+      ...fallbackSeasons.map(
+        (rule) => [`SEASON:${rule.id}`, rule.updatedAt] as const,
+      ),
+      ...fallbackLootBoxes.map(
+        (rule) => [`LOOT_BOX:${rule.id}`, rule.updatedAt] as const,
+      ),
+    ]);
 
     const earliestRuleActivation = [
       ...missions.map((mission) =>
         guestGameRuleActivationAt(mission.createdAt, mission.conditions),
       ),
       ...fallbackSeasons.map((season) => season.periodFrom ?? season.createdAt),
+      ...fallbackLootBoxes.map((lootBox) =>
+        guestGameRuleActivationAt(lootBox.createdAt, lootBox.limits),
+      ),
     ].reduce((earliest, value) => (value < earliest ? value : earliest));
     const earliestActivation =
       mode === 'LIVE' && liveNotBefore && liveNotBefore > earliestRuleActivation
@@ -307,74 +393,538 @@ export class GuestGameLedgerFallbackService {
       'PROCESSED',
       null,
     );
+    const profileScope =
+      mode === 'LIVE' && (missionsAllowAllProfiles || playTimeAllowAllProfiles)
+        ? undefined
+        : (profileId ?? undefined);
+    const factAnd: Prisma.GuestActivityFactWhereInput[] = [
+      {
+        OR: [{ guestId: { not: null } }, { profileId: { not: null } }],
+      },
+      {
+        OR: [
+          { sourceExternalId: { not: null } },
+          {
+            factType: {
+              in: [
+                'HOURLY_PLAY_TIME_ACCUMULATED',
+                'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+                'SESSION_PLAY_TIME_ACCUMULATED',
+              ],
+            },
+            sessionExternalId: { not: null },
+          },
+        ],
+      },
+      {
+        OR: [
+          {
+            factType: {
+              in: [
+                'HOURLY_PLAY_TIME_ACCUMULATED',
+                'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+                'SESSION_PLAY_TIME_ACCUMULATED',
+              ],
+            },
+            durationMinutes: { gt: 0 },
+          },
+          { factType: 'PRODUCT_PURCHASED' },
+        ],
+      },
+    ];
+    const baseFactWhere: Prisma.GuestActivityFactWhereInput = {
+      tenantId: user.tenantId,
+      profileId: profileScope,
+      factType: { in: factTypes },
+      lifecycleStatus: 'ACTIVE',
+      confidence: 'EXACT',
+      supersededAt: null,
+      happenedAt: { gte: earliestActivation },
+      AND: factAnd,
+    };
     const factPageSize = Math.max(limit * 4, 100);
+    const useDurableCursor =
+      playTimeAllowAllProfiles &&
+      factTypes.some((factType) => isPlayTimeFactType(factType));
+    const watermarkOriginKey = useDurableCursor
+      ? fallbackWatermarkOriginKey(factTypes, liveNotBefore)
+      : null;
+    const exactReconciliationWatermarkOriginKey = useDurableCursor
+      ? fallbackExactReconciliationWatermarkOriginKey(liveNotBefore)
+      : null;
+    const [watermark, exactReconciliationWatermark, retryableReceipts] =
+      useDurableCursor
+        ? await Promise.all([
+            this.prisma.guestGameOriginReceipt.findUnique({
+              where: {
+                tenantId_originKey: {
+                  tenantId: user.tenantId,
+                  originKey: watermarkOriginKey!,
+                },
+              },
+              select: { factId: true, ledgerFirstSeenAt: true },
+            }),
+            this.prisma.guestGameOriginReceipt.findUnique({
+              where: {
+                tenantId_originKey: {
+                  tenantId: user.tenantId,
+                  originKey: exactReconciliationWatermarkOriginKey!,
+                },
+              },
+              select: { factId: true, ledgerFirstSeenAt: true },
+            }),
+            this.prisma.guestGameOriginReceipt.findMany({
+              where: {
+                tenantId: user.tenantId,
+                factId: { not: null },
+                eventType: 'PLAY_HOUR',
+                OR: [
+                  {
+                    policy: 'LIVE_WITH_LEDGER_FALLBACK',
+                    OR: [
+                      {
+                        status: {
+                          in: ['WAITING_LIVE', 'FAILED', 'SHADOWED'],
+                        },
+                      },
+                      {
+                        status: 'PROCESSING',
+                        OR: [
+                          { claimExpiresAt: null },
+                          { claimExpiresAt: { lte: new Date() } },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+                    OR: [
+                      {
+                        status: {
+                          in: ['WAITING_LIVE', 'FAILED'],
+                        },
+                      },
+                      {
+                        status: 'PROCESSING',
+                        OR: [
+                          { claimExpiresAt: null },
+                          { claimExpiresAt: { lte: new Date() } },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              select: { factId: true, eventId: true, policy: true },
+              orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+              // Retry work has its own budget and must not consume discovery
+              // capacity for newly arrived exact receipts.
+              take: Math.max(limit * 2, 100),
+            }),
+          ])
+        : [null, null, []];
+    const exactRetryEventIds = uniqueStrings(
+      retryableReceipts
+        .filter(
+          (receipt) => receipt.policy === 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        )
+        .map((receipt) => receipt.eventId),
+    );
+    const exactReceiptsToReconcile = useDurableCursor
+      ? await this.prisma.guestGameOriginReceipt.findMany({
+          where: {
+            tenantId: user.tenantId,
+            eventType: 'PLAY_HOUR',
+            policy: 'EXACT_OPERATOR_CANONICALIZATION',
+            status: 'PROCESSED',
+            claimedSource: {
+              in: ['EXACT_CANONICALIZATION', 'EXACT_OPERATOR_CANONICALIZATION'],
+            },
+            factId: { not: null },
+            eventId: { not: null },
+            ...(exactReconciliationWatermark
+              ? {
+                  AND: [
+                    {
+                      OR: [
+                        {
+                          updatedAt: {
+                            gt: exactReconciliationWatermark.ledgerFirstSeenAt,
+                          },
+                        },
+                        {
+                          updatedAt:
+                            exactReconciliationWatermark.ledgerFirstSeenAt,
+                          id: {
+                            gt: exactReconciliationWatermark.factId ?? '',
+                          },
+                        },
+                        ...(exactRetryEventIds.length
+                          ? [{ eventId: { in: exactRetryEventIds } }]
+                          : []),
+                      ],
+                    },
+                  ],
+                }
+              : {}),
+          },
+          select: {
+            id: true,
+            originKey: true,
+            factId: true,
+            eventId: true,
+            eventType: true,
+            externalProvider: true,
+            externalDomain: true,
+            policy: true,
+            status: true,
+            claimedSource: true,
+            ledgerFirstSeenAt: true,
+            graceUntil: true,
+            attempts: true,
+            claimExpiresAt: true,
+            processedAt: true,
+            lastError: true,
+            updatedAt: true,
+          },
+          orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+          take: limit + exactRetryEventIds.length,
+        })
+      : [];
+    const exactDiscoveryReceiptsToReconcile = exactReceiptsToReconcile.filter(
+      (receipt) =>
+        receiptComesAfterWatermark(receipt, exactReconciliationWatermark),
+    );
+    const durablyHandledExactReceiptIds = new Set<string>();
+    const exactReceiptFactIds = uniqueStrings(
+      exactReceiptsToReconcile.map((receipt) => receipt.factId),
+    );
+    const exactReceiptFacts = exactReceiptFactIds.length
+      ? await this.prisma.guestActivityFact.findMany({
+          where: {
+            tenantId: user.tenantId,
+            id: { in: exactReceiptFactIds },
+          },
+        })
+      : [];
+    const exactFactById = new Map(
+      exactReceiptFacts.map((fact) => [fact.id, fact] as const),
+    );
+    const staleSessionExternalIds = uniqueStrings(
+      exactReceiptFacts
+        .filter(
+          (fact) =>
+            isPlayTimeFactType(fact.factType) &&
+            (fact.lifecycleStatus !== 'ACTIVE' ||
+              fact.supersededAt !== null ||
+              fact.confidence !== 'EXACT'),
+        )
+        .map((fact) => fact.sessionExternalId),
+    );
+    const activeReplacementFacts = staleSessionExternalIds.length
+      ? await this.prisma.guestActivityFact.findMany({
+          where: {
+            tenantId: user.tenantId,
+            sessionExternalId: { in: staleSessionExternalIds },
+            factType: {
+              in: [
+                'HOURLY_PLAY_TIME_ACCUMULATED',
+                'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+                'SESSION_PLAY_TIME_ACCUMULATED',
+              ],
+            },
+            lifecycleStatus: 'ACTIVE',
+            confidence: 'EXACT',
+            supersededAt: null,
+          },
+        })
+      : [];
+    const activeReplacementFactsBySession = new Map<
+      string,
+      typeof activeReplacementFacts
+    >();
+    for (const fact of activeReplacementFacts) {
+      if (!fact.sessionExternalId) continue;
+      const key = playTimeSessionKey(
+        fact.externalProvider,
+        fact.externalDomain,
+        fact.sourceKind,
+        fact.sessionExternalId,
+      );
+      const values = activeReplacementFactsBySession.get(key) ?? [];
+      values.push(fact);
+      activeReplacementFactsBySession.set(key, values);
+    }
+    const resolvedExactReceiptByFactId = new Map<
+      string,
+      (typeof exactReceiptsToReconcile)[number]
+    >();
+    for (const receipt of exactReceiptsToReconcile) {
+      const sourceFact = receipt.factId
+        ? exactFactById.get(receipt.factId)
+        : null;
+      let resolvedFact = sourceFact ?? null;
+      let skipReason: string | null = null;
+      if (!sourceFact) {
+        skipReason =
+          'Exact canonical source fact no longer exists; reconciliation was quarantined.';
+      } else if (
+        sourceFact.lifecycleStatus !== 'ACTIVE' ||
+        sourceFact.supersededAt !== null ||
+        sourceFact.confidence !== 'EXACT'
+      ) {
+        const sessionKey = sourceFact.sessionExternalId
+          ? playTimeSessionKey(
+              sourceFact.externalProvider,
+              sourceFact.externalDomain,
+              sourceFact.sourceKind,
+              sourceFact.sessionExternalId,
+            )
+          : null;
+        const replacements = sessionKey
+          ? (activeReplacementFactsBySession.get(sessionKey) ?? [])
+          : [];
+        if (replacements.length === 1) {
+          resolvedFact = replacements[0]!;
+        } else {
+          resolvedFact = null;
+          skipReason =
+            replacements.length === 0
+              ? 'Superseded exact fact has no unique active physical-session replacement.'
+              : 'Superseded exact fact has multiple active physical-session replacements.';
+        }
+      }
+      if (resolvedFact) {
+        const validationError =
+          exactReconciliationFactValidationError(resolvedFact);
+        if (validationError) {
+          resolvedFact = null;
+          skipReason = validationError;
+        }
+      }
+      if (!resolvedFact) {
+        const quarantined = await this.persistExactReconciliationQuarantine(
+          user.tenantId,
+          receipt,
+          skipReason ?? 'Exact reconciliation source could not be resolved.',
+        );
+        if (quarantined) {
+          durablyHandledExactReceiptIds.add(receipt.id);
+        }
+        continue;
+      }
+      const collision = resolvedExactReceiptByFactId.get(resolvedFact.id);
+      if (collision && collision.id !== receipt.id) {
+        const reason =
+          'Multiple exact receipts resolve to one active physical session.';
+        const receiptQuarantined =
+          await this.persistExactReconciliationQuarantine(
+            user.tenantId,
+            receipt,
+            reason,
+          );
+        const collisionQuarantined =
+          await this.persistExactReconciliationQuarantine(
+            user.tenantId,
+            collision,
+            reason,
+          );
+        if (receiptQuarantined) {
+          durablyHandledExactReceiptIds.add(receipt.id);
+        }
+        if (collisionQuarantined) {
+          durablyHandledExactReceiptIds.add(collision.id);
+        }
+        resolvedExactReceiptByFactId.delete(resolvedFact.id);
+        continue;
+      }
+      resolvedExactReceiptByFactId.set(resolvedFact.id, receipt);
+    }
+    const retryFactIds = uniqueStrings([
+      ...retryableReceipts.map((receipt) => receipt.factId),
+      ...resolvedExactReceiptByFactId.keys(),
+    ]);
+    const retryFacts = retryFactIds.length
+      ? await this.prisma.guestActivityFact.findMany({
+          where: {
+            ...baseFactWhere,
+            id: { in: retryFactIds },
+          },
+          orderBy: [{ validFrom: 'asc' }, { id: 'asc' }],
+        })
+      : [];
+    let durableCursorConsumed = false;
     let factCursor: { id: string } | undefined;
 
-    while (result.checkedFacts < limit) {
-      const facts = await this.prisma.guestActivityFact.findMany({
-        where: {
-          tenantId: user.tenantId,
-          profileId:
-            mode === 'LIVE' && missionsAllowAllProfiles
-              ? undefined
-              : (profileId ?? undefined),
-          factType: { in: factTypes },
-          lifecycleStatus: 'ACTIVE',
-          confidence: 'EXACT',
-          supersededAt: null,
-          happenedAt: { gte: earliestActivation },
-          AND: [
-            {
-              OR: [{ guestId: { not: null } }, { profileId: { not: null } }],
-            },
-            {
-              OR: [
-                { sourceExternalId: { not: null } },
-                {
-                  factType: {
-                    in: [
-                      'HOURLY_PLAY_TIME_ACCUMULATED',
-                      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
-                    ],
-                  },
-                  sessionExternalId: { not: null },
-                },
-              ],
-            },
-            {
-              OR: [
-                {
-                  factType: {
-                    in: [
-                      'HOURLY_PLAY_TIME_ACCUMULATED',
-                      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
-                    ],
-                  },
-                  durationMinutes: { gt: 0 },
-                },
-                { factType: 'PRODUCT_PURCHASED' },
-              ],
-            },
-          ],
-        },
-        orderBy: [{ validFrom: 'asc' }, { id: 'asc' }],
-        take: factPageSize,
-        ...(factCursor ? { cursor: factCursor, skip: 1 } : {}),
-      });
+    const maxFactsThisRun = limit + retryFacts.length;
+    while (result.checkedFacts < maxFactsThisRun) {
+      if (useDurableCursor && durableCursorConsumed) break;
+      const discoveryCapacity = limit;
+      const discoveryFacts =
+        useDurableCursor && discoveryCapacity === 0
+          ? []
+          : await this.prisma.guestActivityFact.findMany({
+              where:
+                useDurableCursor && watermark
+                  ? {
+                      ...baseFactWhere,
+                      AND: [
+                        ...factAnd,
+                        {
+                          OR: [
+                            {
+                              validFrom: {
+                                gt: watermark.ledgerFirstSeenAt,
+                              },
+                            },
+                            {
+                              validFrom: watermark.ledgerFirstSeenAt,
+                              id: { gt: watermark.factId ?? '' },
+                            },
+                          ],
+                        },
+                      ],
+                    }
+                  : baseFactWhere,
+              orderBy: [{ validFrom: 'asc' }, { id: 'asc' }],
+              take: useDurableCursor ? discoveryCapacity : factPageSize,
+              ...(!useDurableCursor && factCursor
+                ? { cursor: factCursor, skip: 1 }
+                : {}),
+            });
+      const facts = useDurableCursor
+        ? uniqueFacts([...retryFacts, ...discoveryFacts])
+        : discoveryFacts;
+      durableCursorConsumed = useDurableCursor;
       if (!facts.length) break;
+      const playTimeSessions = uniqueStrings(
+        facts
+          .filter((fact) => isPlayTimeFactType(fact.factType))
+          .map((fact) => fact.sessionExternalId),
+      );
+      const activePlayTimeFamilyFacts = playTimeSessions.length
+        ? await this.prisma.guestActivityFact.findMany({
+            where: {
+              tenantId: user.tenantId,
+              sessionExternalId: { in: playTimeSessions },
+              factType: {
+                in: [
+                  'HOURLY_PLAY_TIME_ACCUMULATED',
+                  'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+                  'SESSION_PLAY_TIME_ACCUMULATED',
+                ],
+              },
+              lifecycleStatus: 'ACTIVE',
+              confidence: 'EXACT',
+              supersededAt: null,
+            },
+            select: {
+              id: true,
+              externalProvider: true,
+              externalDomain: true,
+              sourceKind: true,
+              sessionExternalId: true,
+              factType: true,
+              validFrom: true,
+            },
+          })
+        : [];
+      const conflictingPlayTimeSessions = playTimeConflictCandidates(
+        activePlayTimeFamilyFacts,
+      );
 
       for (const fact of facts) {
-        if (result.checkedFacts >= limit) break;
+        if (result.checkedFacts >= maxFactsThisRun) break;
+        const resolvedExactReceipt = resolvedExactReceiptByFactId.get(fact.id);
+        if (
+          isPlayTimeFactType(fact.factType) &&
+          fact.sessionExternalId &&
+          conflictingPlayTimeSessions.has(
+            playTimeSessionKey(
+              fact.externalProvider,
+              fact.externalDomain,
+              fact.sourceKind,
+              fact.sessionExternalId,
+            ),
+          )
+        ) {
+          if (resolvedExactReceipt) {
+            const quarantined = await this.persistExactReconciliationQuarantine(
+              user.tenantId,
+              resolvedExactReceipt,
+              'Conflicting exact play-time classifications for one physical session.',
+            );
+            if (quarantined) {
+              durablyHandledExactReceiptIds.add(resolvedExactReceipt.id);
+            }
+          }
+          const conflictKey = playTimeSessionKey(
+            fact.externalProvider,
+            fact.externalDomain,
+            fact.sourceKind,
+            fact.sessionExternalId,
+          );
+          if (conflictingPlayTimeSessions.get(conflictKey)?.id === fact.id) {
+            const processDto = fallbackProcessDto(
+              fact,
+              fallbackStableExternalId(fact),
+            );
+            const originKeys = processDto
+              ? fallbackOriginKeys(fact, processDto)
+              : null;
+            const existingReceipt = originKeys
+              ? await this.findOriginReceiptByCandidates(
+                  user.tenantId,
+                  originKeys.all,
+                )
+              : null;
+            const originKey =
+              existingReceipt?.originKey ?? originKeys?.canonical ?? null;
+            if (originKey) {
+              if (!existingReceipt) {
+                await this.prisma.guestGameOriginReceipt.upsert({
+                  where: {
+                    tenantId_originKey: {
+                      tenantId: user.tenantId,
+                      originKey,
+                    },
+                  },
+                  create: {
+                    tenantId: user.tenantId,
+                    originKey,
+                    factId: fact.id,
+                    eventType: 'PLAY_HOUR',
+                    externalProvider: fact.externalProvider,
+                    externalDomain: fact.externalDomain,
+                    policy: 'LIVE_WITH_LEDGER_FALLBACK',
+                    status: 'FAILED',
+                    ledgerFirstSeenAt: new Date(),
+                    graceUntil: new Date(),
+                    lastError:
+                      'Conflicting exact play-time classifications for one session.',
+                  },
+                  update: {},
+                });
+              }
+            }
+          }
+          result.failedFacts += 1;
+          continue;
+        }
         const stableExternalId = fallbackStableExternalId(fact);
         const processDto = fallbackProcessDto(fact, stableExternalId);
         if (!processDto || !fact.happenedAt || !stableExternalId) continue;
-        const originKey = buildGuestGameOriginKey({
-          externalProvider: fact.externalProvider,
-          externalDomain: fact.externalDomain,
-          eventType: processDto.eventType,
-          stableExternalId,
-        });
-        if (!originKey) continue;
+        const originKeys = fallbackOriginKeys(fact, processDto);
+        let receipt =
+          (resolvedExactReceipt?.policy === 'EXACT_OPERATOR_CANONICALIZATION' &&
+          resolvedExactReceipt.status === 'PROCESSED'
+            ? resolvedExactReceipt
+            : null) ??
+          (await this.findOriginReceiptByCandidates(
+            user.tenantId,
+            originKeys.all,
+          ));
+        const originKey = receipt?.originKey ?? originKeys.canonical;
 
         let routedDryRun: GuestGameDryRunResult;
         try {
@@ -385,19 +935,54 @@ export class GuestGameLedgerFallbackService {
             }),
             mode === 'LIVE'
               ? {
-                  profileId: profileId!,
+                  profileId,
                   factProfileId: fact.profileId,
-                  seasonId: seasonId!,
-                  battlePassStep: battlePassStep!,
+                  seasonId,
+                  battlePassStep,
                   missionsAllowAllProfiles,
+                  playTimeAllowAllProfiles,
                 }
               : null,
           );
-        } catch {
+        } catch (error) {
+          if (resolvedExactReceipt) {
+            const durableMarker =
+              await this.persistExactReconciliationRetryMarker(
+                user.tenantId,
+                {
+                  ...resolvedExactReceipt,
+                  // A reparsed exact receipt may still point at a superseded
+                  // parser fact. The retry marker must follow the active
+                  // physical-session fact or discovery cannot safely advance.
+                  factId: fact.id,
+                },
+                safeErrorMessage(error),
+              );
+            if (durableMarker) {
+              durablyHandledExactReceiptIds.add(resolvedExactReceipt.id);
+            }
+          } else {
+            await this.persistRetryableFactFailure(
+              user.tenantId,
+              fact,
+              originKey,
+              processDto.eventType,
+              safeErrorMessage(error),
+            );
+          }
           result.failedFacts += 1;
           continue;
         }
-        if (!routedDryRun.rules.length) continue;
+        if (!routedDryRun.rules.length) {
+          const plannedExactRetry = Boolean(
+            resolvedExactReceipt?.eventId &&
+            exactRetryEventIds.includes(resolvedExactReceipt.eventId),
+          );
+          if (resolvedExactReceipt && !plannedExactRetry) {
+            durablyHandledExactReceiptIds.add(resolvedExactReceipt.id);
+          }
+          if (!plannedExactRetry) continue;
+        }
         const allowedRuleIds = new Set(
           routedDryRun.rules.map((rule) => rule.id),
         );
@@ -410,7 +995,7 @@ export class GuestGameLedgerFallbackService {
         );
 
         const ledgerFirstSeenAt = new Date();
-        const receipt = await this.prisma.guestGameOriginReceipt.upsert({
+        receipt ??= await this.prisma.guestGameOriginReceipt.upsert({
           where: {
             tenantId_originKey: { tenantId: user.tenantId, originKey },
           },
@@ -431,9 +1016,81 @@ export class GuestGameLedgerFallbackService {
           // operator canonicalization to a different parser fact.
           update: {},
         });
+        const receiptOwnsResolvedExactFact =
+          resolvedExactReceipt?.id === receipt.id &&
+          receipt.policy === 'EXACT_OPERATOR_CANONICALIZATION' &&
+          receipt.status === 'PROCESSED' &&
+          [
+            'EXACT_CANONICALIZATION',
+            'EXACT_OPERATOR_CANONICALIZATION',
+          ].includes(receipt.claimedSource ?? '') &&
+          Boolean(normalizedString(receipt.eventId));
 
-        if (receipt.factId && receipt.factId !== fact.id) {
-          result.duplicateFacts += 1;
+        if (
+          receipt.factId &&
+          receipt.factId !== fact.id &&
+          !receiptOwnsResolvedExactFact
+        ) {
+          const reclassified = await this.repointFallbackReceiptToActiveFact(
+            receipt,
+            fact,
+            ledgerFirstSeenAt,
+            graceMs,
+          );
+          if (!reclassified) {
+            result.duplicateFacts += 1;
+            continue;
+          }
+          receipt = {
+            ...receipt,
+            factId: fact.id,
+            status: 'WAITING_LIVE',
+            claimedSource: null,
+            attempts: 0,
+            claimExpiresAt: null,
+            ledgerFirstSeenAt,
+            graceUntil: new Date(ledgerFirstSeenAt.getTime() + graceMs),
+            processedAt: null,
+            lastError: null,
+          };
+        }
+
+        if (
+          mode === 'LIVE' &&
+          processedExactCanonicalReceiptMatches(
+            receipt,
+            fact,
+            resolvedExactReceipt?.id,
+          )
+        ) {
+          result.checkedFacts += 1;
+          const reconciliation =
+            await this.reconcileProcessedExactCanonicalReceipt({
+              user,
+              fact,
+              receipt,
+              processDto,
+              originKey,
+              allowedRuleIds,
+              allowedBattlePassSteps,
+              fallbackRuleVersions,
+              ruleDomainTimeZones,
+              ruleExternalDomains,
+              claimLeaseMs,
+            });
+          if (reconciliation.durableMarker) {
+            if (resolvedExactReceipt) {
+              durablyHandledExactReceiptIds.add(resolvedExactReceipt.id);
+            }
+          }
+          if (reconciliation.status === 'PROCESSED') {
+            result.liveHandledFacts += 1;
+            result.createdRewards += reconciliation.createdRewards;
+          } else if (reconciliation.status === 'FAILED') {
+            result.failedFacts += 1;
+          } else {
+            result.duplicateFacts += 1;
+          }
           continue;
         }
 
@@ -793,11 +1450,864 @@ export class GuestGameLedgerFallbackService {
         }
       }
 
+      if (useDurableCursor) {
+        const lastDiscoveryFact = discoveryFacts.at(-1);
+        if (lastDiscoveryFact && watermarkOriginKey) {
+          const watermarkReceipt =
+            await this.prisma.guestGameOriginReceipt.upsert({
+              where: {
+                tenantId_originKey: {
+                  tenantId: user.tenantId,
+                  originKey: watermarkOriginKey,
+                },
+              },
+              create: {
+                tenantId: user.tenantId,
+                originKey: watermarkOriginKey,
+                factId: lastDiscoveryFact.id,
+                eventType: 'SYSTEM_WATERMARK',
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: 'guest-activity-ledger',
+                policy: 'SYSTEM_WATERMARK',
+                status: 'PROCESSED',
+                ledgerFirstSeenAt: lastDiscoveryFact.validFrom,
+                graceUntil: lastDiscoveryFact.validFrom,
+                processedAt: new Date(),
+              },
+              update: {},
+            });
+          await this.prisma.guestGameOriginReceipt.updateMany({
+            where: {
+              id: watermarkReceipt.id,
+              policy: 'SYSTEM_WATERMARK',
+              OR: [
+                {
+                  ledgerFirstSeenAt: { lt: lastDiscoveryFact.validFrom },
+                },
+                {
+                  ledgerFirstSeenAt: lastDiscoveryFact.validFrom,
+                  OR: [
+                    { factId: null },
+                    { factId: { lt: lastDiscoveryFact.id } },
+                  ],
+                },
+              ],
+            },
+            data: {
+              factId: lastDiscoveryFact.id,
+              ledgerFirstSeenAt: lastDiscoveryFact.validFrom,
+              graceUntil: lastDiscoveryFact.validFrom,
+              processedAt: new Date(),
+            },
+          });
+        }
+        break;
+      }
+
       factCursor = { id: facts[facts.length - 1].id };
       if (facts.length < factPageSize) break;
     }
 
+    const firstUnhandledExactReceiptIndex =
+      exactDiscoveryReceiptsToReconcile.findIndex(
+        (receipt) => !durablyHandledExactReceiptIds.has(receipt.id),
+      );
+    const lastExactReceipt = exactDiscoveryReceiptsToReconcile
+      .slice(
+        0,
+        firstUnhandledExactReceiptIndex === -1
+          ? exactDiscoveryReceiptsToReconcile.length
+          : firstUnhandledExactReceiptIndex,
+      )
+      .at(-1);
+    if (
+      useDurableCursor &&
+      lastExactReceipt &&
+      exactReconciliationWatermarkOriginKey
+    ) {
+      const exactWatermark = await this.prisma.guestGameOriginReceipt.upsert({
+        where: {
+          tenantId_originKey: {
+            tenantId: user.tenantId,
+            originKey: exactReconciliationWatermarkOriginKey,
+          },
+        },
+        create: {
+          tenantId: user.tenantId,
+          originKey: exactReconciliationWatermarkOriginKey,
+          // The cursor tracks the exact receipt row, not the parser fact.
+          factId: lastExactReceipt.id,
+          eventType: 'SYSTEM_WATERMARK',
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'guest-activity-ledger',
+          policy: 'SYSTEM_WATERMARK',
+          status: 'PROCESSED',
+          ledgerFirstSeenAt: lastExactReceipt.updatedAt,
+          graceUntil: lastExactReceipt.updatedAt,
+          processedAt: new Date(),
+        },
+        update: {},
+      });
+      await this.prisma.guestGameOriginReceipt.updateMany({
+        where: {
+          id: exactWatermark.id,
+          policy: 'SYSTEM_WATERMARK',
+          OR: [
+            { ledgerFirstSeenAt: { lt: lastExactReceipt.updatedAt } },
+            {
+              ledgerFirstSeenAt: lastExactReceipt.updatedAt,
+              OR: [{ factId: null }, { factId: { lt: lastExactReceipt.id } }],
+            },
+          ],
+        },
+        data: {
+          factId: lastExactReceipt.id,
+          ledgerFirstSeenAt: lastExactReceipt.updatedAt,
+          graceUntil: lastExactReceipt.updatedAt,
+          processedAt: new Date(),
+        },
+      });
+    }
+
     return result;
+  }
+
+  private async persistExactReconciliationQuarantine(
+    tenantId: string,
+    receipt: {
+      id: string;
+      factId: string | null;
+      eventId: string | null;
+      eventType: string;
+      externalProvider: IntegrationProvider;
+      externalDomain: string;
+    },
+    reason: string,
+  ) {
+    const eventId = normalizedString(receipt.eventId);
+    if (!eventId) return false;
+    const markerOriginKey = buildGuestGameOriginKey({
+      externalProvider: receipt.externalProvider,
+      externalDomain: receipt.externalDomain,
+      eventType: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+      stableExternalId: eventId,
+    });
+    if (!markerOriginKey) return false;
+
+    const now = new Date();
+    let marker = await this.prisma.guestGameOriginReceipt.upsert({
+      where: {
+        tenantId_originKey: {
+          tenantId,
+          originKey: markerOriginKey,
+        },
+      },
+      create: {
+        tenantId,
+        originKey: markerOriginKey,
+        factId: receipt.factId,
+        eventId,
+        eventType: receipt.eventType,
+        externalProvider: receipt.externalProvider,
+        externalDomain: receipt.externalDomain,
+        policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        status: 'QUARANTINED',
+        claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+        ledgerFirstSeenAt: now,
+        graceUntil: now,
+        processedAt: null,
+        lastError: reason.slice(0, 500),
+      },
+      update: {},
+    });
+    if (
+      marker.policy !== 'EXACT_CANONICAL_RULE_RECONCILIATION' ||
+      marker.eventId !== eventId
+    ) {
+      return false;
+    }
+    if (
+      ['PROCESSED', 'LIVE_PROCESSED', 'DEAD_LETTER'].includes(marker.status)
+    ) {
+      return true;
+    }
+    if (
+      marker.status === 'PROCESSING' &&
+      marker.claimExpiresAt &&
+      marker.claimExpiresAt > now
+    ) {
+      return false;
+    }
+
+    const terminal = await this.prisma.guestGameOriginReceipt.updateMany({
+      where: {
+        id: marker.id,
+        tenantId,
+        eventId,
+        policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        OR: [
+          { status: { in: ['WAITING_LIVE', 'FAILED', 'QUARANTINED'] } },
+          {
+            status: 'PROCESSING',
+            OR: [{ claimExpiresAt: null }, { claimExpiresAt: { lte: now } }],
+          },
+        ],
+      },
+      data: {
+        factId: receipt.factId,
+        status: 'QUARANTINED',
+        claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+        claimExpiresAt: null,
+        processedAt: null,
+        lastError: reason.slice(0, 500),
+      },
+    });
+    return terminal.count === 1;
+  }
+
+  private async persistExactReconciliationRetryMarker(
+    tenantId: string,
+    receipt: {
+      factId: string | null;
+      eventId: string | null;
+      eventType: string;
+      externalProvider: IntegrationProvider;
+      externalDomain: string;
+    },
+    reason: string,
+  ) {
+    const eventId = normalizedString(receipt.eventId);
+    if (!eventId) return false;
+    const markerOriginKey = buildGuestGameOriginKey({
+      externalProvider: receipt.externalProvider,
+      externalDomain: receipt.externalDomain,
+      eventType: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+      stableExternalId: eventId,
+    });
+    if (!markerOriginKey) return false;
+
+    const markerCreatedAt = new Date();
+    let marker = await this.prisma.guestGameOriginReceipt.upsert({
+      where: {
+        tenantId_originKey: {
+          tenantId,
+          originKey: markerOriginKey,
+        },
+      },
+      create: {
+        tenantId,
+        originKey: markerOriginKey,
+        factId: receipt.factId,
+        eventId,
+        eventType: receipt.eventType,
+        externalProvider: receipt.externalProvider,
+        externalDomain: receipt.externalDomain,
+        policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        status: 'FAILED',
+        ledgerFirstSeenAt: markerCreatedAt,
+        graceUntil: markerCreatedAt,
+        processedAt: null,
+        lastError: reason.slice(0, 500),
+      },
+      update: {},
+    });
+    if (
+      marker.policy !== 'EXACT_CANONICAL_RULE_RECONCILIATION' ||
+      marker.eventId !== eventId
+    ) {
+      return false;
+    }
+
+    const terminalStatuses = [
+      'PROCESSED',
+      'LIVE_PROCESSED',
+      'DEAD_LETTER',
+      'TERMINAL_SKIPPED',
+      'QUARANTINED',
+    ];
+    if (terminalStatuses.includes(marker.status)) {
+      return true;
+    }
+
+    if (marker.factId !== receipt.factId) {
+      const rebound = await this.prisma.guestGameOriginReceipt.updateMany({
+        where: {
+          id: marker.id,
+          tenantId,
+          eventId,
+          policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+          factId: marker.factId,
+          OR: [
+            { status: { in: ['WAITING_LIVE', 'FAILED'] } },
+            {
+              status: 'PROCESSING',
+              OR: [
+                { claimExpiresAt: null },
+                { claimExpiresAt: { lte: markerCreatedAt } },
+              ],
+            },
+          ],
+        },
+        data: {
+          factId: receipt.factId,
+          status: 'FAILED',
+          claimedSource: null,
+          claimExpiresAt: null,
+          processedAt: null,
+          lastError: reason.slice(0, 500),
+        },
+      });
+      if (rebound.count !== 1) {
+        // In particular, an active PROCESSING lease owned by another run is
+        // not a durable retry for the active parser fact. Keep the exact
+        // discovery cursor behind it until the lease expires and can rebind.
+        return false;
+      }
+      marker = {
+        ...marker,
+        factId: receipt.factId,
+        status: 'FAILED',
+        claimedSource: null,
+        claimExpiresAt: null,
+        processedAt: null,
+        lastError: reason.slice(0, 500),
+      };
+    }
+
+    // A non-terminal marker bound to the active parser fact is the durable
+    // retry owner. Expired leases are reclaimed by the marker retry query.
+    if (['WAITING_LIVE', 'FAILED', 'PROCESSING'].includes(marker.status)) {
+      return true;
+    }
+    return false;
+  }
+
+  private async reconcileProcessedExactCanonicalReceipt(input: {
+    user: AuthenticatedUser;
+    fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>;
+    receipt: {
+      id: string;
+      factId: string | null;
+      eventId: string | null;
+      policy: string;
+      status: string;
+      claimedSource: string | null;
+    };
+    processDto: GuestGameProcessEventDto;
+    originKey: string;
+    allowedRuleIds: Set<string>;
+    allowedBattlePassSteps: Map<string, number>;
+    fallbackRuleVersions: Map<string, Date>;
+    ruleDomainTimeZones: Map<string, Map<string, string | null>>;
+    ruleExternalDomains: Map<string, string[]>;
+    claimLeaseMs: number;
+  }): Promise<
+    | {
+        status: 'PROCESSED';
+        createdRewards: number;
+        durableMarker: true;
+      }
+    | {
+        status: 'DUPLICATE' | 'FAILED';
+        createdRewards: 0;
+        durableMarker: boolean;
+      }
+  > {
+    const eventId = normalizedString(input.receipt.eventId);
+    if (!eventId) {
+      return {
+        status: 'FAILED',
+        createdRewards: 0,
+        durableMarker: false,
+      };
+    }
+
+    const markerOriginKey = buildGuestGameOriginKey({
+      externalProvider: input.fact.externalProvider,
+      externalDomain: input.fact.externalDomain,
+      eventType: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+      stableExternalId: eventId,
+    });
+    if (!markerOriginKey) {
+      return {
+        status: 'FAILED',
+        createdRewards: 0,
+        durableMarker: false,
+      };
+    }
+
+    const markerCreatedAt = new Date();
+    let marker = await this.prisma.guestGameOriginReceipt.upsert({
+      where: {
+        tenantId_originKey: {
+          tenantId: input.user.tenantId,
+          originKey: markerOriginKey,
+        },
+      },
+      create: {
+        tenantId: input.user.tenantId,
+        originKey: markerOriginKey,
+        factId: input.fact.id,
+        eventId,
+        eventType: 'PLAY_HOUR',
+        externalProvider: input.fact.externalProvider,
+        externalDomain: input.fact.externalDomain,
+        policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        status: 'WAITING_LIVE',
+        ledgerFirstSeenAt: markerCreatedAt,
+        graceUntil: markerCreatedAt,
+      },
+      update: {},
+    });
+    if (
+      marker.policy !== 'EXACT_CANONICAL_RULE_RECONCILIATION' ||
+      marker.eventId !== eventId
+    ) {
+      return {
+        status: 'FAILED',
+        createdRewards: 0,
+        durableMarker: false,
+      };
+    }
+    const terminalMarker = [
+      'PROCESSED',
+      'LIVE_PROCESSED',
+      'DEAD_LETTER',
+      'TERMINAL_SKIPPED',
+      'QUARANTINED',
+    ].includes(marker.status);
+    if (terminalMarker && marker.factId !== input.fact.id) {
+      const canonicalOwner = await this.prisma.guestGameEvent.findFirst({
+        where: {
+          id: eventId,
+          tenantId: input.user.tenantId,
+          originKey: input.originKey,
+        },
+        select: { profileId: true, guestId: true },
+      });
+      if (!canonicalOwner) {
+        return {
+          status: 'FAILED',
+          createdRewards: 0,
+          durableMarker: false,
+        };
+      }
+      const ownerMatches =
+        canonicalOwner.profileId === input.fact.profileId &&
+        canonicalOwner.guestId === input.fact.guestId;
+      if (!ownerMatches) {
+        try {
+          const ownerReconciliation = await reconcileExactCanonicalEventOwner(
+            this.prisma,
+            {
+              tenantId: input.user.tenantId,
+              eventId,
+              originKey: input.originKey,
+              expectedEventType: 'PLAY_HOUR',
+              targetProfileId: input.fact.profileId!,
+              targetGuestId: input.fact.guestId,
+              sourceFactId: input.fact.id,
+              sourceFactUpdatedAt: input.fact.updatedAt,
+            },
+          );
+          if (ownerReconciliation.status === 'QUARANTINED') {
+            return {
+              status: 'FAILED',
+              createdRewards: 0,
+              durableMarker: true,
+            };
+          }
+        } catch {
+          // Ownership validation is fail-closed. The exact receipt remains
+          // behind the durable cursor and is retried after the race settles.
+          return {
+            status: 'FAILED',
+            createdRewards: 0,
+            durableMarker: false,
+          };
+        }
+      }
+    }
+    if (terminalMarker) {
+      return {
+        status: 'DUPLICATE',
+        createdRewards: 0,
+        durableMarker: true,
+      };
+    }
+    if (marker.factId !== input.fact.id) {
+      const rebound = await this.prisma.guestGameOriginReceipt.updateMany({
+        where: {
+          id: marker.id,
+          tenantId: input.user.tenantId,
+          eventId,
+          policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+          factId: marker.factId,
+          OR: [
+            { status: { in: ['WAITING_LIVE', 'FAILED'] } },
+            {
+              status: 'PROCESSING',
+              OR: [
+                { claimExpiresAt: null },
+                { claimExpiresAt: { lte: markerCreatedAt } },
+              ],
+            },
+          ],
+        },
+        data: { factId: input.fact.id },
+      });
+      if (rebound.count !== 1) {
+        return {
+          status: 'DUPLICATE',
+          createdRewards: 0,
+          // A live lease still tied to a superseded parser fact is not
+          // discoverable by the active-fact retry query. Do not advance the
+          // exact cursor; a later run can rebind after the lease expires.
+          durableMarker: false,
+        };
+      }
+      marker = { ...marker, factId: input.fact.id };
+    }
+    if (
+      marker.status === 'PROCESSING' &&
+      marker.claimExpiresAt &&
+      marker.claimExpiresAt > markerCreatedAt
+    ) {
+      return {
+        status: 'DUPLICATE',
+        createdRewards: 0,
+        durableMarker: true,
+      };
+    }
+    if (marker.attempts >= 3) {
+      await this.prisma.guestGameOriginReceipt.updateMany({
+        where: {
+          id: marker.id,
+          tenantId: input.user.tenantId,
+          factId: input.fact.id,
+          eventId,
+          policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+          status: { in: ['WAITING_LIVE', 'FAILED', 'QUARANTINED'] },
+          attempts: { gte: 3 },
+        },
+        data: {
+          status: 'DEAD_LETTER',
+          claimExpiresAt: null,
+          processedAt: new Date(),
+          lastError:
+            marker.lastError ??
+            'Exact reconciliation exhausted deterministic retry attempts.',
+        },
+      });
+      return { status: 'FAILED', createdRewards: 0, durableMarker: true };
+    }
+
+    const claimAttempt = marker.attempts + 1;
+    const claim = await this.prisma.guestGameOriginReceipt.updateMany({
+      where: {
+        id: marker.id,
+        tenantId: input.user.tenantId,
+        factId: input.fact.id,
+        eventId,
+        policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        attempts: { equals: marker.attempts, lt: 3 },
+        OR: [
+          { status: { in: ['WAITING_LIVE', 'FAILED', 'QUARANTINED'] } },
+          {
+            status: 'PROCESSING',
+            OR: [
+              { claimExpiresAt: null },
+              { claimExpiresAt: { lte: markerCreatedAt } },
+            ],
+          },
+        ],
+      },
+      data: {
+        status: 'PROCESSING',
+        claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+        attempts: { increment: 1 },
+        claimExpiresAt: new Date(
+          markerCreatedAt.getTime() + input.claimLeaseMs,
+        ),
+        lastError: null,
+      },
+    });
+    if (claim.count !== 1) {
+      return {
+        status: 'DUPLICATE',
+        createdRewards: 0,
+        durableMarker: true,
+      };
+    }
+
+    try {
+      const canonicalEvent = await this.prisma.guestGameEvent.findFirst({
+        where: {
+          id: eventId,
+          tenantId: input.user.tenantId,
+          originKey: input.originKey,
+        },
+        select: { id: true },
+      });
+      if (!canonicalEvent) {
+        throw new Error(
+          'The canonical event bound to the exact receipt was not found.',
+        );
+      }
+      const processed = await this.gamification.processEvent(
+        input.user,
+        { ...input.processDto, activeRulesOnly: true },
+        {
+          evaluationMode: 'LIVE_LEDGER_FALLBACK',
+          evaluatorVersion: 'ledger-fallback-v1',
+          originKey: input.originKey,
+          ruleDomainTimeZones: input.ruleDomainTimeZones,
+          ruleExternalDomains: input.ruleExternalDomains,
+          allowedRuleIds: input.allowedRuleIds,
+          allowedBattlePassSteps: input.allowedBattlePassSteps,
+          exactReconciliationScope: {
+            sourceFactId: input.fact.id,
+            sourceFactUpdatedAt: input.fact.updatedAt,
+            physicalSessionKey:
+              buildGuestGamePhysicalProgressIdentity({
+                externalProvider: input.fact.externalProvider,
+                externalDomain: input.fact.externalDomain,
+                sourceKind: input.fact.sourceKind,
+                sessionExternalId: input.fact.sessionExternalId,
+                eventType: input.fact.factType,
+              })?.key ??
+              (() => {
+                throw new Error(
+                  'Exact reconciliation fact has no stable physical session identity.',
+                );
+              })(),
+            rules: [...input.allowedRuleIds].map((ruleId) => {
+              const seasonStep =
+                input.allowedBattlePassSteps.get(ruleId) ?? null;
+              const ruleKind = seasonStep
+                ? ('SEASON' as const)
+                : input.fallbackRuleVersions.has(`MISSION:${ruleId}`)
+                  ? ('MISSION' as const)
+                  : ('LOOT_BOX' as const);
+              const ruleUpdatedAt = input.fallbackRuleVersions.get(
+                `${ruleKind}:${ruleId}`,
+              );
+              if (!ruleUpdatedAt) {
+                throw new Error(
+                  `Missing active ${ruleKind} version for exact reconciliation.`,
+                );
+              }
+              return {
+                ruleKind,
+                ruleId,
+                battlePassStep: seasonStep,
+                ruleUpdatedAt,
+              };
+            }),
+          },
+          suppressLedgerShadow: true,
+        },
+      );
+      if (
+        processed.event.id !== eventId ||
+        processed.summary.idempotent !== true
+      ) {
+        throw new Error(
+          'Exact canonical reconciliation returned a different canonical event.',
+        );
+      }
+      if (
+        processed.summary.exactReconciliation?.complete !== true &&
+        processed.summary.exactReconciliation?.waitingForDelivery === true
+      ) {
+        await this.prisma.guestGameOriginReceipt.updateMany({
+          where: {
+            id: marker.id,
+            factId: input.fact.id,
+            status: 'PROCESSING',
+            claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+            attempts: claimAttempt,
+          },
+          data: {
+            status: 'WAITING_LIVE',
+            attempts: marker.attempts,
+            claimExpiresAt: null,
+            processedAt: null,
+            lastError:
+              'Exact effects are persisted and waiting for reward materialization.',
+          },
+        });
+        return {
+          status: 'DUPLICATE',
+          createdRewards: 0,
+          durableMarker: true,
+        };
+      }
+      if (processed.summary.exactReconciliation?.complete !== true) {
+        throw new Error(
+          'Exact canonical reconciliation did not durably finalize every planned effect.',
+        );
+      }
+      const finalized = await this.prisma.guestGameOriginReceipt.updateMany({
+        where: {
+          id: marker.id,
+          factId: input.fact.id,
+          status: 'PROCESSING',
+          claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+          attempts: claimAttempt,
+        },
+        data: {
+          status: 'PROCESSED',
+          eventId,
+          claimExpiresAt: null,
+          processedAt: new Date(),
+          lastError: null,
+        },
+      });
+      return finalized.count === 1
+        ? {
+            status: 'PROCESSED',
+            createdRewards: processed.summary.createdRewards,
+            durableMarker: true,
+          }
+        : {
+            status: 'DUPLICATE',
+            createdRewards: 0,
+            durableMarker: true,
+          };
+    } catch (error) {
+      const ownerQuarantined = exactOwnerQuarantineError(error);
+      const deadLetter = ownerQuarantined || claimAttempt >= 3;
+      await this.prisma.guestGameOriginReceipt.updateMany({
+        where: {
+          id: marker.id,
+          factId: input.fact.id,
+          status: 'PROCESSING',
+          claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+          attempts: claimAttempt,
+        },
+        data: {
+          status: deadLetter ? 'DEAD_LETTER' : 'FAILED',
+          claimExpiresAt: null,
+          processedAt: deadLetter ? new Date() : null,
+          lastError: safeErrorMessage(error).slice(0, 500),
+        },
+      });
+      return {
+        status: 'FAILED',
+        createdRewards: 0,
+        durableMarker: true,
+      };
+    }
+  }
+
+  private async persistRetryableFactFailure(
+    tenantId: string,
+    fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
+    originKey: string,
+    eventType: string | null | undefined,
+    errorMessage: string,
+  ) {
+    const now = new Date();
+    await this.prisma.guestGameOriginReceipt.upsert({
+      where: {
+        tenantId_originKey: { tenantId, originKey },
+      },
+      create: {
+        tenantId,
+        originKey,
+        factId: fact.id,
+        eventType: normalizedString(eventType) ?? fact.factType,
+        externalProvider: fact.externalProvider,
+        externalDomain: fact.externalDomain,
+        policy: 'LIVE_WITH_LEDGER_FALLBACK',
+        status: 'FAILED',
+        ledgerFirstSeenAt: now,
+        graceUntil: now,
+        lastError: errorMessage.slice(0, 500),
+      },
+      update: {},
+    });
+  }
+
+  private async findOriginReceiptByCandidates(
+    tenantId: string,
+    originKeys: readonly string[],
+  ) {
+    for (const originKey of originKeys) {
+      const receipt = await this.prisma.guestGameOriginReceipt.findFirst({
+        where: { tenantId, originKey },
+      });
+      if (receipt) return receipt;
+    }
+    return null;
+  }
+
+  private async repointFallbackReceiptToActiveFact(
+    receipt: {
+      id: string;
+      factId: string | null;
+      policy: string;
+      status: string;
+      claimedSource: string | null;
+      attempts: number;
+      claimExpiresAt: Date | null;
+      eventId?: string | null;
+    },
+    fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
+    now: Date,
+    graceMs: number,
+  ) {
+    if (
+      !isPlayTimeFactType(fact.factType) ||
+      !receipt.factId ||
+      receipt.policy !== 'LIVE_WITH_LEDGER_FALLBACK' ||
+      receipt.claimedSource === 'EXACT_CANONICALIZATION'
+    ) {
+      return null;
+    }
+
+    const repointed = await this.prisma.guestGameOriginReceipt.updateMany({
+      where: {
+        id: receipt.id,
+        factId: receipt.factId,
+        policy: 'LIVE_WITH_LEDGER_FALLBACK',
+        claimedSource: { not: 'EXACT_CANONICALIZATION' },
+        OR: [
+          {
+            status: {
+              in: [
+                'WAITING_LIVE',
+                'FAILED',
+                'SHADOWED',
+                'PROCESSED',
+                'LIVE_PROCESSED',
+              ],
+            },
+          },
+          {
+            status: 'PROCESSING',
+            OR: [{ claimExpiresAt: null }, { claimExpiresAt: { lte: now } }],
+          },
+        ],
+      },
+      data: {
+        factId: fact.id,
+        status: 'WAITING_LIVE',
+        claimedSource: null,
+        attempts: 0,
+        claimExpiresAt: null,
+        ledgerFirstSeenAt: now,
+        graceUntil: new Date(now.getTime() + graceMs),
+        processedAt: null,
+        lastError: null,
+      },
+    });
+    if (repointed.count !== 1) {
+      return null;
+    }
+
+    return true;
   }
 }
 
@@ -913,6 +2423,30 @@ function fallbackReceiptIsTerminal(
   );
 }
 
+function processedExactCanonicalReceiptMatches(
+  receipt: {
+    id: string;
+    factId: string | null;
+    eventId: string | null;
+    policy: string;
+    status: string;
+    claimedSource: string | null;
+  },
+  fact: { id: string },
+  expectedReceiptId?: string,
+) {
+  return (
+    receipt.policy === 'EXACT_OPERATOR_CANONICALIZATION' &&
+    receipt.status === 'PROCESSED' &&
+    ['EXACT_CANONICALIZATION', 'EXACT_OPERATOR_CANONICALIZATION'].includes(
+      receipt.claimedSource ?? '',
+    ) &&
+    (receipt.factId === fact.id ||
+      (Boolean(expectedReceiptId) && receipt.id === expectedReceiptId)) &&
+    Boolean(normalizedString(receipt.eventId))
+  );
+}
+
 function fallbackLegacyExternalReference(dto: GuestGameProcessEventDto) {
   const stableExternalId = normalizedString(dto.externalId);
   const eventType = normalizedString(dto.eventType);
@@ -928,6 +2462,32 @@ function fallbackLegacyExternalReference(dto: GuestGameProcessEventDto) {
       stableExternalId,
     ].join(':'),
   };
+}
+
+function fallbackOriginKeys(
+  fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
+  dto: GuestGameProcessEventDto,
+) {
+  const legacy = buildGuestGameOriginKey({
+    externalProvider: fact.externalProvider,
+    externalDomain: fact.externalDomain,
+    eventType: dto.eventType,
+    stableExternalId: dto.externalId,
+  });
+  const canonical = isPlayTimeFactType(fact.factType)
+    ? buildGuestGamePlayTimeOriginKey({
+        externalProvider: fact.externalProvider,
+        externalDomain: fact.externalDomain,
+        sourceKind: fact.sourceKind,
+        sessionExternalId: fact.sessionExternalId,
+        eventType: dto.eventType,
+      })
+    : legacy;
+  const all = uniqueStrings([canonical, legacy]);
+  if (!canonical || !legacy || !all.length) {
+    throw new Error('Could not build canonical fallback origin keys.');
+  }
+  return { canonical, legacy, all };
 }
 
 function fallbackProcessDto(
@@ -947,15 +2507,20 @@ function fallbackProcessDto(
     externalProvider: fact.externalProvider,
     externalDomain: fact.externalDomain,
     externalId: stableExternalId,
+    sourceKind: fact.sourceKind,
+    sessionExternalId: fact.sessionExternalId,
     suppressLootBoxRewards: true,
     payload: {
       fallback: true,
       factType: fact.factType,
       confidence: fact.confidence,
+      sourceKind: fact.sourceKind,
+      sessionExternalId: fact.sessionExternalId,
     },
   } satisfies GuestGameProcessEventDto;
 
   if (
+    fact.factType === 'SESSION_PLAY_TIME_ACCUMULATED' ||
     fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED' ||
     fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
   ) {
@@ -964,9 +2529,11 @@ function fallbackProcessDto(
       eventType: 'PLAY_HOUR',
       sessionMinutes: fact.durationMinutes,
       sessionType:
-        fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED'
-          ? 'HOURLY'
-          : 'PACKAGE_OR_SUBSCRIPTION',
+        fact.factType === 'SESSION_PLAY_TIME_ACCUMULATED'
+          ? null
+          : fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED'
+            ? 'HOURLY'
+            : 'PACKAGE_OR_SUBSCRIPTION',
       sessionPacket:
         fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
     };
@@ -1000,6 +2567,7 @@ function fallbackStableExternalId(
 ) {
   const sourceExternalId = normalizedString(fact.sourceExternalId);
   if (
+    fact.factType === 'SESSION_PLAY_TIME_ACCUMULATED' ||
     fact.factType === 'HOURLY_PLAY_TIME_ACCUMULATED' ||
     fact.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
   ) {
@@ -1008,14 +2576,44 @@ function fallbackStableExternalId(
   return sourceExternalId;
 }
 
+function exactReconciliationFactValidationError(
+  fact: Prisma.GuestActivityFactGetPayload<Record<string, never>>,
+) {
+  if (!isPlayTimeFactType(fact.factType)) {
+    return 'Exact reconciliation source is not a supported play-time fact.';
+  }
+  if (!fact.profileId || !fact.guestId) {
+    return 'Exact reconciliation source has no trusted profile and guest owner.';
+  }
+  if (!fact.happenedAt || !fact.durationMinutes || fact.durationMinutes <= 0) {
+    return 'Exact reconciliation source has no positive duration or occurrence time.';
+  }
+  const stableExternalId = fallbackStableExternalId(fact);
+  if (
+    !stableExternalId ||
+    !buildGuestGamePhysicalProgressIdentity({
+      externalProvider: fact.externalProvider,
+      externalDomain: fact.externalDomain,
+      sourceKind: fact.sourceKind,
+      sessionExternalId: fact.sessionExternalId,
+      eventType: fact.factType,
+    }) ||
+    !fallbackProcessDto(fact, stableExternalId)
+  ) {
+    return 'Exact reconciliation source has no stable physical-session identity.';
+  }
+  return null;
+}
+
 function routedFallbackDryRun(
   dryRun: GuestGameDryRunResult,
   liveBattlePassScope: {
-    profileId: string;
+    profileId: string | null;
     factProfileId: string | null;
-    seasonId: string;
-    battlePassStep: number;
+    seasonId: string | null;
+    battlePassStep: number | null;
     missionsAllowAllProfiles: boolean;
+    playTimeAllowAllProfiles: boolean;
   } | null = null,
 ): GuestGameDryRunResult {
   const rules = dryRun.rules.filter(
@@ -1026,6 +2624,7 @@ function routedFallbackDryRun(
         'LIVE_LEDGER_FALLBACK',
       ) &&
       (!liveBattlePassScope ||
+        liveBattlePassScope.playTimeAllowAllProfiles ||
         (rule.kind === 'MISSION' &&
           liveBattlePassScope.missionsAllowAllProfiles) ||
         (rule.kind === 'SEASON' &&
@@ -1067,11 +2666,131 @@ function seasonHasFallbackStep(
       index + 1;
     if (expectedStep !== null && sequence !== expectedStep) return false;
     const activationRules = jsonRecord(record.activationRules);
-    return (
-      normalizedString(activationRules.evaluationPolicy)?.toUpperCase() ===
-      'LIVE_WITH_LEDGER_FALLBACK'
+    return guestGamePolicyAllowsEvaluation(
+      guestGameBattlePassStepEvaluationPolicy(activationRules),
+      'LIVE_LEDGER_FALLBACK',
     );
   });
+}
+
+function isPlayTimeFactType(value: string) {
+  return [
+    'HOURLY_PLAY_TIME_ACCUMULATED',
+    'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    'SESSION_PLAY_TIME_ACCUMULATED',
+  ].includes(value);
+}
+
+function fallbackWatermarkOriginKey(
+  factTypes: readonly string[],
+  liveNotBefore: Date | null,
+) {
+  return [
+    'system',
+    'ledger-fallback',
+    'watermark',
+    'v3',
+    liveNotBefore?.toISOString() ?? 'no-cutoff',
+    [...factTypes].sort().join(','),
+  ].join(':');
+}
+
+function fallbackExactReconciliationWatermarkOriginKey(
+  liveNotBefore: Date | null,
+) {
+  return [
+    'system',
+    'ledger-fallback',
+    'exact-reconciliation-watermark',
+    'v1',
+    liveNotBefore?.toISOString() ?? 'no-cutoff',
+  ].join(':');
+}
+
+function receiptComesAfterWatermark(
+  receipt: { id: string; updatedAt: Date },
+  watermark: {
+    factId: string | null;
+    ledgerFirstSeenAt: Date;
+  } | null,
+) {
+  if (!watermark) return true;
+  const timestampDelta =
+    receipt.updatedAt.getTime() - watermark.ledgerFirstSeenAt.getTime();
+  return (
+    timestampDelta > 0 ||
+    (timestampDelta === 0 && receipt.id > (watermark.factId ?? ''))
+  );
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [
+    ...new Set(values.filter((value): value is string => Boolean(value))),
+  ];
+}
+
+function uniqueFacts<T extends { id: string }>(facts: T[]) {
+  return [...new Map(facts.map((fact) => [fact.id, fact])).values()];
+}
+
+function playTimeSessionKey(
+  externalProvider: string,
+  externalDomain: string,
+  sourceKind: string,
+  sessionExternalId: string,
+) {
+  const identity = buildGuestGamePhysicalProgressIdentity({
+    externalProvider,
+    externalDomain,
+    sourceKind,
+    sessionExternalId,
+    eventType: 'PLAY_HOUR',
+  });
+  if (!identity) {
+    throw new Error('Play-time fact has no stable physical session identity.');
+  }
+  return identity.key;
+}
+
+function playTimeConflictCandidates(
+  facts: Array<{
+    id: string;
+    externalProvider: string;
+    externalDomain: string;
+    sourceKind: string;
+    sessionExternalId: string | null;
+    factType: string;
+    validFrom: Date;
+  }>,
+) {
+  const factsBySession = new Map<string, typeof facts>();
+  for (const fact of facts) {
+    if (!fact.sessionExternalId) continue;
+    const key = playTimeSessionKey(
+      fact.externalProvider,
+      fact.externalDomain,
+      fact.sourceKind,
+      fact.sessionExternalId,
+    );
+    const sessionFacts = factsBySession.get(key) ?? [];
+    sessionFacts.push(fact);
+    factsBySession.set(key, sessionFacts);
+  }
+  return new Map(
+    [...factsBySession.entries()]
+      .filter(
+        ([, sessionFacts]) =>
+          new Set(sessionFacts.map((fact) => fact.factType)).size > 1,
+      )
+      .map(([key, sessionFacts]) => [
+        key,
+        [...sessionFacts].sort(
+          (left, right) =>
+            right.validFrom.getTime() - left.validFrom.getTime() ||
+            right.id.localeCompare(left.id),
+        )[0],
+      ]),
+  );
 }
 
 function fallbackEvidence(
@@ -1226,4 +2945,12 @@ function safeErrorMessage(error: unknown) {
   return error instanceof Error && error.message
     ? error.message
     : 'Ledger fallback failed.';
+}
+
+function exactOwnerQuarantineError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const getResponse = (error as { getResponse?: unknown }).getResponse;
+  if (typeof getResponse !== 'function') return false;
+  const response = getResponse.call(error);
+  return jsonRecord(response).code === EXACT_CANONICAL_OWNER_QUARANTINED_CODE;
 }

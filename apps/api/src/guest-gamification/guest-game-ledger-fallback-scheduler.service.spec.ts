@@ -69,6 +69,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
         battlePassStep: null,
         allowAllTenants: false,
         missionsAllowAllProfiles: false,
+        playTimeAllowAllProfiles: false,
         configured: false,
       },
       lastResult: null,
@@ -123,6 +124,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
     expect(fallbackService.runScheduled).toHaveBeenCalledWith(
       expect.objectContaining({
         factTypes: [
+          'SESSION_PLAY_TIME_ACCUMULATED',
           'HOURLY_PLAY_TIME_ACCUMULATED',
           'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
         ],
@@ -276,6 +278,38 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
         seasonId: 'season-1',
         battlePassStep: 2,
         missionsAllowAllProfiles: true,
+      },
+    });
+  });
+
+  it('enables tenant-wide PLAY_TIME fallback without profile, season or step scope', async () => {
+    const config = {
+      GUEST_GAME_LEDGER_FALLBACK_MODE: 'LIVE',
+      GUEST_GAME_LEDGER_FALLBACK_TENANT_ID: 'tenant-1',
+      GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE: '2026-07-18T11:55:00.000Z',
+      GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES: 'true',
+    } as Record<string, string>;
+    const { scheduler, fallbackService } = createScheduler(config);
+
+    await scheduler.runOnce();
+
+    expect(fallbackService.runScheduled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'LIVE',
+        tenantId: 'tenant-1',
+        playTimeAllowAllProfiles: true,
+        liveNotBefore: '2026-07-18T11:55:00.000Z',
+      }),
+    );
+    expect(scheduler.getRuntimeStatus()).toMatchObject({
+      backgroundReady: true,
+      liveCanaryReady: true,
+      scope: {
+        profileId: null,
+        seasonId: null,
+        battlePassStep: null,
+        playTimeAllowAllProfiles: true,
+        configured: true,
       },
     });
   });

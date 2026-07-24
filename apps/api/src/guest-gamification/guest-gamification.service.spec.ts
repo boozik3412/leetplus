@@ -13,9 +13,12 @@ import {
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { GuestBonusLedgerSchedulerRuntimeStatus } from './guest-bonus-ledger-scheduler.service';
+import { EXACT_CANONICAL_OWNER_QUARANTINED_CODE } from './guest-game-exact-owner-reconciler';
 import { buildGuestGameOriginKey } from './guest-game-origin-key';
 import {
+  canonicalGuestGameJsonFingerprint,
   GuestGamificationService,
+  guestGameExactReconciliationDeliveryState,
   type GuestGameDryRunResult,
   type GuestGameEvent,
   type GuestGameLootBox,
@@ -28,6 +31,46 @@ import {
   type GuestGameReward,
   type GuestGameSnapshotFact,
 } from './guest-gamification.service';
+
+describe('exact reconciliation invariants', () => {
+  it('fingerprints an immutable plan independently of object key order', () => {
+    const left = {
+      slotKey: 'free',
+      rule: {
+        id: 'season-1',
+        reward: { amount: 100, type: 'BONUS' },
+      },
+    };
+    const reordered = {
+      rule: {
+        reward: { type: 'BONUS', amount: 100 },
+        id: 'season-1',
+      },
+      slotKey: 'free',
+    };
+    const mutated = {
+      ...reordered,
+      rule: {
+        ...reordered.rule,
+        reward: { ...reordered.rule.reward, amount: 101 },
+      },
+    };
+
+    expect(canonicalGuestGameJsonFingerprint(left)).toBe(
+      canonicalGuestGameJsonFingerprint(reordered),
+    );
+    expect(canonicalGuestGameJsonFingerprint(left)).not.toBe(
+      canonicalGuestGameJsonFingerprint(mutated),
+    );
+  });
+
+  it('reports a dead-lettered exact intent as terminal, not waiting', () => {
+    expect(guestGameExactReconciliationDeliveryState(0, 1)).toEqual({
+      complete: false,
+      waitingForDelivery: false,
+    });
+  });
+});
 
 const now = new Date('2026-06-10T10:00:00.000Z');
 const isoNow = now.toISOString();
@@ -5155,7 +5198,7 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameMission.updateMany).not.toHaveBeenCalled();
     });
 
-    it('can return a play-time draft to the primary source', async () => {
+    it('does not allow a play-time draft to opt out of the shared fallback', async () => {
       const { service, prisma } = createService();
       const draft = missionRow({
         missionType: 'PLAY_TIME',
@@ -5163,22 +5206,13 @@ describe('GuestGamificationService', () => {
         conditions: { schemaVersion: 2, taskType: 'PLAY_TIME' },
       });
       prisma.guestGameMission.findFirst.mockResolvedValue(draft);
-      prisma.guestGameMission.findFirstOrThrow.mockResolvedValue(
-        missionRow({ ...draft, evaluationPolicy: 'LIVE_PRIMARY' }),
-      );
 
-      const result = await service.updateMissionEvaluationPolicy(
-        user,
-        'mission-1',
-        { evaluationPolicy: 'LIVE_PRIMARY' },
-      );
-
-      expect(result.evaluationPolicy).toBe('LIVE_PRIMARY');
-      expect(prisma.guestGameMission.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { evaluationPolicy: 'LIVE_PRIMARY' },
+      await expect(
+        service.updateMissionEvaluationPolicy(user, 'mission-1', {
+          evaluationPolicy: 'LIVE_PRIMARY',
         }),
-      );
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.guestGameMission.updateMany).not.toHaveBeenCalled();
     });
 
     it('fails closed when the draft changes during a policy update', async () => {
@@ -5262,7 +5296,7 @@ describe('GuestGamificationService', () => {
       );
       expect(
         prisma.guestGameMission.update.mock.calls[0][0].data,
-      ).not.toHaveProperty('evaluationPolicy');
+      ).toHaveProperty('evaluationPolicy', 'LIVE_WITH_LEDGER_FALLBACK');
     });
   });
 
@@ -5446,20 +5480,75 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it.each<[string, string, number]>([
-      {
-        name: 'legacy step',
-        rules: { ...playTimeRules, schemaVersion: 1 },
-      },
-      {
-        name: 'non play-time step',
-        rules: { ...playTimeRules, taskType: 'CHECK_IN' },
-      },
-    ])('rejects a $name', async ({ rules }) => {
+    it('canonicalizes a legacy play-time step to the shared fallback', async () => {
+      const { service, prisma } = createService();
+      const legacySeason = seasonRow({
+        levels: [
+          {
+            sequence: 1,
+            activationRules: { ...playTimeRules, schemaVersion: 1 },
+          },
+        ],
+      });
+      prisma.guestGameSeason.findFirst.mockResolvedValue(legacySeason);
+      prisma.guestGameSeason.findFirstOrThrow.mockResolvedValue(
+        seasonRow({
+          ...legacySeason,
+          levels: [
+            {
+              sequence: 1,
+              activationRules: {
+                ...playTimeRules,
+                schemaVersion: 1,
+                evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+              },
+            },
+          ],
+        }),
+      );
+
+      await expect(
+        service.updateBattlePassStepEvaluationPolicy(user, 'season-1', '1', {
+          evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+          expectedUpdatedAt: isoNow,
+        }),
+      ).resolves.toMatchObject({
+        levels: [
+          expect.objectContaining({
+            activationRules: expect.objectContaining({
+              evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+            }),
+          }),
+        ],
+      });
+      expect(prisma.guestGameSeason.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            levels: [
+              expect.objectContaining({
+                activationRules: expect.objectContaining({
+                  evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+                }),
+              }),
+            ],
+          },
+        }),
+      );
+    });
+
+    it('rejects a non play-time step', async () => {
       const { service, prisma } = createService();
       prisma.guestGameSeason.findFirst.mockResolvedValue(
         seasonRow({
-          levels: [{ sequence: 1, activationRules: rules }],
+          levels: [
+            {
+              sequence: 1,
+              activationRules: {
+                ...playTimeRules,
+                taskType: 'CHECK_IN',
+              },
+            },
+          ],
         }),
       );
 
@@ -5544,7 +5633,7 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameSeason.findFirstOrThrow).not.toHaveBeenCalled();
     });
 
-    it('preserves policy only from the uniquely matched persisted step during a normal season save', async () => {
+    it('canonicalizes every v2 PLAY_TIME step to ledger fallback during a normal season save', async () => {
       const { service, prisma } = createService();
       const current = seasonRow({
         status: 'DRAFT',
@@ -5617,7 +5706,7 @@ describe('GuestGamificationService', () => {
         }),
         expect.objectContaining({
           activationRules: expect.objectContaining({
-            evaluationPolicy: 'LIVE_PRIMARY',
+            evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
           }),
         }),
       ]);
@@ -11768,6 +11857,221 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('reloads a pristine exact canonical event after its owner is atomically rebound', async () => {
+      const { service, prisma, guestIdentityResolver } = createService();
+      const profile = profileFixture();
+      const stepRun = battlePassDryRun();
+      const previousEvent = eventResult({
+        id: 'event-exact-owner',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+        profile: {
+          ...eventResult().profile,
+          id: 'profile-stale',
+        },
+        guest: {
+          ...profile.guest!,
+          id: 'guest-stale',
+        },
+      });
+      const reboundEvent = eventResult({
+        id: 'event-exact-owner',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+      });
+      const exactScope = {
+        sourceFactId: 'fact-exact-owner',
+        sourceFactUpdatedAt: now,
+        physicalSessionKey: 'physical-session-1',
+        rules: [
+          {
+            ruleKind: 'SEASON' as const,
+            ruleId: 'season-1',
+            battlePassStep: 2,
+            ruleUpdatedAt: now,
+          },
+        ],
+      };
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      guestIdentityResolver.findActiveGuestForProfileDomain.mockResolvedValue({
+        id: 'guest-1',
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(stepRun);
+      prisma.guestGameEvent.findFirst
+        .mockResolvedValueOnce(previousEvent)
+        .mockResolvedValueOnce(reboundEvent);
+      const persistExact = jest
+        .spyOn(service as any, 'persistExactReconciliationEffects')
+        .mockResolvedValue({
+          dryRun: stepRun,
+          intentIds: [],
+          appliedXpDelta: 0,
+          physicalSessionKey: exactScope.physicalSessionKey,
+          sourceFactId: exactScope.sourceFactId,
+          ownerReconciliation: {
+            status: 'REBOUND',
+            previousProfileId: 'profile-stale',
+            previousGuestId: 'guest-stale',
+          },
+        });
+      jest.spyOn(service, 'recordRuleDecisions').mockResolvedValue({
+        decisionsPersisted: true,
+        lootBoxEntitlements: [],
+      });
+      jest
+        .spyOn(service as any, 'getMissingMatchedLootBoxEntitlementRuleIds')
+        .mockResolvedValue([]);
+      jest
+        .spyOn(
+          service as any,
+          'getMissingMatchedMissionRewardEntitlementRuleIds',
+        )
+        .mockResolvedValue([]);
+
+      const result = await service.processEvent(
+        user,
+        {
+          profileId: profile.id,
+          guestId: 'guest-1',
+          eventType: 'PLAY_HOUR',
+          sourceFactKind: 'GUEST_SESSION',
+          sourceFactId: exactScope.sourceFactId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-exact-owner',
+        },
+        {
+          evaluationMode: 'LIVE_LEDGER_FALLBACK',
+          materializeRewards: false,
+          originKey: 'origin-exact-owner',
+          exactReconciliationScope: exactScope,
+          suppressLedgerShadow: true,
+        },
+      );
+
+      expect(persistExact).toHaveBeenCalledWith(
+        user,
+        stepRun,
+        previousEvent.id,
+        profile.id,
+        'guest-1',
+        'origin-exact-owner',
+        exactScope,
+      );
+      expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledTimes(2);
+      expect(result.event).toMatchObject({
+        id: 'event-exact-owner',
+        profile: { id: profile.id },
+        guest: { id: 'guest-1' },
+      });
+      expect(result.summary.exactReconciliation).toMatchObject({
+        complete: true,
+        waitingForDelivery: false,
+        deadLetterIntentCount: 0,
+      });
+    });
+
+    it('surfaces a durable exact owner quarantine before any material effect runs', async () => {
+      const { service, prisma, guestIdentityResolver } = createService();
+      const profile = profileFixture();
+      const stepRun = battlePassDryRun();
+      const previousEvent = eventResult({
+        id: 'event-exact-quarantined',
+        eventType: 'PLAY_HOUR',
+        xpDelta: 0,
+        occurredAt: now as unknown as string,
+        createdAt: now as unknown as string,
+        profile: {
+          ...eventResult().profile,
+          id: 'profile-stale',
+        },
+        guest: {
+          ...profile.guest!,
+          id: 'guest-stale',
+        },
+      });
+      const exactScope = {
+        sourceFactId: 'fact-exact-quarantined',
+        sourceFactUpdatedAt: now,
+        physicalSessionKey: 'physical-session-quarantined',
+        rules: [
+          {
+            ruleKind: 'MISSION' as const,
+            ruleId: 'mission-1',
+            battlePassStep: null,
+            ruleUpdatedAt: now,
+          },
+        ],
+      };
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      guestIdentityResolver.findActiveGuestForProfileDomain.mockResolvedValue({
+        id: 'guest-1',
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(stepRun);
+      prisma.guestGameEvent.findFirst.mockResolvedValueOnce(previousEvent);
+      jest
+        .spyOn(service as any, 'persistExactReconciliationEffects')
+        .mockResolvedValue({
+          dryRun: stepRun,
+          intentIds: [],
+          appliedXpDelta: 0,
+          physicalSessionKey: exactScope.physicalSessionKey,
+          sourceFactId: exactScope.sourceFactId,
+          ownerReconciliation: {
+            status: 'QUARANTINED',
+            quarantineOriginKey: 'owner-quarantine-origin',
+            reasonCode: 'MATERIAL_EFFECTS_EXIST',
+          },
+        });
+      const materialize = jest.spyOn(
+        service as any,
+        'materializeProcessRewardIntents',
+      );
+      const recordDecisions = jest.spyOn(service, 'recordRuleDecisions');
+
+      const error = await service
+        .processEvent(
+          user,
+          {
+            profileId: profile.id,
+            guestId: 'guest-1',
+            eventType: 'PLAY_HOUR',
+            sourceFactKind: 'GUEST_SESSION',
+            sourceFactId: exactScope.sourceFactId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalId: 'session-exact-quarantined',
+          },
+          {
+            evaluationMode: 'LIVE_LEDGER_FALLBACK',
+            originKey: 'origin-exact-quarantined',
+            exactReconciliationScope: exactScope,
+            suppressLedgerShadow: true,
+          },
+        )
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
+      });
+      expect(materialize).not.toHaveBeenCalled();
+      expect(recordDecisions).not.toHaveBeenCalled();
+      expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledTimes(1);
+    });
+
     it('skips rewards and decisions for exact canonicalization of an existing event', async () => {
       const { service, prisma } = createService();
       const profile = profileFixture();
@@ -14259,7 +14563,10 @@ describe('GuestGamificationService', () => {
       jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
       const decisionSpy = jest
         .spyOn(service, 'recordRuleDecisions')
-        .mockResolvedValue({ lootBoxEntitlements: [] });
+        .mockResolvedValue({
+          lootBoxEntitlements: [],
+          decisionsPersisted: true,
+        });
       const processSpy = jest.spyOn(service, 'processEvent');
 
       const result = await service.runSnapshotPipeline(user, { limit: 10 });

@@ -30,7 +30,7 @@ const SYNC_JOB_MAX_ATTEMPTS = 5;
 const SYNC_JOB_BASE_BACKOFF_MS = 15 * 1000;
 const INFERRED_PACKAGE_USAGE_LOOKBACK_DAYS = 30;
 const INFERRED_PACKAGE_USAGE_SIGNAL_WINDOW_MS = 15 * 60 * 1000;
-const GUEST_ACTIVITY_PARSER_VERSION = 'guest-activity-v3';
+const GUEST_ACTIVITY_PARSER_VERSION = 'guest-activity-v4';
 
 const SOURCE_GUEST_LOG = 'LANGAME_GUEST_LOG';
 const SOURCE_GUEST_SESSION = 'LANGAME_GUEST_SESSION';
@@ -44,6 +44,7 @@ type GuestActivityFactType =
   | 'PACKAGE_OR_SUBSCRIPTION_PURCHASED'
   | 'PACKAGE_OR_SUBSCRIPTION_USED'
   | 'HOURLY_SESSION_STARTED'
+  | 'SESSION_PLAY_TIME_ACCUMULATED'
   | 'HOURLY_PLAY_TIME_ACCUMULATED'
   | 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
   | 'PRODUCT_PURCHASED'
@@ -52,6 +53,12 @@ type GuestActivityFactType =
   | 'BONUS_TOPUP'
   | 'VISIT'
   | 'REWARD_TRACE';
+
+const EXACT_SESSION_PLAY_TIME_FACT_TYPES = [
+  'SESSION_PLAY_TIME_ACCUMULATED',
+  'HOURLY_PLAY_TIME_ACCUMULATED',
+  'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+] as const satisfies readonly GuestActivityFactType[];
 
 type GuestActivityConfidence = 'EXACT' | 'TEXT_MATCH' | 'INFERRED' | 'UNKNOWN';
 
@@ -2234,20 +2241,27 @@ export class GuestActivityLedgerService {
     sessionExternalId: string,
     persistedFactId: string,
   ) {
+    const isExactPlayTime = isExactSessionPlayTimeFactType(factType);
+    const factTypeIdentity = isExactPlayTime
+      ? { in: [...EXACT_SESSION_PLAY_TIME_FACT_TYPES] }
+      : factType;
     const stableIdentity = {
       tenantId: context.tenantId,
-      profileId: context.profile.id,
       externalProvider: IntegrationProvider.LANGAME,
       externalDomain: context.externalDomain,
       sourceKind: SOURCE_GUEST_SESSION,
-      factType,
+      factType: factTypeIdentity,
       sessionExternalId,
+      ...(isExactPlayTime ? {} : { profileId: context.profile.id }),
     } satisfies Prisma.GuestActivityFactWhereInput;
     const versions = await this.prisma.guestActivityFact.findMany({
       where: stableIdentity,
       select: { id: true, createdAt: true },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+    // Exact session identity deliberately spans profiles. The newest observed
+    // version wins, so an automatic rebind can replace a stale owner without
+    // allowing a replay of an older payload to roll back a corrected session.
     const activeVersionId = versions[0]?.id ?? persistedFactId;
     const supersededAt = new Date();
 
@@ -2274,7 +2288,7 @@ export class GuestActivityLedgerService {
   private async reconcileHistoricalSessionFactVersions(
     context: LedgerSyncContext,
   ) {
-    const versions = await this.prisma.guestActivityFact.findMany({
+    const profileVersions = await this.prisma.guestActivityFact.findMany({
       where: {
         tenantId: context.tenantId,
         profileId: context.profile.id,
@@ -2284,6 +2298,7 @@ export class GuestActivityLedgerService {
       },
       select: {
         id: true,
+        profileId: true,
         factType: true,
         sessionExternalId: true,
         createdAt: true,
@@ -2291,13 +2306,55 @@ export class GuestActivityLedgerService {
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+    const exactSessionExternalIds = Array.from(
+      new Set(
+        profileVersions
+          .filter(
+            (version) =>
+              version.sessionExternalId &&
+              isExactSessionPlayTimeFactType(version.factType),
+          )
+          .map((version) => version.sessionExternalId!),
+      ),
+    );
+    const crossProfileExactVersions =
+      exactSessionExternalIds.length > 0
+        ? await this.prisma.guestActivityFact.findMany({
+            where: {
+              tenantId: context.tenantId,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: context.externalDomain,
+              sourceKind: SOURCE_GUEST_SESSION,
+              factType: { in: [...EXACT_SESSION_PLAY_TIME_FACT_TYPES] },
+              sessionExternalId: { in: exactSessionExternalIds },
+            },
+            select: {
+              id: true,
+              profileId: true,
+              factType: true,
+              sessionExternalId: true,
+              createdAt: true,
+              lifecycleStatus: true,
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          })
+        : [];
+    const versions = [
+      ...profileVersions.filter(
+        (version) => !isExactSessionPlayTimeFactType(version.factType),
+      ),
+      ...crossProfileExactVersions,
+    ];
     const groups = new Map<string, typeof versions>();
 
     for (const version of versions) {
       if (!version.sessionExternalId) {
         continue;
       }
-      const key = `${version.factType}:${version.sessionExternalId}`;
+      const factFamily = isExactSessionPlayTimeFactType(version.factType)
+        ? 'SESSION_PLAY_TIME'
+        : version.factType;
+      const key = `${factFamily}:${version.sessionExternalId}`;
       const group = groups.get(key) ?? [];
       group.push(version);
       groups.set(key, group);
@@ -2308,9 +2365,13 @@ export class GuestActivityLedgerService {
       if (group.length < 2) {
         continue;
       }
+      // The query is globally ordered inside the scoped physical-session
+      // identity. Do not prefer the profile currently being reconciled:
+      // replaying a stale profile must not take ownership back from a newer,
+      // corrected binding.
       const activeVersionId = group[0].id;
       const staleActiveIds = group
-        .slice(1)
+        .filter((version) => version.id !== activeVersionId)
         .filter((version) => version.lifecycleStatus === 'ACTIVE')
         .map((version) => version.id);
       if (staleActiveIds.length > 0) {
@@ -2322,7 +2383,10 @@ export class GuestActivityLedgerService {
           },
         });
       }
-      if (group[0].lifecycleStatus !== 'ACTIVE') {
+      const activeVersion = group.find(
+        (version) => version.id === activeVersionId,
+      );
+      if (activeVersion?.lifecycleStatus !== 'ACTIVE') {
         await this.prisma.guestActivityFact.updateMany({
           where: { id: activeVersionId },
           data: {
@@ -2640,14 +2704,20 @@ export class GuestActivityLedgerService {
       });
     }
 
-    if (playedMinutes !== null && tariff.kind !== 'unknown') {
+    if (playedMinutes !== null) {
       const packageOrSubscription = tariff.kind === 'package_or_subscription';
-      const playTimeFactType: GuestActivityFactType = packageOrSubscription
-        ? 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
-        : 'HOURLY_PLAY_TIME_ACCUMULATED';
-      const tariffType = packageOrSubscription
-        ? 'package_or_subscription'
-        : 'hourly';
+      const playTimeFactType: GuestActivityFactType =
+        tariff.kind === 'unknown'
+          ? 'SESSION_PLAY_TIME_ACCUMULATED'
+          : packageOrSubscription
+            ? 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'
+            : 'HOURLY_PLAY_TIME_ACCUMULATED';
+      const tariffType =
+        tariff.kind === 'unknown'
+          ? null
+          : packageOrSubscription
+            ? 'package_or_subscription'
+            : 'hourly';
 
       facts.push({
         factType: playTimeFactType,
@@ -2670,6 +2740,7 @@ export class GuestActivityLedgerService {
           tariffGroupId: tariff.tariffGroupId,
           tariffTypeGroup: tariff.tariffType,
           tariffName: tariff.tariffName,
+          sessionBillingKind: tariff.kind,
           calculation: 'date_stop - date_start',
         }),
       });
@@ -3085,7 +3156,23 @@ function relevantFactsForRule(
     trigger.includes('minute') ||
     trigger.includes('hour')
   ) {
+    if (
+      session.includes('package') ||
+      session.includes('packet') ||
+      session.includes('subscription') ||
+      session.includes('abonement')
+    ) {
+      return ['PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED'];
+    }
+    if (
+      session.includes('hourly') ||
+      session.includes('regular') ||
+      session.includes('common')
+    ) {
+      return ['HOURLY_PLAY_TIME_ACCUMULATED'];
+    }
     return [
+      'SESSION_PLAY_TIME_ACCUMULATED',
       'HOURLY_PLAY_TIME_ACCUMULATED',
       'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
     ];
@@ -3128,6 +3215,12 @@ function relevantFactsForRule(
   }
 
   return ['SESSION_STARTED', 'REWARD_TRACE'];
+}
+
+function isExactSessionPlayTimeFactType(
+  value: unknown,
+): value is (typeof EXACT_SESSION_PLAY_TIME_FACT_TYPES)[number] {
+  return EXACT_SESSION_PLAY_TIME_FACT_TYPES.some((item) => item === value);
 }
 
 function resolveProductName(

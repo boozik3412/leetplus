@@ -17,12 +17,14 @@ const DEFAULT_BATCH_SIZE = 30;
 const DEFAULT_GRACE_MS = 60_000;
 const DEFAULT_CLAIM_LEASE_MS = 120_000;
 const ALLOWED_FACT_TYPES = [
+  'SESSION_PLAY_TIME_ACCUMULATED',
   'HOURLY_PLAY_TIME_ACCUMULATED',
   'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
   'PRODUCT_PURCHASED',
 ] as const;
 
 const DEFAULT_FACT_TYPES = [
+  'SESSION_PLAY_TIME_ACCUMULATED',
   'HOURLY_PLAY_TIME_ACCUMULATED',
   'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
 ] as const;
@@ -46,6 +48,7 @@ export type GuestGameLedgerFallbackRuntimeStatus = {
     battlePassStep: number | null;
     allowAllTenants: boolean;
     missionsAllowAllProfiles: boolean;
+    playTimeAllowAllProfiles: boolean;
     configured: boolean;
   };
   intervalMs: number;
@@ -217,14 +220,14 @@ export class GuestGameLedgerFallbackSchedulerService
     const liveNotBefore = this.liveNotBefore();
     const allowAllTenants = this.allowAllTenants();
     const missionsAllowAllProfiles = this.missionsAllowAllProfiles();
+    const playTimeAllowAllProfiles = this.playTimeAllowAllProfiles();
     const scopeConfigured = this.scopeConfigured(mode);
     const killSwitchEnabled = this.killSwitchEnabled();
     const liveCanaryReady =
       mode === 'LIVE' &&
       Boolean(tenantId || tenantSlug) &&
-      Boolean(profileId) &&
-      Boolean(seasonId) &&
-      battlePassStep !== null &&
+      (playTimeAllowAllProfiles ||
+        (Boolean(profileId) && Boolean(seasonId) && battlePassStep !== null)) &&
       Boolean(liveNotBefore) &&
       !allowAllTenants;
 
@@ -250,6 +253,7 @@ export class GuestGameLedgerFallbackSchedulerService
         battlePassStep,
         allowAllTenants,
         missionsAllowAllProfiles,
+        playTimeAllowAllProfiles,
         configured: scopeConfigured,
       },
       intervalMs: this.intervalMs(),
@@ -276,12 +280,11 @@ export class GuestGameLedgerFallbackSchedulerService
     const tenantResult = status.lastResult?.tenants.find(
       (result) => result.tenantId === tenantId,
     );
-    const {
-      scope: _scope,
-      lastResult: _lastResult,
-      lastError,
-      ...publicStatus
-    } = status;
+    const publicStatus = omitKeys(status, [
+      'scope',
+      'lastResult',
+      'lastError',
+    ] as const);
 
     return {
       ...publicStatus,
@@ -293,7 +296,7 @@ export class GuestGameLedgerFallbackSchedulerService
       lastResult: tenantResult
         ? omitTenantIdentityFromResult(tenantResult)
         : null,
-      lastRunFailed: Boolean(lastError),
+      lastRunFailed: Boolean(status.lastError),
     };
   }
 
@@ -334,6 +337,9 @@ export class GuestGameLedgerFallbackSchedulerService
     if (this.missionsAllowAllProfiles()) {
       dto.missionsAllowAllProfiles = true;
     }
+    if (this.playTimeAllowAllProfiles()) {
+      dto.playTimeAllowAllProfiles = true;
+    }
     return dto;
   }
 
@@ -347,11 +353,16 @@ export class GuestGameLedgerFallbackSchedulerService
     }
     return Boolean(
       tenantConfigured &&
-      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID') &&
-      this.optionalString('GUEST_GAME_LEDGER_FALLBACK_SEASON_ID') &&
-      this.optionalPositiveInteger(
-        'GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP',
-      ) !== null &&
+      (this.playTimeAllowAllProfiles() ||
+        (Boolean(
+          this.optionalString('GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID'),
+        ) &&
+          Boolean(
+            this.optionalString('GUEST_GAME_LEDGER_FALLBACK_SEASON_ID'),
+          ) &&
+          this.optionalPositiveInteger(
+            'GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP',
+          ) !== null)) &&
       !this.allowAllTenants(),
     );
   }
@@ -363,6 +374,12 @@ export class GuestGameLedgerFallbackSchedulerService
   private missionsAllowAllProfiles() {
     return this.optionalBoolean(
       'GUEST_GAME_LEDGER_FALLBACK_MISSIONS_ALLOW_ALL_PROFILES',
+    );
+  }
+
+  private playTimeAllowAllProfiles() {
+    return this.optionalBoolean(
+      'GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES',
     );
   }
 
@@ -479,10 +496,16 @@ function omitTenantIdentityFromResult(
   GuestGameLedgerFallbackRunResult['tenants'][number],
   'tenantId' | 'tenantSlug'
 > {
-  const {
-    tenantId: _tenantId,
-    tenantSlug: _tenantSlug,
-    ...publicResult
-  } = result;
-  return publicResult;
+  return omitKeys(result, ['tenantId', 'tenantSlug'] as const);
+}
+
+function omitKeys<T extends object, K extends keyof T>(
+  value: T,
+  keys: readonly K[],
+): Omit<T, K> {
+  const copy = { ...value };
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
+  return copy;
 }

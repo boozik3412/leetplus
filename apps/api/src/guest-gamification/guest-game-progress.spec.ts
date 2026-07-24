@@ -372,6 +372,400 @@ describe('guest game progress trigger matching', () => {
     });
   });
 
+  it('counts one physical PLAY_TIME session after its fact id and classification change', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 120,
+        progressUnit: 'minutes',
+        conditions: {
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR'],
+            target: 120,
+          },
+        },
+      },
+      {
+        eventType: 'PLAY_HOUR',
+        occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+        sourceFactId: 'hourly-fact-v2',
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-42',
+        sessionType: 'hourly',
+        sessionPacket: false,
+        sessionMinutes: 75,
+      },
+      [
+        {
+          eventType: 'SESSION_PLAY_TIME_ACCUMULATED',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'neutral-fact-v1',
+          externalProvider: 'langame',
+          externalDomain: 'https://46.langamepro.ru/public_api',
+          sourceKind: 'GUEST_SESSION',
+          sessionExternalId: 'session-42',
+          sessionType: null,
+          sessionPacket: false,
+          sessionMinutes: 75,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 75,
+      matchedEvents: 1,
+      completed: false,
+    });
+  });
+
+  it('uses the current package reclassification without doubling duration', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 120,
+        progressUnit: 'minutes',
+        conditions: {
+          sessionType: 'packet_hours',
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR'],
+            target: 120,
+          },
+        },
+      },
+      {
+        eventType: 'PLAY_HOUR',
+        occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+        sourceFactId: 'package-fact-v2',
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-42',
+        sessionType: 'package_or_subscription',
+        sessionPacket: true,
+        sessionMinutes: 75,
+      },
+      [
+        {
+          eventType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'hourly-fact-v1',
+          externalProvider: 'LANGAME',
+          externalDomain: '46.langamepro.ru',
+          sourceKind: 'GUEST_SESSION',
+          sessionExternalId: 'session-42',
+          sessionType: 'hourly',
+          sessionPacket: false,
+          sessionMinutes: 75,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 75,
+      matchedEvents: 1,
+      completed: false,
+    });
+  });
+
+  it.each([
+    [
+      'provider',
+      {
+        externalProvider: 'OTHER_PROVIDER',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-42',
+      },
+    ],
+    [
+      'domain',
+      {
+        externalProvider: 'LANGAME',
+        externalDomain: 'other.langamepro.ru',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-42',
+      },
+    ],
+    [
+      'source kind',
+      {
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: 'OTHER_SESSION_SOURCE',
+        sessionExternalId: 'session-42',
+      },
+    ],
+    [
+      'session id',
+      {
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-43',
+      },
+    ],
+  ])(
+    'keeps PLAY_TIME events with a different %s distinct',
+    (_, historyIdentity) => {
+      const result = evaluateGuestGameProgress(
+        {
+          triggerKind: 'PLAY_HOUR',
+          progressTarget: 120,
+          progressUnit: 'minutes',
+          conditions: {
+            metric: {
+              aggregation: 'duration',
+              eventTypes: ['PLAY_HOUR'],
+              target: 120,
+            },
+          },
+        },
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+          sourceFactId: 'fact-current',
+          externalProvider: 'LANGAME',
+          externalDomain: '46.langamepro.ru',
+          sourceKind: 'LANGAME_GUEST_SESSION',
+          sessionExternalId: 'session-42',
+          sessionMinutes: 60,
+        },
+        [
+          {
+            eventType: 'PLAY_HOUR',
+            occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+            sourceFactId: 'fact-history',
+            ...historyIdentity,
+            sessionMinutes: 60,
+          },
+        ],
+      );
+
+      expect(result).toMatchObject({
+        current: 120,
+        matchedEvents: 2,
+        completed: true,
+      });
+    },
+  );
+
+  it('falls back to the same source fact when a strong component is missing', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 120,
+        progressUnit: 'minutes',
+        conditions: {
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR'],
+            target: 120,
+          },
+        },
+      },
+      {
+        eventType: 'PLAY_HOUR',
+        occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+        sourceFactId: 'fact-legacy',
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: null,
+        sessionExternalId: 'session-42',
+        sessionMinutes: 60,
+      },
+      [
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'fact-legacy',
+          sessionMinutes: 60,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 60,
+      matchedEvents: 1,
+      completed: false,
+    });
+  });
+
+  it('bridges an existing legacy event to a strong current identity by source fact', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 120,
+        progressUnit: 'minutes',
+        conditions: {
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR'],
+            target: 120,
+          },
+        },
+      },
+      {
+        eventType: 'PLAY_HOUR',
+        occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+        sourceFactId: 'fact-shared',
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-42',
+        sessionMinutes: 60,
+      },
+      [
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'fact-shared',
+          sessionMinutes: 60,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 60,
+      matchedEvents: 1,
+      completed: false,
+    });
+  });
+
+  it('does not let one legacy fact merge conflicting strong sessions', () => {
+    const common = {
+      eventType: 'PLAY_HOUR',
+      sourceFactId: 'fact-shared',
+      externalProvider: 'LANGAME',
+      externalDomain: '46.langamepro.ru',
+      sourceKind: 'LANGAME_GUEST_SESSION',
+      sessionMinutes: 60,
+    };
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 180,
+        progressUnit: 'minutes',
+        conditions: {
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR'],
+            target: 180,
+          },
+        },
+      },
+      {
+        ...common,
+        occurredAt: new Date('2026-07-15T10:10:00.000Z'),
+        sessionExternalId: 'session-42',
+      },
+      [
+        {
+          ...common,
+          occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+          sessionExternalId: 'session-43',
+        },
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'fact-shared',
+          sessionMinutes: 60,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 180,
+      matchedEvents: 3,
+      completed: true,
+    });
+  });
+
+  it('does not merge different fallback fact ids without a strong identity', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 120,
+        progressUnit: 'minutes',
+        conditions: {
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR'],
+            target: 120,
+          },
+        },
+      },
+      {
+        eventType: 'PLAY_HOUR',
+        occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+        sourceFactId: 'fact-v2',
+        sessionMinutes: 60,
+      },
+      [
+        {
+          eventType: 'PLAY_HOUR',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'fact-v1',
+          sessionMinutes: 60,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 120,
+      matchedEvents: 2,
+      completed: true,
+    });
+  });
+
+  it('dedupes PLAY_HOUR and SESSION_STOP representations of one session', () => {
+    const result = evaluateGuestGameProgress(
+      {
+        triggerKind: 'PLAY_HOUR',
+        progressTarget: 120,
+        progressUnit: 'minutes',
+        conditions: {
+          metric: {
+            aggregation: 'duration',
+            eventTypes: ['PLAY_HOUR'],
+            target: 120,
+          },
+        },
+      },
+      {
+        eventType: 'PLAY_HOUR',
+        occurredAt: new Date('2026-07-15T10:05:00.000Z'),
+        sourceFactId: 'play-hour-fact',
+        externalProvider: 'LANGAME',
+        externalDomain: '46.langamepro.ru',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-42',
+        sessionMinutes: 60,
+      },
+      [
+        {
+          eventType: 'SESSION_STOP',
+          occurredAt: new Date('2026-07-15T10:00:00.000Z'),
+          sourceFactId: 'session-stop-fact',
+          externalProvider: 'LANGAME',
+          externalDomain: '46.langamepro.ru',
+          sourceKind: 'GUEST_SESSION',
+          sessionExternalId: 'session-42',
+          sessionMinutes: 60,
+        },
+      ],
+    );
+
+    expect(result).toMatchObject({
+      current: 60,
+      matchedEvents: 1,
+      completed: false,
+    });
+  });
+
   it('counts a regular session, its package correction and a later session as two physical sessions', () => {
     const occurredAt = new Date('2026-07-15T10:00:00.000Z');
     const result = evaluateGuestGameProgress(

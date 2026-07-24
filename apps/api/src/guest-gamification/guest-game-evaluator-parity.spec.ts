@@ -161,6 +161,81 @@ const scenarios: ParityScenario[] = [
     expectedCurrent: 65,
   },
   {
+    name: 'PLAY_TIME ANY accepts exact duration with an unknown tariff',
+    triggerKind: 'PLAY_HOUR',
+    sessionType: 'ANY',
+    progressTarget: 60,
+    progressUnit: 'minute',
+    conditions: {
+      metric: {
+        aggregation: 'duration',
+        eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+        target: 60,
+      },
+    },
+    events: [
+      {
+        id: 'play-any-unknown-tariff',
+        liveType: 'SESSION_STOP',
+        ledgerType: 'SESSION_PLAY_TIME_ACCUMULATED',
+        happenedAt: '2026-07-10T08:00:00.000Z',
+        durationMinutes: 60,
+      },
+    ],
+    expectedCompleted: true,
+    expectedCurrent: 60,
+  },
+  {
+    name: 'PLAY_TIME HOURLY rejects exact duration with an unknown tariff',
+    triggerKind: 'PLAY_HOUR',
+    sessionType: 'HOURLY',
+    progressTarget: 60,
+    progressUnit: 'minute',
+    conditions: {
+      metric: {
+        aggregation: 'duration',
+        eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+        target: 60,
+      },
+    },
+    events: [
+      {
+        id: 'play-hourly-unknown-tariff',
+        liveType: 'SESSION_STOP',
+        ledgerType: 'SESSION_PLAY_TIME_ACCUMULATED',
+        happenedAt: '2026-07-10T08:00:00.000Z',
+        durationMinutes: 120,
+      },
+    ],
+    expectedCompleted: false,
+    expectedCurrent: 0,
+  },
+  {
+    name: 'PLAY_TIME PACKAGE rejects exact duration with an unknown tariff',
+    triggerKind: 'PLAY_HOUR',
+    sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+    progressTarget: 60,
+    progressUnit: 'minute',
+    conditions: {
+      metric: {
+        aggregation: 'duration',
+        eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+        target: 60,
+      },
+    },
+    events: [
+      {
+        id: 'play-package-unknown-tariff',
+        liveType: 'SESSION_STOP',
+        ledgerType: 'SESSION_PLAY_TIME_ACCUMULATED',
+        happenedAt: '2026-07-10T08:00:00.000Z',
+        durationMinutes: 120,
+      },
+    ],
+    expectedCompleted: false,
+    expectedCurrent: 0,
+  },
+  {
     name: 'PLAY_TIME HOURLY ignores package minutes',
     triggerKind: 'PLAY_HOUR',
     sessionType: 'HOURLY',
@@ -977,6 +1052,18 @@ describe('standalone SESSION_START case event parity', () => {
 });
 
 describe('ledger readiness gaps that must not be promoted to fallback', () => {
+  it('routes tariff-neutral play time only to ANY-session rules', () => {
+    expect(relevantGuestGameFacts('PLAY_HOUR', 'ANY')).toContain(
+      'SESSION_PLAY_TIME_ACCUMULATED',
+    );
+    expect(relevantGuestGameFacts('PLAY_HOUR', 'HOURLY')).not.toContain(
+      'SESSION_PLAY_TIME_ACCUMULATED',
+    );
+    expect(
+      relevantGuestGameFacts('PLAY_HOUR', 'PACKAGE_OR_SUBSCRIPTION'),
+    ).not.toContain('SESSION_PLAY_TIME_ACCUMULATED');
+  });
+
   it('does not treat a generic Langame visit as opening the game module', () => {
     expect(relevantGuestGameFacts('APP_OPEN', null)).toEqual(['APP_OPENED']);
     expect(relevantGuestGameFacts('APP_OPEN', null)).not.toContain('VISIT');

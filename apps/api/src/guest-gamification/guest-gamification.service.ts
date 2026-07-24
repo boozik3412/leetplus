@@ -74,12 +74,21 @@ import {
   type GuestGameMissionTaskType,
 } from './guest-game-mission-contract';
 import {
+  buildGuestGamePhysicalProgressIdentity,
   buildGuestGameOriginKey,
+  buildGuestGamePlayTimeOriginKey,
   buildGuestGameRewardIdempotencyKey,
   canonicalGuestGameEventType,
 } from './guest-game-origin-key';
 import {
-  guestGameEvaluationPolicy,
+  EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
+  reconcileExactCanonicalEventOwnerInTransaction,
+  type ExactCanonicalOwnerReconcileOutcome,
+} from './guest-game-exact-owner-reconciler';
+import {
+  guestGameBattlePassStepEvaluationPolicy,
+  guestGameLootBoxEvaluationPolicy,
+  guestGameMissionEvaluationPolicy,
   guestGamePolicyAllowsEvaluation,
   type GuestGameEvaluationMode,
 } from './guest-game-source-policy';
@@ -2382,6 +2391,9 @@ export type GuestGameDryRunDto = {
   traceId?: string | null;
   sourceFactId?: string | null;
   sourceFactKind?: string | null;
+  externalProvider?: string | null;
+  sourceKind?: string | null;
+  sessionExternalId?: string | null;
   profileId?: string | null;
   guestId?: string | null;
   lootBoxId?: string | null;
@@ -2410,7 +2422,6 @@ export type GuestGameDryRunDto = {
 };
 
 export type GuestGameProcessEventDto = GuestGameDryRunDto & {
-  externalProvider?: string | null;
   externalDomain?: string | null;
   externalId?: string | null;
   payload?: Prisma.InputJsonObject | null;
@@ -2527,6 +2538,7 @@ export type GuestGameLootBoxEntitlementWriteOutcome = {
 
 export type GuestGameRuleDecisionRecordResult = {
   lootBoxEntitlements: GuestGameLootBoxEntitlementWriteOutcome[];
+  decisionsPersisted: boolean;
 };
 
 export type GuestGameProcessEventResult = {
@@ -2542,6 +2554,14 @@ export type GuestGameProcessEventResult = {
     idempotencyKey: string | null;
     idempotent: boolean;
     langameWrite: false;
+    exactReconciliation?: {
+      complete: boolean;
+      waitingForDelivery: boolean;
+      deadLetterIntentCount: number;
+      persistedIntentCount: number;
+      appliedXpDelta: number;
+      decisionsPersisted: boolean;
+    };
   };
   note: string;
 };
@@ -2591,6 +2611,15 @@ type ProcessRewardIntentMaterialization = {
   stats: GuestGameEffectMaterializeResult;
 };
 
+type ExactReconciliationPersistence = {
+  dryRun: GuestGameDryRunResult;
+  intentIds: string[];
+  appliedXpDelta: number;
+  physicalSessionKey: string;
+  sourceFactId: string;
+  ownerReconciliation: ExactCanonicalOwnerReconcileOutcome;
+};
+
 type GuestGameProcessEventOptions = {
   allowedRuleIds?: Iterable<string>;
   allowedBattlePassSteps?: ReadonlyMap<string, number>;
@@ -2615,6 +2644,23 @@ type GuestGameProcessEventOptions = {
     sourceFactUpdatedAt: Date;
     seasonUpdatedAt: Date;
     confirmationHash: string;
+  };
+  /**
+   * Bounded recovery for an exact canonical physical event that was created
+   * without evaluating rules. The caller must pin both the active source fact
+   * and every allowed rule version. This path may add only the effects of the
+   * supplied rules to the already-owned event; it never creates a new event.
+   */
+  exactReconciliationScope?: {
+    sourceFactId: string;
+    sourceFactUpdatedAt: Date;
+    physicalSessionKey: string;
+    rules: Array<{
+      ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
+      ruleId: string;
+      battlePassStep: number | null;
+      ruleUpdatedAt: Date;
+    }>;
   };
 };
 
@@ -2977,8 +3023,10 @@ function finiteJsonNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function uniqueStrings(values: string[]) {
-  return [...new Set(values)].slice(0, 16);
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [
+    ...new Set(values.filter((value): value is string => Boolean(value))),
+  ].slice(0, 16);
 }
 
 function allUniqueStrings(values: string[]) {
@@ -8634,24 +8682,12 @@ export class GuestGamificationService {
           'Задание создано в старом редакторе и не может быть перезаписано мастером.',
         );
       }
-      const existingTaskType = missionTaskType(
-        nullableString(jsonRecord(existing.conditions).taskType) ??
-          existing.missionType,
-      );
-      const preserveEvaluationPolicy =
-        existing.status === 'DRAFT' &&
-        existingTaskType === taskType &&
-        taskType === 'PLAY_TIME' &&
-        (existing.evaluationPolicy === 'LIVE_PRIMARY' ||
-          existing.evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK');
       const row = await this.prisma.guestGameMission.update({
         where: { id },
         data: {
           ...(await this.buildMissionData(user, missionDto, false)),
           definitionVersion: guestGameMissionDefinitionVersion,
-          ...(preserveEvaluationPolicy
-            ? {}
-            : { evaluationPolicy: missionEvaluationPolicy(taskType) }),
+          evaluationPolicy: missionEvaluationPolicy(taskType),
         },
         include: missionInclude,
       });
@@ -8862,12 +8898,9 @@ export class GuestGamificationService {
     const evaluationPolicy = nullableString(
       dto.evaluationPolicy,
     )?.toUpperCase();
-    if (
-      evaluationPolicy !== 'LIVE_PRIMARY' &&
-      evaluationPolicy !== 'LIVE_WITH_LEDGER_FALLBACK'
-    ) {
+    if (evaluationPolicy !== 'LIVE_WITH_LEDGER_FALLBACK') {
       throw new BadRequestException(
-        'Разрешены только LIVE_PRIMARY и LIVE_WITH_LEDGER_FALLBACK.',
+        'Для игрового времени обязателен LIVE_WITH_LEDGER_FALLBACK.',
       );
     }
 
@@ -9026,12 +9059,9 @@ export class GuestGamificationService {
     const evaluationPolicy = nullableString(
       dto.evaluationPolicy,
     )?.toUpperCase();
-    if (
-      evaluationPolicy !== 'LIVE_PRIMARY' &&
-      evaluationPolicy !== 'LIVE_WITH_LEDGER_FALLBACK'
-    ) {
+    if (evaluationPolicy !== 'LIVE_WITH_LEDGER_FALLBACK') {
       throw new BadRequestException(
-        'Разрешены только LIVE_PRIMARY и LIVE_WITH_LEDGER_FALLBACK.',
+        'Для игрового времени обязателен LIVE_WITH_LEDGER_FALLBACK.',
       );
     }
 
@@ -9071,11 +9101,9 @@ export class GuestGamificationService {
     const activationRules = jsonRecord(
       level.activationRules as Prisma.JsonValue | null,
     );
-    const schemaVersion = dryRunNumber(activationRules.schemaVersion, 1);
-    const taskType = nullableString(activationRules.taskType)?.toUpperCase();
     if (
-      schemaVersion !== guestGameMissionDefinitionVersion ||
-      taskType !== 'PLAY_TIME'
+      guestGameBattlePassStepEvaluationPolicy(activationRules) !==
+      'LIVE_WITH_LEDGER_FALLBACK'
     ) {
       throw new BadRequestException(
         'Ledger fallback разрешён только для шага PLAY_TIME контракта v2.',
@@ -12030,7 +12058,10 @@ export class GuestGamificationService {
     const categoryName = nullableString(dto.categoryName) ?? null;
     const supplierName = nullableString(dto.supplierName) ?? null;
     const quantity = dryRunOptionalNumber(dto.quantity);
+    const externalProvider = nullableString(dto.externalProvider) ?? null;
     const externalDomain = nullableString(dto.externalDomain) ?? null;
+    const sourceKind = nullableString(dto.sourceKind) ?? null;
+    const sessionExternalId = nullableString(dto.sessionExternalId) ?? null;
     const sourceFactKind = nullableString(dto.sourceFactKind) ?? null;
     const sourceFactId = nullableString(dto.sourceFactId) ?? null;
     const [profile, lootBoxes, missions, seasons, store] = await Promise.all([
@@ -12102,6 +12133,9 @@ export class GuestGamificationService {
       limitOccurredAt,
       sourceFactKind,
       sourceFactId,
+      externalProvider,
+      sourceKind,
+      sessionExternalId,
       profile,
       guest,
       storeId: store?.id ?? null,
@@ -12237,7 +12271,7 @@ export class GuestGamificationService {
     } = {},
   ): Promise<GuestGameRuleDecisionRecordResult> {
     if (!dryRun.rules.length) {
-      return { lootBoxEntitlements: [] };
+      return { lootBoxEntitlements: [], decisionsPersisted: true };
     }
 
     const evaluationRunId =
@@ -12336,7 +12370,7 @@ export class GuestGamificationService {
       }
     }
 
-    return { lootBoxEntitlements };
+    return { lootBoxEntitlements, decisionsPersisted };
   }
 
   private async getMissingMatchedLootBoxEntitlementRuleIds(
@@ -13329,6 +13363,11 @@ export class GuestGamificationService {
     dto: GuestGameProcessEventDto,
     options: GuestGameProcessEventOptions = {},
   ): Promise<GuestGameProcessEventResult> {
+    if (options.replayRewardScope && options.exactReconciliationScope) {
+      throw new BadRequestException(
+        'Rule replay and exact canonical reconciliation cannot run together.',
+      );
+    }
     const { profile, profileCreated } = await this.ensureProcessProfile(
       user,
       dto,
@@ -13424,23 +13463,44 @@ export class GuestGamificationService {
       ? suppressLootBoxEntitlementsDryRun(rewardDryRun)
       : rewardDryRun;
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
-    const originKey =
-      nullableString(options.originKey) ??
-      buildProcessOriginKey(dto, dryRun.eventType);
+    const derivedOriginKeys = buildProcessOriginKeys(dto, dryRun.eventType);
+    const requestedOriginKey = nullableString(options.originKey);
+    const originCandidates = uniqueStrings([
+      requestedOriginKey,
+      ...derivedOriginKeys.all,
+    ]);
+    let originKey =
+      requestedOriginKey ??
+      derivedOriginKeys.canonical ??
+      derivedOriginKeys.legacy ??
+      null;
     const materializeRewards = options.materializeRewards !== false;
     const processPayload = buildProcessPayload(dto, dryRun, materializeRewards);
-    let existingEvent = originKey
-      ? await this.findProcessEventByOriginKey(user, originKey)
-      : null;
+    let existingEvent: EventRow | null = null;
+    for (const candidateOriginKey of originCandidates) {
+      existingEvent = await this.findProcessEventByOriginKey(
+        user,
+        candidateOriginKey,
+      );
+      if (existingEvent) {
+        originKey =
+          nullableString(existingEvent.originKey) ?? candidateOriginKey;
+        break;
+      }
+    }
     if (!existingEvent && eventReference) {
       existingEvent = await this.findProcessEventByReference(
         user,
         eventReference,
       );
+      if (existingEvent?.originKey) {
+        originKey = existingEvent.originKey;
+      }
     }
 
     if (
       existingEvent &&
+      !options.exactReconciliationScope &&
       !processEventOriginOwnerMatches(
         existingEvent,
         profile.id,
@@ -13453,6 +13513,36 @@ export class GuestGamificationService {
     }
 
     if (existingEvent) {
+      const exactPersistence = options.exactReconciliationScope
+        ? await this.persistExactReconciliationEffects(
+            user,
+            dryRun,
+            existingEvent.id,
+            profile.id,
+            processGuestId,
+            originKey,
+            options.exactReconciliationScope,
+          )
+        : null;
+      if (exactPersistence?.ownerReconciliation.status === 'QUARANTINED') {
+        throw new ConflictException({
+          code: EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
+          message:
+            'Exact canonical event ownership is quarantined because it cannot be transferred safely.',
+        });
+      }
+      if (exactPersistence?.ownerReconciliation.status === 'REBOUND') {
+        const reboundEvent = originKey
+          ? await this.findProcessEventByOriginKey(user, originKey)
+          : null;
+        if (!reboundEvent) {
+          throw new ConflictException(
+            'The rebound exact canonical event could not be reloaded.',
+          );
+        }
+        existingEvent = reboundEvent;
+      }
+      const effectDryRun = exactPersistence?.dryRun ?? dryRun;
       const replayIntentIds = options.replayRewardScope
         ? await this.persistReplayRewardIntent(
             user,
@@ -13495,23 +13585,29 @@ export class GuestGamificationService {
           )
         : [];
       const materialized = materializeRewards
-        ? await this.materializeProcessRewardIntents(
-            user,
-            dto,
-            dryRun,
-            existingEvent,
-            profile.id,
-            eventReference,
-            originKey,
-            replayIntentIds ? { intentIds: replayIntentIds } : undefined,
-          )
+        ? exactPersistence && exactPersistence.intentIds.length === 0
+          ? null
+          : await this.materializeProcessRewardIntents(
+              user,
+              dto,
+              effectDryRun,
+              existingEvent,
+              profile.id,
+              eventReference,
+              originKey,
+              replayIntentIds
+                ? { intentIds: replayIntentIds }
+                : exactPersistence
+                  ? { intentIds: exactPersistence.intentIds }
+                  : undefined,
+            )
         : null;
       const persistedProcessDryRun = processPersistedEventDryRun(
         existingEvent,
-        materialized?.dryRun ?? dryRun,
+        materialized?.dryRun ?? effectDryRun,
       );
       const processDryRun = dryRunWithPersistedRewardIntents(
-        persistedProcessDryRun ?? dryRun,
+        persistedProcessDryRun ?? effectDryRun,
         materialized?.dryRun ?? null,
       );
       const processRewards = materialized?.rewards ?? existingRewards;
@@ -13548,11 +13644,101 @@ export class GuestGamificationService {
             new Set(missingEntitlementRuleIds),
           )
         : null;
+      let exactReconciliation:
+        | NonNullable<
+            GuestGameProcessEventResult['summary']['exactReconciliation']
+          >
+        | undefined;
+
+      if (exactPersistence && options.exactReconciliationScope) {
+        const decisionResult = await this.recordRuleDecisions(
+          user,
+          exactPersistence.dryRun,
+          {
+            eventId: existingEvent.id,
+            originKey,
+            traceId: nullableString(dto.traceId),
+            sourceFactId: exactPersistence.sourceFactId,
+            sourceExternalId: nullableString(dto.externalId),
+            sourceFactKind: 'EXACT_CANONICAL_RECONCILIATION',
+            evaluationRunId: [
+              'exact-canonical-reconciliation',
+              existingEvent.id,
+            ].join(':'),
+            evaluationMode: 'LIVE_LEDGER_FALLBACK',
+            evaluatorVersion:
+              options.evaluatorVersion ?? 'ledger-exact-reconciliation-v1',
+            suppressLedgerShadow: true,
+            replaceExistingRun: true,
+            excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
+            evidence: {
+              exactCanonicalReconciliation: true,
+              sourceFactId: exactPersistence.sourceFactId,
+              physicalSessionKey: exactPersistence.physicalSessionKey,
+              intentIds: exactPersistence.intentIds,
+            },
+          },
+        );
+        const [
+          pendingIntentCount,
+          deadLetterIntentCount,
+          missingExactLootBoxes,
+          missingExactMissions,
+        ] = await Promise.all([
+          exactPersistence.intentIds.length
+            ? this.prisma.guestGameRewardIntent.count({
+                where: {
+                  tenantId: user.tenantId,
+                  eventId: existingEvent.id,
+                  id: { in: exactPersistence.intentIds },
+                  status: { in: ['PENDING', 'PROCESSING', 'FAILED'] },
+                },
+              })
+            : Promise.resolve(0),
+          exactPersistence.intentIds.length
+            ? this.prisma.guestGameRewardIntent.count({
+                where: {
+                  tenantId: user.tenantId,
+                  eventId: existingEvent.id,
+                  id: { in: exactPersistence.intentIds },
+                  status: 'DEAD_LETTER',
+                },
+              })
+            : Promise.resolve(0),
+          this.getMissingMatchedLootBoxEntitlementRuleIds(
+            user,
+            exactPersistence.dryRun,
+            existingEvent.id,
+          ),
+          this.getMissingMatchedMissionRewardEntitlementRuleIds(
+            user,
+            exactPersistence.dryRun,
+            existingEvent.id,
+          ),
+        ]);
+        const deliveryState = guestGameExactReconciliationDeliveryState(
+          pendingIntentCount,
+          deadLetterIntentCount,
+        );
+        exactReconciliation = {
+          complete:
+            decisionResult.decisionsPersisted &&
+            deliveryState.complete &&
+            missingExactLootBoxes.length === 0 &&
+            missingExactMissions.length === 0,
+          waitingForDelivery: deliveryState.waitingForDelivery,
+          deadLetterIntentCount,
+          persistedIntentCount: exactPersistence.intentIds.length,
+          appliedXpDelta: exactPersistence.appliedXpDelta,
+          decisionsPersisted: decisionResult.decisionsPersisted,
+        };
+      }
 
       // Legacy events do not have an immutable reward intent. Re-evaluating
       // them here could advance another Battle Pass step or reroll a lootbox.
       if (
         !options.replayRewardScope &&
+        !options.exactReconciliationScope &&
         (materialized || entitlementRecoveryDryRun)
       ) {
         await this.recordRuleDecisions(
@@ -13596,7 +13782,7 @@ export class GuestGamificationService {
         rewards: processRewards,
         summary: {
           profileCreated: false,
-          appliedXpDelta: 0,
+          appliedXpDelta: exactPersistence?.appliedXpDelta ?? 0,
           createdRewards: createdRewards.length,
           queuedRewardAmount: sum(
             processRewards.map((reward) => reward.rewardAmount),
@@ -13604,6 +13790,7 @@ export class GuestGamificationService {
           idempotencyKey: originKey ?? eventReference?.externalId ?? null,
           idempotent: true,
           langameWrite: false,
+          ...(exactReconciliation ? { exactReconciliation } : {}),
         },
         note:
           createdRewards.length > 0
@@ -13612,7 +13799,7 @@ export class GuestGamificationService {
       };
     }
 
-    if (options.replayRewardScope) {
+    if (options.replayRewardScope || options.exactReconciliationScope) {
       throw new ConflictException(
         'Точечный replay не создаёт новое физическое событие: каноническое событие исходного факта не найдено.',
       );
@@ -14071,6 +14258,8 @@ export class GuestGamificationService {
       externalProvider: IntegrationProvider.LANGAME,
       externalDomain: liveSession.externalDomain,
       externalId: liveSession.externalSessionId,
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId: liveSession.externalSessionId,
       activeRulesOnly: true,
       suppressLootBoxRewards: true,
       note:
@@ -14186,6 +14375,9 @@ export class GuestGamificationService {
       // below gives the correction event its own idempotency/origin key.
       sourceFactId: originalSourceFactId,
       sourceFactKind: 'GUEST_SESSION',
+      sourceKind: nullableString(dto.sourceKind) ?? 'GUEST_SESSION',
+      sessionExternalId:
+        nullableString(dto.sessionExternalId) ?? originalSourceFactId,
       externalId: correctionExternalId,
       activeRulesOnly: true,
       suppressLootBoxRewards: true,
@@ -14615,6 +14807,580 @@ export class GuestGamificationService {
     return row ? mapReward(row) : null;
   }
 
+  private async persistExactReconciliationEffects(
+    user: AuthenticatedUser,
+    dryRun: GuestGameDryRunResult,
+    eventId: string,
+    profileId: string,
+    guestId: string | null,
+    originKey: string | null,
+    scope: NonNullable<
+      GuestGameProcessEventOptions['exactReconciliationScope']
+    >,
+  ): Promise<ExactReconciliationPersistence> {
+    if (!originKey) {
+      throw new BadRequestException(
+        'Exact canonical reconciliation requires the immutable source originKey.',
+      );
+    }
+    const scopeKey = (value: {
+      ruleKind: string;
+      ruleId: string;
+      battlePassStep: number | null;
+    }) =>
+      [
+        value.ruleKind,
+        value.ruleId,
+        value.ruleKind === 'SEASON' ? (value.battlePassStep ?? '') : '',
+      ].join(':');
+    const expectedScope = new Map(
+      scope.rules.map((item) => [scopeKey(item), item] as const),
+    );
+    if (expectedScope.size !== scope.rules.length) {
+      throw new ConflictException(
+        'Exact canonical reconciliation contains duplicate rule scopes.',
+      );
+    }
+    const scopedRules = dryRun.rules.filter((rule) =>
+      expectedScope.has(
+        scopeKey({
+          ruleKind: rule.kind,
+          ruleId: rule.id,
+          battlePassStep: rule.battlePassStep ?? null,
+        }),
+      ),
+    );
+
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const eventRows = await tx.$queryRaw<
+              Array<{
+                id: string;
+                profileId: string | null;
+                guestId: string | null;
+                eventType: string;
+                occurredAt: Date;
+                xpDelta: number;
+                payload: Prisma.JsonValue | null;
+              }>
+            >(Prisma.sql`
+              SELECT "id", "profileId", "guestId", "eventType", "occurredAt",
+                     "xpDelta", "payload"
+              FROM "GuestGameEvent"
+              WHERE "id" = ${eventId}
+                AND "tenantId" = ${user.tenantId}
+                AND "originKey" = ${originKey}
+              FOR UPDATE
+            `);
+            const factRows = await tx.$queryRaw<
+              Array<{
+                id: string;
+                updatedAt: Date;
+                profileId: string | null;
+                externalProvider: string;
+                externalDomain: string;
+                sourceKind: string;
+                sessionExternalId: string | null;
+                factType: string;
+              }>
+            >(Prisma.sql`
+              SELECT "id", "updatedAt", "profileId", "externalProvider",
+                     "externalDomain", "sourceKind", "sessionExternalId",
+                     "factType"
+              FROM "GuestActivityFact"
+              WHERE "id" = ${scope.sourceFactId}
+                AND "tenantId" = ${user.tenantId}
+                AND "lifecycleStatus" = 'ACTIVE'
+                AND "confidence" = 'EXACT'
+                AND "supersededAt" IS NULL
+              FOR SHARE
+            `);
+            const eventRow = eventRows[0];
+            const factRow = factRows[0];
+            if (
+              eventRows.length !== 1 ||
+              !eventRow ||
+              factRows.length !== 1 ||
+              !factRow
+            ) {
+              throw new ConflictException(
+                'The exact source event or active fact changed before effects were persisted.',
+              );
+            }
+            const factPhysicalIdentity = buildGuestGamePhysicalProgressIdentity(
+              {
+                externalProvider: factRow.externalProvider,
+                externalDomain: factRow.externalDomain,
+                sourceKind: factRow.sourceKind,
+                sessionExternalId: factRow.sessionExternalId,
+                eventType: factRow.factType,
+              },
+            );
+            if (
+              !factPhysicalIdentity ||
+              factPhysicalIdentity.key !== scope.physicalSessionKey
+            ) {
+              throw new ConflictException(
+                'The active exact fact does not belong to the expected physical session.',
+              );
+            }
+
+            const ownerReconciliation =
+              await reconcileExactCanonicalEventOwnerInTransaction(tx, {
+                tenantId: user.tenantId,
+                eventId,
+                originKey,
+                expectedEventType: dryRun.eventType,
+                targetProfileId: profileId,
+                targetGuestId: guestId,
+                sourceFactId: scope.sourceFactId,
+                sourceFactUpdatedAt: scope.sourceFactUpdatedAt,
+              });
+            if (ownerReconciliation.status === 'QUARANTINED') {
+              return {
+                dryRun,
+                intentIds: [],
+                appliedXpDelta: 0,
+                physicalSessionKey: scope.physicalSessionKey,
+                sourceFactId: scope.sourceFactId,
+                ownerReconciliation,
+              };
+            }
+            if (ownerReconciliation.status === 'REBOUND') {
+              eventRow.profileId = profileId;
+              eventRow.guestId = guestId;
+            }
+            if (
+              eventRow.profileId !== profileId ||
+              eventRow.guestId !== guestId
+            ) {
+              throw new ConflictException(
+                'The exact canonical event owner does not match the active exact fact.',
+              );
+            }
+
+            const payload = jsonRecord(eventRow.payload);
+            const hasStoredPlan = Object.prototype.hasOwnProperty.call(
+              payload,
+              'exactReconciliationPlan',
+            );
+            let plan = exactReconciliationPlanFromPayload(payload);
+            let qualificationOutcomes: AtomicMissionQualificationOutcome[] = [];
+            let qualificationSourceRules: ProcessRewardIntentRuleSnapshot[] =
+              [];
+
+            if (hasStoredPlan && !plan) {
+              throw new ConflictException(
+                'The canonical event contains a corrupt exact reconciliation plan.',
+              );
+            }
+            if (plan) {
+              if (
+                plan.eventId !== eventId ||
+                plan.originKey !== originKey ||
+                plan.profileId !== profileId ||
+                plan.physicalSessionKey !== scope.physicalSessionKey ||
+                plan.eventType !== eventRow.eventType ||
+                plan.occurredAt !== eventRow.occurredAt.toISOString()
+              ) {
+                throw new ConflictException(
+                  'The immutable exact reconciliation plan belongs to different event evidence.',
+                );
+              }
+            } else {
+              if (
+                !(factRow.updatedAt instanceof Date) ||
+                factRow.updatedAt.getTime() !==
+                  scope.sourceFactUpdatedAt.getTime() ||
+                scopedRules.length !== expectedScope.size
+              ) {
+                throw new ConflictException(
+                  'The exact fact or evaluated rule scope changed before the plan was persisted.',
+                );
+              }
+
+              const ruleIdsByKind = {
+                MISSION: scope.rules
+                  .filter((item) => item.ruleKind === 'MISSION')
+                  .map((item) => item.ruleId),
+                SEASON: scope.rules
+                  .filter((item) => item.ruleKind === 'SEASON')
+                  .map((item) => item.ruleId),
+                LOOT_BOX: scope.rules
+                  .filter((item) => item.ruleKind === 'LOOT_BOX')
+                  .map((item) => item.ruleId),
+              };
+              const lockRuleRows = async (
+                table:
+                  | 'GuestGameMission'
+                  | 'GuestGameSeason'
+                  | 'GuestGameLootBox',
+                ids: string[],
+              ) => {
+                if (!ids.length) {
+                  return [] as Array<{ id: string; updatedAt: Date }>;
+                }
+                return tx.$queryRaw<Array<{ id: string; updatedAt: Date }>>(
+                  Prisma.sql`
+                    SELECT "id", "updatedAt"
+                    FROM ${Prisma.raw(`"${table}"`)}
+                    WHERE "tenantId" = ${user.tenantId}
+                      AND "status" = 'ACTIVE'
+                      AND "id" IN (${Prisma.join(ids)})
+                    ORDER BY "id"
+                    FOR SHARE
+                  `,
+                );
+              };
+              const [missionRows, seasonRows, lootBoxRows] = await Promise.all([
+                lockRuleRows('GuestGameMission', ruleIdsByKind.MISSION),
+                lockRuleRows('GuestGameSeason', ruleIdsByKind.SEASON),
+                lockRuleRows('GuestGameLootBox', ruleIdsByKind.LOOT_BOX),
+              ]);
+              const currentRuleVersions = new Map([
+                ...missionRows.map(
+                  (row) => [`MISSION:${row.id}`, row.updatedAt] as const,
+                ),
+                ...seasonRows.map(
+                  (row) => [`SEASON:${row.id}`, row.updatedAt] as const,
+                ),
+                ...lootBoxRows.map(
+                  (row) => [`LOOT_BOX:${row.id}`, row.updatedAt] as const,
+                ),
+              ]);
+              for (const expected of scope.rules) {
+                const current = currentRuleVersions.get(
+                  `${expected.ruleKind}:${expected.ruleId}`,
+                );
+                if (
+                  !(current instanceof Date) ||
+                  current.getTime() !== expected.ruleUpdatedAt.getTime()
+                ) {
+                  throw new ConflictException(
+                    'An exact reconciliation rule changed before qualification.',
+                  );
+                }
+              }
+
+              const snapshots = scopedRules.map(processRewardRuleSnapshot);
+              qualificationSourceRules = snapshots;
+              const qualificationSnapshots = snapshots.filter((rule) => {
+                if (rule.kind !== 'MISSION' || !rule.eligible) return false;
+                const hasIssuableEffect =
+                  rule.xpDelta !== 0 ||
+                  rule.rewardType === 'LOOT_BOX_ENTITLEMENT' ||
+                  Boolean(rule.rewardLabel) ||
+                  (rule.rewardAmount ?? 0) > 0;
+                return (
+                  hasIssuableEffect &&
+                  missionDryRunRuleRequiresAtomicQualification(rule)
+                );
+              });
+              qualificationOutcomes = qualificationSnapshots.length
+                ? await this.atomicMissionQualificationOutcomes(tx, {
+                    tenantId: user.tenantId,
+                    profileId,
+                    guestId: dryRun.guest?.id ?? null,
+                    occurredAt: eventRow.occurredAt,
+                    timeZone: guestGameTimeZone(dryRun.store?.timeZone ?? null),
+                    rules: qualificationSnapshots,
+                  })
+                : [];
+              const deniedMissionIds = new Set(
+                qualificationOutcomes
+                  .filter((outcome) => !outcome.allowed)
+                  .map((outcome) => outcome.ruleId),
+              );
+              const qualifiedRules = scopedRules.map((rule) =>
+                deniedMissionIds.has(rule.id)
+                  ? {
+                      ...rule,
+                      eligible: false,
+                      blockers: [
+                        ...rule.blockers,
+                        'Mission issuance limits were exhausted atomically.',
+                      ],
+                    }
+                  : rule,
+              );
+              const qualifiedDryRun = dryRunWithRules(dryRun, qualifiedRules);
+              const rewardIntents = qualifiedRules
+                .filter(shouldQueueProcessReward)
+                .map((rule) =>
+                  processRewardIntentPlan(
+                    rule,
+                    eventRow.occurredAt.toISOString(),
+                    profileId,
+                  ),
+                );
+              plan = {
+                schemaVersion: 1,
+                eventId,
+                originKey,
+                profileId,
+                physicalSessionKey: scope.physicalSessionKey,
+                sourceFactId: scope.sourceFactId,
+                sourceFactUpdatedAt: scope.sourceFactUpdatedAt.toISOString(),
+                createdAt: new Date().toISOString(),
+                occurredAt: eventRow.occurredAt.toISOString(),
+                eventType: eventRow.eventType,
+                ruleVersions: scope.rules.map((item) => ({
+                  ruleKind: item.ruleKind,
+                  ruleId: item.ruleId,
+                  battlePassStep: item.battlePassStep,
+                  ruleUpdatedAt: item.ruleUpdatedAt.toISOString(),
+                })),
+                rules: qualifiedRules.map(processRewardRuleSnapshot),
+                rewardIntents,
+                expectedXpDelta: sum(
+                  qualifiedRules
+                    .filter((rule) => rule.eligible)
+                    .map((rule) => rule.xpDelta),
+                ),
+              };
+              await tx.guestGameEvent.update({
+                where: { id: eventId },
+                data: {
+                  payload: {
+                    ...payload,
+                    physicalSourceKey: plan.physicalSessionKey,
+                    exactReconciliationPlan: plan,
+                  } as Prisma.InputJsonObject,
+                },
+              });
+            }
+
+            const qualifiedDryRun = exactReconciliationPlanDryRun(
+              eventRow,
+              dryRun,
+              plan,
+            );
+
+            for (const outcome of qualificationOutcomes.filter(
+              (item) => item.allowed,
+            )) {
+              const rule = qualificationSourceRules.find(
+                (item) => item.id === outcome.ruleId,
+              );
+              if (!rule) continue;
+              const idempotencyKey = [
+                'mission-qualification',
+                eventId,
+                rule.id,
+              ].join(':');
+              const intent = await tx.guestGameRewardIntent.upsert({
+                where: {
+                  tenantId_idempotencyKey: {
+                    tenantId: user.tenantId,
+                    idempotencyKey,
+                  },
+                },
+                create: {
+                  tenantId: user.tenantId,
+                  eventId,
+                  profileId,
+                  originKey,
+                  ruleType: 'MISSION',
+                  ruleId: rule.id,
+                  effectKind: 'QUALIFICATION',
+                  slotKey: 'mission-qualification',
+                  idempotencyKey,
+                  claimKey: null,
+                  status: 'APPLIED',
+                  plan: {
+                    schemaVersion: 1,
+                    qualifiedAt: outcome.qualifiedAt,
+                    slotKey: 'mission-qualification',
+                    claimKey: null,
+                    rule,
+                    atomicMissionLimit: {
+                      codes: outcome.codes,
+                      counts: outcome.counts,
+                      isolationLevel: 'SERIALIZABLE',
+                    },
+                  },
+                  qualifiedAt: new Date(outcome.qualifiedAt),
+                  processedAt: new Date(),
+                },
+                update: {},
+              });
+              if (
+                intent.eventId !== eventId ||
+                intent.profileId !== profileId ||
+                intent.ruleId !== rule.id ||
+                intent.effectKind !== 'QUALIFICATION' ||
+                intent.status !== 'APPLIED'
+              ) {
+                throw new ConflictException(
+                  'Mission qualification was concurrently owned by another event.',
+                );
+              }
+            }
+
+            const plans = plan.rewardIntents;
+            const intentIds: string[] = [];
+            for (const rewardPlan of plans) {
+              const idempotencyKey = buildGuestGameRewardIdempotencyKey({
+                originKey,
+                ruleKind: rewardPlan.rule.kind,
+                ruleId: rewardPlan.rule.id,
+                slot: rewardPlan.slotKey,
+              });
+              if (!idempotencyKey) {
+                throw new ConflictException(
+                  'Could not derive exact reconciliation reward idempotency.',
+                );
+              }
+              const data = {
+                tenantId: user.tenantId,
+                eventId,
+                profileId,
+                originKey,
+                ruleType: rewardPlan.rule.kind,
+                ruleId: rewardPlan.rule.id,
+                effectKind: 'REWARD',
+                slotKey: rewardPlan.slotKey,
+                idempotencyKey,
+                claimKey: rewardPlan.claimKey,
+                status: 'PENDING',
+                plan: rewardPlan,
+                qualifiedAt: new Date(rewardPlan.qualifiedAt),
+              } satisfies Prisma.GuestGameRewardIntentUncheckedCreateInput;
+              const intent = rewardPlan.claimKey
+                ? await tx.guestGameRewardIntent.upsert({
+                    where: {
+                      tenantId_claimKey: {
+                        tenantId: user.tenantId,
+                        claimKey: rewardPlan.claimKey,
+                      },
+                    },
+                    create: data,
+                    update: {},
+                  })
+                : await tx.guestGameRewardIntent.upsert({
+                    where: {
+                      tenantId_idempotencyKey: {
+                        tenantId: user.tenantId,
+                        idempotencyKey,
+                      },
+                    },
+                    create: data,
+                    update: {},
+                  });
+              const storedPlan = parseProcessRewardIntentPlan(intent.plan);
+              if (
+                intent.eventId !== eventId ||
+                intent.profileId !== profileId ||
+                intent.originKey !== originKey ||
+                intent.idempotencyKey !== idempotencyKey ||
+                intent.claimKey !== rewardPlan.claimKey ||
+                ![
+                  'PENDING',
+                  'PROCESSING',
+                  'FAILED',
+                  'APPLIED',
+                  'DEAD_LETTER',
+                ].includes(intent.status) ||
+                !storedPlan ||
+                canonicalGuestGameJsonFingerprint(storedPlan) !==
+                  canonicalGuestGameJsonFingerprint(rewardPlan)
+              ) {
+                throw new ConflictException(
+                  'An exact reward intent is owned by another event, profile, or rule version.',
+                );
+              }
+              intentIds.push(intent.id);
+            }
+
+            const expectedXpDelta = plan.expectedXpDelta;
+            const existingPosting = await tx.guestGameXpPosting.findUnique({
+              where: { eventId },
+            });
+            let appliedXpDelta = 0;
+            if (existingPosting) {
+              if (
+                existingPosting.profileId !== profileId ||
+                existingPosting.requestedDelta !== expectedXpDelta
+              ) {
+                throw new ConflictException(
+                  'The canonical event already has a different XP posting.',
+                );
+              }
+              appliedXpDelta = existingPosting.appliedDelta;
+            } else if (expectedXpDelta !== 0) {
+              if (eventRow.xpDelta !== 0) {
+                throw new ConflictException(
+                  'The canonical event XP was changed before exact reconciliation.',
+                );
+              }
+              const incremented = await tx.guestGameProfile.update({
+                where: { id: profileId },
+                data: {
+                  xp: { increment: expectedXpDelta },
+                  lastActivityAt: new Date(),
+                },
+                select: { xp: true },
+              });
+              const balanceBefore = incremented.xp - expectedXpDelta;
+              const balanceAfter = Math.max(0, incremented.xp);
+              appliedXpDelta = balanceAfter - balanceBefore;
+              await tx.guestGameProfile.update({
+                where: { id: profileId },
+                data: {
+                  xp: balanceAfter,
+                  level: levelFromXp(balanceAfter),
+                  lastActivityAt: new Date(),
+                },
+              });
+              await tx.guestGameEvent.update({
+                where: { id: eventId },
+                data: { xpDelta: appliedXpDelta },
+              });
+              await tx.guestGameXpPosting.create({
+                data: {
+                  tenantId: user.tenantId,
+                  profileId,
+                  eventId,
+                  idempotencyKey: `guest-game-xp:${eventId}`,
+                  requestedDelta: expectedXpDelta,
+                  appliedDelta: appliedXpDelta,
+                  balanceBefore,
+                  balanceAfter,
+                  evidence: {
+                    eventType: plan.eventType,
+                    originKey,
+                    sourceFactId: plan.sourceFactId,
+                    physicalSessionKey: plan.physicalSessionKey,
+                    exactCanonicalReconciliation: true,
+                  },
+                },
+              });
+            }
+
+            return {
+              dryRun: qualifiedDryRun,
+              intentIds,
+              appliedXpDelta,
+              physicalSessionKey: plan.physicalSessionKey,
+              sourceFactId: plan.sourceFactId,
+              ownerReconciliation,
+            };
+          },
+          { isolationLevel: 'Serializable' },
+        );
+      } catch (error) {
+        if (isSerializationConflictError(error) && attempt < maxAttempts) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error('Exact canonical reconciliation retry exhausted.');
+  }
+
   private async persistReplayRewardIntent(
     user: AuthenticatedUser,
     dryRun: GuestGameDryRunResult,
@@ -14950,6 +15716,12 @@ export class GuestGamificationService {
       sourceFactKind:
         nullableString(storedPayload.sourceFactKind) ??
         nullableString(dto.sourceFactKind),
+      sourceKind:
+        nullableString(storedPayload.sourceKind) ??
+        nullableString(dto.sourceKind),
+      sessionExternalId:
+        nullableString(storedPayload.sessionExternalId) ??
+        nullableString(dto.sessionExternalId),
       externalProvider: storedReference?.externalProvider ?? null,
       externalDomain: storedReference?.externalDomain ?? null,
       externalId: storedReference?.externalId ?? null,
@@ -15685,6 +16457,7 @@ export class GuestGamificationService {
       select: {
         eventType: true,
         occurredAt: true,
+        externalProvider: true,
         externalDomain: true,
         payload: true,
       },
@@ -17040,10 +17813,7 @@ export class GuestGamificationService {
     const externalDomains = uniqueStrings(
       stores.map((store) => store.externalDomain ?? ''),
     );
-    const persistedLevelMatches = matchPersistedBattlePassLevels(
-      value,
-      currentLevels,
-    );
+    matchPersistedBattlePassLevels(value, currentLevels);
 
     return Promise.all(
       value.map(async (item, index) => {
@@ -17052,17 +17822,24 @@ export class GuestGamificationService {
         const rawTaskType = nullableString(rawRules.taskType);
 
         // Published legacy seasons keep their old evaluator until an operator
-        // explicitly saves the step with the v2 condition editor.
+        // explicitly saves the step with the v2 condition editor. We still
+        // canonicalize the source policy for semantic play-time steps so a
+        // stale scalar cannot disable the shared exact-duration fallback.
         if (!rawTaskType) {
-          return level as Prisma.InputJsonObject;
+          const evaluationPolicy =
+            guestGameBattlePassStepEvaluationPolicy(rawRules);
+          return evaluationPolicy === 'LIVE_WITH_LEDGER_FALLBACK'
+            ? cleanJsonRecord({
+                ...level,
+                activationRules: cleanJsonRecord({
+                  ...rawRules,
+                  evaluationPolicy,
+                }),
+              })
+            : (level as Prisma.InputJsonObject);
         }
 
         const taskType = missionTaskType(rawTaskType);
-        const persistedEvaluationPolicy =
-          persistedBattlePassPlayTimeEvaluationPolicy(
-            persistedLevelMatches.get(index),
-            taskType,
-          );
         let conditions = normalizeMissionWizardConditions({
           taskType,
           conditions: rawRules,
@@ -17215,11 +17992,7 @@ export class GuestGamificationService {
             source: 'battle_pass_step',
             taskType,
             triggerKind: missionWizardTrigger(taskType),
-            evaluationPolicy:
-              persistedEvaluationPolicy ??
-              (taskType === 'PLAY_TIME'
-                ? 'LIVE_PRIMARY'
-                : missionEvaluationPolicy(taskType)),
+            evaluationPolicy: missionEvaluationPolicy(taskType),
             periodicity: 'NONE',
             ...(taskType === 'BALANCE_TOPUP'
               ? { domainScoped: true, externalDomains }
@@ -19883,6 +20656,7 @@ function lootBoxVisibleInCatalog(rule: { usageKind?: string | null }) {
 }
 
 function mapLootBox(row: LootBoxRow): GuestGameLootBox {
+  const periodRules = jsonRecord(row.periodRules);
   return {
     id: row.id,
     name: row.name,
@@ -19895,7 +20669,13 @@ function mapLootBox(row: LootBoxRow): GuestGameLootBox {
     segment: row.segment,
     sessionType: row.sessionType,
     storeIds: stringArray(row.storeIds),
-    periodRules: row.periodRules,
+    periodRules: {
+      ...periodRules,
+      evaluationPolicy: guestGameLootBoxEvaluationPolicy(
+        row.triggerKind,
+        periodRules,
+      ),
+    },
     limits: row.limits,
     probabilityRules: row.probabilityRules,
     budgetAmount: numberOrNull(row.budgetAmount),
@@ -19952,7 +20732,12 @@ function mapMission(row: MissionRow): GuestGameMission {
     antiFraudRules: row.antiFraudRules,
     manualApprovalRequired: row.manualApprovalRequired,
     definitionVersion: row.definitionVersion,
-    evaluationPolicy: row.evaluationPolicy,
+    evaluationPolicy: guestGameMissionEvaluationPolicy(
+      row.definitionVersion,
+      conditions,
+      effectiveMissionType,
+      row.evaluationPolicy,
+    ),
     note: row.note,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -20362,7 +21147,7 @@ function mapSeason(row: SeasonRow): GuestGameSeason {
     periodFrom: iso(row.periodFrom),
     periodTo: iso(row.periodTo),
     xpRules: row.xpRules,
-    levels: row.levels,
+    levels: effectiveBattlePassLevelPolicies(row.levels),
     freeRewards: row.freeRewards,
     premiumRewards: row.premiumRewards,
     premiumEnabled: row.premiumEnabled,
@@ -20376,6 +21161,27 @@ function mapSeason(row: SeasonRow): GuestGameSeason {
     audience: mapAudience(row.audience),
     createdBy: mapUser(row.createdByUser),
   };
+}
+
+function effectiveBattlePassLevelPolicies(value: Prisma.JsonValue | null) {
+  if (!Array.isArray(value)) return value;
+
+  return value.map((item) => {
+    const level = jsonRecord(item);
+    const activationRules = jsonRecord(
+      level.activationRules as Prisma.JsonValue | null,
+    );
+    if (!Object.keys(activationRules).length) return item;
+
+    return {
+      ...level,
+      activationRules: {
+        ...activationRules,
+        evaluationPolicy:
+          guestGameBattlePassStepEvaluationPolicy(activationRules),
+      },
+    };
+  }) as Prisma.JsonValue;
 }
 
 function mapPromoCard(row: PromoCardRow): GuestGamePromoCard {
@@ -24007,6 +24813,29 @@ function buildProcessOriginKey(
   });
 }
 
+function buildProcessOriginKeys(
+  dto: GuestGameProcessEventDto,
+  eventType: string,
+) {
+  const legacy = buildProcessOriginKey(dto, eventType);
+  const canonical =
+    buildGuestGamePlayTimeOriginKey({
+      externalProvider:
+        integrationProviderValue(dto.externalProvider) ??
+        IntegrationProvider.LANGAME,
+      externalDomain: nullableString(dto.externalDomain),
+      sourceKind: nullableString(dto.sourceKind),
+      sessionExternalId: nullableString(dto.sessionExternalId),
+      eventType,
+    }) ?? legacy;
+
+  return {
+    canonical,
+    legacy,
+    all: uniqueStrings([canonical, legacy]),
+  };
+}
+
 function processEventOriginOwnerMatches(
   event: Pick<EventRow, 'profileId' | 'eventType'>,
   profileId: string,
@@ -24112,6 +24941,14 @@ function pipelineProcessDtoFromFact(
     externalProvider: fact.externalProvider,
     externalDomain: fact.externalDomain,
     externalId: fact.externalId,
+    sourceKind:
+      fact.source === 'GUEST_SESSION' && fact.eventType === 'PLAY_HOUR'
+        ? fact.source
+        : null,
+    sessionExternalId:
+      fact.source === 'GUEST_SESSION' && fact.eventType === 'PLAY_HOUR'
+        ? fact.externalId
+        : null,
   };
 }
 
@@ -24289,6 +25126,8 @@ function buildProcessPayload(
     externalProvider: nullableString(dto.externalProvider),
     externalDomain: nullableString(dto.externalDomain),
     externalId: nullableString(dto.externalId),
+    sourceKind: nullableString(dto.sourceKind),
+    sessionExternalId: nullableString(dto.sessionExternalId),
     ...(extraPayload ? { extra: extraPayload } : {}),
     store: dryRun.store,
     input: dryRun.input,
@@ -24346,6 +25185,28 @@ type ProcessRewardIntentPlan = {
   slotKey: string;
   claimKey: string | null;
   rule: ProcessRewardIntentRuleSnapshot;
+};
+
+type ExactReconciliationPlan = {
+  schemaVersion: 1;
+  eventId: string;
+  originKey: string;
+  profileId: string;
+  physicalSessionKey: string;
+  sourceFactId: string;
+  sourceFactUpdatedAt: string;
+  createdAt: string;
+  occurredAt: string;
+  eventType: string;
+  ruleVersions: Array<{
+    ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
+    ruleId: string;
+    battlePassStep: number | null;
+    ruleUpdatedAt: string;
+  }>;
+  rules: ProcessRewardIntentRuleSnapshot[];
+  rewardIntents: ProcessRewardIntentPlan[];
+  expectedXpDelta: number;
 };
 
 type AtomicMissionQualificationOutcome = {
@@ -24424,6 +25285,36 @@ function processRewardIntentPlan(
 
 function processRewardIntentPlanKey(plan: ProcessRewardIntentPlan) {
   return `${plan.rule.kind}:${plan.rule.id}:${plan.slotKey}`;
+}
+
+export function canonicalGuestGameJsonFingerprint(value: unknown): string {
+  return JSON.stringify(canonicalGuestGameJsonValue(value));
+}
+
+export function guestGameExactReconciliationDeliveryState(
+  pendingIntentCount: number,
+  deadLetterIntentCount: number,
+) {
+  return {
+    complete: pendingIntentCount === 0 && deadLetterIntentCount === 0,
+    waitingForDelivery: deadLetterIntentCount === 0 && pendingIntentCount > 0,
+  };
+}
+
+function canonicalGuestGameJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalGuestGameJsonValue);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, canonicalGuestGameJsonValue(value[key])]),
+  );
 }
 
 function processRewardInputSnapshot(
@@ -24919,6 +25810,164 @@ function parseProcessRewardIntentPlan(
     claimKey: nullableString(value.claimKey) ?? null,
     rule,
   };
+}
+
+function parseExactReconciliationPlan(
+  value: unknown,
+): ExactReconciliationPlan | null {
+  if (!isRecord(value) || intValue(value.schemaVersion) !== 1) return null;
+  const eventId = nullableId(value.eventId);
+  const originKey = nullableString(value.originKey);
+  const profileId = nullableId(value.profileId);
+  const physicalSessionKey = nullableString(value.physicalSessionKey);
+  const sourceFactId = nullableId(value.sourceFactId);
+  const sourceFactUpdatedAt = dateValue(value.sourceFactUpdatedAt);
+  const createdAt = dateValue(value.createdAt);
+  const occurredAt = dateValue(value.occurredAt);
+  const eventType = nullableString(value.eventType);
+  const expectedXpDelta = intValue(value.expectedXpDelta);
+  if (
+    !eventId ||
+    !originKey ||
+    !profileId ||
+    !physicalSessionKey ||
+    !sourceFactId ||
+    !sourceFactUpdatedAt ||
+    !createdAt ||
+    !occurredAt ||
+    !eventType ||
+    expectedXpDelta == null ||
+    !Array.isArray(value.ruleVersions) ||
+    !Array.isArray(value.rules) ||
+    !Array.isArray(value.rewardIntents)
+  ) {
+    return null;
+  }
+
+  const ruleVersions = value.ruleVersions
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const ruleKind = nullableString(item.ruleKind);
+      const ruleId = nullableId(item.ruleId);
+      const ruleUpdatedAt = dateValue(item.ruleUpdatedAt);
+      if (
+        (ruleKind !== 'LOOT_BOX' &&
+          ruleKind !== 'MISSION' &&
+          ruleKind !== 'SEASON') ||
+        !ruleId ||
+        !ruleUpdatedAt
+      ) {
+        return null;
+      }
+      return {
+        ruleKind,
+        ruleId,
+        battlePassStep: intValue(item.battlePassStep) ?? null,
+        ruleUpdatedAt: ruleUpdatedAt.toISOString(),
+      };
+    })
+    .filter((item): item is ExactReconciliationPlan['ruleVersions'][number] =>
+      Boolean(item),
+    );
+  const rules = value.rules
+    .map(parseProcessRewardIntentRule)
+    .filter((item): item is ProcessRewardIntentRuleSnapshot => Boolean(item));
+  const rewardIntents = value.rewardIntents
+    .map(parseProcessRewardIntentPlan)
+    .filter((item): item is ProcessRewardIntentPlan => Boolean(item));
+  if (
+    ruleVersions.length !== value.ruleVersions.length ||
+    rules.length !== value.rules.length ||
+    rewardIntents.length !== value.rewardIntents.length
+  ) {
+    return null;
+  }
+
+  const ruleKeys = new Set(
+    rules.map((rule) =>
+      [
+        rule.kind,
+        rule.id,
+        rule.kind === 'SEASON' ? (rule.battlePassStep ?? '') : '',
+      ].join(':'),
+    ),
+  );
+  const versionKeys = new Set(
+    ruleVersions.map((rule) =>
+      [
+        rule.ruleKind,
+        rule.ruleId,
+        rule.ruleKind === 'SEASON' ? (rule.battlePassStep ?? '') : '',
+      ].join(':'),
+    ),
+  );
+  if (
+    ruleKeys.size !== rules.length ||
+    versionKeys.size !== ruleVersions.length ||
+    ruleKeys.size !== versionKeys.size ||
+    [...ruleKeys].some((key) => !versionKeys.has(key))
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    eventId,
+    originKey,
+    profileId,
+    physicalSessionKey,
+    sourceFactId,
+    sourceFactUpdatedAt: sourceFactUpdatedAt.toISOString(),
+    createdAt: createdAt.toISOString(),
+    occurredAt: occurredAt.toISOString(),
+    eventType,
+    ruleVersions,
+    rules,
+    rewardIntents,
+    expectedXpDelta,
+  };
+}
+
+function exactReconciliationPlanFromPayload(
+  payload: unknown,
+): ExactReconciliationPlan | null {
+  const record = jsonRecord(payload as Prisma.JsonValue | null);
+  if (
+    !Object.prototype.hasOwnProperty.call(record, 'exactReconciliationPlan')
+  ) {
+    return null;
+  }
+  return parseExactReconciliationPlan(record.exactReconciliationPlan);
+}
+
+function exactReconciliationPlanDryRun(
+  event: PersistedProcessEventEvidence,
+  identityDryRun: GuestGameDryRunResult,
+  plan: ExactReconciliationPlan,
+) {
+  const payload = jsonRecord(event.payload);
+  const occurredAt =
+    event.occurredAt instanceof Date
+      ? event.occurredAt
+      : dateValue(event.occurredAt);
+  if (!occurredAt || occurredAt.toISOString() !== plan.occurredAt) {
+    throw new ConflictException(
+      'The canonical event no longer matches its exact reconciliation plan.',
+    );
+  }
+  const store = processRewardStoreSnapshot(payload.store, identityDryRun.store);
+  const input = processRewardInputSnapshot(payload.input, identityDryRun.input);
+  return dryRunWithRules(
+    {
+      ...identityDryRun,
+      eventType: plan.eventType,
+      occurredAt: plan.occurredAt,
+      store,
+      input,
+      note: 'Exact reconciliation is resumed from immutable event evidence.',
+    },
+    plan.rules.map((rule) => ({ ...rule, progress: null })),
+  );
 }
 
 function parseProcessRewardIntentRule(
@@ -26071,6 +27120,7 @@ function mapProfileSummary(
 function storedEventToProgressEvent(row: {
   eventType: string;
   occurredAt: Date;
+  externalProvider: IntegrationProvider | null;
   externalDomain: string | null;
   payload: Prisma.JsonValue | null;
 }): GuestGameProgressEvent {
@@ -26082,6 +27132,11 @@ function storedEventToProgressEvent(row: {
     eventType: row.eventType,
     occurredAt: row.occurredAt,
     sourceFactId: nullableString(payload.sourceFactId),
+    externalProvider:
+      nullableString(row.externalProvider) ??
+      nullableString(payload.externalProvider),
+    sourceKind: nullableString(payload.sourceKind),
+    sessionExternalId: nullableString(payload.sessionExternalId),
     storeId: nullableString(store.id),
     externalDomain:
       nullableString(row.externalDomain) ??
@@ -26113,6 +27168,9 @@ function currentEventToProgressEvent(
     eventType: context.eventType,
     occurredAt: context.occurredAt,
     sourceFactId: context.sourceFactId,
+    externalProvider: context.externalProvider,
+    sourceKind: context.sourceKind,
+    sessionExternalId: context.sessionExternalId,
     storeId: context.storeId,
     externalDomain: context.externalDomain,
     sessionType: context.sessionType,
@@ -26141,6 +27199,9 @@ type DryRunContext = {
   limitOccurredAt: Date;
   sourceFactKind: string | null;
   sourceFactId: string | null;
+  externalProvider: string | null;
+  sourceKind: string | null;
+  sessionExternalId: string | null;
   profile: GuestGameProfile | null;
   guest: GuestGameProfile['guest'];
   storeId: string | null;
@@ -26299,7 +27360,10 @@ function evaluateLootBoxDryRun(
     name: rule.name,
     status: rule.status,
     triggerKind: rule.triggerKind,
-    evaluationPolicy: 'LIVE_PRIMARY',
+    evaluationPolicy: guestGameLootBoxEvaluationPolicy(
+      rule.triggerKind,
+      rule.periodRules,
+    ),
     manualApprovalRequired: rule.manualApprovalRequired,
     rewardType,
     rewardAmount,
@@ -26383,7 +27447,12 @@ function evaluateMissionDryRun(
     name: rule.name,
     status: rule.status,
     triggerKind: rule.triggerKind,
-    evaluationPolicy: guestGameEvaluationPolicy(rule.evaluationPolicy),
+    evaluationPolicy: guestGameMissionEvaluationPolicy(
+      rule.definitionVersion,
+      rule.conditions,
+      rule.missionType,
+      rule.evaluationPolicy,
+    ),
     manualApprovalRequired: rule.manualApprovalRequired,
     rewardType: rule.rewardType,
     rewardAmount: rule.rewardAmount,
@@ -26419,8 +27488,8 @@ function evaluateSeasonDryRun(
     context,
   );
   const currentStep = levels[completedLevelCount] ?? null;
-  const currentStepPolicy = guestGameEvaluationPolicy(
-    dryRunRecord(currentStep?.activationRules).evaluationPolicy,
+  const currentStepPolicy = guestGameBattlePassStepEvaluationPolicy(
+    currentStep?.activationRules,
   );
   const stepRewardPlan = currentStep
     ? dryRunSeasonFreeRewardPlan(currentStep, context, blockers, reasons)
@@ -29419,31 +30488,6 @@ function battlePassLevelIdentity(value: unknown, index: number) {
     id: nullableString(record.id) ?? null,
     level: level != null && level > 0 ? level : null,
   };
-}
-
-function persistedBattlePassPlayTimeEvaluationPolicy(
-  persistedLevel: Record<string, unknown> | undefined,
-  incomingTaskType: GuestGameMissionTaskType,
-) {
-  if (!persistedLevel || incomingTaskType !== 'PLAY_TIME') {
-    return null;
-  }
-
-  const rules = jsonRecord(
-    persistedLevel.activationRules as Prisma.JsonValue | null,
-  );
-  if (
-    dryRunNumber(rules.schemaVersion, 1) !==
-      guestGameMissionDefinitionVersion ||
-    nullableString(rules.taskType)?.toUpperCase() !== 'PLAY_TIME'
-  ) {
-    return null;
-  }
-
-  const policy = nullableString(rules.evaluationPolicy)?.toUpperCase();
-  return policy === 'LIVE_PRIMARY' || policy === 'LIVE_WITH_LEDGER_FALLBACK'
-    ? policy
-    : null;
 }
 
 function buildVisualSeasonData(

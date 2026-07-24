@@ -1,6 +1,9 @@
 import { ConflictException } from '@nestjs/common';
 import { IntegrationProvider } from '@prisma/client';
-import { buildGuestGameOriginKey } from './guest-game-origin-key';
+import {
+  buildGuestGameOriginKey,
+  buildGuestGamePlayTimeOriginKey,
+} from './guest-game-origin-key';
 import { GuestGameRuleReplayService } from './guest-game-rule-replay.service';
 
 const factUpdatedAt = new Date('2026-07-18T12:00:00.000Z');
@@ -256,7 +259,14 @@ function createService(
   };
 }
 
-const canonicalOriginKey = buildGuestGameOriginKey({
+const canonicalOriginKey = buildGuestGamePlayTimeOriginKey({
+  externalProvider: IntegrationProvider.LANGAME,
+  externalDomain: '46.langamepro.ru',
+  sourceKind: 'GUEST_SESSION',
+  sessionExternalId: 'session-270',
+  eventType: 'PLAY_HOUR',
+}) as string;
+const legacyCanonicalOriginKey = buildGuestGameOriginKey({
   externalProvider: IntegrationProvider.LANGAME,
   externalDomain: '46.langamepro.ru',
   eventType: 'PLAY_HOUR',
@@ -446,6 +456,145 @@ describe('GuestGameRuleReplayService', () => {
     expect(result.confirmationHash).toHaveLength(64);
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
+
+  it('replays a neutral play-time fact with a null session type only for an ANY step', async () => {
+    const { service, prisma, gamification } = createService();
+    const replaySeason = season();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+    });
+    prisma.guestGameSeason.findFirst.mockResolvedValue({
+      ...replaySeason,
+      levels: replaySeason.levels.map((level) =>
+        level.id === 'step-2'
+          ? {
+              ...level,
+              activationRules: {
+                ...level.activationRules,
+                sessionType: 'ANY',
+              },
+            }
+          : level,
+      ),
+    });
+
+    await expect(
+      service.previewBattlePass(user, target),
+    ).resolves.toMatchObject({
+      outcome: 'READY',
+      fact: { factType: 'SESSION_PLAY_TIME_ACCUMULATED' },
+    });
+    expect(gamification.dryRun).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        sessionType: null,
+        sessionPacket: false,
+        sourceFactId: 'fact-270',
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('keeps BP replay identity stable when sourceExternalId changes', async () => {
+    const first = createService();
+    const reparsed = createService();
+    first.prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      sourceExternalId: 'parser-row-v1',
+      sessionExternalId: 'session-270',
+      sourceKind: 'LANGAME_GUEST_SESSION',
+    });
+    reparsed.prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      sourceExternalId: 'parser-row-v2',
+      sessionExternalId: 'session-270',
+      sourceKind: 'LANGAME_GUEST_SESSION',
+    });
+
+    const [firstPreview, reparsedPreview] = await Promise.all([
+      first.service.previewBattlePass(user, target),
+      reparsed.service.previewBattlePass(user, target),
+    ]);
+
+    expect(reparsedPreview.source.originKey).toBe(
+      firstPreview.source.originKey,
+    );
+    expect(reparsedPreview.source.originKey).toMatch(/^ggo:v2:/);
+    expect(reparsedPreview.source.eventId).toBe(firstPreview.source.eventId);
+    expect(reparsedPreview.source.originReceiptStatus).toBe(
+      firstPreview.source.originReceiptStatus,
+    );
+    expect(reparsed.gamification.dryRun).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        externalId: 'session-270',
+        sourceKind: 'LANGAME_GUEST_SESSION',
+        sessionExternalId: 'session-270',
+        payload: expect.objectContaining({
+          sourceKind: 'LANGAME_GUEST_SESSION',
+          sessionExternalId: 'session-270',
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('keeps equal session ids from distinct source kinds separate', async () => {
+    const langameSession = createService();
+    const importedSession = createService();
+    langameSession.prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      sourceKind: 'LANGAME_GUEST_SESSION',
+    });
+    importedSession.prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      sourceKind: 'IMPORTED_GUEST_SESSION',
+    });
+
+    const [langamePreview, importedPreview] = await Promise.all([
+      langameSession.service.previewBattlePass(user, target),
+      importedSession.service.previewBattlePass(user, target),
+    ]);
+
+    expect(importedPreview.source.originKey).not.toBe(
+      langamePreview.source.originKey,
+    );
+    expect(importedPreview.source.originKey).toMatch(/^ggo:v2:/);
+    expect(langamePreview.source.originKey).toMatch(/^ggo:v2:/);
+  });
+
+  it.each(['HOURLY', 'PACKAGE_OR_SUBSCRIPTION'])(
+    'rejects a neutral play-time fact for a %s step before evaluation',
+    async (sessionType) => {
+      const { service, prisma, gamification } = createService();
+      const replaySeason = season();
+      prisma.guestActivityFact.findFirst.mockResolvedValue({
+        ...fact(),
+        factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+      });
+      prisma.guestGameSeason.findFirst.mockResolvedValue({
+        ...replaySeason,
+        levels: replaySeason.levels.map((level) =>
+          level.id === 'step-2'
+            ? {
+                ...level,
+                activationRules: {
+                  ...level.activationRules,
+                  sessionType,
+                },
+              }
+            : level,
+        ),
+      });
+
+      await expect(service.previewBattlePass(user, target)).rejects.toThrow(
+        'Neutral play-time facts can be replayed only for a PLAY_TIME step with sessionType=ANY.',
+      );
+      expect(gamification.dryRun).not.toHaveBeenCalled();
+    },
+  );
 
   it('routes a storeless replay fact through the selected season domain and timezone', async () => {
     const { service, prisma, gamification } = createService();
@@ -844,6 +993,126 @@ describe('GuestGameRuleReplayService exact play-time canonicalization', () => {
     expect(prisma.guestGameOriginReceipt.create).not.toHaveBeenCalled();
     expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
     expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('keeps exact canonical origin stable across parser source ids', async () => {
+    const first = createCanonicalizationService({
+      receipt: canonicalReceipt('PROCESSED'),
+      event: canonicalEvent(),
+    });
+    const reparsed = createCanonicalizationService({
+      receipt: canonicalReceipt('PROCESSED'),
+      event: canonicalEvent(),
+    });
+    first.prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      sourceExternalId: 'parser-row-v1',
+      sessionExternalId: 'session-270',
+      sourceKind: 'LANGAME_GUEST_SESSION',
+    });
+    reparsed.prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      sourceExternalId: 'parser-row-v2',
+      sessionExternalId: 'session-270',
+      sourceKind: 'LANGAME_GUEST_SESSION',
+    });
+
+    const [firstPreview, reparsedPreview] = await Promise.all([
+      first.service.previewExactPlayTimeCanonicalization(user, exactTarget),
+      reparsed.service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ]);
+
+    expect(reparsedPreview.canonical.originKey).toBe(
+      firstPreview.canonical.originKey,
+    );
+    expect(reparsedPreview.canonical.originKey).toMatch(/^ggo:v2:/);
+    expect(reparsedPreview.canonical.stableExternalId).toBe('session-270');
+    expect(reparsedPreview.canonical.eventId).toBe(
+      firstPreview.canonical.eventId,
+    );
+    expect(reparsedPreview.receipt.id).toBe(firstPreview.receipt.id);
+  });
+
+  it('reuses a validated legacy v1 exact event and receipt', async () => {
+    const legacyReceipt = canonicalReceipt('PROCESSED');
+    const legacyEvent = canonicalEvent({
+      originKey: legacyCanonicalOriginKey,
+    });
+    const { service, prisma } = createCanonicalizationService({
+      receipt: legacyReceipt,
+      event: legacyEvent,
+    });
+    prisma.guestGameOriginReceipt.findUnique.mockImplementation(
+      ({ where }: { where: { tenantId_originKey: { originKey: string } } }) =>
+        Promise.resolve(
+          where.tenantId_originKey.originKey === legacyCanonicalOriginKey
+            ? legacyReceipt
+            : null,
+        ),
+    );
+
+    await expect(
+      service.previewExactPlayTimeCanonicalization(user, exactTarget),
+    ).resolves.toMatchObject({
+      outcome: 'IDEMPOTENT',
+      canonical: {
+        originKey: legacyCanonicalOriginKey,
+        eventId: 'event-canonical',
+        eventValidated: true,
+      },
+      receipt: {
+        id: 'receipt-canonical',
+        status: 'PROCESSED',
+      },
+    });
+  });
+
+  it('canonicalizes a neutral exact fact without inventing a session type', async () => {
+    const { service, prisma, gamification } = createCanonicalizationService();
+    prisma.guestActivityFact.findFirst.mockResolvedValue({
+      ...fact(),
+      factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+    });
+    prisma.guestGameEvent.findFirst.mockResolvedValue(
+      canonicalEvent({
+        payload: {
+          sourceFactId: 'fact-270',
+          sourceFactKind: 'GUEST_SESSION',
+          store: { id: 'store-1', name: 'Club' },
+          input: {
+            sessionMinutes: 270,
+            sessionType: null,
+            sessionPacket: false,
+          },
+        },
+      }),
+    );
+    const preview = await service.previewExactPlayTimeCanonicalization(
+      user,
+      exactTarget,
+    );
+
+    await expect(
+      service.applyExactPlayTimeCanonicalization(user, {
+        ...exactTarget,
+        expectedFactUpdatedAt: preview.expectedFactUpdatedAt,
+        confirmationHash: preview.confirmationHash,
+        confirmation: 'APPLY_EXACT_CANONICALIZATION',
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'APPLIED',
+      fact: { factType: 'SESSION_PLAY_TIME_ACCUMULATED' },
+    });
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        sessionType: null,
+        sessionPacket: false,
+        sourceFactId: 'fact-270',
+      }),
+      expect.any(Object),
+    );
   });
 
   it('creates and finalizes only the canonical event with an atomic safe audit', async () => {

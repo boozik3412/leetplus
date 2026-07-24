@@ -1,3 +1,5 @@
+import { buildGuestGamePhysicalProgressIdentity } from './guest-game-origin-key';
+
 export type GuestGameProgressAggregation =
   | 'count'
   | 'sum'
@@ -10,6 +12,9 @@ export type GuestGameProgressEvent = {
   eventType: string;
   occurredAt: Date;
   sourceFactId?: string | null;
+  externalProvider?: string | null;
+  sourceKind?: string | null;
+  sessionExternalId?: string | null;
   storeId?: string | null;
   externalDomain?: string | null;
   sessionType?: string | null;
@@ -149,31 +154,93 @@ function dedupeProgressEvents(
     event: GuestGameProgressEvent;
     current: boolean;
   };
-  const selectedBySourceFact = new Map<string, ProgressEventCandidate>();
-  const eventsWithoutSourceFact: GuestGameProgressEvent[] = [];
+  type StrongProgressGroup = {
+    selected: ProgressEventCandidate;
+    sourceFactIds: Set<string>;
+  };
+  const selectedByPhysicalIdentity = new Map<string, StrongProgressGroup>();
+  const candidatesWithoutStrongIdentity: ProgressEventCandidate[] = [];
+  const eventsWithoutPhysicalIdentity: GuestGameProgressEvent[] = [];
   const candidates: ProgressEventCandidate[] = [
     ...historyEvents.map((event) => ({ event, current: false })),
     ...(currentEvent ? [{ event: currentEvent, current: true }] : []),
   ];
 
   for (const candidate of candidates) {
+    const physicalIdentity = strongPhysicalProgressEventIdentity(
+      candidate.event,
+    );
+    if (!physicalIdentity) {
+      candidatesWithoutStrongIdentity.push(candidate);
+      continue;
+    }
+
+    const sourceFactId = physicalProgressSourceFactId(
+      candidate.event.sourceFactId,
+    );
+    const group = selectedByPhysicalIdentity.get(physicalIdentity);
+    if (!group) {
+      selectedByPhysicalIdentity.set(physicalIdentity, {
+        selected: candidate,
+        sourceFactIds: new Set(sourceFactId ? [sourceFactId] : []),
+      });
+      continue;
+    }
+
+    if (sourceFactId) {
+      group.sourceFactIds.add(sourceFactId);
+    }
+    if (progressEventPreferred(candidate, group.selected)) {
+      group.selected = candidate;
+    }
+  }
+
+  const unmergedLegacyCandidates: ProgressEventCandidate[] = [];
+  for (const candidate of candidatesWithoutStrongIdentity) {
     const sourceFactId = physicalProgressSourceFactId(
       candidate.event.sourceFactId,
     );
     if (!sourceFactId) {
-      eventsWithoutSourceFact.push(candidate.event);
+      eventsWithoutPhysicalIdentity.push(candidate.event);
       continue;
     }
 
-    const selected = selectedBySourceFact.get(sourceFactId);
+    const matchingStrongGroups = Array.from(
+      selectedByPhysicalIdentity.values(),
+    ).filter((group) => group.sourceFactIds.has(sourceFactId));
+    if (matchingStrongGroups.length !== 1) {
+      unmergedLegacyCandidates.push(candidate);
+      continue;
+    }
+
+    const group = matchingStrongGroups[0];
+    if (progressEventPreferred(candidate, group.selected)) {
+      group.selected = candidate;
+    }
+  }
+
+  const selectedLegacyCandidates = new Map<string, ProgressEventCandidate>();
+  for (const candidate of unmergedLegacyCandidates) {
+    const sourceFactId = physicalProgressSourceFactId(
+      candidate.event.sourceFactId,
+    );
+    if (!sourceFactId) {
+      eventsWithoutPhysicalIdentity.push(candidate.event);
+      continue;
+    }
+    const selected = selectedLegacyCandidates.get(sourceFactId);
     if (!selected || progressEventPreferred(candidate, selected)) {
-      selectedBySourceFact.set(sourceFactId, candidate);
+      selectedLegacyCandidates.set(sourceFactId, candidate);
     }
   }
 
   return [
-    ...Array.from(selectedBySourceFact.values(), ({ event }) => event),
-    ...eventsWithoutSourceFact,
+    ...Array.from(
+      selectedByPhysicalIdentity.values(),
+      ({ selected }) => selected.event,
+    ),
+    ...Array.from(selectedLegacyCandidates.values(), ({ event }) => event),
+    ...eventsWithoutPhysicalIdentity,
   ];
 }
 
@@ -192,6 +259,17 @@ function progressEventPreferred(
   }
 
   return candidate.event.occurredAt > selected.event.occurredAt;
+}
+
+function strongPhysicalProgressEventIdentity(event: GuestGameProgressEvent) {
+  const strongIdentity = buildGuestGamePhysicalProgressIdentity({
+    externalProvider: event.externalProvider,
+    externalDomain: event.externalDomain,
+    sourceKind: event.sourceKind,
+    sessionExternalId: event.sessionExternalId,
+    eventType: event.eventType,
+  });
+  return strongIdentity?.key ?? null;
 }
 
 function physicalProgressSourceFactId(value: string | null | undefined) {

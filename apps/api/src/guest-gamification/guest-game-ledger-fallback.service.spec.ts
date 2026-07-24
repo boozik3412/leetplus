@@ -1,4 +1,6 @@
 import { IntegrationProvider, TenantLifecycleStatus } from '@prisma/client';
+import { ConflictException } from '@nestjs/common';
+import * as exactOwnerReconciler from './guest-game-exact-owner-reconciler';
 import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
 
 const now = new Date('2026-07-18T12:00:00.000Z');
@@ -37,17 +39,70 @@ function fact(validFrom: Date) {
     storeId: 'store-1',
     externalProvider: IntegrationProvider.LANGAME,
     externalDomain: '46.langamepro.ru',
+    sourceKind: 'LANGAME_GUEST_LOG',
     sourceHash: 'ledger-parser-version-specific-hash',
     sourceExternalId: 'session-42',
     sessionExternalId: 'session-42',
     factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
     lifecycleStatus: 'ACTIVE',
     confidence: 'EXACT',
+    supersededAt: null,
     validFrom,
+    updatedAt: validFrom,
     happenedAt: validFrom,
     durationMinutes: 60,
     amount: null,
     evidence: {},
+  };
+}
+
+function processedExactReceipt(
+  id: string,
+  factId: string,
+  eventId: string,
+  updatedAt: Date,
+) {
+  return {
+    id,
+    originKey: `exact-origin-${id}`,
+    factId,
+    eventId,
+    eventType: 'PLAY_HOUR',
+    policy: 'EXACT_OPERATOR_CANONICALIZATION',
+    status: 'PROCESSED',
+    claimedSource: 'EXACT_CANONICALIZATION',
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain: '46.langamepro.ru',
+    ledgerFirstSeenAt: updatedAt,
+    graceUntil: updatedAt,
+    attempts: 1,
+    claimExpiresAt: null,
+    processedAt: updatedAt,
+    lastError: null,
+    updatedAt,
+  };
+}
+
+function exactReconciliationMarker(
+  id: string,
+  factId: string,
+  eventId: string,
+  status: 'WAITING_LIVE' | 'QUARANTINED' = 'WAITING_LIVE',
+) {
+  return {
+    id,
+    factId,
+    eventId,
+    policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+    status,
+    claimedSource:
+      status === 'QUARANTINED' ? 'LEDGER_FALLBACK_EXACT_RECONCILIATION' : null,
+    ledgerFirstSeenAt: now,
+    graceUntil: now,
+    attempts: 0,
+    claimExpiresAt: null,
+    processedAt: null,
+    lastError: null,
   };
 }
 
@@ -83,6 +138,27 @@ function dryRun() {
         selectedRewardLabel: null,
         selectedReward: null,
         xpDelta: 10,
+        budgetAmount: null,
+        progress: null,
+        reasons: [],
+        blockers: [],
+      },
+      {
+        id: 'loot-box-1',
+        kind: 'LOOT_BOX',
+        name: 'One-hour entitlement',
+        status: 'ACTIVE',
+        triggerKind: 'PLAY_HOUR',
+        evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+        manualApprovalRequired: false,
+        rewardMaterializationSuppressed: true,
+        eligible: true,
+        rewardType: 'LOOT_BOX',
+        rewardAmount: null,
+        rewardLabel: 'Club container',
+        selectedRewardLabel: 'Club container',
+        selectedReward: null,
+        xpDelta: 0,
         budgetAmount: null,
         progress: null,
         reasons: [],
@@ -165,8 +241,28 @@ function createService(options?: {
         {
           id: 'mission-1',
           createdAt: new Date('2026-07-01T00:00:00.000Z'),
-          conditions: {},
+          updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+          definitionVersion: 2,
+          missionType: 'PLAY_TIME',
+          evaluationPolicy: 'LIVE_PRIMARY',
+          conditions: {
+            schemaVersion: 2,
+            taskType: 'PLAY_TIME',
+          },
           periodFrom: null,
+          storeIds: ['store-1'],
+        },
+      ]),
+    },
+    guestGameLootBox: {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'loot-box-1',
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+          triggerKind: 'PLAY_HOUR',
+          periodRules: { evaluationPolicy: 'LIVE_PRIMARY' },
+          limits: {},
           storeIds: ['store-1'],
         },
       ]),
@@ -176,6 +272,7 @@ function createService(options?: {
         {
           id: 'season-1',
           createdAt: new Date('2026-07-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-07-17T00:00:00.000Z'),
           periodFrom: null,
           storeIds: ['store-1'],
           levels: [
@@ -186,7 +283,9 @@ function createService(options?: {
             {
               sequence: 2,
               activationRules: {
-                evaluationPolicy: 'LIVE_WITH_LEDGER_FALLBACK',
+                schemaVersion: 2,
+                taskType: 'PLAY_TIME',
+                evaluationPolicy: 'LIVE_PRIMARY',
               },
             },
           ],
@@ -206,6 +305,9 @@ function createService(options?: {
       findMany: jest.fn().mockResolvedValue([fact(validFrom)]),
     },
     guestGameOriginReceipt: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn().mockResolvedValue({
         id: 'receipt-1',
         status: 'WAITING_LIVE',
@@ -252,6 +354,7 @@ describe('GuestGameLedgerFallbackService', () => {
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     jest.useRealTimers();
   });
 
@@ -371,7 +474,7 @@ describe('GuestGameLedgerFallbackService', () => {
       evaluationMode: 'SHADOW_LEDGER_FALLBACK',
       suppressLedgerShadow: true,
     });
-    expect(decisionCalls[0]?.[2].originKey).toMatch(/^ggo:v1:[a-f0-9]{64}$/);
+    expect(decisionCalls[0]?.[2].originKey).toMatch(/^ggo:v2:[a-f0-9]{64}$/);
     expect(prisma.guestGameOriginReceipt.updateMany).toHaveBeenCalledWith({
       where: { id: 'receipt-1', status: 'WAITING_LIVE' },
       data: { status: 'SHADOWED', processedAt: now },
@@ -457,14 +560,20 @@ describe('GuestGameLedgerFallbackService', () => {
       {
         id: 'mission-1',
         createdAt: new Date('2026-07-01T00:00:00.000Z'),
-        conditions: {},
+        definitionVersion: 2,
+        missionType: 'PLAY_TIME',
+        evaluationPolicy: 'LIVE_PRIMARY',
+        conditions: { schemaVersion: 2, taskType: 'PLAY_TIME' },
         periodFrom: null,
         storeIds: ['store-1'],
       },
       {
         id: 'mission-2',
         createdAt: new Date('2026-07-01T00:00:00.000Z'),
-        conditions: {},
+        definitionVersion: 2,
+        missionType: 'PLAY_TIME',
+        evaluationPolicy: 'LIVE_PRIMARY',
+        conditions: { schemaVersion: 2, taskType: 'PLAY_TIME' },
         periodFrom: null,
         storeIds: ['store-2'],
       },
@@ -630,6 +739,285 @@ describe('GuestGameLedgerFallbackService', () => {
     );
   });
 
+  it.each([
+    ['hourly', 'HOURLY_PLAY_TIME_ACCUMULATED', 'HOURLY', false],
+    [
+      'package or subscription',
+      'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      'PACKAGE_OR_SUBSCRIPTION',
+      true,
+    ],
+  ])(
+    'maps an exact %s fact to the canonical PLAY_HOUR DTO',
+    async (_label, factType, sessionType, sessionPacket) => {
+      const { service, prisma, gamification } = createService();
+      prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+        {
+          ...fact(new Date(now.getTime() - 60_000)),
+          factType,
+          durationMinutes: 75,
+        },
+      ]);
+
+      await expect(
+        service.runScheduled({
+          mode: 'SHADOW',
+          tenantId: 'tenant-1',
+        }),
+      ).resolves.toMatchObject({ shadowFacts: 1 });
+
+      expect(gamification.dryRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          eventType: 'PLAY_HOUR',
+          sessionMinutes: 75,
+          sessionType,
+          sessionPacket,
+          sourceFactKind: 'GUEST_SESSION',
+          suppressLootBoxRewards: true,
+        }),
+        expect.any(Object),
+      );
+    },
+  );
+
+  it('routes neutral exact play time as PLAY_HOUR with no tariff so an ANY condition can match', async () => {
+    const { service, prisma, gamification } = createService();
+    const neutralFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'neutral-fact',
+      factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+      durationMinutes: 75,
+    };
+    prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce([neutralFact])
+      .mockResolvedValueOnce([neutralFact]);
+    gamification.dryRun.mockImplementationOnce(
+      (_user: unknown, dto: { sessionType?: string | null }) => {
+        const result = dryRun();
+        result.rules =
+          dto.sessionType == null
+            ? [
+                {
+                  ...result.rules[0],
+                  name: 'Any session type',
+                },
+              ]
+            : [];
+        return Promise.resolve(result);
+      },
+    );
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      shadowFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(gamification.dryRun).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        sessionMinutes: 75,
+        sessionType: null,
+        sessionPacket: false,
+        sourceFactKind: 'GUEST_SESSION',
+      }),
+      expect.any(Object),
+    );
+    expect(gamification.recordRuleDecisions).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        rules: [
+          expect.objectContaining({
+            id: 'mission-1',
+            name: 'Any session type',
+          }),
+        ],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('reopens a fallback-owned origin after neutral play time is reclassified as HOURLY and reuses the canonical event', async () => {
+    const { service, prisma, gamification } = createService();
+    const neutralFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'neutral-fact',
+      factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+    };
+    const hourlyFact = {
+      ...neutralFact,
+      id: 'hourly-fact',
+      factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+    };
+    prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce([neutralFact])
+      .mockResolvedValueOnce([neutralFact])
+      .mockResolvedValueOnce([hourlyFact])
+      .mockResolvedValueOnce([hourlyFact])
+      .mockResolvedValueOnce([hourlyFact])
+      .mockResolvedValueOnce([hourlyFact]);
+
+    const waitingNeutralReceipt = {
+      id: 'receipt-reclassified-session',
+      factId: neutralFact.id,
+      policy: 'LIVE_WITH_LEDGER_FALLBACK',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 0,
+      claimExpiresAt: null,
+      eventId: null,
+    };
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(waitingNeutralReceipt)
+      .mockResolvedValueOnce({
+        ...waitingNeutralReceipt,
+        status: 'PROCESSED',
+        claimedSource: 'LEDGER_FALLBACK',
+        attempts: 1,
+        eventId: 'canonical-event',
+      })
+      .mockResolvedValueOnce({
+        ...waitingNeutralReceipt,
+        factId: hourlyFact.id,
+        ledgerFirstSeenAt: new Date(),
+        graceUntil: new Date(now.getTime() - 1),
+      });
+    gamification.processEvent
+      .mockResolvedValueOnce({
+        event: { id: 'canonical-event' },
+        summary: { idempotent: false, createdRewards: 1 },
+      })
+      .mockResolvedValueOnce({
+        event: { id: 'canonical-event' },
+        summary: { idempotent: true, createdRewards: 0 },
+      });
+
+    const scope = {
+      mode: 'LIVE' as const,
+      ...liveCanaryScope,
+      graceMs: 15_000,
+    };
+    await expect(service.runScheduled(scope)).resolves.toMatchObject({
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    await expect(service.runScheduled(scope)).resolves.toMatchObject({
+      deferredFacts: 1,
+      fallbackFacts: 0,
+      duplicateFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    const repointCall =
+      prisma.guestGameOriginReceipt.updateMany.mock.calls.find(
+        ([input]) => input.data.factId === hourlyFact.id,
+      )?.[0];
+    expect(repointCall).toMatchObject({
+      where: {
+        id: waitingNeutralReceipt.id,
+        factId: neutralFact.id,
+        policy: 'LIVE_WITH_LEDGER_FALLBACK',
+        claimedSource: { not: 'EXACT_CANONICALIZATION' },
+      },
+      data: {
+        factId: hourlyFact.id,
+        status: 'WAITING_LIVE',
+        claimedSource: null,
+        attempts: 0,
+      },
+    });
+
+    jest.advanceTimersByTime(15_001);
+    await expect(service.runScheduled(scope)).resolves.toMatchObject({
+      fallbackFacts: 1,
+      duplicateFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(gamification.processEvent).toHaveBeenCalledTimes(2);
+    const processCalls = gamification.processEvent.mock
+      .calls as unknown as Array<
+      [
+        unknown,
+        { externalId: string; sessionType: string | null },
+        { originKey: string },
+      ]
+    >;
+    expect(processCalls[0]?.[1]).toMatchObject({
+      externalId: 'session-42',
+      sessionType: null,
+    });
+    expect(processCalls[1]?.[1]).toMatchObject({
+      externalId: 'session-42',
+      sessionType: 'HOURLY',
+    });
+    expect(processCalls[1]?.[2].originKey).toBe(processCalls[0]?.[2].originKey);
+  });
+
+  it('fails closed when one session has simultaneous conflicting exact play-time classifications', async () => {
+    const { service, prisma, gamification } = createService();
+    const hourlyFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'hourly-fact',
+      factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+    };
+    const packageFact = {
+      ...hourlyFact,
+      id: 'package-fact',
+      factType: 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      validFrom: new Date(now.getTime() - 30_000),
+      happenedAt: new Date(now.getTime() - 30_000),
+    };
+    prisma.guestActivityFact.findMany
+      .mockResolvedValueOnce([hourlyFact, packageFact])
+      .mockResolvedValueOnce([hourlyFact, packageFact]);
+
+    await expect(
+      service.runScheduled({
+        mode: 'SHADOW',
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 0,
+      failedFacts: 2,
+      shadowFacts: 0,
+      fallbackFacts: 0,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(gamification.dryRun).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+    expect(prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          factId: packageFact.id,
+          eventType: 'PLAY_HOUR',
+          policy: 'LIVE_WITH_LEDGER_FALLBACK',
+          status: 'FAILED',
+          lastError:
+            'Conflicting exact play-time classifications for one session.',
+        }),
+        update: {},
+      }),
+    );
+  });
+
   it('does not substitute a session id for a purchase sale id', async () => {
     const { service, prisma, gamification } = createService();
     prisma.guestActivityFact.findMany.mockResolvedValueOnce([
@@ -683,7 +1071,7 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
-  it('applies the LIVE cutoff, exact profile and positive-duration query guards', async () => {
+  it('applies the LIVE cutoff and excludes superseded or non-positive play-time facts', async () => {
     const { service, prisma } = createService();
 
     await service.runScheduled({
@@ -696,8 +1084,12 @@ describe('GuestGameLedgerFallbackService', () => {
         where: expect.objectContaining({
           tenantId: 'tenant-1',
           profileId: 'profile-1',
+          lifecycleStatus: 'ACTIVE',
+          confidence: 'EXACT',
+          supersededAt: null,
           factType: {
             in: [
+              'SESSION_PLAY_TIME_ACCUMULATED',
               'HOURLY_PLAY_TIME_ACCUMULATED',
               'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
             ],
@@ -777,6 +1169,162 @@ describe('GuestGameLedgerFallbackService', () => {
       expect.any(Object),
       expect.objectContaining({
         allowedRuleIds: new Set(['mission-1', 'season-1']),
+        allowedBattlePassSteps: new Map([['season-1', 2]]),
+      }),
+    );
+  });
+
+  it('routes stale-primary v2 missions, Battle Pass steps and PLAY_HOUR lootboxes for every tenant profile', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestActivityFact.findMany.mockResolvedValueOnce([
+      {
+        ...fact(new Date(now.getTime() - 60_000)),
+        profileId: 'profile-2',
+        guestId: 'guest-2',
+      },
+    ]);
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 'tenant-1',
+          profileId: undefined,
+        }),
+      }),
+    );
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        profileId: 'profile-2',
+        eventType: 'PLAY_HOUR',
+      }),
+      expect.objectContaining({
+        allowedRuleIds: new Set(['mission-1', 'loot-box-1', 'season-1']),
+        allowedBattlePassSteps: new Map([['season-1', 2]]),
+      }),
+    );
+  });
+
+  it('does not route a lootbox with an empty trigger as a PLAY_HOUR fallback rule', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.guestGameLootBox.findMany.mockResolvedValueOnce([
+      {
+        id: 'loot-box-1',
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        triggerKind: '',
+        periodRules: { evaluationPolicy: 'LIVE_PRIMARY' },
+        limits: {},
+        storeIds: ['store-1'],
+      },
+    ]);
+    gamification.dryRun.mockResolvedValueOnce({
+      ...dryRun(),
+      rules: dryRun().rules.map((rule) =>
+        rule.kind === 'LOOT_BOX'
+          ? {
+              ...rule,
+              triggerKind: '',
+              evaluationPolicy: 'LIVE_PRIMARY',
+            }
+          : rule,
+      ),
+    });
+
+    await service.runScheduled({
+      mode: 'LIVE',
+      tenantId: liveCanaryScope.tenantId,
+      liveNotBefore: liveCanaryScope.liveNotBefore,
+      playTimeAllowAllProfiles: true,
+      graceMs: 15_000,
+    });
+
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        allowedRuleIds: new Set(['mission-1', 'season-1']),
+        allowedBattlePassSteps: new Map([['season-1', 2]]),
+      }),
+    );
+  });
+
+  it('processes a tenant-wide mission, Battle Pass step and lootbox only once across retries', async () => {
+    const { service, prisma, gamification } = createService();
+    const waitingReceipt = {
+      id: 'receipt-tenant-wide',
+      factId: 'fact-1',
+      policy: 'LIVE_WITH_LEDGER_FALLBACK',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 0,
+      claimExpiresAt: null,
+    };
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(waitingReceipt)
+      .mockResolvedValueOnce({
+        id: 'receipt-watermark',
+        factId: 'fact-1',
+        status: 'PROCESSED',
+      })
+      .mockResolvedValueOnce({
+        ...waitingReceipt,
+        status: 'PROCESSED',
+        claimedSource: 'LEDGER_FALLBACK',
+        attempts: 1,
+      })
+      .mockResolvedValueOnce({
+        id: 'receipt-watermark',
+        factId: 'fact-1',
+        status: 'PROCESSED',
+      });
+
+    const scope = {
+      mode: 'LIVE' as const,
+      tenantId: liveCanaryScope.tenantId,
+      liveNotBefore: liveCanaryScope.liveNotBefore,
+      playTimeAllowAllProfiles: true,
+      graceMs: 15_000,
+    };
+    await expect(service.runScheduled(scope)).resolves.toMatchObject({
+      fallbackFacts: 1,
+      createdEvents: 1,
+      createdRewards: 1,
+    });
+    await expect(service.runScheduled(scope)).resolves.toMatchObject({
+      fallbackFacts: 0,
+      duplicateFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        activeRulesOnly: true,
+        suppressLootBoxRewards: true,
+      }),
+      expect.objectContaining({
+        evaluationMode: 'LIVE_LEDGER_FALLBACK',
+        suppressLedgerShadow: true,
+        allowedRuleIds: new Set(['mission-1', 'loot-box-1', 'season-1']),
         allowedBattlePassSteps: new Map([['season-1', 2]]),
       }),
     );
@@ -921,7 +1469,7 @@ describe('GuestGameLedgerFallbackService', () => {
         OR: [
           {
             originKey: expect.stringMatching(
-              /^ggo:v1:[a-f0-9]{64}$/,
+              /^ggo:v2:[a-f0-9]{64}$/,
             ) as unknown as string,
           },
           {
@@ -1069,7 +1617,7 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(processCalls[0]?.[2].allowedBattlePassSteps).toEqual(
       new Map([['season-1', 2]]),
     );
-    expect(processCalls[0]?.[2].originKey).toMatch(/^ggo:v1:[a-f0-9]{64}$/);
+    expect(processCalls[0]?.[2].originKey).toMatch(/^ggo:v2:[a-f0-9]{64}$/);
     const receiptUpdates = prisma.guestGameOriginReceipt.updateMany.mock
       .calls as unknown as Array<
       [{ where: Record<string, unknown>; data: Record<string, unknown> }]
@@ -1142,7 +1690,16 @@ describe('GuestGameLedgerFallbackService', () => {
     });
     expect(gamification.dryRun).toHaveBeenCalledTimes(2);
     expect(gamification.processEvent).toHaveBeenCalledTimes(1);
-    expect(prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.guestGameOriginReceipt.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          factId: 'broken-fact',
+          status: 'FAILED',
+          policy: 'LIVE_WITH_LEDGER_FALLBACK',
+        }),
+      }),
+    );
   });
 
   it('isolates a LIVE reconciliation failure and continues with the next fact', async () => {
@@ -1254,7 +1811,7 @@ describe('GuestGameLedgerFallbackService', () => {
       createdEvents: 1,
       createdRewards: 1,
     });
-    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(4);
     expect(gamification.processEvent).toHaveBeenCalledTimes(1);
     const deadLetter = prisma.guestGameOriginReceipt.updateMany.mock.calls.find(
       ([input]) => input.where.id === 'receipt-exhausted-fact-0',
@@ -1306,6 +1863,1667 @@ describe('GuestGameLedgerFallbackService', () => {
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
+  it('reconciles a processed exact canonical event once without taking over its receipt', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-exact-1',
+    });
+    const exactReceipt = {
+      id: 'receipt-exact',
+      originKey: 'exact-origin',
+      factId: 'fact-1',
+      eventId: 'event-exact-1',
+      eventType: 'PLAY_HOUR',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_CANONICALIZATION',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: '46.langamepro.ru',
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 1,
+      claimExpiresAt: null,
+      processedAt: new Date(now.getTime() - 30_000),
+      lastError: null,
+      updatedAt: new Date(now.getTime() - 30_000),
+    };
+    const waitingMarker = {
+      id: 'receipt-exact-reconciliation',
+      factId: 'fact-1',
+      eventId: 'event-exact-1',
+      policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: now,
+      graceUntil: now,
+      attempts: 0,
+      claimExpiresAt: null,
+    };
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(exactReceipt)
+      .mockResolvedValueOnce(waitingMarker)
+      .mockResolvedValueOnce(exactReceipt)
+      .mockResolvedValueOnce({
+        ...waitingMarker,
+        status: 'PROCESSED',
+        claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+        attempts: 1,
+      });
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: 'event-exact-1' },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    const scope = {
+      mode: 'LIVE' as const,
+      ...liveCanaryScope,
+      graceMs: 15_000,
+    };
+    await expect(service.runScheduled(scope)).resolves.toMatchObject({
+      checkedFacts: 1,
+      liveHandledFacts: 1,
+      fallbackFacts: 0,
+      duplicateFacts: 0,
+      createdEvents: 0,
+      createdRewards: 1,
+    });
+    await expect(service.runScheduled(scope)).resolves.toMatchObject({
+      checkedFacts: 1,
+      liveHandledFacts: 0,
+      fallbackFacts: 0,
+      duplicateFacts: 1,
+      createdEvents: 0,
+      createdRewards: 0,
+    });
+
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        eventType: 'PLAY_HOUR',
+        activeRulesOnly: true,
+      }),
+      expect.objectContaining({
+        originKey: expect.any(String),
+        allowedRuleIds: new Set(['season-1']),
+        allowedBattlePassSteps: new Map([['season-1', 2]]),
+      }),
+    );
+    const receiptMutations =
+      prisma.guestGameOriginReceipt.updateMany.mock.calls.map(
+        ([input]) => input,
+      );
+    expect(receiptMutations).toHaveLength(2);
+    expect(receiptMutations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'receipt-exact-reconciliation',
+            factId: 'fact-1',
+            policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+          }),
+          data: expect.objectContaining({
+            status: 'PROCESSING',
+            claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+          }),
+        }),
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'receipt-exact-reconciliation',
+            factId: 'fact-1',
+            claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+          }),
+          data: expect.objectContaining({
+            status: 'PROCESSED',
+            eventId: 'event-exact-1',
+          }),
+        }),
+      ]),
+    );
+    expect(
+      receiptMutations.some(
+        (mutation) => mutation.where.id === 'receipt-exact',
+      ),
+    ).toBe(false);
+    expect(prisma.guestGameOriginReceipt.upsert.mock.calls[1][0]).toMatchObject(
+      {
+        create: {
+          factId: 'fact-1',
+          eventId: 'event-exact-1',
+          policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        },
+        update: {},
+      },
+    );
+  });
+
+  it('adopts an existing v2 exact receipt without creating a second canonical receipt', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-exact-v2',
+    });
+    const exactReceipt = {
+      id: 'receipt-exact-v2',
+      originKey: '',
+      factId: 'fact-1',
+      eventId: 'event-exact-v2',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_CANONICALIZATION',
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 1,
+      claimExpiresAt: null,
+    };
+    prisma.guestGameOriginReceipt.findFirst.mockImplementationOnce((input) =>
+      Promise.resolve({
+        ...exactReceipt,
+        originKey: input.where.originKey,
+      }),
+    );
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+      id: 'receipt-exact-v2-reconciliation',
+      factId: 'fact-1',
+      eventId: 'event-exact-v2',
+      policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: now,
+      graceUntil: now,
+      attempts: 0,
+      claimExpiresAt: null,
+    });
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: 'event-exact-v2' },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      liveHandledFacts: 1,
+      createdEvents: 0,
+      createdRewards: 1,
+    });
+
+    expect(prisma.guestGameOriginReceipt.findFirst).toHaveBeenCalledTimes(1);
+    expect(
+      prisma.guestGameOriginReceipt.findFirst.mock.calls[0][0].where.originKey,
+    ).toMatch(/^ggo:v2:[a-f0-9]{64}$/);
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        originKey: expect.stringMatching(/^ggo:v2:[a-f0-9]{64}$/),
+      }),
+    );
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input.create?.policy)
+        .filter(
+          (policy) =>
+            policy === 'EXACT_OPERATOR_CANONICALIZATION' ||
+            policy === 'LIVE_WITH_LEDGER_FALLBACK',
+        ),
+    ).toEqual([]);
+  });
+
+  it('adopts a pre-existing v1 exact receipt when no v2 receipt exists', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-exact-v1',
+    });
+    prisma.guestGameOriginReceipt.findFirst
+      .mockResolvedValueOnce(null)
+      .mockImplementationOnce((input) =>
+        Promise.resolve({
+          id: 'receipt-exact-v1',
+          originKey: input.where.originKey,
+          factId: 'fact-1',
+          eventId: 'event-exact-v1',
+          policy: 'EXACT_OPERATOR_CANONICALIZATION',
+          status: 'PROCESSED',
+          claimedSource: 'EXACT_CANONICALIZATION',
+          ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+          graceUntil: new Date(now.getTime() - 1_000),
+          attempts: 1,
+          claimExpiresAt: null,
+        }),
+      );
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+      id: 'receipt-exact-v1-reconciliation',
+      factId: 'fact-1',
+      eventId: 'event-exact-v1',
+      policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: now,
+      graceUntil: now,
+      attempts: 0,
+      claimExpiresAt: null,
+    });
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: 'event-exact-v1' },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        ...liveCanaryScope,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      liveHandledFacts: 1,
+      createdEvents: 0,
+      createdRewards: 1,
+    });
+
+    expect(prisma.guestGameOriginReceipt.findFirst).toHaveBeenCalledTimes(2);
+    expect(
+      prisma.guestGameOriginReceipt.findFirst.mock.calls.map(
+        ([input]) => input.where.originKey,
+      ),
+    ).toEqual([
+      expect.stringMatching(/^ggo:v2:[a-f0-9]{64}$/),
+      expect.stringMatching(/^ggo:v1:[a-f0-9]{64}$/),
+    ]);
+    expect(gamification.processEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        originKey: expect.stringMatching(/^ggo:v1:[a-f0-9]{64}$/),
+      }),
+    );
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input.create?.policy)
+        .filter(
+          (policy) =>
+            policy === 'EXACT_OPERATOR_CANONICALIZATION' ||
+            policy === 'LIVE_WITH_LEDGER_FALLBACK',
+        ),
+    ).toEqual([]);
+  });
+
+  it('discovers a processed exact receipt beyond the normal fact watermark and persists its own cursor', async () => {
+    const { service, prisma, gamification } = createService({
+      liveEventId: 'event-exact-1',
+    });
+    const exactReceipt = {
+      id: 'receipt-exact',
+      originKey: 'exact-origin',
+      factId: 'fact-1',
+      eventId: 'event-exact-1',
+      eventType: 'PLAY_HOUR',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_CANONICALIZATION',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: '46.langamepro.ru',
+      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+      graceUntil: new Date(now.getTime() - 1_000),
+      attempts: 1,
+      claimExpiresAt: null,
+      processedAt: new Date(now.getTime() - 30_000),
+      lastError: null,
+      updatedAt: new Date(now.getTime() - 30_000),
+    };
+    prisma.guestGameOriginReceipt.findUnique
+      .mockResolvedValueOnce({
+        factId: 'fact-after-exact',
+        ledgerFirstSeenAt: new Date(now.getTime() + 60_000),
+      })
+      .mockResolvedValueOnce(null);
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([exactReceipt]);
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-reconciliation',
+        factId: 'fact-1',
+        eventId: 'event-exact-1',
+        policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+        status: 'WAITING_LIVE',
+        claimedSource: null,
+        ledgerFirstSeenAt: now,
+        graceUntil: now,
+        attempts: 0,
+        claimExpiresAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: 'receipt-exact',
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: 'event-exact-1' },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 1,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      liveHandledFacts: 1,
+      createdEvents: 0,
+      createdRewards: 1,
+    });
+
+    expect(
+      prisma.guestGameOriginReceipt.findMany.mock.calls[1][0],
+    ).toMatchObject({
+      where: {
+        policy: 'EXACT_OPERATOR_CANONICALIZATION',
+        status: 'PROCESSED',
+        eventId: { not: null },
+      },
+      orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+      take: 1,
+    });
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === 'receipt-exact',
+        ),
+    ).toMatchObject({
+      create: {
+        factId: 'receipt-exact',
+        eventType: 'SYSTEM_WATERMARK',
+        policy: 'SYSTEM_WATERMARK',
+      },
+      update: {},
+    });
+  });
+
+  it('continues after a failed exact reconciliation and advances the exact cursor through the next processed receipt', async () => {
+    const { service, prisma, gamification } = createService();
+    const firstFact = {
+      ...fact(new Date(now.getTime() - 120_000)),
+      id: 'fact-exact-1',
+      sourceExternalId: 'session-exact-1',
+      sessionExternalId: 'session-exact-1',
+    };
+    const secondFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-2',
+      sourceExternalId: 'session-exact-2',
+      sessionExternalId: 'session-exact-2',
+    };
+    const firstExactReceipt = {
+      id: 'receipt-exact-1',
+      originKey: 'exact-origin-1',
+      factId: firstFact.id,
+      eventId: 'event-exact-1',
+      eventType: 'PLAY_HOUR',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_CANONICALIZATION',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: '46.langamepro.ru',
+      updatedAt: new Date(now.getTime() - 30_000),
+      ledgerFirstSeenAt: new Date(now.getTime() - 120_000),
+      graceUntil: new Date(now.getTime() - 120_000),
+      attempts: 1,
+      claimExpiresAt: null,
+    };
+    const secondExactReceipt = {
+      ...firstExactReceipt,
+      id: 'receipt-exact-2',
+      originKey: 'exact-origin-2',
+      factId: secondFact.id,
+      eventId: 'event-exact-2',
+      updatedAt: new Date(now.getTime() - 15_000),
+    };
+    const firstMarker = {
+      id: 'receipt-exact-reconciliation-1',
+      factId: firstFact.id,
+      eventId: firstExactReceipt.eventId,
+      policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+      status: 'WAITING_LIVE',
+      claimedSource: null,
+      ledgerFirstSeenAt: now,
+      graceUntil: now,
+      attempts: 0,
+      claimExpiresAt: null,
+    };
+    const secondMarker = {
+      ...firstMarker,
+      id: 'receipt-exact-reconciliation-2',
+      factId: secondFact.id,
+      eventId: secondExactReceipt.eventId,
+    };
+
+    prisma.guestGameOriginReceipt.findUnique
+      .mockResolvedValueOnce({
+        factId: 'fact-after-exact',
+        ledgerFirstSeenAt: new Date(now.getTime() + 60_000),
+      })
+      .mockResolvedValueOnce(null);
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([firstExactReceipt, secondExactReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      if (input.where?.id?.in) {
+        return Promise.resolve([firstFact, secondFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(firstMarker)
+      .mockResolvedValueOnce(secondMarker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: secondExactReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockImplementation((input) =>
+      Promise.resolve({ id: input.where.id }),
+    );
+    gamification.processEvent
+      .mockRejectedValueOnce(
+        new ConflictException({
+          code: 'EXACT_CANONICAL_OWNER_QUARANTINED',
+          message:
+            'Exact canonical event ownership is quarantined because it cannot be transferred safely.',
+        }),
+      )
+      .mockResolvedValueOnce({
+        event: { id: secondExactReceipt.eventId },
+        summary: {
+          idempotent: true,
+          createdRewards: 1,
+          exactReconciliation: {
+            complete: true,
+            persistedIntentCount: 1,
+            appliedXpDelta: 0,
+            decisionsPersisted: true,
+          },
+        },
+      });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 2,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 2,
+      failedFacts: 1,
+      liveHandledFacts: 1,
+      createdRewards: 1,
+    });
+
+    expect(gamification.processEvent).toHaveBeenCalledTimes(2);
+    const receiptMutations =
+      prisma.guestGameOriginReceipt.updateMany.mock.calls.map(
+        ([input]) => input,
+      );
+    expect(receiptMutations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: firstMarker.id,
+            factId: firstFact.id,
+            status: 'PROCESSING',
+          }),
+          data: expect.objectContaining({
+            status: 'DEAD_LETTER',
+          }),
+        }),
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: secondMarker.id,
+            factId: secondFact.id,
+            status: 'PROCESSING',
+          }),
+          data: expect.objectContaining({
+            status: 'PROCESSED',
+            eventId: secondExactReceipt.eventId,
+          }),
+        }),
+      ]),
+    );
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === secondExactReceipt.id,
+        ),
+    ).toMatchObject({
+      create: {
+        factId: secondExactReceipt.id,
+        eventType: 'SYSTEM_WATERMARK',
+        policy: 'SYSTEM_WATERMARK',
+      },
+      update: {},
+    });
+  });
+
+  it.each(['missing', 'ambiguous'] as const)(
+    'quarantines a %s exact source and advances through the next exact receipt',
+    async (scenario) => {
+      const { service, prisma, gamification } = createService();
+      const staleFirstFact = {
+        ...fact(new Date(now.getTime() - 180_000)),
+        id: 'fact-exact-stale',
+        sourceExternalId: 'session-ambiguous',
+        sessionExternalId: 'session-ambiguous',
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: new Date(now.getTime() - 120_000),
+      };
+      const replacementA = {
+        ...staleFirstFact,
+        id: 'fact-exact-replacement-a',
+        lifecycleStatus: 'ACTIVE',
+        supersededAt: null,
+      };
+      const replacementB = {
+        ...replacementA,
+        id: 'fact-exact-replacement-b',
+      };
+      const secondFact = {
+        ...fact(new Date(now.getTime() - 60_000)),
+        id: 'fact-exact-next',
+        sourceExternalId: 'session-exact-next',
+        sessionExternalId: 'session-exact-next',
+      };
+      const firstFactId =
+        scenario === 'missing' ? 'fact-exact-missing' : staleFirstFact.id;
+      const firstReceipt = processedExactReceipt(
+        'receipt-exact-first',
+        firstFactId,
+        'event-exact-first',
+        new Date(now.getTime() - 30_000),
+      );
+      const secondReceipt = processedExactReceipt(
+        'receipt-exact-next',
+        secondFact.id,
+        'event-exact-next',
+        new Date(now.getTime() - 15_000),
+      );
+      const quarantineMarker = exactReconciliationMarker(
+        'marker-exact-first',
+        firstFactId,
+        firstReceipt.eventId,
+        'QUARANTINED',
+      );
+      const secondMarker = exactReconciliationMarker(
+        'marker-exact-next',
+        secondFact.id,
+        secondReceipt.eventId,
+      );
+
+      prisma.guestGameOriginReceipt.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([firstReceipt, secondReceipt]);
+      prisma.guestActivityFact.findMany.mockImplementation((input) => {
+        const ids = input.where?.id?.in as string[] | undefined;
+        if (ids?.includes(firstFactId)) {
+          return Promise.resolve(
+            scenario === 'missing'
+              ? [secondFact]
+              : [staleFirstFact, secondFact],
+          );
+        }
+        if (ids?.includes(secondFact.id)) {
+          return Promise.resolve([secondFact]);
+        }
+        const sessions = input.where?.sessionExternalId?.in as
+          | string[]
+          | undefined;
+        if (sessions?.includes('session-ambiguous')) {
+          return Promise.resolve([replacementA, replacementB]);
+        }
+        if (sessions?.includes(secondFact.sessionExternalId)) {
+          return Promise.resolve([secondFact]);
+        }
+        return Promise.resolve([]);
+      });
+      prisma.guestGameOriginReceipt.upsert
+        .mockResolvedValueOnce(quarantineMarker)
+        .mockResolvedValueOnce(secondMarker)
+        .mockResolvedValueOnce({
+          id: 'receipt-exact-watermark',
+          factId: secondReceipt.id,
+          policy: 'SYSTEM_WATERMARK',
+          status: 'PROCESSED',
+        });
+      prisma.guestGameEvent.findFirst.mockImplementation((input) =>
+        Promise.resolve({ id: input.where.id }),
+      );
+      gamification.processEvent.mockResolvedValueOnce({
+        event: { id: secondReceipt.eventId },
+        summary: {
+          idempotent: true,
+          createdRewards: 1,
+          exactReconciliation: {
+            complete: true,
+            persistedIntentCount: 1,
+            appliedXpDelta: 0,
+            decisionsPersisted: true,
+          },
+        },
+      });
+
+      await expect(
+        service.runScheduled({
+          mode: 'LIVE',
+          tenantId: liveCanaryScope.tenantId,
+          liveNotBefore: liveCanaryScope.liveNotBefore,
+          playTimeAllowAllProfiles: true,
+          limit: 2,
+          graceMs: 15_000,
+        }),
+      ).resolves.toMatchObject({
+        checkedFacts: 1,
+        failedFacts: 0,
+        liveHandledFacts: 1,
+        createdRewards: 1,
+      });
+
+      expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+      expect(
+        JSON.stringify(prisma.guestGameOriginReceipt.findMany.mock.calls[0][0]),
+      ).not.toContain('QUARANTINED');
+      expect(
+        prisma.guestGameOriginReceipt.upsert.mock.calls
+          .map(([input]) => input)
+          .find(
+            (input) =>
+              input.create?.policy === 'EXACT_CANONICAL_RULE_RECONCILIATION' &&
+              input.create?.eventId === firstReceipt.eventId,
+          ),
+      ).toMatchObject({
+        create: {
+          status: 'QUARANTINED',
+          eventId: firstReceipt.eventId,
+        },
+      });
+      expect(
+        prisma.guestGameOriginReceipt.upsert.mock.calls
+          .map(([input]) => input)
+          .find(
+            (input) =>
+              input.create?.policy === 'SYSTEM_WATERMARK' &&
+              input.create?.factId === secondReceipt.id,
+          ),
+      ).toBeDefined();
+    },
+  );
+
+  it('quarantines a malformed active exact replacement without starving the next exact receipt', async () => {
+    const { service, prisma, gamification } = createService();
+    const staleFact = {
+      ...fact(new Date(now.getTime() - 180_000)),
+      id: 'fact-exact-malformed-stale',
+      sourceExternalId: 'session-exact-malformed',
+      sessionExternalId: 'session-exact-malformed',
+      lifecycleStatus: 'SUPERSEDED',
+      supersededAt: new Date(now.getTime() - 120_000),
+    };
+    const malformedReplacement = {
+      ...staleFact,
+      id: 'fact-exact-malformed-replacement',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+      happenedAt: null,
+      durationMinutes: null,
+    };
+    const nextFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-after-malformed',
+      sourceExternalId: 'session-exact-after-malformed',
+      sessionExternalId: 'session-exact-after-malformed',
+    };
+    const malformedReceipt = processedExactReceipt(
+      'receipt-exact-malformed',
+      staleFact.id,
+      'event-exact-malformed',
+      new Date(now.getTime() - 30_000),
+    );
+    const nextReceipt = processedExactReceipt(
+      'receipt-exact-after-malformed',
+      nextFact.id,
+      'event-exact-after-malformed',
+      new Date(now.getTime() - 15_000),
+    );
+    const quarantineMarker = exactReconciliationMarker(
+      'marker-exact-malformed',
+      staleFact.id,
+      malformedReceipt.eventId,
+      'QUARANTINED',
+    );
+    const nextMarker = exactReconciliationMarker(
+      'marker-exact-after-malformed',
+      nextFact.id,
+      nextReceipt.eventId,
+    );
+
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([malformedReceipt, nextReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      const ids = input.where?.id?.in as string[] | undefined;
+      if (ids?.includes(staleFact.id)) {
+        return Promise.resolve([staleFact, nextFact]);
+      }
+      if (ids?.includes(nextFact.id)) {
+        return Promise.resolve([nextFact]);
+      }
+      const sessions = input.where?.sessionExternalId?.in as
+        | string[]
+        | undefined;
+      if (sessions?.includes(staleFact.sessionExternalId)) {
+        return Promise.resolve([malformedReplacement]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(quarantineMarker)
+      .mockResolvedValueOnce(nextMarker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: nextReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockImplementation((input) =>
+      Promise.resolve({ id: input.where.id }),
+    );
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: nextReceipt.eventId },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 2,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      failedFacts: 0,
+      liveHandledFacts: 1,
+      createdRewards: 1,
+    });
+
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'EXACT_CANONICAL_RULE_RECONCILIATION' &&
+            input.create?.eventId === malformedReceipt.eventId,
+        ),
+    ).toMatchObject({
+      create: {
+        status: 'QUARANTINED',
+        eventId: malformedReceipt.eventId,
+        lastError:
+          'Exact reconciliation source has no positive duration or occurrence time.',
+      },
+    });
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === nextReceipt.id,
+        ),
+    ).toBeDefined();
+  });
+
+  it('quarantines conflicting exact classifications without starving the next exact receipt', async () => {
+    const { service, prisma, gamification } = createService();
+    const conflictingFact = {
+      ...fact(new Date(now.getTime() - 120_000)),
+      id: 'fact-exact-conflict',
+      sourceExternalId: 'session-exact-conflict',
+      sessionExternalId: 'session-exact-conflict',
+    };
+    const conflictingSibling = {
+      ...conflictingFact,
+      id: 'fact-exact-conflict-sibling',
+      factType: 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+    };
+    const nextFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-after-conflict',
+      sourceExternalId: 'session-exact-after-conflict',
+      sessionExternalId: 'session-exact-after-conflict',
+    };
+    const conflictReceipt = processedExactReceipt(
+      'receipt-exact-conflict',
+      conflictingFact.id,
+      'event-exact-conflict',
+      new Date(now.getTime() - 30_000),
+    );
+    const nextReceipt = processedExactReceipt(
+      'receipt-exact-after-conflict',
+      nextFact.id,
+      'event-exact-after-conflict',
+      new Date(now.getTime() - 15_000),
+    );
+    const quarantineMarker = exactReconciliationMarker(
+      'marker-exact-conflict',
+      conflictingFact.id,
+      conflictReceipt.eventId,
+      'QUARANTINED',
+    );
+    const nextMarker = exactReconciliationMarker(
+      'marker-exact-after-conflict',
+      nextFact.id,
+      nextReceipt.eventId,
+    );
+
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([conflictReceipt, nextReceipt]);
+    prisma.guestGameOriginReceipt.findFirst.mockResolvedValue(conflictReceipt);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      const ids = input.where?.id?.in as string[] | undefined;
+      if (ids?.includes(conflictingFact.id)) {
+        return Promise.resolve([conflictingFact, nextFact]);
+      }
+      if (ids?.includes(nextFact.id)) {
+        return Promise.resolve([conflictingFact, nextFact]);
+      }
+      const sessions = input.where?.sessionExternalId?.in as
+        | string[]
+        | undefined;
+      if (sessions?.includes(conflictingFact.sessionExternalId)) {
+        return Promise.resolve([conflictingFact, conflictingSibling, nextFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(quarantineMarker)
+      .mockResolvedValueOnce(nextMarker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: nextReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockImplementation((input) =>
+      Promise.resolve({ id: input.where.id }),
+    );
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: nextReceipt.eventId },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 2,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      failedFacts: 1,
+      liveHandledFacts: 1,
+      createdRewards: 1,
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === nextReceipt.id,
+        ),
+    ).toBeDefined();
+  });
+
+  it('persists an exact retry marker when dry-run fails and advances through the next receipt', async () => {
+    const { service, prisma, gamification } = createService();
+    const failedFact = {
+      ...fact(new Date(now.getTime() - 120_000)),
+      id: 'fact-exact-dry-run-failed',
+      sourceExternalId: 'session-exact-dry-run-failed',
+      sessionExternalId: 'session-exact-dry-run-failed',
+    };
+    const nextFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-after-dry-run',
+      sourceExternalId: 'session-exact-after-dry-run',
+      sessionExternalId: 'session-exact-after-dry-run',
+    };
+    const failedReceipt = processedExactReceipt(
+      'receipt-exact-dry-run-failed',
+      failedFact.id,
+      'event-exact-dry-run-failed',
+      new Date(now.getTime() - 30_000),
+    );
+    const nextReceipt = processedExactReceipt(
+      'receipt-exact-after-dry-run',
+      nextFact.id,
+      'event-exact-after-dry-run',
+      new Date(now.getTime() - 15_000),
+    );
+    const retryMarker = {
+      ...exactReconciliationMarker(
+        'marker-exact-dry-run-failed',
+        failedFact.id,
+        failedReceipt.eventId,
+      ),
+      status: 'FAILED',
+      lastError: 'dry-run failed',
+    };
+    const nextMarker = exactReconciliationMarker(
+      'marker-exact-after-dry-run',
+      nextFact.id,
+      nextReceipt.eventId,
+    );
+
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([failedReceipt, nextReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      const ids = input.where?.id?.in as string[] | undefined;
+      if (ids?.length) return Promise.resolve([failedFact, nextFact]);
+      const sessions = input.where?.sessionExternalId?.in as
+        | string[]
+        | undefined;
+      if (sessions?.length) return Promise.resolve([failedFact, nextFact]);
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(retryMarker)
+      .mockResolvedValueOnce(nextMarker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: nextReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockImplementation((input) =>
+      Promise.resolve({ id: input.where.id }),
+    );
+    gamification.dryRun
+      .mockRejectedValueOnce(new Error('dry-run failed'))
+      .mockResolvedValueOnce(dryRun());
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: nextReceipt.eventId },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 2,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      failedFacts: 1,
+      liveHandledFacts: 1,
+      createdRewards: 1,
+    });
+    expect(prisma.guestGameOriginReceipt.upsert.mock.calls[0][0]).toMatchObject(
+      {
+        create: {
+          eventId: failedReceipt.eventId,
+          policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+          status: 'FAILED',
+        },
+      },
+    );
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === nextReceipt.id,
+        ),
+    ).toBeDefined();
+  });
+
+  it('advances the exact cursor when durable effects are waiting for delivery', async () => {
+    const { service, prisma, gamification } = createService();
+    const exactFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-waiting-delivery',
+      sourceExternalId: 'session-exact-waiting-delivery',
+      sessionExternalId: 'session-exact-waiting-delivery',
+    };
+    const exactReceipt = processedExactReceipt(
+      'receipt-exact-waiting-delivery',
+      exactFact.id,
+      'event-exact-waiting-delivery',
+      new Date(now.getTime() - 15_000),
+    );
+    const marker = exactReconciliationMarker(
+      'marker-exact-waiting-delivery',
+      exactFact.id,
+      exactReceipt.eventId,
+    );
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([exactReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      if (input.where?.id?.in || input.where?.sessionExternalId?.in) {
+        return Promise.resolve([exactFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(marker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: exactReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockResolvedValue({
+      id: exactReceipt.eventId,
+    });
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: exactReceipt.eventId },
+      summary: {
+        idempotent: true,
+        createdRewards: 0,
+        exactReconciliation: {
+          complete: false,
+          waitingForDelivery: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 1,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 1,
+      failedFacts: 0,
+    });
+    expect(
+      prisma.guestGameOriginReceipt.updateMany.mock.calls
+        .map(([input]) => input)
+        .find((input) => input.data?.status === 'WAITING_LIVE'),
+    ).toMatchObject({
+      where: {
+        id: marker.id,
+        factId: exactFact.id,
+        status: 'PROCESSING',
+      },
+    });
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === exactReceipt.id,
+        ),
+    ).toBeDefined();
+  });
+
+  it('treats a processed reconciliation marker bound to an old parser fact as durable only when the current owner matches', async () => {
+    const { service, prisma, gamification } = createService();
+    const reconcileOwner = jest.spyOn(
+      exactOwnerReconciler,
+      'reconcileExactCanonicalEventOwner',
+    );
+    const exactFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-reparsed',
+      sourceExternalId: 'session-exact-reparsed',
+      sessionExternalId: 'session-exact-reparsed',
+    };
+    const exactReceipt = processedExactReceipt(
+      'receipt-exact-reparsed',
+      exactFact.id,
+      'event-exact-reparsed',
+      new Date(now.getTime() - 15_000),
+    );
+    const marker = {
+      ...exactReconciliationMarker(
+        'marker-exact-reparsed',
+        'fact-old-parser-version',
+        exactReceipt.eventId,
+      ),
+      status: 'PROCESSED',
+      attempts: 1,
+      processedAt: new Date(now.getTime() - 30_000),
+    };
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([exactReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      if (input.where?.id?.in || input.where?.sessionExternalId?.in) {
+        return Promise.resolve([exactFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(marker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: exactReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockResolvedValueOnce({
+      profileId: exactFact.profileId,
+      guestId: exactFact.guestId,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 1,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 1,
+      failedFacts: 0,
+    });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+    expect(reconcileOwner).not.toHaveBeenCalled();
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === exactReceipt.id,
+        ),
+    ).toBeDefined();
+  });
+
+  it('durably quarantines a terminal exact marker when a replacement changes owner after effects', async () => {
+    const { service, prisma, gamification } = createService();
+    const exactFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-reparsed-owner-change',
+      profileId: 'profile-current-owner',
+      guestId: 'guest-current-owner',
+      sourceExternalId: 'session-exact-reparsed-owner-change',
+      sessionExternalId: 'session-exact-reparsed-owner-change',
+    };
+    const exactReceipt = processedExactReceipt(
+      'receipt-exact-reparsed-owner-change',
+      exactFact.id,
+      'event-exact-reparsed-owner-change',
+      new Date(now.getTime() - 15_000),
+    );
+    const marker = {
+      ...exactReconciliationMarker(
+        'marker-exact-reparsed-owner-change',
+        'fact-old-owner',
+        exactReceipt.eventId,
+      ),
+      status: 'PROCESSED',
+      attempts: 1,
+      processedAt: new Date(now.getTime() - 30_000),
+    };
+    const reconcileOwner = jest
+      .spyOn(exactOwnerReconciler, 'reconcileExactCanonicalEventOwner')
+      .mockResolvedValueOnce({
+        status: 'QUARANTINED',
+        quarantineOriginKey: 'owner-quarantine-origin',
+        reasonCode: 'MATERIAL_EFFECTS_EXIST',
+      });
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([exactReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      if (input.where?.id?.in || input.where?.sessionExternalId?.in) {
+        return Promise.resolve([exactFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(marker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: exactReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockResolvedValueOnce({
+      profileId: 'profile-old-owner',
+      guestId: 'guest-old-owner',
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 1,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 0,
+      failedFacts: 1,
+    });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+    expect(reconcileOwner).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        tenantId: liveCanaryScope.tenantId,
+        eventId: exactReceipt.eventId,
+        expectedEventType: 'PLAY_HOUR',
+        targetProfileId: exactFact.profileId,
+        targetGuestId: exactFact.guestId,
+        sourceFactId: exactFact.id,
+        sourceFactUpdatedAt: exactFact.updatedAt,
+      }),
+    );
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === exactReceipt.id,
+        ),
+    ).toBeDefined();
+  });
+
+  it('keeps the exact cursor behind an active reconciliation lease bound to an old parser fact', async () => {
+    const { service, prisma, gamification } = createService();
+    const exactFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-reparsed-active-lease',
+      sourceExternalId: 'session-exact-reparsed-active-lease',
+      sessionExternalId: 'session-exact-reparsed-active-lease',
+    };
+    const exactReceipt = processedExactReceipt(
+      'receipt-exact-reparsed-active-lease',
+      exactFact.id,
+      'event-exact-reparsed-active-lease',
+      new Date(now.getTime() - 15_000),
+    );
+    const marker = {
+      ...exactReconciliationMarker(
+        'marker-exact-reparsed-active-lease',
+        'fact-old-parser-version',
+        exactReceipt.eventId,
+      ),
+      status: 'PROCESSING',
+      claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+      attempts: 1,
+      claimExpiresAt: new Date(now.getTime() + 60_000),
+    };
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([exactReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      if (input.where?.id?.in || input.where?.sessionExternalId?.in) {
+        return Promise.resolve([exactFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce(marker);
+    prisma.guestGameOriginReceipt.updateMany.mockResolvedValueOnce({
+      count: 0,
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 1,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      duplicateFacts: 1,
+      failedFacts: 0,
+    });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === exactReceipt.id,
+        ),
+    ).toBeUndefined();
+    const rebind = prisma.guestGameOriginReceipt.updateMany.mock.calls[0][0];
+    expect(rebind.where).toMatchObject({
+      id: marker.id,
+      factId: 'fact-old-parser-version',
+      OR: expect.arrayContaining([
+        expect.objectContaining({
+          status: 'PROCESSING',
+        }),
+      ]),
+    });
+    expect(JSON.stringify(rebind.where)).toContain('claimExpiresAt');
+  });
+
+  it('does not treat a foreign active reconciliation lease as a durable dry-run retry marker', async () => {
+    const { service, prisma, gamification } = createService();
+    const exactFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-reparsed-dry-run',
+      sourceExternalId: 'session-exact-reparsed-dry-run',
+      sessionExternalId: 'session-exact-reparsed-dry-run',
+    };
+    const exactReceipt = processedExactReceipt(
+      'receipt-exact-reparsed-dry-run',
+      exactFact.id,
+      'event-exact-reparsed-dry-run',
+      new Date(now.getTime() - 15_000),
+    );
+    const marker = {
+      ...exactReconciliationMarker(
+        'marker-exact-reparsed-dry-run',
+        'fact-old-parser-version',
+        exactReceipt.eventId,
+      ),
+      status: 'PROCESSING',
+      claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+      attempts: 1,
+      claimExpiresAt: new Date(now.getTime() + 60_000),
+    };
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([exactReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      if (input.where?.id?.in || input.where?.sessionExternalId?.in) {
+        return Promise.resolve([exactFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce(marker);
+    prisma.guestGameOriginReceipt.updateMany.mockResolvedValueOnce({
+      count: 0,
+    });
+    gamification.dryRun.mockRejectedValueOnce(new Error('dry-run failed'));
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 1,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 0,
+      failedFacts: 1,
+    });
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === exactReceipt.id,
+        ),
+    ).toBeUndefined();
+    expect(prisma.guestGameOriginReceipt.upsert.mock.calls[0][0]).toMatchObject(
+      {
+        create: {
+          factId: exactFact.id,
+          eventId: exactReceipt.eventId,
+          policy: 'EXACT_CANONICAL_RULE_RECONCILIATION',
+          status: 'FAILED',
+        },
+      },
+    );
+    expect(
+      prisma.guestGameOriginReceipt.updateMany.mock.calls[0][0],
+    ).toMatchObject({
+      where: {
+        id: marker.id,
+        factId: 'fact-old-parser-version',
+      },
+      data: {
+        factId: exactFact.id,
+        status: 'FAILED',
+      },
+    });
+  });
+
+  it('rebinds an expired reconciliation lease to the active parser fact and reconciles it', async () => {
+    const { service, prisma, gamification } = createService();
+    const exactFact = {
+      ...fact(new Date(now.getTime() - 60_000)),
+      id: 'fact-exact-reparsed-expired-lease',
+      sourceExternalId: 'session-exact-reparsed-expired-lease',
+      sessionExternalId: 'session-exact-reparsed-expired-lease',
+    };
+    const exactReceipt = processedExactReceipt(
+      'receipt-exact-reparsed-expired-lease',
+      exactFact.id,
+      'event-exact-reparsed-expired-lease',
+      new Date(now.getTime() - 15_000),
+    );
+    const marker = {
+      ...exactReconciliationMarker(
+        'marker-exact-reparsed-expired-lease',
+        'fact-old-parser-version',
+        exactReceipt.eventId,
+      ),
+      status: 'PROCESSING',
+      claimedSource: 'LEDGER_FALLBACK_EXACT_RECONCILIATION',
+      attempts: 1,
+      claimExpiresAt: new Date(now.getTime() - 60_000),
+    };
+    prisma.guestGameOriginReceipt.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([exactReceipt]);
+    prisma.guestActivityFact.findMany.mockImplementation((input) => {
+      if (input.where?.id?.in || input.where?.sessionExternalId?.in) {
+        return Promise.resolve([exactFact]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.guestGameOriginReceipt.upsert
+      .mockResolvedValueOnce(marker)
+      .mockResolvedValueOnce({
+        id: 'receipt-exact-watermark',
+        factId: exactReceipt.id,
+        policy: 'SYSTEM_WATERMARK',
+        status: 'PROCESSED',
+      });
+    prisma.guestGameEvent.findFirst.mockResolvedValue({
+      id: exactReceipt.eventId,
+    });
+    gamification.processEvent.mockResolvedValueOnce({
+      event: { id: exactReceipt.eventId },
+      summary: {
+        idempotent: true,
+        createdRewards: 1,
+        exactReconciliation: {
+          complete: true,
+          persistedIntentCount: 1,
+          appliedXpDelta: 0,
+          decisionsPersisted: true,
+        },
+      },
+    });
+
+    await expect(
+      service.runScheduled({
+        mode: 'LIVE',
+        tenantId: liveCanaryScope.tenantId,
+        liveNotBefore: liveCanaryScope.liveNotBefore,
+        playTimeAllowAllProfiles: true,
+        limit: 1,
+        graceMs: 15_000,
+      }),
+    ).resolves.toMatchObject({
+      checkedFacts: 1,
+      liveHandledFacts: 1,
+      duplicateFacts: 0,
+      failedFacts: 0,
+      createdRewards: 1,
+    });
+    expect(gamification.processEvent).toHaveBeenCalledTimes(1);
+    const mutations = prisma.guestGameOriginReceipt.updateMany.mock.calls.map(
+      ([input]) => input,
+    );
+    expect(mutations[0]).toMatchObject({
+      where: {
+        id: marker.id,
+        factId: 'fact-old-parser-version',
+      },
+      data: {
+        factId: exactFact.id,
+      },
+    });
+    expect(mutations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: marker.id,
+            factId: exactFact.id,
+          }),
+          data: expect.objectContaining({
+            status: 'PROCESSING',
+          }),
+        }),
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: marker.id,
+            factId: exactFact.id,
+            status: 'PROCESSING',
+          }),
+          data: expect.objectContaining({
+            status: 'PROCESSED',
+          }),
+        }),
+      ]),
+    );
+    expect(
+      prisma.guestGameOriginReceipt.upsert.mock.calls
+        .map(([input]) => input)
+        .find(
+          (input) =>
+            input.create?.policy === 'SYSTEM_WATERMARK' &&
+            input.create?.factId === exactReceipt.id,
+        ),
+    ).toBeDefined();
+  });
+
   it.each([
     ['active', new Date(now.getTime() + 60_000)],
     ['expired', new Date(now.getTime() - 60_000)],
@@ -1343,37 +3561,41 @@ describe('GuestGameLedgerFallbackService', () => {
     },
   );
 
-  it('does not repoint or claim an operator-owned exact receipt before its lease starts', async () => {
-    const { service, prisma, gamification } = createService();
-    prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
-      id: 'receipt-exact',
-      factId: 'fact-1',
-      policy: 'EXACT_OPERATOR_CANONICALIZATION',
-      status: 'WAITING_LIVE',
-      claimedSource: null,
-      ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
-      graceUntil: new Date(now.getTime() - 1_000),
-      attempts: 0,
-      claimExpiresAt: null,
-    });
+  it.each(['WAITING_LIVE', 'FAILED'])(
+    'does not repoint or claim an operator-owned exact receipt in %s status',
+    async (status) => {
+      const { service, prisma, gamification } = createService();
+      prisma.guestGameOriginReceipt.upsert.mockResolvedValueOnce({
+        id: 'receipt-exact',
+        factId: 'fact-1',
+        eventId: null,
+        policy: 'EXACT_OPERATOR_CANONICALIZATION',
+        status,
+        claimedSource: null,
+        ledgerFirstSeenAt: new Date(now.getTime() - 60_000),
+        graceUntil: new Date(now.getTime() - 1_000),
+        attempts: status === 'FAILED' ? 1 : 0,
+        claimExpiresAt: null,
+      });
 
-    await expect(
-      service.runScheduled({
-        mode: 'LIVE',
-        ...liveCanaryScope,
-        graceMs: 15_000,
-        tenantId: 'tenant-1',
-      }),
-    ).resolves.toMatchObject({
-      duplicateFacts: 1,
-      fallbackFacts: 0,
-    });
-    expect(
-      prisma.guestGameOriginReceipt.upsert.mock.calls[0][0].update,
-    ).toEqual({});
-    expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
-    expect(gamification.processEvent).not.toHaveBeenCalled();
-  });
+      await expect(
+        service.runScheduled({
+          mode: 'LIVE',
+          ...liveCanaryScope,
+          graceMs: 15_000,
+          tenantId: 'tenant-1',
+        }),
+      ).resolves.toMatchObject({
+        duplicateFacts: 1,
+        fallbackFacts: 0,
+      });
+      expect(
+        prisma.guestGameOriginReceipt.upsert.mock.calls[0][0].update,
+      ).toEqual({});
+      expect(prisma.guestGameOriginReceipt.updateMany).not.toHaveBeenCalled();
+      expect(gamification.processEvent).not.toHaveBeenCalled();
+    },
+  );
 
   it('claims an existing LIVE event before reconciliation and loses safely to exact canonicalization', async () => {
     const { service, prisma, gamification } = createService({
@@ -1458,7 +3680,7 @@ describe('GuestGameLedgerFallbackService', () => {
       createdEvents: 1,
       createdRewards: 1,
     });
-    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.guestActivityFact.findMany).toHaveBeenCalledTimes(4);
     expect(gamification.processEvent).toHaveBeenCalledTimes(1);
   });
 });

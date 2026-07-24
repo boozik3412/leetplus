@@ -6,12 +6,12 @@
 
 ## Что происходит автоматически
 
-| Сущность | После выполнения условия | Действие гостя |
-| --- | --- | --- |
-| Задание | Создается и отправляется одобренная награда | Не требуется |
-| Этап Battle Pass | Создается и отправляется награда этапа, открывается следующий | Не требуется |
-| Чекин | Награда создается после успешного чекина | Нажать кнопку чекина |
-| Лутбокс | Сохраняется право открыть контейнер | Нажать `Открыть контейнер` для выбора и выдачи приза |
+| Сущность         | После выполнения условия                                      | Действие гостя                                       |
+| ---------------- | ------------------------------------------------------------- | ---------------------------------------------------- |
+| Задание          | Создается и отправляется одобренная награда                   | Не требуется                                         |
+| Этап Battle Pass | Создается и отправляется награда этапа, открывается следующий | Не требуется                                         |
+| Чекин            | Награда создается после успешного чекина                      | Нажать кнопку чекина                                 |
+| Лутбокс          | Сохраняется право открыть контейнер                           | Нажать `Открыть контейнер` для выбора и выдачи приза |
 
 Лутбокс никогда не должен автоматически выбирать приз или создавать reward только из-за фоновой проверки, открытия приложения или scheduler tick.
 
@@ -57,19 +57,20 @@ Receipt supplemental-очереди использует lease. Просроче
 
 - `GUEST_GAME_LEDGER_FALLBACK_MODE=OFF|SHADOW|LIVE`; безопасное значение по умолчанию — `OFF`.
 - `GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH=true` немедленно останавливает новые тики независимо от режима.
-- `GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES` фильтруется жёстким allow-list: `HOURLY_PLAY_TIME_ACCUMULATED`, `PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED`, `PRODUCT_PURCHASED`. В `LIVE` допускаются только два точных типа игрового времени. `PRODUCT_PURCHASED` остаётся только в `SHADOW` до отдельной проверки lifecycle отмен и возвратов по стабильному sale ID; добавление его в env не разрешает боевую обработку.
+- `GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES` фильтруется жёстким allow-list: `SESSION_PLAY_TIME_ACCUMULATED`, `HOURLY_PLAY_TIME_ACCUMULATED`, `PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED`, `PRODUCT_PURCHASED`. В `LIVE` допускаются три точных типа игрового времени: нейтральный факт используется только правилами с типом сессии «Любая», а тарифные факты остаются строгими. `PRODUCT_PURCHASED` остаётся только в `SHADOW` до отдельной проверки lifecycle отмен и возвратов по стабильному sale ID; добавление его в env не разрешает боевую обработку.
 - `GUEST_GAME_LEDGER_FALLBACK_GRACE_MS`, `...CLAIM_LEASE_MS`, `...INTERVAL_MS` и `...BATCH_SIZE` задают grace-window, lease для восстановления после рестарта, частоту и размер пакета. Grace-window начинается при первом появлении origin receipt.
-- `LIVE` требует одновременно точный tenant (`...TENANT_ID` или `...TENANT_SLUG`), `GUEST_GAME_LEDGER_FALLBACK_PROFILE_ID`, `GUEST_GAME_LEDGER_FALLBACK_SEASON_ID` и положительный `GUEST_GAME_LEDGER_FALLBACK_BATTLE_PASS_STEP`. Эти значения ограничивают canary одним профилем и одним шагом одного сезона; при отсутствии любого параметра scheduler fail-closed.
-- `GUEST_GAME_LEDGER_FALLBACK_MISSIONS_ALLOW_ALL_PROFILES=true` расширяет только активные задания `PLAY_TIME` с policy `LIVE_WITH_LEDGER_FALLBACK` на все профили настроенного tenant. Флаг не расширяет Battle Pass: он остаётся ограничен точными `PROFILE_ID`, `SEASON_ID` и `BATTLE_PASS_STEP`. Значение по умолчанию — `false`.
+- `LIVE` работает в двух fail-closed scope. Legacy canary требует точный tenant, `PROFILE_ID`, `SEASON_ID`, положительный `BATTLE_PASS_STEP` и `LIVE_NOT_BEFORE`. Общий режим игрового времени требует точный tenant, `LIVE_NOT_BEFORE` и явный флаг `GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES=true`; `ALLOW_ALL_TENANTS` в обоих режимах запрещён.
+- `GUEST_GAME_LEDGER_FALLBACK_MISSIONS_ALLOW_ALL_PROFILES=true` сохранён для legacy staged-rollout: он расширяет только активные задания `PLAY_TIME`, оставляя Battle Pass в точном canary scope. Для единого контура заданий, Battle Pass и лутбоксов используется общий `PLAY_TIME_ALLOW_ALL_PROFILES`.
+- `GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES=true` направляет точные факты игрового времени всех профилей настроенного tenant во все совместимые активные v2-задания, текущие шаги Battle Pass и условия `PLAY_HOUR` лутбоксов. Фиксированный сезон или шаг не требуется. Награды и права открытия создаются существующим идемпотентным pipeline; для лутбокса создаётся только entitlement, случайный приз появляется после ручного открытия. Значение по умолчанию — `false`.
 - `GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE` обязателен для `LIVE` и задаётся валидной UTC ISO-датой, например `2026-07-19T16:30:00.000Z`. Факты раньше cutoff не выбираются, поэтому накопленные `SHADOWED` receipts не могут задним числом породить event, XP или reward после переключения режима.
 - `GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS` должен оставаться `false`: режим `LIVE` с `true` запрещён и fail-closed. Расширение заданий допускается только внутри явно настроенного tenant.
 
 Безопасный rollout выполняется последовательно:
 
 1. Развернуть код с `MODE=OFF` либо оставить действующий tenant/profile-scoped `SHADOW`; проверить health, миграции, freshness, replay и отсутствие дублей.
-2. Заполнить точные tenant, profile, season и Battle Pass step; установить `LIVE_NOT_BEFORE` на текущий момент UTC непосредственно перед canary. Оставить `ALLOW_ALL_TENANTS=false`, только два точных типа игрового времени и небольшой batch. Флаг `MISSIONS_ALLOW_ALL_PROFILES` включать лишь после проверки точного PLAY_TIME-факта и policy активного задания.
+2. Для первого canary заполнить точные tenant, profile, season и Battle Pass step; установить `LIVE_NOT_BEFORE` на текущий момент UTC непосредственно перед canary. Оставить `ALLOW_ALL_TENANTS=false`, только три точных типа игрового времени и небольшой batch.
 3. Сначала запустить `MODE=LIVE` с `KILL_SWITCH=true`, проверить итоговую runtime-конфигурацию, затем снять kill switch. Подтвердить цепочку fact → receipt → event → decision → reward intent/effect → bonus ledger и отсутствие повторов при следующем tick/restart.
-4. Не расширять Battle Pass profile/season/step scope и не включать покупки до отдельного решения по результатам canary. Для заданий расширение выполняется только флагом `MISSIONS_ALLOW_ALL_PROFILES` и только для policy `LIVE_WITH_LEDGER_FALLBACK`.
+4. После подтверждения canary включить `PLAY_TIME_ALLOW_ALL_PROFILES=true` только для проверенного tenant. Убедиться, что один точный факт маршрутизируется во все совместимые активные задания, текущие шаги Battle Pass и `PLAY_HOUR`-лутбоксы, а повторный tick не создаёт вторую награду. Покупки в этот rollout не включать.
 
 Rollback не требует удаления данных или отката миграций: немедленно установить `GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH=true` либо вернуть `GUEST_GAME_LEDGER_FALLBACK_MODE=SHADOW`/`OFF` и перезапустить только API. Основной LIVE snapshot-контур продолжает работать. Уже созданные receipts, events и postings сохраняются для аудита и не переигрываются; перед следующим canary задаётся новый `LIVE_NOT_BEFORE`.
 

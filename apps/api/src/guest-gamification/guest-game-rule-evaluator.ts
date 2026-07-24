@@ -1268,6 +1268,7 @@ export function relevantGuestGameFacts(
       return ['HOURLY_PLAY_TIME_ACCUMULATED'];
     }
     return [
+      'SESSION_PLAY_TIME_ACCUMULATED',
       'HOURLY_PLAY_TIME_ACCUMULATED',
       'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
     ];

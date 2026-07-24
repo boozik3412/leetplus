@@ -7,11 +7,29 @@ export type GuestGameOriginInput = {
   stableExternalId?: string | null;
 };
 
+export type GuestGamePhysicalProgressIdentityInput = {
+  externalProvider?: string | null;
+  externalDomain?: string | null;
+  sourceKind?: string | null;
+  sessionExternalId?: string | null;
+  eventType?: string | null;
+};
+
+export type GuestGamePhysicalProgressIdentity = {
+  externalProvider: string;
+  externalDomain: string;
+  sourceKind: string;
+  sessionExternalId: string;
+  family: 'PLAY_TIME';
+  key: string;
+};
+
 const canonicalEventAliases: Record<string, string> = {
   SESSION_STARTED: 'SESSION_START',
   SESSION_START: 'SESSION_START',
   SESSION_ENDED: 'SESSION_STOP',
   SESSION_STOP: 'SESSION_STOP',
+  SESSION_PLAY_TIME_ACCUMULATED: 'PLAY_HOUR',
   HOURLY_PLAY_TIME_ACCUMULATED: 'PLAY_HOUR',
   PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED: 'PLAY_HOUR',
   PLAY_HOUR: 'PLAY_HOUR',
@@ -26,6 +44,28 @@ export function canonicalGuestGameEventType(value: unknown): string | null {
   const normalized = normalizedString(value)?.toUpperCase() ?? null;
   if (!normalized) return null;
   return canonicalEventAliases[normalized] ?? normalized;
+}
+
+export function canonicalGuestGameProgressFamily(
+  value: unknown,
+): 'PLAY_TIME' | null {
+  const eventType = canonicalGuestGameEventType(value);
+  return eventType === 'PLAY_HOUR' ||
+    eventType === 'SESSION_STOP' ||
+    eventType === 'PLAY_TIME'
+    ? 'PLAY_TIME'
+    : null;
+}
+
+export function normalizeGuestGameSourceKind(value: unknown): string | null {
+  const normalized = normalizedString(value)?.toUpperCase() ?? null;
+  if (!normalized) return null;
+
+  if (normalized === 'GUEST_SESSION') {
+    return 'LANGAME_GUEST_SESSION';
+  }
+
+  return normalized;
 }
 
 export function normalizeGuestGameExternalDomain(
@@ -73,6 +113,69 @@ export function buildGuestGameOriginKey(
   return `ggo:v1:${digest}`;
 }
 
+/**
+ * Tenant-neutral identity of one physical play-time session.
+ *
+ * The tenant stays in the database/query scope. Unlike source fact ids, this
+ * tuple survives parser reruns and play-time classification changes without
+ * merging sessions from different providers, domains or physical sources.
+ */
+export function buildGuestGamePhysicalProgressIdentity(
+  input: GuestGamePhysicalProgressIdentityInput,
+): GuestGamePhysicalProgressIdentity | null {
+  const externalProvider = normalizedString(
+    input.externalProvider,
+  )?.toUpperCase();
+  const externalDomain = normalizeGuestGameExternalDomain(input.externalDomain);
+  const sourceKind = normalizeGuestGameSourceKind(input.sourceKind);
+  const sessionExternalId = normalizedString(input.sessionExternalId);
+  const family = canonicalGuestGameProgressFamily(input.eventType);
+
+  if (
+    !externalProvider ||
+    !externalDomain ||
+    !sourceKind ||
+    !sessionExternalId ||
+    !family
+  ) {
+    return null;
+  }
+
+  const digest = physicalProgressDigest({
+    externalProvider,
+    externalDomain,
+    sourceKind,
+    sessionExternalId,
+    family,
+  });
+
+  return {
+    externalProvider,
+    externalDomain,
+    sourceKind,
+    sessionExternalId,
+    family,
+    key: `ggp:v1:${digest}`,
+  };
+}
+
+/**
+ * Canonical v2 origin for PLAY_TIME only.
+ *
+ * The v1 builder remains unchanged for legacy lookup and every non-play-time
+ * action. Callers rolling this out must probe the v2 key first and the v1 key
+ * second before creating an event or receipt.
+ */
+export function buildGuestGamePlayTimeOriginKey(
+  input: GuestGamePhysicalProgressIdentityInput,
+): string | null {
+  const identity = buildGuestGamePhysicalProgressIdentity(input);
+  if (!identity) return null;
+
+  const digest = physicalProgressDigest(identity);
+  return `ggo:v2:${digest}`;
+}
+
 export function buildGuestGameRewardIdempotencyKey(input: {
   originKey?: string | null;
   ruleKind?: string | null;
@@ -95,6 +198,26 @@ export function buildGuestGameRewardIdempotencyKey(input: {
     )
     .digest('hex');
   return `ggr:v1:${digest}`;
+}
+
+function physicalProgressDigest(input: {
+  externalProvider: string;
+  externalDomain: string;
+  sourceKind: string;
+  sessionExternalId: string;
+  family: 'PLAY_TIME';
+}) {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        input.externalProvider,
+        input.externalDomain,
+        input.sourceKind,
+        input.sessionExternalId,
+        input.family,
+      ]),
+    )
+    .digest('hex');
 }
 
 function normalizedString(value: unknown): string | null {

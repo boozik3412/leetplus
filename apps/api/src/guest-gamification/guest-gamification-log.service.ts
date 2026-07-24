@@ -19,6 +19,12 @@ import {
   compareGuestGameRuleDecisionPair,
   type GuestGameComparisonSourceFreshness,
 } from './guest-game-rule-comparison';
+import {
+  guestGameBattlePassStepEvaluationPolicy,
+  guestGameLootBoxEvaluationPolicy,
+  guestGameMissionEvaluationPolicy,
+  type GuestGameEvaluationPolicy,
+} from './guest-game-source-policy';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -1003,7 +1009,10 @@ export class GuestGamificationLogService {
           ),
           progressTarget: null,
           progressUnit: null,
-          evaluationPolicy: 'LIVE_PRIMARY',
+          evaluationPolicy: guestGameLootBoxEvaluationPolicy(
+            rule.triggerKind,
+            rule.periodRules,
+          ),
         })),
       ...missions
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -1028,7 +1037,12 @@ export class GuestGamificationLogService {
           ),
           progressTarget: rule.progressTarget,
           progressUnit: rule.progressUnit,
-          evaluationPolicy: rule.evaluationPolicy,
+          evaluationPolicy: guestGameMissionEvaluationPolicy(
+            rule.definitionVersion,
+            rule.conditions,
+            rule.missionType,
+            rule.evaluationPolicy,
+          ),
         })),
       ...seasons
         .filter((rule) => matchesStore(rule.storeIds, options.storeId))
@@ -1050,7 +1064,7 @@ export class GuestGamificationLogService {
           ),
           progressTarget: null,
           progressUnit: null,
-          evaluationPolicy: 'LIVE_PRIMARY',
+          evaluationPolicy: battlePassSeasonEvaluationPolicy(rule.levels),
         })),
     ].slice(0, options.limit);
 
@@ -1472,6 +1486,8 @@ function factTitle(factType: string) {
     PACKAGE_OR_SUBSCRIPTION_PURCHASED: 'Покупка пакета или абонемента',
     PACKAGE_OR_SUBSCRIPTION_USED: 'Использование пакета или абонемента',
     HOURLY_SESSION_STARTED: 'Почасовая сессия',
+    SESSION_PLAY_TIME_ACCUMULATED:
+      'Наиграно за сессию (тип тарифа не определён)',
     HOURLY_PLAY_TIME_ACCUMULATED: 'Наиграно по почасовой оплате',
     PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED:
       'Наиграно по пакету или абонементу',
@@ -1616,6 +1632,20 @@ function legacyRuleDecisionFromAudits(
   }
 
   return null;
+}
+
+function battlePassSeasonEvaluationPolicy(
+  levels: unknown,
+): GuestGameEvaluationPolicy | 'MIXED' {
+  if (!Array.isArray(levels)) {
+    return 'LIVE_PRIMARY';
+  }
+
+  const policies = levels.map((level) =>
+    guestGameBattlePassStepEvaluationPolicy(jsonObject(level)?.activationRules),
+  );
+  const uniquePolicies = new Set<GuestGameEvaluationPolicy>(policies);
+  return uniquePolicies.size === 1 ? (policies[0] ?? 'LIVE_PRIMARY') : 'MIXED';
 }
 
 function jsonObject(value: unknown): Record<string, unknown> | null {

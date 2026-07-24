@@ -10,6 +10,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   buildGuestGameOriginKey,
+  buildGuestGamePlayTimeOriginKey,
   canonicalGuestGameEventType,
 } from './guest-game-origin-key';
 import {
@@ -17,8 +18,13 @@ import {
   type GuestGameDryRunRule,
   type GuestGameProcessEventDto,
 } from './guest-gamification.service';
+import {
+  guestGameBattlePassStepEvaluationPolicy,
+  guestGamePolicyAllowsEvaluation,
+} from './guest-game-source-policy';
 
 const replayFactTypes = new Set([
+  'SESSION_PLAY_TIME_ACCUMULATED',
   'HOURLY_PLAY_TIME_ACCUMULATED',
   'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
 ]);
@@ -41,6 +47,11 @@ const replayIntentStatuses = new Set([
   'FAILED',
   'APPLIED',
 ]);
+
+type PhysicalPlayTimeProcessEventDto = GuestGameProcessEventDto & {
+  sourceKind: string;
+  sessionExternalId: string;
+};
 
 export type GuestGameBattlePassReplayPreviewDto = {
   factId?: string | null;
@@ -224,6 +235,8 @@ type PreparedReplay = {
     confidence: string;
     externalProvider: string;
     externalDomain: string;
+    sourceKind: string;
+    sessionExternalId: string;
     stableExternalId: string;
     updatedAt: Date;
   };
@@ -238,7 +251,7 @@ type PreparedReplay = {
     title: string | null;
   };
   rule: GuestGameDryRunRule;
-  processDto: GuestGameProcessEventDto;
+  processDto: PhysicalPlayTimeProcessEventDto;
   ruleDomainTimeZones: ReadonlyMap<string, ReadonlyMap<string, string | null>>;
   ruleExternalDomains: ReadonlyMap<string, readonly string[]>;
   originKey: string;
@@ -302,6 +315,29 @@ type ExactCanonicalReceiptRow = {
   updatedAt: Date;
 };
 
+type ExactCanonicalReceiptBinding = {
+  originKey: string;
+  receipt: ExactCanonicalReceiptRow;
+};
+
+type ExactPlayTimeOriginKeys = {
+  canonical: string;
+  legacy: string;
+  all: string[];
+};
+
+type ReplayOriginReceiptRow = {
+  factId: string | null;
+  eventId: string | null;
+  eventType: string;
+  status: string;
+};
+
+type ReplayOriginReceiptBinding = {
+  originKey: string;
+  receipt: ReplayOriginReceiptRow;
+};
+
 type PreparedExactCanonicalization = {
   tenantId: string;
   fact: {
@@ -323,14 +359,14 @@ type PreparedExactCanonicalization = {
     sourceKind: string;
     sourceHash: string;
     sourceExternalId: string | null;
-    sessionExternalId: string | null;
+    sessionExternalId: string;
     stableExternalId: string;
     updatedAt: Date;
   };
-  processDto: GuestGameProcessEventDto;
+  processDto: PhysicalPlayTimeProcessEventDto;
   originKey: string;
   externalEventId: string;
-  expectedSessionType: 'HOURLY' | 'PACKAGE_OR_SUBSCRIPTION';
+  expectedSessionType: 'HOURLY' | 'PACKAGE_OR_SUBSCRIPTION' | null;
   receipt: ExactCanonicalReceiptRow | null;
   event: ExactCanonicalEventRow | null;
   confirmationHash: string;
@@ -1334,19 +1370,21 @@ export class GuestGameRuleReplayService {
         'The fact external guest identity does not match the selected profile guest identity.',
       );
     }
-    const stableExternalId =
-      normalizedString(factRow.sourceExternalId) ??
-      normalizedString(factRow.sessionExternalId);
-    if (!stableExternalId) {
+    const sessionExternalId = normalizedString(factRow.sessionExternalId);
+    if (!sessionExternalId) {
       throw new ConflictException(
-        'The play-time fact has no stable source/session external id.',
+        'The play-time fact has no stable sessionExternalId.',
       );
     }
-    const expectedSessionType =
-      factRow.factType === 'HOURLY_PLAY_TIME_ACCUMULATED'
-        ? 'HOURLY'
-        : 'PACKAGE_OR_SUBSCRIPTION';
-    const processDto: GuestGameProcessEventDto = {
+    const stableExternalId = sessionExternalId;
+    const originKeys = exactPlayTimeOriginKeys({
+      externalProvider: factRow.externalProvider,
+      externalDomain: factRow.externalDomain,
+      sourceKind: factRow.sourceKind,
+      sessionExternalId,
+    });
+    const expectedSessionType = replaySessionTypeFromFactType(factRow.factType);
+    const processDto: PhysicalPlayTimeProcessEventDto = {
       profileId: factRow.profileId,
       guestId: factRow.guestId,
       storeId: factRow.storeId,
@@ -1360,40 +1398,30 @@ export class GuestGameRuleReplayService {
       externalProvider: factRow.externalProvider,
       externalDomain: factRow.externalDomain,
       externalId: stableExternalId,
+      sourceKind: factRow.sourceKind,
+      sessionExternalId,
       suppressLootBoxRewards: true,
       payload: {
         exactCanonicalization: true,
         factType: factRow.factType,
         confidence: 'EXACT',
+        sourceKind: factRow.sourceKind,
+        sessionExternalId,
       },
     };
-    const originKey = buildGuestGameOriginKey({
-      externalProvider: factRow.externalProvider,
-      externalDomain: factRow.externalDomain,
-      eventType: 'PLAY_HOUR',
-      stableExternalId,
-    });
-    if (!originKey) {
-      throw new ConflictException('Could not build a stable originKey.');
-    }
     const externalEventId = [
       'guest-game',
       'GUEST_SESSION',
       'PLAY_HOUR',
       stableExternalId,
     ].join(':');
-    const [receipt, events] = await Promise.all([
-      this.prisma.guestGameOriginReceipt.findUnique({
-        where: {
-          tenantId_originKey: { tenantId: user.tenantId, originKey },
-        },
-        select: exactCanonicalReceiptSelect,
-      }),
+    const [receiptBinding, events] = await Promise.all([
+      this.findExactCanonicalReceipt(user.tenantId, originKeys),
       this.prisma.guestGameEvent.findMany({
         where: {
           tenantId: user.tenantId,
           OR: [
-            { originKey },
+            { originKey: { in: originKeys.all } },
             {
               externalProvider: factRow.externalProvider,
               externalDomain: factRow.externalDomain,
@@ -1412,6 +1440,21 @@ export class GuestGameRuleReplayService {
       );
     }
     const event = [...uniqueEvents.values()][0] ?? null;
+    const eventOriginKey =
+      event?.originKey && originKeys.all.includes(event.originKey)
+        ? event.originKey
+        : null;
+    if (
+      receiptBinding &&
+      eventOriginKey &&
+      receiptBinding.originKey !== eventOriginKey
+    ) {
+      throw new ConflictException(
+        'The receipt and canonical event resolve through different PLAY_TIME origins.',
+      );
+    }
+    const originKey =
+      receiptBinding?.originKey ?? eventOriginKey ?? originKeys.canonical;
     const prepared: PreparedExactCanonicalization = {
       tenantId: user.tenantId,
       fact: {
@@ -1433,7 +1476,7 @@ export class GuestGameRuleReplayService {
         sourceKind: factRow.sourceKind,
         sourceHash: factRow.sourceHash,
         sourceExternalId: factRow.sourceExternalId,
-        sessionExternalId: factRow.sessionExternalId,
+        sessionExternalId,
         stableExternalId,
         updatedAt: factRow.updatedAt,
       },
@@ -1441,7 +1484,7 @@ export class GuestGameRuleReplayService {
       originKey,
       externalEventId,
       expectedSessionType,
-      receipt: receipt,
+      receipt: receiptBinding?.receipt ?? null,
       event,
       confirmationHash: '',
     };
@@ -1626,6 +1669,38 @@ export class GuestGameRuleReplayService {
         'The canonical event already has persisted rule, XP, reward, effect or entitlement materialization.',
       );
     }
+  }
+
+  private async findExactCanonicalReceipt(
+    tenantId: string,
+    originKeys: ExactPlayTimeOriginKeys,
+  ): Promise<ExactCanonicalReceiptBinding | null> {
+    const candidates = await Promise.all(
+      originKeys.all.map(async (originKey) => ({
+        originKey,
+        receipt: await this.prisma.guestGameOriginReceipt.findUnique({
+          where: {
+            tenantId_originKey: { tenantId, originKey },
+          },
+          select: exactCanonicalReceiptSelect,
+        }),
+      })),
+    );
+    const matches = candidates.filter(
+      (
+        candidate,
+      ): candidate is {
+        originKey: string;
+        receipt: ExactCanonicalReceiptRow;
+      } => Boolean(candidate.receipt),
+    );
+    const receiptIds = new Set(matches.map(({ receipt }) => receipt.id));
+    if (receiptIds.size > 1) {
+      throw new ConflictException(
+        'Both v2 and legacy PLAY_TIME receipts exist for one physical session.',
+      );
+    }
+    return matches[0] ?? null;
   }
 
   private async ensureExactCanonicalizationReceipt(
@@ -1854,14 +1929,17 @@ export class GuestGameRuleReplayService {
       );
     }
 
-    const stableExternalId =
-      normalizedString(factRow.sourceExternalId) ??
-      normalizedString(factRow.sessionExternalId);
-    if (!stableExternalId) {
-      throw new ConflictException(
-        'У факта нет стабильного source/session external id.',
-      );
+    const sessionExternalId = normalizedString(factRow.sessionExternalId);
+    if (!sessionExternalId) {
+      throw new ConflictException('У факта нет стабильного sessionExternalId.');
     }
+    const stableExternalId = sessionExternalId;
+    const originKeys = exactPlayTimeOriginKeys({
+      externalProvider: factRow.externalProvider,
+      externalDomain: factRow.externalDomain,
+      sourceKind: factRow.sourceKind,
+      sessionExternalId,
+    });
     const steps = canonicalSteps(seasonRow.levels);
     const step = steps.find((item) => item.id === stepId);
     if (!step) {
@@ -1877,11 +1955,21 @@ export class GuestGameRuleReplayService {
       numberValue(activationRules.schemaVersion, 1) !== 2 ||
       normalizedString(activationRules.taskType)?.toUpperCase() !==
         'PLAY_TIME' ||
-      normalizedString(activationRules.evaluationPolicy)?.toUpperCase() !==
-        'LIVE_WITH_LEDGER_FALLBACK'
+      !guestGamePolicyAllowsEvaluation(
+        guestGameBattlePassStepEvaluationPolicy(activationRules),
+        'LIVE_LEDGER_FALLBACK',
+      )
     ) {
       throw new ConflictException(
         'Replay разрешён только для v2 PLAY_TIME шага с LIVE_WITH_LEDGER_FALLBACK.',
+      );
+    }
+    if (
+      factRow.factType === 'SESSION_PLAY_TIME_ACCUMULATED' &&
+      normalizedString(activationRules.sessionType)?.toUpperCase() !== 'ANY'
+    ) {
+      throw new ConflictException(
+        'Neutral play-time facts can be replayed only for a PLAY_TIME step with sessionType=ANY.',
       );
     }
 
@@ -1902,17 +1990,14 @@ export class GuestGameRuleReplayService {
       selectedStores,
     );
 
-    const processDto: GuestGameProcessEventDto = {
+    const processDto: PhysicalPlayTimeProcessEventDto = {
       profileId: factRow.profileId,
       guestId: factRow.guestId,
       storeId: factRow.storeId,
       eventType: 'PLAY_HOUR',
       occurredAt: factRow.happenedAt.toISOString(),
       sessionMinutes: factRow.durationMinutes,
-      sessionType:
-        factRow.factType === 'HOURLY_PLAY_TIME_ACCUMULATED'
-          ? 'HOURLY'
-          : 'PACKAGE_OR_SUBSCRIPTION',
+      sessionType: replaySessionTypeFromFactType(factRow.factType),
       sessionPacket:
         factRow.factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
       sourceFactId: factRow.id,
@@ -1920,25 +2005,25 @@ export class GuestGameRuleReplayService {
       externalProvider: factRow.externalProvider,
       externalDomain: factRow.externalDomain,
       externalId: stableExternalId,
+      sourceKind: factRow.sourceKind,
+      sessionExternalId,
       suppressLootBoxRewards: true,
       payload: {
         replay: true,
         factType: factRow.factType,
         confidence: factRow.confidence,
+        sourceKind: factRow.sourceKind,
+        sessionExternalId,
       },
     };
-    const originKey = buildGuestGameOriginKey({
-      externalProvider: factRow.externalProvider,
-      externalDomain: factRow.externalDomain,
-      eventType: 'PLAY_HOUR',
-      stableExternalId,
-    });
-    if (!originKey) {
-      throw new ConflictException('Не удалось вычислить originKey факта.');
-    }
+    const originReceiptBinding = await this.findReplayOriginReceipt(
+      user.tenantId,
+      originKeys,
+    );
+    const originKey = originReceiptBinding?.originKey ?? originKeys.canonical;
 
     const claimKey = `season:${seasonRow.id}:profile:${factRow.profileId}:step:${step.sequence}`;
-    const [dryRun, originReceipt, event, existingIntent] = await Promise.all([
+    const [dryRun, event, existingIntent] = await Promise.all([
       this.gamification.dryRun(user, processDto, {
         rewardScope: {
           seasonId: seasonRow.id,
@@ -1948,17 +2033,6 @@ export class GuestGameRuleReplayService {
         ruleDomainTimeZones: ruleRouting.ruleDomainTimeZones,
         ruleExternalDomains: ruleRouting.ruleExternalDomains,
       }),
-      this.prisma.guestGameOriginReceipt.findUnique({
-        where: {
-          tenantId_originKey: { tenantId: user.tenantId, originKey },
-        },
-        select: {
-          factId: true,
-          eventId: true,
-          eventType: true,
-          status: true,
-        },
-      }),
       this.findCanonicalEvent(
         user.tenantId,
         originKey,
@@ -1967,6 +2041,7 @@ export class GuestGameRuleReplayService {
       ),
       this.findIntent(user.tenantId, claimKey),
     ]);
+    const originReceipt = originReceiptBinding?.receipt ?? null;
     const matchingRules = dryRun.rules.filter(
       (rule) =>
         rule.kind === 'SEASON' &&
@@ -2051,6 +2126,8 @@ export class GuestGameRuleReplayService {
         confidence: factRow.confidence,
         externalProvider: factRow.externalProvider,
         externalDomain: factRow.externalDomain,
+        sourceKind: factRow.sourceKind,
+        sessionExternalId,
         stableExternalId,
         updatedAt: factRow.updatedAt,
       },
@@ -2072,6 +2149,47 @@ export class GuestGameRuleReplayService {
       confirmationHash: sha256(preparedForHash),
       existingIntent,
     };
+  }
+
+  private async findReplayOriginReceipt(
+    tenantId: string,
+    originKeys: ExactPlayTimeOriginKeys,
+  ): Promise<ReplayOriginReceiptBinding | null> {
+    const candidates = await Promise.all(
+      originKeys.all.map(async (originKey) => ({
+        originKey,
+        receipt: await this.prisma.guestGameOriginReceipt.findUnique({
+          where: {
+            tenantId_originKey: { tenantId, originKey },
+          },
+          select: {
+            factId: true,
+            eventId: true,
+            eventType: true,
+            status: true,
+          },
+        }),
+      })),
+    );
+    const matches = candidates.filter(
+      (
+        candidate,
+      ): candidate is {
+        originKey: string;
+        receipt: ReplayOriginReceiptRow;
+      } => Boolean(candidate.receipt),
+    );
+    const eventIds = new Set(
+      matches
+        .map(({ receipt }) => receipt.eventId)
+        .filter((eventId): eventId is string => Boolean(eventId)),
+    );
+    if (matches.length > 1 && eventIds.size > 1) {
+      throw new ConflictException(
+        'The v2 and legacy PLAY_TIME receipts resolve to different events.',
+      );
+    }
+    return matches[0] ?? null;
   }
 
   private async findCanonicalEvent(
@@ -2583,6 +2701,46 @@ function lootBoxEntitlementOverLimitDigest(
   candidates: LootBoxEntitlementOverLimitCandidateId[],
 ) {
   return sha256(candidates);
+}
+
+function exactPlayTimeOriginKeys(input: {
+  externalProvider: string;
+  externalDomain: string;
+  sourceKind: string;
+  sessionExternalId: string;
+}): ExactPlayTimeOriginKeys {
+  const canonical = buildGuestGamePlayTimeOriginKey({
+    externalProvider: input.externalProvider,
+    externalDomain: input.externalDomain,
+    sourceKind: input.sourceKind,
+    sessionExternalId: input.sessionExternalId,
+    eventType: 'PLAY_HOUR',
+  });
+  const legacy = buildGuestGameOriginKey({
+    externalProvider: input.externalProvider,
+    externalDomain: input.externalDomain,
+    eventType: 'PLAY_HOUR',
+    stableExternalId: input.sessionExternalId,
+  });
+  if (!canonical || !legacy) {
+    throw new ConflictException(
+      'Could not build canonical and legacy PLAY_TIME origins.',
+    );
+  }
+  return {
+    canonical,
+    legacy,
+    all: [...new Set([canonical, legacy])],
+  };
+}
+
+function replaySessionTypeFromFactType(factType: string) {
+  if (factType === 'SESSION_PLAY_TIME_ACCUMULATED') return null;
+  if (factType === 'HOURLY_PLAY_TIME_ACCUMULATED') return 'HOURLY' as const;
+  if (factType === 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED') {
+    return 'PACKAGE_OR_SUBSCRIPTION' as const;
+  }
+  throw new BadRequestException('Replay supports only exact play-time facts.');
 }
 
 function requiredId(value: unknown, field: string) {

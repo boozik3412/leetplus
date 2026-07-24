@@ -76,8 +76,8 @@ describe('GuestActivityLedgerService', () => {
     externalDomain?: string;
     externalProvider?: IntegrationProvider;
     sourceKind?: string;
-    factType?: string;
-    sessionExternalId?: string;
+    factType?: string | { in?: string[] };
+    sessionExternalId?: string | { in?: string[] };
     lifecycleStatus?: string;
     happenedAt?: DateRange;
   };
@@ -270,13 +270,29 @@ describe('GuestActivityLedgerService', () => {
       return false;
     }
 
-    if (where.factType && row.factType !== where.factType) {
+    if (typeof where.factType === 'string' && row.factType !== where.factType) {
       return false;
     }
 
     if (
-      where.sessionExternalId &&
+      typeof where.factType === 'object' &&
+      where.factType.in &&
+      !where.factType.in.includes(String(row.factType))
+    ) {
+      return false;
+    }
+
+    if (
+      typeof where.sessionExternalId === 'string' &&
       row.sessionExternalId !== where.sessionExternalId
+    ) {
+      return false;
+    }
+
+    if (
+      typeof where.sessionExternalId === 'object' &&
+      where.sessionExternalId.in &&
+      !where.sessionExternalId.in.includes(String(row.sessionExternalId))
     ) {
       return false;
     }
@@ -1068,7 +1084,7 @@ describe('GuestActivityLedgerService', () => {
     );
   });
 
-  it('does not classify a session as hourly when Langame omits the packet marker', async () => {
+  it('keeps exact play time neutral when Langame omits the packet marker', async () => {
     langameClient.listGuestLogs.mockResolvedValue([]);
     langameClient.listGuestSessions.mockResolvedValue([
       {
@@ -1094,6 +1110,16 @@ describe('GuestActivityLedgerService', () => {
       expect.arrayContaining([
         expect.objectContaining({ factType: 'SESSION_STARTED' }),
         expect.objectContaining({ factType: 'SESSION_ENDED' }),
+        expect.objectContaining({
+          factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+          confidence: 'EXACT',
+          durationMinutes: 60,
+          tariffType: null,
+          evidence: expect.objectContaining({
+            sessionBillingKind: 'unknown',
+            calculation: 'date_stop - date_start',
+          }),
+        }),
       ]),
     );
     expect(
@@ -1105,6 +1131,203 @@ describe('GuestActivityLedgerService', () => {
         ].includes(String(fact.factType)),
       ),
     ).toBe(false);
+  });
+
+  it('reclassifies one session across the exact play-time fact family without leaving two active durations', async () => {
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    const sessionWithoutTariff = {
+      id: 'session-reclassified-1',
+      guest_id: externalGuestId,
+      club_id: '15',
+      date_start: '07.07.2026 10:00',
+      date_stop: '07.07.2026 11:00',
+    };
+    const classifiedHourlySession = {
+      ...sessionWithoutTariff,
+      packet: 1,
+    };
+    const reclassifiedPackageSession = {
+      ...sessionWithoutTariff,
+      packet: 9,
+    };
+    langameClient.listGuestSessions
+      .mockResolvedValueOnce([sessionWithoutTariff])
+      .mockResolvedValueOnce([classifiedHourlySession])
+      .mockResolvedValueOnce([reclassifiedPackageSession]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'SESSION_WITHOUT_TARIFF',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'SESSION_RECLASSIFIED_AS_HOURLY',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId,
+      storeId,
+      reason: 'SESSION_RECLASSIFIED_AS_PACKAGE',
+    });
+
+    const playTimeFacts = Array.from(facts.values()).filter(
+      (fact) =>
+        fact.sessionExternalId === sessionWithoutTariff.id &&
+        [
+          'SESSION_PLAY_TIME_ACCUMULATED',
+          'HOURLY_PLAY_TIME_ACCUMULATED',
+          'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+        ].includes(String(fact.factType)),
+    );
+
+    expect(playTimeFacts).toHaveLength(3);
+    expect(
+      playTimeFacts.filter((fact) => fact.lifecycleStatus === 'ACTIVE'),
+    ).toEqual([
+      expect.objectContaining({
+        factType: 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+        durationMinutes: 60,
+        tariffType: 'package_or_subscription',
+      }),
+    ]);
+    expect(
+      playTimeFacts.filter(
+        (fact) =>
+          fact.factType !== 'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        factType: 'SESSION_PLAY_TIME_ACCUMULATED',
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: expect.any(Date),
+      }),
+      expect.objectContaining({
+        factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: expect.any(Date),
+      }),
+    ]);
+  });
+
+  it('keeps one physical exact session on the corrected profile when the stale binding is synced again', async () => {
+    const staleProfileId = 'profile-stale-binding';
+    const correctedProfileId = 'profile-corrected-binding';
+    const staleExternalGuestId = 'external-stale-binding';
+    const correctedExternalGuestId = 'external-corrected-binding';
+    const physicalSessionId = 'physical-session-after-rebind';
+    const profileRow = (
+      id: string,
+      linkedGuestId: string,
+      externalId: string,
+    ) => ({
+      id,
+      guestId: linkedGuestId,
+      phoneHash: `phone-hash-${id}`,
+      guest: {
+        id: linkedGuestId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: source.domain,
+        externalGuestId: externalId,
+      },
+    });
+    (prisma.guestGameProfile.findFirst as jest.Mock)
+      .mockResolvedValueOnce(
+        profileRow(staleProfileId, 'guest-stale-binding', staleExternalGuestId),
+      )
+      .mockResolvedValueOnce(
+        profileRow(
+          correctedProfileId,
+          'guest-corrected-binding',
+          correctedExternalGuestId,
+        ),
+      )
+      .mockResolvedValueOnce(
+        profileRow(staleProfileId, 'guest-stale-binding', staleExternalGuestId),
+      );
+    langameClient.listGuestLogs.mockResolvedValue([]);
+    langameClient.listGuestSessions
+      .mockResolvedValueOnce([
+        {
+          id: physicalSessionId,
+          guest_id: staleExternalGuestId,
+          club_id: '15',
+          packet: 1,
+          date_start: '07.07.2026 10:00',
+          date_stop: '07.07.2026 11:00',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: physicalSessionId,
+          guest_id: correctedExternalGuestId,
+          club_id: '15',
+          packet: 1,
+          date_start: '07.07.2026 10:00',
+          date_stop: '07.07.2026 11:00',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: physicalSessionId,
+          guest_id: staleExternalGuestId,
+          club_id: '15',
+          packet: 1,
+          date_start: '07.07.2026 10:00',
+          date_stop: '07.07.2026 11:00',
+        },
+      ]);
+
+    await service.syncProfile({
+      tenantId,
+      profileId: staleProfileId,
+      storeId,
+      reason: 'STALE_PROFILE_BINDING',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId: correctedProfileId,
+      storeId,
+      reason: 'CORRECTED_PROFILE_BINDING',
+    });
+    await service.syncProfile({
+      tenantId,
+      profileId: staleProfileId,
+      storeId,
+      reason: 'STALE_PROFILE_REPLAY',
+    });
+
+    const exactSessionFacts = Array.from(facts.values()).filter(
+      (fact) =>
+        fact.sessionExternalId === physicalSessionId &&
+        [
+          'SESSION_PLAY_TIME_ACCUMULATED',
+          'HOURLY_PLAY_TIME_ACCUMULATED',
+          'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+        ].includes(String(fact.factType)),
+    );
+
+    expect(exactSessionFacts).toHaveLength(2);
+    expect(
+      exactSessionFacts.filter((fact) => fact.lifecycleStatus === 'ACTIVE'),
+    ).toEqual([
+      expect.objectContaining({
+        profileId: correctedProfileId,
+        factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+        durationMinutes: 60,
+      }),
+    ]);
+    expect(
+      exactSessionFacts.find((fact) => fact.profileId === staleProfileId),
+    ).toEqual(
+      expect.objectContaining({
+        lifecycleStatus: 'SUPERSEDED',
+        supersededAt: expect.any(Date),
+      }),
+    );
   });
 
   it('normalizes Langame product expenses into product purchase facts', async () => {
@@ -1389,7 +1612,7 @@ describe('GuestActivityLedgerService', () => {
     expect(createdFacts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          parserVersion: 'guest-activity-v3',
+          parserVersion: 'guest-activity-v4',
           lifecycleStatus: 'ACTIVE',
           normalizationRunId: expect.any(String),
         }),
@@ -1411,7 +1634,7 @@ describe('GuestActivityLedgerService', () => {
 
     expect(rebuilt).toEqual(
       expect.objectContaining({
-        parserVersion: 'guest-activity-v3',
+        parserVersion: 'guest-activity-v4',
         rawRecordsProcessed: rawRecords.size,
       }),
     );

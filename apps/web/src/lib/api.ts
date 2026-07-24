@@ -1,3 +1,9 @@
+import {
+  request as httpRequest,
+  type ClientRequest,
+  type IncomingHttpHeaders,
+} from "node:http";
+import { request as httpsRequest } from "node:https";
 import { cookies } from "next/headers";
 
 export const AUTH_COOKIE_NAME = "leetplus_access_token";
@@ -7,6 +13,20 @@ export type ApiErrorResponse = {
   message?: string | string[];
   error?: string;
   statusCode?: number;
+};
+
+export type ApiJsonRequestOptions = {
+  body?: string;
+  headers?: Record<string, string>;
+  method?: string;
+};
+
+export type ApiJsonResult<T> = {
+  data: T | null;
+  error: string | null;
+  headers: IncomingHttpHeaders;
+  ok: boolean;
+  status: number;
 };
 
 export function getApiUrl() {
@@ -72,6 +92,108 @@ export async function readJsonWithTimeout<T>(
   }
 }
 
+export async function requestJsonWithTimeout<T>(
+  input: string,
+  init: ApiJsonRequestOptions = {},
+  timeoutMs = DEFAULT_API_TIMEOUT_MS,
+): Promise<ApiJsonResult<T>> {
+  const response = await requestTextWithTimeout(input, init, timeoutMs);
+  const ok = response.status >= 200 && response.status < 300;
+  const parsed = response.body
+    ? parseJsonResponse(response.body, input, ok)
+    : null;
+
+  return {
+    data: ok ? (parsed as T) : null,
+    error: ok ? null : getApiErrorMessage(parsed),
+    headers: response.headers,
+    ok,
+    status: response.status,
+  };
+}
+
+function requestTextWithTimeout(
+  input: string,
+  init: ApiJsonRequestOptions,
+  timeoutMs: number,
+) {
+  return new Promise<{
+    body: string;
+    headers: IncomingHttpHeaders;
+    status: number;
+  }>((resolve, reject) => {
+    const url = new URL(input);
+    const transport = url.protocol === "https:" ? httpsRequest : httpRequest;
+    let request: ClientRequest | null = null;
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      request?.destroy(new Error(apiTimeoutMessage(timeoutMs)));
+    }, timeoutMs);
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+
+    request = transport(
+      url,
+      {
+        headers: init.headers,
+        method: init.method ?? "GET",
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+
+        response.on("data", (chunk: Buffer | string) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        response.on("end", () => {
+          finish(() => {
+            resolve({
+              body: Buffer.concat(chunks).toString("utf8"),
+              headers: response.headers,
+              status: response.statusCode ?? 0,
+            });
+          });
+        });
+        response.on("error", (error) => {
+          finish(() => reject(error));
+        });
+      },
+    );
+
+    request.on("error", (error) => {
+      finish(() => reject(normalizeApiTimeoutError(error, timeoutMs)));
+    });
+
+    if (init.body) {
+      request.write(init.body);
+    }
+
+    request.end();
+  });
+}
+
+function parseJsonResponse(body: string, input: string, strict: boolean) {
+  try {
+    return JSON.parse(body) as unknown;
+  } catch (error) {
+    if (strict) {
+      throw new Error(
+        `Failed to parse API JSON from ${input}: ${String(error)}`,
+      );
+    }
+
+    return null;
+  }
+}
+
 async function withApiTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -97,7 +219,8 @@ async function withApiTimeout<T>(
 function normalizeApiTimeoutError(error: unknown, timeoutMs: number) {
   if (
     error instanceof Error &&
-    (error.name === "AbortError" || error.message === apiTimeoutMessage(timeoutMs))
+    (error.name === "AbortError" ||
+      error.message === apiTimeoutMessage(timeoutMs))
   ) {
     return new Error(apiTimeoutMessage(timeoutMs));
   }
@@ -112,14 +235,23 @@ function apiTimeoutMessage(timeoutMs: number) {
 export async function readApiError(response: Response) {
   try {
     const data = await readJsonWithTimeout<ApiErrorResponse>(response);
-    const message = data.message;
-
-    if (Array.isArray(message)) {
-      return message.join(", ");
-    }
-
-    return message ?? data.error ?? "Ошибка запроса";
+    return getApiErrorMessage(data);
   } catch {
     return "Ошибка запроса";
   }
+}
+
+function getApiErrorMessage(data: unknown) {
+  if (!data || typeof data !== "object") {
+    return "Ошибка запроса";
+  }
+
+  const response = data as ApiErrorResponse;
+  const message = response.message;
+
+  if (Array.isArray(message)) {
+    return message.join(", ");
+  }
+
+  return message ?? response.error ?? "Ошибка запроса";
 }

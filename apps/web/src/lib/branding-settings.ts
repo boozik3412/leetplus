@@ -1,9 +1,7 @@
 import {
-  fetchWithTimeout,
   getApiUrl,
   getAuthHeaders,
-  readJsonWithTimeout,
-  readApiError,
+  requestJsonWithTimeout,
 } from "./api";
 
 export type BrandingStoreLogo = {
@@ -25,16 +23,20 @@ export type BrandingSettings = {
 };
 
 export async function getBrandingSettings(): Promise<BrandingSettings> {
-  const response = await fetchWithTimeout(getApiUrl() + "/settings/branding", {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await requestJsonWithTimeout<BrandingSettings>(
+    getApiUrl() + "/settings/branding",
+    {
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
-    throw new Error(
-      `Failed to fetch branding settings: ${await readApiError(response)}`,
-    );
+    throw new Error(`Failed to fetch branding settings: ${response.error}`);
   }
 
-  return readJsonWithTimeout<BrandingSettings>(response);
+  if (!response.data) {
+    throw new Error("Failed to fetch branding settings: empty response");
+  }
+
+  return response.data;
 }

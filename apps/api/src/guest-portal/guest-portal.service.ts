@@ -2410,7 +2410,7 @@ export class GuestPortalService {
 
     if (!callConfig.enabled || !callConfig.configured) {
       throw new BadRequestException(
-        'Звонок на номер пока не настроен. Используйте Telegram-бот или SMS-код.',
+        'Звонок на номер пока не настроен. Используйте Telegram-бот.',
       );
     }
 

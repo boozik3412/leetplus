@@ -143,8 +143,11 @@ export class GuestGamificationController {
   @Get('workspace')
   getWorkspace(
     @CurrentUser() user: AuthenticatedUser,
+    @Query('compact') compact?: string,
   ): Promise<GuestGamificationWorkspace> {
-    return this.gamificationService.getWorkspace(user);
+    return this.gamificationService.getWorkspace(user, {
+      compact: compact === '1' || compact === 'true',
+    });
   }
 
   @Post('dry-run')

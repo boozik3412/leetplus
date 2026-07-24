@@ -592,7 +592,10 @@ export default async function GamificationPage({
   const needsProductCatalog = initialTab === "seasons";
   const [workspace, audiences, stores, guestsResponse, leads, products] =
     await Promise.all([
-      safeValue(getGuestGamificationWorkspace(), emptyWorkspace),
+      safeValue(
+        getGuestGamificationWorkspace({ compact: true }),
+        emptyWorkspace,
+      ),
       safeValue(getGuestAudiences(), []),
       safeValue<Store[]>(getStores(), []),
       needsGuestDirectory

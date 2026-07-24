@@ -361,6 +361,9 @@ function createService(
   staffTeamChatService: {
     createGamificationRewardApprovalNotification: jest.Mock;
   } | null = null,
+  mediaService: {
+    createAsset: jest.Mock;
+  } | null = null,
 ) {
   const langameSettingsService = {
     resolveTenantAccess: jest.fn(),
@@ -407,9 +410,74 @@ function createService(
       bonusLedgerService as any,
       guestIdentityResolver as any,
       staffTeamChatService as any,
+      mediaService as any,
     ),
   };
 }
+
+describe('promo banner media migration', () => {
+  it('moves a legacy inline image into the media store before returning cards', async () => {
+    const prisma = createPrismaMock();
+    const mediaService = {
+      createAsset: jest.fn().mockResolvedValue({ id: 'asset-1' }),
+    };
+    const metadata = {
+      imageUrl: `data:image/jpeg;base64,${Buffer.from([
+        0xff, 0xd8, 0xff, 0xd9,
+      ]).toString('base64')}`,
+      imageStorage: 'inline_jpeg',
+    };
+    const row = {
+      id: 'promo-1',
+      tenantId: user.tenantId,
+      createdByUserId: user.id,
+      title: 'Banner',
+      label: null,
+      description: null,
+      tag: null,
+      status: 'ACTIVE',
+      targetAnchor: null,
+      priority: 1,
+      storeIds: [],
+      periodFrom: null,
+      periodTo: null,
+      metadata,
+      createdAt: now,
+      updatedAt: now,
+      createdByUser: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+      },
+    };
+    prisma.guestGamePromoCard.findMany.mockResolvedValue([row]);
+    prisma.guestGamePromoCard.update.mockResolvedValue(row);
+    const { service } = createService(prisma, null, null, mediaService);
+
+    const cards = await service.getPromoCards(user);
+
+    expect(mediaService.createAsset).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        originalname: 'promo-banner-promo-1.jpg',
+        mimetype: 'image/jpeg',
+      }),
+    );
+    expect(prisma.guestGamePromoCard.update).toHaveBeenCalledWith({
+      where: { id: 'promo-1' },
+      data: {
+        metadata: {
+          imageUrl: '/api/guest-game/media/asset-1',
+          imageStorage: 'media_asset',
+        },
+      },
+    });
+    expect(cards[0]?.metadata).toEqual({
+      imageUrl: '/api/guest-game/media/asset-1',
+      imageStorage: 'media_asset',
+    });
+  });
+});
 
 describe('exact XP reconciliation persistence', () => {
   it('bootstraps a strictly matching legacy v2 LIVE posting, then adds exact XP once', async () => {

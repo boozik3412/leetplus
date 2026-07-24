@@ -18,11 +18,33 @@ type GameAuthPageProps = {
 export default async function GameAuthPage({ searchParams }: GameAuthPageProps) {
   const params = await searchParams;
   const { directory, loadError } = await loadClubDirectory();
+  const authDirectory = {
+    ...directory,
+    verification: {
+      ...directory.verification,
+      recommendedChannel: "TELEGRAM_BOT" as const,
+      options: directory.verification.options.filter(
+        (option) =>
+          option.channel === "TELEGRAM_BOT" || option.channel === "USER_CALL",
+      ),
+    },
+    clubs: directory.clubs.map((club) => ({
+      ...club,
+      tenant: {
+        ...club.tenant,
+        gameLogoUrl: null,
+      },
+      store: {
+        ...club.store,
+        gameLogoUrl: null,
+      },
+    })),
+  };
 
   return (
     <PlayRegistrationClient
       initialClubId={searchParam(params.clubId) ?? searchParam(params.club)}
-      initialDirectory={directory}
+      initialDirectory={authDirectory}
       initialReferralCode={searchParam(params.ref)}
       initialStoreId={searchParam(params.storeId)}
       loadError={loadError}

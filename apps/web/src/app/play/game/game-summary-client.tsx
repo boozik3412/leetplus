@@ -27,6 +27,7 @@ import {
   GuestMissionPreview,
   type GuestMissionPreviewData,
 } from "@/components/guest-mission-preview";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
@@ -1025,6 +1026,7 @@ function ReadyGameView({
       closeActiveCompletionDialog();
 
       if (openRewards) {
+        startNavigationFeedback();
         router.push("/game/rewards");
       }
       return;
@@ -1040,6 +1042,7 @@ function ReadyGameView({
       closeActiveCompletionDialog();
 
       if (openRewards) {
+        startNavigationFeedback();
         router.push("/game/rewards");
       }
     } catch (error) {
@@ -1196,6 +1199,7 @@ function ReadyGameView({
       // Even if the local session endpoint is unavailable, send the guest to auth.
     }
 
+    startNavigationFeedback();
     router.push("/game/auth");
     router.refresh();
   }

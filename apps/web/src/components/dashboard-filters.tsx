@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type { Store } from "@/lib/stores";
 
 type DashboardPeriod =
@@ -218,6 +219,7 @@ export function DashboardFilters({
       params.append("storeIds", storeId);
     });
 
+    startNavigationFeedback();
     startTransition(() => {
       router.push(`${pathname}?${params.toString()}`);
     });

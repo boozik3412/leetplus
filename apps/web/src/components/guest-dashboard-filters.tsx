@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type {
   GuestFilterOptions,
   GuestListFilters,
@@ -167,6 +168,7 @@ export function GuestDashboardFilters({
       params.set("direction", filters.direction);
     }
 
+    startNavigationFeedback();
     router.push(`${pathname}?${params.toString()}`);
 
     if (options?.closePanel ?? true) {

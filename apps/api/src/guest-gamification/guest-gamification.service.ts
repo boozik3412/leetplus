@@ -97,6 +97,7 @@ import {
   guestGamePolicyAllowsEvaluation,
   type GuestGameEvaluationMode,
 } from './guest-game-source-policy';
+import { GuestGameMediaService } from './guest-game-media.service';
 
 const statusValues = [
   'DRAFT',
@@ -3827,6 +3828,8 @@ export class GuestGamificationService {
     private readonly guestIdentityResolver: GuestIdentityResolverService,
     @Optional()
     private readonly staffTeamChatService?: StaffTeamChatService,
+    @Optional()
+    private readonly mediaService?: GuestGameMediaService,
   ) {}
 
   private async resolveProfileIdentityGuestIds(
@@ -4042,6 +4045,7 @@ export class GuestGamificationService {
 
   async getWorkspace(
     user: AuthenticatedUser,
+    options: { compact?: boolean } = {},
   ): Promise<GuestGamificationWorkspace> {
     const [
       profiles,
@@ -4123,8 +4127,8 @@ export class GuestGamificationService {
       missions,
       seasons,
       promoCards,
-      rewards,
-      events,
+      rewards: options.compact ? rewards.slice(0, 20) : rewards,
+      events: options.compact ? events.slice(0, 20) : events,
       tariffSnapshots,
       guestLogCatalog,
     };
@@ -9287,7 +9291,53 @@ export class GuestGamificationService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
+    await Promise.all(
+      rows.map((row) => this.migrateInlinePromoCardImage(user, row)),
+    );
+
     return rows.map(mapPromoCard);
+  }
+
+  private async migrateInlinePromoCardImage(
+    user: AuthenticatedUser,
+    row: PromoCardRow,
+  ) {
+    if (!this.mediaService) {
+      return;
+    }
+
+    const metadata = jsonRecord(row.metadata);
+    const image = inlineImageUpload(nullableString(metadata.imageUrl));
+
+    if (!image) {
+      return;
+    }
+
+    try {
+      const asset = await this.mediaService.createAsset(user, {
+        originalname: `promo-banner-${row.id}.${image.extension}`,
+        mimetype: image.contentType,
+        size: image.buffer.length,
+        buffer: image.buffer,
+      });
+      const nextMetadata = {
+        ...metadata,
+        imageUrl: `/api/guest-game/media/${asset.id}`,
+        imageStorage: 'media_asset',
+      } satisfies Prisma.JsonObject;
+
+      await this.prisma.guestGamePromoCard.update({
+        where: { id: row.id },
+        data: { metadata: nextMetadata },
+      });
+      row.metadata = nextMetadata;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to migrate inline promo image ${row.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   async createPromoCard(
@@ -21712,6 +21762,38 @@ function mapPromoCard(row: PromoCardRow): GuestGamePromoCard {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     createdBy: mapUser(row.createdByUser),
+  };
+}
+
+function inlineImageUpload(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,([a-z0-9+/=\s]+)$/i.exec(
+    value.trim(),
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const contentType = match[1].toLowerCase();
+  const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+
+  if (!buffer.length) {
+    return null;
+  }
+
+  return {
+    buffer,
+    contentType,
+    extension:
+      contentType === 'image/png'
+        ? 'png'
+        : contentType === 'image/webp'
+          ? 'webp'
+          : 'jpg',
   };
 }
 

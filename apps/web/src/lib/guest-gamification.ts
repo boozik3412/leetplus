@@ -1533,11 +1533,17 @@ export type GuestGamificationWorkspace = {
   guestLogCatalog: GuestGameGuestLogCatalog;
 };
 
-export async function getGuestGamificationWorkspace(): Promise<GuestGamificationWorkspace> {
-  const response = await fetch(`${getApiUrl()}/guests/gamification/workspace`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+export async function getGuestGamificationWorkspace(
+  options: { compact?: boolean } = {},
+): Promise<GuestGamificationWorkspace> {
+  const query = options.compact ? "?compact=1" : "";
+  const response = await fetch(
+    `${getApiUrl()}/guests/gamification/workspace${query}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch guest gamification workspace");

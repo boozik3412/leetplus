@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type {
   GuestPortalClubSelectResponse,
   GuestPortalGameSummary,
@@ -254,6 +255,7 @@ export function GameClubSelectClient({
       setHasExplicitClubSelection(true);
       setSessionState("ready");
       showToast(data.message);
+      startNavigationFeedback();
       router.replace("/game");
     } catch (error) {
       setSelectedClubId(previousSelectedClubId ?? previousCurrentClubId);

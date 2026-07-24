@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type { AuthUser } from "@/lib/auth";
 import { getDefaultLandingPath } from "@/lib/landing";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
@@ -296,6 +297,7 @@ export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
 
       keepLoading = true;
       setIsRedirecting(true);
+      startNavigationFeedback();
       router.replace(
         isInviteRegister
           ? landingPath

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 import { StaffMaterialPreview } from "@/components/staff-material-preview";
 import type {
   StaffTaskPriority,
@@ -276,6 +277,7 @@ export function StaffTaskTemplateBuilder({
       }
 
       setMessage("Задача создана из шаблона.");
+      startNavigationFeedback();
       router.push("/staff/tasks");
       router.refresh();
     } catch (caught) {

@@ -1723,7 +1723,7 @@ export function GuestGamificationPanel({
 
   async function reloadWorkspace() {
     const next = await fetchJson<GuestGamificationWorkspace>(
-      "/api/guests/gamification/workspace",
+      "/api/guests/gamification/workspace?compact=1",
     );
     setWorkspace(next);
   }
@@ -15233,7 +15233,8 @@ function promoTargetLabel(targetAnchor: string | null) {
 }
 
 async function buildPromoBannerMetadata(form: PromoBannerForm) {
-  const imageUrl = await renderPromoBannerImage(form);
+  const renderedImage = await renderPromoBannerImage(form);
+  const imageUrl = await persistPromoBannerImage(renderedImage);
   const scale = clampPromoBannerScale(Number(form.imageScale));
   const offsetX = clampPromoBannerOffset(Number(form.imageOffsetX));
   const offsetY = clampPromoBannerOffset(Number(form.imageOffsetY));
@@ -15243,7 +15244,7 @@ async function buildPromoBannerMetadata(form: PromoBannerForm) {
     source: "advanced_editor",
     imageAspectRatio: "9:16",
     imageUrl: imageUrl || null,
-    imageStorage: imageUrl ? "inline_jpeg" : null,
+    imageStorage: imageUrl ? "media_asset" : null,
     actionLabel: nullable(form.actionLabel),
     actionUrl,
     crop: {
@@ -15252,6 +15253,37 @@ async function buildPromoBannerMetadata(form: PromoBannerForm) {
       offsetY,
     },
   };
+}
+
+async function persistPromoBannerImage(imageUrl: string) {
+  if (!imageUrl || !isInlineImageSource(imageUrl)) {
+    return imageUrl;
+  }
+
+  const imageResponse = await fetch(imageUrl);
+
+  if (!imageResponse.ok) {
+    throw new Error("Не удалось подготовить картинку баннера к загрузке.");
+  }
+
+  const blob = await imageResponse.blob();
+  const body = new FormData();
+  body.set(
+    "file",
+    new File([blob], "promo-banner.jpg", {
+      type: blob.type || "image/jpeg",
+    }),
+  );
+  const asset = await fetchJson<{ url?: string }>("/api/guest-game/media", {
+    method: "POST",
+    body,
+  });
+
+  if (!asset.url) {
+    throw new Error("Медиахранилище не вернуло адрес картинки.");
+  }
+
+  return asset.url;
 }
 
 async function renderPromoBannerImage(form: PromoBannerForm) {

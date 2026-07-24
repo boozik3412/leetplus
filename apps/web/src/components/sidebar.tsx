@@ -14,6 +14,7 @@ import { getDefaultLandingPath, isShiftWorkspaceRole } from "@/lib/landing";
 import { canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 
 type NavItem = {
   href: string;
@@ -794,6 +795,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     await fetch("/api/auth/logout", {
       method: "POST",
     });
+    startNavigationFeedback();
     router.push("/login");
     router.refresh();
   }

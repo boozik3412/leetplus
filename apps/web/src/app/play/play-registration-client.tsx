@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LegalEntityInfo } from "@/components/legal-entity-info";
+import { startNavigationFeedback } from "@/components/navigation-feedback";
 import type {
   GuestPortalGamificationClub,
   GuestPortalGamificationClubDirectory,
@@ -266,6 +267,7 @@ export function PlayRegistrationClient({
     [initialReferralCode],
   );
   const openClubSelectionAfterAuth = useCallback(() => {
+    startNavigationFeedback();
     router.replace("/game/clubs");
   }, [router]);
 
@@ -1659,7 +1661,9 @@ export function PlayRegistrationClient({
           <LegalEntityInfo compact className="lp-game-auth-legal" />
         ) : null}
       </div>
-      {userCallAuth && isUserCallInstructionOpen ? (
+      {userCallAuth &&
+      isUserCallInstructionOpen &&
+      (!userCallAuthStatus || userCallAuthStatus.status === "PENDING") ? (
         <UserCallInstructionModal
           callHref={userCallAuth.callHref}
           callNumber={userCallAuth.callNumber}
@@ -2940,12 +2944,12 @@ function getVisibleVerificationPlan(
   surface: PlayRegistrationSurface,
 ): GuestPortalGamificationClubDirectory["verification"] {
   const options = verification.options.filter((option) => {
-    if (HIDDEN_PUBLIC_VERIFICATION_CHANNELS.has(option.channel)) {
-      return false;
-    }
-
     if (surface === "game-auth") {
       return GAME_AUTH_VERIFICATION_CHANNELS.has(option.channel);
+    }
+
+    if (HIDDEN_PUBLIC_VERIFICATION_CHANNELS.has(option.channel)) {
+      return false;
     }
 
     return true;

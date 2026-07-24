@@ -620,6 +620,7 @@ describe('exact XP reconciliation persistence', () => {
         'guest-1',
         originKey,
         scope,
+        'EXACT_PLAY_TIME',
       ) as Promise<{ appliedXpDelta: number }>;
 
     prisma.guestGameXpPosting.findUnique.mockResolvedValue({
@@ -945,6 +946,7 @@ describe('exact XP reconciliation persistence', () => {
             },
           ],
         },
+        'EXACT_PLAY_TIME',
       ) as Promise<{ appliedXpDelta: number }>;
 
     installLockedRows();
@@ -1216,6 +1218,7 @@ describe('exact XP reconciliation persistence', () => {
             },
           ],
         },
+        'EXACT_PLAY_TIME',
       ) as Promise<{ appliedXpDelta: number; intentIds: string[] }>;
 
     installLockedRows();
@@ -10092,7 +10095,11 @@ describe('GuestGamificationService', () => {
 
       prisma.guestGameLootBox.findMany.mockResolvedValue([]);
       prisma.guestGameMission.findMany.mockResolvedValue([
-        { triggerKind: 'SESSION_START' },
+        {
+          triggerKind: 'SESSION_START',
+          missionType: 'CUSTOM',
+          conditions: {},
+        },
       ]);
       prisma.guestGameSeason.findMany.mockResolvedValue([]);
 
@@ -10107,7 +10114,176 @@ describe('GuestGamificationService', () => {
         },
         select: { triggerKind: true },
       });
+      expect(prisma.guestGameMission.findMany).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        select: {
+          triggerKind: true,
+          missionType: true,
+          conditions: true,
+        },
+      });
+      expect(prisma.guestGameSeason.findMany).toHaveBeenCalledWith({
+        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        select: { xpRules: true, levels: true },
+      });
     });
+
+    it.each([
+      {
+        triggerKind: 'APP_OPEN',
+        missionType: 'CUSTOM',
+        conditions: { taskType: 'SESSION_START' },
+      },
+      {
+        triggerKind: 'APP_OPEN',
+        missionType: 'SESSION_START',
+        conditions: {},
+      },
+      {
+        triggerKind: 'APP_OPEN',
+        missionType: 'CUSTOM',
+        conditions: { eventTypes: 'SESSION_START' },
+      },
+      {
+        triggerKind: 'APP_OPEN',
+        missionType: 'CUSTOM',
+        conditions: { metric: { eventType: 'SESSION_START' } },
+      },
+    ])(
+      'detects legacy and v2 mission SESSION_START shapes',
+      async (mission) => {
+        const { service, prisma } = createService();
+
+        prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+        prisma.guestGameMission.findMany.mockResolvedValue([mission]);
+        prisma.guestGameSeason.findMany.mockResolvedValue([]);
+
+        await expect(
+          (service as any).hasActiveSessionStartRules(user),
+        ).resolves.toBe(true);
+      },
+    );
+
+    it('lets an explicit non-start mission event marker override stale SESSION_START fields', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+      prisma.guestGameMission.findMany.mockResolvedValue([
+        {
+          triggerKind: 'SESSION_START',
+          missionType: 'SESSION_START',
+          conditions: {
+            taskType: 'SESSION_START',
+            eventType: 'APP_OPEN',
+          },
+        },
+      ]);
+      prisma.guestGameSeason.findMany.mockResolvedValue([]);
+
+      await expect(
+        (service as any).hasActiveSessionStartRules(user),
+      ).resolves.toBe(false);
+    });
+
+    it('detects SESSION_START activation rules in active Battle Pass levels', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+      prisma.guestGameMission.findMany.mockResolvedValue([]);
+      prisma.guestGameSeason.findMany.mockResolvedValue([
+        {
+          xpRules: {},
+          levels: [
+            {
+              level: 1,
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'PLAY_TIME',
+                triggerKind: 'SESSION_START',
+              },
+            },
+          ],
+        },
+      ]);
+
+      await expect(
+        (service as any).hasActiveSessionStartRules(user),
+      ).resolves.toBe(true);
+    });
+
+    it.each([
+      {
+        eventTypes: ['SESSION_START'],
+      },
+      {
+        eventTypes: 'SESSION_START',
+      },
+      {
+        eventType: 'SESSION_START',
+      },
+      {
+        metric: { eventTypes: ['SESSION_START'] },
+      },
+      {
+        metric: { eventTypes: 'SESSION_START' },
+      },
+      {
+        metric: { eventType: 'SESSION_START' },
+      },
+      {
+        schemaVersion: 2,
+        taskType: 'SESSION_START',
+      },
+    ])(
+      'detects scalar and array Battle Pass SESSION_START event markers',
+      async (activationRules) => {
+        const { service, prisma } = createService();
+
+        prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+        prisma.guestGameMission.findMany.mockResolvedValue([]);
+        prisma.guestGameSeason.findMany.mockResolvedValue([
+          {
+            xpRules: {},
+            levels: [{ level: 1, activationRules }],
+          },
+        ]);
+
+        await expect(
+          (service as any).hasActiveSessionStartRules(user),
+        ).resolves.toBe(true);
+      },
+    );
+
+    it.each([
+      {
+        schemaVersion: 2,
+        taskType: 'APP_OPEN',
+        triggerKind: 'APP_OPEN',
+      },
+      {
+        schemaVersion: 2,
+        triggerKind: 'SESSION_START',
+        metric: { eventTypes: 'APP_OPEN' },
+      },
+    ])(
+      'does not false-positive an unrelated or non-executable Battle Pass shape',
+      async (activationRules) => {
+        const { service, prisma } = createService();
+
+        prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+        prisma.guestGameMission.findMany.mockResolvedValue([]);
+        prisma.guestGameSeason.findMany.mockResolvedValue([
+          {
+            xpRules: {},
+            levels: [{ level: 1, activationRules }],
+          },
+        ]);
+
+        await expect(
+          (service as any).hasActiveSessionStartRules(user),
+        ).resolves.toBe(false);
+      },
+    );
 
     it('processes the open Langame session as SESSION_START with snapshot-compatible idempotency', async () => {
       const { service } = createService();
@@ -12915,6 +13091,7 @@ describe('GuestGamificationService', () => {
         'guest-1',
         'origin-exact-owner',
         exactScope,
+        'EXACT_PLAY_TIME',
       );
       expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledTimes(2);
       expect(result.event).toMatchObject({

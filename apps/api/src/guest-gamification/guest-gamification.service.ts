@@ -75,10 +75,13 @@ import {
 } from './guest-game-mission-contract';
 import {
   buildGuestGamePhysicalProgressIdentity,
+  buildGuestGamePhysicalSessionStartIdentity,
   buildGuestGameOriginKey,
   buildGuestGamePlayTimeOriginKey,
   buildGuestGameRewardIdempotencyKey,
   canonicalGuestGameEventType,
+  normalizeGuestGameExternalDomain,
+  normalizeGuestGameSourceKind,
 } from './guest-game-origin-key';
 import {
   EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
@@ -87,8 +90,10 @@ import {
 } from './guest-game-exact-owner-reconciler';
 import {
   guestGameBattlePassStepEvaluationPolicy,
+  guestGameBattlePassStepMatchesSessionStart,
   guestGameLootBoxEvaluationPolicy,
   guestGameMissionEvaluationPolicy,
+  guestGameMissionMatchesSessionStart,
   guestGamePolicyAllowsEvaluation,
   type GuestGameEvaluationMode,
 } from './guest-game-source-policy';
@@ -2451,6 +2456,7 @@ type GuestGameLootBoxRewardCandidate = Omit<
 export type GuestGameDryRunRule = {
   id: string;
   kind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
+  ruleUpdatedAt?: string | null;
   name: string;
   status: string;
   triggerKind: string | null;
@@ -2467,6 +2473,7 @@ export type GuestGameDryRunRule = {
   progress: GuestGameProgressResult | null;
   battlePassLevel?: number | null;
   battlePassStep?: number | null;
+  battlePassStepId?: string | null;
   battlePassStepTitle?: string | null;
   battlePassRewardTrack?: 'FREE' | 'PREMIUM' | null;
   rewardLootBoxId?: string | null;
@@ -2620,6 +2627,23 @@ type ExactReconciliationPersistence = {
   ownerReconciliation: ExactCanonicalOwnerReconcileOutcome;
 };
 
+type CanonicalRuleReconciliationKind =
+  | 'EXACT_PLAY_TIME'
+  | 'SESSION_START_RECLASSIFICATION';
+
+type CanonicalRuleReconciliationScope = {
+  sourceFactId: string;
+  sourceFactUpdatedAt: Date;
+  physicalSessionKey: string;
+  rules: Array<{
+    ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
+    ruleId: string;
+    battlePassStep: number | null;
+    battlePassStepId?: string | null;
+    ruleUpdatedAt: Date;
+  }>;
+};
+
 type GuestGameProcessEventOptions = {
   allowedRuleIds?: Iterable<string>;
   allowedBattlePassSteps?: ReadonlyMap<string, number>;
@@ -2659,6 +2683,26 @@ type GuestGameProcessEventOptions = {
       ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
       ruleId: string;
       battlePassStep: number | null;
+      battlePassStepId?: string | null;
+      ruleUpdatedAt: Date;
+    }>;
+  };
+  /**
+   * Bounded enrichment of one already-created generic SESSION_START event
+   * after the same physical session receives an exact HOURLY/PACKAGE marker.
+   * Rules are additionally intersected with the immutable rule identities
+   * stored on the original generic event so the same start cannot advance a
+   * later Battle Pass step.
+   */
+  sessionStartReclassificationScope?: {
+    sourceFactId: string;
+    sourceFactUpdatedAt: Date;
+    physicalSessionKey: string;
+    rules: Array<{
+      ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
+      ruleId: string;
+      battlePassStep: number | null;
+      battlePassStepId: string | null;
       ruleUpdatedAt: Date;
     }>;
   };
@@ -13439,9 +13483,16 @@ export class GuestGamificationService {
     dto: GuestGameProcessEventDto,
     options: GuestGameProcessEventOptions = {},
   ): Promise<GuestGameProcessEventResult> {
-    if (options.replayRewardScope && options.exactReconciliationScope) {
+    const reconciliationScopeCount = [
+      options.exactReconciliationScope,
+      options.sessionStartReclassificationScope,
+    ].filter(Boolean).length;
+    if (
+      (options.replayRewardScope && reconciliationScopeCount > 0) ||
+      reconciliationScopeCount > 1
+    ) {
       throw new BadRequestException(
-        'Rule replay and exact canonical reconciliation cannot run together.',
+        'Rule replay and canonical reconciliation modes cannot run together.',
       );
     }
     const { profile, profileCreated } = await this.ensureProcessProfile(
@@ -13577,6 +13628,7 @@ export class GuestGamificationService {
     if (
       existingEvent &&
       !options.exactReconciliationScope &&
+      !options.sessionStartReclassificationScope &&
       !processEventOriginOwnerMatches(
         existingEvent,
         profile.id,
@@ -13589,17 +13641,36 @@ export class GuestGamificationService {
     }
 
     if (existingEvent) {
-      const exactPersistence = options.exactReconciliationScope
-        ? await this.persistExactReconciliationEffects(
-            user,
-            dryRun,
-            existingEvent.id,
-            profile.id,
-            processGuestId,
-            originKey,
-            options.exactReconciliationScope,
-          )
-        : null;
+      const reconciliationKind: CanonicalRuleReconciliationKind | null =
+        options.exactReconciliationScope
+          ? 'EXACT_PLAY_TIME'
+          : options.sessionStartReclassificationScope
+            ? 'SESSION_START_RECLASSIFICATION'
+            : null;
+      const requestedReconciliationScope =
+        options.exactReconciliationScope ??
+        options.sessionStartReclassificationScope;
+      const reconciliationScope =
+        reconciliationKind === 'SESSION_START_RECLASSIFICATION' &&
+        requestedReconciliationScope
+          ? restrictSessionStartReclassificationScopeToPersistedRules(
+              existingEvent,
+              requestedReconciliationScope,
+            )
+          : requestedReconciliationScope;
+      const exactPersistence =
+        reconciliationScope && reconciliationKind
+          ? await this.persistExactReconciliationEffects(
+              user,
+              dryRun,
+              existingEvent.id,
+              profile.id,
+              processGuestId,
+              originKey,
+              reconciliationScope,
+              reconciliationKind,
+            )
+          : null;
       if (exactPersistence?.ownerReconciliation.status === 'QUARANTINED') {
         throw new ConflictException({
           code: EXACT_CANONICAL_OWNER_QUARANTINED_CODE,
@@ -13726,7 +13797,7 @@ export class GuestGamificationService {
           >
         | undefined;
 
-      if (exactPersistence && options.exactReconciliationScope) {
+      if (exactPersistence && reconciliationScope && reconciliationKind) {
         const decisionResult = await this.recordRuleDecisions(
           user,
           exactPersistence.dryRun,
@@ -13738,7 +13809,9 @@ export class GuestGamificationService {
             sourceExternalId: nullableString(dto.externalId),
             sourceFactKind: 'EXACT_CANONICAL_RECONCILIATION',
             evaluationRunId: [
-              'exact-canonical-reconciliation',
+              reconciliationKind === 'SESSION_START_RECLASSIFICATION'
+                ? 'session-start-reclassification'
+                : 'exact-canonical-reconciliation',
               existingEvent.id,
             ].join(':'),
             evaluationMode: 'LIVE_LEDGER_FALLBACK',
@@ -13748,7 +13821,10 @@ export class GuestGamificationService {
             replaceExistingRun: true,
             excludeSeasonRewardIds: processRewards.map((reward) => reward.id),
             evidence: {
-              exactCanonicalReconciliation: true,
+              exactCanonicalReconciliation:
+                reconciliationKind === 'EXACT_PLAY_TIME',
+              sessionStartReclassification:
+                reconciliationKind === 'SESSION_START_RECLASSIFICATION',
               sourceFactId: exactPersistence.sourceFactId,
               physicalSessionKey: exactPersistence.physicalSessionKey,
               intentIds: exactPersistence.intentIds,
@@ -13815,6 +13891,7 @@ export class GuestGamificationService {
       if (
         !options.replayRewardScope &&
         !options.exactReconciliationScope &&
+        !options.sessionStartReclassificationScope &&
         (materialized || entitlementRecoveryDryRun)
       ) {
         await this.recordRuleDecisions(
@@ -13875,7 +13952,11 @@ export class GuestGamificationService {
       };
     }
 
-    if (options.replayRewardScope || options.exactReconciliationScope) {
+    if (
+      options.replayRewardScope ||
+      options.exactReconciliationScope ||
+      options.sessionStartReclassificationScope
+    ) {
       throw new ConflictException(
         'Точечный replay не создаёт новое физическое событие: каноническое событие исходного факта не найдено.',
       );
@@ -14526,11 +14607,15 @@ export class GuestGamificationService {
       }),
       this.prisma.guestGameMission.findMany({
         where: { tenantId: user.tenantId, status: 'ACTIVE' },
-        select: { triggerKind: true },
+        select: {
+          triggerKind: true,
+          missionType: true,
+          conditions: true,
+        },
       }),
       this.prisma.guestGameSeason.findMany({
         where: { tenantId: user.tenantId, status: 'ACTIVE' },
-        select: { xpRules: true },
+        select: { xpRules: true, levels: true },
       }),
     ]);
 
@@ -14539,10 +14624,17 @@ export class GuestGamificationService {
         guestGameTriggerMatches(rule.triggerKind, 'SESSION_START'),
       ) ||
       missions.some((rule) =>
-        guestGameTriggerMatches(rule.triggerKind, 'SESSION_START'),
+        guestGameMissionMatchesSessionStart(
+          rule.conditions,
+          rule.missionType,
+          rule.triggerKind,
+        ),
       ) ||
       seasons.some((season) =>
         this.seasonXpRulesMatchLiveSessionStart(season.xpRules),
+      ) ||
+      seasons.some((season) =>
+        this.seasonLevelsMatchLiveSessionStart(season.levels),
       )
     );
   }
@@ -14553,6 +14645,12 @@ export class GuestGamificationService {
     return (
       dryRunNumber(rules.visit, 0) > 0 ||
       dryRunNumber(rules.packetSessionBonus, 0) > 0
+    );
+  }
+
+  private seasonLevelsMatchLiveSessionStart(value: unknown) {
+    return dryRunSeasonLevels(value).some((level) =>
+      guestGameBattlePassStepMatchesSessionStart(level.activationRules),
     );
   }
 
@@ -14890,24 +14988,29 @@ export class GuestGamificationService {
     profileId: string,
     guestId: string | null,
     originKey: string | null,
-    scope: NonNullable<
-      GuestGameProcessEventOptions['exactReconciliationScope']
-    >,
+    scope: CanonicalRuleReconciliationScope,
+    reconciliationKind: CanonicalRuleReconciliationKind,
   ): Promise<ExactReconciliationPersistence> {
     if (!originKey) {
       throw new BadRequestException(
         'Exact canonical reconciliation requires the immutable source originKey.',
       );
     }
+    const useBattlePassStepId =
+      reconciliationKind === 'SESSION_START_RECLASSIFICATION';
     const scopeKey = (value: {
       ruleKind: string;
       ruleId: string;
       battlePassStep: number | null;
+      battlePassStepId?: string | null;
     }) =>
       [
         value.ruleKind,
         value.ruleId,
         value.ruleKind === 'SEASON' ? (value.battlePassStep ?? '') : '',
+        useBattlePassStepId && value.ruleKind === 'SEASON'
+          ? (value.battlePassStepId ?? '')
+          : '',
       ].join(':');
     const expectedScope = new Map(
       scope.rules.map((item) => [scopeKey(item), item] as const),
@@ -14923,6 +15026,7 @@ export class GuestGamificationService {
           ruleKind: rule.kind,
           ruleId: rule.id,
           battlePassStep: rule.battlePassStep ?? null,
+          battlePassStepId: rule.battlePassStepId ?? null,
         }),
       ),
     );
@@ -14938,13 +15042,17 @@ export class GuestGamificationService {
                 profileId: string | null;
                 guestId: string | null;
                 eventType: string;
+                externalProvider: string | null;
+                externalDomain: string | null;
+                externalId: string | null;
                 occurredAt: Date;
                 xpDelta: number;
                 payload: Prisma.JsonValue | null;
               }>
             >(Prisma.sql`
-              SELECT "id", "profileId", "guestId", "eventType", "occurredAt",
-                     "xpDelta", "payload"
+              SELECT "id", "profileId", "guestId", "eventType",
+                     "externalProvider", "externalDomain", "externalId",
+                     "occurredAt", "xpDelta", "payload"
               FROM "GuestGameEvent"
               WHERE "id" = ${eventId}
                 AND "tenantId" = ${user.tenantId}
@@ -14956,16 +15064,18 @@ export class GuestGamificationService {
                 id: string;
                 updatedAt: Date;
                 profileId: string | null;
+                guestId: string | null;
                 externalProvider: string;
                 externalDomain: string;
                 sourceKind: string;
                 sessionExternalId: string | null;
                 factType: string;
+                happenedAt: Date | null;
               }>
             >(Prisma.sql`
-              SELECT "id", "updatedAt", "profileId", "externalProvider",
+              SELECT "id", "updatedAt", "profileId", "guestId", "externalProvider",
                      "externalDomain", "sourceKind", "sessionExternalId",
-                     "factType"
+                     "factType", "happenedAt"
               FROM "GuestActivityFact"
               WHERE "id" = ${scope.sourceFactId}
                 AND "tenantId" = ${user.tenantId}
@@ -14986,15 +15096,22 @@ export class GuestGamificationService {
                 'The exact source event or active fact changed before effects were persisted.',
               );
             }
-            const factPhysicalIdentity = buildGuestGamePhysicalProgressIdentity(
-              {
-                externalProvider: factRow.externalProvider,
-                externalDomain: factRow.externalDomain,
-                sourceKind: factRow.sourceKind,
-                sessionExternalId: factRow.sessionExternalId,
-                eventType: factRow.factType,
-              },
-            );
+            const factPhysicalIdentity =
+              reconciliationKind === 'SESSION_START_RECLASSIFICATION'
+                ? buildGuestGamePhysicalSessionStartIdentity({
+                    externalProvider: factRow.externalProvider,
+                    externalDomain: factRow.externalDomain,
+                    sourceKind: factRow.sourceKind,
+                    sessionExternalId: factRow.sessionExternalId,
+                    eventType: factRow.factType,
+                  })
+                : buildGuestGamePhysicalProgressIdentity({
+                    externalProvider: factRow.externalProvider,
+                    externalDomain: factRow.externalDomain,
+                    sourceKind: factRow.sourceKind,
+                    sessionExternalId: factRow.sessionExternalId,
+                    eventType: factRow.factType,
+                  });
             if (
               !factPhysicalIdentity ||
               factPhysicalIdentity.key !== scope.physicalSessionKey
@@ -15005,16 +15122,26 @@ export class GuestGamificationService {
             }
 
             const ownerReconciliation =
-              await reconcileExactCanonicalEventOwnerInTransaction(tx, {
-                tenantId: user.tenantId,
-                eventId,
-                originKey,
-                expectedEventType: dryRun.eventType,
-                targetProfileId: profileId,
-                targetGuestId: guestId,
-                sourceFactId: scope.sourceFactId,
-                sourceFactUpdatedAt: scope.sourceFactUpdatedAt,
-              });
+              reconciliationKind === 'SESSION_START_RECLASSIFICATION'
+                ? await validateSessionStartReclassificationEvidence(
+                    tx,
+                    user.tenantId,
+                    eventRow,
+                    factRow,
+                    profileId,
+                    guestId,
+                    scope,
+                  )
+                : await reconcileExactCanonicalEventOwnerInTransaction(tx, {
+                    tenantId: user.tenantId,
+                    eventId,
+                    originKey,
+                    expectedEventType: dryRun.eventType,
+                    targetProfileId: profileId,
+                    targetGuestId: guestId,
+                    sourceFactId: scope.sourceFactId,
+                    sourceFactUpdatedAt: scope.sourceFactUpdatedAt,
+                  });
             if (ownerReconciliation.status === 'QUARANTINED') {
               return {
                 dryRun,
@@ -15052,10 +15179,14 @@ export class GuestGamificationService {
             }
             if (plan) {
               if (
+                plan.reconciliationKind !== reconciliationKind ||
                 plan.eventId !== eventId ||
                 plan.originKey !== originKey ||
                 plan.profileId !== profileId ||
                 plan.physicalSessionKey !== scope.physicalSessionKey ||
+                plan.sourceFactId !== scope.sourceFactId ||
+                plan.sourceFactUpdatedAt !==
+                  scope.sourceFactUpdatedAt.toISOString() ||
                 plan.eventType !== eventRow.eventType ||
                 plan.occurredAt !== eventRow.occurredAt.toISOString()
               ) {
@@ -15190,6 +15321,7 @@ export class GuestGamificationService {
                 );
               plan = {
                 schemaVersion: 1,
+                reconciliationKind,
                 eventId,
                 originKey,
                 profileId,
@@ -15203,6 +15335,7 @@ export class GuestGamificationService {
                   ruleKind: item.ruleKind,
                   ruleId: item.ruleId,
                   battlePassStep: item.battlePassStep,
+                  battlePassStepId: item.battlePassStepId ?? null,
                   ruleUpdatedAt: item.ruleUpdatedAt.toISOString(),
                 })),
                 rules: qualifiedRules.map(processRewardRuleSnapshot),
@@ -21114,6 +21247,7 @@ function mapMission(row: MissionRow): GuestGameMission {
       conditions,
       effectiveMissionType,
       row.evaluationPolicy,
+      row.triggerKind,
     ),
     note: row.note,
     createdAt: row.createdAt.toISOString(),
@@ -25529,6 +25663,7 @@ function buildProcessPayload(
 type ProcessRewardIntentRuleSnapshot = {
   id: string;
   kind: GuestGameDryRunRule['kind'];
+  ruleUpdatedAt: string | null;
   name: string;
   status: string;
   triggerKind: string | null;
@@ -25545,6 +25680,7 @@ type ProcessRewardIntentRuleSnapshot = {
   budgetAmount: number | null;
   battlePassLevel: number | null;
   battlePassStep: number | null;
+  battlePassStepId: string | null;
   battlePassStepTitle: string | null;
   battlePassRewardTrack: 'FREE' | 'PREMIUM' | null;
   rewardLootBoxId: string | null;
@@ -25566,6 +25702,7 @@ type ProcessRewardIntentPlan = {
 
 type ExactReconciliationPlan = {
   schemaVersion: 1;
+  reconciliationKind: CanonicalRuleReconciliationKind;
   eventId: string;
   originKey: string;
   profileId: string;
@@ -25579,6 +25716,7 @@ type ExactReconciliationPlan = {
     ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
     ruleId: string;
     battlePassStep: number | null;
+    battlePassStepId: string | null;
     ruleUpdatedAt: string;
   }>;
   rules: ProcessRewardIntentRuleSnapshot[];
@@ -25635,6 +25773,7 @@ function processRewardRuleSnapshot(
   return {
     id: rule.id,
     kind: rule.kind,
+    ruleUpdatedAt: rule.ruleUpdatedAt ?? null,
     name: rule.name,
     status: rule.status,
     triggerKind: rule.triggerKind,
@@ -25652,6 +25791,7 @@ function processRewardRuleSnapshot(
     budgetAmount: rule.budgetAmount,
     battlePassLevel: rule.battlePassLevel ?? null,
     battlePassStep: rule.battlePassStep ?? null,
+    battlePassStepId: rule.battlePassStepId ?? null,
     battlePassStepTitle: rule.battlePassStepTitle ?? null,
     battlePassRewardTrack: rule.battlePassRewardTrack ?? null,
     rewardLootBoxId: rule.rewardLootBoxId ?? null,
@@ -26181,6 +26321,250 @@ type PersistedProcessEventEvidence = {
   guest?: { id: string } | null;
 };
 
+function canonicalReconciliationRuleKey(value: {
+  kind?: string | null;
+  ruleKind?: string | null;
+  id?: string | null;
+  ruleId?: string | null;
+  battlePassStep?: number | null;
+  battlePassStepId?: string | null;
+}) {
+  const kind = nullableString(value.kind) ?? nullableString(value.ruleKind);
+  const id = nullableId(value.id) ?? nullableId(value.ruleId);
+  if (!kind || !id) return null;
+  return [
+    kind,
+    id,
+    kind === 'SEASON' ? (value.battlePassStep ?? '') : '',
+    kind === 'SEASON' ? (value.battlePassStepId ?? '') : '',
+  ].join(':');
+}
+
+function restrictSessionStartReclassificationScopeToPersistedRules(
+  event: PersistedProcessEventEvidence,
+  scope: CanonicalRuleReconciliationScope,
+): CanonicalRuleReconciliationScope {
+  const payload = jsonRecord(event.payload);
+  const input = jsonRecord(payload.input as Prisma.JsonValue | null);
+  if (
+    canonicalGuestGameEventType(event.eventType) !== 'SESSION_START' ||
+    intValue(payload.processSchemaVersion) !== 2 ||
+    nullableString(payload.source) !== 'guest_gamification_process_event' ||
+    nullableString(input.sessionType) !== null ||
+    !Array.isArray(payload.rules)
+  ) {
+    throw new ConflictException(
+      'Session-start reclassification requires immutable generic process-event evidence.',
+    );
+  }
+  const persistedRules = payload.rules.map(parseProcessRewardIntentRule);
+  if (persistedRules.some((rule): rule is null => rule === null)) {
+    throw new ConflictException(
+      'The original generic session-start rule snapshot is corrupt.',
+    );
+  }
+  const persistedByKey = new Map(
+    persistedRules.map((rule) => [
+      canonicalReconciliationRuleKey(rule!),
+      rule!,
+    ]),
+  );
+  if (persistedByKey.size !== persistedRules.length) {
+    throw new ConflictException(
+      'The original generic session-start rule snapshot is ambiguous.',
+    );
+  }
+  return {
+    ...scope,
+    rules: scope.rules.filter((rule) => {
+      const key = canonicalReconciliationRuleKey(rule);
+      const persisted = key ? persistedByKey.get(key) : null;
+      if (!persisted) return false;
+      const persistedRuleVersion = dateValue(persisted.ruleUpdatedAt);
+      if (
+        !persistedRuleVersion ||
+        persistedRuleVersion.getTime() !== rule.ruleUpdatedAt.getTime()
+      ) {
+        throw new ConflictException(
+          'A session-start rule changed after the generic event was evaluated.',
+        );
+      }
+      return true;
+    }),
+  };
+}
+
+async function validateSessionStartReclassificationEvidence(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  event: {
+    id: string;
+    profileId: string | null;
+    guestId: string | null;
+    eventType: string;
+    externalProvider: string | null;
+    externalDomain: string | null;
+    externalId: string | null;
+    occurredAt: Date;
+    payload: Prisma.JsonValue | null;
+  },
+  fact: {
+    id: string;
+    updatedAt: Date;
+    profileId: string | null;
+    guestId: string | null;
+    externalProvider: string;
+    externalDomain: string;
+    sourceKind: string;
+    sessionExternalId: string | null;
+    factType: string;
+    happenedAt: Date | null;
+  },
+  profileId: string,
+  guestId: string | null,
+  scope: CanonicalRuleReconciliationScope,
+): Promise<ExactCanonicalOwnerReconcileOutcome> {
+  const payload = jsonRecord(event.payload);
+  const input = jsonRecord(payload.input as Prisma.JsonValue | null);
+  const sourceFactId = nullableId(payload.sourceFactId);
+  const typedFactTypes = [
+    'HOURLY_SESSION_STARTED',
+    'PACKAGE_OR_SUBSCRIPTION_USED',
+  ];
+  const eventProvider = nullableString(event.externalProvider)?.toUpperCase();
+  const factProvider = nullableString(fact.externalProvider)?.toUpperCase();
+  const payloadProvider = nullableString(
+    payload.externalProvider,
+  )?.toUpperCase();
+  const eventDomain = normalizeGuestGameExternalDomain(event.externalDomain);
+  const factDomain = normalizeGuestGameExternalDomain(fact.externalDomain);
+  const payloadDomain = normalizeGuestGameExternalDomain(
+    payload.externalDomain,
+  );
+  const payloadSourceKind = normalizeGuestGameSourceKind(payload.sourceKind);
+  const factSourceKind = normalizeGuestGameSourceKind(fact.sourceKind);
+  const payloadSessionExternalId = nullableString(payload.sessionExternalId);
+  const factSessionExternalId = nullableString(fact.sessionExternalId);
+
+  if (
+    !guestId ||
+    event.profileId !== profileId ||
+    event.guestId !== guestId ||
+    fact.profileId !== profileId ||
+    fact.guestId !== guestId ||
+    fact.updatedAt.getTime() !== scope.sourceFactUpdatedAt.getTime() ||
+    canonicalGuestGameEventType(event.eventType) !== 'SESSION_START' ||
+    canonicalGuestGameEventType(fact.factType) !== 'SESSION_START' ||
+    !typedFactTypes.includes(fact.factType) ||
+    intValue(payload.processSchemaVersion) !== 2 ||
+    nullableString(payload.source) !== 'guest_gamification_process_event' ||
+    nullableString(input.sessionType) !== null ||
+    !sourceFactId ||
+    sourceFactId === fact.id ||
+    !eventProvider ||
+    eventProvider !== factProvider ||
+    eventProvider !== payloadProvider ||
+    !eventDomain ||
+    eventDomain !== factDomain ||
+    eventDomain !== payloadDomain ||
+    !factSourceKind ||
+    factSourceKind !== payloadSourceKind ||
+    !factSessionExternalId ||
+    factSessionExternalId !== payloadSessionExternalId ||
+    nullableString(event.externalId) !== factSessionExternalId ||
+    !fact.happenedAt ||
+    event.occurredAt.getTime() !== fact.happenedAt.getTime()
+  ) {
+    throw new ConflictException(
+      'The typed session-start fact does not safely enrich the canonical generic event.',
+    );
+  }
+
+  const genericRows = await tx.$queryRaw<
+    Array<{
+      id: string;
+      profileId: string | null;
+      guestId: string | null;
+      externalProvider: string;
+      externalDomain: string;
+      sourceKind: string;
+      sessionExternalId: string | null;
+      factType: string;
+      happenedAt: Date | null;
+    }>
+  >(Prisma.sql`
+    SELECT "id", "profileId", "guestId", "externalProvider",
+           "externalDomain", "sourceKind", "sessionExternalId",
+           "factType", "happenedAt"
+    FROM "GuestActivityFact"
+    WHERE "tenantId" = ${tenantId}
+      AND "id" = ${sourceFactId}
+    FOR SHARE
+  `);
+  const generic = genericRows[0];
+  if (
+    genericRows.length !== 1 ||
+    !generic ||
+    generic.factType !== 'SESSION_STARTED' ||
+    generic.profileId !== profileId ||
+    generic.guestId !== guestId ||
+    nullableString(generic.externalProvider)?.toUpperCase() !== factProvider ||
+    normalizeGuestGameExternalDomain(generic.externalDomain) !== factDomain ||
+    normalizeGuestGameSourceKind(generic.sourceKind) !== factSourceKind ||
+    nullableString(generic.sessionExternalId) !== factSessionExternalId ||
+    !generic.happenedAt ||
+    generic.happenedAt.getTime() !== event.occurredAt.getTime()
+  ) {
+    throw new ConflictException(
+      'The canonical event is not backed by the expected generic session-start fact.',
+    );
+  }
+
+  const typedCandidates = await tx.$queryRaw<
+    Array<{
+      id: string;
+      externalProvider: string;
+      externalDomain: string;
+      sourceKind: string;
+      sessionExternalId: string | null;
+      factType: string;
+    }>
+  >(Prisma.sql`
+    SELECT "id", "externalProvider", "externalDomain", "sourceKind",
+           "sessionExternalId", "factType"
+    FROM "GuestActivityFact"
+    WHERE "tenantId" = ${tenantId}
+      AND "externalProvider" = ${fact.externalProvider}
+      AND "sessionExternalId" = ${fact.sessionExternalId}
+      AND "factType" IN ('HOURLY_SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED')
+      AND "lifecycleStatus" = 'ACTIVE'
+      AND "confidence" = 'EXACT'
+      AND "supersededAt" IS NULL
+    ORDER BY "id"
+    FOR SHARE
+  `);
+  const samePhysicalTypedFacts = typedCandidates.filter(
+    (candidate) =>
+      buildGuestGamePhysicalSessionStartIdentity({
+        externalProvider: candidate.externalProvider,
+        externalDomain: candidate.externalDomain,
+        sourceKind: candidate.sourceKind,
+        sessionExternalId: candidate.sessionExternalId,
+        eventType: candidate.factType,
+      })?.key === scope.physicalSessionKey,
+  );
+  if (
+    samePhysicalTypedFacts.length !== 1 ||
+    samePhysicalTypedFacts[0]?.id !== fact.id
+  ) {
+    throw new ConflictException(
+      'The physical session has no single active exact typed start marker.',
+    );
+  }
+
+  return { status: 'UNCHANGED' };
+}
+
 function processPersistedEventDryRun(
   event: PersistedProcessEventEvidence,
   identityDryRun: GuestGameDryRunResult,
@@ -26625,6 +27009,11 @@ function parseExactReconciliationPlan(
   value: unknown,
 ): ExactReconciliationPlan | null {
   if (!isRecord(value) || intValue(value.schemaVersion) !== 1) return null;
+  const rawReconciliationKind = nullableString(value.reconciliationKind);
+  const reconciliationKind: CanonicalRuleReconciliationKind =
+    rawReconciliationKind === 'SESSION_START_RECLASSIFICATION'
+      ? 'SESSION_START_RECLASSIFICATION'
+      : 'EXACT_PLAY_TIME';
   const eventId = nullableId(value.eventId);
   const originKey = nullableString(value.originKey);
   const profileId = nullableId(value.profileId);
@@ -26672,6 +27061,7 @@ function parseExactReconciliationPlan(
         ruleKind,
         ruleId,
         battlePassStep: intValue(item.battlePassStep) ?? null,
+        battlePassStepId: nullableString(item.battlePassStepId) ?? null,
         ruleUpdatedAt: ruleUpdatedAt.toISOString(),
       };
     })
@@ -26698,6 +27088,10 @@ function parseExactReconciliationPlan(
         rule.kind,
         rule.id,
         rule.kind === 'SEASON' ? (rule.battlePassStep ?? '') : '',
+        reconciliationKind === 'SESSION_START_RECLASSIFICATION' &&
+        rule.kind === 'SEASON'
+          ? (rule.battlePassStepId ?? '')
+          : '',
       ].join(':'),
     ),
   );
@@ -26707,6 +27101,10 @@ function parseExactReconciliationPlan(
         rule.ruleKind,
         rule.ruleId,
         rule.ruleKind === 'SEASON' ? (rule.battlePassStep ?? '') : '',
+        reconciliationKind === 'SESSION_START_RECLASSIFICATION' &&
+        rule.ruleKind === 'SEASON'
+          ? (rule.battlePassStepId ?? '')
+          : '',
       ].join(':'),
     ),
   );
@@ -26721,6 +27119,7 @@ function parseExactReconciliationPlan(
 
   return {
     schemaVersion: 1,
+    reconciliationKind,
     eventId,
     originKey,
     profileId,
@@ -26797,6 +27196,7 @@ function parseProcessRewardIntentRule(
   return {
     id,
     kind,
+    ruleUpdatedAt: dateValue(value.ruleUpdatedAt)?.toISOString() ?? null,
     name,
     status: nullableString(value.status) ?? 'ACTIVE',
     triggerKind: nullableString(value.triggerKind) ?? null,
@@ -26821,6 +27221,7 @@ function parseProcessRewardIntentRule(
     budgetAmount: finiteJsonNumber(value.budgetAmount) ?? null,
     battlePassLevel: intValue(value.battlePassLevel) ?? null,
     battlePassStep: intValue(value.battlePassStep) ?? null,
+    battlePassStepId: nullableString(value.battlePassStepId) ?? null,
     battlePassStepTitle: nullableString(value.battlePassStepTitle) ?? null,
     battlePassRewardTrack: processBattlePassRewardTrack(
       value.battlePassRewardTrack,
@@ -28166,6 +28567,7 @@ function evaluateLootBoxDryRun(
   return dryRunRuleResult({
     id: rule.id,
     kind: 'LOOT_BOX',
+    ruleUpdatedAt: rule.updatedAt,
     name: rule.name,
     status: rule.status,
     triggerKind: rule.triggerKind,
@@ -28253,6 +28655,7 @@ function evaluateMissionDryRun(
   return dryRunRuleResult({
     id: rule.id,
     kind: 'MISSION',
+    ruleUpdatedAt: rule.updatedAt,
     name: rule.name,
     status: rule.status,
     triggerKind: rule.triggerKind,
@@ -28261,6 +28664,7 @@ function evaluateMissionDryRun(
       rule.conditions,
       rule.missionType,
       rule.evaluationPolicy,
+      rule.triggerKind,
     ),
     manualApprovalRequired: rule.manualApprovalRequired,
     rewardType: rule.rewardType,
@@ -28366,6 +28770,7 @@ function evaluateSeasonDryRun(
   return dryRunRuleResult({
     id: rule.id,
     kind: 'SEASON',
+    ruleUpdatedAt: rule.updatedAt,
     name: rule.name,
     status: rule.status,
     triggerKind: 'BATTLE_PASS',
@@ -28384,6 +28789,7 @@ function evaluateSeasonDryRun(
     progress,
     battlePassLevel: currentStep?.level ?? null,
     battlePassStep: currentStep?.sequence ?? null,
+    battlePassStepId: currentStep?.id ?? null,
     battlePassStepTitle: currentStep?.title ?? null,
     battlePassRewardTrack: stepRewardPlan?.rewardTrack ?? null,
     rewardLootBoxId: stepRewardPlan?.rewardLootBoxId ?? null,
@@ -29402,6 +29808,7 @@ function dryRunRewardMatchesGuest(
 }
 
 type DryRunSeasonLevel = {
+  id: string;
   level: number;
   sequence: number;
   title: string | null;
@@ -29427,6 +29834,12 @@ function dryRunSeasonLevels(value: unknown): DryRunSeasonLevel[] {
       }
 
       return {
+        id:
+          dryRunString(record.id) ??
+          `legacy-${createHash('sha256')
+            .update(canonicalGuestGameJsonFingerprint(record))
+            .digest('hex')
+            .slice(0, 24)}`,
         level,
         sequence: index + 1,
         title: dryRunString(record.title),

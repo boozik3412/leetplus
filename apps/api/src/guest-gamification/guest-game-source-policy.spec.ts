@@ -54,21 +54,77 @@ describe('guest game source policy router', () => {
     ).toBe('LIVE_WITH_LEDGER_FALLBACK');
   });
 
-  it('canonicalizes every PLAY_HOUR lootbox to fallback while session-start stays primary', () => {
+  it.each([
+    [
+      'conditions task type',
+      { taskType: 'SESSION_START' },
+      'CUSTOM',
+      'APP_OPEN',
+    ],
+    [
+      'conditions event marker',
+      { eventTypes: 'SESSION_START' },
+      'CUSTOM',
+      'APP_OPEN',
+    ],
+    [
+      'metric event marker',
+      { metric: { eventType: 'SESSION_START' } },
+      'CUSTOM',
+      'APP_OPEN',
+    ],
+    ['legacy mission type', {}, 'SESSION_START', 'APP_OPEN'],
+    ['denormalized trigger', {}, 'CUSTOM', 'SESSION_START'],
+  ])(
+    'routes a SESSION_START mission represented by %s through the fallback',
+    (_label, conditions, missionType, triggerKind) => {
+      expect(
+        guestGameMissionEvaluationPolicy(
+          1,
+          conditions,
+          missionType,
+          'LIVE_PRIMARY',
+          triggerKind,
+        ),
+      ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    },
+  );
+
+  it('lets an explicit non-start mission event marker override stale SESSION_START fields', () => {
+    expect(
+      guestGameMissionEvaluationPolicy(
+        2,
+        {
+          taskType: 'SESSION_START',
+          metric: { eventTypes: ['APP_OPEN'] },
+        },
+        'SESSION_START',
+        'LIVE_PRIMARY',
+        'SESSION_START',
+      ),
+    ).toBe('LIVE_PRIMARY');
+  });
+
+  it('canonicalizes every PLAY_HOUR and SESSION_START lootbox to fallback', () => {
     expect(guestGameLootBoxEvaluationPolicy('PLAY_HOUR', {})).toBe(
       'LIVE_WITH_LEDGER_FALLBACK',
     );
     expect(guestGameLootBoxEvaluationPolicy('SESSION_START', {})).toBe(
-      'LIVE_PRIMARY',
+      'LIVE_WITH_LEDGER_FALLBACK',
     );
     expect(
       guestGameLootBoxEvaluationPolicy('PLAY_HOUR', {
         evaluationPolicy: 'LIVE_PRIMARY',
       }),
     ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    expect(
+      guestGameLootBoxEvaluationPolicy('SESSION_START', {
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
   });
 
-  it('routes every semantic PLAY_TIME Battle Pass step through the fallback', () => {
+  it('routes every semantic PLAY_TIME or SESSION_START Battle Pass step through the fallback', () => {
     expect(
       guestGameBattlePassStepEvaluationPolicy({
         schemaVersion: 2,
@@ -86,21 +142,81 @@ describe('guest game source policy router', () => {
     expect(
       guestGameBattlePassStepEvaluationPolicy({
         schemaVersion: 2,
+        triggerKind: 'SESSION_START',
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 1,
+        eventTypes: ['SESSION_START'],
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 1,
+        metric: { eventTypes: ['SESSION_START'] },
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 1,
+        eventTypes: 'SESSION_START',
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 1,
+        eventType: 'SESSION_START',
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 1,
+        metric: { eventType: 'SESSION_START' },
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 2,
         taskType: 'APP_OPEN',
         evaluationPolicy: 'LIVE_PRIMARY',
       }),
     ).toBe('LIVE_PRIMARY');
   });
 
-  it('keeps an explicit non-play-time Battle Pass task primary despite stale play-time fields', () => {
+  it('lets an explicit non-start event marker override stale session triggers', () => {
     expect(
       guestGameBattlePassStepEvaluationPolicy({
         schemaVersion: 2,
         taskType: 'CHECK_IN',
-        triggerKind: 'PLAY_HOUR',
-        eventTypes: ['PLAY_HOUR', 'SESSION_STOP'],
+        triggerKind: 'SESSION_START',
+        metric: { eventTypes: 'APP_OPEN' },
         evaluationPolicy: 'LIVE_PRIMARY',
       }),
     ).toBe('LIVE_PRIMARY');
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 1,
+        triggerKind: 'PLAY_HOUR',
+        eventType: 'APP_OPEN',
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_PRIMARY');
+  });
+
+  it('routes the wizard SESSION_START taskType through the typed ledger fallback', () => {
+    expect(
+      guestGameBattlePassStepEvaluationPolicy({
+        schemaVersion: 2,
+        taskType: 'SESSION_START',
+        evaluationPolicy: 'LIVE_PRIMARY',
+      }),
+    ).toBe('LIVE_WITH_LEDGER_FALLBACK');
   });
 });

@@ -113,7 +113,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
     expect(fallbackService.runScheduled).not.toHaveBeenCalled();
   });
 
-  it('defaults to play-time facts and requires an explicit purchase opt-in', async () => {
+  it('defaults to play-time facts and requires explicit session-start or purchase opt-in', async () => {
     const { scheduler, fallbackService } = createScheduler({
       GUEST_GAME_LEDGER_FALLBACK_MODE: 'SHADOW',
       GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG: 'demo',
@@ -212,7 +212,7 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
     const { scheduler, fallbackService } = createScheduler({
       ...liveCanaryConfig,
       GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES:
-        'PRODUCT_PURCHASED,HOURLY_PLAY_TIME_ACCUMULATED,PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+        'PRODUCT_PURCHASED,SESSION_STARTED,HOURLY_SESSION_STARTED,PACKAGE_OR_SUBSCRIPTION_USED,HOURLY_PLAY_TIME_ACCUMULATED,PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
     });
 
     await expect(scheduler.runOnce()).resolves.toMatchObject({
@@ -221,6 +221,9 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
     expect(fallbackService.runScheduled).toHaveBeenCalledWith({
       mode: 'LIVE',
       factTypes: [
+        'SESSION_STARTED',
+        'HOURLY_SESSION_STARTED',
+        'PACKAGE_OR_SUBSCRIPTION_USED',
         'HOURLY_PLAY_TIME_ACCUMULATED',
         'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
       ],
@@ -239,6 +242,9 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
       liveCanaryReady: true,
       liveNotBefore: '2026-07-18T11:55:00.000Z',
       factTypes: [
+        'SESSION_STARTED',
+        'HOURLY_SESSION_STARTED',
+        'PACKAGE_OR_SUBSCRIPTION_USED',
         'HOURLY_PLAY_TIME_ACCUMULATED',
         'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
       ],
@@ -297,6 +303,11 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
       expect.objectContaining({
         mode: 'LIVE',
         tenantId: 'tenant-1',
+        factTypes: [
+          'SESSION_PLAY_TIME_ACCUMULATED',
+          'HOURLY_PLAY_TIME_ACCUMULATED',
+          'PACKAGE_OR_SUBSCRIPTION_PLAY_TIME_ACCUMULATED',
+        ],
         playTimeAllowAllProfiles: true,
         liveNotBefore: '2026-07-18T11:55:00.000Z',
       }),
@@ -313,6 +324,54 @@ describe('GuestGameLedgerFallbackSchedulerService', () => {
       },
     });
   });
+
+  it('accepts only canonical session-start fact types', async () => {
+    const { scheduler, fallbackService } = createScheduler({
+      GUEST_GAME_LEDGER_FALLBACK_MODE: 'SHADOW',
+      GUEST_GAME_LEDGER_FALLBACK_TENANT_SLUG: 'demo',
+      GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES:
+        'SESSION_START,SESSION_STARTED,HOURLY_SESSION_STARTED,PACKAGE_OR_SUBSCRIPTION_USED,PACKAGE_SESSION_STARTED',
+    });
+
+    await scheduler.runOnce();
+
+    expect(fallbackService.runScheduled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        factTypes: [
+          'SESSION_STARTED',
+          'HOURLY_SESSION_STARTED',
+          'PACKAGE_OR_SUBSCRIPTION_USED',
+        ],
+      }),
+    );
+  });
+
+  it.each([
+    ['tenant scope', 'GUEST_GAME_LEDGER_FALLBACK_TENANT_ID'],
+    ['fresh cutoff', 'GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE'],
+  ])(
+    'fails closed for tenant-wide session-start fallback without %s',
+    async (_label, key) => {
+      const config = {
+        GUEST_GAME_LEDGER_FALLBACK_MODE: 'LIVE',
+        GUEST_GAME_LEDGER_FALLBACK_TENANT_ID: 'tenant-1',
+        GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE: '2026-07-18T11:55:00.000Z',
+        GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES: 'true',
+        GUEST_GAME_LEDGER_FALLBACK_FACT_TYPES:
+          'SESSION_STARTED,HOURLY_SESSION_STARTED,PACKAGE_OR_SUBSCRIPTION_USED',
+      } as Record<string, string>;
+      delete config[key];
+      const { scheduler, fallbackService } = createScheduler(config);
+
+      await expect(scheduler.runOnce()).resolves.toBeNull();
+      expect(fallbackService.runScheduled).not.toHaveBeenCalled();
+      expect(scheduler.getRuntimeStatus()).toMatchObject({
+        mode: 'LIVE',
+        backgroundReady: false,
+        liveCanaryReady: false,
+      });
+    },
+  );
 
   it('does not overlap scheduler ticks', async () => {
     let release: ((value: GuestGameLedgerFallbackRunResult) => void) | null =

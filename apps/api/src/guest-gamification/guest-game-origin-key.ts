@@ -24,8 +24,19 @@ export type GuestGamePhysicalProgressIdentity = {
   key: string;
 };
 
+export type GuestGamePhysicalSessionStartIdentity = {
+  externalProvider: string;
+  externalDomain: string;
+  sourceKind: string;
+  sessionExternalId: string;
+  family: 'SESSION_START';
+  key: string;
+};
+
 const canonicalEventAliases: Record<string, string> = {
   SESSION_STARTED: 'SESSION_START',
+  HOURLY_SESSION_STARTED: 'SESSION_START',
+  PACKAGE_OR_SUBSCRIPTION_USED: 'SESSION_START',
   SESSION_START: 'SESSION_START',
   SESSION_ENDED: 'SESSION_STOP',
   SESSION_STOP: 'SESSION_STOP',
@@ -160,6 +171,53 @@ export function buildGuestGamePhysicalProgressIdentity(
 }
 
 /**
+ * Stable identity of one physical session start.
+ *
+ * Generic and typed start facts deliberately share this identity so a delayed
+ * HOURLY/PACKAGE marker can enrich the already-created canonical SESSION_START
+ * event without creating a second physical event.
+ */
+export function buildGuestGamePhysicalSessionStartIdentity(
+  input: GuestGamePhysicalProgressIdentityInput,
+): GuestGamePhysicalSessionStartIdentity | null {
+  const externalProvider = normalizedString(
+    input.externalProvider,
+  )?.toUpperCase();
+  const externalDomain = normalizeGuestGameExternalDomain(input.externalDomain);
+  const sourceKind = normalizeGuestGameSourceKind(input.sourceKind);
+  const sessionExternalId = normalizedString(input.sessionExternalId);
+  const eventType = canonicalGuestGameEventType(input.eventType);
+
+  if (
+    !externalProvider ||
+    !externalDomain ||
+    !sourceKind ||
+    !sessionExternalId ||
+    eventType !== 'SESSION_START'
+  ) {
+    return null;
+  }
+
+  const family = 'SESSION_START' as const;
+  const digest = physicalProgressDigest({
+    externalProvider,
+    externalDomain,
+    sourceKind,
+    sessionExternalId,
+    family,
+  });
+
+  return {
+    externalProvider,
+    externalDomain,
+    sourceKind,
+    sessionExternalId,
+    family,
+    key: `ggs:v1:${digest}`,
+  };
+}
+
+/**
  * Canonical v2 origin for PLAY_TIME only.
  *
  * The v1 builder remains unchanged for legacy lookup and every non-play-time
@@ -205,7 +263,7 @@ function physicalProgressDigest(input: {
   externalDomain: string;
   sourceKind: string;
   sessionExternalId: string;
-  family: 'PLAY_TIME';
+  family: 'PLAY_TIME' | 'SESSION_START';
 }) {
   return createHash('sha256')
     .update(

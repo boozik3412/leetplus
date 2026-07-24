@@ -2,7 +2,10 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SettingsWorkspace } from "@/components/settings-workspace";
 import { requireCurrentUser } from "@/lib/auth";
 import { getBrandingSettings } from "@/lib/branding-settings";
-import { getLangameSettings } from "@/lib/langame-settings";
+import {
+  getLangameSettings,
+  type LangameSettings,
+} from "@/lib/langame-settings";
 import { can } from "@/lib/permissions";
 
 const SETTINGS_DATA_TIMEOUT_MS = 15_000;
@@ -69,7 +72,11 @@ async function loadSettingsWorkspaceData() {
   console.warn("[settings] data load start");
 
   const [langameResult, brandingResult] = await Promise.allSettled([
-    withSettingsDataTimeout("langame", getLangameSettings(), startedAt),
+    withSettingsDataTimeout(
+      "langame",
+      getLangameSettings().then(sanitizeLangameSettingsForSettingsPage),
+      startedAt,
+    ),
     withSettingsDataTimeout("branding", getBrandingSettings(), startedAt),
   ]);
 
@@ -141,6 +148,22 @@ function getSettingsErrorMessage(error: unknown) {
   }
 
   return "Неизвестная ошибка загрузки настроек";
+}
+
+function sanitizeLangameSettingsForSettingsPage(
+  settings: LangameSettings,
+): LangameSettings {
+  return {
+    tenantName: settings.tenantName,
+    hasApiKey: settings.hasApiKey,
+    domains: settings.domains,
+    sources: settings.sources,
+    syncJobs: [],
+    latestSuccessfulSyncJob: null,
+    endpointProfiles: [],
+    endpointSnapshotCandidates: [],
+    endpointSnapshots: [],
+  };
 }
 
 function SettingsDataScript({

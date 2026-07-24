@@ -268,6 +268,7 @@ type PreparedReplay = {
     originKey: string | null;
     ruleType: string;
     ruleId: string;
+    effectKind: string;
     slotKey: string;
     claimKey: string | null;
     status: string;
@@ -2248,6 +2249,7 @@ export class GuestGameRuleReplayService {
       intent.profileId !== prepared.fact.profileId ||
       intent.ruleType !== 'SEASON' ||
       intent.ruleId !== prepared.season.id ||
+      intent.effectKind !== 'REWARD' ||
       intent.slotKey !== prepared.slotKey ||
       intent.claimKey !== prepared.claimKey ||
       intent.event.profileId !== prepared.fact.profileId ||
@@ -2269,7 +2271,10 @@ export class GuestGameRuleReplayService {
 
   private findIntent(tenantId: string, claimKey: string) {
     return this.prisma.guestGameRewardIntent.findUnique({
-      where: { tenantId_claimKey: { tenantId, claimKey } },
+      where: {
+        tenantId_claimKey: { tenantId, claimKey },
+        effectKind: 'REWARD',
+      },
       select: {
         id: true,
         eventId: true,
@@ -2278,6 +2283,7 @@ export class GuestGameRuleReplayService {
         originKey: true,
         ruleType: true,
         ruleId: true,
+        effectKind: true,
         slotKey: true,
         claimKey: true,
         status: true,

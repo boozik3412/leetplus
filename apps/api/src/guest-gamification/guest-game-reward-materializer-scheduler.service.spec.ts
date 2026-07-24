@@ -502,6 +502,31 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
         expect(firstCountCall[0].where?.tenantId).toBe('tenant-1');
         expect(firstCountCall[0].where?.attempts).toEqual({ lt: 9 });
       }
+
+      for (const method of [
+        prisma.guestGameRewardIntent.groupBy,
+        prisma.guestGameRewardIntent.count,
+        prisma.guestGameRewardIntent.findFirst,
+      ]) {
+        const calls = method.mock.calls as unknown as Array<
+          [{ where?: Record<string, unknown> }]
+        >;
+        for (const [argument] of calls) {
+          expect(argument.where?.effectKind).toBe('REWARD');
+        }
+      }
+      for (const method of [
+        prisma.guestGameRewardEffect.groupBy,
+        prisma.guestGameRewardEffect.count,
+        prisma.guestGameRewardEffect.findFirst,
+      ]) {
+        const calls = method.mock.calls as unknown as Array<
+          [{ where?: Record<string, unknown> }]
+        >;
+        for (const [argument] of calls) {
+          expect(argument.where).not.toHaveProperty('effectKind');
+        }
+      }
     } finally {
       jest.useRealTimers();
     }

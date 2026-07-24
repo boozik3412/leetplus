@@ -156,6 +156,7 @@ function existingIntent(status = 'APPLIED') {
       'guest-game-origin:LANGAME:46.langamepro.ru:PLAY_HOUR:session-270',
     ruleType: 'SEASON',
     ruleId: 'season-1',
+    effectKind: 'REWARD',
     slotKey: '2:BATTLE_PASS_REWARD',
     claimKey: 'season:season-1:profile:profile-0646:step:2',
     status,
@@ -906,6 +907,33 @@ describe('GuestGameRuleReplayService', () => {
     await expect(service.previewBattlePass(user, target)).rejects.toThrow(
       'несовместимым планом награды',
     );
+  });
+
+  it('filters by REWARD and rejects a non-reward intent returned for the claim key', async () => {
+    const incompatible = {
+      ...existingIntent(),
+      effectKind: 'XP_POSTING',
+    };
+    const { service, prisma, gamification } = createService({
+      intent: incompatible,
+    });
+
+    await expect(service.previewBattlePass(user, target)).rejects.toThrow(
+      ConflictException,
+    );
+    expect(prisma.guestGameRewardIntent.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId_claimKey: {
+            tenantId: user.tenantId,
+            claimKey: 'season:season-1:profile:profile-0646:step:2',
+          },
+          effectKind: 'REWARD',
+        },
+        select: expect.objectContaining({ effectKind: true }),
+      }),
+    );
+    expect(gamification.processEvent).not.toHaveBeenCalled();
   });
 
   it('returns idempotent after the applied reward advances the current BP step', async () => {

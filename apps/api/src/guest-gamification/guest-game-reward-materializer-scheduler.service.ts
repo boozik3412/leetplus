@@ -208,6 +208,18 @@ export class GuestGameRewardMaterializerSchedulerService
       ...processingWhere,
       OR: [{ claimExpiresAt: null }, { claimExpiresAt: { lte: observedAt } }],
     };
+    const intentReadyWhere = {
+      ...readyWhere,
+      effectKind: 'REWARD',
+    };
+    const intentProcessingWhere = {
+      ...processingWhere,
+      effectKind: 'REWARD',
+    };
+    const intentExpiredLeaseWhere = {
+      ...expiredLeaseWhere,
+      effectKind: 'REWARD',
+    };
 
     const [
       intentStatuses,
@@ -223,14 +235,16 @@ export class GuestGameRewardMaterializerSchedulerService
     ] = await Promise.all([
       this.prisma.guestGameRewardIntent.groupBy({
         by: ['status'],
-        where: { tenantId: scopedTenantId },
+        where: { tenantId: scopedTenantId, effectKind: 'REWARD' },
         _count: { _all: true },
       }),
-      this.prisma.guestGameRewardIntent.count({ where: readyWhere }),
-      this.prisma.guestGameRewardIntent.count({ where: processingWhere }),
-      this.prisma.guestGameRewardIntent.count({ where: expiredLeaseWhere }),
+      this.prisma.guestGameRewardIntent.count({ where: intentReadyWhere }),
+      this.prisma.guestGameRewardIntent.count({ where: intentProcessingWhere }),
+      this.prisma.guestGameRewardIntent.count({
+        where: intentExpiredLeaseWhere,
+      }),
       this.prisma.guestGameRewardIntent.findFirst({
-        where: readyWhere,
+        where: intentReadyWhere,
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: { createdAt: true },
       }),

@@ -14,11 +14,15 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import type { GuestBonusLedgerSchedulerRuntimeStatus } from './guest-bonus-ledger-scheduler.service';
 import { EXACT_CANONICAL_OWNER_QUARANTINED_CODE } from './guest-game-exact-owner-reconciler';
-import { buildGuestGameOriginKey } from './guest-game-origin-key';
+import {
+  buildGuestGameOriginKey,
+  buildGuestGamePhysicalProgressIdentity,
+} from './guest-game-origin-key';
 import {
   canonicalGuestGameJsonFingerprint,
   GuestGamificationService,
   guestGameExactReconciliationDeliveryState,
+  guestGameExactXpTopUpPlan,
   type GuestGameDryRunResult,
   type GuestGameEvent,
   type GuestGameLootBox,
@@ -30,9 +34,24 @@ import {
   type GuestGameProfile,
   type GuestGameReward,
   type GuestGameSnapshotFact,
+  type GuestGameXpRuleAttribution,
 } from './guest-gamification.service';
 
 describe('exact reconciliation invariants', () => {
+  const xpAttribution = (
+    ruleId: string,
+    requestedDelta: number,
+    source: GuestGameXpRuleAttribution['source'],
+  ): GuestGameXpRuleAttribution => ({
+    ruleKey: `MISSION:${ruleId}:`,
+    ruleKind: 'MISSION',
+    ruleId,
+    battlePassStep: null,
+    requestedDelta,
+    appliedDelta: requestedDelta,
+    source,
+  });
+
   it('fingerprints an immutable plan independently of object key order', () => {
     const left = {
       slotKey: 'free',
@@ -69,6 +88,43 @@ describe('exact reconciliation invariants', () => {
       complete: false,
       waitingForDelivery: false,
     });
+  });
+
+  it('does not subtract unrelated LIVE XP from an exact rule top-up', () => {
+    const live = xpAttribution('mission-live', 10, 'LIVE');
+    const exact = xpAttribution('mission-exact', 30, 'EXACT');
+
+    expect(guestGameExactXpTopUpPlan([live], [exact])).toEqual({
+      existingRequestedTotal: 10,
+      existingAppliedTotal: 10,
+      expectedScopedTotal: 30,
+      requestedTopUp: 30,
+      missingAttributions: [exact],
+      mergedAttributions: [exact, live],
+    });
+  });
+
+  it('does not repost XP already attributed to the same exact rule', () => {
+    const live = xpAttribution('mission-exact', 30, 'LIVE');
+    const exact = xpAttribution('mission-exact', 30, 'EXACT');
+
+    expect(guestGameExactXpTopUpPlan([live], [exact])).toEqual({
+      existingRequestedTotal: 30,
+      existingAppliedTotal: 30,
+      expectedScopedTotal: 30,
+      requestedTopUp: 0,
+      missingAttributions: [],
+      mergedAttributions: [live],
+    });
+  });
+
+  it('fails closed when the same rule has incompatible XP attribution', () => {
+    expect(() =>
+      guestGameExactXpTopUpPlan(
+        [xpAttribution('mission-exact', 10, 'LIVE')],
+        [xpAttribution('mission-exact', 30, 'EXACT')],
+      ),
+    ).toThrow(ConflictException);
   });
 });
 
@@ -117,6 +173,8 @@ function createPrismaMock() {
     guestGameXpPosting: {
       create: jest.fn().mockResolvedValue({}),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
     },
     guestGameRewardIntent: {
       upsert: jest.fn().mockImplementation(({ create }) =>
@@ -352,6 +410,866 @@ function createService(
     ),
   };
 }
+
+describe('exact XP reconciliation persistence', () => {
+  it('bootstraps a strictly matching legacy v2 LIVE posting, then adds exact XP once', async () => {
+    const { service, prisma } = createService();
+    const profile = profileFixture();
+    const eventId = 'event-exact-xp-top-up';
+    const sourceFactId = 'fact-exact-xp-top-up';
+    const originKey = 'origin-exact-xp-top-up';
+    const sessionExternalId = 'session-exact-xp-top-up';
+    const physicalIdentity = buildGuestGamePhysicalProgressIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+
+    const scope = {
+      sourceFactId,
+      sourceFactUpdatedAt: now,
+      physicalSessionKey: physicalIdentity!.key,
+      rules: [
+        {
+          ruleKind: 'MISSION' as const,
+          ruleId: 'mission-exact-xp',
+          battlePassStep: null,
+          ruleUpdatedAt: now,
+        },
+      ],
+    };
+    const exactPlan = {
+      schemaVersion: 1,
+      eventId,
+      originKey,
+      profileId: profile.id,
+      physicalSessionKey: physicalIdentity!.key,
+      sourceFactId,
+      sourceFactUpdatedAt: isoNow,
+      createdAt: isoNow,
+      occurredAt: isoNow,
+      eventType: 'PLAY_HOUR',
+      ruleVersions: [
+        {
+          ruleKind: 'MISSION',
+          ruleId: 'mission-exact-xp',
+          battlePassStep: null,
+          ruleUpdatedAt: isoNow,
+        },
+      ],
+      rules: [
+        {
+          id: 'mission-exact-xp',
+          kind: 'MISSION',
+          name: 'Exact XP mission',
+          eligible: true,
+          xpDelta: 30,
+        },
+      ],
+      rewardIntents: [],
+      expectedXpDelta: 30,
+    };
+    const liveAttribution = {
+      ruleKey: 'MISSION:mission-unrelated-live:',
+      ruleKind: 'MISSION',
+      ruleId: 'mission-unrelated-live',
+      battlePassStep: null,
+      requestedDelta: 10,
+      appliedDelta: 10,
+      source: 'LIVE',
+    } as const;
+    const exactAttribution = {
+      ruleKey: 'MISSION:mission-exact-xp:',
+      ruleKind: 'MISSION',
+      ruleId: 'mission-exact-xp',
+      battlePassStep: null,
+      requestedDelta: 30,
+      appliedDelta: 30,
+      source: 'EXACT',
+    } as const;
+    const xpIntent = (
+      id: string,
+      attribution: typeof liveAttribution | typeof exactAttribution,
+    ) => ({
+      id,
+      tenantId: user.tenantId,
+      eventId,
+      profileId: profile.id,
+      originKey,
+      ruleType: attribution.ruleKind,
+      ruleId: attribution.ruleId,
+      effectKind: 'XP_POSTING',
+      slotKey: `xp:${attribution.ruleKey}`,
+      idempotencyKey: `guest-game-xp-rule:${eventId}:${attribution.ruleKey}`,
+      claimKey: null,
+      status: 'APPLIED',
+      plan: {
+        schemaVersion: 1,
+        effectKind: 'XP_POSTING',
+        qualifiedAt: isoNow,
+        slotKey: `xp:${attribution.ruleKey}`,
+        claimKey: null,
+        ...attribution,
+        sourceFactId: attribution.source === 'EXACT' ? sourceFactId : null,
+        physicalSessionKey:
+          attribution.source === 'EXACT' ? physicalIdentity!.key : null,
+      },
+    });
+    let persistedXpIntents = [] as ReturnType<typeof xpIntent>[];
+    prisma.guestGameRewardIntent.findMany.mockImplementation(
+      ({ where }: any) => {
+        if (where?.effectKind === 'XP_POSTING') {
+          return Promise.resolve(persistedXpIntents);
+        }
+        if (where?.effectKind === 'REWARD') {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      },
+    );
+    const liveV2Payload = {
+      processSchemaVersion: 2,
+      rules: [
+        {
+          id: liveAttribution.ruleId,
+          kind: liveAttribution.ruleKind,
+          name: 'Unrelated LIVE XP mission',
+          eligible: true,
+          xpDelta: liveAttribution.requestedDelta,
+        },
+      ],
+      exactReconciliationPlan: exactPlan,
+    };
+    const lockedEvent = {
+      id: eventId,
+      profileId: profile.id,
+      guestId: 'guest-1',
+      lootBoxId: null,
+      missionId: null,
+      seasonId: null,
+      eventType: 'PLAY_HOUR',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      originKey,
+      occurredAt: now,
+      xpDelta: 10,
+      payload: liveV2Payload,
+    };
+    const lockedFact = {
+      id: sourceFactId,
+      updatedAt: now,
+      profileId: profile.id,
+      guestId: 'guest-1',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+      confidence: 'EXACT',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+    };
+    const lockedReceipt = {
+      id: 'receipt-exact-xp-top-up',
+      factId: sourceFactId,
+      eventId,
+      eventType: 'PLAY_HOUR',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_CANONICALIZATION',
+    };
+    const installLockedRows = (
+      eventXpDelta: number,
+      payload = liveV2Payload,
+    ) => {
+      prisma.$queryRaw.mockReset();
+      prisma.$queryRaw
+        .mockResolvedValueOnce([
+          { ...lockedEvent, xpDelta: eventXpDelta, payload },
+        ])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([
+          { ...lockedEvent, xpDelta: eventXpDelta, payload },
+        ])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedReceipt]);
+    };
+    const invoke = () =>
+      (service as any).persistExactReconciliationEffects(
+        user,
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          occurredAt: isoNow,
+          rules: [],
+          summary: {
+            checkedRules: 0,
+            eligibleRules: 0,
+            blockedRules: 0,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          },
+        }),
+        eventId,
+        profile.id,
+        'guest-1',
+        originKey,
+        scope,
+      ) as Promise<{ appliedXpDelta: number }>;
+
+    prisma.guestGameXpPosting.findUnique.mockResolvedValue({
+      id: 'posting-exact-xp-top-up',
+      tenantId: user.tenantId,
+      profileId: profile.id,
+      eventId,
+      idempotencyKey: `guest-game-xp:${eventId}`,
+      requestedDelta: 10,
+      appliedDelta: 10,
+      balanceBefore: 100,
+      balanceAfter: 110,
+      evidence: { eventType: 'PLAY_HOUR' },
+    });
+    prisma.guestGameProfile.update
+      .mockResolvedValueOnce({ xp: 160 })
+      .mockResolvedValueOnce({ xp: 160 });
+
+    installLockedRows(10, {
+      ...liveV2Payload,
+      rules: [
+        {
+          ...liveV2Payload.rules[0],
+          xpDelta: liveAttribution.requestedDelta - 1,
+        },
+      ],
+    });
+    await expect(invoke()).rejects.toThrow(
+      'Legacy canonical XP does not match the immutable EXACT or LIVE rule snapshot.',
+    );
+    expect(
+      prisma.guestGameRewardIntent.upsert.mock.calls
+        .map(([call]) => call)
+        .filter((call: any) => call.create.effectKind === 'XP_POSTING'),
+    ).toHaveLength(0);
+    prisma.guestGameRewardIntent.upsert.mockClear();
+
+    installLockedRows(10);
+    const first = await invoke();
+
+    expect(first.appliedXpDelta).toBe(30);
+    expect(prisma.guestGameProfile.update).toHaveBeenNthCalledWith(1, {
+      where: { id: profile.id },
+      data: {
+        xp: { increment: 30 },
+        lastActivityAt: expect.any(Date),
+      },
+      select: { xp: true },
+    });
+    expect(prisma.guestGameEvent.update).toHaveBeenCalledWith({
+      where: { id: eventId },
+      data: { xpDelta: 40 },
+    });
+    expect(prisma.guestGameXpPosting.update).toHaveBeenCalledWith({
+      where: { eventId },
+      data: expect.objectContaining({
+        requestedDelta: 40,
+        appliedDelta: 40,
+        balanceBefore: 100,
+        balanceAfter: 140,
+        evidence: expect.objectContaining({
+          exactReconciliationTopUp: expect.objectContaining({
+            requestedDelta: 30,
+            appliedDelta: 30,
+            balanceBefore: 130,
+            balanceAfter: 160,
+          }),
+        }),
+      }),
+    });
+    expect(
+      prisma.guestGameRewardIntent.upsert.mock.calls
+        .map(([call]) => call)
+        .filter((call: any) => call.create.effectKind === 'XP_POSTING'),
+    ).toEqual([
+      expect.objectContaining({
+        create: expect.objectContaining({
+          eventId,
+          profileId: profile.id,
+          ruleId: liveAttribution.ruleId,
+          effectKind: 'XP_POSTING',
+          status: 'APPLIED',
+          plan: expect.objectContaining({
+            source: 'LIVE',
+            requestedDelta: 10,
+            sourceFactId: null,
+            physicalSessionKey: null,
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        create: expect.objectContaining({
+          eventId,
+          profileId: profile.id,
+          ruleId: exactAttribution.ruleId,
+          effectKind: 'XP_POSTING',
+          status: 'APPLIED',
+          plan: expect.objectContaining({
+            source: 'EXACT',
+            requestedDelta: 30,
+            sourceFactId,
+            physicalSessionKey: physicalIdentity!.key,
+          }),
+        }),
+      }),
+    ]);
+
+    persistedXpIntents = [
+      xpIntent('xp-intent-live', liveAttribution),
+      xpIntent('xp-intent-exact', exactAttribution),
+    ];
+    installLockedRows(40);
+    prisma.guestGameXpPosting.findUnique.mockResolvedValue({
+      id: 'posting-exact-xp-top-up',
+      tenantId: user.tenantId,
+      profileId: profile.id,
+      eventId,
+      idempotencyKey: `guest-game-xp:${eventId}`,
+      requestedDelta: 40,
+      appliedDelta: 40,
+      balanceBefore: 100,
+      balanceAfter: 140,
+      evidence: { exactCanonicalReconciliation: true },
+    });
+    prisma.guestGameProfile.update.mockClear();
+    prisma.guestGameEvent.update.mockClear();
+    prisma.guestGameXpPosting.update.mockClear();
+    prisma.guestGameRewardIntent.upsert.mockClear();
+
+    const retry = await invoke();
+
+    expect(retry.appliedXpDelta).toBe(0);
+    expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameEvent.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameRewardIntent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('restores an EXACT per-rule receipt from a legacy immutable plan without reposting XP', async () => {
+    const { service, prisma } = createService();
+    const profile = profileFixture();
+    const eventId = 'event-exact-xp-same-rule';
+    const sourceFactId = 'fact-exact-xp-same-rule';
+    const originKey = 'origin-exact-xp-same-rule';
+    const sessionExternalId = 'session-exact-xp-same-rule';
+    const ruleId = 'mission-shared-live-exact';
+    const ruleKey = `MISSION:${ruleId}:`;
+    const physicalIdentity = buildGuestGamePhysicalProgressIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+
+    const exactPlan = {
+      schemaVersion: 1,
+      eventId,
+      originKey,
+      profileId: profile.id,
+      physicalSessionKey: physicalIdentity!.key,
+      sourceFactId,
+      sourceFactUpdatedAt: isoNow,
+      createdAt: isoNow,
+      occurredAt: isoNow,
+      eventType: 'PLAY_HOUR',
+      ruleVersions: [
+        {
+          ruleKind: 'MISSION',
+          ruleId,
+          battlePassStep: null,
+          ruleUpdatedAt: isoNow,
+        },
+      ],
+      rules: [
+        {
+          id: ruleId,
+          kind: 'MISSION',
+          name: 'Shared LIVE and EXACT XP mission',
+          eligible: true,
+          xpDelta: 30,
+        },
+      ],
+      rewardIntents: [],
+      expectedXpDelta: 30,
+    };
+    const payload = {
+      processSchemaVersion: 2,
+      exactReconciliationPlan: exactPlan,
+    };
+    const exactReceipt = {
+      id: 'xp-intent-shared-live-exact',
+      tenantId: user.tenantId,
+      eventId,
+      profileId: profile.id,
+      originKey,
+      ruleType: 'MISSION',
+      ruleId,
+      effectKind: 'XP_POSTING',
+      slotKey: `xp:${ruleKey}`,
+      idempotencyKey: `guest-game-xp-rule:${eventId}:${ruleKey}`,
+      claimKey: null,
+      status: 'APPLIED',
+      plan: {
+        schemaVersion: 1,
+        effectKind: 'XP_POSTING',
+        qualifiedAt: isoNow,
+        slotKey: `xp:${ruleKey}`,
+        claimKey: null,
+        ruleKey,
+        ruleKind: 'MISSION',
+        ruleId,
+        battlePassStep: null,
+        requestedDelta: 30,
+        appliedDelta: 30,
+        source: 'EXACT',
+        sourceFactId,
+        physicalSessionKey: physicalIdentity!.key,
+      },
+    };
+    let persistedXpIntents: Array<typeof exactReceipt> = [];
+    prisma.guestGameRewardIntent.findMany.mockImplementation(
+      ({ where }: any) => {
+        if (where?.effectKind === 'XP_POSTING') {
+          return Promise.resolve(persistedXpIntents);
+        }
+        return Promise.resolve([]);
+      },
+    );
+    prisma.guestGameXpPosting.findUnique.mockResolvedValue({
+      id: 'posting-exact-xp-same-rule',
+      tenantId: user.tenantId,
+      profileId: profile.id,
+      eventId,
+      idempotencyKey: `guest-game-xp:${eventId}`,
+      requestedDelta: 30,
+      appliedDelta: 30,
+      balanceBefore: 100,
+      balanceAfter: 130,
+      evidence: { eventType: 'PLAY_HOUR' },
+    });
+
+    const lockedEvent = {
+      id: eventId,
+      profileId: profile.id,
+      guestId: 'guest-1',
+      lootBoxId: null,
+      missionId: null,
+      seasonId: null,
+      eventType: 'PLAY_HOUR',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      originKey,
+      occurredAt: now,
+      xpDelta: 30,
+      payload,
+    };
+    const lockedFact = {
+      id: sourceFactId,
+      updatedAt: now,
+      profileId: profile.id,
+      guestId: 'guest-1',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+      confidence: 'EXACT',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+    };
+    const lockedReceipt = {
+      id: 'receipt-exact-xp-same-rule',
+      factId: sourceFactId,
+      eventId,
+      eventType: 'PLAY_HOUR',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_CANONICALIZATION',
+    };
+    const installLockedRows = () => {
+      prisma.$queryRaw.mockReset();
+      prisma.$queryRaw
+        .mockResolvedValueOnce([lockedEvent])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedEvent])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedReceipt]);
+    };
+    const invoke = () =>
+      (service as any).persistExactReconciliationEffects(
+        user,
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          occurredAt: isoNow,
+          rules: [],
+          summary: {
+            checkedRules: 0,
+            eligibleRules: 0,
+            blockedRules: 0,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          },
+        }),
+        eventId,
+        profile.id,
+        'guest-1',
+        originKey,
+        {
+          sourceFactId,
+          sourceFactUpdatedAt: now,
+          physicalSessionKey: physicalIdentity!.key,
+          rules: [
+            {
+              ruleKind: 'MISSION',
+              ruleId,
+              battlePassStep: null,
+              ruleUpdatedAt: now,
+            },
+          ],
+        },
+      ) as Promise<{ appliedXpDelta: number }>;
+
+    installLockedRows();
+    const first = await invoke();
+
+    expect(first.appliedXpDelta).toBe(0);
+    expect(prisma.guestGameRewardIntent.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.guestGameRewardIntent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          eventId,
+          profileId: profile.id,
+          ruleId,
+          effectKind: 'XP_POSTING',
+          status: 'APPLIED',
+          plan: expect.objectContaining({
+            ruleKey,
+            source: 'EXACT',
+            requestedDelta: 30,
+            sourceFactId,
+            physicalSessionKey: physicalIdentity!.key,
+          }),
+        }),
+      }),
+    );
+    expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameEvent.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.create).not.toHaveBeenCalled();
+
+    persistedXpIntents = [exactReceipt];
+    prisma.guestGameRewardIntent.upsert.mockClear();
+    installLockedRows();
+
+    const retry = await invoke();
+
+    expect(retry.appliedXpDelta).toBe(0);
+    expect(prisma.guestGameRewardIntent.upsert).not.toHaveBeenCalled();
+    expect(prisma.guestGameProfile.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameEvent.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameXpPosting.create).not.toHaveBeenCalled();
+  });
+
+  it('suppresses an EXACT cross-event reward claim while topping up only independent XP rules, including on retry', async () => {
+    const { service, prisma } = createService();
+    const profile = profileFixture();
+    const eventId = 'event-exact-cross-event-claim';
+    const sourceFactId = 'fact-exact-cross-event-claim';
+    const originKey = 'origin-exact-cross-event-claim';
+    const sessionExternalId = 'session-exact-cross-event-claim';
+    const physicalIdentity = buildGuestGamePhysicalProgressIdentity({
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      eventType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+    });
+    expect(physicalIdentity).not.toBeNull();
+
+    const claimedRule = {
+      ...dryRunResult().rules[0],
+      id: 'season-cross-event-claim',
+      kind: 'SEASON' as const,
+      name: 'Current season diagnostics',
+      rewardType: 'BATTLE_PASS_REWARD',
+      rewardAmount: 0,
+      rewardLabel: 'Step 2 reward',
+      selectedRewardLabel: 'Step 2 reward',
+      xpDelta: 30,
+      battlePassLevel: 2,
+      battlePassStep: 2,
+      battlePassStepTitle: 'Hour session',
+    };
+    const xpOnlyRule = {
+      ...dryRunResult().rules[0],
+      id: 'mission-exact-independent-xp',
+      name: 'Independent XP',
+      rewardType: null,
+      rewardAmount: null,
+      rewardLabel: null,
+      selectedRewardLabel: null,
+      xpDelta: 20,
+    };
+    const claimKey = 'season:season-cross-event-claim:profile:profile-1:step:2';
+    const rewardPlan = {
+      schemaVersion: 1,
+      qualifiedAt: isoNow,
+      slotKey: '2:BATTLE_PASS_REWARD',
+      claimKey,
+      rule: claimedRule,
+    };
+    const exactPlan = {
+      schemaVersion: 1,
+      eventId,
+      originKey,
+      profileId: profile.id,
+      physicalSessionKey: physicalIdentity!.key,
+      sourceFactId,
+      sourceFactUpdatedAt: isoNow,
+      createdAt: isoNow,
+      occurredAt: isoNow,
+      eventType: 'PLAY_HOUR',
+      ruleVersions: [
+        {
+          ruleKind: 'SEASON',
+          ruleId: claimedRule.id,
+          battlePassStep: 2,
+          ruleUpdatedAt: isoNow,
+        },
+        {
+          ruleKind: 'MISSION',
+          ruleId: xpOnlyRule.id,
+          battlePassStep: null,
+          ruleUpdatedAt: isoNow,
+        },
+      ],
+      rules: [claimedRule, xpOnlyRule],
+      rewardIntents: [rewardPlan],
+      expectedXpDelta: 50,
+    };
+    const payload = {
+      processSchemaVersion: 2,
+      rules: [claimedRule, xpOnlyRule],
+      exactReconciliationPlan: exactPlan,
+    };
+    let eventXpDelta = 0;
+    let profileXp = 100;
+    let posting: Record<string, any> | null = null;
+    const persistedXpIntents: Array<Record<string, any>> = [];
+    const lockedFact = {
+      id: sourceFactId,
+      updatedAt: now,
+      profileId: profile.id,
+      guestId: 'guest-1',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      sourceKind: 'GUEST_SESSION',
+      sessionExternalId,
+      factType: 'HOURLY_PLAY_TIME_ACCUMULATED',
+      confidence: 'EXACT',
+      lifecycleStatus: 'ACTIVE',
+      supersededAt: null,
+    };
+    const lockedReceipt = {
+      id: 'receipt-exact-cross-event-claim',
+      factId: sourceFactId,
+      eventId,
+      eventType: 'PLAY_HOUR',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      policy: 'EXACT_OPERATOR_CANONICALIZATION',
+      status: 'PROCESSED',
+      claimedSource: 'EXACT_CANONICALIZATION',
+    };
+    const lockedEvent = () => ({
+      id: eventId,
+      profileId: profile.id,
+      guestId: 'guest-1',
+      lootBoxId: null,
+      missionId: null,
+      seasonId: null,
+      eventType: 'PLAY_HOUR',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club-1',
+      originKey,
+      occurredAt: now,
+      xpDelta: eventXpDelta,
+      payload,
+    });
+    const installLockedRows = () => {
+      prisma.$queryRaw.mockReset();
+      prisma.$queryRaw
+        .mockResolvedValueOnce([lockedEvent()])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedEvent()])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedFact])
+        .mockResolvedValueOnce([lockedReceipt]);
+    };
+
+    prisma.guestGameXpPosting.findUnique.mockImplementation(() =>
+      Promise.resolve(posting),
+    );
+    prisma.guestGameRewardIntent.findMany.mockImplementation(({ where }: any) =>
+      Promise.resolve(
+        where?.effectKind === 'XP_POSTING' ? persistedXpIntents : [],
+      ),
+    );
+    prisma.guestGameRewardIntent.upsert.mockImplementation(({ create }) => {
+      if (create.effectKind === 'REWARD') {
+        return Promise.resolve({
+          id: 'intent-owned-by-previous-event',
+          ...create,
+          eventId: 'event-previous-claim-owner',
+          originKey: 'origin-previous-claim-owner',
+          idempotencyKey: 'previous-claim-idempotency',
+          plan: {
+            ...create.plan,
+            qualifiedAt: '2026-06-09T10:00:00.000Z',
+            rule: {
+              ...create.plan.rule,
+              name: 'Previous season diagnostics',
+              reasons: ['previous evaluator reason'],
+            },
+          },
+        });
+      }
+      const existing = persistedXpIntents.find(
+        (row) => row.idempotencyKey === create.idempotencyKey,
+      );
+      if (existing) return Promise.resolve(existing);
+      const row = {
+        id: `intent-${persistedXpIntents.length + 1}`,
+        ...create,
+      };
+      persistedXpIntents.push(row);
+      return Promise.resolve(row);
+    });
+    prisma.guestGameProfile.update.mockImplementation(({ data }) => {
+      if (data.xp?.increment) profileXp += data.xp.increment;
+      if (typeof data.xp === 'number') profileXp = data.xp;
+      return Promise.resolve({ xp: profileXp });
+    });
+    prisma.guestGameEvent.update.mockImplementation(({ data }) => {
+      if (typeof data.xpDelta === 'number') eventXpDelta = data.xpDelta;
+      return Promise.resolve(lockedEvent());
+    });
+    prisma.guestGameXpPosting.create.mockImplementation(({ data }) => {
+      posting = { id: 'posting-exact-cross-event-claim', ...data };
+      return Promise.resolve(posting);
+    });
+
+    const invoke = () =>
+      (service as any).persistExactReconciliationEffects(
+        user,
+        dryRunResult({
+          eventType: 'PLAY_HOUR',
+          occurredAt: isoNow,
+          rules: [],
+          summary: {
+            checkedRules: 0,
+            eligibleRules: 0,
+            blockedRules: 0,
+            estimatedRewardAmount: 0,
+            projectedXpDelta: 0,
+          },
+        }),
+        eventId,
+        profile.id,
+        'guest-1',
+        originKey,
+        {
+          sourceFactId,
+          sourceFactUpdatedAt: now,
+          physicalSessionKey: physicalIdentity!.key,
+          rules: [
+            {
+              ruleKind: 'SEASON',
+              ruleId: claimedRule.id,
+              battlePassStep: 2,
+              ruleUpdatedAt: now,
+            },
+            {
+              ruleKind: 'MISSION',
+              ruleId: xpOnlyRule.id,
+              battlePassStep: null,
+              ruleUpdatedAt: now,
+            },
+          ],
+        },
+      ) as Promise<{ appliedXpDelta: number; intentIds: string[] }>;
+
+    installLockedRows();
+    const first = await invoke();
+
+    expect(first).toMatchObject({ appliedXpDelta: 20, intentIds: [] });
+    expect(profileXp).toBe(120);
+    expect(eventXpDelta).toBe(20);
+    expect(posting).toMatchObject({
+      requestedDelta: 20,
+      appliedDelta: 20,
+      balanceBefore: 100,
+      balanceAfter: 120,
+    });
+    expect(
+      persistedXpIntents.map((intent) => ({
+        effectKind: intent.effectKind,
+        ruleId: intent.ruleId,
+        requestedDelta: intent.plan.requestedDelta,
+      })),
+    ).toEqual([
+      {
+        effectKind: 'XP_POSTING',
+        ruleId: xpOnlyRule.id,
+        requestedDelta: 20,
+      },
+    ]);
+    expect(
+      persistedXpIntents.some((intent) => intent.ruleId === claimedRule.id),
+    ).toBe(false);
+
+    const profileUpdatesAfterFirst =
+      prisma.guestGameProfile.update.mock.calls.length;
+    const eventUpdatesAfterFirst =
+      prisma.guestGameEvent.update.mock.calls.length;
+    const postingCreatesAfterFirst =
+      prisma.guestGameXpPosting.create.mock.calls.length;
+    installLockedRows();
+
+    const retry = await invoke();
+
+    expect(retry).toMatchObject({ appliedXpDelta: 0, intentIds: [] });
+    expect(prisma.guestGameProfile.update).toHaveBeenCalledTimes(
+      profileUpdatesAfterFirst,
+    );
+    expect(prisma.guestGameEvent.update).toHaveBeenCalledTimes(
+      eventUpdatesAfterFirst,
+    );
+    expect(prisma.guestGameXpPosting.create).toHaveBeenCalledTimes(
+      postingCreatesAfterFirst,
+    );
+    expect(profileXp).toBe(120);
+  });
+});
 
 function enablePrimarySnapshotBackfill(
   fixture: ReturnType<typeof createService>,
@@ -6438,29 +7356,41 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameEvent.findUnique).not.toHaveBeenCalled();
     });
 
-    it('does not award XP again when a Battle Pass step claim is already anchored to another event', async () => {
+    it('suppresses a cross-event Battle Pass claim with changed diagnostics without rolling back other reward or XP-only rules', async () => {
       const { service, prisma } = createService();
       const missionRule = dryRunResult().rules[0];
+      const seasonRule = {
+        ...missionRule,
+        id: 'season-1',
+        kind: 'SEASON' as const,
+        name: 'Club season',
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardAmount: 0,
+        rewardLabel: 'Step 2 reward',
+        selectedRewardLabel: 'Step 2 reward',
+        battlePassLevel: 2,
+        battlePassStep: 2,
+        battlePassStepTitle: 'Hour session',
+        periodicLimitPeriod: null,
+      };
+      const xpOnlyRule = {
+        ...missionRule,
+        id: 'mission-xp-only',
+        name: 'XP only mission',
+        rewardType: null,
+        rewardAmount: null,
+        rewardLabel: null,
+        selectedRewardLabel: null,
+        xpDelta: 20,
+        periodicLimitPeriod: null,
+      };
       const rewardIntents = [
         {
           schemaVersion: 1,
           qualifiedAt: isoNow,
           slotKey: '2:BATTLE_PASS_REWARD',
           claimKey: 'season:season-1:profile:profile-1:step:2',
-          rule: {
-            ...missionRule,
-            id: 'season-1',
-            kind: 'SEASON',
-            name: 'Club season',
-            rewardType: 'BATTLE_PASS_REWARD',
-            rewardAmount: 0,
-            rewardLabel: 'Step 2 reward',
-            selectedRewardLabel: 'Step 2 reward',
-            battlePassLevel: 2,
-            battlePassStep: 2,
-            battlePassStepTitle: 'Hour session',
-            periodicLimitPeriod: null,
-          },
+          rule: seasonRule,
         },
         {
           schemaVersion: 1,
@@ -6475,6 +7405,7 @@ describe('GuestGamificationService', () => {
       ];
       const payload = {
         processSchemaVersion: 2,
+        rules: [seasonRule, missionRule, xpOnlyRule],
         rewardIntents,
       };
       const createdRow = {
@@ -6489,7 +7420,7 @@ describe('GuestGamificationService', () => {
       };
       const finalRow = {
         ...createdRow,
-        xpDelta: 30,
+        xpDelta: 50,
       };
 
       jest.spyOn(service as any, 'buildEventData').mockResolvedValue({
@@ -6498,26 +7429,39 @@ describe('GuestGamificationService', () => {
         eventType: 'SESSION_START',
         source: 'API_IMPORT',
         originKey: 'origin-claim-race',
-        xpDelta: 60,
+        xpDelta: 80,
         occurredAt: now,
         payload,
       });
       prisma.guestGameEvent.create.mockResolvedValue(createdRow);
       prisma.guestGameEvent.findUnique.mockResolvedValue(finalRow);
-      prisma.guestGameRewardIntent.upsert
-        .mockImplementationOnce(({ create }) =>
-          Promise.resolve({
+      prisma.guestGameRewardIntent.upsert.mockImplementation(({ create }) => {
+        if (
+          create.effectKind === 'REWARD' &&
+          create.claimKey === 'season:season-1:profile:profile-1:step:2'
+        ) {
+          return Promise.resolve({
             id: 'intent-existing-step',
             ...create,
             eventId: 'event-existing-step',
-          }),
-        )
-        .mockImplementationOnce(({ create }) =>
-          Promise.resolve({
-            id: 'intent-mission',
-            ...create,
-          }),
-        );
+            originKey: 'origin-existing-step',
+            idempotencyKey: 'intent-existing-step-idempotency',
+            plan: {
+              ...create.plan,
+              qualifiedAt: '2026-06-09T10:00:00.000Z',
+              rule: {
+                ...create.plan.rule,
+                name: 'Previous season diagnostics',
+                reasons: ['previous evaluator reason'],
+              },
+            },
+          });
+        }
+        return Promise.resolve({
+          id: `intent-${create.effectKind}-${create.ruleId}`,
+          ...create,
+        });
+      });
       prisma.guestGameProfile.update
         .mockResolvedValueOnce({ xp: 150 })
         .mockResolvedValueOnce({});
@@ -6531,7 +7475,7 @@ describe('GuestGamificationService', () => {
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: 'club-1',
           externalId: 'session-claim-race',
-          xpDelta: 60,
+          xpDelta: 80,
           occurredAt: isoNow,
           payload,
         },
@@ -6577,12 +7521,12 @@ describe('GuestGamificationService', () => {
       );
       expect(prisma.guestGameEvent.update).toHaveBeenCalledWith({
         where: { id: 'event-claim-race' },
-        data: { xpDelta: 30 },
+        data: { xpDelta: 50 },
       });
       expect(prisma.guestGameProfile.update).toHaveBeenNthCalledWith(1, {
         where: { id: 'profile-1' },
         data: {
-          xp: { increment: 30 },
+          xp: { increment: 50 },
           lastActivityAt: expect.any(Date),
         },
         select: { xp: true },
@@ -6590,13 +7534,19 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameXpPosting.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           eventId: 'event-claim-race',
-          requestedDelta: 30,
-          appliedDelta: 30,
+          requestedDelta: 50,
+          appliedDelta: 50,
         }),
       });
+      expect(
+        prisma.guestGameRewardIntent.upsert.mock.calls
+          .map(([call]) => call.create)
+          .filter((create) => create.effectKind === 'XP_POSTING')
+          .map((create) => create.ruleId),
+      ).toEqual([missionRule.id, xpOnlyRule.id]);
       expect(result).toMatchObject({
         id: 'event-claim-race',
-        xpDelta: 30,
+        xpDelta: 50,
       });
     });
 

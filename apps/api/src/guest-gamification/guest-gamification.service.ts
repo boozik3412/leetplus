@@ -11715,9 +11715,8 @@ export class GuestGamificationService {
             }
 
             let effectiveXpDelta = qualifiedXpDelta;
+            const persistedPlanKeys = new Set<string>();
             if (qualifiedRewardIntentPlans.length > 0) {
-              const persistedPlanKeys = new Set<string>();
-
               for (const plan of qualifiedRewardIntentPlans) {
                 const idempotencyKey =
                   buildGuestGameRewardIdempotencyKey({
@@ -11770,9 +11769,52 @@ export class GuestGamificationService {
                       update: {},
                     });
 
-                if (intent.eventId === created.id) {
-                  persistedPlanKeys.add(processRewardIntentPlanKey(plan));
+                const storedPlan = parseProcessRewardIntentPlan(intent.plan);
+                if (
+                  intent.tenantId !== user.tenantId ||
+                  intent.profileId !== profileId ||
+                  intent.ruleType !== plan.rule.kind ||
+                  intent.ruleId !== plan.rule.id ||
+                  intent.effectKind !== 'REWARD' ||
+                  intent.slotKey !== plan.slotKey ||
+                  intent.claimKey !== plan.claimKey ||
+                  ![
+                    'PENDING',
+                    'PROCESSING',
+                    'FAILED',
+                    'APPLIED',
+                    'DEAD_LETTER',
+                  ].includes(intent.status) ||
+                  !storedPlan ||
+                  storedPlan.slotKey !== plan.slotKey ||
+                  storedPlan.claimKey !== plan.claimKey ||
+                  storedPlan.rule.kind !== plan.rule.kind ||
+                  storedPlan.rule.id !== plan.rule.id
+                ) {
+                  throw new ConflictException(
+                    'A reward intent is owned by another event, profile, effect, or rule version.',
+                  );
                 }
+                if (intent.eventId !== created.id) {
+                  if (!plan.claimKey) {
+                    throw new ConflictException(
+                      'A reward intent without a stable claim is owned by another event.',
+                    );
+                  }
+                  continue;
+                }
+                if (
+                  intent.originKey !==
+                    nullableString(canonicalIdentity.originKey) ||
+                  intent.idempotencyKey !== idempotencyKey ||
+                  canonicalGuestGameJsonFingerprint(storedPlan) !==
+                    canonicalGuestGameJsonFingerprint(plan)
+                ) {
+                  throw new ConflictException(
+                    'A reward intent for this event has incompatible immutable evidence.',
+                  );
+                }
+                persistedPlanKeys.add(processRewardIntentPlanKey(plan));
               }
 
               effectiveXpDelta -= sum(
@@ -11793,6 +11835,40 @@ export class GuestGamificationService {
             }
 
             if (profileId && effectiveXpDelta !== 0) {
+              const persistedRewardIntentPlans =
+                qualifiedRewardIntentPlans.filter((plan) =>
+                  persistedPlanKeys.has(processRewardIntentPlanKey(plan)),
+                );
+              const liveXpAttributions = guestGameLiveXpRuleAttributions(
+                qualifiedPayload,
+                persistedRewardIntentPlans,
+              );
+              if (liveXpAttributions) {
+                const attributionPlan = guestGameExactXpTopUpPlan(
+                  liveXpAttributions,
+                  [],
+                );
+                if (
+                  attributionPlan.existingRequestedTotal !== effectiveXpDelta ||
+                  attributionPlan.existingAppliedTotal !== effectiveXpDelta
+                ) {
+                  throw new ConflictException(
+                    'LIVE per-rule XP attribution does not match the canonical event XP.',
+                  );
+                }
+                for (const attribution of liveXpAttributions) {
+                  await persistGuestGameXpPostingIntent(tx, {
+                    tenantId: user.tenantId,
+                    eventId: created.id,
+                    profileId,
+                    originKey:
+                      nullableString(canonicalIdentity.originKey) ?? null,
+                    attribution,
+                    qualifiedAt: created.occurredAt,
+                  });
+                }
+              }
+
               const incremented = await tx.guestGameProfile.update({
                 where: { id: profileId },
                 data: {
@@ -14963,10 +15039,7 @@ export class GuestGamificationService {
             }
 
             const payload = jsonRecord(eventRow.payload);
-            const hasStoredPlan = Object.prototype.hasOwnProperty.call(
-              payload,
-              'exactReconciliationPlan',
-            );
+            const hasStoredPlan = 'exactReconciliationPlan' in payload;
             let plan = exactReconciliationPlanFromPayload(payload);
             let qualificationOutcomes: AtomicMissionQualificationOutcome[] = [];
             let qualificationSourceRules: ProcessRewardIntentRuleSnapshot[] =
@@ -15106,7 +15179,6 @@ export class GuestGamificationService {
                     }
                   : rule,
               );
-              const qualifiedDryRun = dryRunWithRules(dryRun, qualifiedRules);
               const rewardIntents = qualifiedRules
                 .filter(shouldQueueProcessReward)
                 .map((rule) =>
@@ -15148,7 +15220,7 @@ export class GuestGamificationService {
                     ...payload,
                     physicalSourceKey: plan.physicalSessionKey,
                     exactReconciliationPlan: plan,
-                  } as Prisma.InputJsonObject,
+                  },
                 },
               });
             }
@@ -15220,8 +15292,91 @@ export class GuestGamificationService {
               }
             }
 
+            const [
+              existingPosting,
+              existingXpPostingIntentRows,
+              preexistingRewardIntentRows,
+            ] = await Promise.all([
+              tx.guestGameXpPosting.findUnique({
+                where: { eventId },
+              }),
+              tx.guestGameRewardIntent.findMany({
+                where: {
+                  tenantId: user.tenantId,
+                  eventId,
+                  effectKind: 'XP_POSTING',
+                },
+                select: {
+                  tenantId: true,
+                  eventId: true,
+                  profileId: true,
+                  originKey: true,
+                  ruleType: true,
+                  ruleId: true,
+                  effectKind: true,
+                  slotKey: true,
+                  idempotencyKey: true,
+                  claimKey: true,
+                  status: true,
+                  plan: true,
+                },
+              }),
+              tx.guestGameRewardIntent.findMany({
+                where: {
+                  tenantId: user.tenantId,
+                  eventId,
+                  effectKind: 'REWARD',
+                },
+                select: {
+                  tenantId: true,
+                  eventId: true,
+                  profileId: true,
+                  originKey: true,
+                  ruleType: true,
+                  ruleId: true,
+                  effectKind: true,
+                  slotKey: true,
+                  idempotencyKey: true,
+                  claimKey: true,
+                  status: true,
+                  plan: true,
+                },
+              }),
+            ]);
+            let existingXpAttributions = guestGameXpRuleAttributionsFromIntents(
+              existingXpPostingIntentRows,
+              {
+                tenantId: user.tenantId,
+                eventId,
+                profileId,
+                originKey,
+              },
+            );
+            const preexistingRewardIntentPlans =
+              preexistingRewardIntentRows.map((intent) => {
+                const storedPlan = parseProcessRewardIntentPlan(intent.plan);
+                if (
+                  intent.tenantId !== user.tenantId ||
+                  intent.eventId !== eventId ||
+                  intent.profileId !== profileId ||
+                  intent.originKey !== originKey ||
+                  intent.ruleType !== storedPlan?.rule.kind ||
+                  intent.ruleId !== storedPlan.rule.id ||
+                  intent.effectKind !== 'REWARD' ||
+                  intent.slotKey !== storedPlan.slotKey ||
+                  intent.claimKey !== storedPlan.claimKey ||
+                  !storedPlan
+                ) {
+                  throw new ConflictException(
+                    'The canonical event contains an incompatible reward intent.',
+                  );
+                }
+                return storedPlan;
+              });
+
             const plans = plan.rewardIntents;
             const intentIds: string[] = [];
+            const suppressedRewardPlanKeys = new Set<string>();
             for (const rewardPlan of plans) {
               const idempotencyKey = buildGuestGameRewardIdempotencyKey({
                 originKey,
@@ -15249,7 +15404,7 @@ export class GuestGamificationService {
                 plan: rewardPlan,
                 qualifiedAt: new Date(rewardPlan.qualifiedAt),
               } satisfies Prisma.GuestGameRewardIntentUncheckedCreateInput;
-              const intent = rewardPlan.claimKey
+              const intent: GuestGameRewardIntent = rewardPlan.claimKey
                 ? await tx.guestGameRewardIntent.upsert({
                     where: {
                       tenantId_claimKey: {
@@ -15272,10 +15427,12 @@ export class GuestGamificationService {
                   });
               const storedPlan = parseProcessRewardIntentPlan(intent.plan);
               if (
-                intent.eventId !== eventId ||
+                intent.tenantId !== user.tenantId ||
                 intent.profileId !== profileId ||
-                intent.originKey !== originKey ||
-                intent.idempotencyKey !== idempotencyKey ||
+                intent.ruleType !== rewardPlan.rule.kind ||
+                intent.ruleId !== rewardPlan.rule.id ||
+                intent.effectKind !== 'REWARD' ||
+                intent.slotKey !== rewardPlan.slotKey ||
                 intent.claimKey !== rewardPlan.claimKey ||
                 ![
                   'PENDING',
@@ -15285,79 +15442,299 @@ export class GuestGamificationService {
                   'DEAD_LETTER',
                 ].includes(intent.status) ||
                 !storedPlan ||
-                canonicalGuestGameJsonFingerprint(storedPlan) !==
-                  canonicalGuestGameJsonFingerprint(rewardPlan)
+                storedPlan.slotKey !== rewardPlan.slotKey ||
+                storedPlan.claimKey !== rewardPlan.claimKey ||
+                storedPlan.rule.kind !== rewardPlan.rule.kind ||
+                storedPlan.rule.id !== rewardPlan.rule.id
               ) {
                 throw new ConflictException(
                   'An exact reward intent is owned by another event, profile, or rule version.',
                 );
               }
+              if (intent.eventId !== eventId) {
+                if (!rewardPlan.claimKey) {
+                  throw new ConflictException(
+                    'An exact reward intent without a stable claim is owned by another event.',
+                  );
+                }
+                suppressedRewardPlanKeys.add(
+                  processRewardIntentPlanKey(rewardPlan),
+                );
+                continue;
+              }
+              if (
+                intent.originKey !== originKey ||
+                intent.idempotencyKey !== idempotencyKey ||
+                canonicalGuestGameJsonFingerprint(storedPlan) !==
+                  canonicalGuestGameJsonFingerprint(rewardPlan)
+              ) {
+                throw new ConflictException(
+                  'An exact reward intent for this event has incompatible immutable evidence.',
+                );
+              }
               intentIds.push(intent.id);
             }
 
-            const expectedXpDelta = plan.expectedXpDelta;
-            const existingPosting = await tx.guestGameXpPosting.findUnique({
-              where: { eventId },
-            });
-            let appliedXpDelta = 0;
+            const plannedExactXpAttributions =
+              guestGameExactXpRuleAttributions(plan);
+            const exactAttributionTotals = guestGameExactXpTopUpPlan(
+              [],
+              plannedExactXpAttributions,
+            );
+            if (
+              exactAttributionTotals.expectedScopedTotal !==
+              plan.expectedXpDelta
+            ) {
+              throw new ConflictException(
+                'The immutable exact plan has an inconsistent per-rule XP total.',
+              );
+            }
+            const exactXpAttributions = plannedExactXpAttributions.filter(
+              (attribution) =>
+                !plan.rules.some(
+                  (rule) =>
+                    rule.kind === attribution.ruleKind &&
+                    rule.id === attribution.ruleId &&
+                    (rule.kind !== 'SEASON' ||
+                      (rule.battlePassStep ?? null) ===
+                        attribution.battlePassStep) &&
+                    suppressedRewardPlanKeys.has(
+                      processRewardRuleKey(
+                        rule as unknown as GuestGameDryRunRule,
+                      ),
+                    ),
+                ),
+            );
+
             if (existingPosting) {
               if (
+                existingPosting.tenantId !== user.tenantId ||
                 existingPosting.profileId !== profileId ||
-                existingPosting.requestedDelta !== expectedXpDelta
+                existingPosting.requestedDelta < 0 ||
+                existingPosting.appliedDelta < 0 ||
+                existingPosting.appliedDelta !==
+                  existingPosting.requestedDelta ||
+                existingPosting.balanceAfter - existingPosting.balanceBefore !==
+                  existingPosting.appliedDelta ||
+                existingPosting.idempotencyKey !== `guest-game-xp:${eventId}` ||
+                eventRow.xpDelta !== existingPosting.requestedDelta
               ) {
                 throw new ConflictException(
                   'The canonical event already has a different XP posting.',
                 );
               }
-              appliedXpDelta = existingPosting.appliedDelta;
-            } else if (expectedXpDelta !== 0) {
-              if (eventRow.xpDelta !== 0) {
+
+              if (
+                existingPosting.requestedDelta > 0 &&
+                existingXpAttributions.length === 0
+              ) {
+                let inferredAttributions: GuestGameXpRuleAttribution[] | null =
+                  null;
+                if (hasStoredPlan) {
+                  const inferredExactAttributions =
+                    guestGameExactXpRuleAttributions(plan);
+                  const inferredExactTotals = guestGameExactXpTopUpPlan(
+                    [],
+                    inferredExactAttributions,
+                  );
+                  if (
+                    inferredExactTotals.expectedScopedTotal ===
+                      existingPosting.requestedDelta &&
+                    inferredExactTotals.expectedScopedTotal ===
+                      existingPosting.appliedDelta
+                  ) {
+                    inferredAttributions = inferredExactAttributions;
+                  }
+                }
+
+                if (!inferredAttributions) {
+                  const inferredLiveAttributions =
+                    guestGameLiveXpRuleAttributions(
+                      payload,
+                      preexistingRewardIntentPlans,
+                    );
+                  if (!inferredLiveAttributions) {
+                    throw new ConflictException(
+                      'Legacy canonical XP cannot be attributed to immutable EXACT or LIVE rules.',
+                    );
+                  }
+                  const inferredLiveTotals = guestGameExactXpTopUpPlan(
+                    inferredLiveAttributions,
+                    [],
+                  );
+                  if (
+                    inferredLiveTotals.existingRequestedTotal !==
+                      existingPosting.requestedDelta ||
+                    inferredLiveTotals.existingAppliedTotal !==
+                      existingPosting.appliedDelta
+                  ) {
+                    throw new ConflictException(
+                      'Legacy canonical XP does not match the immutable EXACT or LIVE rule snapshot.',
+                    );
+                  }
+                  inferredAttributions = inferredLiveAttributions;
+                }
+
+                for (const attribution of inferredAttributions) {
+                  await persistGuestGameXpPostingIntent(tx, {
+                    tenantId: user.tenantId,
+                    eventId,
+                    profileId,
+                    originKey,
+                    attribution,
+                    qualifiedAt: eventRow.occurredAt,
+                    ...(attribution.source === 'EXACT'
+                      ? {
+                          sourceFactId: plan.sourceFactId,
+                          physicalSessionKey: plan.physicalSessionKey,
+                        }
+                      : {}),
+                  });
+                }
+                existingXpAttributions = inferredAttributions;
+              }
+
+              const existingAttributionTotals = guestGameExactXpTopUpPlan(
+                existingXpAttributions,
+                [],
+              );
+              if (
+                existingAttributionTotals.existingRequestedTotal !==
+                  existingPosting.requestedDelta ||
+                existingAttributionTotals.existingAppliedTotal !==
+                  existingPosting.appliedDelta
+              ) {
                 throw new ConflictException(
-                  'The canonical event XP was changed before exact reconciliation.',
+                  'Per-rule XP receipts do not match the canonical aggregate posting.',
                 );
               }
+            } else if (
+              eventRow.xpDelta !== 0 ||
+              existingXpAttributions.length > 0
+            ) {
+              throw new ConflictException(
+                'The canonical event has XP evidence without an aggregate posting.',
+              );
+            }
+
+            const topUp = guestGameExactXpTopUpPlan(
+              existingXpAttributions,
+              exactXpAttributions,
+            );
+            for (const attribution of topUp.missingAttributions) {
+              await persistGuestGameXpPostingIntent(tx, {
+                tenantId: user.tenantId,
+                eventId,
+                profileId,
+                originKey,
+                attribution,
+                qualifiedAt: eventRow.occurredAt,
+                sourceFactId: plan.sourceFactId,
+                physicalSessionKey: plan.physicalSessionKey,
+              });
+            }
+
+            let appliedXpDelta = 0;
+            if (topUp.requestedTopUp > 0) {
               const incremented = await tx.guestGameProfile.update({
                 where: { id: profileId },
                 data: {
-                  xp: { increment: expectedXpDelta },
+                  xp: { increment: topUp.requestedTopUp },
                   lastActivityAt: new Date(),
                 },
                 select: { xp: true },
               });
-              const balanceBefore = incremented.xp - expectedXpDelta;
-              const balanceAfter = Math.max(0, incremented.xp);
-              appliedXpDelta = balanceAfter - balanceBefore;
+              const topUpBalanceBefore = incremented.xp - topUp.requestedTopUp;
+              const topUpBalanceAfter = Math.max(0, incremented.xp);
+              const appliedTopUp = topUpBalanceAfter - topUpBalanceBefore;
+              if (appliedTopUp !== topUp.requestedTopUp) {
+                throw new ConflictException(
+                  'Positive exact XP was not applied in full.',
+                );
+              }
+              const aggregateRequestedDelta =
+                (existingPosting?.requestedDelta ?? 0) + topUp.requestedTopUp;
+              const aggregateAppliedDelta =
+                (existingPosting?.appliedDelta ?? 0) + appliedTopUp;
+              const aggregateBalanceBefore = existingPosting
+                ? existingPosting.balanceBefore
+                : topUpBalanceBefore;
+              const aggregateBalanceAfter = existingPosting
+                ? existingPosting.balanceAfter + appliedTopUp
+                : topUpBalanceAfter;
+              if (
+                aggregateBalanceAfter - aggregateBalanceBefore !==
+                aggregateAppliedDelta
+              ) {
+                throw new ConflictException(
+                  'Exact XP aggregate balance boundaries do not match the applied delta.',
+                );
+              }
+              const aggregateEventXpDelta =
+                eventRow.xpDelta + topUp.requestedTopUp;
+              appliedXpDelta = appliedTopUp;
+
               await tx.guestGameProfile.update({
                 where: { id: profileId },
                 data: {
-                  xp: balanceAfter,
-                  level: levelFromXp(balanceAfter),
+                  xp: topUpBalanceAfter,
+                  level: levelFromXp(topUpBalanceAfter),
                   lastActivityAt: new Date(),
                 },
               });
               await tx.guestGameEvent.update({
                 where: { id: eventId },
-                data: { xpDelta: appliedXpDelta },
+                data: { xpDelta: aggregateEventXpDelta },
               });
-              await tx.guestGameXpPosting.create({
-                data: {
-                  tenantId: user.tenantId,
-                  profileId,
-                  eventId,
-                  idempotencyKey: `guest-game-xp:${eventId}`,
-                  requestedDelta: expectedXpDelta,
-                  appliedDelta: appliedXpDelta,
-                  balanceBefore,
-                  balanceAfter,
-                  evidence: {
-                    eventType: plan.eventType,
-                    originKey,
-                    sourceFactId: plan.sourceFactId,
-                    physicalSessionKey: plan.physicalSessionKey,
-                    exactCanonicalReconciliation: true,
+              if (existingPosting) {
+                await tx.guestGameXpPosting.update({
+                  where: { eventId },
+                  data: {
+                    requestedDelta: aggregateRequestedDelta,
+                    appliedDelta: aggregateAppliedDelta,
+                    balanceBefore: aggregateBalanceBefore,
+                    balanceAfter: aggregateBalanceAfter,
+                    evidence: {
+                      ...jsonRecord(existingPosting.evidence),
+                      exactCanonicalReconciliation: true,
+                      exactReconciliationTopUp: {
+                        requestedDelta: topUp.requestedTopUp,
+                        appliedDelta: appliedTopUp,
+                        balanceBefore: topUpBalanceBefore,
+                        balanceAfter: topUpBalanceAfter,
+                        sourceFactId: plan.sourceFactId,
+                        physicalSessionKey: plan.physicalSessionKey,
+                        ruleKeys: topUp.missingAttributions.map(
+                          (item) => item.ruleKey,
+                        ),
+                      },
+                    },
                   },
-                },
-              });
+                });
+              } else {
+                await tx.guestGameXpPosting.create({
+                  data: {
+                    tenantId: user.tenantId,
+                    profileId,
+                    eventId,
+                    idempotencyKey: `guest-game-xp:${eventId}`,
+                    requestedDelta: aggregateRequestedDelta,
+                    appliedDelta: aggregateAppliedDelta,
+                    balanceBefore: aggregateBalanceBefore,
+                    balanceAfter: aggregateBalanceAfter,
+                    evidence: {
+                      eventType: plan.eventType,
+                      originKey,
+                      sourceFactId: plan.sourceFactId,
+                      physicalSessionKey: plan.physicalSessionKey,
+                      exactCanonicalReconciliation: true,
+                      ruleKeys: topUp.missingAttributions.map(
+                        (item) => item.ruleKey,
+                      ),
+                    },
+                  },
+                });
+              }
             }
 
             return {
@@ -25209,6 +25586,33 @@ type ExactReconciliationPlan = {
   expectedXpDelta: number;
 };
 
+export type GuestGameXpRuleAttribution = {
+  ruleKey: string;
+  ruleKind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
+  ruleId: string;
+  battlePassStep: number | null;
+  requestedDelta: number;
+  appliedDelta: number;
+  source: 'LIVE' | 'EXACT';
+};
+
+type ProcessXpPostingIntentPlan = {
+  schemaVersion: 1;
+  effectKind: 'XP_POSTING';
+  qualifiedAt: string;
+  slotKey: string;
+  claimKey: null;
+  ruleKey: string;
+  ruleKind: GuestGameXpRuleAttribution['ruleKind'];
+  ruleId: string;
+  battlePassStep: number | null;
+  requestedDelta: number;
+  appliedDelta: number;
+  source: GuestGameXpRuleAttribution['source'];
+  sourceFactId: string | null;
+  physicalSessionKey: string | null;
+};
+
 type AtomicMissionQualificationOutcome = {
   ruleId: string;
   allowed: boolean;
@@ -25298,6 +25702,411 @@ export function guestGameExactReconciliationDeliveryState(
   return {
     complete: pendingIntentCount === 0 && deadLetterIntentCount === 0,
     waitingForDelivery: deadLetterIntentCount === 0 && pendingIntentCount > 0,
+  };
+}
+
+function guestGameXpRuleAttributionKey(
+  rule: Pick<
+    GuestGameXpRuleAttribution,
+    'ruleKind' | 'ruleId' | 'battlePassStep'
+  >,
+) {
+  return [
+    rule.ruleKind,
+    rule.ruleId,
+    rule.ruleKind === 'SEASON' ? (rule.battlePassStep ?? '') : '',
+  ].join(':');
+}
+
+function guestGameXpPostingIntentSlotKey(
+  attribution: GuestGameXpRuleAttribution,
+) {
+  return `xp:${attribution.ruleKey}`;
+}
+
+function guestGameXpPostingIntentIdempotencyKey(
+  eventId: string,
+  attribution: GuestGameXpRuleAttribution,
+) {
+  return ['guest-game-xp-rule', eventId, attribution.ruleKey].join(':');
+}
+
+function guestGameXpPostingIntentPlan(input: {
+  attribution: GuestGameXpRuleAttribution;
+  qualifiedAt: Date | string;
+  sourceFactId?: string | null;
+  physicalSessionKey?: string | null;
+}): ProcessXpPostingIntentPlan {
+  const qualifiedAt =
+    input.qualifiedAt instanceof Date
+      ? input.qualifiedAt
+      : dateValue(input.qualifiedAt);
+  if (!qualifiedAt || Number.isNaN(qualifiedAt.getTime())) {
+    throw new ConflictException(
+      'Per-rule XP attribution requires a valid qualification timestamp.',
+    );
+  }
+  const { attribution } = input;
+  return {
+    schemaVersion: 1,
+    effectKind: 'XP_POSTING',
+    qualifiedAt: qualifiedAt.toISOString(),
+    slotKey: guestGameXpPostingIntentSlotKey(attribution),
+    claimKey: null,
+    ruleKey: attribution.ruleKey,
+    ruleKind: attribution.ruleKind,
+    ruleId: attribution.ruleId,
+    battlePassStep: attribution.battlePassStep,
+    requestedDelta: attribution.requestedDelta,
+    appliedDelta: attribution.appliedDelta,
+    source: attribution.source,
+    sourceFactId: nullableId(input.sourceFactId) ?? null,
+    physicalSessionKey: nullableString(input.physicalSessionKey) ?? null,
+  };
+}
+
+function parseGuestGameXpPostingIntentPlan(
+  value: unknown,
+): ProcessXpPostingIntentPlan | null {
+  if (
+    !isRecord(value) ||
+    intValue(value.schemaVersion) !== 1 ||
+    value.effectKind !== 'XP_POSTING'
+  ) {
+    return null;
+  }
+  const qualifiedAt = dateValue(value.qualifiedAt);
+  const slotKey = nullableString(value.slotKey);
+  const ruleKey = nullableString(value.ruleKey);
+  const ruleKind = nullableString(value.ruleKind);
+  const ruleId = nullableId(value.ruleId);
+  const battlePassStep = intValue(value.battlePassStep) ?? null;
+  const requestedDelta = intValue(value.requestedDelta);
+  const appliedDelta = intValue(value.appliedDelta);
+  const source = nullableString(value.source);
+  if (
+    !qualifiedAt ||
+    !slotKey ||
+    !ruleKey ||
+    (ruleKind !== 'LOOT_BOX' &&
+      ruleKind !== 'MISSION' &&
+      ruleKind !== 'SEASON') ||
+    !ruleId ||
+    requestedDelta == null ||
+    appliedDelta == null ||
+    requestedDelta <= 0 ||
+    appliedDelta !== requestedDelta ||
+    (source !== 'LIVE' && source !== 'EXACT')
+  ) {
+    return null;
+  }
+  const attribution = {
+    ruleKey,
+    ruleKind,
+    ruleId,
+    battlePassStep: ruleKind === 'SEASON' ? battlePassStep : null,
+    requestedDelta,
+    appliedDelta,
+    source,
+  } satisfies GuestGameXpRuleAttribution;
+  if (
+    ruleKey !== guestGameXpRuleAttributionKey(attribution) ||
+    slotKey !== guestGameXpPostingIntentSlotKey(attribution)
+  ) {
+    return null;
+  }
+  return {
+    schemaVersion: 1,
+    effectKind: 'XP_POSTING',
+    qualifiedAt: qualifiedAt.toISOString(),
+    slotKey,
+    claimKey: null,
+    ruleKey,
+    ruleKind,
+    ruleId,
+    battlePassStep: attribution.battlePassStep,
+    requestedDelta,
+    appliedDelta,
+    source,
+    sourceFactId: nullableId(value.sourceFactId) ?? null,
+    physicalSessionKey: nullableString(value.physicalSessionKey) ?? null,
+  };
+}
+
+async function persistGuestGameXpPostingIntent(
+  tx: Prisma.TransactionClient,
+  input: {
+    tenantId: string;
+    eventId: string;
+    profileId: string;
+    originKey: string | null;
+    attribution: GuestGameXpRuleAttribution;
+    qualifiedAt: Date | string;
+    sourceFactId?: string | null;
+    physicalSessionKey?: string | null;
+  },
+) {
+  const plan = guestGameXpPostingIntentPlan(input);
+  const idempotencyKey = guestGameXpPostingIntentIdempotencyKey(
+    input.eventId,
+    input.attribution,
+  );
+  const intent = await tx.guestGameRewardIntent.upsert({
+    where: {
+      tenantId_idempotencyKey: {
+        tenantId: input.tenantId,
+        idempotencyKey,
+      },
+    },
+    create: {
+      tenantId: input.tenantId,
+      eventId: input.eventId,
+      profileId: input.profileId,
+      originKey: input.originKey,
+      ruleType: input.attribution.ruleKind,
+      ruleId: input.attribution.ruleId,
+      effectKind: 'XP_POSTING',
+      slotKey: plan.slotKey,
+      idempotencyKey,
+      claimKey: null,
+      status: 'APPLIED',
+      plan,
+      qualifiedAt: new Date(plan.qualifiedAt),
+      processedAt: new Date(),
+    },
+    update: {},
+  });
+  const storedPlan = parseGuestGameXpPostingIntentPlan(intent.plan);
+  if (
+    intent.tenantId !== input.tenantId ||
+    intent.eventId !== input.eventId ||
+    intent.profileId !== input.profileId ||
+    intent.originKey !== input.originKey ||
+    intent.ruleType !== input.attribution.ruleKind ||
+    intent.ruleId !== input.attribution.ruleId ||
+    intent.effectKind !== 'XP_POSTING' ||
+    intent.slotKey !== plan.slotKey ||
+    intent.idempotencyKey !== idempotencyKey ||
+    intent.claimKey !== null ||
+    intent.status !== 'APPLIED' ||
+    !storedPlan ||
+    canonicalGuestGameJsonFingerprint(storedPlan) !==
+      canonicalGuestGameJsonFingerprint(plan)
+  ) {
+    throw new ConflictException(
+      'Per-rule XP attribution is owned by another event, profile, or rule version.',
+    );
+  }
+  return intent;
+}
+
+function guestGameXpRuleAttribution(
+  rule: ProcessRewardIntentRuleSnapshot,
+  source: GuestGameXpRuleAttribution['source'],
+): GuestGameXpRuleAttribution | null {
+  if (!rule.eligible || rule.xpDelta === 0) return null;
+  if (!Number.isSafeInteger(rule.xpDelta) || rule.xpDelta < 0) {
+    throw new ConflictException(
+      'Exact reconciliation supports only non-negative per-rule XP.',
+    );
+  }
+  const attribution = {
+    ruleKind: rule.kind,
+    ruleId: rule.id,
+    battlePassStep:
+      rule.kind === 'SEASON' ? (rule.battlePassStep ?? null) : null,
+    requestedDelta: rule.xpDelta,
+    appliedDelta: rule.xpDelta,
+    source,
+  } satisfies Omit<GuestGameXpRuleAttribution, 'ruleKey'>;
+  return {
+    ruleKey: guestGameXpRuleAttributionKey(attribution),
+    ...attribution,
+  };
+}
+
+function guestGameExactXpRuleAttributions(
+  plan: ExactReconciliationPlan,
+): GuestGameXpRuleAttribution[] {
+  return plan.rules
+    .map((rule) => guestGameXpRuleAttribution(rule, 'EXACT'))
+    .filter(
+      (attribution): attribution is GuestGameXpRuleAttribution =>
+        attribution != null,
+    );
+}
+
+function guestGameLiveXpRuleAttributions(
+  payload: unknown,
+  persistedRewardIntentPlans: ProcessRewardIntentPlan[],
+): GuestGameXpRuleAttribution[] | null {
+  const record = isRecord(payload) ? payload : {};
+  if (
+    intValue(record.processSchemaVersion) !== 2 ||
+    !Array.isArray(record.rules)
+  ) {
+    return null;
+  }
+  const rules = record.rules.map(parseProcessRewardIntentRule);
+  if (
+    !rules.every(
+      (rule): rule is ProcessRewardIntentRuleSnapshot => rule != null,
+    )
+  ) {
+    return null;
+  }
+  const persistedPlanKeys = new Set(
+    persistedRewardIntentPlans.map(processRewardIntentPlanKey),
+  );
+  return rules
+    .filter(
+      (rule) =>
+        !shouldQueueProcessReward(rule as GuestGameDryRunRule) ||
+        persistedPlanKeys.has(
+          processRewardRuleKey(rule as GuestGameDryRunRule),
+        ),
+    )
+    .map((rule) => guestGameXpRuleAttribution(rule, 'LIVE'))
+    .filter(
+      (attribution): attribution is GuestGameXpRuleAttribution =>
+        attribution != null,
+    );
+}
+
+function guestGameXpRuleAttributionsFromIntents(
+  rows: Array<{
+    tenantId: string;
+    eventId: string;
+    profileId: string | null;
+    originKey: string | null;
+    ruleType: string;
+    ruleId: string;
+    effectKind: string;
+    slotKey: string;
+    idempotencyKey: string;
+    claimKey: string | null;
+    status: string;
+    plan: Prisma.JsonValue;
+  }>,
+  input: {
+    tenantId: string;
+    eventId: string;
+    profileId: string;
+    originKey: string | null;
+  },
+): GuestGameXpRuleAttribution[] {
+  return rows.map((row) => {
+    const plan = parseGuestGameXpPostingIntentPlan(row.plan);
+    if (!plan) {
+      throw new ConflictException(
+        'The canonical event contains a corrupt per-rule XP attribution.',
+      );
+    }
+    const attribution = {
+      ruleKey: plan.ruleKey,
+      ruleKind: plan.ruleKind,
+      ruleId: plan.ruleId,
+      battlePassStep: plan.battlePassStep,
+      requestedDelta: plan.requestedDelta,
+      appliedDelta: plan.appliedDelta,
+      source: plan.source,
+    } satisfies GuestGameXpRuleAttribution;
+    if (
+      row.tenantId !== input.tenantId ||
+      row.eventId !== input.eventId ||
+      row.profileId !== input.profileId ||
+      row.originKey !== input.originKey ||
+      row.ruleType !== attribution.ruleKind ||
+      row.ruleId !== attribution.ruleId ||
+      row.effectKind !== 'XP_POSTING' ||
+      row.slotKey !== guestGameXpPostingIntentSlotKey(attribution) ||
+      row.idempotencyKey !==
+        guestGameXpPostingIntentIdempotencyKey(input.eventId, attribution) ||
+      row.claimKey !== null ||
+      row.status !== 'APPLIED'
+    ) {
+      throw new ConflictException(
+        'The canonical event has an ambiguous per-rule XP attribution.',
+      );
+    }
+    return attribution;
+  });
+}
+
+export function guestGameExactXpTopUpPlan(
+  existingAttributions: GuestGameXpRuleAttribution[],
+  exactAttributions: GuestGameXpRuleAttribution[],
+) {
+  const validate = (
+    attributions: GuestGameXpRuleAttribution[],
+    expectedSource?: GuestGameXpRuleAttribution['source'],
+  ) => {
+    const byRule = new Map<string, GuestGameXpRuleAttribution>();
+    for (const attribution of attributions) {
+      if (
+        !attribution.ruleKey ||
+        !attribution.ruleId ||
+        (attribution.ruleKind !== 'LOOT_BOX' &&
+          attribution.ruleKind !== 'MISSION' &&
+          attribution.ruleKind !== 'SEASON') ||
+        (expectedSource != null && attribution.source !== expectedSource) ||
+        !Number.isSafeInteger(attribution.requestedDelta) ||
+        !Number.isSafeInteger(attribution.appliedDelta) ||
+        attribution.requestedDelta <= 0 ||
+        attribution.appliedDelta !== attribution.requestedDelta ||
+        attribution.ruleKey !== guestGameXpRuleAttributionKey(attribution) ||
+        byRule.has(attribution.ruleKey)
+      ) {
+        throw new ConflictException(
+          'Exact reconciliation contains ambiguous per-rule XP attribution.',
+        );
+      }
+      byRule.set(attribution.ruleKey, attribution);
+    }
+    return byRule;
+  };
+
+  const existingByRule = validate(existingAttributions);
+  const exactByRule = validate(exactAttributions, 'EXACT');
+  let requestedTopUp = 0;
+  const missingAttributions: GuestGameXpRuleAttribution[] = [];
+  const merged = new Map(existingByRule);
+
+  for (const [ruleKey, expected] of exactByRule) {
+    const existing = existingByRule.get(ruleKey);
+    if (existing) {
+      if (
+        existing.ruleKind !== expected.ruleKind ||
+        existing.ruleId !== expected.ruleId ||
+        existing.battlePassStep !== expected.battlePassStep ||
+        existing.requestedDelta !== expected.requestedDelta
+      ) {
+        throw new ConflictException(
+          'Exact reconciliation cannot replace an existing rule XP attribution.',
+        );
+      }
+      continue;
+    }
+    requestedTopUp += expected.requestedDelta;
+    missingAttributions.push(expected);
+    merged.set(ruleKey, expected);
+  }
+
+  return {
+    existingRequestedTotal: sum(
+      existingAttributions.map((item) => item.requestedDelta),
+    ),
+    existingAppliedTotal: sum(
+      existingAttributions.map((item) => item.appliedDelta),
+    ),
+    expectedScopedTotal: sum(
+      exactAttributions.map((item) => item.requestedDelta),
+    ),
+    requestedTopUp,
+    missingAttributions,
+    mergedAttributions: [...merged.values()].sort((left, right) =>
+      left.ruleKey.localeCompare(right.ruleKey),
+    ),
   };
 }
 

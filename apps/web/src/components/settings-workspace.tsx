@@ -28,6 +28,12 @@ const initialState: SettingsWorkspaceState = {
   isLoading: true,
 };
 
+declare global {
+  interface Window {
+    __leetplusSettingsPayload?: SettingsBootstrapPayload;
+  }
+}
+
 export function SettingsWorkspace() {
   const [state, setState] = useState(initialState);
 
@@ -46,12 +52,15 @@ export function SettingsWorkspace() {
       });
     }, SETTINGS_TIMEOUT_MS);
 
-    function handleBootstrap(event: Event) {
+    function applyPayload(payload: SettingsBootstrapPayload | undefined) {
       if (!mounted) {
         return;
       }
 
-      const payload = (event as CustomEvent<SettingsBootstrapPayload>).detail;
+      if (!payload) {
+        return;
+      }
+
       window.clearTimeout(slowTimeout);
       setState({
         ...payload,
@@ -59,10 +68,19 @@ export function SettingsWorkspace() {
       });
     }
 
+    function handleBootstrap(event: Event) {
+      applyPayload((event as CustomEvent<SettingsBootstrapPayload>).detail);
+    }
+
     window.addEventListener(SETTINGS_BOOTSTRAP_EVENT, handleBootstrap);
+    applyPayload(window.__leetplusSettingsPayload);
+
     const script = document.createElement("script");
     script.async = true;
     script.src = `/api/settings/bootstrap?_=${Date.now()}`;
+    script.onload = () => {
+      applyPayload(window.__leetplusSettingsPayload);
+    };
     script.onerror = () => {
       if (!mounted) {
         return;

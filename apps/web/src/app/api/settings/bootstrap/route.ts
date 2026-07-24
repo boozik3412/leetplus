@@ -51,9 +51,13 @@ export async function GET() {
 }
 
 function respondWithBootstrap(payload: SettingsBootstrapPayload) {
-  const body = `window.dispatchEvent(new CustomEvent(${JSON.stringify(
-    SETTINGS_BOOTSTRAP_EVENT,
-  )}, { detail: ${serializeForScript(payload)} }));`;
+  const serializedPayload = serializeForScript(payload);
+  const body = [
+    `window.__leetplusSettingsPayload = ${serializedPayload};`,
+    `window.dispatchEvent(new CustomEvent(${JSON.stringify(
+      SETTINGS_BOOTSTRAP_EVENT,
+    )}, { detail: window.__leetplusSettingsPayload }));`,
+  ].join("");
 
   return new Response(body, {
     headers: {

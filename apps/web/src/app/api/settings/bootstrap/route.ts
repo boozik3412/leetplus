@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getAuthHeaders } from "@/lib/api";
 import {
   getBrandingSettings,
@@ -16,24 +15,13 @@ type SettingsBootstrapPayload = {
   langameError: string | null;
 };
 
-const CALLBACK_PATTERN =
-  /^window\.__leetplusSettingsCallbacks\.c[a-zA-Z0-9]+$/;
+const SETTINGS_BOOTSTRAP_EVENT = "leetplus:settings-bootstrap";
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const callback = url.searchParams.get("callback") ?? "";
-
-  if (!CALLBACK_PATTERN.test(callback)) {
-    return NextResponse.json(
-      { message: "Некорректный callback" },
-      { status: 400 },
-    );
-  }
-
+export async function GET() {
   const headers = await getAuthHeaders();
 
   if (!headers.Authorization) {
-    return respondWithCallback(callback, {
+    return respondWithBootstrap({
       brandingSettings: null,
       langameSettings: null,
       brandingError: "Необходимо войти в аккаунт",
@@ -46,7 +34,7 @@ export async function GET(request: Request) {
     getBrandingSettings(),
   ]);
 
-  return respondWithCallback(callback, {
+  return respondWithBootstrap({
     brandingSettings:
       brandingResult.status === "fulfilled" ? brandingResult.value : null,
     langameSettings:
@@ -62,11 +50,10 @@ export async function GET(request: Request) {
   });
 }
 
-function respondWithCallback(
-  callback: string,
-  payload: SettingsBootstrapPayload,
-) {
-  const body = `${callback}(${serializeForScript(payload)});`;
+function respondWithBootstrap(payload: SettingsBootstrapPayload) {
+  const body = `window.dispatchEvent(new CustomEvent(${JSON.stringify(
+    SETTINGS_BOOTSTRAP_EVENT,
+  )}, { detail: ${serializeForScript(payload)} }));`;
 
   return new Response(body, {
     headers: {

@@ -7,7 +7,7 @@ import type { BrandingSettings } from "@/lib/branding-settings";
 import type { LangameSettings } from "@/lib/langame-settings";
 
 const SETTINGS_TIMEOUT_MS = 15_000;
-const BOOTSTRAP_CALLBACKS_KEY = "__leetplusSettingsCallbacks";
+const SETTINGS_BOOTSTRAP_EVENT = "leetplus:settings-bootstrap";
 
 type SettingsBootstrapPayload = {
   brandingSettings: BrandingSettings | null;
@@ -28,25 +28,11 @@ const initialState: SettingsWorkspaceState = {
   isLoading: true,
 };
 
-declare global {
-  interface Window {
-    __leetplusSettingsCallbacks?: Record<
-      string,
-      (payload: SettingsBootstrapPayload) => void
-    >;
-  }
-}
-
 export function SettingsWorkspace() {
   const [state, setState] = useState(initialState);
 
   useEffect(() => {
     let mounted = true;
-    const callbackId = `c${Date.now()}${Math.random()
-      .toString(36)
-      .slice(2)}`;
-    window[BOOTSTRAP_CALLBACKS_KEY] ??= {};
-
     const slowTimeout = window.setTimeout(() => {
       if (!mounted) {
         return;
@@ -60,24 +46,23 @@ export function SettingsWorkspace() {
       });
     }, SETTINGS_TIMEOUT_MS);
 
-    window[BOOTSTRAP_CALLBACKS_KEY][callbackId] = (payload) => {
+    function handleBootstrap(event: Event) {
       if (!mounted) {
         return;
       }
 
+      const payload = (event as CustomEvent<SettingsBootstrapPayload>).detail;
       window.clearTimeout(slowTimeout);
       setState({
         ...payload,
         isLoading: false,
       });
-    };
+    }
 
+    window.addEventListener(SETTINGS_BOOTSTRAP_EVENT, handleBootstrap);
     const script = document.createElement("script");
     script.async = true;
-    const callbackName = `window.${BOOTSTRAP_CALLBACKS_KEY}.${callbackId}`;
-    script.src = `/api/settings/bootstrap?callback=${encodeURIComponent(
-      callbackName,
-    )}&_=${Date.now()}`;
+    script.src = `/api/settings/bootstrap?_=${Date.now()}`;
     script.onerror = () => {
       if (!mounted) {
         return;
@@ -96,7 +81,7 @@ export function SettingsWorkspace() {
     return () => {
       mounted = false;
       window.clearTimeout(slowTimeout);
-      delete window[BOOTSTRAP_CALLBACKS_KEY]?.[callbackId];
+      window.removeEventListener(SETTINGS_BOOTSTRAP_EVENT, handleBootstrap);
       script.remove();
     };
   }, []);

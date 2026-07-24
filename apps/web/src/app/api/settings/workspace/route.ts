@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAuthHeaders } from "@/lib/api";
-import { getBrandingSettings } from "@/lib/branding-settings";
+import {
+  getBrandingSettings,
+  type BrandingSettings,
+} from "@/lib/branding-settings";
 import {
   getLangameSettings,
   type LangameSettings,
@@ -22,7 +25,7 @@ export async function GET() {
 
   const [langameResult, brandingResult] = await Promise.allSettled([
     getLangameSettings().then(sanitizeLangameSettingsForSettingsPage),
-    getBrandingSettings(),
+    getBrandingSettings().then(sanitizeBrandingSettingsForSettingsPage),
   ]);
 
   return NextResponse.json(
@@ -42,6 +45,28 @@ export async function GET() {
     },
     { headers: RESPONSE_HEADERS },
   );
+}
+
+function sanitizeBrandingSettingsForSettingsPage(
+  settings: BrandingSettings,
+): BrandingSettings {
+  return {
+    tenant: {
+      id: settings.tenant.id,
+      name: settings.tenant.name,
+      gameLogoUrl: null,
+      hasGameLogo: Boolean(settings.tenant.gameLogoUrl),
+    },
+    stores: settings.stores.map((store) => ({
+      id: store.id,
+      publicSlug: store.publicSlug,
+      name: store.name,
+      address: store.address,
+      isActive: store.isActive,
+      gameLogoUrl: null,
+      hasGameLogo: Boolean(store.gameLogoUrl),
+    })),
+  };
 }
 
 function sanitizeLangameSettingsForSettingsPage(

@@ -33,6 +33,10 @@ export function BrandingSettingsForm({
     initialSettings.tenant.gameLogoUrl,
   );
   const [stores, setStores] = useState(initialSettings.stores);
+  const [tenantLogoChanged, setTenantLogoChanged] = useState(false);
+  const [changedStoreLogoIds, setChangedStoreLogoIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -40,33 +44,72 @@ export function BrandingSettingsForm({
   async function saveSettings() {
     setError(null);
     setSuccess(null);
+
+    const changedStoreLogos = stores
+      .filter((store) => changedStoreLogoIds.has(store.id))
+      .map((store) => ({
+        storeId: store.id,
+        logoUrl: store.gameLogoUrl,
+      }));
+
+    if (!tenantLogoChanged && changedStoreLogos.length === 0) {
+      setSuccess("Изменений в логотипах нет.");
+      return;
+    }
+
     setIsSaving(true);
 
     try {
+      const payload: {
+        tenantLogoUrl?: string | null;
+        storeLogos?: Array<{ storeId: string; logoUrl: string | null }>;
+      } = {};
+
+      if (tenantLogoChanged) {
+        payload.tenantLogoUrl = tenantLogoUrl;
+      }
+
+      if (changedStoreLogos.length > 0) {
+        payload.storeLogos = changedStoreLogos;
+      }
+
       const response = await fetch("/api/settings/branding", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          tenantLogoUrl,
-          storeLogos: stores.map((store) => ({
-            storeId: store.id,
-            logoUrl: store.gameLogoUrl,
-          })),
-        }),
+        body: JSON.stringify(payload),
       });
-      const data = (await response.json()) as unknown;
 
       if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as unknown;
         setError(getErrorMessage(data));
         return;
       }
 
-      const nextSettings = data as BrandingSettings;
+      const nextSettings = {
+        ...settings,
+        tenant: {
+          ...settings.tenant,
+          gameLogoUrl: tenantLogoChanged
+            ? tenantLogoUrl
+            : settings.tenant.gameLogoUrl,
+          hasGameLogo: tenantLogoChanged
+            ? Boolean(tenantLogoUrl)
+            : settings.tenant.hasGameLogo,
+        },
+        stores: stores.map((store) =>
+          changedStoreLogoIds.has(store.id)
+            ? { ...store, hasGameLogo: Boolean(store.gameLogoUrl) }
+            : store,
+        ),
+      } satisfies BrandingSettings;
+
       setSettings(nextSettings);
       setTenantLogoUrl(nextSettings.tenant.gameLogoUrl);
       setStores(nextSettings.stores);
+      setTenantLogoChanged(false);
+      setChangedStoreLogoIds(new Set());
       setSuccess("Логотипы игрового модуля сохранены.");
     } catch {
       setError("API недоступен");
@@ -85,6 +128,7 @@ export function BrandingSettingsForm({
     }
 
     setTenantLogoUrl(dataUrl);
+    setTenantLogoChanged(true);
     setSuccess(null);
     setError(null);
   }
@@ -110,6 +154,11 @@ export function BrandingSettingsForm({
         store.id === storeId ? { ...store, gameLogoUrl: logoUrl } : store,
       ),
     );
+    setChangedStoreLogoIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.add(storeId);
+      return nextIds;
+    });
   }
 
   async function readLogoInput(event: ChangeEvent<HTMLInputElement>) {
@@ -171,7 +220,10 @@ export function BrandingSettingsForm({
           inheritedLogoUrl={null}
           uploadLabel="Загрузить"
           onChange={handleTenantLogoChange}
-          onRemove={() => setTenantLogoUrl(null)}
+          onRemove={() => {
+            setTenantLogoUrl(null);
+            setTenantLogoChanged(true);
+          }}
         />
 
         <div className="min-w-0">
@@ -228,7 +280,9 @@ function StoreLogoPanel({
       subtitle={store.address ?? (store.isActive ? "Активен" : "Отключен")}
       logoUrl={store.gameLogoUrl}
       inheritedLogoUrl={inheritedLogoUrl}
-      uploadLabel={store.gameLogoUrl ? "Заменить" : "Загрузить"}
+      uploadLabel={
+        store.gameLogoUrl || store.hasGameLogo ? "Заменить" : "Загрузить"
+      }
       onChange={onChange}
       onRemove={onRemove}
     />

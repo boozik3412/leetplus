@@ -11,6 +11,7 @@ export type BrandingStoreLogo = {
   address: string | null;
   isActive: boolean;
   gameLogoUrl: string | null;
+  hasGameLogo?: boolean;
 };
 
 export type BrandingSettings = {
@@ -18,6 +19,7 @@ export type BrandingSettings = {
     id: string;
     name: string;
     gameLogoUrl: string | null;
+    hasGameLogo?: boolean;
   };
   stores: BrandingStoreLogo[];
 };

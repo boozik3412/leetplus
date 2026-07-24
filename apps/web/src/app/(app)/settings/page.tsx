@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SettingsWorkspace } from "@/components/settings-workspace";
 import { requireCurrentUser } from "@/lib/auth";
@@ -30,6 +29,8 @@ export default async function SettingsPage() {
     );
   }
 
+  const settingsData = await loadSettingsWorkspaceData();
+
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
@@ -54,51 +55,32 @@ export default async function SettingsPage() {
           </p>
         </div>
 
-        <Suspense fallback={<SettingsWorkspaceLoading />}>
-          <SettingsWorkspaceData />
-        </Suspense>
+        <SettingsWorkspace {...settingsData} />
       </div>
     </main>
   );
 }
 
-async function SettingsWorkspaceData() {
+async function loadSettingsWorkspaceData() {
   const [langameResult, brandingResult] = await Promise.allSettled([
     getLangameSettings(),
     getBrandingSettings(),
   ]);
 
-  return (
-    <SettingsWorkspace
-      brandingSettings={
-        brandingResult.status === "fulfilled" ? brandingResult.value : null
-      }
-      langameSettings={
-        langameResult.status === "fulfilled" ? langameResult.value : null
-      }
-      brandingError={
-        brandingResult.status === "rejected"
-          ? getSettingsErrorMessage(brandingResult.reason)
-          : null
-      }
-      langameError={
-        langameResult.status === "rejected"
-          ? getSettingsErrorMessage(langameResult.reason)
-          : null
-      }
-    />
-  );
-}
-
-function SettingsWorkspaceLoading() {
-  return (
-    <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
-        <span className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-500 dark:border-emerald-950 dark:border-t-emerald-400" />
-        <span>Загружаем настройки...</span>
-      </div>
-    </section>
-  );
+  return {
+    brandingSettings:
+      brandingResult.status === "fulfilled" ? brandingResult.value : null,
+    langameSettings:
+      langameResult.status === "fulfilled" ? langameResult.value : null,
+    brandingError:
+      brandingResult.status === "rejected"
+        ? getSettingsErrorMessage(brandingResult.reason)
+        : null,
+    langameError:
+      langameResult.status === "rejected"
+        ? getSettingsErrorMessage(langameResult.reason)
+        : null,
+  };
 }
 
 function getSettingsErrorMessage(error: unknown) {

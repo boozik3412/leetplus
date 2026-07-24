@@ -2,6 +2,7 @@ import {
   fetchWithTimeout,
   getApiUrl,
   getAuthHeaders,
+  readJsonWithTimeout,
   readApiError,
 } from "./api";
 
@@ -116,5 +117,5 @@ export async function getLangameSettings(): Promise<LangameSettings> {
     );
   }
 
-  return response.json() as Promise<LangameSettings>;
+  return readJsonWithTimeout<LangameSettings>(response);
 }

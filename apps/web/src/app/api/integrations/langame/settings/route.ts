@@ -3,6 +3,7 @@ import {
   fetchWithTimeout,
   getApiUrl,
   getAuthHeaders,
+  readJsonWithTimeout,
   readApiError,
 } from "@/lib/api";
 
@@ -30,7 +31,7 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json(await response.json());
+  return NextResponse.json(await readJsonWithTimeout(response));
 }
 
 export async function PUT(request: Request) {
@@ -62,5 +63,5 @@ export async function PUT(request: Request) {
     );
   }
 
-  return NextResponse.json(await response.json());
+  return NextResponse.json(await readJsonWithTimeout(response));
 }

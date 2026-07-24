@@ -42,29 +42,76 @@ export async function fetchWithTimeout(
   timeoutMs = DEFAULT_API_TIMEOUT_MS,
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    return await fetch(input, {
-      ...init,
-      signal: controller.signal,
-    });
+    return await withApiTimeout(
+      fetch(input, {
+        ...init,
+        signal: controller.signal,
+      }),
+      timeoutMs,
+      () => controller.abort(),
+    );
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(
-        `API request timed out after ${Math.round(timeoutMs / 1000)}s`,
-      );
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+    throw normalizeApiTimeoutError(error, timeoutMs);
   }
+}
+
+export async function readJsonWithTimeout<T>(
+  response: Response,
+  timeoutMs = DEFAULT_API_TIMEOUT_MS,
+) {
+  try {
+    return await withApiTimeout(
+      response.json() as Promise<T>,
+      timeoutMs,
+      () => {},
+    );
+  } catch (error) {
+    throw normalizeApiTimeoutError(error, timeoutMs);
+  }
+}
+
+async function withApiTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      onTimeout();
+      reject(new Error(apiTimeoutMessage(timeoutMs)));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function normalizeApiTimeoutError(error: unknown, timeoutMs: number) {
+  if (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.message === apiTimeoutMessage(timeoutMs))
+  ) {
+    return new Error(apiTimeoutMessage(timeoutMs));
+  }
+
+  return error;
+}
+
+function apiTimeoutMessage(timeoutMs: number) {
+  return `API request timed out after ${Math.round(timeoutMs / 1000)}s`;
 }
 
 export async function readApiError(response: Response) {
   try {
-    const data = (await response.json()) as ApiErrorResponse;
+    const data = await readJsonWithTimeout<ApiErrorResponse>(response);
     const message = data.message;
 
     if (Array.isArray(message)) {

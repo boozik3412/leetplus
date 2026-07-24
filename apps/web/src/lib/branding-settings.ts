@@ -2,6 +2,7 @@ import {
   fetchWithTimeout,
   getApiUrl,
   getAuthHeaders,
+  readJsonWithTimeout,
   readApiError,
 } from "./api";
 
@@ -35,5 +36,5 @@ export async function getBrandingSettings(): Promise<BrandingSettings> {
     );
   }
 
-  return response.json() as Promise<BrandingSettings>;
+  return readJsonWithTimeout<BrandingSettings>(response);
 }

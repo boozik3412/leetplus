@@ -57,7 +57,8 @@ export default async function SettingsPage() {
           </p>
         </div>
 
-        <SettingsWorkspace {...settingsData} />
+        <SettingsDataScript data={settingsData} />
+        <SettingsWorkspace />
       </div>
     </main>
   );
@@ -140,4 +141,20 @@ function getSettingsErrorMessage(error: unknown) {
   }
 
   return "Неизвестная ошибка загрузки настроек";
+}
+
+function SettingsDataScript({
+  data,
+}: {
+  data: Awaited<ReturnType<typeof loadSettingsWorkspaceData>>;
+}) {
+  return (
+    <script
+      id="leetplus-settings-data"
+      type="application/json"
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify(data).replace(/</g, "\\u003c"),
+      }}
+    />
+  );
 }

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
+import {
+  fetchWithTimeout,
+  getApiUrl,
+  getAuthHeaders,
+  readApiError,
+} from "@/lib/api";
 
 export async function GET() {
   const headers = await getAuthHeaders();
@@ -11,9 +16,12 @@ export async function GET() {
     );
   }
 
-  const response = await fetch(`${getApiUrl()}/integrations/langame/settings`, {
-    headers,
-  });
+  const response = await fetchWithTimeout(
+    `${getApiUrl()}/integrations/langame/settings`,
+    {
+      headers,
+    },
+  );
 
   if (!response.ok) {
     return NextResponse.json(
@@ -35,14 +43,17 @@ export async function PUT(request: Request) {
     );
   }
 
-  const response = await fetch(`${getApiUrl()}/integrations/langame/settings`, {
-    method: "PUT",
-    headers: {
-      ...headers,
-      "Content-Type": "application/json",
+  const response = await fetchWithTimeout(
+    `${getApiUrl()}/integrations/langame/settings`,
+    {
+      method: "PUT",
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+      },
+      body: await request.text(),
     },
-    body: await request.text(),
-  });
+  );
 
   if (!response.ok) {
     return NextResponse.json(

@@ -1,4 +1,9 @@
-import { getApiUrl, getAuthHeaders } from "./api";
+import {
+  fetchWithTimeout,
+  getApiUrl,
+  getAuthHeaders,
+  readApiError,
+} from "./api";
 
 export type LangameSourceSettings = {
   id: string;
@@ -97,13 +102,18 @@ export type LangameSyncJob = {
 };
 
 export async function getLangameSettings(): Promise<LangameSettings> {
-  const response = await fetch(`${getApiUrl()}/integrations/langame/settings`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetchWithTimeout(
+    `${getApiUrl()}/integrations/langame/settings`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
-    throw new Error("Failed to fetch Langame settings");
+    throw new Error(
+      `Failed to fetch Langame settings: ${await readApiError(response)}`,
+    );
   }
 
   return response.json() as Promise<LangameSettings>;

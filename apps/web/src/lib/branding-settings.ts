@@ -1,4 +1,9 @@
-import { getApiUrl, getAuthHeaders } from "./api";
+import {
+  fetchWithTimeout,
+  getApiUrl,
+  getAuthHeaders,
+  readApiError,
+} from "./api";
 
 export type BrandingStoreLogo = {
   id: string;
@@ -19,13 +24,15 @@ export type BrandingSettings = {
 };
 
 export async function getBrandingSettings(): Promise<BrandingSettings> {
-  const response = await fetch(getApiUrl() + "/settings/branding", {
+  const response = await fetchWithTimeout(getApiUrl() + "/settings/branding", {
     cache: "no-store",
     headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to fetch branding settings");
+    throw new Error(
+      `Failed to fetch branding settings: ${await readApiError(response)}`,
+    );
   }
 
   return response.json() as Promise<BrandingSettings>;

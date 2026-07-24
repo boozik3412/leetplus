@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
+import {
+  fetchWithTimeout,
+  getApiUrl,
+  getAuthHeaders,
+  readApiError,
+} from "@/lib/api";
 
 export async function GET() {
   const headers = await getAuthHeaders();
@@ -11,7 +16,7 @@ export async function GET() {
     );
   }
 
-  const response = await fetch(getApiUrl() + "/settings/branding", {
+  const response = await fetchWithTimeout(getApiUrl() + "/settings/branding", {
     headers,
   });
 
@@ -35,7 +40,7 @@ export async function PUT(request: Request) {
     );
   }
 
-  const response = await fetch(getApiUrl() + "/settings/branding", {
+  const response = await fetchWithTimeout(getApiUrl() + "/settings/branding", {
     method: "PUT",
     headers: {
       ...headers,

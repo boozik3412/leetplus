@@ -1,24 +1,55 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { BrandingSettingsForm } from "@/components/branding-settings-form";
 import { LangameSettingsForm } from "@/components/langame-settings-form";
 import type { BrandingSettings } from "@/lib/branding-settings";
 import type { LangameSettings } from "@/lib/langame-settings";
 
-type SettingsWorkspaceProps = {
-  brandingSettings: BrandingSettings | null;
-  langameSettings: LangameSettings | null;
-  brandingError: string | null;
-  langameError: string | null;
+const SETTINGS_TIMEOUT_MS = 15_000;
+
+type SectionState<T> = {
+  data: T | null;
+  error: string | null;
+  isLoading: boolean;
 };
 
-export function SettingsWorkspace({
-  brandingSettings,
-  langameSettings,
-  brandingError,
-  langameError,
-}: SettingsWorkspaceProps) {
-  const hasLoadError = Boolean(langameError) || Boolean(brandingError);
+function getInitialSectionState<T>(): SectionState<T> {
+  return {
+    data: null,
+    error: null,
+    isLoading: true,
+  };
+}
+
+export function SettingsWorkspace() {
+  const [branding, setBranding] = useState<SectionState<BrandingSettings>>(
+    getInitialSectionState,
+  );
+  const [langame, setLangame] = useState<SectionState<LangameSettings>>(
+    getInitialSectionState,
+  );
+
+  useEffect(() => {
+    let mounted = true;
+
+    loadSection<BrandingSettings>("/api/settings/branding", (next) => {
+      if (mounted) {
+        setBranding(next);
+      }
+    });
+    loadSection<LangameSettings>("/api/integrations/langame/settings", (next) => {
+      if (mounted) {
+        setLangame(next);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const hasLoadError = Boolean(langame.error) || Boolean(branding.error);
 
   return (
     <>
@@ -29,24 +60,134 @@ export function SettingsWorkspace({
         </section>
       ) : null}
 
-      {brandingSettings ? (
-        <BrandingSettingsForm initialSettings={brandingSettings} />
+      {branding.isLoading ? (
+        <SettingsSectionLoading title="Загружаем брендинг..." />
+      ) : branding.data ? (
+        <BrandingSettingsForm initialSettings={branding.data} />
       ) : (
         <SettingsSectionError
-          message={brandingError}
+          message={branding.error}
           title="Брендинг не загрузился"
         />
       )}
 
-      {langameSettings ? (
-        <LangameSettingsForm initialSettings={langameSettings} />
+      {langame.isLoading ? (
+        <SettingsSectionLoading title="Загружаем Langame..." />
+      ) : langame.data ? (
+        <LangameSettingsForm initialSettings={langame.data} />
       ) : (
         <SettingsSectionError
-          message={langameError}
+          message={langame.error}
           title="Langame не загрузился"
         />
       )}
     </>
+  );
+}
+
+function loadSection<T>(
+  url: string,
+  setSection: (next: SectionState<T>) => void,
+) {
+  let settled = false;
+  const slowTimeout = window.setTimeout(() => {
+    if (settled) {
+      return;
+    }
+
+    setSection({
+      data: null,
+      error: getSlowApiMessage(),
+      isLoading: false,
+    });
+  }, SETTINGS_TIMEOUT_MS);
+
+  void loadJson<T>(url)
+    .then((data) => {
+      settled = true;
+      setSection({
+        data,
+        error: null,
+        isLoading: false,
+      });
+    })
+    .catch((error: unknown) => {
+      settled = true;
+      setSection({
+        data: null,
+        error: getLoadErrorMessage(error),
+        isLoading: false,
+      });
+    })
+    .finally(() => {
+      window.clearTimeout(slowTimeout);
+    });
+}
+
+async function loadJson<T>(url: string): Promise<T> {
+  const response = await fetch(withCacheBuster(url), {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(readApiError(text));
+  }
+
+  return JSON.parse(text) as T;
+}
+
+function withCacheBuster(url: string) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}_=${Date.now()}`;
+}
+
+function readApiError(text: string) {
+  try {
+    const data = JSON.parse(text) as {
+      message?: string | string[];
+      error?: string;
+    };
+
+    if (Array.isArray(data.message)) {
+      return data.message.join(", ");
+    }
+
+    return data.message ?? data.error ?? "Ошибка запроса";
+  } catch {
+    return "Ошибка запроса";
+  }
+}
+
+function getLoadErrorMessage(error: unknown) {
+  if (error instanceof SyntaxError) {
+    return "API вернул некорректный JSON";
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Неизвестная ошибка загрузки настроек";
+}
+
+function getSlowApiMessage() {
+  return `API отвечает дольше ${Math.round(SETTINGS_TIMEOUT_MS / 1000)} секунд`;
+}
+
+function SettingsSectionLoading({ title }: { title: string }) {
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-500 dark:border-emerald-950 dark:border-t-emerald-400" />
+        <span>{title}</span>
+      </div>
+    </section>
   );
 }
 

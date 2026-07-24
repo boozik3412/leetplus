@@ -1,8 +1,6 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SettingsWorkspace } from "@/components/settings-workspace";
 import { requireCurrentUser } from "@/lib/auth";
-import { getBrandingSettings } from "@/lib/branding-settings";
-import { getLangameSettings } from "@/lib/langame-settings";
 import { can } from "@/lib/permissions";
 
 export default async function SettingsPage() {
@@ -29,11 +27,6 @@ export default async function SettingsPage() {
     );
   }
 
-  const [langameResult, brandingResult] = await Promise.allSettled([
-    getLangameSettings(),
-    getBrandingSettings(),
-  ]);
-
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
@@ -58,33 +51,8 @@ export default async function SettingsPage() {
           </p>
         </div>
 
-        <SettingsWorkspace
-          brandingSettings={
-            brandingResult.status === "fulfilled" ? brandingResult.value : null
-          }
-          langameSettings={
-            langameResult.status === "fulfilled" ? langameResult.value : null
-          }
-          brandingError={
-            brandingResult.status === "rejected"
-              ? getSettingsErrorMessage(brandingResult.reason)
-              : null
-          }
-          langameError={
-            langameResult.status === "rejected"
-              ? getSettingsErrorMessage(langameResult.reason)
-              : null
-          }
-        />
+        <SettingsWorkspace />
       </div>
     </main>
   );
-}
-
-function getSettingsErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Неизвестная ошибка загрузки настроек";
 }

@@ -1,24 +1,118 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { BrandingSettingsForm } from "@/components/branding-settings-form";
 import { LangameSettingsForm } from "@/components/langame-settings-form";
 import type { BrandingSettings } from "@/lib/branding-settings";
 import type { LangameSettings } from "@/lib/langame-settings";
 
-type SettingsWorkspaceProps = {
+const SETTINGS_TIMEOUT_MS = 15_000;
+const BOOTSTRAP_CALLBACKS_KEY = "__leetplusSettingsCallbacks";
+
+type SettingsBootstrapPayload = {
   brandingSettings: BrandingSettings | null;
   langameSettings: LangameSettings | null;
   brandingError: string | null;
   langameError: string | null;
 };
 
-export function SettingsWorkspace({
-  brandingSettings,
-  langameSettings,
-  brandingError,
-  langameError,
-}: SettingsWorkspaceProps) {
-  const hasLoadError = Boolean(langameError) || Boolean(brandingError);
+type SettingsWorkspaceState = SettingsBootstrapPayload & {
+  isLoading: boolean;
+};
+
+const initialState: SettingsWorkspaceState = {
+  brandingSettings: null,
+  langameSettings: null,
+  brandingError: null,
+  langameError: null,
+  isLoading: true,
+};
+
+declare global {
+  interface Window {
+    __leetplusSettingsCallbacks?: Record<
+      string,
+      (payload: SettingsBootstrapPayload) => void
+    >;
+  }
+}
+
+export function SettingsWorkspace() {
+  const [state, setState] = useState(initialState);
+
+  useEffect(() => {
+    let mounted = true;
+    const callbackId = `c${Date.now()}${Math.random()
+      .toString(36)
+      .slice(2)}`;
+    window[BOOTSTRAP_CALLBACKS_KEY] ??= {};
+
+    const slowTimeout = window.setTimeout(() => {
+      if (!mounted) {
+        return;
+      }
+
+      setState({
+        ...initialState,
+        brandingError: getSlowApiMessage(),
+        langameError: getSlowApiMessage(),
+        isLoading: false,
+      });
+    }, SETTINGS_TIMEOUT_MS);
+
+    window[BOOTSTRAP_CALLBACKS_KEY][callbackId] = (payload) => {
+      if (!mounted) {
+        return;
+      }
+
+      window.clearTimeout(slowTimeout);
+      setState({
+        ...payload,
+        isLoading: false,
+      });
+    };
+
+    const script = document.createElement("script");
+    script.async = true;
+    const callbackName = `window.${BOOTSTRAP_CALLBACKS_KEY}.${callbackId}`;
+    script.src = `/api/settings/bootstrap?callback=${encodeURIComponent(
+      callbackName,
+    )}&_=${Date.now()}`;
+    script.onerror = () => {
+      if (!mounted) {
+        return;
+      }
+
+      window.clearTimeout(slowTimeout);
+      setState({
+        ...initialState,
+        brandingError: "Не удалось загрузить настройки",
+        langameError: "Не удалось загрузить настройки",
+        isLoading: false,
+      });
+    };
+    document.head.appendChild(script);
+
+    return () => {
+      mounted = false;
+      window.clearTimeout(slowTimeout);
+      delete window[BOOTSTRAP_CALLBACKS_KEY]?.[callbackId];
+      script.remove();
+    };
+  }, []);
+
+  if (state.isLoading) {
+    return (
+      <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-200 border-t-emerald-500 dark:border-emerald-950 dark:border-t-emerald-400" />
+          <span>Загружаем настройки...</span>
+        </div>
+      </section>
+    );
+  }
+
+  const hasLoadError = Boolean(state.langameError) || Boolean(state.brandingError);
 
   return (
     <>
@@ -29,25 +123,29 @@ export function SettingsWorkspace({
         </section>
       ) : null}
 
-      {brandingSettings ? (
-        <BrandingSettingsForm initialSettings={brandingSettings} />
+      {state.brandingSettings ? (
+        <BrandingSettingsForm initialSettings={state.brandingSettings} />
       ) : (
         <SettingsSectionError
-          message={brandingError}
+          message={state.brandingError}
           title="Брендинг не загрузился"
         />
       )}
 
-      {langameSettings ? (
-        <LangameSettingsForm initialSettings={langameSettings} />
+      {state.langameSettings ? (
+        <LangameSettingsForm initialSettings={state.langameSettings} />
       ) : (
         <SettingsSectionError
-          message={langameError}
+          message={state.langameError}
           title="Langame не загрузился"
         />
       )}
     </>
   );
+}
+
+function getSlowApiMessage() {
+  return `API отвечает дольше ${Math.round(SETTINGS_TIMEOUT_MS / 1000)} секунд`;
 }
 
 function SettingsSectionError({

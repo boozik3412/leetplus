@@ -6,7 +6,8 @@ import { LangameSettingsForm } from "@/components/langame-settings-form";
 import type { BrandingSettings } from "@/lib/branding-settings";
 import type { LangameSettings } from "@/lib/langame-settings";
 
-const SETTINGS_DATA_ELEMENT_ID = "leetplus-settings-data";
+const SETTINGS_WORKSPACE_ENDPOINT = "/api/settings/workspace";
+const SETTINGS_WORKSPACE_TIMEOUT_MS = 15_000;
 
 type SettingsWorkspacePayload = {
   brandingSettings: BrandingSettings | null;
@@ -32,36 +33,49 @@ export function SettingsWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+    }, SETTINGS_WORKSPACE_TIMEOUT_MS);
 
     queueMicrotask(() => {
-      if (cancelled) {
-        return;
-      }
+      void fetchSettingsPayload(controller.signal)
+        .then((payload) => {
+          if (cancelled) {
+            return;
+          }
 
-      try {
-        const payload = readSettingsPayload();
+          setState({
+            ...payload,
+            isLoading: false,
+          });
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
 
-        setState({
-          ...payload,
-          isLoading: false,
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить настройки";
+
+          setState({
+            ...initialState,
+            brandingError: message,
+            langameError: message,
+            isLoading: false,
+          });
+        })
+        .finally(() => {
+          window.clearTimeout(timeout);
         });
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Не удалось прочитать настройки";
-
-        setState({
-          ...initialState,
-          brandingError: message,
-          langameError: message,
-          isLoading: false,
-        });
-      }
     });
 
     return () => {
       cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeout);
     };
   }, []);
 
@@ -108,15 +122,44 @@ export function SettingsWorkspace() {
   );
 }
 
-function readSettingsPayload(): SettingsWorkspacePayload {
-  const element = document.getElementById(SETTINGS_DATA_ELEMENT_ID);
-  const text = element?.textContent;
+async function fetchSettingsPayload(signal: AbortSignal) {
+  let response: Response;
 
-  if (!text) {
-    throw new Error("Настройки не найдены в HTML-ответе");
+  try {
+    response = await fetch(SETTINGS_WORKSPACE_ENDPOINT, {
+      headers: {
+        Accept: "application/json",
+      },
+      signal,
+    });
+  } catch (error) {
+    if (signal.aborted) {
+      throw new Error("Настройки не загрузились за 15 секунд");
+    }
+
+    throw error;
   }
 
-  return JSON.parse(text) as SettingsWorkspacePayload;
+  const payload = (await response.json()) as unknown;
+
+  if (!response.ok) {
+    throw new Error(getSettingsPayloadError(payload));
+  }
+
+  return payload as SettingsWorkspacePayload;
+}
+
+function getSettingsPayloadError(payload: unknown) {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "message" in payload &&
+    typeof payload.message === "string"
+  ) {
+    return payload.message;
+  }
+
+  return "Не удалось загрузить настройки";
 }
 
 function SettingsSectionError({

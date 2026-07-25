@@ -192,6 +192,7 @@ model Tenant {
   guestGameSeasons                     GuestGameSeason[]
   guestGameRewards                     GuestGameReward[]
   guestGameCompletionNotifications     GuestGameCompletionNotification[]
+  guestGameRewardWalletItems           GuestGameRewardWalletItem[]
   guestGameDeliveries                  GuestGameDelivery[]
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
   guestGameEvents                      GuestGameEvent[]
@@ -558,6 +559,7 @@ model Store {
   marketingPromoBundleUsages      MarketingPromoBundleUsage[]
   marketingMissionRewards         MarketingMissionReward[]
   guestGameRewards                GuestGameReward[]
+  guestGameRewardWalletItems      GuestGameRewardWalletItem[]
   guestGameDeliveries             GuestGameDelivery[]
   guestGameAuditEvents            GuestGameAuditEvent[]
   guestGameRuleDecisions          GuestGameRuleDecision[]
@@ -1654,6 +1656,8 @@ model GuestGameProfile {
   staffTestReason    String?
   staffTestMatchedAt DateTime?
   lastActivityAt     DateTime?
+  gameActivatedAt    DateTime?
+  preActivationXpExcluded Int                        @default(0)
   createdAt          DateTime                        @default(now())
   updatedAt          DateTime                        @updatedAt
 
@@ -1663,6 +1667,7 @@ model GuestGameProfile {
   createdByUser            User?                            @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards                  GuestGameReward[]
   completionNotifications  GuestGameCompletionNotification[]
+  rewardWalletItems        GuestGameRewardWalletItem[]
   bonusLedgerEntries       GuestBonusLedgerEntry[]
   deliveries               GuestGameDelivery[]
   events                   GuestGameEvent[]
@@ -1911,6 +1916,9 @@ model GuestGameReward {
   rewardRarityLabel String?
   rewardDropChance  Decimal?             @db.Decimal(8, 4)
   rewardCode        String?
+  claimRequired     Boolean              @default(true)
+  deliveryRequestedAt DateTime?
+  claimExpiresAt    DateTime?
   qualifiedAt       DateTime             @default(now())
   expiresAt         DateTime?
   paidAt            DateTime?
@@ -1935,11 +1943,13 @@ model GuestGameReward {
   rewardIntents      GuestGameRewardIntent[]
   rewardEffects      GuestGameRewardEffect[]
   completionNotifications GuestGameCompletionNotification[]
+  walletItems        GuestGameRewardWalletItem[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
   @@unique([tenantId, idempotencyKey], map: "guest_game_reward_idempotency_uidx")
   @@index([tenantId, originKey], map: "guest_game_reward_origin_idx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
+  @@index([tenantId, claimRequired, deliveryRequestedAt, claimExpiresAt, status], map: "guest_game_reward_claim_queue_idx")
   @@index([profileId], map: "guest_game_reward_profile_idx")
   @@index([guestId], map: "guest_game_reward_guest_idx")
   @@index([lootBoxId], map: "guest_game_reward_loot_box_idx")
@@ -1966,6 +1976,47 @@ model GuestGameCompletionNotification {
 
   @@unique([tenantId, rewardId], map: "guest_game_completion_notification_reward_uidx")
   @@index([tenantId, profileId, acknowledgedAt, createdAt], map: "guest_game_completion_notification_pending_idx")
+}
+
+model GuestGameRewardWalletItem {
+  id            String   @id @default(uuid())
+  tenantId      String
+  profileId     String
+  storeId       String?
+  rewardId      String?
+  entitlementId String?
+  eventId       String?
+  kind          String
+  sourceKind    String
+  sourceId      String?
+  title         String
+  rewardLabel   String
+  status        String   @default("PENDING")
+  claimXpDelta  Int      @default(0)
+  availableAt   DateTime @default(now())
+  expiresAt     DateTime
+  claimedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id])
+  profile     GuestGameProfile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  store       Store?                @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  reward      GuestGameReward?      @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+  entitlement GuestGameEntitlement? @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+  event       GuestGameEvent?       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, rewardId], map: "guest_game_reward_wallet_reward_uidx")
+  @@unique([tenantId, entitlementId], map: "guest_game_reward_wallet_entitlement_uidx")
+  @@unique([tenantId, eventId], map: "guest_game_reward_wallet_event_uidx")
+  @@index([tenantId, profileId, status, expiresAt, availableAt, id], map: "guest_game_reward_wallet_pending_idx")
+  @@index([profileId], map: "guest_game_reward_wallet_profile_idx")
+  @@index([storeId], map: "guest_game_reward_wallet_store_idx")
+  @@index([rewardId], map: "guest_game_reward_wallet_reward_idx")
+  @@index([entitlementId], map: "guest_game_reward_wallet_entitlement_idx")
+  @@index([eventId], map: "guest_game_reward_wallet_event_idx")
+  @@index([expiresAt, id], map: "guest_game_reward_wallet_expiry_idx")
+  @@index([kind, status, updatedAt, id], map: "guest_game_reward_wallet_stale_opening_idx")
 }
 
 model GuestGameDelivery {
@@ -2068,10 +2119,12 @@ model GuestGameEvent {
   entitlements  GuestGameEntitlement[]
   xpPosting     GuestGameXpPosting?
   rewardIntents GuestGameRewardIntent[]
+  walletItems   GuestGameRewardWalletItem[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_event_external_uidx")
   @@unique([tenantId, originKey], map: "guest_game_event_origin_uidx")
   @@index([tenantId, eventType, occurredAt], map: "guest_game_event_type_idx")
+  @@index([tenantId, profileId, occurredAt], map: "guest_game_event_profile_activation_xp_idx")
   @@index([profileId], map: "guest_game_event_profile_idx")
   @@index([guestId], map: "guest_game_event_guest_idx")
   @@index([lootBoxId], map: "guest_game_event_loot_box_idx")
@@ -2188,6 +2241,7 @@ model GuestGameEntitlement {
   store   Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
   event   GuestGameEvent?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
   reward  GuestGameReward?  @relation(fields: [rewardId], references: [id], onDelete: SetNull)
+  walletItems GuestGameRewardWalletItem[]
 
   @@unique([tenantId, idempotencyKey], map: "guest_game_entitlement_idempotency_uidx")
   @@index([tenantId, originKey], map: "guest_game_entitlement_origin_idx")

@@ -150,6 +150,8 @@ export type GuestPortalMissionRewardStatus = {
   rewardLabel: string | null;
   rewardAmount: number | null;
   rewardWalletState:
+    | "WAITING_CLAIM"
+    | "DELIVERY_PROCESSING"
     | "WAITING_APPROVAL"
     | "READY"
     | "REDEEMED"
@@ -339,6 +341,8 @@ export type GuestPortalPayload = {
       latestReward: {
         id: string;
         walletState:
+          | "WAITING_CLAIM"
+          | "DELIVERY_PROCESSING"
           | "WAITING_APPROVAL"
           | "READY"
           | "REDEEMED"
@@ -450,6 +454,8 @@ export type GuestPortalPayload = {
       id: string;
       status: string;
       walletState:
+        | "WAITING_CLAIM"
+        | "DELIVERY_PROCESSING"
         | "WAITING_APPROVAL"
         | "READY"
         | "REDEEMED"
@@ -462,11 +468,19 @@ export type GuestPortalPayload = {
       rewardRarityLabel: string | null;
       rewardDropChance: number | null;
       sourceId: string | null;
-      sourceKind: "LOOT_BOX" | "MISSION" | "BATTLE_PASS" | "MANUAL";
+      sourceKind:
+        | "CHECK_IN"
+        | "LOOT_BOX"
+        | "MISSION"
+        | "BATTLE_PASS"
+        | "MANUAL";
       sourceLabel: string | null;
+      storeId: string | null;
+      storeName: string | null;
       rewardCode: string | null;
       claimPayload: string | null;
       qualifiedAt: string;
+      claimedAt: string | null;
       expiresAt: string | null;
     }>;
     bonusHistory: {
@@ -490,8 +504,14 @@ export type GuestPortalPayload = {
         amount: number;
         balanceAfter: number | null;
         title: string;
-        sourceKind: "LOOT_BOX" | "MISSION" | "BATTLE_PASS" | "MANUAL";
+        sourceKind:
+          | "CHECK_IN"
+          | "LOOT_BOX"
+          | "MISSION"
+          | "BATTLE_PASS"
+          | "MANUAL";
         sourceLabel: string | null;
+        storeId?: string | null;
         storeName: string | null;
         occurredAt: string;
         confirmedAt: string | null;
@@ -616,6 +636,57 @@ export type GuestPortalCompletionNotification = {
   nextCondition: string | null;
 };
 
+export type GuestPortalRewardWalletItem = {
+  id: string;
+  kind: "REWARD" | "LOOT_BOX_ENTITLEMENT";
+  sourceKind:
+    | "CHECK_IN"
+    | "MISSION"
+    | "BATTLE_PASS"
+    | "LOOT_BOX"
+    | "MANUAL";
+  sourceId: string | null;
+  storeId: string | null;
+  storeName: string | null;
+  lootBoxId: string | null;
+  title: string;
+  rewardLabel: string;
+  availableAt: string;
+  expiresAt: string;
+  claimedAt: string | null;
+  status: "PENDING" | "PROCESSING" | "FAILED" | "OPENING";
+  action: "CLAIM_REWARD" | "OPEN_LOOT_BOX" | null;
+  errorHint: string | null;
+};
+
+export type GuestPortalRewardWalletHistoryItem = {
+  id: string;
+  walletItemId: string;
+  rewardId: string | null;
+  eventId: string | null;
+  entitlementId: string | null;
+  kind: "REWARD" | "LOOT_BOX_ENTITLEMENT";
+  status: "PENDING" | "PROCESSING" | "FAILED" | "OPENING" | "CLAIMED";
+  sourceKind: GuestPortalRewardWalletItem["sourceKind"];
+  sourceId: string | null;
+  storeId: string | null;
+  storeName: string | null;
+  lootBoxId: string | null;
+  title: string;
+  rewardLabel: string;
+  availableAt: string;
+  claimedAt: string | null;
+  expiresAt: string;
+};
+
+export type GuestPortalRewardWallet = {
+  pendingCount: number;
+  nextExpiresAt: string | null;
+  retentionDays: number;
+  items: GuestPortalRewardWalletItem[];
+  history: GuestPortalRewardWalletHistoryItem[];
+};
+
 export type GuestPortalGameSummary = {
   generatedAt: string;
   tenant: GuestPortalPayload["tenant"];
@@ -665,10 +736,14 @@ export type GuestPortalGameSummary = {
         | "sourceId"
         | "sourceKind"
         | "sourceLabel"
+        | "storeId"
+        | "storeName"
         | "rewardCode"
         | "claimPayload"
         | "qualifiedAt"
+        | "claimedAt"
         | "expiresAt"
+        | "status"
       >
     >;
     latestBonus:
@@ -682,6 +757,7 @@ export type GuestPortalGameSummary = {
   completionNotifications: {
     pending: GuestPortalCompletionNotification[];
   };
+  rewardWallet: GuestPortalRewardWallet;
   lootBoxes: {
     total: number;
     featured: Array<

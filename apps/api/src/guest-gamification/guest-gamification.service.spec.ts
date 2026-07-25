@@ -7795,6 +7795,49 @@ describe('GuestGamificationService', () => {
     });
   });
 
+  describe('lootbox session type normalization', () => {
+    it.each([
+      ['Любая', null],
+      ['ANY', null],
+      ['hourly', 'regular_session'],
+      ['hourly_session', 'regular_session'],
+      ['regular_session', 'regular_session'],
+      ['packet_hours', 'packet_hours'],
+      ['PACKAGE_OR_SUBSCRIPTION', 'packet_hours'],
+      ['package_or_subscription_session', 'packet_hours'],
+    ])('persists %s as %s', async (sessionType, expected) => {
+      const { service } = createService();
+
+      await expect(
+        (service as any).buildLootBoxData(
+          user,
+          {
+            name: 'Session lootbox',
+            rewardType: 'PROMOCODE',
+            sessionType,
+          },
+          true,
+        ),
+      ).resolves.toEqual(expect.objectContaining({ sessionType: expected }));
+    });
+
+    it('rejects an unsupported session type instead of weakening the rule', async () => {
+      const { service } = createService();
+
+      await expect(
+        (service as any).buildLootBoxData(
+          user,
+          {
+            name: 'Session lootbox',
+            rewardType: 'PROMOCODE',
+            sessionType: 'TYPO',
+          },
+          true,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
   describe('dryRun', () => {
     it('evaluates eligible rules without creating events, rewards, or Langame writes', async () => {
       const { service, prisma, langameClient } = createService();
@@ -7912,6 +7955,40 @@ describe('GuestGamificationService', () => {
           expect.objectContaining({ id: 'package', eligible: false }),
         ]),
       );
+    });
+
+    it('matches an ANY-session lootbox for hourly and package session starts', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({ id: 'any-session', sessionType: 'ANY' }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+
+      const hourlyResult = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'HOURLY',
+        sessionPacket: false,
+      });
+      const packageResult = await service.dryRun(user, {
+        eventType: 'SESSION_START',
+        occurredAt: isoNow,
+        sessionType: 'PACKAGE_OR_SUBSCRIPTION',
+        sessionPacket: true,
+      });
+
+      expect(hourlyResult.rules).toEqual([
+        expect.objectContaining({ id: 'any-session', eligible: true }),
+      ]);
+      expect(packageResult.rules).toEqual([
+        expect.objectContaining({ id: 'any-session', eligible: true }),
+      ]);
     });
 
     it('allows an explicit manual open to evaluate a reward-template lootbox', async () => {

@@ -3143,7 +3143,7 @@ function storeIdsFromJson(value: Prisma.JsonValue | null): string[] {
   return [];
 }
 
-function relevantFactsForRule(
+export function relevantFactsForRule(
   triggerKind: string | null,
   sessionType?: string | null,
 ) {
@@ -3179,12 +3179,22 @@ function relevantFactsForRule(
   }
 
   if (trigger.includes('session')) {
-    return session.includes('package') ||
+    if (
+      session.includes('package') ||
       session.includes('packet') ||
       session.includes('subscription') ||
       session.includes('abonement')
-      ? ['SESSION_STARTED', 'PACKAGE_OR_SUBSCRIPTION_USED']
-      : ['SESSION_STARTED', 'HOURLY_SESSION_STARTED'];
+    ) {
+      return ['PACKAGE_OR_SUBSCRIPTION_USED'];
+    }
+    if (
+      session.includes('hourly') ||
+      session.includes('regular') ||
+      session.includes('common')
+    ) {
+      return ['HOURLY_SESSION_STARTED'];
+    }
+    return ['SESSION_STARTED'];
   }
 
   if (

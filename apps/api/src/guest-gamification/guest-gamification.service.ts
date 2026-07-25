@@ -18216,7 +18216,7 @@ export class GuestGamificationService {
       rewardAmount: decimalValue(dto.rewardAmount),
       rewardLabel: nullableString(dto.rewardLabel),
       segment: nullableString(dto.segment),
-      sessionType: nullableString(dto.sessionType),
+      sessionType: canonicalLootBoxSessionType(dto.sessionType),
       storeIds: jsonValue(dto.storeIds),
       periodRules: jsonValue(dto.periodRules),
       limits:
@@ -30604,6 +30604,7 @@ function normalizeSessionType(value: string) {
     [
       'packet_hours',
       'package_or_subscription',
+      'package_or_subscription_session',
       'packet',
       'package',
       'package_hours',
@@ -30618,14 +30619,51 @@ function normalizeSessionType(value: string) {
   }
 
   if (
-    ['hourly', 'regular_session', 'regular', 'common', 'default'].includes(
-      normalized,
-    )
+    [
+      'hourly',
+      'hourly_session',
+      'regular_session',
+      'regular',
+      'common',
+      'default',
+    ].includes(normalized)
   ) {
     return 'regular_session';
   }
 
   return normalized;
+}
+
+function canonicalLootBoxSessionType(
+  value: unknown,
+): 'regular_session' | 'packet_hours' | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const raw = nullableString(value);
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = normalizeSessionType(raw);
+  if (
+    ['any', 'all', 'any_session', 'любая', 'любой', 'любая_сессия'].includes(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+  if (normalized === 'regular_session') {
+    return 'regular_session';
+  }
+  if (normalized === 'packet_hours') {
+    return 'packet_hours';
+  }
+
+  throw new BadRequestException(
+    'Тип сессии лутбокса должен быть ANY, HOURLY или PACKAGE_OR_SUBSCRIPTION.',
+  );
 }
 
 function dryRunOptionalNumber(

@@ -8,6 +8,7 @@ import {
   classifyGuestActivitySyncFailure,
   GuestActivityLedgerService,
   isRecoverableSyncState,
+  relevantFactsForRule,
   sanitizeGuestActivityEvidencePayload,
   sanitizeGuestActivityRawPayload,
   sanitizeGuestActivityText,
@@ -1909,6 +1910,24 @@ describe('guest activity sync failure classification', () => {
       }),
     ).toBe(false);
   });
+});
+
+describe('guest activity fact selection for session rules', () => {
+  it.each([
+    ['SESSION_START', null, ['SESSION_STARTED']],
+    ['SESSION_START', 'ANY', ['SESSION_STARTED']],
+    ['SESSION_START', 'HOURLY', ['HOURLY_SESSION_STARTED']],
+    [
+      'SESSION_START',
+      'PACKAGE_OR_SUBSCRIPTION',
+      ['PACKAGE_OR_SUBSCRIPTION_USED'],
+    ],
+  ])(
+    'selects one canonical fact stream for %s / %s',
+    (triggerKind, sessionType, expected) => {
+      expect(relevantFactsForRule(triggerKind, sessionType)).toEqual(expected);
+    },
+  );
 });
 
 describe('guest activity payload sanitization', () => {

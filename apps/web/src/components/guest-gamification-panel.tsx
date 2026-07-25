@@ -7666,9 +7666,7 @@ function LootBoxesTab({
                       setForm({ ...form, sessionType: event.target.value })
                     }
                   >
-                    <option value="" disabled>
-                      Выберите тип
-                    </option>
+                    <option value="">Любая</option>
                     {sessionTypeOptions.map((option) => (
                       <option key={option.value || "any"} value={option.value}>
                         {option.label}
@@ -14478,7 +14476,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     caseRarity: lootBoxCaseRarity(lootBox.probabilityRules),
     audienceId: lootBox.audience?.id ?? "",
     segment: lootBox.segment ?? "",
-    sessionType: lootBox.sessionType ?? "",
+    sessionType: normalizeUiSessionType(lootBox.sessionType),
     tariffGroupId: stringRule(lootBox.periodRules, "tariffGroupId", ""),
     tariffPeriodId: stringRule(lootBox.periodRules, "tariffPeriodId", ""),
     tariffTypeId: stringRule(lootBox.periodRules, "tariffTypeId", ""),
@@ -17346,11 +17344,29 @@ function trackingId(prefix: string, value: string | null | undefined) {
 }
 
 function normalizeUiSessionType(value: string | null | undefined) {
-  const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  const normalized = (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (
+    [
+      "any",
+      "all",
+      "any_session",
+      "любая",
+      "любой",
+      "любая_сессия",
+    ].includes(normalized)
+  ) {
+    return "";
+  }
 
   if (
     [
       "packet_hours",
+      "package_or_subscription",
+      "package_or_subscription_session",
       "packet",
       "package",
       "package_hours",
@@ -17365,7 +17381,14 @@ function normalizeUiSessionType(value: string | null | undefined) {
   }
 
   if (
-    ["regular_session", "regular", "common", "default"].includes(normalized)
+    [
+      "hourly",
+      "hourly_session",
+      "regular_session",
+      "regular",
+      "common",
+      "default",
+    ].includes(normalized)
   ) {
     return "regular_session";
   }

@@ -13,6 +13,7 @@ import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import {
   GuestCommunicationConsentStatus,
   GuestCrmStatus,
+  type GuestGameEntitlement,
   type GuestPortalOtpChallenge,
   IntegrationProvider,
   Prisma,
@@ -1663,6 +1664,11 @@ type GuestPortalLootBoxUnlockEventRow = {
   eventType: string;
   occurredAt: Date;
   payload: Prisma.JsonValue | null;
+};
+
+type GuestPortalEntitlementReconciliationResult = {
+  entitlement: GuestGameEntitlement;
+  outcome: 'UNCHANGED' | 'RECONCILED' | 'IDEMPOTENT' | 'BLOCKED';
 };
 
 type GuestPortalVisualLootBoxRef = {
@@ -4442,7 +4448,7 @@ export class GuestPortalService {
     let entitlement =
       entitlementReadMode === 'OFF'
         ? null
-        : await this.findPortalLootBoxEntitlement(
+        : await this.findReconciledPortalLootBoxEntitlement(
             context.tenant.id,
             ownerGuestId,
             profile.id,
@@ -4471,9 +4477,16 @@ export class GuestPortalService {
         storeTimeZone: context.store.timeZone,
         lootBox,
         unlockEvents,
-        rewards: currentRewards,
       });
-      entitlement = backfilled?.status === 'AVAILABLE' ? backfilled : null;
+      if (backfilled?.outcome === 'BLOCKED') {
+        throw new ServiceUnavailableException(
+          'Право на открытие требует безопасной сверки с историей наград. Повторите попытку позже.',
+        );
+      }
+      entitlement =
+        backfilled?.entitlement.status === 'AVAILABLE'
+          ? backfilled.entitlement
+          : null;
     }
     if (
       !portalLootBoxVisibleInCatalog(lootBox) &&
@@ -8338,6 +8351,240 @@ export class GuestPortalService {
     });
   }
 
+  private async findReconciledPortalLootBoxEntitlement(
+    tenantId: string,
+    guestId: string | null,
+    profileId: string,
+    storeId: string,
+    lootBoxId: string,
+    limits: Prisma.JsonValue | null,
+    storeTimeZone: string | null,
+    now: Date,
+  ): Promise<GuestGameEntitlement | null> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const entitlement = await this.findPortalLootBoxEntitlement(
+        tenantId,
+        guestId,
+        profileId,
+        storeId,
+        lootBoxId,
+        limits,
+        storeTimeZone,
+        now,
+      );
+      if (!entitlement) return null;
+
+      const reconciliation =
+        await this.reconcilePortalLootBoxEntitlementFromLegacy(
+          entitlement,
+          profileId,
+        );
+      if (reconciliation.outcome === 'UNCHANGED') {
+        return reconciliation.entitlement;
+      }
+      if (reconciliation.outcome === 'BLOCKED') {
+        throw new ServiceUnavailableException(
+          'Право на открытие требует безопасной сверки с историей наград. Повторите попытку позже.',
+        );
+      }
+    }
+
+    throw new ServiceUnavailableException(
+      'История прав на открытие слишком велика для безопасной автоматической сверки.',
+    );
+  }
+
+  private async reconcilePortalLootBoxEntitlementFromLegacy(
+    entitlement: GuestGameEntitlement,
+    profileIdOverride?: string,
+  ): Promise<GuestPortalEntitlementReconciliationResult> {
+    const rewardProfileId = entitlement.profileId ?? profileIdOverride ?? null;
+    if (
+      entitlement.ruleType !== 'LOOT_BOX' ||
+      entitlement.status !== 'AVAILABLE' ||
+      entitlement.consumedAt ||
+      entitlement.canceledAt ||
+      entitlement.rewardId ||
+      !entitlement.sourceEventType ||
+      !rewardProfileId
+    ) {
+      return { entitlement, outcome: 'UNCHANGED' };
+    }
+    const sourceEventType = entitlement.sourceEventType;
+    let matchedRewardId: string | null = null;
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const rewardWhere: Prisma.GuestGameRewardWhereInput = {
+          tenantId: entitlement.tenantId,
+          profileId: rewardProfileId,
+          lootBoxId: entitlement.ruleId,
+          source: 'API_IMPORT',
+          status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+          ...(entitlement.storeId ? { storeId: entitlement.storeId } : {}),
+          AND: [
+            {
+              evidence: {
+                path: ['sourceFactKind'],
+                equals: GAME_LOOT_BOX_OPEN_SOURCE_KIND,
+              },
+            },
+            {
+              evidence: {
+                path: ['eventType'],
+                equals: sourceEventType,
+              },
+            },
+            {
+              evidence: {
+                path: ['occurredAt'],
+                equals: entitlement.qualifiedAt.toISOString(),
+              },
+            },
+            {
+              evidence: {
+                path: ['rule', 'id'],
+                equals: entitlement.ruleId,
+              },
+            },
+            {
+              evidence: {
+                path: ['rule', 'kind'],
+                equals: 'LOOT_BOX',
+              },
+            },
+          ],
+        };
+        const matchingRewards = await tx.guestGameReward.findMany({
+          where: rewardWhere,
+          orderBy: [{ qualifiedAt: 'asc' }, { createdAt: 'asc' }],
+          take: 2,
+        });
+
+        if (matchingRewards.length === 0) {
+          return { entitlement, outcome: 'UNCHANGED' };
+        }
+        if (matchingRewards.length > 1) {
+          this.logger.warn(
+            `Legacy loot-box reward reconciliation is ambiguous for entitlement ${entitlement.id}.`,
+          );
+          return { entitlement, outcome: 'BLOCKED' };
+        }
+
+        const reward = matchingRewards[0];
+        matchedRewardId = reward.id;
+        const existingBinding = await tx.guestGameEntitlement.findFirst({
+          where: {
+            tenantId: entitlement.tenantId,
+            rewardId: reward.id,
+          },
+          select: { id: true },
+        });
+        if (existingBinding && existingBinding.id !== entitlement.id) {
+          this.logger.warn(
+            `Legacy loot-box reward ${reward.id} is already bound to another entitlement.`,
+          );
+          return { entitlement, outcome: 'BLOCKED' };
+        }
+
+        const reconciledAt = new Date();
+        const evidence = {
+          ...jsonRecord(entitlement.evidence),
+          reconciliation: {
+            kind: 'LEGACY_DIRECT_OPEN_EXACT_EVIDENCE_V1',
+            reconciledAt: reconciledAt.toISOString(),
+            rewardId: reward.id,
+          },
+        };
+        const updated = await tx.guestGameEntitlement.updateMany({
+          where: {
+            id: entitlement.id,
+            tenantId: entitlement.tenantId,
+            profileId: entitlement.profileId,
+            ruleType: 'LOOT_BOX',
+            ruleId: entitlement.ruleId,
+            status: 'AVAILABLE',
+            consumedAt: null,
+            canceledAt: null,
+            rewardId: null,
+          },
+          data: {
+            status: 'CONSUMED',
+            consumedAt: reward.qualifiedAt,
+            rewardId: reward.id,
+            evidence,
+          },
+        });
+        if (updated.count === 1) {
+          return {
+            entitlement: {
+              ...entitlement,
+              status: 'CONSUMED',
+              consumedAt: reward.qualifiedAt,
+              rewardId: reward.id,
+              evidence,
+              updatedAt: reconciledAt,
+            },
+            outcome: 'RECONCILED',
+          };
+        }
+
+        const current = await tx.guestGameEntitlement.findFirst({
+          where: {
+            id: entitlement.id,
+            tenantId: entitlement.tenantId,
+          },
+        });
+        if (current?.status === 'CONSUMED' && current.rewardId === reward.id) {
+          return { entitlement: current, outcome: 'IDEMPOTENT' };
+        }
+
+        this.logger.warn(
+          `Legacy loot-box reward reconciliation lost a concurrent update for entitlement ${entitlement.id}.`,
+        );
+        return { entitlement: current ?? entitlement, outcome: 'BLOCKED' };
+      });
+    } catch (error) {
+      if (
+        !(
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) ||
+        !matchedRewardId
+      ) {
+        throw error;
+      }
+
+      const [current, existingBinding] = await Promise.all([
+        this.prisma.guestGameEntitlement.findFirst({
+          where: {
+            id: entitlement.id,
+            tenantId: entitlement.tenantId,
+          },
+        }),
+        this.prisma.guestGameEntitlement.findFirst({
+          where: {
+            tenantId: entitlement.tenantId,
+            rewardId: matchedRewardId,
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (
+        current?.status === 'CONSUMED' &&
+        current.rewardId === matchedRewardId &&
+        existingBinding?.id === entitlement.id
+      ) {
+        return { entitlement: current, outcome: 'IDEMPOTENT' };
+      }
+
+      this.logger.warn(
+        `Legacy loot-box reward was bound concurrently to another entitlement while reconciling ${entitlement.id}.`,
+      );
+      return { entitlement: current ?? entitlement, outcome: 'BLOCKED' };
+    }
+  }
+
   private async backfillPortalLootBoxEntitlementFromLegacy(input: {
     tenantId: string;
     guestId: string | null;
@@ -8353,8 +8600,7 @@ export class GuestPortalService {
       periodRules: Prisma.JsonValue | null;
     };
     unlockEvents: GuestPortalLootBoxUnlockEventRow[];
-    rewards: GuestPortalRewardRow[];
-  }) {
+  }): Promise<GuestPortalEntitlementReconciliationResult | null> {
     const unlockEvent = portalLegacyLootBoxEntitlementBackfillEvent(
       input.lootBox,
       input.unlockEvents,
@@ -8378,7 +8624,12 @@ export class GuestPortalService {
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
-    if (existing) return existing;
+    if (existing) {
+      return this.reconcilePortalLootBoxEntitlementFromLegacy(
+        existing,
+        input.profileId,
+      );
+    }
 
     const limits = jsonRecord(input.lootBox.limits);
     const periodicLimit = lootBoxPeriodicLimitPeriod(limits.periodicLimit);
@@ -8406,17 +8657,6 @@ export class GuestPortalService {
             periodKey,
           ].join(':')
         : ['loot-box', input.lootBox.id, sourceIdentity].join(':');
-    const consumedReward = input.rewards
-      .filter(
-        (reward) =>
-          reward.lootBoxId === input.lootBox.id &&
-          !['CANCELED', 'VOID', 'REJECTED'].includes(reward.status) &&
-          reward.qualifiedAt.getTime() >= unlockEvent.occurredAt.getTime(),
-      )
-      .sort(
-        (left, right) =>
-          left.qualifiedAt.getTime() - right.qualifiedAt.getTime(),
-      )[0];
     const payload = jsonRecord(unlockEvent.payload);
     const rawSourceFactId = payload.sourceFactId;
     const sourceFactId =
@@ -8443,13 +8683,13 @@ export class GuestPortalService {
       sourceFactId,
       sourceFactKind,
       traceId: null,
-      status: consumedReward ? 'CONSUMED' : 'AVAILABLE',
+      status: 'AVAILABLE',
       idempotencyKey,
       qualifiedAt: unlockEvent.occurredAt,
       validUntil: null,
-      consumedAt: consumedReward?.qualifiedAt ?? null,
+      consumedAt: null,
       canceledAt: null,
-      rewardId: consumedReward?.id ?? null,
+      rewardId: null,
       evidence: {
         evaluationMode: 'LEGACY_ENTITLEMENT_BACKFILL',
         evaluatorVersion: 'persisted-event-rule-v1',
@@ -8470,7 +8710,7 @@ export class GuestPortalService {
     } satisfies Prisma.GuestGameEntitlementUncheckedCreateInput;
 
     try {
-      return await this.prisma.guestGameEntitlement.upsert({
+      const entitlement = await this.prisma.guestGameEntitlement.upsert({
         where: {
           tenantId_idempotencyKey: {
             tenantId: input.tenantId,
@@ -8480,6 +8720,10 @@ export class GuestPortalService {
         create,
         update: {},
       });
+      return this.reconcilePortalLootBoxEntitlementFromLegacy(
+        entitlement,
+        input.profileId,
+      );
     } catch {
       this.logger.warn(
         `Legacy loot-box entitlement backfill failed closed for tenant ${input.tenantId}, rule ${input.lootBox.id}.`,
@@ -8594,6 +8838,9 @@ export class GuestPortalService {
           ruleType: 'LOOT_BOX',
           ruleId: input.lootBoxId,
           status: 'AVAILABLE',
+          consumedAt: null,
+          canceledAt: null,
+          rewardId: null,
         },
         data: {
           status: 'CONSUMED',
@@ -9202,13 +9449,14 @@ export class GuestPortalService {
               storeTimeZone: context.store.timeZone,
               lootBox,
               unlockEvents: lootBoxUnlockEvents,
-              rewards,
             }),
           ),
       );
 
-      backfilledRows.forEach((entitlement) => {
+      backfilledRows.forEach((reconciliation) => {
+        const entitlement = reconciliation?.entitlement;
         if (
+          reconciliation?.outcome !== 'BLOCKED' &&
           entitlement?.status === 'AVAILABLE' &&
           !entitlementRows.some((row) => row.id === entitlement.id)
         ) {

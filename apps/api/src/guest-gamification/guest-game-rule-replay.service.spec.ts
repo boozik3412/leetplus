@@ -1561,6 +1561,23 @@ describe('GuestGameRuleReplayService loot-box entitlement maintenance', () => {
     expect(result.digest).toHaveLength(64);
     expect(result).not.toHaveProperty('profileId');
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const queryCalls = prisma.$queryRaw.mock.calls as unknown as Array<
+      [
+        {
+          strings: readonly string[];
+        },
+      ]
+    >;
+    const query = queryCalls[0][0] as {
+      strings: readonly string[];
+    };
+    const sql = query.strings.join('?');
+    expect(sql).toContain(`r."evidence"->>'eventType' = e."sourceEventType"`);
+    expect(sql).toContain(`to_char(\n                e."qualifiedAt",`);
+    expect(sql).not.toContain('AT TIME ZONE');
+    expect(sql).not.toContain('nextQualifiedAt');
+    expect(sql).not.toContain(`r."qualifiedAt" >= e."qualifiedAt"`);
+    expect(sql).not.toContain(`r."qualifiedAt" <= e."validUntil"`);
   });
 
   it('rechecks and atomically binds an exact legacy open', async () => {

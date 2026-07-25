@@ -2158,6 +2158,9 @@ describe('GuestPortalService', () => {
           ruleType: 'LOOT_BOX',
           ruleId: 'loot-entitled',
           status: 'AVAILABLE',
+          consumedAt: null,
+          canceledAt: null,
+          rewardId: null,
         },
         data: {
           status: 'CONSUMED',
@@ -2396,6 +2399,463 @@ describe('GuestPortalService', () => {
         }),
       ).rejects.toThrow('Награда по праву открытия не найдена в базе');
       expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('reconciles an available entitlement with the exact legacy direct-open reward', async () => {
+      const { prisma, service } = createService();
+      const qualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const rewardQualifiedAt = new Date('2026-07-17T15:05:59.000Z');
+      const entitlement = {
+        id: 'entitlement-legacy-open',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+        eventId: 'event-session-1',
+        originKey: 'session-origin-1',
+        evaluationRunId: 'run-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekday',
+        ruleName: 'Weekday case',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: 'session-1',
+        sourceFactKind: 'SESSION_STARTED',
+        traceId: null,
+        status: 'AVAILABLE',
+        idempotencyKey: 'loot-box:loot-weekday:session-origin-1',
+        qualifiedAt,
+        validUntil: null,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: { input: { sessionType: 'hourly' } },
+        createdAt: qualifiedAt,
+        updatedAt: qualifiedAt,
+      };
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-legacy-open',
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          storeId: 'store-1',
+          lootBoxId: 'loot-weekday',
+          source: 'API_IMPORT',
+          status: 'PAID',
+          qualifiedAt: rewardQualifiedAt,
+          createdAt: rewardQualifiedAt,
+          evidence: {
+            sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+            eventType: 'SESSION_START',
+            occurredAt: qualifiedAt.toISOString(),
+            rule: { id: 'loot-weekday', kind: 'LOOT_BOX' },
+          },
+        },
+      ]);
+      prisma.guestGameEntitlement.findFirst.mockResolvedValue(null);
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await (
+        service as any
+      ).reconcilePortalLootBoxEntitlementFromLegacy(entitlement);
+
+      expect(result).toMatchObject({
+        outcome: 'RECONCILED',
+        entitlement: {
+          status: 'CONSUMED',
+          consumedAt: rewardQualifiedAt,
+          rewardId: 'reward-legacy-open',
+        },
+      });
+      expect(prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            profileId: 'profile-1',
+            lootBoxId: 'loot-weekday',
+            source: 'API_IMPORT',
+            status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+          }),
+          take: 2,
+        }),
+      );
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'entitlement-legacy-open',
+            status: 'AVAILABLE',
+            consumedAt: null,
+            canceledAt: null,
+            rewardId: null,
+          }),
+          data: expect.objectContaining({
+            status: 'CONSUMED',
+            consumedAt: rewardQualifiedAt,
+            rewardId: 'reward-legacy-open',
+          }),
+        }),
+      );
+    });
+
+    it('keeps a legitimate entitlement when no exact legacy reward fingerprint matches', async () => {
+      const { prisma, service } = createService();
+      const qualifiedAt = new Date('2026-07-13T14:52:00.000Z');
+      const entitlement = {
+        id: 'entitlement-unused',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+        eventId: 'event-session-unused',
+        originKey: 'session-origin-unused',
+        evaluationRunId: 'run-unused',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekday',
+        ruleName: 'Weekday case',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: 'session-unused',
+        sourceFactKind: 'SESSION_STARTED',
+        traceId: null,
+        status: 'AVAILABLE',
+        idempotencyKey: 'loot-box:loot-weekday:session-origin-unused',
+        qualifiedAt,
+        validUntil: null,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: {},
+        createdAt: qualifiedAt,
+        updatedAt: qualifiedAt,
+      };
+      prisma.guestGameReward.findMany.mockResolvedValue([]);
+
+      const result = await (
+        service as any
+      ).reconcilePortalLootBoxEntitlementFromLegacy(entitlement);
+
+      expect(result).toEqual({ entitlement, outcome: 'UNCHANGED' });
+      expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('reconciles the same exact legacy reward idempotently after a concurrent retry', async () => {
+      const { prisma, service } = createService();
+      const qualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const consumedAt = new Date('2026-07-17T15:05:59.000Z');
+      const entitlement = {
+        id: 'entitlement-retry',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        storeId: 'store-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekday',
+        sourceEventType: 'SESSION_START',
+        status: 'AVAILABLE',
+        qualifiedAt,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: {},
+      };
+      const reward = {
+        id: 'reward-retry',
+        qualifiedAt: consumedAt,
+        createdAt: consumedAt,
+      };
+      const consumedEntitlement = {
+        ...entitlement,
+        status: 'CONSUMED',
+        consumedAt,
+        rewardId: reward.id,
+      };
+      prisma.guestGameReward.findMany.mockResolvedValue([reward]);
+      prisma.guestGameEntitlement.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(consumedEntitlement);
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await (
+        service as any
+      ).reconcilePortalLootBoxEntitlementFromLegacy(entitlement);
+
+      expect(result).toEqual({
+        entitlement: consumedEntitlement,
+        outcome: 'IDEMPOTENT',
+      });
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('reconciles a rewardId unique race only when the same entitlement won', async () => {
+      const { prisma, service } = createService();
+      const qualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const consumedAt = new Date('2026-07-17T15:05:59.000Z');
+      const entitlement = {
+        id: 'entitlement-unique-race',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        storeId: 'store-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekday',
+        sourceEventType: 'SESSION_START',
+        status: 'AVAILABLE',
+        qualifiedAt,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: {},
+      };
+      const reward = {
+        id: 'reward-unique-race',
+        qualifiedAt: consumedAt,
+        createdAt: consumedAt,
+      };
+      const consumedEntitlement = {
+        ...entitlement,
+        status: 'CONSUMED',
+        consumedAt,
+        rewardId: reward.id,
+      };
+      const uniqueError = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        {
+          code: 'P2002',
+          clientVersion: 'test',
+          meta: { target: ['rewardId'] },
+        },
+      );
+      prisma.guestGameReward.findMany.mockResolvedValue([reward]);
+      prisma.guestGameEntitlement.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(consumedEntitlement)
+        .mockResolvedValueOnce({ id: entitlement.id });
+      prisma.guestGameEntitlement.updateMany.mockRejectedValue(uniqueError);
+
+      await expect(
+        (service as any).reconcilePortalLootBoxEntitlementFromLegacy(
+          entitlement,
+        ),
+      ).resolves.toEqual({
+        entitlement: consumedEntitlement,
+        outcome: 'IDEMPOTENT',
+      });
+    });
+
+    it('fails closed when more than one legacy reward has the exact entitlement fingerprint', async () => {
+      const { prisma, service } = createService();
+      const qualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const entitlement = {
+        id: 'entitlement-ambiguous',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        storeId: 'store-1',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekday',
+        sourceEventType: 'SESSION_START',
+        status: 'AVAILABLE',
+        qualifiedAt,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: {},
+      };
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-1',
+          qualifiedAt: new Date('2026-07-17T15:05:59.000Z'),
+          createdAt: new Date('2026-07-17T15:05:59.000Z'),
+        },
+        {
+          id: 'reward-2',
+          qualifiedAt: new Date('2026-07-17T15:06:00.000Z'),
+          createdAt: new Date('2026-07-17T15:06:00.000Z'),
+        },
+      ]);
+
+      const result = await (
+        service as any
+      ).reconcilePortalLootBoxEntitlementFromLegacy(entitlement);
+
+      expect(result).toEqual({ entitlement, outcome: 'BLOCKED' });
+      expect(prisma.guestGameEntitlement.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('preserves BLOCKED when a newly backfilled entitlement has ambiguous legacy rewards', async () => {
+      const { prisma, service } = createService();
+      const qualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const entitlement = {
+        id: 'entitlement-backfill-ambiguous',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+        eventId: 'event-backfill-ambiguous',
+        originKey: 'origin-backfill-ambiguous',
+        evaluationRunId:
+          'legacy-loot-box-entitlement-backfill:event-backfill-ambiguous',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekday',
+        ruleName: 'Weekday case',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: 'session-backfill-ambiguous',
+        sourceFactKind: 'SESSION_STARTED',
+        traceId: null,
+        status: 'AVAILABLE',
+        idempotencyKey: 'loot-box:loot-weekday:origin-backfill-ambiguous',
+        qualifiedAt,
+        validUntil: null,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: { evaluationMode: 'LEGACY_ENTITLEMENT_BACKFILL' },
+        createdAt: qualifiedAt,
+        updatedAt: qualifiedAt,
+      };
+      prisma.guestGameEntitlement.findFirst.mockResolvedValueOnce(null);
+      prisma.guestGameEntitlement.upsert.mockResolvedValue(entitlement);
+      prisma.guestGameReward.findMany.mockResolvedValue([
+        {
+          id: 'reward-ambiguous-1',
+          qualifiedAt: new Date('2026-07-17T15:05:59.000Z'),
+          createdAt: new Date('2026-07-17T15:05:59.000Z'),
+        },
+        {
+          id: 'reward-ambiguous-2',
+          qualifiedAt: new Date('2026-07-17T15:06:00.000Z'),
+          createdAt: new Date('2026-07-17T15:06:00.000Z'),
+        },
+      ]);
+
+      const result = await (
+        service as any
+      ).backfillPortalLootBoxEntitlementFromLegacy({
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+        storeId: 'store-1',
+        storeTimeZone: 'Asia/Yekaterinburg',
+        lootBox: {
+          id: 'loot-weekday',
+          name: 'Weekday case',
+          triggerKind: 'SESSION_START',
+          sessionType: null,
+          limits: {},
+          periodRules: {},
+        },
+        unlockEvents: [
+          {
+            id: 'event-backfill-ambiguous',
+            originKey: 'origin-backfill-ambiguous',
+            eventType: 'SESSION_START',
+            occurredAt: qualifiedAt,
+            payload: {
+              sourceFactId: 'session-backfill-ambiguous',
+              sourceFactKind: 'SESSION_STARTED',
+              store: {
+                id: 'store-1',
+                timeZone: 'Asia/Yekaterinburg',
+              },
+              rules: [
+                {
+                  id: 'loot-weekday',
+                  kind: 'LOOT_BOX',
+                  eligible: true,
+                  blockers: [],
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+      expect(result).toEqual({ entitlement, outcome: 'BLOCKED' });
+      expect(prisma.guestGameEntitlement.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('skips a reconciled stale entitlement and returns the next legitimate entitlement', async () => {
+      const { prisma, service } = createService();
+      const staleQualifiedAt = new Date('2026-07-17T14:24:00.000Z');
+      const unusedQualifiedAt = new Date('2026-07-13T14:52:00.000Z');
+      const stale = {
+        id: 'entitlement-stale',
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: 'store-1',
+        eventId: 'event-stale',
+        originKey: 'origin-stale',
+        evaluationRunId: 'run-stale',
+        ruleType: 'LOOT_BOX',
+        ruleId: 'loot-weekday',
+        ruleName: 'Weekday case',
+        sourceEventType: 'SESSION_START',
+        sourceFactId: 'session-stale',
+        sourceFactKind: 'SESSION_STARTED',
+        traceId: null,
+        status: 'AVAILABLE',
+        idempotencyKey: 'loot-box:loot-weekday:origin-stale',
+        qualifiedAt: staleQualifiedAt,
+        validUntil: null,
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        evidence: {},
+        createdAt: staleQualifiedAt,
+        updatedAt: staleQualifiedAt,
+      };
+      const unused = {
+        ...stale,
+        id: 'entitlement-unused',
+        eventId: 'event-unused',
+        originKey: 'origin-unused',
+        evaluationRunId: 'run-unused',
+        idempotencyKey: 'loot-box:loot-weekday:origin-unused',
+        qualifiedAt: unusedQualifiedAt,
+        createdAt: unusedQualifiedAt,
+        updatedAt: unusedQualifiedAt,
+      };
+      const rewardQualifiedAt = new Date('2026-07-17T15:05:59.000Z');
+      prisma.guestGameEntitlement.findFirst
+        .mockResolvedValueOnce(stale)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(unused);
+      prisma.guestGameReward.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'reward-stale',
+            tenantId: 'tenant-1',
+            profileId: 'profile-1',
+            storeId: 'store-1',
+            lootBoxId: 'loot-weekday',
+            source: 'API_IMPORT',
+            status: 'PAID',
+            qualifiedAt: rewardQualifiedAt,
+            createdAt: rewardQualifiedAt,
+            evidence: {
+              sourceFactKind: 'GUEST_LOOT_BOX_OPEN',
+              eventType: 'SESSION_START',
+              occurredAt: staleQualifiedAt.toISOString(),
+              rule: { id: 'loot-weekday', kind: 'LOOT_BOX' },
+            },
+          },
+        ])
+        .mockResolvedValueOnce([]);
+      prisma.guestGameEntitlement.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await (
+        service as any
+      ).findReconciledPortalLootBoxEntitlement(
+        'tenant-1',
+        'guest-1',
+        'profile-1',
+        'store-1',
+        'loot-weekday',
+        {},
+        'Asia/Yekaterinburg',
+        new Date('2026-07-25T00:00:00.000Z'),
+      );
+
+      expect(result).toEqual(unused);
+      expect(prisma.guestGameEntitlement.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameReward.findMany).toHaveBeenCalledTimes(2);
     });
 
     it('accepts a repeated entitlement binding to the same reward', async () => {

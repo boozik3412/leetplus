@@ -537,10 +537,18 @@ export class GuestGameRuleReplayService {
                   AND r."tenantId" = e."tenantId"
                   AND r."profileId" = e."profileId"
                   AND r."lootBoxId" = e."ruleId"
-                  AND r."storeId" IS NOT DISTINCT FROM e."storeId"
-                  AND r."status" NOT IN ('CANCELED', 'VOID', 'REJECTED')
+                  AND (e."storeId" IS NULL OR r."storeId" = e."storeId")
+                  AND r."status" IN ('PENDING', 'APPROVED', 'PAID')
                   AND r."source" = 'API_IMPORT'
                   AND r."evidence"->>'sourceFactKind' = 'GUEST_LOOT_BOX_OPEN'
+                  AND r."evidence"->>'eventType' = e."sourceEventType"
+                  AND r."evidence"->'rule'->>'id' = e."ruleId"
+                  AND r."evidence"->'rule'->>'kind' = 'LOOT_BOX'
+                  AND r."evidence"->>'occurredAt' =
+                    to_char(
+                      e."qualifiedAt",
+                      'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                    )
               )
           `);
           if (updated !== 1) {
@@ -1168,7 +1176,7 @@ export class GuestGameRuleReplayService {
   ) {
     return client.$queryRaw<ExactEntitlementReconciliationCandidateRow[]>(
       Prisma.sql`
-        WITH ordered_entitlements AS (
+        WITH entitlement_rows AS (
           SELECT
             e."id",
             e."tenantId",
@@ -1181,14 +1189,13 @@ export class GuestGameRuleReplayService {
             e."consumedAt",
             e."canceledAt",
             e."rewardId",
-            LEAD(e."qualifiedAt") OVER (
-              PARTITION BY e."tenantId", e."profileId", e."ruleId"
-              ORDER BY e."qualifiedAt", e."id"
-            ) AS "nextQualifiedAt"
+            e."sourceEventType"
           FROM "GuestGameEntitlement" e
           WHERE e."tenantId" = ${tenantId}
             AND e."ruleType" = 'LOOT_BOX'
             AND e."profileId" IS NOT NULL
+            AND e."status" IN ('AVAILABLE', 'CONSUMED')
+            AND e."canceledAt" IS NULL
         ),
         candidate_pairs AS (
           SELECT
@@ -1199,24 +1206,27 @@ export class GuestGameRuleReplayService {
             e."guestId" AS "guestId",
             e."storeId" AS "storeId",
             r."qualifiedAt" AS "rewardQualifiedAt"
-          FROM ordered_entitlements e
+          FROM entitlement_rows e
           INNER JOIN "GuestGameReward" r
             ON r."tenantId" = e."tenantId"
            AND r."profileId" = e."profileId"
            AND r."lootBoxId" = e."ruleId"
-           AND r."storeId" IS NOT DISTINCT FROM e."storeId"
-           AND r."qualifiedAt" >= e."qualifiedAt"
-           AND (
-             e."nextQualifiedAt" IS NULL
-             OR r."qualifiedAt" < e."nextQualifiedAt"
-           )
+           AND (e."storeId" IS NULL OR r."storeId" = e."storeId")
           WHERE e."status" = 'AVAILABLE'
             AND e."consumedAt" IS NULL
             AND e."canceledAt" IS NULL
             AND e."rewardId" IS NULL
-            AND r."status" NOT IN ('CANCELED', 'VOID', 'REJECTED')
+            AND r."status" IN ('PENDING', 'APPROVED', 'PAID')
             AND r."source" = 'API_IMPORT'
             AND r."evidence"->>'sourceFactKind' = 'GUEST_LOOT_BOX_OPEN'
+            AND r."evidence"->>'eventType' = e."sourceEventType"
+            AND r."evidence"->'rule'->>'id' = e."ruleId"
+            AND r."evidence"->'rule'->>'kind' = 'LOOT_BOX'
+            AND r."evidence"->>'occurredAt' =
+              to_char(
+                e."qualifiedAt",
+                'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+              )
             AND NOT EXISTS (
               SELECT 1
               FROM "GuestGameEntitlement" bound

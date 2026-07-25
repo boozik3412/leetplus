@@ -1,26 +1,50 @@
 # Live-награды гостевого игрового модуля
 
-Дата: 20.07.2026
+Last updated: 2026-07-26
 
 Этот документ описывает боевой контракт гостевой геймификации. Он важнее старых заметок о ручной выдаче, если они расходятся.
 
-## Что происходит автоматически
+## Квалификация и явное получение
 
-| Сущность         | После выполнения условия                                      | Действие гостя                                       |
-| ---------------- | ------------------------------------------------------------- | ---------------------------------------------------- |
-| Задание          | Создается и отправляется одобренная награда                   | Не требуется                                         |
-| Этап Battle Pass | Создается и отправляется награда этапа, открывается следующий | Не требуется                                         |
-| Чекин            | Награда создается после успешного чекина                      | Нажать кнопку чекина                                 |
-| Лутбокс          | Сохраняется право открыть контейнер                           | Нажать `Открыть контейнер` для выбора и выдачи приза |
+| Источник | После выполнения условия | Действие гостя |
+| --- | --- | --- |
+| Задание | Обычная награда и event XP квалифицируются как отдельные 30-дневные wallet item | Нажать `Забрать`; получить каждый item независимо |
+| Этап Battle Pass | Фиксируется выполнение этапа; награда и XP квалифицируются в кошелёк | Нажать `Забрать`; переход этапа не означает выдачу ценности |
+| Чекин | После нажатия чекина квалифицируются настроенные reward/XP item | Явно забрать квалифицированные item |
+| Другое игровое событие | Reward и event XP сохраняются в кошелёк, но не применяются | Нажать `Забрать` |
+| Лутбокс | Сохраняется entitlement на одну ручную попытку открытия | Нажать `Открыть контейнер`; `Забрать все` его не открывает |
 
-Лутбокс никогда не должен автоматически выбирать приз или создавать reward только из-за фоновой проверки, открытия приложения или scheduler tick.
+Автоматически выполняется только проверка условия и фиксация квалификации. До явного claim обычная награда не отправляется во внешний контур, XP не применяется к профилю, а код и claim payload не раскрываются. Лутбокс никогда не должен автоматически выбирать приз из-за фоновой проверки, открытия приложения, completion ACK или scheduler tick.
+
+## Граница активации и кошелёк наград
+
+- Участие профиля в игровом контуре начинается с `GuestGameProfile.gameActivatedAt`: это время первого доверенного `APP_OPEN`, принятого через `POST /guest-portal/session/app-open`. Для существующих профилей граница восстанавливается только из полностью аттестованного канонического события `APP_OPEN` штатного гостевого портала LeetPlus. Импортированная или историческая активность Langame сама по себе профиль не активирует. Факты, события, rewards и entitlements раньше этой границы не засчитываются и не должны задним числом попадать в кошелёк.
+- При первом доверенном `APP_OPEN` API строит `signed` (знаковую) проекцию автоматического XP до активации, атомарно фиксирует её в `preActivationXpExcluded`, исключает только ещё не исключённую разницу и пересчитывает уровень. Ручной и не связанный с игровыми событиями XP сохраняется. Последующие summary повторяют знаковую проверку, поэтому поздно восстановленный pre-activation posting исключается ровно один раз, включая корректирующие отрицательные значения, и не может раздувать прогресс гостя.
+- Кошелёк хранит claim-required обычные награды, отложенный event XP и неоткрытые lootbox entitlements, но не заменяет канонические таблицы. Обычный reward до claim остаётся `APPROVED` с `claimRequired=true`; связанный effect имеет `WAITING_CLAIM`. Код и claim payload в публичном summary отсутствуют. Entitlement доступен к open только в статусе `AVAILABLE`.
+- Обычная награда и XP одного события материализуются двумя отдельными wallet item. Claim reward не применяет XP, а claim XP не подтверждает reward. Повторный вызов каждого exact item идемпотентен.
+- Непринятый wallet item живёт до `qualifiedAt + 30 суток`. При `expiresAt <= now` `PENDING` item перестаёт быть доступным: claim-required reward переводится в `EXPIRED`, ожидающий effect — в `CANCELED`, `AVAILABLE` entitlement — в `EXPIRED`, затем wallet-запись физически удаляется bounded retention scheduler.
+- Claim, принятый строго до deadline, фиксирует `deliveryRequestedAt < claimExpiresAt`. После этого ordinary item в `PROCESSING` или `FAILED` не удаляется на границе 30 суток и может завершить безопасную доставку либо перейти в операционную сверку. TTL ограничивает время принять награду, а не обрывает уже принятую доставку.
+- `POST /guest-portal/session/reward-wallet/items/:walletItemId/claim` запускает реальное получение: для XP атомарно создаёт claim-event/posting и обновляет профиль; для обычной награды освобождает ожидающий effect и разрешает ledger delivery. `POST /guest-portal/session/reward-wallet/claim-all` делает это только для обычных `PENDING/FAILED` item. Он никогда не открывает лутбоксы, не расходует entitlement и не выбирает случайный приз.
+- `POST /guest-portal/session/completion-notifications/:notificationId/acknowledge` обслуживает только прочтение поздравительного уведомления. Закрытие модалки не является claim, не меняет wallet item и не запускает доставку.
+- Исторические rewards, уже подтверждённые/доставленные до запуска нового контура, и ранее применённый XP никогда не backfill-ятся как `PENDING`: это создало бы ложную повторную выдачу.
+- Ручное открытие entitlement выполняется exact-маршрутом `POST /guest-portal/session/reward-wallet/items/:walletItemId/open`. Он принимает идентификатор wallet item, повторно проверяет tenant, профиль, текущий клуб, 30-дневный срок и точный `AVAILABLE` entitlement, после чего открывает связанный lootbox один раз. Совместимый маршрут `/session/loot-boxes/:lootBoxId/open` использует ту же entitlement-authoritative проверку: legacy unlock event сам по себе открыть контейнер не может. Для события внутри текущего 30-дневного окна разрешён bounded backfill, который сначала создаёт entitlement и wallet item; событие на границе day 30 или старше завершается fail-closed.
+- После материализации живой попытки entitlement является доказательством уже пройденной квалификации. При exact open wallet item и entitlement атомарно резервируются состоянием `OPENING`; оно является authoritative lock для параллельных запросов и опасных административных изменений. При открытии повторно не проверяются текущая аудитория, временное окно, session/tariff-условия и issuance limits: иначе несколько честно накопленных прав блокировали бы друг друга. Сохраняются проверки точного владельца, tenant/profile/store, live entitlement/wallet, активного исходного rule, единственного random roll и идемпотентного связывания reward с consumed entitlement. Незавершённый `OPENING` восстанавливается контролируемым stale-recovery, а не вторым roll.
+- Кошелёк профиля общий внутри tenant, а wallet item сохраняет `storeId`. Если право получено в другом клубе, клиент сначала вызывает `POST /guest-portal/session/select-club` с точными `tenantSlug` и `storeId`, применяет возвращённый summary и новый session cookie, показывает пользователю переключение, а затем вызывает exact open по `walletItemId`. Автоматическое открытие при переключении, загрузке страницы или `claim-all` запрещено.
+- Общий `GET /guest-portal/session/game-summary` возвращает `rewardWallet`: `pendingCount`, `nextExpiresAt`, `retentionDays` и `items`. Публичные состояния item: `PENDING`, `PROCESSING`, `FAILED`, `OPENING`; действия: `CLAIM_REWARD`, `OPEN_LOOT_BOX` либо `null`. `FAILED` допускает явный retry только для доказанно безопасной ошибки до внешнего write; `PROCESSING/OPENING` не имеют кнопки действия. `errorHint` содержит безопасное объяснение без персональных данных или внешнего payload. `pendingCount` включает все незавершённые состояния, а `nextExpiresAt` учитывает только ещё не принятые expiring item.
+
+### Lifecycle лутбокса при живом entitlement
+
+- Пока существует непросроченная `PENDING` wallet-запись с `AVAILABLE` entitlement либо любой `OPENING`, backend блокирует удаление, перезапуск, деактивацию и семантическое изменение lootbox rule. `OPENING` остаётся блокирующим независимо от исходного `expiresAt`, пока попытка не финализирована или не восстановлена. К семантическим относятся как минимум статус и клубная область, usage/trigger, награда и probability rules, session/period/limits и режим ручного подтверждения.
+- Legacy-состояние, в котором entitlement уже ссылается на удалённое или неактивное правило, не исправляется автоматической подменой правила, восстановлением по одному имени или новым random roll. Exact open завершается fail-closed. Оператор сверяет wallet item, entitlement, исходный rule ID и аудит, после чего выполняет контролируемое восстановление исходного определения либо явную компенсацию/закрытие права по утверждённой процедуре.
 
 ## Источники событий и обработка
 
-1. `POST /guest-portal/session/app-open` фиксирует открытие игрового модуля, строит `previousSummary` и вызывает `processEvent` для активных правил `APP_OPEN`.
-2. `GuestGamificationPipelineSchedulerService` каждые 15 секунд по умолчанию обрабатывает подготовленные snapshot-факты Langame через `runSnapshotPipelineScheduled`.
-3. После успешного активного правила создается идемпотентное игровое событие и reward. Для автоматических наград `queueAndDispatchApprovedReward` передает ее в bonus ledger.
-4. Bonus ledger dispatcher выполняет разрешенную отправку в Langame и сохраняет статусы доставки и аудит.
+1. Первый trusted `POST /guest-portal/session/app-open` атомарно фиксирует `gameActivatedAt`; только события и факты не раньше этой границы допускаются к боевой квалификации.
+2. `APP_OPEN` строит `previousSummary`, а `GuestGamificationPipelineSchedulerService` каждые 15 секунд по умолчанию обрабатывает подготовленные snapshot-факты через `runSnapshotPipelineScheduled`.
+3. После успешного активного правила создаётся идемпотентное игровое событие. Ordinary reward получает `claimRequired=true`, effect `WAITING_CLAIM` и wallet item; event XP сохраняется отдельным XP wallet item без изменения профиля.
+4. Явный claim переводит ordinary wallet item в `PROCESSING`, историю — в `DELIVERY_PROCESSING`, а XP применяет локально и атомарно. Completion ACK этой границы не касается.
+5. Bonus ledger dispatcher выбирает claim-required reward только при доказанном своевременном `deliveryRequestedAt < claimExpiresAt` и связанном wallet item `PROCESSING/FAILED`.
+6. Подтверждённая внешняя доставка завершает reward/wallet. Если запрос во внешний Langame write уже был отправлен, но результат неоднозначен, ledger переходит в `RECONCILIATION_REQUIRED`, wallet остаётся `PROCESSING`, а автоматический и гостевой retry запрещены до сверки.
 
 Scheduler работает внутри `leetplus-api.service`, отдельный systemd unit не нужен. В production он включен автоматически при наличии `SYNC_SERVICE_TOKEN`, если `GUEST_GAME_PIPELINE_SCHEDULER_ENABLED` не задан явно.
 
@@ -61,7 +85,7 @@ Receipt supplemental-очереди использует lease. Просроче
 - `GUEST_GAME_LEDGER_FALLBACK_GRACE_MS`, `...CLAIM_LEASE_MS`, `...INTERVAL_MS` и `...BATCH_SIZE` задают grace-window, lease для восстановления после рестарта, частоту и размер пакета. Grace-window начинается при первом появлении origin receipt.
 - `LIVE` работает в двух fail-closed scope. Legacy canary требует точный tenant, `PROFILE_ID`, `SEASON_ID`, положительный `BATTLE_PASS_STEP` и `LIVE_NOT_BEFORE`. Общий режим игрового времени требует точный tenant, `LIVE_NOT_BEFORE` и явный флаг `GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES=true`; `ALLOW_ALL_TENANTS` в обоих режимах запрещён.
 - `GUEST_GAME_LEDGER_FALLBACK_MISSIONS_ALLOW_ALL_PROFILES=true` сохранён для legacy staged-rollout: он расширяет только активные задания `PLAY_TIME`, оставляя Battle Pass в точном canary scope. Для единого контура заданий, Battle Pass и лутбоксов используется общий `PLAY_TIME_ALLOW_ALL_PROFILES`.
-- `GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES=true` направляет точные факты игрового времени и явно включённые start-факты всех профилей настроенного tenant во все совместимые активные v2-задания, текущие шаги Battle Pass и лутбоксы. Фиксированный сезон или шаг не требуется. Один физический старт имеет стабильный origin key; позднее уточнение «почасовая»/«пакет или абонемент» обогащает уже созданное событие и не может повторно выдать XP, награду или entitlement либо продвинуть следующий шаг Battle Pass. Награды и права открытия создаются существующим идемпотентным pipeline; для лутбокса создаётся только entitlement, случайный приз появляется после ручного открытия. Значение по умолчанию — `false`.
+- `GUEST_GAME_LEDGER_FALLBACK_PLAY_TIME_ALLOW_ALL_PROFILES=true` направляет точные факты игрового времени и явно включённые start-факты всех профилей настроенного tenant во все совместимые активные v2-задания, текущие шаги Battle Pass и лутбоксы. Фиксированный сезон или шаг не требуется. Один физический старт имеет стабильный origin key; позднее уточнение «почасовая»/«пакет или абонемент» обогащает уже созданное событие и не может повторно квалифицировать XP, reward или entitlement либо продвинуть следующий шаг Battle Pass. Ordinary reward/XP материализуются в claim-required wallet item; для лутбокса создаётся только entitlement, случайный приз появляется после ручного открытия. Значение по умолчанию — `false`.
 - `GUEST_GAME_LEDGER_FALLBACK_LIVE_NOT_BEFORE` обязателен для `LIVE` и задаётся валидной UTC ISO-датой, например `2026-07-19T16:30:00.000Z`. Факты раньше cutoff не выбираются, поэтому накопленные `SHADOWED` receipts не могут задним числом породить event, XP или reward после переключения режима.
 - `GUEST_GAME_LEDGER_FALLBACK_ALLOW_ALL_TENANTS` должен оставаться `false`: режим `LIVE` с `true` запрещён и fail-closed. Расширение заданий допускается только внутри явно настроенного tenant.
 
@@ -88,7 +112,7 @@ Rollback не требует удаления данных или отката �
 - `SHADOW` — сохраняет объяснимое решение, но не создаёт entitlement, event, XP, reward или приз;
 - `LIVE` — сохраняет только entitlement через существующую таблицу прав на открытие.
 
-Для `LIVE` обязательны точный tenant, точный profile и `GUEST_GAME_LOOT_BOX_RECOVERY_LIVE_NOT_BEFORE`; `ALLOW_ALL_TENANTS=true` запрещён. Кроме того, чтение entitlement в `game-summary` должно быть включено для той же области через `GUEST_GAME_ENTITLEMENT_READ_MODE=PRIMARY` либо `CANARY` с совпадающими tenant/profile. Иначе scheduler остаётся fail-closed, чтобы не создавать невидимые гостю права.
+Для `LIVE` обязательны точный tenant, точный profile и `GUEST_GAME_LOOT_BOX_RECOVERY_LIVE_NOT_BEFORE`; `ALLOW_ALL_TENANTS=true` запрещён. `GUEST_GAME_ENTITLEMENT_READ_MODE=PRIMARY` либо `CANARY` с совпадающими tenant/profile остаётся явным rollout-guard самого recovery worker. При этом гостевые `game-summary` и open-маршруты всегда entitlement-authoritative: значение `OFF` не возвращает legacy-event authorization и не делает старое право невидимым.
 
 Повторная синхронизация, reparse, restart или retry не создают второе право: receipt, решение и entitlement используют стабильную идентичность исходной сессии. Уже выполненный `DAILY`-кейс не теряет право после окончания дня или временного окна; период ограничивает новое получение, а не срок открытия уже заработанного кейса.
 
@@ -123,37 +147,44 @@ Apply выполняется в `SERIALIZABLE`-транзакции и прек�
 
 Восстановление прав на открытие самостоятельных session-start кейсов управляется отдельным контуром `GUEST_GAME_LOOT_BOX_RECOVERY_*`. Kill switch по умолчанию включён; worker запускается только при явном `GUEST_GAME_LOOT_BOX_RECOVERY_KILL_SWITCH=false`. В `LIVE` допускаются только точный tenant, один profile, валидный `LIVE_NOT_BEFORE`, `EXACT`-факты и стабильный внешний идентификатор сессии. Ожидание точного hourly/package-маркера хранится как `WAITING_CORRELATION`, не расходует лимит ошибок обработки и повторяется с backoff до истечения `LOOKBACK_MS`; `MAX_ATTEMPTS` применяется только после реального claim и ошибки evaluator/persistence. Retry-очередь фильтруется по `GuestActivityFact.profileId` и валидности anchor внутри SQL до `ORDER BY ... LIMIT`, поэтому receipts других профилей не могут вытеснить scoped canary. Этот контур выдаёт только entitlement на ручное открытие `STANDALONE|BOTH` кейса и не выбирает случайный приз.
 
-### P0: атомарность event, XP и плана награды
+### P0: атомарность квалификации, отложенного XP и плана награды
 
 Новый effect-posting контур разделяет фиксацию квалификации и внешние side effects:
 
-1. `GuestGameEvent`, изменение XP профиля, append-only `GuestGameXpPosting` и все `GuestGameRewardIntent` создаются одной короткой транзакцией. Внутри неё нет сетевых вызовов или отправки в Langame.
-2. `GuestGameXpPosting` фиксирует event, идемпотентный ключ, запрошенную/применённую дельту и баланс до/после. Уникальности по `eventId` и `tenantId + idempotencyKey` запрещают повторное XP при retry/replay.
-3. `GuestGameRewardIntent.plan` — неизменяемый снимок решения на момент события: тип и ID правила, точный шаг Battle Pass или выбранный лутбокс и конкретная награда. Retry уже созданного события материализует награду только из этого плана и не выполняет fresh dry-run следующего шага или новый случайный выбор.
-4. После commit materializer создаёт reward идемпотентно. Если reward уже существует, reconciliation восстанавливает только отсутствующие штатные side effects: entitlement лутбокса и постановку в существующий bonus ledger. Внешний provider dispatch из reward-effect materializer не выполняется: его делает только действующий bonus-ledger scheduler со своей очередью, claim/retry и production-флагами.
+1. `GuestGameEvent` и `GuestGameRewardIntent` фиксируют результат квалификации без сетевого вызова. Для claim-required event XP исходное событие хранит нулевую применённую дельту: профиль не меняется до действия гостя.
+2. Запрошенный XP хранится как отдельный wallet item в `claimXpDelta`. Claim выполняется в `SERIALIZABLE`-транзакции: создаёт отдельное событие `REWARD_CLAIMED`, append-only `GuestGameXpPosting`, обновляет XP/level и переводит только этот item в `CLAIMED`. Идемпотентный ключ wallet item запрещает двойное применение.
+3. Если событие содержит reward и XP, создаются два item. Ни materializer, ни completion ACK не имеют права объединить их в одно подтверждение.
+4. `GuestGameRewardIntent.plan` — неизменяемый снимок решения на момент события: тип и ID правила, точный шаг Battle Pass или выбранный лутбокс и конкретная награда. Retry уже созданного события материализует награду только из этого плана и не выполняет fresh dry-run следующего шага или новый случайный выбор.
+5. После commit materializer создаёт обычный reward с `claimRequired=true`; `BONUS_LEDGER_QUEUE` остаётся в `WAITING_CLAIM` до своевременного guest claim. Для лутбокса materializer создаёт entitlement, но не выбирает приз. Внешний provider dispatch из reward-effect materializer не выполняется.
 
-Additive-миграция `20260718180000_guest_game_effect_postings` добавляет `GuestGameXpPosting`, `GuestGameRewardIntent`, внешние ключи, уникальности и queue/claim индексы. Backfill исторических событий не выполняется. Миграция подготовлена в репозитории, но на production ещё не применялась; deploy и применение миграции не являются разрешением включать fallback. `GUEST_GAME_LEDGER_FALLBACK_MODE` и `GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE` должны оставаться `OFF` до отдельного контролируемого rollout.
+Additive-миграция `20260718180000_guest_game_effect_postings` добавляет `GuestGameXpPosting`, `GuestGameRewardIntent`, внешние ключи, уникальности и queue/claim индексы. Backfill исторических событий не выполняется. Deploy и применение миграции сами по себе не являются разрешением включать fallback: `GUEST_GAME_LEDGER_FALLBACK_MODE` и `GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE` должны оставаться `OFF` до отдельного контролируемого rollout.
 
-Additive-миграция `20260718190000_guest_game_reward_effect_outbox` добавляет durable `GuestGameRewardEffect` и dedupe key системного сообщения staff chat. Reward и его начальные эффекты `STAFF_APPROVAL_NOTIFICATION`, `LOOT_BOX_ENTITLEMENT` или `BONUS_LEDGER_QUEUE` фиксируются одной транзакцией. Effect materializer использует `FOR UPDATE SKIP LOCKED`, lease/reclaim, `leaseVersion` как fencing token, retry/backoff и терминальный `DEAD_LETTER`; финализация чужого или устаревшего claim запрещена.
+Additive-миграция `20260718190000_guest_game_reward_effect_outbox` добавляет durable `GuestGameRewardEffect` и dedupe key системного сообщения staff chat. Reward и его начальные эффекты `STAFF_APPROVAL_NOTIFICATION`, `LOOT_BOX_ENTITLEMENT` или `BONUS_LEDGER_QUEUE` фиксируются одной транзакцией; claim-required `BONUS_LEDGER_QUEUE` стартует в `WAITING_CLAIM`. Effect materializer использует `FOR UPDATE SKIP LOCKED`, lease/reclaim, `leaseVersion` как fencing token, retry/backoff и терминальный `DEAD_LETTER`; финализация чужого или устаревшего claim запрещена.
 
-Текущий статус production gate: код автономного materializer готов, но обе миграции подготовлены только в репозитории и на production не применялись. `GuestGameRewardMaterializerSchedulerService` по умолчанию выключен, без tenant scope не запускается, имеет отдельный kill switch и последовательно дренирует intent, затем effect outbox. Поэтому готовность кода не является разрешением deploy/rollout: сначала миграции применяются с `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false`, затем выполняется проверка очередей и только после этого допускается tenant-scoped canary.
+Additive-миграция `20260725213500_guest_game_reward_wallet` добавляет границу первой активации, 30-дневные wallet item и claim-поля reward. Её backfill fail-closed: ранее доставленные rewards, раскрытые коды и уже применённый XP не создают новые `PENDING` item. Backfill entitlement допускается только при точном живом источнике и внутри текущего окна.
+
+Production gate остаётся fail-closed: `GuestGameRewardMaterializerSchedulerService` по умолчанию выключен, без tenant scope не запускается, имеет отдельный kill switch и последовательно дренирует intent, затем effect outbox. Перед tenant-scoped canary нужно подтвердить фактическое состояние миграций и очередей при `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false`; готовность кода сама по себе не разрешает rollout.
 
 Закрытые кодовые P0-gate:
 
 - автономный intent/effect scheduler с `OFF` по умолчанию, обязательным tenant scope, ограниченными batch/interval и независимым kill switch;
 - атомарный конкурентный claim intent и effect через `FOR UPDATE SKIP LOCKED`, lease/reclaim и `leaseVersion` fencing;
-- fault-injection на транзакционных границах event/XP/intent и reward/effect, а также retry/dead-letter для entitlement, approval notification и bonus-ledger queue;
+- fault-injection на транзакционных границах event/XP/intent и reward/effect, безопасный retry/dead-letter до внешнего write и `RECONCILIATION_REQUIRED` без retry после неоднозначного Langame write;
 - restart/retry/replay и конкурентная обработка, при которой materializer читает immutable plan и не переоценивает актуальный шаг Battle Pass или случайный выбор лутбокса;
 - reward-effect materializer не выполняет provider dispatch: эта граница остаётся под отдельным действующим bonus-ledger scheduler.
 
-Оставшийся production gate — операционный: проверить миграции и индексы на production-объёме, задеплоить API при выключенном materializer, подтвердить очереди и метрики, затем провести tenant-scoped canary. В этой реализации production, переменные окружения и база данных не изменялись.
+Операционный gate: проверить миграции и индексы на production-объёме, задеплоить API при выключенном materializer, подтвердить очереди и метрики, затем провести tenant-scoped canary.
 
 ## Гостевой интерфейс
 
 - Страница игры: `/game`; совместимый URL: `/play/game`.
 - Авторизация: `/game/auth`; выбор клуба: `/game/clubs`; история наград: `/game/rewards`.
 - Клиент запрашивает `GET /guest-portal/session/game-summary` раз в 15 секунд.
+- При ненулевом `pendingCount` после шкалы уровня показывается блок кошелька, а в шапке — компактный индикатор. В карточках источников отражается локальный статус. Когда незавершённых item нет, блок и индикатор скрыты.
+- Кнопка `Забрать награды` запускает `claim-all` только для обычных item; для лутбоксов пользователь всегда выбирает конкретный `Открыть контейнер`. `PROCESSING/OPENING` визуально заблокированы, `FAILED` показывает безопасный retry или состояние сверки.
+- История наград является вторичным действием кошелька и показывает `WAITING_CLAIM`, `DELIVERY_PROCESSING`, завершённые и истёкшие результаты без преждевременного кода.
 - После каждого обновления новое summary сравнивается с предыдущим. Новые чек-ин, задания и шаги Battle Pass добавляются в последовательную очередь поздравительных модалок. Следующая модалка открывается только после закрытия предыдущей.
+- Закрытие поздравительной модалки вызывает только notification ACK. Получение происходит исключительно из кошелька.
 - Ошибка чекина и повторный чекин тоже показываются модалкой. Для повтора отображаются время прежней награды и момент следующей доступности по локальному времени клуба.
 
 ## Правила условий
@@ -187,10 +218,12 @@ Detailed migration preflight, runtime flag semantics, sequential deployment, can
 
 1. Убедиться, что активное правило имеет правильный клуб, статус, триггер и лимиты.
 2. Выполнить условие реальным гостем и дождаться следующего обновления summary или нажать штатное обновление.
-3. Проверить, что появилась одна награда в истории и одна поздравительная модалка; для нескольких результатов модалки должны показываться по очереди.
-4. Для Battle Pass проверить смену текущего шага и автоматическую награду. Для лутбокса проверить, что он лишь разблокирован до ручного открытия.
-5. При расхождении открыть диагностику игрового журнала: факт Langame, решение правила, reward/ledger статус и время клуба.
-6. Для supplemental rollout сначала задеплоить с режимом `OFF`, затем включить `SHADOW` и подтвердить отсутствие наград. Только после проверки freshness, replay и mismatch включать `LIVE`; при любой аномалии вернуть `OFF` без удаления фактов или миграций.
-7. Перед применением `20260718180000_guest_game_effect_postings` и `20260718190000_guest_game_reward_effect_outbox` проверить время блокировок и конфликтующие дубли. API и миграции сначала разворачиваются с `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false`; отсутствие tenant scope также должно удерживать scheduler в fail-closed состоянии.
-8. При выключенных processors проверить создание одной связки `event + XP posting + reward intent` и durable effect без внешней отправки, затем задать один tenant scope и включить materializer canary. `BONUS_LEDGER_QUEUE` должен только поставить запись в ledger; Langame provider dispatch проверяется отдельно через существующий bonus-ledger scheduler.
-9. Во время canary проверить reclaim просроченного lease, fencing устаревшего worker, retry/dead-letter и восстановление ровно одного reward со штатными side effects из исходного immutable plan. Kill switch должен остановить новые claims без удаления очереди; откат выполняется переводом `GUEST_GAME_REWARD_MATERIALIZER_ENABLED=false` или kill switch в `true`.
+3. Проверить, что квалификация создала ожидаемые wallet item: отдельный ordinary reward и отдельный XP item при mixed результате. До claim XP/уровень, внешний баланс и код не должны измениться.
+4. Закрыть поздравительную модалку и убедиться, что item остался `PENDING/WAITING_CLAIM`. Затем выполнить exact claim и проверить переход `PROCESSING/DELIVERY_PROCESSING` к подтверждённому результату ровно один раз.
+5. Для Battle Pass проверить смену текущего шага отдельно от получения награды. Для лутбокса проверить `AVAILABLE → OPENING → CONSUMED`, отсутствие открытия через `claim-all` и единственный random roll.
+6. Проверить границы TTL: `PENDING` за миллисекунду до deadline доступен, на deadline истекает; принятый до deadline `PROCESSING/FAILED` не удаляется после него. Старые уже доставленные reward/XP не появляются в кошельке.
+7. При расхождении открыть диагностику игрового журнала: факт, решение правила, `WAITING_CLAIM/DELIVERY_PROCESSING`, wallet/ledger статус и время клуба. Неоднозначный Langame write должен остановиться в `RECONCILIATION_REQUIRED` без второго внешнего запроса.
+8. Для supplemental rollout сначала задеплоить с режимом `OFF`, затем включить `SHADOW` и подтвердить отсутствие наград. Только после проверки freshness, replay и mismatch включать `LIVE`; при любой аномалии вернуть `OFF` без удаления фактов или миграций.
+9. Перед применением `20260718180000_guest_game_effect_postings`, `20260718190000_guest_game_reward_effect_outbox` и `20260725213500_guest_game_reward_wallet` проверить время блокировок и конфликтующие дубли. API и миграции сначала разворачиваются с processors в fail-closed конфигурации.
+10. При выключенных processors проверить создание одной квалификации, отдельных wallet item и `WAITING_CLAIM` effect без XP/внешней отправки; затем задать один tenant scope и включить materializer canary.
+11. Во время canary проверить leases/fencing, безопасный retry до внешнего write, отсутствие retry после неоднозначного write и восстановление ровно одного результата из immutable plan.

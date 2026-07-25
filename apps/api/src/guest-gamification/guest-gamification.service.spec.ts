@@ -23,6 +23,7 @@ import {
   GuestGamificationService,
   guestGameExactReconciliationDeliveryState,
   guestGameExactXpTopUpPlan,
+  guestGameRewardUsesBonusLedger,
   type GuestGameDryRunResult,
   type GuestGameEvent,
   type GuestGameLootBox,
@@ -36,6 +37,19 @@ import {
   type GuestGameSnapshotFact,
   type GuestGameXpRuleAttribution,
 } from './guest-gamification.service';
+
+describe('reward delivery plan', () => {
+  it.each([
+    ['BONUS_BALANCE', true],
+    ['bonus', true],
+    ['LANGAME_BALANCE', true],
+    ['PROMOCODE', false],
+    ['LOOT_BOX_ENTITLEMENT', false],
+    ['PHYSICAL_GIFT', false],
+  ])('maps %s to bonus-ledger delivery=%s', (rewardType, expected) => {
+    expect(guestGameRewardUsesBonusLedger(rewardType)).toBe(expected);
+  });
+});
 
 describe('exact reconciliation invariants', () => {
   const xpAttribution = (
@@ -166,6 +180,7 @@ function createPrismaMock() {
       create: jest.fn().mockResolvedValue({}),
     },
     guestGameEntitlement: {
+      count: jest.fn().mockResolvedValue(0),
       findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn().mockResolvedValue({}),
@@ -216,6 +231,10 @@ function createPrismaMock() {
       updateMany: jest.fn(),
     },
     guestGameCompletionNotification: {
+      upsert: jest.fn().mockResolvedValue({}),
+    },
+    guestGameRewardWalletItem: {
+      count: jest.fn().mockResolvedValue(0),
       upsert: jest.fn().mockResolvedValue({}),
     },
     guestGameDelivery: {
@@ -321,6 +340,7 @@ function createPrismaMock() {
     },
     guestBonusLedgerEntry: {
       count: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn(),
     },
     $transaction: jest.fn(function (
@@ -382,7 +402,14 @@ function createService(
     getRuntimeStatus: jest.fn(() => schedulerStatus),
   };
   const bonusLedgerService = {
-    queueApprovedRewards: jest.fn().mockResolvedValue({ queued: 0 }),
+    queueApprovedRewards: jest.fn().mockResolvedValue({
+      checkedRewards: 0,
+      queued: 0,
+      skipped: 0,
+      rewardTypes: [],
+      items: [],
+      note: 'mock queue',
+    }),
     dispatch: jest.fn().mockResolvedValue({ confirmed: 0 }),
   };
   const configService = {
@@ -1905,6 +1932,9 @@ function rewardResult(
     rewardDropChance: null,
     rewardCode: 'LP-TEST',
     claimPayload: 'LEETPLUS_REWARD:reward-1:LP-TEST',
+    claimRequired: false,
+    deliveryRequestedAt: null,
+    claimExpiresAt: null,
     qualifiedAt: isoNow,
     expiresAt: null,
     paidAt: null,
@@ -2291,6 +2321,9 @@ function rewardRow(overrides: Record<string, unknown> = {}) {
     rewardRarityLabel: null,
     rewardDropChance: null,
     rewardCode: 'LP-100',
+    claimRequired: false,
+    deliveryRequestedAt: null,
+    claimExpiresAt: null,
     qualifiedAt: now,
     expiresAt: null,
     paidAt: null,
@@ -2981,11 +3014,33 @@ describe('GuestGamificationService', () => {
         },
       ]);
       prisma.guestGameReward.findFirst.mockResolvedValue(approvedReward);
+      bonusLedgerService.queueApprovedRewards.mockResolvedValue({
+        checkedRewards: 1,
+        queued: 1,
+        skipped: 0,
+        rewardTypes: ['BONUS'],
+        items: [
+          {
+            rewardId: approvedReward.id,
+            status: 'QUEUED',
+            reason: null,
+            externalDomain: 'club-1',
+            externalGuestId: null,
+            amount: 50,
+          },
+        ],
+        note: 'queued',
+      });
 
-      await service.materializeRewardEffects(user, {
+      const result = await service.materializeRewardEffects(user, {
         rewardId: approvedReward.id,
       });
 
+      expect(result).toMatchObject({
+        applied: 1,
+        failed: 0,
+        rewardIds: [approvedReward.id],
+      });
       expect(bonusLedgerService.queueApprovedRewards).toHaveBeenCalledWith(
         user,
         {
@@ -3381,7 +3436,9 @@ describe('GuestGamificationService', () => {
 
       prisma.$queryRaw
         .mockResolvedValueOnce([claim(1, 1)])
-        .mockResolvedValueOnce([claim(2, 2)]);
+        .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }])
+        .mockResolvedValueOnce([claim(2, 2)])
+        .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }]);
       prisma.guestGameReward.findFirst.mockResolvedValue(entitlementReward);
       prisma.guestGameLootBox.findFirst.mockResolvedValue({
         id: 'loot-box-template',
@@ -3436,7 +3493,23 @@ describe('GuestGamificationService', () => {
       prisma.guestGameReward.findFirst.mockResolvedValue(bonusReward);
       bonusLedgerService.queueApprovedRewards
         .mockRejectedValueOnce(new Error('ledger unavailable'))
-        .mockResolvedValueOnce({ queued: 1 });
+        .mockResolvedValueOnce({
+          checkedRewards: 1,
+          queued: 1,
+          skipped: 0,
+          rewardTypes: ['BONUS_BALANCE'],
+          items: [
+            {
+              rewardId: bonusReward.id,
+              status: 'QUEUED',
+              reason: null,
+              externalDomain: 'club-1',
+              externalGuestId: null,
+              amount: 50,
+            },
+          ],
+          note: 'queued',
+        });
 
       const failed = await service.materializeRewardEffects(user, {
         rewardId: bonusReward.id,
@@ -3463,6 +3536,87 @@ describe('GuestGamificationService', () => {
       expect(bonusLedgerService.dispatch).not.toHaveBeenCalled();
       expect(langameClient.postEndpoint).not.toHaveBeenCalled();
       expect(langameClient.listTransactions).not.toHaveBeenCalled();
+    });
+
+    it('keeps a claimed balance reward failed when no durable ledger entry can be queued', async () => {
+      const { service, prisma, bonusLedgerService } = createService();
+      const bonusReward = rewardRow({
+        id: 'reward-missing-phone',
+        status: 'APPROVED',
+        rewardType: 'BONUS_BALANCE',
+        rewardAmount: new Prisma.Decimal(50),
+      });
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          id: 'effect-missing-phone',
+          rewardId: bonusReward.id,
+          effectKind: 'BONUS_LEDGER_QUEUE',
+          payload: {},
+          attempts: 1,
+          leaseVersion: 1,
+        },
+      ]);
+      prisma.guestGameReward.findFirst.mockResolvedValue(bonusReward);
+      prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue(null);
+      bonusLedgerService.queueApprovedRewards.mockResolvedValue({
+        checkedRewards: 1,
+        queued: 0,
+        skipped: 1,
+        rewardTypes: ['BONUS_BALANCE'],
+        items: [
+          {
+            rewardId: bonusReward.id,
+            status: 'SKIPPED',
+            reason: 'Guest has no decryptable phone.',
+            externalDomain: 'club-1',
+            externalGuestId: null,
+            amount: 50,
+          },
+        ],
+        note: 'not queued',
+      });
+
+      const result = await service.materializeRewardEffects(user, {
+        rewardId: bonusReward.id,
+      });
+
+      expect(result).toMatchObject({ failed: 1, applied: 0, rewardIds: [] });
+      expect(prisma.guestBonusLedgerEntry.findFirst).toHaveBeenCalledWith({
+        where: {
+          tenantId: user.tenantId,
+          rewardId: bonusReward.id,
+          source: 'GAMIFICATION_REWARD',
+          status: {
+            in: [
+              'PENDING',
+              'FAILED',
+              'PROCESSING',
+              'DISPATCHING',
+              'RECONCILIATION_REQUIRED',
+              'CONFIRMED',
+            ],
+          },
+        },
+        select: { id: true },
+      });
+      expect(prisma.guestGameRewardEffect.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'effect-missing-phone',
+            status: 'PROCESSING',
+            leaseVersion: 1,
+          }),
+          data: expect.objectContaining({
+            status: 'FAILED',
+            lastError: 'Guest has no decryptable phone.',
+          }),
+        }),
+      );
+      expect(prisma.guestGameRewardEffect.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'APPLIED' }),
+        }),
+      );
     });
 
     it('does not finalize an effect after losing its lease fence', async () => {
@@ -6797,6 +6951,155 @@ describe('GuestGamificationService', () => {
     });
   });
 
+  describe('lootbox wallet lifecycle guard', () => {
+    it('blocks a semantic lootbox update while an unopened wallet right is live', async () => {
+      const { service, prisma } = createService();
+      const row = {
+        ...activeLootBox({
+          id: 'loot-live',
+          rewardLabel: 'Old prize',
+          storeIds: ['store-1'],
+        }),
+        tenantId: user.tenantId,
+        createdAt: now,
+        updatedAt: now,
+        createdByUser: null,
+      };
+      prisma.guestGameLootBox.findFirst.mockResolvedValue(row);
+      prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
+
+      await expect(
+        service.updateLootBox(user, 'loot-live', {
+          rewardLabel: 'Changed prize',
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'LOOT_BOX_HAS_LIVE_WALLET_ENTITLEMENTS',
+          pendingEntitlements: 1,
+        }),
+      });
+
+      expect(prisma.guestGameRewardWalletItem.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          tenantId: user.tenantId,
+          kind: 'LOOT_BOX_ENTITLEMENT',
+          OR: [
+            { status: 'OPENING' },
+            {
+              status: 'PENDING',
+              expiresAt: { gt: expect.any(Date) },
+            },
+          ],
+          entitlement: {
+            is: expect.objectContaining({
+              tenantId: user.tenantId,
+              ruleId: 'loot-live',
+            }),
+          },
+        }),
+      });
+      expect(prisma.guestGameLootBox.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps display-only lootbox edits available while a wallet right is live', async () => {
+      const { service, prisma } = createService();
+      const row = {
+        ...activeLootBox({
+          id: 'loot-live',
+          name: 'Old display name',
+          storeIds: ['store-1'],
+        }),
+        tenantId: user.tenantId,
+        createdAt: now,
+        updatedAt: now,
+        createdByUser: null,
+      };
+      prisma.guestGameLootBox.findFirst.mockResolvedValue(row);
+      prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
+      prisma.guestGameLootBox.update.mockResolvedValue({
+        ...row,
+        name: 'New display name',
+      });
+
+      await service.updateLootBox(user, 'loot-live', {
+        name: 'New display name',
+      });
+
+      expect(prisma.guestGameRewardWalletItem.count).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.update).toHaveBeenCalled();
+    });
+
+    it('blocks restart and delete while an unopened wallet right is live', async () => {
+      const { service, prisma } = createService();
+      const row = {
+        ...activeLootBox({ id: 'loot-live', storeIds: ['store-1'] }),
+        tenantId: user.tenantId,
+      };
+      prisma.guestGameLootBox.findFirst.mockResolvedValue(row);
+      prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
+
+      await expect(
+        service.restartLootBox(user, 'loot-live'),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'LOOT_BOX_HAS_LIVE_WALLET_ENTITLEMENTS',
+        }),
+      });
+      await expect(
+        service.deleteLootBox(user, 'loot-live', { force: true }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'LOOT_BOX_HAS_LIVE_WALLET_ENTITLEMENTS',
+        }),
+      });
+
+      expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not let visual reconciliation detach a live entitlement rule', async () => {
+      const { service, prisma } = createService();
+      jest
+        .spyOn(service as any, 'getPilotStores')
+        .mockResolvedValue([visualEditorStore()]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({
+          id: 'loot-live',
+          storeIds: ['store-1'],
+        }),
+      ]);
+      prisma.guestGameLootBox.findFirst.mockResolvedValue(
+        activeLootBox({
+          id: 'loot-live',
+          storeIds: ['store-1'],
+        }),
+      );
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getPromoCards').mockResolvedValue([]);
+      prisma.guestGameRewardWalletItem.count.mockResolvedValue(1);
+
+      await expect(
+        (service as any).reconcilePublishedVisualEditorPayload(
+          user,
+          'store-1',
+          visualEditorPayload({
+            battlePass: {
+              ...visualEditorPayload().battlePass,
+              enabled: false,
+            },
+            lootBoxes: [],
+          }),
+        ),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'LOOT_BOX_HAS_LIVE_WALLET_ENTITLEMENTS',
+        }),
+      });
+      expect(prisma.guestGameLootBox.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('restartLootBox', () => {
     it('resets lootbox limits from now and closes unfinished rewards', async () => {
       const { service, prisma } = createService();
@@ -8023,6 +8326,140 @@ describe('GuestGamificationService', () => {
       ]);
     });
 
+    it('treats an exact wallet entitlement as authoritative after qualification', async () => {
+      const { service, prisma } = createService();
+      const changedRule = activeLootBox({
+        id: 'loot-entitled',
+        storeIds: ['store-1'],
+        triggerKind: 'PLAY_HOUR',
+        sessionType: 'packet_hours',
+        audience: {
+          id: 'audience-vip',
+          name: 'VIP',
+          description: null,
+          guestsCount: 1,
+        },
+        periodRules: {
+          weekdays: [0],
+          hours: ['23:00-23:30'],
+          minSessionMinutes: 180,
+        },
+        limits: {
+          periodicLimit: 'DAILY',
+          perGuestPerWeek: 1,
+          totalPerDay: 1,
+        },
+        budgetAmount: 1,
+      });
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337 Pushkinskaya',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([changedRule]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([
+        rewardRow({
+          id: 'reward-existing',
+          lootBoxId: 'loot-entitled',
+          rewardAmount: new Prisma.Decimal(50),
+        }),
+      ]);
+      jest
+        .spyOn(service as any, 'getDryRunAudienceMemberIds')
+        .mockResolvedValue(new Set());
+      prisma.guestGameEntitlement.findMany.mockResolvedValue([
+        {
+          id: 'entitlement-existing',
+          ruleId: 'loot-entitled',
+          status: 'AVAILABLE',
+          rewardId: null,
+          profileId: 'profile-1',
+          guestId: 'guest-1',
+          qualifiedAt: now,
+          evidence: null,
+        },
+      ]);
+
+      const input = {
+        lootBoxId: 'loot-entitled',
+        profileId: 'profile-1',
+        storeId: 'store-1',
+        eventType: 'APP_OPEN',
+        occurredAt: '2026-06-10T10:00:00.000Z',
+        sessionType: 'HOURLY',
+        sessionMinutes: 0,
+      };
+      const ordinary = await service.dryRun(user, input);
+      const entitled = await service.dryRun(user, input, {
+        prequalifiedLootBoxOpen: {
+          tenantId: 'tenant-1',
+          entitlementId: 'entitlement-wallet',
+          ruleId: 'loot-entitled',
+          profileId: 'profile-1',
+          storeId: 'store-1',
+        },
+      } as any);
+
+      expect(ordinary.rules[0]).toMatchObject({
+        id: 'loot-entitled',
+        eligible: false,
+      });
+      expect(ordinary.rules[0].blockers.length).toBeGreaterThan(1);
+      expect(entitled.rules[0]).toMatchObject({
+        id: 'loot-entitled',
+        eligible: true,
+        blockers: [],
+        reasons: expect.arrayContaining([
+          'The exact reward-wallet entitlement was prequalified at issuance.',
+        ]),
+      });
+    });
+
+    it('rejects a prequalified entitlement proof outside its exact scope', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service as any, 'assertStore').mockResolvedValue({
+        id: 'store-1',
+        name: '1337 Pushkinskaya',
+        timeZone: 'Asia/Yekaterinburg',
+      });
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([
+        activeLootBox({ id: 'loot-entitled', storeIds: ['store-1'] }),
+      ]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+
+      await expect(
+        service.dryRun(
+          user,
+          {
+            lootBoxId: 'loot-entitled',
+            profileId: 'profile-1',
+            storeId: 'store-1',
+            eventType: 'SESSION_START',
+          },
+          {
+            prequalifiedLootBoxOpen: {
+              tenantId: 'tenant-1',
+              entitlementId: 'entitlement-wallet',
+              ruleId: 'loot-other',
+              profileId: 'profile-1',
+              storeId: 'store-1',
+            },
+          } as any,
+        ),
+      ).rejects.toThrow('scope does not match');
+    });
+
     it('checks mission weekday limits in the selected club timezone', async () => {
       const { service } = createService();
 
@@ -9164,6 +9601,74 @@ describe('GuestGamificationService', () => {
         },
       });
     });
+
+    it.each([
+      [
+        'unactivated profile',
+        null,
+        isoNow,
+        'Игровой модуль ещё не активирован',
+      ],
+      [
+        'backdated event',
+        '2026-06-10T10:00:01.000Z',
+        isoNow,
+        'Событие произошло до первого открытия игрового модуля',
+      ],
+    ] as const)(
+      'blocks APP_OPEN eligibility and projected effects for an %s',
+      async (_, gameActivatedAt, occurredAt, blocker) => {
+        const { service } = createService();
+
+        jest
+          .spyOn(service as any, 'resolveDryRunProfile')
+          .mockResolvedValue(profileFixture({ gameActivatedAt }));
+        jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+        jest.spyOn(service, 'getMissions').mockResolvedValue([
+          activeMission({
+            missionType: 'APP_OPEN',
+            triggerKind: 'APP_OPEN',
+            progressTarget: 1,
+            progressUnit: 'открытие',
+            definitionVersion: 2,
+            conditions: {
+              schemaVersion: 2,
+              source: 'mission_wizard',
+              taskType: 'APP_OPEN',
+              visibility: 'VISIBLE',
+              sessionType: 'ANY',
+              metric: {
+                aggregation: 'exists',
+                eventTypes: ['APP_OPEN'],
+                target: 1,
+                unit: 'открытие',
+              },
+            },
+          }),
+        ]);
+        jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+        jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+        jest
+          .spyOn(service as any, 'getDryRunProgressEvents')
+          .mockResolvedValue([]);
+
+        const result = await service.dryRun(user, {
+          eventType: 'APP_OPEN',
+          occurredAt,
+        });
+
+        expect(result.rules[0]).toMatchObject({
+          kind: 'MISSION',
+          eligible: false,
+          blockers: expect.arrayContaining([expect.stringContaining(blocker)]),
+        });
+        expect(result.summary).toMatchObject({
+          eligibleRules: 0,
+          estimatedRewardAmount: 0,
+          projectedXpDelta: 0,
+        });
+      },
+    );
 
     it('evaluates a Battle Pass play-time step with the mission wizard v2 contract', async () => {
       const { service } = createService();
@@ -12559,8 +13064,17 @@ describe('GuestGamificationService', () => {
         },
       ]);
       prisma.guestGameLootBox.findMany.mockResolvedValue([
-        { id: 'reward-lootbox', name: 'Ежедневный шанс' },
+        {
+          id: 'reward-lootbox',
+          name: 'Ежедневный шанс',
+          updatedAt: now,
+        },
       ]);
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'reward-lootbox',
+        name: 'Ежедневный шанс',
+        updatedAt: now,
+      });
 
       await service.recordRuleDecisions(user, missionRun, {
         eventId: 'mission-event-1',
@@ -12575,7 +13089,7 @@ describe('GuestGamificationService', () => {
           status: 'ACTIVE',
           usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
         },
-        select: { id: true, name: true },
+        select: { id: true, name: true, updatedAt: true },
       });
       expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -12743,8 +13257,17 @@ describe('GuestGamificationService', () => {
         },
       ]);
       prisma.guestGameLootBox.findMany.mockResolvedValue([
-        { id: 'reward-lootbox', name: 'Daily reward lootbox' },
+        {
+          id: 'reward-lootbox',
+          name: 'Daily reward lootbox',
+          updatedAt: now,
+        },
       ]);
+      prisma.guestGameLootBox.findFirst.mockResolvedValue({
+        id: 'reward-lootbox',
+        name: 'Daily reward lootbox',
+        updatedAt: now,
+      });
       const run = dryRunResult({
         occurredAt: '2026-06-10T18:55:00.000Z',
         store: {
@@ -12837,7 +13360,7 @@ describe('GuestGamificationService', () => {
           status: 'ACTIVE',
           usageKind: { in: ['REWARD_TEMPLATE', 'BOTH'] },
         },
-        select: { id: true, name: true },
+        select: { id: true, name: true, updatedAt: true },
       });
       expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledTimes(2);
       expect(prisma.guestGameEntitlement.upsert).toHaveBeenNthCalledWith(
@@ -13565,6 +14088,7 @@ describe('GuestGamificationService', () => {
         user,
         expect.objectContaining({ xpDelta: 0 }),
         'origin-exact-new',
+        null,
       );
       const exactCreateInput = createProcessEvent.mock.calls[0]?.[1] as {
         payload?: Record<string, unknown>;
@@ -13929,6 +14453,7 @@ describe('GuestGamificationService', () => {
         user,
         expect.objectContaining({ xpDelta: 0 }),
         'origin-step-race',
+        null,
       );
       expect(result).toMatchObject({
         dryRun: { rules: [] },
@@ -13982,6 +14507,7 @@ describe('GuestGamificationService', () => {
           source: 'API_IMPORT',
         }),
         sessionOriginKey,
+        null,
       );
       expect(result.summary).toMatchObject({
         profileCreated: false,
@@ -14169,6 +14695,7 @@ describe('GuestGamificationService', () => {
           }),
         }),
         sessionOriginKey,
+        null,
       );
       expect(prisma.guestGameEntitlement.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -15356,10 +15883,16 @@ describe('GuestGamificationService', () => {
         new Map([['MISSION:mission-1:BONUS', intentIdempotencyKey]]),
       );
 
-      expect(createRewardSpy).toHaveBeenCalledWith(user, expect.any(Object), {
-        originKey: null,
-        idempotencyKey: intentIdempotencyKey,
-      });
+      expect(createRewardSpy).toHaveBeenCalledWith(
+        user,
+        expect.any(Object),
+        expect.objectContaining({
+          originKey: null,
+          idempotencyKey: intentIdempotencyKey,
+          claimRequired: true,
+          claimExpiresAt: new Date('2026-07-10T10:00:00.000Z'),
+        }),
+      );
       expect(prisma.guestGameReward.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
@@ -16750,6 +17283,9 @@ describe('GuestGamificationService', () => {
       const pending = rewardRow({
         id: 'reward-mission-pending',
         status: 'PENDING',
+        claimRequired: true,
+        deliveryRequestedAt: null,
+        claimExpiresAt: new Date('2026-07-10T10:00:00.000Z'),
         missionId: 'mission-1',
         mission,
         rewardType: 'BONUS_BALANCE',
@@ -16760,6 +17296,9 @@ describe('GuestGamificationService', () => {
       const approved = rewardRow({
         id: 'reward-mission-pending',
         status: 'APPROVED',
+        claimRequired: true,
+        deliveryRequestedAt: null,
+        claimExpiresAt: new Date('2026-07-10T10:00:00.000Z'),
         approvedByUserId: user.id,
         missionId: 'mission-1',
         mission,
@@ -16767,6 +17306,14 @@ describe('GuestGamificationService', () => {
         rewardAmount: new Prisma.Decimal(50),
         rewardLabel: '50 bonus points',
         rewardCode: 'LP-50',
+        profile: {
+          id: 'profile-1',
+          displayName: 'Guest One',
+          contactMasked: '+7 *** **-11',
+          xp: 120,
+          level: 2,
+          gameActivatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
       });
 
       prisma.guestGameReward.findFirst.mockResolvedValue(pending);
@@ -16800,10 +17347,30 @@ describe('GuestGamificationService', () => {
           expect.objectContaining({
             rewardId: 'reward-mission-pending',
             effectKind: 'BONUS_LEDGER_QUEUE',
-            status: 'PENDING',
+            status: 'WAITING_CLAIM',
           }),
         ],
         skipDuplicates: true,
+      });
+      expect(prisma.guestGameRewardWalletItem.upsert).toHaveBeenCalledWith({
+        where: {
+          tenantId_rewardId: {
+            tenantId: user.tenantId,
+            rewardId: 'reward-mission-pending',
+          },
+        },
+        create: expect.objectContaining({
+          tenantId: user.tenantId,
+          profileId: 'profile-1',
+          rewardId: 'reward-mission-pending',
+          sourceKind: 'MISSION',
+          sourceId: 'mission-1',
+          title: 'Visit mission',
+          status: 'PENDING',
+          availableAt: now,
+          expiresAt: new Date('2026-07-10T10:00:00.000Z'),
+        }),
+        update: {},
       });
       expect(bonusLedgerService.queueApprovedRewards).not.toHaveBeenCalled();
       expect(bonusLedgerService.dispatch).not.toHaveBeenCalled();
@@ -16941,6 +17508,77 @@ describe('GuestGamificationService', () => {
   });
 
   describe('prepareDeliveries', () => {
+    it('hides wallet-managed reward codes and excludes them from legacy delivery preparation', async () => {
+      const { service, prisma } = createService();
+      const walletReward = rewardRow({
+        claimRequired: true,
+        deliveryRequestedAt: now,
+        claimExpiresAt: new Date('2026-07-10T10:00:00.000Z'),
+      });
+      prisma.guestGameReward.findMany.mockResolvedValue([walletReward]);
+
+      const mappedRewards = await service.getRewards(user, { take: null });
+
+      expect(mappedRewards[0]).toMatchObject({
+        id: 'reward-1',
+        claimRequired: true,
+        rewardCode: null,
+        claimPayload: null,
+      });
+
+      jest.spyOn(service, 'getProfiles').mockResolvedValue([profileFixture()]);
+      jest.spyOn(service, 'getRewards').mockResolvedValue(mappedRewards);
+
+      const result = await service.prepareDeliveries(user, {
+        includeBlocked: true,
+      });
+
+      expect(result).toEqual({
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        deliveries: [],
+      });
+      expect(prisma.guestGameDelivery.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps legacy reward code delivery unchanged when claimRequired is false', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameReward.findMany.mockResolvedValue([rewardRow()]);
+
+      const mappedRewards = await service.getRewards(user, { take: null });
+
+      expect(mappedRewards[0]).toMatchObject({
+        id: 'reward-1',
+        claimRequired: false,
+        rewardCode: 'LP-100',
+        claimPayload: 'LEETPLUS_REWARD:reward-1:LP-100',
+      });
+    });
+
+    it('revalidates claimRequired under a reward row lock before preparing a legacy delivery', async () => {
+      const { service, prisma } = createService();
+      jest.spyOn(service, 'getProfiles').mockResolvedValue([profileFixture()]);
+      jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
+      prisma.$queryRaw.mockResolvedValue([{ claimRequired: true }]);
+
+      const result = await service.prepareDeliveries(user, {
+        includeBlocked: true,
+      });
+
+      expect(result).toEqual({
+        created: 0,
+        updated: 0,
+        skipped: 1,
+        deliveries: [],
+      });
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameDelivery.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+    });
+
     it.each(['SENT', 'FAILED', 'CANCELED'] as const)(
       'does not overwrite terminal %s deliveries during outbox refresh',
       async (status) => {
@@ -16959,6 +17597,7 @@ describe('GuestGamificationService', () => {
           .spyOn(service as any, 'createDeliveryEvent')
           .mockResolvedValue(null);
         prisma.guestGameDelivery.findFirst.mockResolvedValue(sentDelivery);
+        prisma.$queryRaw.mockResolvedValue([{ claimRequired: false }]);
 
         const result = await service.prepareDeliveries(user, {
           includeBlocked: true,
@@ -16984,6 +17623,7 @@ describe('GuestGamificationService', () => {
       jest.spyOn(service, 'getProfiles').mockResolvedValue([profileFixture()]);
       jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
       jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+      prisma.$queryRaw.mockResolvedValue([{ claimRequired: false }]);
       prisma.guestGameDelivery.findFirst.mockResolvedValue(
         deliveryRow({
           status: 'BLOCKED',
@@ -17050,6 +17690,7 @@ describe('GuestGamificationService', () => {
           note: 'retry after provider fix',
         }),
       );
+      prisma.$queryRaw.mockResolvedValue([{ claimRequired: false }]);
       jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
 
       const result = await service.updateDelivery(user, 'delivery-1', {
@@ -17088,6 +17729,31 @@ describe('GuestGamificationService', () => {
         }),
       );
     });
+
+    it.each(['READY', 'SENT'] as const)(
+      'blocks manual %s when a fresh locked reward is wallet-managed',
+      async (nextStatus) => {
+        const { service, prisma } = createService();
+        prisma.guestGameDelivery.findFirst.mockResolvedValue(
+          deliveryRow({
+            status: nextStatus === 'READY' ? 'FAILED' : 'READY',
+            failedAt: nextStatus === 'READY' ? now : null,
+            reward: rewardRow({ claimRequired: false }),
+          }),
+        );
+        prisma.$queryRaw.mockResolvedValue([{ claimRequired: true }]);
+
+        await expect(
+          service.updateDelivery(user, 'delivery-1', {
+            status: nextStatus,
+          }),
+        ).rejects.toBeInstanceOf(ConflictException);
+
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+        expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
+      },
+    );
 
     it.each(['SENT', 'CANCELED'] as const)(
       'does not return terminal %s delivery to READY manually',
@@ -17142,6 +17808,65 @@ describe('GuestGamificationService', () => {
   });
 
   describe('dispatchDeliveries', () => {
+    it('blocks a wallet-managed reward returned by a stale legacy outbox query', async () => {
+      const { service, prisma } = createService();
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('wallet-managed reward must not be sent'));
+      prisma.guestGameDelivery.findMany.mockResolvedValue([
+        deliveryRow({
+          reward: rewardRow({
+            claimRequired: true,
+            deliveryRequestedAt: now,
+            claimExpiresAt: new Date('2026-07-10T10:00:00.000Z'),
+          }),
+        }),
+      ]);
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+      jest.spyOn(service, 'getDeliveries').mockResolvedValue([]);
+
+      const result = await service.dispatchDeliveries(user, { dryRun: true });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            reward: { is: { claimRequired: false } },
+          }),
+        }),
+      );
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+        user,
+        'delivery-1',
+        'reward-1',
+        expect.objectContaining({
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: 'READY',
+          toStatus: 'READY',
+          channel: 'TELEGRAM',
+          payload: expect.objectContaining({
+            reason: 'wallet_managed_reward',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        checked: 1,
+        sent: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: 1,
+        items: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            rewardId: 'reward-1',
+            status: 'BLOCKED',
+          }),
+        ],
+      });
+      expect(JSON.stringify(result)).not.toContain('LP-100');
+    });
+
     it('records dispatcher dry-run events without sending or mutating deliveries', async () => {
       const { service, prisma } = createService();
 
@@ -17612,6 +18337,7 @@ describe('GuestGamificationService', () => {
             status: 'READY',
             readinessStatus: 'READY_FOR_BOT',
             channel: { in: ['TELEGRAM'] },
+            reward: { is: { claimRequired: false } },
           }),
         }),
       );
@@ -17651,6 +18377,40 @@ describe('GuestGamificationService', () => {
           expiresAt: null,
         },
       });
+    });
+
+    it('filters a wallet-managed reward returned by a stale bot outbox query', async () => {
+      const { service, prisma } = createService();
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      prisma.guestGameDelivery.findMany.mockResolvedValue([
+        deliveryRow({
+          reward: rewardRow({
+            claimRequired: true,
+            deliveryRequestedAt: now,
+            claimExpiresAt: new Date('2026-07-10T10:00:00.000Z'),
+          }),
+        }),
+      ]);
+
+      const result = await service.pullBotDeliveries({
+        tenantSlug: user.tenantSlug,
+        channels: 'telegram',
+      });
+
+      expect(prisma.guestGameDelivery.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            reward: { is: { claimRequired: false } },
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        checked: 1,
+        ready: 0,
+        skipped: 1,
+        items: [],
+      });
+      expect(JSON.stringify(result)).not.toContain('LP-100');
     });
 
     it('acks bot delivery result and records a sanitized audit event', async () => {

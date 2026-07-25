@@ -14,8 +14,12 @@ import type {
 } from "react";
 import type {
   GuestPortalCheckInResponse,
+  GuestPortalClubSelectResponse,
   GuestPortalGameSummary,
   GuestPortalLootBoxRarity,
+  GuestPortalRewardWallet,
+  GuestPortalRewardWalletHistoryItem,
+  GuestPortalRewardWalletItem,
 } from "@/lib/guest-portal";
 import {
   isHttpExternalActionUrl,
@@ -33,8 +37,15 @@ type LoadState = "loading" | "ready" | "empty" | "error";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
 type GameRewardWalletState =
   GuestPortalGameSummary["rewards"]["recent"][number]["walletState"];
-type GameRewardHistoryItem =
-  GuestPortalGameSummary["rewards"]["recent"][number];
+type GameRewardHistoryItem = Omit<
+  GuestPortalGameSummary["rewards"]["recent"][number],
+  "sourceKind"
+> & {
+  sourceKind: GuestPortalRewardWalletItem["sourceKind"];
+  storeId: string | null;
+  storeName: string | null;
+  claimedAt: string | null;
+};
 type GameBonusHistoryItem =
   GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
 type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
@@ -77,6 +88,8 @@ type HomeLootCard = {
   dailyLimit: number | null;
   periodicLimitPeriod: "DAILY" | "WEEKLY" | "MONTHLY" | null;
   periodicOpenedCount: number;
+  walletReady: boolean;
+  walletStatus: GuestPortalRewardWalletItem["status"] | null;
 };
 type LootboxOverlayPhase =
   | "ready"
@@ -162,6 +175,8 @@ function debugHomeLootCard(card: HomeLootCard | null | undefined) {
     dailyLimit: card.dailyLimit,
     periodicLimitPeriod: card.periodicLimitPeriod,
     periodicOpenedCount: card.periodicOpenedCount,
+    walletReady: card.walletReady,
+    walletStatus: card.walletStatus,
   };
 }
 
@@ -266,7 +281,12 @@ type BattlePassEventName =
   | "track_scroll"
   | "level_focus";
 type QuestStatus = "done" | "live" | "next";
-type RewardHistorySource = "lootbox" | "battlepass" | "quest" | "promo";
+type RewardHistorySource =
+  | "checkin"
+  | "lootbox"
+  | "battlepass"
+  | "quest"
+  | "promo";
 type RewardHistorySourceFilter = RewardHistorySource | "all";
 type RewardHistoryRarityFilter = GuestPortalLootBoxRarity | "all";
 type RewardHistoryGroup = "source" | "rarity" | "date";
@@ -283,17 +303,27 @@ const LOOTBOX_CASE_RARITY_LABELS: Record<GuestPortalLootBoxRarity, string> = {
   legendary: "Легендарный",
 };
 const LEVEL_XP_STEP = 500;
+const REWARD_WALLET_PULSE_STORAGE_VERSION = 1;
+const EMPTY_REWARD_WALLET: GuestPortalRewardWallet = {
+  pendingCount: 0,
+  nextExpiresAt: null,
+  retentionDays: 30,
+  items: [],
+  history: [],
+};
 const REWARD_HISTORY_SOURCE_ORDER: RewardHistorySource[] = [
+  "checkin",
   "lootbox",
   "battlepass",
   "quest",
   "promo",
 ];
 const REWARD_HISTORY_SOURCE_LABELS: Record<RewardHistorySource, string> = {
+  checkin: "Чекины",
   lootbox: "Лутбоксы",
   battlepass: "Боевой пропуск",
   quest: "Квесты",
-  promo: "Промокоды",
+  promo: "Другие награды",
 };
 const REWARD_HISTORY_RARITY_ORDER: GuestPortalLootBoxRarity[] = [
   "common",
@@ -313,6 +343,7 @@ const REWARD_HISTORY_GROUP_TITLES: Record<RewardHistoryGroup, string> = {
   date: "Хронология наград",
 };
 const REWARD_HISTORY_SOURCE_TONES: Record<RewardHistorySource, string> = {
+  checkin: "129 230 176",
   lootbox: "131 228 236",
   battlepass: "208 170 108",
   quest: "148 214 184",
@@ -374,6 +405,7 @@ type PlayerQuest = {
     type: "xp" | "lootbox" | "rank" | "promo";
     value: string | number;
   };
+  walletItem: GuestPortalRewardWalletItem | null;
   preview: GuestMissionPreviewData;
 };
 type QuestCompletionDialog = {
@@ -442,6 +474,14 @@ export function GameSummaryClient() {
     useState<GuestPortalGameSummary | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState<string | null>(null);
+  const summaryEpochRef = useRef(0);
+  const applySummary = useCallback(
+    (nextSummary: GuestPortalGameSummary | null) => {
+      summaryEpochRef.current += 1;
+      setSummary(nextSummary);
+    },
+    [],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -455,7 +495,7 @@ export function GameSummaryClient() {
         }
 
         setCompletionBaseline(appOpen.previousSummary);
-        setSummary(appOpen.summary);
+        applySummary(appOpen.summary);
         setLoadState("ready");
         setMessage(null);
       } catch (error) {
@@ -464,7 +504,7 @@ export function GameSummaryClient() {
         }
 
         if (error instanceof EmptySessionError) {
-          setSummary(null);
+          applySummary(null);
           setLoadState("empty");
           setMessage(error.message);
           return;
@@ -482,7 +522,7 @@ export function GameSummaryClient() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [applySummary]);
 
   useEffect(() => {
     if (loadState !== "ready") {
@@ -502,12 +542,13 @@ export function GameSummaryClient() {
       }
 
       refreshRunning = true;
+      const requestEpoch = summaryEpochRef.current;
 
       try {
         const nextSummary = await loadGameSummary();
 
-        if (isActive) {
-          setSummary(nextSummary);
+        if (isActive && requestEpoch === summaryEpochRef.current) {
+          applySummary(nextSummary);
         }
       } catch {
         // Keep the last usable screen; manual refresh still reports errors.
@@ -536,7 +577,7 @@ export function GameSummaryClient() {
       window.removeEventListener("focus", refreshVisibleSummary);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [loadState]);
+  }, [applySummary, loadState]);
 
   if (loadState === "loading") {
     return <GameShell body={<LoadingView />} />;
@@ -574,7 +615,7 @@ export function GameSummaryClient() {
         <ReadyGameView
           summary={summary}
           completionBaseline={completionBaseline}
-          onSummaryChange={setSummary}
+          onSummaryChange={applySummary}
         />
       }
     />
@@ -585,6 +626,30 @@ export function GameRewardsClient() {
   const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState<string | null>(null);
+  const [walletMessage, setWalletMessage] = useState<string | null>(null);
+  const [switchToastMessage, setSwitchToastMessage] = useState<string | null>(
+    null,
+  );
+  const [walletClaimingItemId, setWalletClaimingItemId] = useState<
+    string | null
+  >(null);
+  const [walletClaimAllPending, setWalletClaimAllPending] = useState(false);
+  const walletActionPendingRef = useRef(false);
+  const summaryEpochRef = useRef(0);
+  const rewardWallet = summary
+    ? gameRewardWallet(summary)
+    : EMPTY_REWARD_WALLET;
+  const rewardWalletPulse = useRewardWalletPulse(
+    rewardWallet,
+    summary?.profile.id ?? null,
+  );
+  const applySummary = useCallback(
+    (nextSummary: GuestPortalGameSummary | null) => {
+      summaryEpochRef.current += 1;
+      setSummary(nextSummary);
+    },
+    [],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -597,7 +662,7 @@ export function GameRewardsClient() {
           return;
         }
 
-        setSummary(appOpen.summary);
+        applySummary(appOpen.summary);
         setLoadState("ready");
         setMessage(null);
       } catch (error) {
@@ -606,7 +671,7 @@ export function GameRewardsClient() {
         }
 
         if (error instanceof EmptySessionError) {
-          setSummary(null);
+          applySummary(null);
           setLoadState("empty");
           setMessage(error.message);
           return;
@@ -624,7 +689,80 @@ export function GameRewardsClient() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [applySummary]);
+
+  useEffect(() => {
+    if (loadState !== "ready") {
+      return;
+    }
+
+    let isActive = true;
+    let refreshRunning = false;
+
+    async function refreshVisibleRewards() {
+      if (
+        !isActive ||
+        refreshRunning ||
+        walletActionPendingRef.current ||
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+
+      refreshRunning = true;
+      const requestEpoch = summaryEpochRef.current;
+
+      try {
+        const nextSummary = await loadGameSummary();
+
+        if (
+          isActive &&
+          !walletActionPendingRef.current &&
+          requestEpoch === summaryEpochRef.current
+        ) {
+          applySummary(nextSummary);
+        }
+      } catch {
+        // Keep the last usable reward journal.
+      } finally {
+        refreshRunning = false;
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void refreshVisibleRewards();
+      }
+    }
+
+    const intervalId = window.setInterval(
+      () => void refreshVisibleRewards(),
+      15_000,
+    );
+
+    window.addEventListener("focus", refreshVisibleRewards);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshVisibleRewards);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [applySummary, loadState]);
+
+  useEffect(() => {
+    if (!switchToastMessage) {
+      return;
+    }
+
+    const timerId = window.setTimeout(
+      () => setSwitchToastMessage(null),
+      2600,
+    );
+
+    return () => window.clearTimeout(timerId);
+  }, [switchToastMessage]);
 
   if (loadState === "loading") {
     return <GameShell body={<LoadingView />} />;
@@ -658,12 +796,154 @@ export function GameRewardsClient() {
     );
   }
 
+  async function handleRewardWalletItem(
+    item: GuestPortalRewardWalletItem,
+  ): Promise<boolean> {
+    const currentSummary = summary;
+
+    if (
+      !currentSummary ||
+      !isRewardWalletItemActionable(item) ||
+      walletActionPendingRef.current ||
+      walletClaimingItemId ||
+      walletClaimAllPending
+    ) {
+      return false;
+    }
+
+    walletActionPendingRef.current = true;
+    setWalletClaimingItemId(item.id);
+    setWalletMessage(null);
+    let switchedStoreName: string | null = null;
+
+    try {
+      if (item.action === "OPEN_LOOT_BOX") {
+        const storeSelection = await selectRewardWalletItemStore(
+          currentSummary,
+          item,
+        );
+
+        if (storeSelection.switched) {
+          switchedStoreName = storeSelection.summary.store.name;
+          applySummary(storeSelection.summary);
+          setSwitchToastMessage(
+            `Переключились на клуб «${switchedStoreName}». Открываем ваш лутбокс.`,
+          );
+        }
+
+        const result = await openGameRewardWalletLootBox(item.id);
+        const rewardLabel =
+          result.rewards[0]?.rewardLabel ?? item.rewardLabel;
+
+        applySummary(result.summary);
+        setWalletMessage(`Лутбокс открыт. Ваша награда: ${rewardLabel}.`);
+        return true;
+      }
+
+      if (item.action !== "CLAIM_REWARD") {
+        return false;
+      }
+
+      const nextSummary = await claimGameRewardWalletItem(item.id);
+      applySummary(nextSummary);
+      setWalletMessage(`Награда «${item.rewardLabel}» отправлена на начисление.`);
+      return true;
+    } catch (error) {
+      setWalletMessage(
+        getErrorMessage(
+          error,
+          switchedStoreName
+            ? `Клуб «${switchedStoreName}» выбран, но открыть лутбокс не удалось. Попробуйте ещё раз.`
+            : "Не удалось получить награду. Попробуйте ещё раз.",
+        ),
+      );
+      return false;
+    } finally {
+      walletActionPendingRef.current = false;
+      setWalletClaimingItemId(null);
+    }
+  }
+
+  async function handleRewardWalletClaimAll(): Promise<boolean> {
+    if (
+      !rewardWallet.items.some(isClaimableRewardWalletItem) ||
+      walletActionPendingRef.current ||
+      walletClaimingItemId ||
+      walletClaimAllPending
+    ) {
+      return false;
+    }
+
+    walletActionPendingRef.current = true;
+    setWalletClaimAllPending(true);
+    setWalletMessage(null);
+
+    try {
+      const nextSummary = await claimAllGameRewardWalletItems();
+      const nextWallet = gameRewardWallet(nextSummary);
+
+      applySummary(nextSummary);
+      setWalletMessage(
+        nextWallet.pendingCount > 0
+          ? "Доступные награды отправлены. Остальные остаются в кошельке со своим статусом."
+          : "Все доступные награды получены.",
+      );
+      return true;
+    } catch (error) {
+      setWalletMessage(
+        getErrorMessage(
+          error,
+          "Не удалось получить награды. Попробуйте ещё раз.",
+        ),
+      );
+      return false;
+    } finally {
+      walletActionPendingRef.current = false;
+      setWalletClaimAllPending(false);
+    }
+  }
+
   return (
     <GameShell
       body={
         <div className="lp-club-home lp-reward-standalone-page">
+          <GameModuleTopbar
+            summary={summary}
+            wallet={rewardWallet}
+            walletPulsing={rewardWalletPulse}
+            claimingItemId={walletClaimingItemId}
+            claimAllPending={walletClaimAllPending}
+            onItemAction={handleRewardWalletItem}
+            onClaimAll={handleRewardWalletClaimAll}
+          />
           <div className="lp-reward-standalone-shell">
+            {walletMessage ? (
+              <div
+                className="lp-reward-wallet-message"
+                role="status"
+                aria-live="polite"
+              >
+                {walletMessage}
+              </div>
+            ) : null}
+            <RewardWalletInboxPanel
+              wallet={rewardWallet}
+              claimingItemId={walletClaimingItemId}
+              claimAllPending={walletClaimAllPending}
+              onItemAction={handleRewardWalletItem}
+              onClaimAll={handleRewardWalletClaimAll}
+            />
             <RewardJournalPanel summary={summary} standalone />
+            <div
+              className={[
+                "lp-club-toast",
+                switchToastMessage ? "is-visible" : "",
+              ].join(" ")}
+              role="status"
+              aria-live="polite"
+            >
+              {switchToastMessage}
+            </div>
           </div>
         </div>
       }
@@ -724,6 +1004,122 @@ function EmptySessionView({
   );
 }
 
+function GameModuleTopbar({
+  summary,
+  wallet,
+  walletPulsing,
+  claimingItemId,
+  claimAllPending,
+  onItemAction,
+  onClaimAll,
+}: {
+  summary: GuestPortalGameSummary;
+  wallet: GuestPortalRewardWallet;
+  walletPulsing: boolean;
+  claimingItemId: string | null;
+  claimAllPending: boolean;
+  onItemAction: (item: GuestPortalRewardWalletItem) => Promise<boolean>;
+  onClaimAll: () => Promise<boolean>;
+}) {
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const brandLogoUrl = summary.store.gameLogoUrl ?? summary.tenant.gameLogoUrl;
+  const brandLogoTitle = summary.store.gameLogoUrl
+    ? summary.store.name
+    : summary.tenant.name;
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [menuOpen]);
+
+  async function handleLogout() {
+    setMenuOpen(false);
+
+    try {
+      await logoutGameSession();
+    } catch {
+      // Even if the local session endpoint is unavailable, send the guest to auth.
+    }
+
+    startNavigationFeedback();
+    router.push("/game/auth");
+    router.refresh();
+  }
+
+  return (
+    <header className="lp-club-topbar">
+      <div className="lp-club-menu">
+        <button
+          type="button"
+          className="lp-club-menu-button"
+          aria-label="Открыть меню"
+          aria-expanded={menuOpen}
+          aria-controls="gameModuleMenu"
+          onClick={() => setMenuOpen((value) => !value)}
+        >
+          <MenuIcon />
+        </button>
+
+        <nav
+          id="gameModuleMenu"
+          className={["lp-club-menu-panel", menuOpen ? "is-open" : ""].join(
+            " ",
+          )}
+          aria-label="Меню игрового модуля"
+          hidden={!menuOpen}
+        >
+          <button type="button" onClick={handleLogout}>
+            <ExitIcon />
+            <span>Выйти</span>
+          </button>
+        </nav>
+      </div>
+
+      <div className="lp-club-network">
+        <Link href="/start" className="lp-club-brand" aria-label="LeetPlus">
+          <BrandMark logoUrl={brandLogoUrl} title={brandLogoTitle} />
+          <span>{summary.tenant.name}</span>
+        </Link>
+        <Link href="/game/clubs" className="lp-club-switch">
+          <ClubIcon />
+          <span>{summary.store.name}</span>
+        </Link>
+      </div>
+
+      <div className="lp-club-header-actions">
+        {wallet.pendingCount > 0 ? (
+          <RewardWalletHeaderIndicator
+            wallet={wallet}
+            pulsing={walletPulsing}
+            claimingItemId={claimingItemId}
+            claimAllPending={claimAllPending}
+            onItemAction={onItemAction}
+            onClaimAll={onClaimAll}
+          />
+        ) : null}
+        <div
+          className="lp-club-session-state"
+          title="Телефон подтвержден, клуб выбран"
+        >
+          Профиль активен
+        </div>
+      </div>
+    </header>
+  );
+}
+
 function ReadyGameView({
   summary,
   completionBaseline,
@@ -759,7 +1155,6 @@ function ReadyGameView({
   const lootBoxesRef = useRef<HTMLElement | null>(null);
   const battlePassRef = useRef<HTMLElement | null>(null);
   const [promoCode, setPromoCode] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [checkInPending, setCheckInPending] = useState(false);
   const [summaryRefreshPending, setSummaryRefreshPending] = useState(false);
   const [unavailableLootboxCard, setUnavailableLootboxCard] =
@@ -768,7 +1163,7 @@ function ReadyGameView({
     useState<UnavailableLootboxMessage>(null);
   const [nicknamePending, setNicknamePending] = useState(false);
   const [questsExpanded, setQuestsExpanded] = useState(false);
-  const [questDetails, setQuestDetails] = useState<PlayerQuest | null>(null);
+  const [questDetailsId, setQuestDetailsId] = useState<string | null>(null);
   const [questBoardStyle, setQuestBoardStyle] = useState<QuestBoardStyle>({});
   const [completionDialogQueue, setCompletionDialogQueue] = useState<
     CompletionDialogQueueItem[]
@@ -778,6 +1173,16 @@ function ReadyGameView({
   const [completionDialogError, setCompletionDialogError] = useState<
     string | null
   >(null);
+  const [walletClaimingItemId, setWalletClaimingItemId] = useState<
+    string | null
+  >(null);
+  const [walletClaimAllPending, setWalletClaimAllPending] = useState(false);
+  const walletActionPendingRef = useRef(false);
+  const rewardWallet = gameRewardWallet(summary);
+  const rewardWalletPulse = useRewardWalletPulse(
+    rewardWallet,
+    summary.profile.id,
+  );
   const homeBanners = buildHomeBanners(
     summary,
     primaryAction,
@@ -786,6 +1191,9 @@ function ReadyGameView({
   const lootCards = buildHomeLootCards(summary, selectedLootId);
   const battleQuests = buildHomeBattleQuests(summary);
   const playerQuests = useMemo(() => buildPlayerQuests(summary), [summary]);
+  const questDetails = questDetailsId
+    ? (playerQuests.find((quest) => quest.id === questDetailsId) ?? null)
+    : null;
   const checkInAction =
     summary.nextActions.find((action) => action.kind === "CHECK_IN") ?? null;
   const checkInSummary = summary.checkIn ?? null;
@@ -843,22 +1251,6 @@ function ReadyGameView({
 
     return () => window.clearTimeout(timerId);
   }, [toastMessage]);
-
-  useEffect(() => {
-    if (!menuOpen) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [menuOpen]);
 
   useEffect(() => {
     if (lootboxOverlayPhase !== "open") {
@@ -1044,12 +1436,23 @@ function ReadyGameView({
       if (openRewards) {
         startNavigationFeedback();
         router.push("/game/rewards");
+        return;
+      }
+
+      try {
+        const nextSummary = await loadGameSummary();
+
+        applySummaryWithCompletionDialogs(nextSummary);
+      } catch {
+        showToast(
+          "Уведомление закрыто. Статус награды обновится автоматически.",
+        );
       }
     } catch (error) {
       setCompletionDialogError(
         getErrorMessage(
           error,
-          "Не удалось сохранить подтверждение. Попробуйте ещё раз.",
+          "Не удалось закрыть уведомление. Попробуйте ещё раз.",
         ),
       );
     } finally {
@@ -1130,11 +1533,23 @@ function ReadyGameView({
   }
 
   function handleQuestClick(quest: PlayerQuest) {
-    setQuestDetails(quest);
+    setQuestDetailsId(quest.id);
   }
 
   function closeQuestDetails() {
-    setQuestDetails(null);
+    setQuestDetailsId(null);
+  }
+
+  async function handleQuestRewardClaim(quest: PlayerQuest) {
+    if (!quest.walletItem) {
+      closeQuestDetails();
+      return;
+    }
+
+    const claimed = await handleRewardWalletItem(quest.walletItem);
+    if (claimed) {
+      closeQuestDetails();
+    }
   }
 
   async function handleCheckIn() {
@@ -1190,20 +1605,6 @@ function ReadyGameView({
     }
   }
 
-  async function handleLogout() {
-    setMenuOpen(false);
-
-    try {
-      await logoutGameSession();
-    } catch {
-      // Even if the local session endpoint is unavailable, send the guest to auth.
-    }
-
-    startNavigationFeedback();
-    router.push("/game/auth");
-    router.refresh();
-  }
-
   function showLootboxOverlay(card: HomeLootCard) {
     lootboxOpenRunRef.current += 1;
     setUnavailableLootboxCard(null);
@@ -1233,6 +1634,131 @@ function ReadyGameView({
 
     setUnavailableLootboxCard(card);
     setUnavailableLootboxMessage(null);
+  }
+
+  async function handleRewardWalletItem(
+    item: GuestPortalRewardWalletItem,
+  ): Promise<boolean> {
+    if (!isRewardWalletItemActionable(item)) {
+      return false;
+    }
+
+    if (item.action === "OPEN_LOOT_BOX") {
+      if (
+        walletActionPendingRef.current ||
+        walletClaimingItemId ||
+        walletClaimAllPending
+      ) {
+        return false;
+      }
+
+      walletActionPendingRef.current = true;
+      setWalletClaimingItemId(item.id);
+      let switchedStoreName: string | null = null;
+
+      try {
+        const storeSelection = await selectRewardWalletItemStore(summary, item);
+
+        if (storeSelection.switched) {
+          switchedStoreName = storeSelection.summary.store.name;
+          applySummaryWithCompletionDialogs(storeSelection.summary);
+          showToast(
+            `Переключились на клуб «${switchedStoreName}». Открываем ваш лутбокс.`,
+          );
+        }
+
+        const result = await openGameRewardWalletLootBox(item.id);
+        const rewardLabel =
+          result.rewards[0]?.rewardLabel ?? item.rewardLabel;
+
+        applySummaryWithCompletionDialogs(result.summary);
+        showToast(`Лутбокс открыт. Ваша награда: ${rewardLabel}.`);
+        return true;
+      } catch (error) {
+        showToast(
+          getErrorMessage(
+            error,
+            switchedStoreName
+              ? `Клуб «${switchedStoreName}» выбран, но открыть лутбокс не удалось. Попробуйте ещё раз.`
+              : "Не удалось открыть лутбокс. Попробуйте ещё раз.",
+          ),
+        );
+        return false;
+      } finally {
+        walletActionPendingRef.current = false;
+        setWalletClaimingItemId(null);
+      }
+
+    }
+
+    if (
+      item.action !== "CLAIM_REWARD" ||
+      walletActionPendingRef.current ||
+      walletClaimingItemId ||
+      walletClaimAllPending
+    ) {
+      return false;
+    }
+
+    walletActionPendingRef.current = true;
+    setWalletClaimingItemId(item.id);
+
+    try {
+      const nextSummary = await claimGameRewardWalletItem(item.id);
+
+      applySummaryWithCompletionDialogs(nextSummary);
+      showToast(`Награда «${item.rewardLabel}» отправлена на начисление.`);
+      return true;
+    } catch (error) {
+      showToast(
+        getErrorMessage(
+          error,
+          "Не удалось получить награду. Попробуйте ещё раз.",
+        ),
+      );
+      return false;
+    } finally {
+      walletActionPendingRef.current = false;
+      setWalletClaimingItemId(null);
+    }
+  }
+
+  async function handleRewardWalletClaimAll(): Promise<boolean> {
+    if (
+      !gameRewardWallet(summary).items.some(isClaimableRewardWalletItem) ||
+      walletActionPendingRef.current ||
+      walletClaimingItemId ||
+      walletClaimAllPending
+    ) {
+      return false;
+    }
+
+    walletActionPendingRef.current = true;
+    setWalletClaimAllPending(true);
+
+    try {
+      const nextSummary = await claimAllGameRewardWalletItems();
+      const nextWallet = gameRewardWallet(nextSummary);
+
+      applySummaryWithCompletionDialogs(nextSummary);
+      showToast(
+        nextWallet.pendingCount > 0
+          ? "Доступные награды отправлены. Остальные остаются в кошельке со своим статусом."
+          : "Все доступные награды получены.",
+      );
+      return true;
+    } catch (error) {
+      showToast(
+        getErrorMessage(
+          error,
+          "Не удалось получить награды. Попробуйте ещё раз.",
+        ),
+      );
+      return false;
+    } finally {
+      walletActionPendingRef.current = false;
+      setWalletClaimAllPending(false);
+    }
   }
 
   function closeUnavailableLootboxModal() {
@@ -1617,52 +2143,15 @@ function ReadyGameView({
 
   return (
     <div className="lp-club-home">
-      <header className="lp-club-topbar">
-        <div className="lp-club-menu">
-          <button
-            type="button"
-            className="lp-club-menu-button"
-            aria-label="Открыть меню"
-            aria-expanded={menuOpen}
-            aria-controls="gameModuleMenu"
-            onClick={() => setMenuOpen((value) => !value)}
-          >
-            <MenuIcon />
-          </button>
-
-          <nav
-            id="gameModuleMenu"
-            className={["lp-club-menu-panel", menuOpen ? "is-open" : ""].join(
-              " ",
-            )}
-            aria-label="Меню игрового модуля"
-            hidden={!menuOpen}
-          >
-            <button type="button" onClick={handleLogout}>
-              <ExitIcon />
-              <span>Выйти</span>
-            </button>
-          </nav>
-        </div>
-
-        <div className="lp-club-network">
-          <Link href="/start" className="lp-club-brand" aria-label="LeetPlus">
-            <BrandMark logoUrl={brandLogoUrl} title={brandLogoTitle} />
-            <span>{summary.tenant.name}</span>
-          </Link>
-          <Link href="/game/clubs" className="lp-club-switch">
-            <ClubIcon />
-            <span>{summary.store.name}</span>
-          </Link>
-        </div>
-
-        <div
-          className="lp-club-session-state"
-          title="Телефон подтвержден, клуб выбран"
-        >
-          Профиль активен
-        </div>
-      </header>
+      <GameModuleTopbar
+        summary={summary}
+        wallet={rewardWallet}
+        walletPulsing={rewardWalletPulse}
+        claimingItemId={walletClaimingItemId}
+        claimAllPending={walletClaimAllPending}
+        onItemAction={handleRewardWalletItem}
+        onClaimAll={handleRewardWalletClaimAll}
+      />
 
       <div
         ref={shellRef}
@@ -1706,6 +2195,8 @@ function ReadyGameView({
           checkInSummary={checkInSummary}
           checkInAvailable={checkInAvailable}
           checkInPending={checkInPending}
+          rewardWallet={rewardWallet}
+          rewardWalletPulsing={rewardWalletPulse}
           questsExpanded={questsExpanded}
           promoCode={promoCode}
           nicknamePending={nicknamePending}
@@ -1713,6 +2204,7 @@ function ReadyGameView({
           onPromoSubmit={handlePromoSubmit}
           onNicknameSubmit={handleNicknameSubmit}
           onCheckIn={handleCheckIn}
+          onRewardWalletOpen={() => router.push("/game/rewards?view=pending")}
           onQuestClick={handleQuestClick}
           onQuestsToggle={toggleQuestsExpanded}
         />
@@ -1763,7 +2255,12 @@ function ReadyGameView({
       ) : null}
 
       {questDetails ? (
-        <QuestDetailsModal quest={questDetails} onClose={closeQuestDetails} />
+        <QuestDetailsModal
+          quest={questDetails}
+          claiming={walletClaimingItemId === questDetails.walletItem?.id}
+          onClose={closeQuestDetails}
+          onClaim={handleQuestRewardClaim}
+        />
       ) : null}
 
       {activeCompletionDialog?.kind === "BATTLE_PASS" ? (
@@ -1927,7 +2424,7 @@ function QuestCompletionModal({
             onClick={() => onAcknowledge(false)}
             disabled={acknowledging}
           >
-            {acknowledging ? "Сохраняем..." : "Отлично"}
+            {acknowledging ? "Закрываем..." : "Отлично"}
           </button>
         </div>
       </div>
@@ -1937,11 +2434,27 @@ function QuestCompletionModal({
 
 function QuestDetailsModal({
   quest,
+  claiming,
   onClose,
+  onClaim,
 }: {
   quest: PlayerQuest;
+  claiming: boolean;
   onClose: () => void;
+  onClaim: (quest: PlayerQuest) => Promise<void>;
 }) {
+  const preview = claiming
+    ? {
+        ...quest.preview,
+        actionText: quest.walletItem
+          ? rewardWalletItemPendingActionLabel(quest.walletItem)
+          : "Закрываем…",
+      }
+    : quest.preview;
+  const walletActionDisabled = Boolean(
+    quest.walletItem && !isRewardWalletItemActionable(quest.walletItem),
+  );
+
   return (
     <div
       className="lp-quest-complete-overlay lp-lootbox-unavailable-overlay"
@@ -1966,12 +2479,33 @@ function QuestDetailsModal({
         <h3 id="questDetailsTitle" className="sr-only">
           {quest.title}
         </h3>
-        <GuestMissionPreview
-          data={quest.preview}
-          mode="full"
-          showLabels={false}
-          onAction={onClose}
-        />
+        <fieldset
+          className="m-0 min-w-0 border-0 p-0"
+          disabled={claiming || walletActionDisabled}
+          aria-busy={claiming}
+        >
+          <GuestMissionPreview
+            data={preview}
+            mode="full"
+            showLabels={false}
+            onAction={() => {
+              if (claiming) {
+                return;
+              }
+
+              if (quest.walletItem) {
+                if (!isRewardWalletItemActionable(quest.walletItem)) {
+                  return;
+                }
+
+                void onClaim(quest);
+                return;
+              }
+
+              onClose();
+            }}
+          />
+        </fieldset>
       </div>
     </div>
   );
@@ -2107,6 +2641,7 @@ function HomeLootBoxes({
                   "lp-lootbox-entry",
                   card.active ? "is-active" : "",
                   !card.openable ? "is-disabled" : "",
+                  card.walletStatus ? "has-wallet-reward" : "",
                 ].join(" ")}
                 aria-haspopup="dialog"
                 aria-controls={
@@ -2122,7 +2657,12 @@ function HomeLootBoxes({
                     <strong>{card.title}</strong>
                   </span>
                   <span className="lp-lootbox-entry-state-wrap">
-                    <span className="lp-lootbox-entry-state">
+                    <span
+                      className={[
+                        "lp-lootbox-entry-state",
+                        card.walletReady ? "is-wallet-ready" : "",
+                      ].join(" ")}
+                    >
                       {card.status}
                     </span>
                     {blockedReason ? (
@@ -2141,12 +2681,27 @@ function HomeLootBoxes({
                   />
                 </span>
                 <span className="lp-lootbox-entry-bottom">
-                  <span className="lp-lootbox-entry-hint">
-                    {lootboxCardHint(card)}
-                  </span>
-                  <span className="lp-lootbox-mini-lock" aria-hidden="true">
-                    <LockIcon />
-                  </span>
+                  {card.walletStatus ? (
+                    <span className="lp-lootbox-wallet-ready">
+                      <ClubIcon />
+                      {lootboxWalletStatusLabel(
+                        card.walletStatus,
+                        card.walletReady,
+                      )}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="lp-lootbox-entry-hint">
+                        {lootboxCardHint(card)}
+                      </span>
+                      <span
+                        className="lp-lootbox-mini-lock"
+                        aria-hidden="true"
+                      >
+                        <LockIcon />
+                      </span>
+                    </>
+                  )}
                 </span>
               </button>
             );
@@ -3261,7 +3816,7 @@ function BattlePassLevelCompletionModal({
             disabled={acknowledging}
           >
             {acknowledging
-              ? "Сохраняем..."
+              ? "Закрываем..."
               : hasNextLevel
                 ? "К следующему уровню"
                 : "Отлично"}
@@ -3560,10 +4115,7 @@ function BattlePassReceivedRewardCard({
   title: string;
 }) {
   const rarityLabel = lootboxRewardRarityLabel(reward);
-  const readyCode =
-    reward.walletState === "READY"
-      ? (reward.rewardCode ?? reward.claimPayload)
-      : null;
+  const claimCode = rewardHistoryClaimCode(reward);
 
   return (
     <div className="lp-battlepass-received-card">
@@ -3578,7 +4130,11 @@ function BattlePassReceivedRewardCard({
           Шанс выпадения: {formatRewardChance(reward.rewardDropChance)}
         </small>
       ) : null}
-      {readyCode ? <em>Код кассиру: {readyCode}</em> : null}
+      {claimCode ? (
+        <em>
+          {claimCode.label}: {claimCode.value}
+        </em>
+      ) : null}
       <small>{walletStateHint(reward.walletState)}</small>
       <Link href="/game/rewards" className="lp-battlepass-reward-history-link">
         Открыть историю наград
@@ -4137,6 +4693,712 @@ function battlePassSeasonTimeLabel(value: string | null | undefined) {
 
   return ` · до конца ${formatNumber(totalHours)} ч`;
 }
+
+function gameRewardWallet(
+  summary: GuestPortalGameSummary,
+): GuestPortalRewardWallet {
+  const wallet = (
+    summary as GuestPortalGameSummary & {
+      rewardWallet?: GuestPortalRewardWallet;
+    }
+  ).rewardWallet;
+
+  if (!wallet || !Array.isArray(wallet.items)) {
+    return EMPTY_REWARD_WALLET;
+  }
+
+  return {
+    pendingCount: Math.max(0, wallet.pendingCount),
+    nextExpiresAt: wallet.nextExpiresAt,
+    retentionDays: wallet.retentionDays || 30,
+    items: wallet.items,
+    history: Array.isArray(wallet.history) ? wallet.history : [],
+  };
+}
+
+function useRewardWalletPulse(
+  wallet: GuestPortalRewardWallet,
+  profileId: string | null,
+) {
+  const [pulsing, setPulsing] = useState(false);
+  const itemIdSignature = wallet.items
+    .map((item) => item.id)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    const currentItemIds = itemIdSignature ? itemIdSignature.split(",") : [];
+    const storageKey = `leetplus:reward-wallet-pulse:v${REWARD_WALLET_PULSE_STORAGE_VERSION}:${profileId ?? "anonymous"}`;
+    let seen: ReturnType<typeof readRewardWalletPulseState> = null;
+
+    try {
+      seen = readRewardWalletPulseState(
+        window.localStorage.getItem(storageKey),
+      );
+    } catch {
+      // A disabled storage must not block the reward wallet.
+    }
+
+    const current = {
+      version: REWARD_WALLET_PULSE_STORAGE_VERSION,
+      count: wallet.pendingCount,
+      itemIds: currentItemIds,
+    };
+    const hasNewReward =
+      wallet.pendingCount > 0 &&
+      (!seen ||
+        wallet.pendingCount > seen.count ||
+        currentItemIds.some((itemId) => !seen.itemIds.includes(itemId)));
+
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(current));
+    } catch {
+      // The pulse still works for the current render without persistence.
+    }
+
+    if (
+      !hasNewReward ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => setPulsing(true));
+    const timerId = window.setTimeout(() => setPulsing(false), 1100);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timerId);
+      setPulsing(false);
+    };
+  }, [itemIdSignature, profileId, wallet.pendingCount]);
+
+  return pulsing;
+}
+
+function readRewardWalletPulseState(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as {
+      version?: unknown;
+      count?: unknown;
+      itemIds?: unknown;
+    };
+
+    if (
+      parsed.version !== REWARD_WALLET_PULSE_STORAGE_VERSION ||
+      typeof parsed.count !== "number" ||
+      !Array.isArray(parsed.itemIds) ||
+      !parsed.itemIds.every((itemId) => typeof itemId === "string")
+    ) {
+      return null;
+    }
+
+    return {
+      count: parsed.count,
+      itemIds: parsed.itemIds as string[],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function rewardWalletSourceLabel(item: GuestPortalRewardWalletItem) {
+  const labels = {
+    CHECK_IN: "Ежедневный чекин",
+    MISSION: "Задание",
+    BATTLE_PASS: "Боевой пропуск",
+    LOOT_BOX: "Лутбокс",
+    MANUAL: "Награда клуба",
+  } satisfies Record<GuestPortalRewardWalletItem["sourceKind"], string>;
+
+  return labels[item.sourceKind];
+}
+
+function rewardWalletSourceCaption(item: GuestPortalRewardWalletItem) {
+  const sourceLabel = rewardWalletSourceLabel(item);
+  const storeName = item.storeName?.trim();
+
+  return storeName ? `${sourceLabel} · ${storeName}` : sourceLabel;
+}
+
+function rewardWalletItemActionLabel(item: GuestPortalRewardWalletItem) {
+  if (item.status === "FAILED" && item.action === "CLAIM_REWARD") {
+    return "Повторить";
+  }
+
+  if (item.action === "OPEN_LOOT_BOX") {
+    return item.status === "FAILED"
+      ? "Повторить открытие"
+      : "Открыть лутбокс";
+  }
+
+  if (item.action === "CLAIM_REWARD") {
+    return "Забрать";
+  }
+
+  if (item.status === "PROCESSING") {
+    return "Начисляем…";
+  }
+
+  if (item.status === "OPENING") {
+    return "Открываем…";
+  }
+
+  return "Ожидает";
+}
+
+function rewardWalletItemPendingActionLabel(
+  item: GuestPortalRewardWalletItem,
+) {
+  if (item.action === "OPEN_LOOT_BOX") {
+    return "Открываем…";
+  }
+
+  if (item.status === "FAILED") {
+    return "Повторяем…";
+  }
+
+  return "Получаем…";
+}
+
+function rewardWalletItemStatusLabel(item: GuestPortalRewardWalletItem) {
+  if (item.status === "PROCESSING") {
+    return "Начисляется";
+  }
+
+  if (item.status === "OPENING") {
+    return "Открывается";
+  }
+
+  if (item.status === "FAILED") {
+    return item.kind === "LOOT_BOX_ENTITLEMENT"
+      ? "Не удалось открыть"
+      : "Не удалось начислить";
+  }
+
+  return item.kind === "LOOT_BOX_ENTITLEMENT"
+    ? "Готов к открытию"
+    : "Ждёт получения";
+}
+
+function rewardWalletItemStatusHint(item: GuestPortalRewardWalletItem) {
+  if (item.status === "FAILED") {
+    return (
+      item.errorHint?.trim() ||
+      (item.kind === "LOOT_BOX_ENTITLEMENT"
+        ? "Попробуйте открыть лутбокс ещё раз."
+        : "Повторите получение награды.")
+    );
+  }
+
+  if (item.status === "PROCESSING") {
+    return "Проверяем начисление награды.";
+  }
+
+  if (item.status === "OPENING") {
+    return "Лутбокс уже открывается. Результат скоро появится.";
+  }
+
+  return rewardWalletExpiryLabel(item);
+}
+
+function rewardWalletItemCompactStatus(item: GuestPortalRewardWalletItem) {
+  if (item.action === "CLAIM_REWARD") {
+    return item.status === "FAILED" ? "Повторить" : "Забрать";
+  }
+
+  if (item.action === "OPEN_LOOT_BOX") {
+    return item.status === "FAILED" ? "Повторить" : "Открыть";
+  }
+
+  return item.status === "OPENING" ? "Открываем…" : "Начисляем…";
+}
+
+function checkInRewardWalletLabel(item: GuestPortalRewardWalletItem) {
+  const rewardLabel = item.rewardLabel.trim();
+  const signedRewardLabel = /^[+\u2212-]/u.test(rewardLabel)
+    ? rewardLabel
+    : `+${rewardLabel}`;
+  const statusLabel =
+    item.status === "PENDING"
+      ? "НЕ ПОЛУЧЕНО"
+      : item.status === "FAILED"
+        ? "НЕ ПОЛУЧЕНО · ПОВТОРИТЬ"
+        : item.status === "PROCESSING"
+          ? "НАЧИСЛЯЕТСЯ"
+          : "ОТКРЫВАЕТСЯ";
+
+  return `${signedRewardLabel} — ${statusLabel}`;
+}
+
+function isRewardWalletItemActionable(item: GuestPortalRewardWalletItem) {
+  return (
+    item.action === "CLAIM_REWARD" || item.action === "OPEN_LOOT_BOX"
+  );
+}
+
+function isClaimableRewardWalletItem(item: GuestPortalRewardWalletItem) {
+  return (
+    item.kind === "REWARD" &&
+    (item.status === "PENDING" || item.status === "FAILED") &&
+    item.action === "CLAIM_REWARD"
+  );
+}
+
+function rewardWalletItemPriority(item: GuestPortalRewardWalletItem) {
+  if (isClaimableRewardWalletItem(item)) {
+    return item.status === "FAILED" ? 0 : 1;
+  }
+
+  if (
+    item.action === "OPEN_LOOT_BOX" &&
+    (item.status === "PENDING" || item.status === "FAILED")
+  ) {
+    return item.status === "FAILED" ? 2 : 3;
+  }
+
+  if (isRewardWalletItemActionable(item)) {
+    return 4;
+  }
+
+  if (item.status === "FAILED") {
+    return 5;
+  }
+
+  return 6;
+}
+
+function orderedRewardWalletItems(items: GuestPortalRewardWalletItem[]) {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const priorityDelta =
+        rewardWalletItemPriority(left.item) -
+        rewardWalletItemPriority(right.item);
+
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+
+      const expiryDelta =
+        Date.parse(left.item.expiresAt) - Date.parse(right.item.expiresAt);
+
+      if (Number.isFinite(expiryDelta) && expiryDelta !== 0) {
+        return expiryDelta;
+      }
+
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
+}
+
+function selectPreferredRewardWalletItem(
+  items: GuestPortalRewardWalletItem[],
+  predicate: (item: GuestPortalRewardWalletItem) => boolean,
+) {
+  return orderedRewardWalletItems(items.filter(predicate))[0] ?? null;
+}
+
+function orderedPlayerQuests(quests: PlayerQuest[]) {
+  return quests
+    .map((quest, index) => ({ quest, index }))
+    .sort((left, right) => {
+      const leftPriority = left.quest.walletItem
+        ? rewardWalletItemPriority(left.quest.walletItem)
+        : 7;
+      const rightPriority = right.quest.walletItem
+        ? rewardWalletItemPriority(right.quest.walletItem)
+        : 7;
+
+      return leftPriority - rightPriority || left.index - right.index;
+    })
+    .map(({ quest }) => quest);
+}
+
+function rewardWalletExpiryLabel(item: GuestPortalRewardWalletItem) {
+  return `Доступно до ${formatDate(item.expiresAt)}`;
+}
+
+function WalletCaseIcon() {
+  return (
+    <Image
+      src="/assets/gamification-lootbox.svg"
+      alt=""
+      width={24}
+      height={24}
+      aria-hidden="true"
+    />
+  );
+}
+
+function RewardWalletHeaderIndicator({
+  wallet,
+  pulsing,
+  claimingItemId,
+  claimAllPending,
+  onItemAction,
+  onClaimAll,
+}: {
+  wallet: GuestPortalRewardWallet;
+  pulsing: boolean;
+  claimingItemId: string | null;
+  claimAllPending: boolean;
+  onItemAction: (item: GuestPortalRewardWalletItem) => Promise<boolean>;
+  onClaimAll: () => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const visibleItems = orderedRewardWalletItems(wallet.items).slice(0, 4);
+  const hasClaimableItems = wallet.items.some(isClaimableRewardWalletItem);
+  const hiddenItemCount = Math.max(
+    0,
+    wallet.pendingCount - visibleItems.length,
+  );
+  const closeAndRestoreFocus = useCallback(() => {
+    const trigger = triggerRef.current;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : null;
+    setOpen(false);
+    window.requestAnimationFrame(() => {
+      const fallbackSelectors = [
+        "#rewards .lp-club-ghost-link",
+        "#rewards select",
+        ".lp-club-menu-button",
+        ".lp-club-switch",
+      ];
+      const candidates = [
+        trigger,
+        previouslyFocused,
+        ...fallbackSelectors.map((selector) =>
+          document.querySelector<HTMLElement>(selector),
+        ),
+      ];
+
+      for (const candidate of candidates) {
+        if (
+          !candidate?.isConnected ||
+          candidate.matches(":disabled, [aria-disabled='true']")
+        ) {
+          continue;
+        }
+
+        candidate.focus();
+        if (document.activeElement === candidate) {
+          return;
+        }
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !rootRef.current?.contains(event.target)
+      ) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeAndRestoreFocus();
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeAndRestoreFocus, open]);
+
+  return (
+    <div ref={rootRef} className="lp-reward-wallet-header">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={[
+          "lp-reward-wallet-trigger",
+          pulsing ? "is-pulsing" : "",
+        ].join(" ")}
+        aria-label={`Награды ждут вас: ${formatNumber(wallet.pendingCount)}`}
+        aria-expanded={open}
+        aria-controls="rewardWalletDropdown"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <WalletCaseIcon />
+        <span>{formatNumber(wallet.pendingCount)}</span>
+      </button>
+
+      {open ? (
+        <section
+          id="rewardWalletDropdown"
+          className="lp-reward-wallet-dropdown"
+          aria-label="Награды, ожидающие получения"
+          aria-live="polite"
+        >
+          <header>
+            <span className="lp-club-small-label">Награды</span>
+            <strong>{formatNumber(wallet.pendingCount)}</strong>
+          </header>
+
+          <div className="lp-reward-wallet-dropdown-list">
+            {visibleItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={item.status === "FAILED" ? "is-failed" : ""}
+                title={rewardWalletItemStatusHint(item)}
+                disabled={
+                  !isRewardWalletItemActionable(item) ||
+                  claimAllPending ||
+                  claimingItemId === item.id ||
+                  Boolean(claimingItemId)
+                }
+                onClick={() => {
+                  void onItemAction(item)
+                    .then((succeeded) => {
+                      if (succeeded) {
+                        closeAndRestoreFocus();
+                      }
+                    })
+                    .catch(() => undefined);
+                }}
+              >
+                <span className="lp-reward-wallet-item-icon" aria-hidden="true">
+                  <WalletCaseIcon />
+                </span>
+                <span>
+                  <small>{rewardWalletSourceCaption(item)}</small>
+                  <strong>{item.title}</strong>
+                  <em>
+                    {item.rewardLabel} · {rewardWalletItemStatusLabel(item)}
+                  </em>
+                  <small className="lp-reward-wallet-item-hint">
+                    {rewardWalletItemStatusHint(item)}
+                  </small>
+                </span>
+                <b>
+                  {claimingItemId === item.id
+                    ? rewardWalletItemPendingActionLabel(item)
+                    : rewardWalletItemActionLabel(item)}
+                </b>
+              </button>
+            ))}
+          </div>
+
+          {hiddenItemCount > 0 ? (
+            <p className="lp-reward-wallet-more">
+              Ещё {formatNumber(hiddenItemCount)} в кошельке
+            </p>
+          ) : null}
+
+          {hasClaimableItems ? (
+            <button
+              type="button"
+              className="lp-reward-wallet-claim-all"
+              disabled={claimAllPending || Boolean(claimingItemId)}
+              onClick={() => {
+                void onClaimAll()
+                  .then((succeeded) => {
+                    if (succeeded) {
+                      closeAndRestoreFocus();
+                    }
+                  })
+                  .catch(() => undefined);
+              }}
+            >
+              {claimAllPending ? "Отправляем…" : "Забрать начисления"}
+            </button>
+          ) : (
+            <p className="lp-reward-wallet-open-note">
+              Остальные награды уже обрабатываются или открываются вручную
+            </p>
+          )}
+          <Link
+            href="/game/rewards"
+            className="lp-reward-wallet-history-link"
+            onClick={() => setOpen(false)}
+          >
+            История наград
+          </Link>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function RewardWalletCard({
+  wallet,
+  pulsing,
+  onOpen,
+}: {
+  wallet: GuestPortalRewardWallet;
+  pulsing: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <section
+      className={[
+        "lp-club-reward-wallet",
+        pulsing ? "is-pulsing" : "",
+      ].join(" ")}
+      aria-label={`${formatNumber(wallet.pendingCount)} наград ожидают получения`}
+    >
+      <div className="lp-club-reward-wallet-head">
+        <span className="lp-club-reward-wallet-icon" aria-hidden="true">
+          <WalletCaseIcon />
+        </span>
+        <strong>Награды ждут вас</strong>
+        <span className="lp-club-reward-wallet-count">
+          {formatNumber(wallet.pendingCount)}
+        </span>
+      </div>
+      <p>У вас есть неполученные награды</p>
+      <button
+        type="button"
+        className="lp-club-reward-wallet-primary"
+        onClick={onOpen}
+      >
+        Забрать награды
+      </button>
+      <Link href="/game/rewards" className="lp-club-reward-wallet-history">
+        История наград
+      </Link>
+      <small>
+        Награды хранятся {formatNumber(wallet.retentionDays || 30)} дней
+      </small>
+    </section>
+  );
+}
+
+function RewardWalletInboxPanel({
+  wallet,
+  claimingItemId,
+  claimAllPending,
+  onItemAction,
+  onClaimAll,
+}: {
+  wallet: GuestPortalRewardWallet;
+  claimingItemId: string | null;
+  claimAllPending: boolean;
+  onItemAction: (item: GuestPortalRewardWalletItem) => Promise<boolean>;
+  onClaimAll: () => Promise<boolean>;
+}) {
+  if (wallet.pendingCount <= 0) {
+    return null;
+  }
+
+  const hiddenItemCount = Math.max(
+    0,
+    wallet.pendingCount - wallet.items.length,
+  );
+  const hasClaimableItems = wallet.items.some(isClaimableRewardWalletItem);
+
+  return (
+    <section
+      className="lp-club-panel lp-reward-wallet-inbox"
+      aria-label="Награды, ожидающие получения"
+    >
+      <header className="lp-reward-wallet-inbox-head">
+        <div>
+          <span className="lp-club-small-label">Кошелёк наград</span>
+          <h1>Награды ждут вас</h1>
+          <p>
+            Заберите начисления и откройте сохранённые лутбоксы. Срок хранения
+            указан у каждой награды.
+          </p>
+        </div>
+        <span className="lp-reward-wallet-inbox-count">
+          {formatNumber(wallet.pendingCount)}
+        </span>
+      </header>
+
+      <div className="lp-reward-wallet-inbox-list" aria-live="polite">
+        {orderedRewardWalletItems(wallet.items).map((item) => (
+          <article
+            key={item.id}
+            className={[
+              "lp-reward-wallet-inbox-item",
+              item.status === "FAILED" ? "is-failed" : "",
+            ].join(" ")}
+          >
+            <span className="lp-reward-wallet-item-icon" aria-hidden="true">
+              <WalletCaseIcon />
+            </span>
+            <div>
+              <small>{rewardWalletSourceCaption(item)}</small>
+              <strong>{item.title}</strong>
+              <span>{item.rewardLabel}</span>
+              <em className="lp-reward-wallet-item-status">
+                {rewardWalletItemStatusLabel(item)}
+              </em>
+              <em
+                className="lp-reward-wallet-item-hint"
+                role={item.status === "FAILED" ? "alert" : undefined}
+              >
+                {rewardWalletItemStatusHint(item)}
+              </em>
+            </div>
+            <button
+              type="button"
+              disabled={
+                !isRewardWalletItemActionable(item) ||
+                claimAllPending ||
+                claimingItemId === item.id ||
+                Boolean(claimingItemId)
+              }
+              onClick={() => void onItemAction(item).catch(() => undefined)}
+            >
+              {claimingItemId === item.id
+                ? rewardWalletItemPendingActionLabel(item)
+                : rewardWalletItemActionLabel(item)}
+            </button>
+          </article>
+        ))}
+      </div>
+
+      {hiddenItemCount > 0 ? (
+        <p className="lp-reward-wallet-inbox-more">
+          Показаны первые {formatNumber(wallet.items.length)} из{" "}
+          {formatNumber(wallet.pendingCount)} незавершённых наград.
+        </p>
+      ) : null}
+
+      <div className="lp-reward-wallet-inbox-actions">
+        {hasClaimableItems ? (
+          <button
+            type="button"
+            disabled={claimAllPending || Boolean(claimingItemId)}
+            onClick={() => void onClaimAll().catch(() => undefined)}
+          >
+            {claimAllPending ? "Отправляем…" : "Забрать все начисления"}
+          </button>
+        ) : null}
+        <span>
+          Лутбоксы открываются вручную, начисления могут занять некоторое
+          время
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function PlayerProfilePanel({
   summary,
   profileLogoUrl,
@@ -4148,6 +5410,8 @@ function PlayerProfilePanel({
   checkInSummary,
   checkInAvailable,
   checkInPending,
+  rewardWallet,
+  rewardWalletPulsing,
   questsExpanded,
   promoCode,
   nicknamePending,
@@ -4155,6 +5419,7 @@ function PlayerProfilePanel({
   onPromoSubmit,
   onNicknameSubmit,
   onCheckIn,
+  onRewardWalletOpen,
   onQuestClick,
   onQuestsToggle,
 }: {
@@ -4168,6 +5433,8 @@ function PlayerProfilePanel({
   checkInSummary: GuestPortalGameSummary["checkIn"] | null;
   checkInAvailable: boolean;
   checkInPending: boolean;
+  rewardWallet: GuestPortalRewardWallet;
+  rewardWalletPulsing: boolean;
   questsExpanded: boolean;
   promoCode: string;
   nicknamePending: boolean;
@@ -4175,10 +5442,11 @@ function PlayerProfilePanel({
   onPromoSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onNicknameSubmit: (displayName: string) => Promise<void>;
   onCheckIn: () => void;
+  onRewardWalletOpen: () => void;
   onQuestClick: (quest: PlayerQuest) => void;
   onQuestsToggle: () => void;
 }) {
-  const compactQuests = quests.slice(0, 5);
+  const compactQuests = orderedPlayerQuests(quests).slice(0, 5);
   const checkInDescription =
     checkInAction?.description ??
     checkInSummary?.description ??
@@ -4190,6 +5458,12 @@ function PlayerProfilePanel({
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const levelProgress = buildPlayerLevelProgress(summary.profile);
   const phoneMasked = formatPlayerPhoneMasked(summary.profile.contactMasked);
+  const pendingCheckInItem = selectPreferredRewardWalletItem(
+    rewardWallet.items,
+    (item) =>
+      item.sourceKind === "CHECK_IN" &&
+      item.storeId === summary.store.id,
+  );
 
   useEffect(() => {
     if (!nicknameEditing) {
@@ -4332,16 +5606,36 @@ function PlayerProfilePanel({
         </div>
       </div>
 
-      {checkInAvailable ? (
+      {rewardWallet.pendingCount > 0 ? (
+        <RewardWalletCard
+          wallet={rewardWallet}
+          pulsing={rewardWalletPulsing}
+          onOpen={onRewardWalletOpen}
+        />
+      ) : null}
+
+      {checkInAvailable || pendingCheckInItem ? (
         <section className="lp-club-checkin-card" aria-label="Чекин в клубе">
           <span className="lp-club-small-label">Чекин</span>
           <strong>
             {checkInAction?.title ?? checkInSummary?.title ?? "Чекин в клубе"}
           </strong>
           <p>{checkInDescription}</p>
-          <button type="button" disabled={checkInPending} onClick={onCheckIn}>
-            {checkInPending ? "Проверяем" : "Сделать чекин"}
-          </button>
+          {pendingCheckInItem ? (
+            <span
+              className="lp-club-checkin-pending"
+              title={rewardWalletItemStatusHint(pendingCheckInItem)}
+              role="status"
+              aria-live="polite"
+            >
+              {checkInRewardWalletLabel(pendingCheckInItem)}
+            </span>
+          ) : null}
+          {checkInAvailable ? (
+            <button type="button" disabled={checkInPending} onClick={onCheckIn}>
+              {checkInPending ? "Проверяем" : "Сделать чекин"}
+            </button>
+          ) : null}
         </section>
       ) : null}
 
@@ -4358,14 +5652,6 @@ function PlayerProfilePanel({
           onChange={(event) => onPromoCodeChange(event.target.value)}
         />
         <button type="submit">Активировать</button>
-        <Link
-          className="lp-club-side-link"
-          href="/game/rewards"
-          target="_blank"
-          rel="noreferrer"
-        >
-          История наград
-        </Link>
       </form>
 
       <section
@@ -4405,6 +5691,7 @@ function PlayerProfilePanel({
                   "lp-club-side-quest",
                   quest.status === "done" ? "is-done" : "",
                   quest.status === "live" ? "is-current" : "",
+                  quest.walletItem ? "has-wallet-reward" : "",
                 ].join(" ")}
                 aria-haspopup="dialog"
                 onClick={() => onQuestClick(quest)}
@@ -4415,6 +5702,11 @@ function PlayerProfilePanel({
                   showLabels={false}
                   className="!m-0 !w-full !max-w-full !p-0"
                 />
+                {quest.walletItem ? (
+                  <span className="lp-club-side-quest-claim">
+                    {rewardWalletItemCompactStatus(quest.walletItem)}
+                  </span>
+                ) : null}
               </button>
             ))
           ) : (
@@ -4493,6 +5785,7 @@ function QuestBoard({
                     "lp-club-quest-full-card",
                     quest.status === "done" ? "is-done" : "",
                     quest.status === "live" ? "is-current" : "",
+                    quest.walletItem ? "has-wallet-reward" : "",
                   ].join(" ")}
                   disabled={!expanded}
                   aria-haspopup="dialog"
@@ -4504,6 +5797,11 @@ function QuestBoard({
                     showLabels={false}
                     className="!m-0 !w-full !max-w-full !p-0"
                   />
+                  {quest.walletItem ? (
+                    <span className="lp-club-side-quest-claim">
+                      {rewardWalletItemCompactStatus(quest.walletItem)}
+                    </span>
+                  ) : null}
                 </button>
               ))
             ) : (
@@ -4648,35 +5946,70 @@ function buildHomeLootCards(
   summary: GuestPortalGameSummary,
   selectedLootId: string | null,
 ): HomeLootCard[] {
-  const realCards = summary.lootBoxes.featured.slice(0, 3).map((lootBox) => ({
-    id: lootBox.id,
-    title: lootBox.name,
-    description:
-      lootBox.latestReward?.rewardLabel ??
-      lootBox.rewardLabel ??
-      "Лутбокс с наградой за активность в клубе.",
-    triggerKind: lootBox.triggerKind,
-    sessionType: lootBox.sessionType,
-    schedule: lootBox.schedule,
-    status: lootboxCardStatus(lootBox),
-    active: false,
-    openable: lootBox.openable,
-    openState: lootBox.openState,
-    openBlocker: lootBox.openBlocker,
-    rewardLabel: lootBox.rewardLabel,
-    caseRarity: normalizeLootboxRarity(lootBox.caseRarity) ?? "common",
-    caseRarityLabel:
-      lootBox.caseRarityLabel ?? LOOTBOX_CASE_RARITY_LABELS[lootBox.caseRarity],
-    rewardRarity: lootBox.latestReward?.rewardRarity ?? null,
-    rewardRarityLabel: lootBox.latestReward?.rewardRarityLabel ?? null,
-    rewardDropChance: lootBox.latestReward?.rewardDropChance ?? null,
-    weeklyOpenedCount: lootBox.weeklyOpenedCount,
-    weeklyLimit: lootBox.weeklyLimit,
-    dailyOpenedCount: lootBox.dailyOpenedCount,
-    dailyLimit: lootBox.dailyLimit,
-    periodicLimitPeriod: lootBox.periodicLimitPeriod,
-    periodicOpenedCount: lootBox.periodicOpenedCount,
-  }));
+  const walletLootBoxItems = new Map<string, GuestPortalRewardWalletItem>();
+
+  for (const item of gameRewardWallet(summary).items) {
+    if (item.kind !== "LOOT_BOX_ENTITLEMENT") {
+      continue;
+    }
+
+    const lootBoxId =
+      item.lootBoxId ??
+      (item.sourceKind === "LOOT_BOX" ? item.sourceId : null);
+
+    if (!lootBoxId) {
+      continue;
+    }
+
+    const currentItem = walletLootBoxItems.get(lootBoxId);
+    if (
+      !currentItem ||
+      (!isRewardWalletItemActionable(currentItem) &&
+        isRewardWalletItemActionable(item)) ||
+      (currentItem.status === "FAILED" && item.status === "PENDING")
+    ) {
+      walletLootBoxItems.set(lootBoxId, item);
+    }
+  }
+
+  const realCards = summary.lootBoxes.featured.slice(0, 3).map((lootBox) => {
+    const walletItem = walletLootBoxItems.get(lootBox.id) ?? null;
+    const walletReady = walletItem?.action === "OPEN_LOOT_BOX";
+    const walletStatus = walletItem?.status ?? null;
+
+    return {
+      id: lootBox.id,
+      title: lootBox.name,
+      description:
+        lootBox.latestReward?.rewardLabel ??
+        lootBox.rewardLabel ??
+        "Лутбокс с наградой за активность в клубе.",
+      triggerKind: lootBox.triggerKind,
+      sessionType: lootBox.sessionType,
+      schedule: lootBox.schedule,
+      status: lootboxCardStatus(lootBox, walletReady, walletStatus),
+      active: false,
+      openable: lootBox.openable,
+      openState: lootBox.openState,
+      openBlocker: lootBox.openBlocker,
+      rewardLabel: lootBox.rewardLabel,
+      caseRarity: normalizeLootboxRarity(lootBox.caseRarity) ?? "common",
+      caseRarityLabel:
+        lootBox.caseRarityLabel ??
+        LOOTBOX_CASE_RARITY_LABELS[lootBox.caseRarity],
+      rewardRarity: lootBox.latestReward?.rewardRarity ?? null,
+      rewardRarityLabel: lootBox.latestReward?.rewardRarityLabel ?? null,
+      rewardDropChance: lootBox.latestReward?.rewardDropChance ?? null,
+      weeklyOpenedCount: lootBox.weeklyOpenedCount,
+      weeklyLimit: lootBox.weeklyLimit,
+      dailyOpenedCount: lootBox.dailyOpenedCount,
+      dailyLimit: lootBox.dailyLimit,
+      periodicLimitPeriod: lootBox.periodicLimitPeriod,
+      periodicOpenedCount: lootBox.periodicOpenedCount,
+      walletReady,
+      walletStatus,
+    };
+  });
   const activeId = selectedLootId ?? realCards[0]?.id ?? null;
 
   return realCards.map((card) => ({
@@ -4687,7 +6020,25 @@ function buildHomeLootCards(
 
 function lootboxCardStatus(
   lootBox: GuestPortalGameSummary["lootBoxes"]["featured"][number],
+  walletReady: boolean,
+  walletStatus: GuestPortalRewardWalletItem["status"] | null,
 ) {
+  if (walletStatus === "OPENING") {
+    return "открываем";
+  }
+
+  if (walletStatus === "PROCESSING") {
+    return "начисляем";
+  }
+
+  if (walletStatus === "FAILED") {
+    return walletReady ? "повторить" : "ошибка открытия";
+  }
+
+  if (walletReady) {
+    return "награда доступна";
+  }
+
   if (!lootBox.openable && lootBox.openState === "LIMIT_REACHED") {
     return "лимит";
   }
@@ -4705,6 +6056,25 @@ function lootboxCardStatus(
   }
 
   return "доступен";
+}
+
+function lootboxWalletStatusLabel(
+  walletStatus: GuestPortalRewardWalletItem["status"],
+  walletReady: boolean,
+) {
+  if (walletStatus === "OPENING") {
+    return "Открываем…";
+  }
+
+  if (walletStatus === "PROCESSING") {
+    return "Проверяем начисление";
+  }
+
+  if (walletStatus === "FAILED") {
+    return walletReady ? "Повторить открытие" : "Не удалось открыть";
+  }
+
+  return "Награда доступна";
 }
 
 function lootboxCardBlockedTooltip(card: HomeLootCard) {
@@ -5142,10 +6512,18 @@ function normalizeGameRuleSessionType(value: string | null) {
 }
 
 function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
+  const walletItems = gameRewardWallet(summary).items;
+
   return summary.missions.featured.map((mission) => {
     const status = playerQuestStatus(mission);
     const progress = playerQuestProgress(mission);
     const reward = playerQuestReward(mission);
+    const walletItem = selectPreferredRewardWalletItem(
+      walletItems,
+      (item) =>
+        item.sourceKind === "MISSION" && item.sourceId === mission.id,
+    );
+    const preview = gameMissionPreviewData(mission);
 
     return {
       id: mission.id,
@@ -5155,7 +6533,13 @@ function buildPlayerQuests(summary: GuestPortalGameSummary): PlayerQuest[] {
       status,
       progress,
       reward,
-      preview: gameMissionPreviewData(mission),
+      walletItem,
+      preview: walletItem
+        ? {
+            ...preview,
+            actionText: rewardWalletItemActionLabel(walletItem),
+          }
+        : preview,
     };
   });
 }
@@ -6627,41 +8011,49 @@ function RewardJournalPanel({
     useState<RewardHistoryRarityFilter>("all");
   const [activeGroup, setActiveGroup] = useState<RewardHistoryGroup>("source");
   const [searchQuery, setSearchQuery] = useState("");
-  const currentClubId = summary.store.id;
-  const currentClubScope = summary.store.address
-    ? `${summary.store.name} / ${summary.store.address}`
-    : summary.store.name;
-  const clubOptions = useMemo(
-    () => [
-      {
-        id: "all",
-        label: "Итого по всем клубам",
-        scope: "Итого по всем клубам",
-      },
-      { id: currentClubId, label: summary.store.name, scope: currentClubScope },
-    ],
-    [currentClubId, currentClubScope, summary.store.name],
+  const rewardHistory = useMemo(
+    () => buildCanonicalRewardHistory(summary),
+    [summary],
   );
+  const clubOptions = useMemo(
+    () => buildRewardHistoryClubOptions(rewardHistory),
+    [rewardHistory],
+  );
+  const effectiveActiveClub = clubOptions.some(
+    (option) => option.id === activeClub,
+  )
+    ? activeClub
+    : "all";
 
   const scopedRewards = useMemo(
     () =>
-      [...summary.rewards.recent].sort(
-        (left, right) =>
-          Date.parse(right.qualifiedAt) - Date.parse(left.qualifiedAt),
-      ),
-    [summary.rewards.recent],
+      effectiveActiveClub === "all"
+        ? rewardHistory
+        : rewardHistory.filter(
+            (item) => rewardHistoryClubKey(item) === effectiveActiveClub,
+          ),
+    [effectiveActiveClub, rewardHistory],
   );
   const totals = useMemo(
     () => buildRewardHistoryTotals(scopedRewards),
     [scopedRewards],
   );
-  const collection = useMemo(
-    () => buildRewardCollection(scopedRewards),
+  const collectedRewards = useMemo(
+    () =>
+      scopedRewards.filter(
+        (item) =>
+          item.walletState === "READY" ||
+          item.walletState === "REDEEMED",
+      ),
     [scopedRewards],
   );
+  const collection = useMemo(
+    () => buildRewardCollection(collectedRewards),
+    [collectedRewards],
+  );
   const collectionIndex = useMemo(
-    () => buildRewardCollectionIndex(scopedRewards),
-    [scopedRewards],
+    () => buildRewardCollectionIndex(collectedRewards),
+    [collectedRewards],
   );
   const filteredRewards = useMemo(
     () =>
@@ -6669,14 +8061,12 @@ function RewardJournalPanel({
         sourceFilter: activeSourceFilter,
         rarityFilter: activeRarityFilter,
         query: searchQuery,
-        clubName: summary.store.name,
       }),
     [
       activeSourceFilter,
       activeRarityFilter,
       scopedRewards,
       searchQuery,
-      summary.store.name,
     ],
   );
   const groupedRewards = useMemo(
@@ -6684,15 +8074,18 @@ function RewardJournalPanel({
     [activeGroup, filteredRewards],
   );
   const selectedClubScope =
-    clubOptions.find((option) => option.id === activeClub)?.scope ??
+    clubOptions.find((option) => option.id === effectiveActiveClub)?.scope ??
     "Итого по всем клубам";
+  const selectedClubLabel =
+    clubOptions.find((option) => option.id === effectiveActiveClub)?.label ??
+    "Все клубы";
   const collectionTarget = Math.max(12, collection.length);
   const collectionPercent = clampPercent(
     (collection.length / collectionTarget) * 100,
   );
   const activeFilterLabel = rewardHistoryActiveFilterLabel({
-    activeClub,
-    clubName: summary.store.name,
+    activeClub: effectiveActiveClub,
+    clubName: selectedClubLabel,
     sourceFilter: activeSourceFilter,
     rarityFilter: activeRarityFilter,
   });
@@ -6723,15 +8116,15 @@ function RewardJournalPanel({
         "lp-club-panel lp-reward-journal",
         standalone ? "is-standalone" : "",
       ].join(" ")}
-      aria-label="Журнал полученных наград"
+      aria-label="История наград и начислений"
     >
       <header className="lp-reward-journal-head">
         <div>
           <div className="lp-club-label">История наград</div>
-          <h2>Журнал полученных наград</h2>
+          <h2>История наград и начислений</h2>
           <p>
-            Карточки достижений, редкость и коллекционный прогресс по наградам
-            игрового модуля.
+            Здесь видны награды в ожидании, начисления в процессе и уже
+            полученные результаты игрового модуля.
           </p>
         </div>
         <div className="lp-reward-journal-side">
@@ -6749,7 +8142,7 @@ function RewardJournalPanel({
         <label className="lp-reward-scope-field">
           <span className="lp-club-small-label">Область истории</span>
           <select
-            value={activeClub}
+            value={effectiveActiveClub}
             onChange={(event) => setActiveClub(event.target.value)}
           >
             {clubOptions.map((option) => (
@@ -6768,7 +8161,7 @@ function RewardJournalPanel({
       <div className="lp-reward-counter-band" aria-label="Счетчики наград">
         <RewardHistoryCounterPanel
           title="По типам"
-          hint="4 источника"
+          hint={`${formatNumber(REWARD_HISTORY_SOURCE_ORDER.length)} источников`}
           counters={REWARD_HISTORY_SOURCE_ORDER.map((source) => ({
             key: source,
             label: REWARD_HISTORY_SOURCE_LABELS[source],
@@ -6882,7 +8275,6 @@ function RewardJournalPanel({
                   <RewardAchievementCard
                     key={item.id}
                     item={item}
-                    clubName={summary.store.name}
                     collectionMark={collectionIndex.get(item.id) ?? null}
                   />
                 ))}
@@ -6893,7 +8285,7 @@ function RewardJournalPanel({
           <p className="lp-reward-empty-copy">
             {hasRewards
               ? "Наград по выбранным условиям пока нет."
-              : "Полученные награды появятся здесь после лутбоксов, квестов, баттлпасса или промокодов."}
+              : "Награды и начисления появятся здесь после лутбоксов, квестов, боевого пропуска или промокодов."}
           </p>
         )}
       </section>
@@ -7001,15 +8393,14 @@ function RewardCollectionCard({ item }: { item: RewardCollectionItem }) {
 
 function RewardAchievementCard({
   item,
-  clubName,
   collectionMark,
 }: {
   item: GameRewardHistoryItem;
-  clubName: string;
   collectionMark: RewardCollectionMark | null;
 }) {
   const source = rewardHistorySource(item);
   const rarity = rewardHistoryRarity(item);
+  const claimCode = rewardHistoryClaimCode(item);
 
   return (
     <article className={`lp-reward-achievement-card rarity-${rarity}`}>
@@ -7018,7 +8409,7 @@ function RewardAchievementCard({
       </span>
       <span className="lp-reward-achievement-main">
         <small>
-          {clubName} /{" "}
+          {rewardHistoryClubLabel(item)} /{" "}
           {item.sourceLabel ?? REWARD_HISTORY_SOURCE_LABELS[source]}
         </small>
         <strong>{item.rewardLabel}</strong>
@@ -7026,6 +8417,12 @@ function RewardAchievementCard({
           {rewardHistoryDescription(item)} ·{" "}
           {walletStateLabel(item.walletState)}
         </span>
+        {claimCode ? (
+          <span className="lp-reward-claim-code">
+            <small>{claimCode.label}</small>
+            <code>{claimCode.value}</code>
+          </span>
+        ) : null}
       </span>
       <span className="lp-reward-achievement-meta">
         <span className="lp-reward-value">{rewardHistoryValue(item)}</span>
@@ -7038,16 +8435,44 @@ function RewardAchievementCard({
           </span>
         ) : null}
         <span className="lp-reward-date">
-          {formatRewardHistoryDay(item.qualifiedAt)}
+          {formatRewardHistoryDay(rewardHistoryOccurredAt(item))}
           <br />
-          {formatRewardHistoryTime(item.qualifiedAt)}
+          {formatRewardHistoryTime(rewardHistoryOccurredAt(item))}
         </span>
       </span>
     </article>
   );
 }
 
+function rewardHistoryClaimCode(
+  item: Pick<
+    GameRewardHistoryItem,
+    "walletState" | "rewardCode" | "claimPayload"
+  >,
+) {
+  const value = (item.rewardCode ?? item.claimPayload)?.trim();
+
+  if (!value) {
+    return null;
+  }
+
+  const labels = {
+    READY: "Код для получения",
+    REDEEMED: "Код полученной награды",
+  } satisfies Partial<Record<GameRewardWalletState, string>>;
+  const label =
+    item.walletState in labels
+      ? labels[item.walletState as keyof typeof labels]
+      : null;
+
+  return label ? { label, value } : null;
+}
+
 function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
+  if (source === "checkin") {
+    return <ClubIcon />;
+  }
+
   if (source === "battlepass") {
     return (
       <svg
@@ -7107,11 +8532,13 @@ function RewardSourceIcon({ source }: { source: RewardHistorySource }) {
 }
 
 function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
-  const reward = summary.rewards.ready[0] ?? null;
+  const reward =
+    summary.rewards.ready.find((item) => item.walletState === "READY") ?? null;
   const recentRewards = summary.rewards.recent;
   const latestBonus = summary.rewards.latestBonus;
   const bonusHistory = summary.rewards.bonusHistory;
   const bonusBalance = summary.loyalty.bonusBalance;
+  const rewardClaimCode = reward ? rewardHistoryClaimCode(reward) : null;
   const hasRewardResult = Boolean(
     reward || latestBonus || recentRewards.length || bonusHistory.items.length,
   );
@@ -7141,7 +8568,7 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
           </span>
         ) : reward ? (
           <span className="rounded-full bg-emerald-300 px-2 py-1 text-xs font-black text-zinc-950">
-            READY
+            Можно забрать
           </span>
         ) : null}
       </div>
@@ -7217,14 +8644,16 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                   Редкость: {lootboxRewardRarityLabel(reward)}
                 </p>
               ) : null}
-              <div className="mt-4 rounded-lg border border-white/10 bg-zinc-950/60 p-4">
-                <p className="text-xs text-zinc-400">Код для кассы</p>
-                <p className="mt-1 break-all text-2xl font-black tracking-wider">
-                  {reward.rewardCode ??
-                    reward.claimPayload ??
-                    "покажите кабинет"}
-                </p>
-              </div>
+              {rewardClaimCode ? (
+                <div className="mt-4 rounded-lg border border-white/10 bg-zinc-950/60 p-4">
+                  <p className="text-xs text-zinc-400">
+                    {rewardClaimCode.label}
+                  </p>
+                  <p className="mt-1 break-all text-2xl font-black tracking-wider">
+                    {rewardClaimCode.value}
+                  </p>
+                </div>
+              ) : null}
               {reward.expiresAt ? (
                 <p className="mt-3 text-xs text-zinc-400">
                   Действует до {formatDate(reward.expiresAt)}
@@ -7266,10 +8695,7 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
               </div>
               <div className="mt-3 space-y-2">
                 {recentRewards.map((item) => {
-                  const readyCode =
-                    item.walletState === "READY"
-                      ? (item.rewardCode ?? item.claimPayload)
-                      : null;
+                  const claimCode = rewardHistoryClaimCode(item);
                   const rarityLabel = lootboxRewardRarityLabel(item);
 
                   return (
@@ -7307,9 +8733,9 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
                         <span>
                           {formatNumber(item.rewardAmount)} · {item.rewardType}
                         </span>
-                        {readyCode ? (
+                        {claimCode ? (
                           <span className="font-black text-emerald-200">
-                            код: {readyCode}
+                            {claimCode.label}: {claimCode.value}
                           </span>
                         ) : item.expiresAt ? (
                           <span>до {formatDate(item.expiresAt)}</span>
@@ -7466,6 +8892,9 @@ function LootBoxesPanel({
             const latestRarityLabel = latestReward
               ? lootboxRewardRarityLabel(latestReward)
               : null;
+            const latestClaimCode = latestReward
+              ? rewardHistoryClaimCode(latestReward)
+              : null;
             const isOpened = openedLootBoxId === lootBox.id;
 
             return (
@@ -7546,10 +8975,9 @@ function LootBoxesPanel({
                             ? ` До ${formatDate(latestReward.expiresAt)}.`
                             : ""}
                         </p>
-                        {latestReward.rewardCode &&
-                        latestReward.walletState === "READY" ? (
+                        {latestClaimCode ? (
                           <p className="mt-3 rounded-lg border border-dashed border-emerald-200/50 px-3 py-2 text-sm font-black text-emerald-50">
-                            Код кассиру: {latestReward.rewardCode}
+                            {latestClaimCode.label}: {latestClaimCode.value}
                           </p>
                         ) : null}
                       </div>
@@ -8093,6 +9521,7 @@ function rewardSourceKindLabel(
   kind: GuestPortalGameSummary["rewards"]["recent"][number]["sourceKind"],
 ) {
   const labels = {
+    CHECK_IN: "чекин",
     LOOT_BOX: "лутбокс",
     MISSION: "квест",
     BATTLE_PASS: "боевой пропуск",
@@ -8105,7 +9534,253 @@ function rewardSourceKindLabel(
   return labels[kind];
 }
 
+function rewardHistoryAmountFromLabel(label: string) {
+  const match = label
+    .replace(/\u00a0/gu, " ")
+    .match(/[+-]?\d[\d\s]*(?:[.,]\d+)?/u)?.[0];
+
+  if (!match) {
+    return 0;
+  }
+
+  const amount = Number(match.replace(/\s/gu, "").replace(",", "."));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function rewardHistoryTypeFromLabel(label: string) {
+  const normalized = label.toLocaleUpperCase("ru-RU");
+
+  if (normalized.includes("XP")) {
+    return "XP";
+  }
+
+  if (normalized.includes("БОНУС")) {
+    return "BONUS";
+  }
+
+  if (normalized.includes("МИНУТ") || normalized.includes("ЧАС")) {
+    return "PLAY_TIME";
+  }
+
+  return "REWARD";
+}
+
+function normalizeRecentRewardHistoryItem(
+  item: GuestPortalGameSummary["rewards"]["recent"][number],
+): GameRewardHistoryItem {
+  return {
+    ...item,
+    sourceKind: item.sourceKind,
+    storeId: item.storeId ?? null,
+    storeName: item.storeName?.trim() || null,
+    claimedAt: item.claimedAt ?? null,
+  };
+}
+
+function normalizeWalletRewardHistoryItem(
+  item: GuestPortalRewardWalletHistoryItem,
+): GameRewardHistoryItem {
+  return {
+    id: item.id,
+    status: item.status,
+    walletState: walletHistoryWalletState(item.status),
+    rewardType: rewardHistoryTypeFromLabel(item.rewardLabel),
+    rewardAmount: rewardHistoryAmountFromLabel(item.rewardLabel),
+    rewardLabel: item.rewardLabel,
+    rewardRarity: null,
+    rewardRarityLabel: null,
+    rewardDropChance: null,
+    sourceId: item.sourceId,
+    sourceKind: item.sourceKind,
+    sourceLabel: item.title,
+    storeId: item.storeId,
+    storeName: item.storeName?.trim() || null,
+    rewardCode: null,
+    claimPayload: null,
+    qualifiedAt: item.availableAt,
+    claimedAt: item.claimedAt ?? null,
+    expiresAt: item.expiresAt,
+  };
+}
+
+function walletHistoryWalletState(
+  status: GuestPortalRewardWalletHistoryItem["status"],
+): GameRewardWalletState {
+  if (status === "CLAIMED") {
+    return "REDEEMED";
+  }
+
+  if (status === "PENDING" || status === "FAILED") {
+    return "WAITING_CLAIM";
+  }
+
+  if (status === "PROCESSING" || status === "OPENING") {
+    return "DELIVERY_PROCESSING";
+  }
+
+  return "DELIVERY_PROCESSING";
+}
+
+function bonusHistoryWalletState(
+  status: GameBonusHistoryItem["status"],
+): GameRewardWalletState {
+  if (status === "CONFIRMED") {
+    return "REDEEMED";
+  }
+
+  if (
+    status === "PENDING" ||
+    status === "PROCESSING" ||
+    status === "UNKNOWN"
+  ) {
+    return "DELIVERY_PROCESSING";
+  }
+
+  return "CANCELED";
+}
+
+function normalizeBonusRewardHistoryItem(
+  item: GameBonusHistoryItem,
+): GameRewardHistoryItem {
+  return {
+    id: item.id,
+    status: item.status,
+    walletState: bonusHistoryWalletState(item.status),
+    rewardType: "BONUS",
+    rewardAmount: item.amount,
+    rewardLabel: item.title,
+    rewardRarity: null,
+    rewardRarityLabel: null,
+    rewardDropChance: null,
+    sourceId: null,
+    sourceKind: item.sourceKind,
+    sourceLabel: item.sourceLabel,
+    storeId: item.storeId ?? null,
+    storeName: item.storeName?.trim() || null,
+    rewardCode: null,
+    claimPayload: null,
+    qualifiedAt: item.occurredAt,
+    claimedAt: item.confirmedAt,
+    expiresAt: null,
+  };
+}
+
+function mergeRewardHistoryItems(
+  current: GameRewardHistoryItem,
+  next: GameRewardHistoryItem,
+) {
+  return {
+    ...current,
+    ...next,
+    rewardType:
+      next.rewardType === "REWARD" ? current.rewardType : next.rewardType,
+    rewardAmount:
+      next.rewardAmount === 0 ? current.rewardAmount : next.rewardAmount,
+    rewardRarity: next.rewardRarity ?? current.rewardRarity,
+    rewardRarityLabel:
+      next.rewardRarityLabel ?? current.rewardRarityLabel,
+    rewardDropChance:
+      next.rewardDropChance ?? current.rewardDropChance,
+    sourceId: next.sourceId ?? current.sourceId,
+    sourceLabel: next.sourceLabel ?? current.sourceLabel,
+    storeId: next.storeId ?? current.storeId,
+    storeName: next.storeName ?? current.storeName,
+    rewardCode: next.rewardCode ?? current.rewardCode,
+    claimPayload: next.claimPayload ?? current.claimPayload,
+    claimedAt: next.claimedAt ?? current.claimedAt,
+    expiresAt: next.expiresAt ?? current.expiresAt,
+  } satisfies GameRewardHistoryItem;
+}
+
+function buildCanonicalRewardHistory(summary: GuestPortalGameSummary) {
+  const byStableId = new Map<string, GameRewardHistoryItem>();
+
+  function upsert(item: GameRewardHistoryItem) {
+    const current = byStableId.get(item.id);
+    byStableId.set(
+      item.id,
+      current ? mergeRewardHistoryItems(current, item) : item,
+    );
+  }
+
+  for (const item of summary.rewards.bonusHistory.items) {
+    upsert(normalizeBonusRewardHistoryItem(item));
+  }
+
+  for (const item of summary.rewards.recent) {
+    upsert(normalizeRecentRewardHistoryItem(item));
+  }
+
+  for (const item of gameRewardWallet(summary).history ?? []) {
+    upsert(normalizeWalletRewardHistoryItem(item));
+  }
+
+  return [...byStableId.values()].sort(
+    (left, right) =>
+      Date.parse(right.claimedAt ?? right.qualifiedAt) -
+      Date.parse(left.claimedAt ?? left.qualifiedAt),
+  );
+}
+
+function rewardHistoryClubKey(
+  item: Pick<GameRewardHistoryItem, "storeId" | "storeName">,
+) {
+  if (item.storeId) {
+    return `store:${item.storeId}`;
+  }
+
+  const storeName = item.storeName?.trim();
+  if (storeName) {
+    return `store-name:${storeName.toLocaleLowerCase("ru-RU")}`;
+  }
+
+  return "network";
+}
+
+function rewardHistoryClubLabel(
+  item: Pick<GameRewardHistoryItem, "storeId" | "storeName">,
+) {
+  const storeName = item.storeName?.trim();
+
+  if (storeName) {
+    return storeName;
+  }
+
+  return item.storeId ? "Клуб без названия" : "Вся сеть";
+}
+
+function buildRewardHistoryClubOptions(items: GameRewardHistoryItem[]) {
+  const byId = new Map<
+    string,
+    { id: string; label: string; scope: string }
+  >();
+
+  for (const item of items) {
+    const id = rewardHistoryClubKey(item);
+    const label = rewardHistoryClubLabel(item);
+
+    if (!byId.has(id)) {
+      byId.set(id, { id, label, scope: label });
+    }
+  }
+
+  return [
+    {
+      id: "all",
+      label: "Все клубы",
+      scope: "Итого по всем клубам",
+    },
+    ...[...byId.values()].sort((left, right) =>
+      left.label.localeCompare(right.label, "ru-RU"),
+    ),
+  ];
+}
+
 function rewardHistorySource(item: GameRewardHistoryItem): RewardHistorySource {
+  if (item.sourceKind === "CHECK_IN") {
+    return "checkin";
+  }
+
   if (item.sourceKind === "LOOT_BOX") {
     return "lootbox";
   }
@@ -8133,12 +9808,22 @@ function rewardHistoryCollectionKey(item: GameRewardHistoryItem) {
   const sourceId =
     source === "lootbox"
       ? (item.sourceId ?? item.sourceLabel ?? item.sourceKind)
-      : (item.sourceId ?? item.sourceKind);
+      : source === "checkin"
+        ? item.sourceKind
+        : (item.sourceId ?? item.sourceKind);
 
   return [item.rewardLabel, rarity, sourceId].join("::");
 }
 
+function rewardHistoryOccurredAt(item: GameRewardHistoryItem) {
+  return item.claimedAt ?? item.qualifiedAt;
+}
+
 function rewardHistoryValue(item: GameRewardHistoryItem) {
+  if (item.rewardAmount <= 0) {
+    return item.rewardLabel;
+  }
+
   const amount = formatNumber(item.rewardAmount);
   const type = item.rewardType.toLocaleUpperCase("ru-RU");
 
@@ -8175,6 +9860,7 @@ function rewardHistoryDescription(item: GameRewardHistoryItem) {
 
 function buildRewardHistoryTotals(items: GameRewardHistoryItem[]) {
   const source = {
+    checkin: 0,
     lootbox: 0,
     battlepass: 0,
     quest: 0,
@@ -8210,8 +9896,9 @@ function buildRewardCollection(
 
     if (current) {
       current.count += 1;
-      if (Date.parse(item.qualifiedAt) > Date.parse(current.latestAt)) {
-        current.latestAt = item.qualifiedAt;
+      const occurredAt = rewardHistoryOccurredAt(item);
+      if (Date.parse(occurredAt) > Date.parse(current.latestAt)) {
+        current.latestAt = occurredAt;
       }
       continue;
     }
@@ -8223,7 +9910,7 @@ function buildRewardCollection(
       source: rewardHistorySource(item),
       rarity: rewardHistoryRarity(item),
       count: 1,
-      latestAt: item.qualifiedAt,
+      latestAt: rewardHistoryOccurredAt(item),
     });
   }
 
@@ -8244,7 +9931,8 @@ function buildRewardCollectionIndex(items: GameRewardHistoryItem[]) {
   const seenByKey = new Map<string, number>();
   const sortedAsc = [...items].sort(
     (left, right) =>
-      Date.parse(left.qualifiedAt) - Date.parse(right.qualifiedAt),
+      Date.parse(rewardHistoryOccurredAt(left)) -
+      Date.parse(rewardHistoryOccurredAt(right)),
   );
 
   for (const item of sortedAsc) {
@@ -8279,7 +9967,6 @@ function filterRewardHistory(
     sourceFilter: RewardHistorySourceFilter;
     rarityFilter: RewardHistoryRarityFilter;
     query: string;
-    clubName: string;
   },
 ) {
   const query = filters.query.trim().toLocaleLowerCase("ru-RU");
@@ -8299,7 +9986,8 @@ function filterRewardHistory(
         item.rewardType,
         REWARD_HISTORY_SOURCE_LABELS[source],
         REWARD_HISTORY_RARITY_LABELS[rarity],
-        filters.clubName,
+        item.storeName,
+        rewardHistoryClubLabel(item),
       ]
         .filter(Boolean)
         .join(" ")
@@ -8335,7 +10023,7 @@ function groupRewardHistory(
 
   const groups = new Map<string, GameRewardHistoryItem[]>();
   for (const item of items) {
-    const key = formatRewardHistoryDay(item.qualifiedAt);
+    const key = formatRewardHistoryDay(rewardHistoryOccurredAt(item));
     groups.set(key, [...(groups.get(key) ?? []), item]);
   }
 
@@ -8347,8 +10035,12 @@ function groupRewardHistory(
     }))
     .sort(
       (left, right) =>
-        Date.parse(right.items[0]?.qualifiedAt ?? "") -
-        Date.parse(left.items[0]?.qualifiedAt ?? ""),
+        Date.parse(
+          right.items[0] ? rewardHistoryOccurredAt(right.items[0]) : "",
+        ) -
+        Date.parse(
+          left.items[0] ? rewardHistoryOccurredAt(left.items[0]) : "",
+        ),
     );
 }
 
@@ -8496,6 +10188,8 @@ function actionPriorityClass(priority: GameNextAction["priority"]) {
 
 function walletStateLabel(state: GameRewardWalletState) {
   const labels = {
+    WAITING_CLAIM: "Ждёт получения",
+    DELIVERY_PROCESSING: "Начисляется",
     WAITING_APPROVAL: "Ждет проверки",
     READY: "Можно забрать",
     REDEEMED: "Выдано",
@@ -8508,6 +10202,8 @@ function walletStateLabel(state: GameRewardWalletState) {
 
 function walletStateBadgeClass(state: GameRewardWalletState) {
   const classes = {
+    WAITING_CLAIM: "bg-cyan-300 text-zinc-950",
+    DELIVERY_PROCESSING: "bg-cyan-300/20 text-cyan-100",
     WAITING_APPROVAL: "bg-amber-300 text-zinc-950",
     READY: "bg-emerald-300 text-zinc-950",
     REDEEMED: "bg-white/10 text-zinc-200",
@@ -8520,6 +10216,10 @@ function walletStateBadgeClass(state: GameRewardWalletState) {
 
 function walletStateHint(state: GameRewardWalletState) {
   const hints = {
+    WAITING_CLAIM:
+      "Награда сохранена в кошельке. Нажмите «Забрать», чтобы начать начисление.",
+    DELIVERY_PROCESSING:
+      "Награда отправлена на начисление. LeetPlus проверяет результат.",
     WAITING_APPROVAL: "Сотрудник клуба проверит результат и подготовит выдачу.",
     READY: "Покажите код кассиру в клубе, чтобы получить награду.",
     REDEEMED: "Награда уже выдана и отмечена в LeetPlus.",
@@ -8906,6 +10606,264 @@ const clubHomeCss = `
   border-radius: 50%;
   background: var(--cyan);
   box-shadow: 0 0 16px rgba(131, 228, 236, 0.64);
+}
+
+.lp-club-header-actions {
+  position: relative;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lp-reward-wallet-header {
+  position: relative;
+}
+
+.lp-reward-wallet-trigger {
+  appearance: none;
+  display: inline-flex;
+  min-width: 66px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 11px;
+  border: 1px solid rgba(131, 228, 236, 0.58);
+  border-radius: 8px;
+  color: var(--cyan);
+  cursor: pointer;
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.12), transparent 62%),
+    rgba(7, 12, 16, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(131, 228, 236, 0.04);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-reward-wallet-trigger:hover,
+.lp-reward-wallet-trigger:focus-visible {
+  border-color: rgba(131, 228, 236, 0.9);
+  outline: none;
+  background: rgba(131, 228, 236, 0.13);
+  transform: translateY(-1px);
+}
+
+.lp-reward-wallet-trigger svg,
+.lp-reward-wallet-trigger img {
+  width: 19px;
+  height: 19px;
+  object-fit: contain;
+}
+
+.lp-reward-wallet-trigger > span {
+  display: grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #fff2c8;
+  font-size: 11px;
+  font-weight: 900;
+  background: #987411;
+  box-shadow: 0 0 18px rgba(218, 171, 50, 0.28);
+}
+
+.lp-reward-wallet-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 50;
+  width: min(360px, calc(100vw - 28px));
+  max-height: calc(100dvh - 84px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  border: 1px solid rgba(131, 228, 236, 0.4);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(131, 228, 236, 0.1), transparent 34%),
+    rgba(4, 10, 13, 0.985);
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.68),
+    0 0 34px rgba(131, 228, 236, 0.1);
+}
+
+.lp-reward-wallet-dropdown > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-reward-wallet-dropdown > header strong {
+  display: grid;
+  min-width: 28px;
+  height: 24px;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: #fff2c8;
+  font-size: 11px;
+  background: rgba(152, 116, 17, 0.72);
+}
+
+.lp-reward-wallet-dropdown-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.lp-reward-wallet-dropdown-list > button {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(196, 224, 225, 0.12);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  background: rgba(196, 224, 225, 0.035);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.lp-reward-wallet-dropdown-list > button:hover,
+.lp-reward-wallet-dropdown-list > button:focus-visible {
+  border-color: rgba(131, 228, 236, 0.42);
+  outline: none;
+  background: rgba(131, 228, 236, 0.07);
+}
+
+.lp-reward-wallet-dropdown-list > button:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+.lp-reward-wallet-dropdown-list > button.is-failed {
+  border-color: rgba(251, 113, 133, 0.42);
+  background: rgba(159, 18, 57, 0.09);
+}
+
+.lp-reward-wallet-dropdown-list > button > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.lp-reward-wallet-dropdown-list small,
+.lp-reward-wallet-dropdown-list em {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-reward-wallet-dropdown-list strong {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-reward-wallet-dropdown-list .lp-reward-wallet-item-hint {
+  color: rgba(196, 224, 225, 0.68);
+}
+
+.lp-reward-wallet-dropdown-list > button.is-failed
+  .lp-reward-wallet-item-hint {
+  color: #fda4af;
+}
+
+.lp-reward-wallet-dropdown-list b {
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.lp-reward-wallet-item-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(131, 228, 236, 0.28);
+  border-radius: 8px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.06);
+}
+
+.lp-reward-wallet-item-icon svg,
+.lp-reward-wallet-item-icon img {
+  width: 17px;
+  height: 17px;
+  object-fit: contain;
+}
+
+.lp-reward-wallet-more {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.lp-reward-wallet-open-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.lp-reward-wallet-claim-all,
+.lp-reward-wallet-history-link {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.lp-reward-wallet-claim-all {
+  border: 1px solid rgba(131, 228, 236, 0.45);
+  color: #001012;
+  cursor: pointer;
+  background: linear-gradient(135deg, #83e4ec, #94d6b8);
+}
+
+.lp-reward-wallet-claim-all:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.lp-reward-wallet-history-link {
+  border: 1px solid rgba(131, 228, 236, 0.22);
+  color: var(--cyan);
+  background: rgba(196, 224, 225, 0.035);
 }
 
 .lp-club-shell {
@@ -9332,6 +11290,11 @@ const clubHomeCss = `
   color: var(--amber);
 }
 
+.lp-lootbox-entry-state.is-wallet-ready {
+  color: var(--cyan);
+  text-shadow: 0 0 14px rgba(131, 228, 236, 0.28);
+}
+
 .lp-lootbox-entry-state-wrap {
   position: relative;
   z-index: 3;
@@ -9439,6 +11402,11 @@ const clubHomeCss = `
     animation: none;
     transform: translateY(2px);
   }
+
+  .lp-reward-wallet-trigger.is-pulsing,
+  .lp-club-reward-wallet.is-pulsing {
+    animation: none;
+  }
 }
 
 .lp-lootbox-entry-bottom {
@@ -9459,6 +11427,31 @@ const clubHomeCss = `
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.lp-lootbox-wallet-ready {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lp-lootbox-wallet-ready svg {
+  width: 17px;
+  height: 17px;
+}
+
+.lootbox-entry.has-wallet-reward {
+  border-color: rgba(131, 228, 236, 0.7);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.38),
+    0 0 30px rgba(131, 228, 236, 0.1);
 }
 
 .lp-lootbox-mini-lock {
@@ -12249,6 +14242,158 @@ const clubHomeCss = `
   text-transform: uppercase;
 }
 
+.lp-club-reward-wallet {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  margin: 16px 0 0;
+  padding: 14px;
+  border: 1px solid rgba(131, 228, 236, 0.58);
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 0 0, rgba(131, 228, 236, 0.14), transparent 42%),
+    rgba(4, 15, 18, 0.88);
+  box-shadow:
+    inset 3px 0 0 rgba(131, 228, 236, 0.18),
+    0 0 26px rgba(131, 228, 236, 0.07);
+}
+
+.lp-club-reward-wallet::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 72%;
+  height: 1px;
+  background: linear-gradient(90deg, var(--cyan), transparent);
+}
+
+.lp-club-reward-wallet-head {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.lp-club-reward-wallet-head > strong {
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.lp-club-reward-wallet-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(131, 228, 236, 0.3);
+  border-radius: 7px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.06);
+}
+
+.lp-club-reward-wallet-icon svg,
+.lp-club-reward-wallet-icon img {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+}
+
+.lp-club-reward-wallet-count {
+  display: grid;
+  min-width: 26px;
+  height: 22px;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: #fff2c8;
+  font-size: 10px;
+  font-weight: 900;
+  background: rgba(152, 116, 17, 0.78);
+}
+
+.lp-club-reward-wallet > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.lp-club-reward-wallet-primary,
+.lp-club-reward-wallet-history {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-align: center;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.lp-club-reward-wallet-primary {
+  border: 1px solid rgba(131, 228, 236, 0.42);
+  color: #001012;
+  cursor: pointer;
+  background: linear-gradient(135deg, #83e4ec, #94d6b8);
+}
+
+.lp-club-reward-wallet-history {
+  border: 1px solid rgba(131, 228, 236, 0.2);
+  color: var(--cyan);
+  background: rgba(196, 224, 225, 0.025);
+}
+
+.lp-club-reward-wallet > small {
+  color: var(--quiet);
+  font-size: 9px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.lp-reward-wallet-trigger.is-pulsing,
+.lp-club-reward-wallet.is-pulsing {
+  animation: lp-reward-wallet-pulse 1050ms ease-out 1;
+}
+
+@keyframes lp-reward-wallet-pulse {
+  0% {
+    box-shadow: 0 0 0 rgba(131, 228, 236, 0);
+  }
+
+  38% {
+    box-shadow:
+      0 0 0 4px rgba(131, 228, 236, 0.1),
+      0 0 34px rgba(131, 228, 236, 0.3);
+  }
+
+  100% {
+    box-shadow: 0 0 0 rgba(131, 228, 236, 0);
+  }
+}
+
+.lp-club-checkin-pending {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid rgba(218, 171, 50, 0.3);
+  border-radius: 999px;
+  color: #f2ce70;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(152, 116, 17, 0.1);
+}
+
 .lp-club-checkin-card {
   display: grid;
   gap: 8px;
@@ -12411,6 +14556,7 @@ const clubHomeCss = `
 
 .lp-club-side-quest,
 .lp-club-quest-full-card {
+  position: relative;
   display: block;
   width: 100%;
   min-width: 0;
@@ -12423,6 +14569,33 @@ const clubHomeCss = `
   text-align: left;
   text-decoration: none;
   background: transparent;
+}
+
+.lp-club-side-quest-claim {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  border: 1px solid rgba(131, 228, 236, 0.34);
+  border-radius: 999px;
+  color: var(--cyan);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  background: rgba(5, 18, 21, 0.92);
+  box-shadow: 0 0 18px rgba(131, 228, 236, 0.12);
+  pointer-events: none;
+}
+
+.lp-club-side-quest.has-wallet-reward p.truncate,
+.lp-club-quest-full-card.has-wallet-reward p.truncate {
+  padding-right: 62px;
 }
 
 .lp-club-side-quest > div,
@@ -12681,10 +14854,193 @@ const clubHomeCss = `
 }
 
 .lp-reward-standalone-shell {
+  display: grid;
+  gap: 16px;
   width: min(1480px, 100%);
   min-height: 100vh;
   margin: 0 auto;
   padding: clamp(18px, 3.4vw, 46px);
+}
+
+.lp-reward-wallet-message {
+  padding: 12px 14px;
+  border: 1px solid rgba(131, 228, 236, 0.28);
+  border-radius: 8px;
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 760;
+  background: rgba(131, 228, 236, 0.07);
+}
+
+.lp-reward-wallet-inbox {
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+  padding: clamp(18px, 2.4vw, 28px);
+  border-color: rgba(131, 228, 236, 0.42);
+  background:
+    radial-gradient(circle at 0 0, rgba(131, 228, 236, 0.13), transparent 34%),
+    linear-gradient(180deg, rgba(7, 16, 19, 0.98), rgba(3, 9, 11, 0.98));
+}
+
+.lp-reward-wallet-inbox-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+}
+
+.lp-reward-wallet-inbox-head h1 {
+  margin-top: 9px;
+  color: var(--text);
+  font-size: clamp(25px, 3vw, 42px);
+  line-height: 1;
+}
+
+.lp-reward-wallet-inbox-head p {
+  max-width: 700px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lp-reward-wallet-inbox-count {
+  display: grid;
+  min-width: 42px;
+  height: 36px;
+  place-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #fff2c8;
+  font-size: 15px;
+  font-weight: 900;
+  background: rgba(152, 116, 17, 0.78);
+  box-shadow: 0 0 24px rgba(218, 171, 50, 0.16);
+}
+
+.lp-reward-wallet-inbox-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lp-reward-wallet-inbox-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid rgba(196, 224, 225, 0.13);
+  border-radius: 9px;
+  background: rgba(196, 224, 225, 0.035);
+}
+
+.lp-reward-wallet-inbox-item.is-failed {
+  border-color: rgba(251, 113, 133, 0.42);
+  background: rgba(159, 18, 57, 0.09);
+}
+
+.lp-reward-wallet-inbox-item > .lp-reward-wallet-item-icon {
+  width: 42px;
+  height: 42px;
+}
+
+.lp-reward-wallet-inbox-item > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.lp-reward-wallet-inbox-item small,
+.lp-reward-wallet-inbox-item em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.lp-reward-wallet-inbox-item .lp-reward-wallet-item-status {
+  color: var(--cyan);
+  font-weight: 800;
+}
+
+.lp-reward-wallet-inbox-item .lp-reward-wallet-item-hint {
+  overflow: visible;
+  color: rgba(196, 224, 225, 0.68);
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.lp-reward-wallet-inbox-item.is-failed .lp-reward-wallet-item-hint {
+  color: #fda4af;
+}
+
+.lp-reward-wallet-inbox-item strong,
+.lp-reward-wallet-inbox-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-reward-wallet-inbox-item strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.lp-reward-wallet-inbox-item > div > span {
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lp-reward-wallet-inbox-item > button,
+.lp-reward-wallet-inbox-actions > button {
+  appearance: none;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(131, 228, 236, 0.42);
+  border-radius: 7px;
+  color: #001012;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #83e4ec, #94d6b8);
+}
+
+.lp-reward-wallet-inbox-item > button:disabled,
+.lp-reward-wallet-inbox-actions > button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.lp-reward-wallet-inbox-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(196, 224, 225, 0.1);
+}
+
+.lp-reward-wallet-inbox-more {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.lp-reward-wallet-inbox-actions > button {
+  min-height: 42px;
+  padding: 0 18px;
+}
+
+.lp-reward-wallet-inbox-actions > span {
+  color: var(--quiet);
+  font-size: 10px;
 }
 
 .lp-reward-journal {
@@ -12900,7 +15256,7 @@ const clubHomeCss = `
 
 .lp-reward-counter-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 8px;
   padding: 0 12px 12px;
 }
@@ -13131,6 +15487,33 @@ const clubHomeCss = `
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+
+.lp-reward-achievement-main .lp-reward-claim-code {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px dashed rgba(131, 228, 236, 0.38);
+  border-radius: 6px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.06);
+}
+
+.lp-reward-achievement-main .lp-reward-claim-code small {
+  color: rgba(196, 224, 225, 0.68);
+  white-space: normal;
+}
+
+.lp-reward-achievement-main .lp-reward-claim-code code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
 }
 
 .lp-reward-collection-card em {
@@ -13647,6 +16030,10 @@ const clubHomeCss = `
     padding-top: 0;
   }
 
+  .lp-club-reward-wallet {
+    margin-top: 0;
+  }
+
   .lp-club-quest-widget {
     grid-column: span 2;
     margin-top: 0;
@@ -13664,7 +16051,7 @@ const clubHomeCss = `
 
 @media (max-width: 920px) {
   .lp-club-topbar {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .lp-club-session-state {
@@ -13675,6 +16062,10 @@ const clubHomeCss = `
   .lp-club-banner-grid,
   .lp-club-loot-grid,
   .lp-club-profile-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-reward-wallet-inbox-list {
     grid-template-columns: 1fr;
   }
 
@@ -13774,6 +16165,56 @@ const clubHomeCss = `
 
   .lp-club-network {
     gap: 12px;
+  }
+
+  .lp-club-header-actions {
+    gap: 6px;
+  }
+
+  .lp-reward-wallet-trigger {
+    min-width: 54px;
+    height: 42px;
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .lp-reward-wallet-trigger > span {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+  }
+
+  .lp-reward-wallet-inbox-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lp-reward-wallet-inbox-count {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+  }
+
+  .lp-reward-wallet-inbox-item {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .lp-reward-wallet-inbox-item > .lp-reward-wallet-item-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .lp-reward-wallet-inbox-item > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .lp-reward-wallet-inbox-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lp-reward-wallet-inbox-actions > span {
+    text-align: center;
   }
 
   .lp-club-brand {
@@ -13984,10 +16425,64 @@ async function acknowledgeGameCompletionNotification(notificationId: string) {
     throw new Error(
       await readResponseMessage(
         response,
-        "Не удалось сохранить подтверждение просмотра.",
+        "Не удалось закрыть уведомление.",
       ),
     );
   }
+}
+
+async function claimGameRewardWalletItem(
+  itemId: string,
+): Promise<GuestPortalGameSummary> {
+  return postGameRewardWalletClaim(
+    `/api/guest-portal/session/reward-wallet/items/${encodeURIComponent(itemId)}/claim`,
+  );
+}
+
+async function claimAllGameRewardWalletItems(): Promise<GuestPortalGameSummary> {
+  return postGameRewardWalletClaim(
+    "/api/guest-portal/session/reward-wallet/claim-all",
+  );
+}
+
+async function postGameRewardWalletClaim(
+  url: string,
+): Promise<GuestPortalGameSummary> {
+  const response = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new EmptySessionError(
+      "Сначала подтвердите телефон и выберите клуб.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(
+        response,
+        "Не удалось обновить кошелёк наград.",
+      ),
+    );
+  }
+
+  const payload = (await response.json()) as
+    | GuestPortalGameSummary
+    | { summary?: GuestPortalGameSummary };
+  const summary =
+    "summary" in payload && payload.summary ? payload.summary : payload;
+
+  if (
+    summary &&
+    "generatedAt" in summary &&
+    typeof summary.generatedAt === "string"
+  ) {
+    return summary as GuestPortalGameSummary;
+  }
+
+  return loadGameSummary();
 }
 
 async function recordGameAppOpen(surface: "WEB" | "TG_MINI_APP") {
@@ -14099,6 +16594,82 @@ async function openGameLootBox(
   });
 
   return result;
+}
+
+async function selectRewardWalletItemStore(
+  summary: GuestPortalGameSummary,
+  item: GuestPortalRewardWalletItem,
+): Promise<{
+  summary: GuestPortalGameSummary;
+  switched: boolean;
+}> {
+  if (!item.storeId || item.storeId === summary.store.id) {
+    return { summary, switched: false };
+  }
+
+  const response = await fetch("/api/guest-portal/session/select-club", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tenantSlug: summary.tenant.slug,
+      storeId: item.storeId,
+    }),
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new EmptySessionError(
+      "Сессия входа истекла. Подтвердите телефон заново.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(
+        response,
+        "Не удалось переключиться на клуб, где доступен этот лутбокс.",
+      ),
+    );
+  }
+
+  const result = (await response.json()) as GuestPortalClubSelectResponse;
+
+  if (result.summary.store.id !== item.storeId) {
+    throw new Error(
+      "Клуб для этого лутбокса не был выбран. Обновите кошелёк и повторите попытку.",
+    );
+  }
+
+  return { summary: result.summary, switched: true };
+}
+
+async function openGameRewardWalletLootBox(
+  walletItemId: string,
+): Promise<GuestPortalLootBoxOpenResponse> {
+  const response = await fetch(
+    `/api/guest-portal/session/reward-wallet/items/${encodeURIComponent(walletItemId)}/open`,
+    {
+      method: "POST",
+      cache: "no-store",
+    },
+  );
+
+  if (response.status === 401) {
+    throw new EmptySessionError(
+      "Сессия входа истекла. Подтвердите телефон заново.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(
+        response,
+        "Лутбокс из кошелька сейчас недоступен.",
+      ),
+    );
+  }
+
+  return (await response.json()) as GuestPortalLootBoxOpenResponse;
 }
 
 async function logoutGameSession() {
@@ -14224,6 +16795,8 @@ function buildLootboxRouletteState({
         dailyLimit: item.dailyLimit,
         periodicLimitPeriod: item.periodicLimitPeriod,
         periodicOpenedCount: item.periodicOpenedCount,
+        walletReady: false,
+        walletStatus: null,
       },
       `lootbox-${index}`,
     ),

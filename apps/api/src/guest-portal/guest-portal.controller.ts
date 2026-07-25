@@ -186,6 +186,35 @@ export class GuestPortalController {
     );
   }
 
+  @Post('session/reward-wallet/claim-all')
+  claimAllRewardWalletItems(
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<GuestPortalGameSummary> {
+    return this.guestPortalService.claimAllRewardWalletItems(authorization);
+  }
+
+  @Post('session/reward-wallet/items/:walletItemId/claim')
+  claimRewardWalletItem(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('walletItemId') walletItemId: string,
+  ): Promise<GuestPortalGameSummary> {
+    return this.guestPortalService.claimRewardWalletItem(
+      authorization,
+      walletItemId,
+    );
+  }
+
+  @Post('session/reward-wallet/items/:walletItemId/open')
+  openRewardWalletLootBoxItem(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('walletItemId') walletItemId: string,
+  ): Promise<GuestPortalLootBoxOpenResponse> {
+    return this.guestPortalService.openRewardWalletLootBoxItem(
+      authorization,
+      walletItemId,
+    );
+  }
+
   @Post('session/profile')
   updateProfile(
     @Headers('authorization') authorization: string | undefined,

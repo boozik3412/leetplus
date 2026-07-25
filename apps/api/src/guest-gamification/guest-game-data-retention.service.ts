@@ -7,6 +7,7 @@ const DEFAULT_RAW_RETENTION_DAYS = 365;
 const DEFAULT_DERIVED_RETENTION_DAYS = 3 * 365;
 const DEFAULT_BATCH_SIZE = 1_000;
 const DEFAULT_MAX_BATCHES = 20;
+const REWARD_WALLET_OPENING_STALE_MS = 5 * 60 * 1_000;
 
 type RetentionCounts = {
   rawRecords: number;
@@ -28,6 +29,11 @@ export class GuestGameDataRetentionService {
 
   async runAll(options: { now?: Date; liveRequested?: boolean } = {}) {
     const now = options.now ?? new Date();
+    await this.recoverStaleRewardWalletOpeningBatches(now);
+    await this.expireOrphanRewardClaimBatches(now);
+    const walletCleanup = {
+      deleted: await this.deleteExpiredRewardWalletItemBatches(now),
+    };
     const [tenants, policies] = await Promise.all([
       this.prisma.tenant.findMany({ select: { id: true } }),
       this.prisma.guestGameDataRetentionPolicy.findMany(),
@@ -50,6 +56,7 @@ export class GuestGameDataRetentionService {
 
     return {
       now: now.toISOString(),
+      walletCleanup,
       tenants: results.length,
       completed: results.filter((result) => result.status !== 'SKIPPED').length,
       skipped: results.filter((result) => result.status === 'SKIPPED').length,
@@ -311,6 +318,611 @@ export class GuestGameDataRetentionService {
           where: { id: { in: ids } },
         }),
     );
+  }
+
+  private async deleteExpiredRewardWalletItemBatches(cutoff: Date) {
+    let deleted = 0;
+    let cursor: { expiresAt: Date; id: string } | null = null;
+    for (let batch = 0; batch < this.maxBatches(); batch += 1) {
+      const rows = await this.prisma.guestGameRewardWalletItem.findMany({
+        where: {
+          status: { in: ['PENDING', 'CLAIMED'] },
+          AND: [
+            { expiresAt: { lte: cutoff } },
+            ...(cursor
+              ? [
+                  {
+                    OR: [
+                      {
+                        expiresAt: {
+                          gt: cursor.expiresAt,
+                          lte: cutoff,
+                        },
+                      },
+                      {
+                        expiresAt: cursor.expiresAt,
+                        id: { gt: cursor.id },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+            {
+              OR: [
+                { status: 'CLAIMED' },
+                {
+                  status: 'PENDING',
+                  kind: 'REWARD',
+                  rewardId: null,
+                  entitlementId: null,
+                  eventId: { not: null },
+                },
+                {
+                  status: 'PENDING',
+                  kind: 'REWARD',
+                  reward: {
+                    is: {
+                      OR: [
+                        {
+                          status: 'APPROVED',
+                          claimRequired: true,
+                          deliveryRequestedAt: null,
+                          claimExpiresAt: { lte: cutoff },
+                        },
+                        {
+                          status: {
+                            in: ['PAID', 'CANCELED', 'EXPIRED'],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+                {
+                  status: 'PENDING',
+                  kind: 'LOOT_BOX_ENTITLEMENT',
+                  entitlement: {
+                    is: {
+                      OR: [
+                        {
+                          status: 'AVAILABLE',
+                          consumedAt: null,
+                          canceledAt: null,
+                          rewardId: null,
+                        },
+                        {
+                          status: {
+                            in: ['CONSUMED', 'CANCELED', 'EXPIRED'],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          status: true,
+          kind: true,
+          rewardId: true,
+          entitlementId: true,
+          eventId: true,
+          expiresAt: true,
+        },
+        orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
+        take: this.batchSize(),
+      });
+      if (rows.length === 0) {
+        break;
+      }
+      const lastRow = rows[rows.length - 1];
+      cursor = { expiresAt: lastRow.expiresAt, id: lastRow.id };
+
+      let batchDeleted = 0;
+      for (const row of rows) {
+        // Fail closed if a mocked delegate or a future query change returns a
+        // delivery/opening state that the candidate filter intentionally
+        // excludes. Accepted claims remain durable beyond their display TTL.
+        if (row.status !== 'PENDING' && row.status !== 'CLAIMED') {
+          continue;
+        }
+
+        const removed = await this.prisma.$transaction(async (tx) => {
+          if (row.status === 'CLAIMED') {
+            const result = await tx.guestGameRewardWalletItem.deleteMany({
+              where: {
+                id: row.id,
+                tenantId: row.tenantId,
+                status: 'CLAIMED',
+                expiresAt: { lte: cutoff },
+              },
+            });
+            return result.count;
+          }
+
+          if (row.rewardId && row.kind === 'REWARD') {
+            // The reward CAS serializes cleanup with a concurrent claim. A
+            // claim accepted even one millisecond before the deadline writes
+            // deliveryRequestedAt first, so this update loses and the wallet
+            // item remains available to PROCESSING/FAILED reconciliation.
+            const expired = await tx.guestGameReward.updateMany({
+              where: {
+                id: row.rewardId,
+                tenantId: row.tenantId,
+                status: 'APPROVED',
+                claimRequired: true,
+                deliveryRequestedAt: null,
+                claimExpiresAt: { lte: cutoff },
+              },
+              data: {
+                status: 'EXPIRED',
+              },
+            });
+            if (expired.count !== 1) {
+              const terminalReward =
+                await tx.guestGameReward.findFirst({
+                  where: {
+                    id: row.rewardId,
+                    tenantId: row.tenantId,
+                    status: { in: ['PAID', 'CANCELED', 'EXPIRED'] },
+                  },
+                  select: { status: true },
+                });
+              if (!terminalReward) {
+                return 0;
+              }
+
+              if (terminalReward.status !== 'PAID') {
+                await tx.guestGameRewardEffect.updateMany({
+                  where: {
+                    tenantId: row.tenantId,
+                    rewardId: row.rewardId,
+                    status: 'WAITING_CLAIM',
+                  },
+                  data: {
+                    status: 'CANCELED',
+                    claimedAt: null,
+                    claimExpiresAt: null,
+                    nextAttemptAt: null,
+                    lastError:
+                      'Reward claim parent reached a terminal state before delivery.',
+                  },
+                });
+              }
+
+              const result =
+                await tx.guestGameRewardWalletItem.deleteMany({
+                  where: {
+                    id: row.id,
+                    tenantId: row.tenantId,
+                    rewardId: row.rewardId,
+                    kind: 'REWARD',
+                    status: 'PENDING',
+                    expiresAt: { lte: cutoff },
+                  },
+                });
+              return result.count;
+            }
+
+            await tx.guestGameRewardEffect.updateMany({
+              where: {
+                tenantId: row.tenantId,
+                rewardId: row.rewardId,
+                status: 'WAITING_CLAIM',
+              },
+              data: {
+                status: 'CANCELED',
+                claimedAt: null,
+                claimExpiresAt: null,
+                nextAttemptAt: null,
+                lastError: 'Reward claim expired before delivery was requested.',
+              },
+            });
+
+            const result = await tx.guestGameRewardWalletItem.deleteMany({
+              where: {
+                id: row.id,
+                tenantId: row.tenantId,
+                rewardId: row.rewardId,
+                kind: 'REWARD',
+                status: 'PENDING',
+                expiresAt: { lte: cutoff },
+              },
+            });
+            return result.count;
+          }
+
+          if (row.entitlementId && row.kind === 'LOOT_BOX_ENTITLEMENT') {
+            const expired = await tx.guestGameEntitlement.updateMany({
+              where: {
+                id: row.entitlementId,
+                tenantId: row.tenantId,
+                status: 'AVAILABLE',
+                consumedAt: null,
+                canceledAt: null,
+                rewardId: null,
+              },
+              data: {
+                status: 'EXPIRED',
+                validUntil: cutoff,
+              },
+            });
+            if (expired.count !== 1) {
+              const terminalEntitlement =
+                await tx.guestGameEntitlement.findFirst({
+                  where: {
+                    id: row.entitlementId,
+                    tenantId: row.tenantId,
+                    status: {
+                      in: ['CONSUMED', 'CANCELED', 'EXPIRED'],
+                    },
+                  },
+                  select: { id: true },
+                });
+              if (!terminalEntitlement) {
+                return 0;
+              }
+
+              const result =
+                await tx.guestGameRewardWalletItem.deleteMany({
+                  where: {
+                    id: row.id,
+                    tenantId: row.tenantId,
+                    entitlementId: row.entitlementId,
+                    kind: 'LOOT_BOX_ENTITLEMENT',
+                    status: 'PENDING',
+                    expiresAt: { lte: cutoff },
+                  },
+                });
+              return result.count;
+            }
+
+            const result = await tx.guestGameRewardWalletItem.deleteMany({
+              where: {
+                id: row.id,
+                tenantId: row.tenantId,
+                entitlementId: row.entitlementId,
+                kind: 'LOOT_BOX_ENTITLEMENT',
+                status: 'PENDING',
+                expiresAt: { lte: cutoff },
+              },
+            });
+            return result.count;
+          }
+
+          if (row.eventId && row.kind === 'REWARD') {
+            const result = await tx.guestGameRewardWalletItem.deleteMany({
+              where: {
+                id: row.id,
+                tenantId: row.tenantId,
+                eventId: row.eventId,
+                kind: 'REWARD',
+                status: 'PENDING',
+                expiresAt: { lte: cutoff },
+              },
+            });
+            return result.count;
+          }
+
+          return 0;
+        });
+        batchDeleted += removed;
+      }
+
+      deleted += batchDeleted;
+      if (rows.length < this.batchSize()) {
+        break;
+      }
+    }
+    return deleted;
+  }
+
+  private async expireOrphanRewardClaimBatches(cutoff: Date) {
+    let expired = 0;
+    for (let batch = 0; batch < this.maxBatches(); batch += 1) {
+      const rows = await this.prisma.guestGameReward.findMany({
+        where: {
+          status: 'APPROVED',
+          claimRequired: true,
+          deliveryRequestedAt: null,
+          claimExpiresAt: { lte: cutoff },
+          walletItems: { none: {} },
+          deliveries: { none: {} },
+          bonusLedgerEntries: {
+            none: {
+              source: 'GAMIFICATION_REWARD',
+              status: { notIn: ['PENDING', 'FAILED'] },
+            },
+          },
+        },
+        select: {
+          id: true,
+          tenantId: true,
+        },
+        orderBy: [{ claimExpiresAt: 'asc' }, { id: 'asc' }],
+        take: this.batchSize(),
+      });
+      if (rows.length === 0) {
+        break;
+      }
+
+      let batchExpired = 0;
+      for (const row of rows) {
+        const changed = await this.prisma.$transaction(async (tx) => {
+          const reward = await tx.guestGameReward.updateMany({
+            where: {
+              id: row.id,
+              tenantId: row.tenantId,
+              status: 'APPROVED',
+              claimRequired: true,
+              deliveryRequestedAt: null,
+              claimExpiresAt: { lte: cutoff },
+              walletItems: { none: {} },
+              deliveries: { none: {} },
+              bonusLedgerEntries: {
+                none: {
+                  source: 'GAMIFICATION_REWARD',
+                  status: { notIn: ['PENDING', 'FAILED'] },
+                },
+              },
+            },
+            data: {
+              status: 'EXPIRED',
+            },
+          });
+          if (reward.count !== 1) {
+            return false;
+          }
+
+          await tx.guestBonusLedgerEntry.updateMany({
+            where: {
+              tenantId: row.tenantId,
+              rewardId: row.id,
+              source: 'GAMIFICATION_REWARD',
+              status: { in: ['PENDING', 'FAILED'] },
+            },
+            data: {
+              status: 'CANCELED',
+              lockedAt: null,
+              nextAttemptAt: null,
+              canceledAt: cutoff,
+              errorCode: 'REWARD_CLAIM_EXPIRED',
+              errorMessage:
+                'Reward claim expired before wallet materialization.',
+            },
+          });
+          await tx.guestGameRewardEffect.updateMany({
+            where: {
+              tenantId: row.tenantId,
+              rewardId: row.id,
+              status: { in: ['PENDING', 'FAILED', 'WAITING_CLAIM'] },
+            },
+            data: {
+              status: 'CANCELED',
+              claimedAt: null,
+              claimExpiresAt: null,
+              nextAttemptAt: null,
+              lastError:
+                'Reward claim expired before wallet materialization.',
+            },
+          });
+          return true;
+        });
+        if (changed) {
+          batchExpired += 1;
+        }
+      }
+
+      expired += batchExpired;
+      if (rows.length < this.batchSize() || batchExpired === 0) {
+        break;
+      }
+    }
+    return expired;
+  }
+
+  private async recoverStaleRewardWalletOpeningBatches(now: Date) {
+    const staleBefore = new Date(
+      now.getTime() - REWARD_WALLET_OPENING_STALE_MS,
+    );
+    let recovered = 0;
+    for (let batch = 0; batch < this.maxBatches(); batch += 1) {
+      const rows = await this.prisma.guestGameRewardWalletItem.findMany({
+        where: {
+          kind: 'LOOT_BOX_ENTITLEMENT',
+          status: 'OPENING',
+          updatedAt: { lte: staleBefore },
+          entitlementId: { not: null },
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          profileId: true,
+          entitlementId: true,
+          expiresAt: true,
+          entitlement: {
+            select: {
+              ruleId: true,
+            },
+          },
+        },
+        orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+        take: this.batchSize(),
+      });
+      if (rows.length === 0) {
+        break;
+      }
+
+      let batchRecovered = 0;
+      for (const row of rows) {
+        if (!row.entitlementId || !row.entitlement?.ruleId) {
+          continue;
+        }
+        const entitlementId = row.entitlementId;
+        const changed = await this.prisma.$transaction(async (tx) => {
+          const current = await tx.guestGameRewardWalletItem.findFirst({
+            where: {
+              id: row.id,
+              tenantId: row.tenantId,
+              profileId: row.profileId,
+              entitlementId,
+              kind: 'LOOT_BOX_ENTITLEMENT',
+              status: 'OPENING',
+              updatedAt: { lte: staleBefore },
+            },
+            select: {
+              id: true,
+              expiresAt: true,
+              entitlement: {
+                select: {
+                  id: true,
+                  status: true,
+                  rewardId: true,
+                  ruleId: true,
+                },
+              },
+            },
+          });
+          if (!current?.entitlement) {
+            return false;
+          }
+
+          let rewardId = current.entitlement.rewardId;
+          if (!rewardId) {
+            const event = await tx.guestGameEvent.findFirst({
+              where: {
+                tenantId: row.tenantId,
+                profileId: row.profileId,
+                lootBoxId: current.entitlement.ruleId,
+                externalId: {
+                  endsWith: `:guest-game-entitlement:${entitlementId}`,
+                },
+              },
+              select: {
+                rewardIntents: {
+                  where: {
+                    tenantId: row.tenantId,
+                    profileId: row.profileId,
+                    ruleType: 'LOOT_BOX',
+                    ruleId: current.entitlement.ruleId,
+                    rewardId: { not: null },
+                  },
+                  select: { rewardId: true },
+                  orderBy: [{ processedAt: 'desc' }, { createdAt: 'desc' }],
+                  take: 1,
+                },
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            });
+            rewardId = event?.rewardIntents[0]?.rewardId ?? null;
+          }
+
+          if (rewardId) {
+            const reward = await tx.guestGameReward.findFirst({
+              where: {
+                id: rewardId,
+                tenantId: row.tenantId,
+                profileId: row.profileId,
+                lootBoxId: current.entitlement.ruleId,
+              },
+              select: { id: true },
+            });
+            if (reward) {
+              if (current.entitlement.status === 'OPENING') {
+                const finalized = await tx.guestGameEntitlement.updateMany({
+                  where: {
+                    id: entitlementId,
+                    tenantId: row.tenantId,
+                    profileId: row.profileId,
+                    ruleType: 'LOOT_BOX',
+                    ruleId: current.entitlement.ruleId,
+                    status: 'OPENING',
+                  },
+                  data: {
+                    status: 'CONSUMED',
+                    consumedAt: now,
+                    rewardId: reward.id,
+                  },
+                });
+                if (finalized.count !== 1) {
+                  return false;
+                }
+              } else if (
+                current.entitlement.status !== 'CONSUMED' ||
+                current.entitlement.rewardId !== reward.id
+              ) {
+                return false;
+              }
+              await tx.guestGameRewardWalletItem.updateMany({
+                where: { id: current.id, status: 'OPENING' },
+                data: { status: 'CLAIMED', claimedAt: now },
+              });
+              return true;
+            }
+          }
+
+          if (current.expiresAt > now) {
+            const restored = await tx.guestGameEntitlement.updateMany({
+              where: {
+                id: entitlementId,
+                tenantId: row.tenantId,
+                profileId: row.profileId,
+                ruleType: 'LOOT_BOX',
+                ruleId: current.entitlement.ruleId,
+                status: 'OPENING',
+                rewardId: null,
+              },
+              data: {
+                status: 'AVAILABLE',
+                consumedAt: null,
+                canceledAt: null,
+                validUntil: null,
+              },
+            });
+            if (restored.count !== 1) {
+              return false;
+            }
+            await tx.guestGameRewardWalletItem.updateMany({
+              where: { id: current.id, status: 'OPENING' },
+              data: { status: 'PENDING', claimedAt: null },
+            });
+            return true;
+          }
+
+          await tx.guestGameEntitlement.updateMany({
+            where: {
+              id: entitlementId,
+              tenantId: row.tenantId,
+              profileId: row.profileId,
+              ruleType: 'LOOT_BOX',
+              ruleId: current.entitlement.ruleId,
+              status: 'OPENING',
+              rewardId: null,
+            },
+            data: {
+              status: 'EXPIRED',
+              validUntil: now,
+            },
+          });
+          await tx.guestGameRewardWalletItem.deleteMany({
+            where: { id: current.id, status: 'OPENING' },
+          });
+          return true;
+        });
+        if (changed) {
+          batchRecovered += 1;
+        }
+      }
+      recovered += batchRecovered;
+      if (rows.length < this.batchSize() || batchRecovered === 0) {
+        break;
+      }
+    }
+    return recovered;
   }
 
   private async deleteIdBatches(

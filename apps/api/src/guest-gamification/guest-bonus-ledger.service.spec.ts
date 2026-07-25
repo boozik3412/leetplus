@@ -34,11 +34,24 @@ function createPrismaMock() {
       findFirst: jest.fn(),
       createMany: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestGameReward: {
+      fields: {
+        claimExpiresAt: 'claimExpiresAt-field-ref',
+      },
       count: jest.fn(),
       findMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestGameRewardWalletItem: {
+      findFirst: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    guestGameEvent: {
+      create: jest.fn(),
     },
     guestGameDelivery: {
       findMany: jest.fn(),
@@ -93,12 +106,26 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   );
 
   prisma.guestBonusLedgerEntry.groupBy.mockResolvedValue([]);
+  prisma.$queryRaw.mockResolvedValue([]);
   prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue(null);
   prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 0 });
   prisma.guestBonusLedgerEntry.update.mockResolvedValue({});
+  prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 1 });
   prisma.guestGameReward.count.mockResolvedValue(0);
   prisma.guestGameReward.findMany.mockResolvedValue([]);
+  prisma.guestGameReward.findFirst.mockResolvedValue({
+    id: 'reward-1',
+    status: 'APPROVED',
+    claimRequired: false,
+    deliveryRequestedAt: null,
+    claimExpiresAt: null,
+    expiresAt: null,
+  });
+  prisma.guestGameReward.update.mockResolvedValue({});
   prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue(null);
+  prisma.guestGameRewardWalletItem.updateMany.mockResolvedValue({ count: 1 });
+  prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameDelivery.findMany.mockResolvedValue([]);
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameDeliveryEvent.createMany.mockResolvedValue({ count: 0 });
@@ -138,6 +165,7 @@ function ledgerEntry(overrides: Record<string, unknown> = {}) {
     status: 'PENDING',
     amount: new Prisma.Decimal(25),
     attempts: 0,
+    lockedAt: new Date('2026-06-10T10:00:00.000Z'),
     reason: 'Bonus reward',
     metadata: {},
     createdAt: new Date('2026-06-10T10:00:00.000Z'),
@@ -146,7 +174,8 @@ function ledgerEntry(overrides: Record<string, unknown> = {}) {
 }
 
 function ledgerTransactionMock() {
-  return {
+  const tx = {
+    $queryRaw: jest.fn(),
     guestBonusBalanceCurrent: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -154,11 +183,20 @@ function ledgerTransactionMock() {
       create: jest.fn(),
     },
     guestBonusLedgerEntry: {
-      update: jest.fn(),
-    },
-    guestGameReward: {
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    guestGameReward: {
+      fields: {
+        claimExpiresAt: 'claimExpiresAt-field-ref',
+      },
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    guestGameRewardWalletItem: {
+      findFirst: jest.fn(),
       updateMany: jest.fn(),
     },
     guestGameProfile: {
@@ -168,6 +206,9 @@ function ledgerTransactionMock() {
       create: jest.fn(),
     },
   };
+  tx.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 1 });
+  tx.guestGameRewardWalletItem.updateMany.mockResolvedValue({ count: 1 });
+  return tx;
 }
 
 function dispatchResult(
@@ -394,6 +435,99 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('promotes only stale DISPATCHING rows to reconciliation before queue claim without a provider retry', async () => {
+    const {
+      service,
+      prisma,
+      langameClient,
+      langameSettingsService,
+    } = createService({
+      LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+      LANGAME_BONUS_ACCRUAL_PATH: '/master_api/guests/balance/phone',
+      LANGAME_BONUS_ACCRUAL_STALE_LOCK_MINUTES: '15',
+    });
+    const now = Date.now();
+    const staleLockedAt = new Date(now - 30 * 60 * 1000);
+    const staleUpdatedAt = new Date(now - 29 * 60 * 1000);
+    const freshLockedAt = new Date(now - 2 * 60 * 1000);
+    const freshUpdatedAt = new Date(now - 60 * 1000);
+    const stale = {
+      id: 'ledger-stale-dispatch',
+      tenantId: user.tenantId,
+      rewardId: 'reward-stale',
+      status: 'DISPATCHING',
+      attempts: 1,
+      lockedAt: staleLockedAt,
+      updatedAt: staleUpdatedAt,
+      errorCode: null,
+      errorMessage: null,
+      metadata: { original: true },
+    };
+    const fresh = {
+      ...stale,
+      id: 'ledger-fresh-dispatch',
+      rewardId: 'reward-fresh',
+      lockedAt: freshLockedAt,
+      updatedAt: freshUpdatedAt,
+    };
+
+    prisma.$queryRaw.mockResolvedValue([stale, fresh]);
+    langameSettingsService.resolveTenantAccess.mockResolvedValue({
+      apiKey: 'secret',
+      sources: [],
+    });
+    jest.spyOn(service as any, 'claimReadyEntries').mockResolvedValue([]);
+
+    await service.dispatch(user, {
+      dryRun: false,
+      queueApprovedRewards: false,
+    });
+
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'ledger-stale-dispatch',
+        tenantId: user.tenantId,
+        status: 'DISPATCHING',
+        attempts: 1,
+        lockedAt: staleLockedAt,
+        updatedAt: staleUpdatedAt,
+      },
+      data: expect.objectContaining({
+        status: 'RECONCILIATION_REQUIRED',
+        processedByUserId: user.id,
+        lockedAt: null,
+        nextAttemptAt: null,
+        errorCode: 'STALE_DISPATCH_OUTCOME_UNKNOWN',
+        metadata: expect.objectContaining({
+          original: true,
+          staleDispatchPromotion: expect.objectContaining({
+            previousStatus: 'DISPATCHING',
+            attempts: 1,
+            staleThresholdMinutes: 15,
+            reason: 'DISPATCH_CRASH_OR_HTTP_OUTCOME_UNKNOWN',
+          }),
+        }),
+      }),
+    });
+    expect(
+      prisma.guestBonusLedgerEntry.updateMany.mock.calls.some(
+        ([args]) => args.where.id === 'ledger-fresh-dispatch',
+      ),
+    ).toBe(false);
+    expect(prisma.guestGameRewardWalletItem.updateMany).not.toHaveBeenCalled();
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(langameClient.postEndpoint).not.toHaveBeenCalled();
+
+    const query = prisma.$queryRaw.mock.calls[0][0] as {
+      strings?: string[];
+    };
+    const sql = query.strings?.join('?') ?? '';
+    expect(sql).toContain("ledger.\"status\" = 'DISPATCHING'");
+    expect(sql).toContain('GREATEST(');
+    expect(sql).toContain('FOR UPDATE SKIP LOCKED');
+  });
+
   it('claims max-attempt guest portal domain failures for source recovery', async () => {
     const { service, prisma } = createService();
 
@@ -425,6 +559,16 @@ describe('GuestBonusLedgerService', () => {
     expect(sql).toContain('"attempts" >=');
     expect(sql).toContain('"externalDomain" = ?');
     expect(sql).toContain('"errorMessage" ILIKE ?');
+    expect(sql).toContain('FROM "GuestGameReward" AS reward');
+    expect(sql).toContain('reward."status" = \'APPROVED\'');
+    expect(sql).toContain('reward."claimRequired" = TRUE');
+    expect(sql).toContain(
+      'reward."deliveryRequestedAt" < reward."claimExpiresAt"',
+    );
+    expect(sql).toContain('FROM "GuestGameRewardWalletItem" AS wallet');
+    expect(sql).toContain("wallet.\"status\" IN ('PROCESSING', 'FAILED')");
+    expect(sql).toContain('retry_wallet."status" = \'PROCESSING\'');
+    expect(sql).not.toContain('reward."claimExpiresAt" > NOW()');
     expect(query.values).toEqual(
       expect.arrayContaining([
         'leetplus-guest-portal',
@@ -760,6 +904,33 @@ describe('GuestBonusLedgerService', () => {
           tenantId: user.tenantId,
           storeId: 'store-1337',
           id: 'reward-1',
+          AND: [
+            {
+              OR: [
+                {
+                  claimRequired: false,
+                  OR: [
+                    { expiresAt: null },
+                    { expiresAt: { gt: expect.any(Date) } },
+                  ],
+                },
+                {
+                  claimRequired: true,
+                  deliveryRequestedAt: {
+                    not: null,
+                    lt: 'claimExpiresAt-field-ref',
+                  },
+                  claimExpiresAt: { not: null },
+                  walletItems: {
+                    some: {
+                      kind: 'REWARD',
+                      status: { in: ['PROCESSING', 'FAILED'] },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
         }),
         take: 1,
       }),
@@ -1345,6 +1516,607 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('returns an unclaimed wallet reward to PENDING and never calls Langame', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({ status: 'PROCESSING', attempts: 1 });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    prisma.guestGameReward.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'APPROVED',
+        claimRequired: true,
+        deliveryRequestedAt: null,
+        claimExpiresAt: new Date('2099-06-10T10:00:00.000Z'),
+      });
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        path: '/master_api/guests/balance/phone',
+        maxAttempts: 3,
+        retryMinutes: 1,
+      },
+      access,
+    );
+
+    expect(result).toMatchObject({
+      ledgerEntryId: 'ledger-1',
+      rewardId: 'reward-1',
+      status: 'BLOCKED',
+      note: expect.stringContaining('ожидает подтвержденного получения'),
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'ledger-1',
+        tenantId: user.tenantId,
+        status: 'PROCESSING',
+      },
+      data: expect.objectContaining({
+        status: 'PENDING',
+        lockedAt: null,
+        errorCode: 'WAITING_REWARD_CLAIM',
+      }),
+    });
+  });
+
+  it('cancels a reward that becomes canceled before the external Langame write', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({ status: 'PROCESSING', attempts: 1 });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    prisma.guestGameReward.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'CANCELED',
+        claimRequired: true,
+        deliveryRequestedAt: new Date('2026-06-10T09:00:00.000Z'),
+        claimExpiresAt: new Date('2026-06-11T09:00:00.000Z'),
+      });
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        path: '/master_api/guests/balance/phone',
+        maxAttempts: 3,
+        retryMinutes: 1,
+      },
+      access,
+    );
+
+    expect(result).toMatchObject({
+      status: 'CANCELED',
+      note: expect.stringContaining('отменена, просрочена'),
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'CANCELED',
+          errorCode: 'REWARD_NOT_DELIVERABLE',
+        }),
+      }),
+    );
+  });
+
+  it('finishes an accepted wallet claim after its original deadline', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({ status: 'PROCESSING', attempts: 1 });
+    const acceptedAt = new Date('2026-06-10T09:00:00.000Z');
+    const claimExpiresAt = new Date('2026-06-10T10:00:00.000Z');
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    prisma.guestGameReward.findFirst.mockResolvedValue({
+      id: 'reward-1',
+      status: 'APPROVED',
+      claimRequired: true,
+      deliveryRequestedAt: acceptedAt,
+      claimExpiresAt,
+      expiresAt: new Date('2026-06-10T09:30:00.000Z'),
+    });
+    prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+      id: 'wallet-1',
+    });
+    prisma.guestGameRewardWalletItem.updateMany.mockResolvedValue({ count: 1 });
+    langameClient.adjustGuestBalanceByPhone.mockResolvedValue({ status: true });
+    jest.spyOn(service as any, 'confirmEntry').mockResolvedValue(null);
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        path: '/master_api/guests/balance/phone',
+        maxAttempts: 3,
+        retryMinutes: 1,
+      },
+      access,
+    );
+
+    expect(result.status).toBe('CONFIRMED');
+    expect(prisma.guestGameRewardWalletItem.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: user.tenantId,
+        rewardId: 'reward-1',
+        kind: 'REWARD',
+        status: { in: ['PROCESSING', 'FAILED'] },
+      },
+      data: { status: 'PROCESSING' },
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires reconciliation and disables retry when the external Langame write outcome is unknown', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({ status: 'PROCESSING', attempts: 1 });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    prisma.guestGameReward.findFirst.mockResolvedValue({
+      id: 'reward-1',
+      status: 'APPROVED',
+      claimRequired: true,
+      deliveryRequestedAt: new Date('2026-06-10T09:00:00.000Z'),
+      claimExpiresAt: new Date('2026-06-11T09:00:00.000Z'),
+      expiresAt: null,
+    });
+    prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+      id: 'wallet-1',
+    });
+    prisma.guestGameRewardWalletItem.updateMany.mockResolvedValue({ count: 1 });
+    langameClient.adjustGuestBalanceByPhone.mockRejectedValue(
+      new Error('Langame write failed'),
+    );
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        path: '/master_api/guests/balance/phone',
+        maxAttempts: 3,
+        retryMinutes: 1,
+      },
+      access,
+    );
+
+    expect(result.status).toBe('RECONCILIATION_REQUIRED');
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'ledger-1',
+          status: 'DISPATCHING',
+        }),
+        data: expect.objectContaining({
+          status: 'RECONCILIATION_REQUIRED',
+          errorCode: 'LANGAME_WRITE_OUTCOME_UNKNOWN',
+        }),
+      }),
+    );
+    expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirms a reconciled external write exactly once without another provider call', async () => {
+    const { service, prisma, langameClient } = createService();
+    const tx = ledgerTransactionMock();
+    const entry = ledgerEntry({
+      status: 'RECONCILIATION_REQUIRED',
+      attempts: 1,
+      errorCode: 'LANGAME_WRITE_OUTCOME_UNKNOWN',
+      errorMessage: 'provider response was lost',
+      langameRequest: { phone: '+7 *** **-33', value: 25 },
+      langameResponse: null,
+    });
+    const acceptedAt = new Date('2026-06-10T09:00:00.000Z');
+    const claimExpiresAt = new Date('2026-06-11T09:00:00.000Z');
+
+    prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue({
+      rewardId: 'reward-1',
+    });
+    tx.guestBonusLedgerEntry.findFirst.mockResolvedValue(entry);
+    tx.guestGameReward.findFirst
+      .mockResolvedValueOnce({
+        id: 'reward-1',
+        status: 'APPROVED',
+        claimRequired: true,
+        deliveryRequestedAt: acceptedAt,
+        claimExpiresAt,
+        expiresAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'reward-1',
+        status: 'APPROVED',
+        tenantId: user.tenantId,
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        lootBoxId: null,
+        missionId: 'mission-1',
+        seasonId: null,
+        rewardLabel: '25 бонусов',
+        rewardCode: 'BONUS_25',
+        approvedByUserId: null,
+        claimRequired: true,
+      });
+    tx.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+      id: 'wallet-1',
+    });
+    tx.guestBonusBalanceCurrent.findUnique.mockResolvedValue({
+      id: 'balance-1',
+      externalGuestId: 'lg-guest-1',
+      bonusBalance: new Prisma.Decimal(100),
+    });
+    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+
+    const result = await service.resolveReconciliation(user, 'ledger-1', {
+      outcome: 'CONFIRMED',
+      note: 'Баланс гостя сверён в Langame, начисление присутствует.',
+      confirmation: true,
+    });
+
+    expect(result).toMatchObject({
+      ledgerEntryId: 'ledger-1',
+      status: 'CONFIRMED',
+      outcome: 'CONFIRMED',
+      operatorNote:
+        'Баланс гостя сверён в Langame, начисление присутствует.',
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(langameClient.postEndpoint).not.toHaveBeenCalled();
+    expect(tx.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'ledger-1',
+          tenantId: user.tenantId,
+          status: 'RECONCILIATION_REQUIRED',
+        },
+        data: expect.objectContaining({
+          status: 'CONFIRMED',
+          processedByUserId: user.id,
+          balanceBefore: new Prisma.Decimal(100),
+          balanceAfter: new Prisma.Decimal(125),
+          metadata: expect.objectContaining({
+            reconciliationResolution: expect.objectContaining({
+              outcome: 'CONFIRMED',
+              confirmation: true,
+              actorUserId: user.id,
+              previousErrorCode: 'LANGAME_WRITE_OUTCOME_UNKNOWN',
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(tx.guestGameReward.update).toHaveBeenCalledWith({
+      where: { id: 'reward-1' },
+      data: expect.objectContaining({
+        status: 'PAID',
+        approvedByUserId: user.id,
+      }),
+    });
+    expect(tx.guestGameRewardWalletItem.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: user.tenantId,
+        rewardId: 'reward-1',
+        kind: 'REWARD',
+        status: 'PROCESSING',
+      },
+      data: expect.objectContaining({
+        status: 'CLAIMED',
+        claimedAt: expect.any(Date),
+      }),
+    });
+    expect(tx.guestGameEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: 'REWARD_PAID',
+          createdByUserId: user.id,
+          externalId: 'bonus-ledger:ledger-1',
+          payload: expect.objectContaining({
+            reconciliationResolution: expect.objectContaining({
+              outcome: 'CONFIRMED',
+              note: 'Баланс гостя сверён в Langame, начисление присутствует.',
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('marks an explicitly not-applied reconciliation retryable without calling the provider', async () => {
+    const { service, prisma, langameClient } = createService();
+    const tx = ledgerTransactionMock();
+    const entry = ledgerEntry({
+      status: 'RECONCILIATION_REQUIRED',
+      attempts: 5,
+      errorCode: 'LANGAME_WRITE_OUTCOME_UNKNOWN',
+      errorMessage: 'provider response was lost',
+      langameRequest: { phone: '+7 *** **-33', value: 25 },
+      langameResponse: null,
+    });
+
+    prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue({
+      rewardId: 'reward-1',
+    });
+    tx.guestBonusLedgerEntry.findFirst.mockResolvedValue(entry);
+    tx.guestGameReward.findFirst.mockResolvedValue({
+      id: 'reward-1',
+      status: 'APPROVED',
+      claimRequired: true,
+      deliveryRequestedAt: new Date('2026-06-10T09:00:00.000Z'),
+      claimExpiresAt: new Date('2026-06-11T09:00:00.000Z'),
+      expiresAt: null,
+    });
+    tx.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+      id: 'wallet-1',
+    });
+    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+
+    const result = await service.resolveReconciliation(user, 'ledger-1', {
+      outcome: 'NOT_APPLIED',
+      note: 'По журналу Langame начисление отсутствует, повтор разрешён.',
+      confirmation: 'true',
+    });
+
+    expect(result).toMatchObject({
+      ledgerEntryId: 'ledger-1',
+      status: 'FAILED',
+      outcome: 'NOT_APPLIED',
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(langameClient.postEndpoint).not.toHaveBeenCalled();
+    expect(tx.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'ledger-1',
+        tenantId: user.tenantId,
+        status: 'RECONCILIATION_REQUIRED',
+      },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        processedByUserId: user.id,
+        attempts: 0,
+        nextAttemptAt: expect.any(Date),
+        errorCode: 'RECONCILIATION_NOT_APPLIED',
+        errorMessage:
+          'По журналу Langame начисление отсутствует, повтор разрешён.',
+        metadata: expect.objectContaining({
+          reconciliationResolution: expect.objectContaining({
+            outcome: 'NOT_APPLIED',
+            confirmation: true,
+            actorUserId: user.id,
+            previousAttempts: 5,
+          }),
+        }),
+      }),
+    });
+    expect(tx.guestGameRewardWalletItem.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: user.tenantId,
+        rewardId: 'reward-1',
+        kind: 'REWARD',
+        status: 'PROCESSING',
+      },
+      data: { status: 'FAILED' },
+    });
+    expect(tx.guestGameReward.update).not.toHaveBeenCalled();
+    expect(tx.guestGameEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('requires both an operator note and explicit reconciliation confirmation', async () => {
+    const { service, prisma, langameClient } = createService();
+
+    await expect(
+      service.resolveReconciliation(user, 'ledger-1', {
+        outcome: 'CONFIRMED',
+        note: ' ',
+        confirmation: true,
+      }),
+    ).rejects.toThrow('обязателен комментарий');
+    await expect(
+      service.resolveReconciliation(user, 'ledger-1', {
+        outcome: 'NOT_APPLIED',
+        note: 'Проверено вручную.',
+        confirmation: false,
+      }),
+    ).rejects.toThrow('явного подтверждения');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+  });
+
+  it('uses a status CAS and rolls back a stale operator resolution', async () => {
+    const { service, prisma, langameClient } = createService();
+    const tx = ledgerTransactionMock();
+    const entry = ledgerEntry({
+      status: 'RECONCILIATION_REQUIRED',
+      attempts: 1,
+      errorCode: 'LANGAME_WRITE_OUTCOME_UNKNOWN',
+      errorMessage: 'provider response was lost',
+      langameRequest: {},
+      langameResponse: null,
+    });
+
+    prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue({
+      rewardId: 'reward-1',
+    });
+    tx.guestBonusLedgerEntry.findFirst.mockResolvedValue(entry);
+    tx.guestGameReward.findFirst.mockResolvedValue({
+      id: 'reward-1',
+      status: 'APPROVED',
+      claimRequired: true,
+      deliveryRequestedAt: new Date('2026-06-10T09:00:00.000Z'),
+      claimExpiresAt: new Date('2026-06-11T09:00:00.000Z'),
+      expiresAt: null,
+    });
+    tx.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+      id: 'wallet-1',
+    });
+    tx.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+
+    await expect(
+      service.resolveReconciliation(user, 'ledger-1', {
+        outcome: 'NOT_APPLIED',
+        note: 'Операторская сверка завершена.',
+        confirmation: true,
+      }),
+    ).rejects.toThrow('уже была разрешена другим оператором');
+
+    expect(tx.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'RECONCILIATION_REQUIRED',
+        }),
+      }),
+    );
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+  });
+
+  it.each(['POST_THROW', 'CONFIRM_THROW'] as const)(
+    'never sends a second provider write after %s',
+    async (failureMode) => {
+      const { service, prisma, langameClient, secretEncryptionService } =
+        createService();
+      const entry = ledgerEntry({ status: 'PROCESSING', attempts: 1 });
+      const access = {
+        apiKey: 'request-token',
+        sources: [
+          {
+            domain: 'club-1',
+            baseUrl: 'https://46.langamepro.ru/public_api',
+          },
+        ],
+      };
+      let ledgerStatus = 'PROCESSING';
+
+      prisma.guest.findFirst.mockResolvedValue({
+        phoneEncrypted: 'encrypted-phone',
+        phoneMasked: '+7 *** **-33',
+      });
+      secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+      prisma.guestGameReward.findFirst.mockResolvedValue({
+        id: 'reward-1',
+        status: 'APPROVED',
+        claimRequired: true,
+        deliveryRequestedAt: new Date('2026-06-10T09:00:00.000Z'),
+        claimExpiresAt: new Date('2026-06-11T09:00:00.000Z'),
+        expiresAt: null,
+      });
+      prisma.guestGameRewardWalletItem.findFirst.mockResolvedValue({
+        id: 'wallet-1',
+      });
+      prisma.guestBonusLedgerEntry.updateMany.mockImplementation(
+        async (args) => {
+          if (
+            args.where.status === 'PROCESSING' &&
+            args.data.status === 'DISPATCHING' &&
+            ledgerStatus === 'PROCESSING'
+          ) {
+            ledgerStatus = 'DISPATCHING';
+            return { count: 1 };
+          }
+          if (
+            args.where.status === 'DISPATCHING' &&
+            args.data.status === 'RECONCILIATION_REQUIRED' &&
+            ledgerStatus === 'DISPATCHING'
+          ) {
+            ledgerStatus = 'RECONCILIATION_REQUIRED';
+            return { count: 1 };
+          }
+          return { count: 0 };
+        },
+      );
+      if (failureMode === 'POST_THROW') {
+        langameClient.adjustGuestBalanceByPhone.mockRejectedValue(
+          new Error('provider outcome unknown'),
+        );
+      } else {
+        langameClient.adjustGuestBalanceByPhone.mockResolvedValue({
+          status: true,
+        });
+        jest
+          .spyOn(service as any, 'confirmEntry')
+          .mockRejectedValue(new Error('confirmation commit failed'));
+      }
+
+      const config = {
+        path: '/master_api/guests/balance/phone',
+        maxAttempts: 3,
+        retryMinutes: 1,
+      };
+      const first = await (service as any).processClaimedEntry(
+        user.id,
+        entry,
+        config,
+        access,
+      );
+      const second = await (service as any).processClaimedEntry(
+        user.id,
+        entry,
+        config,
+        access,
+      );
+
+      expect(first.status).toBe('RECONCILIATION_REQUIRED');
+      expect(second.status).toBe('BLOCKED');
+      expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('cancels claimed ledger entries for staff test profiles before Langame dispatch when accrual is explicitly disabled', async () => {
     const { service, prisma, langameClient, secretEncryptionService } =
       createService();
@@ -1703,6 +2475,108 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('recursively masks camelCase, snake_case, mobile and tel fields in provider responses', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({
+      id: 'ledger-response-sanitizer',
+      rewardId: 'reward-response-sanitizer',
+      attempts: 1,
+      metadata: { rewardType: 'BONUS', langameBalanceType: 'bonus_balance' },
+    });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+    const providerResponse = {
+      status: true,
+      phoneNumber: '79991112233',
+      phone_number: '78887776655',
+      nested: [
+        {
+          mobile_phone: '+7 (900) 111-22-33',
+          safe: 'keep-me',
+        },
+        {
+          contactPhone: '79995554422',
+          details: {
+            tel: '79990001144',
+            contact_number: '79992221100',
+          },
+        },
+        {
+          mobile: 7_999_333_2211,
+          mobileApp: 'do-not-mask',
+          hotel: 'also-do-not-mask',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    langameClient.adjustGuestBalanceByPhone.mockResolvedValue(providerResponse);
+    const confirmEntry = jest
+      .spyOn(service as any, 'confirmEntry')
+      .mockResolvedValue(null);
+
+    await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        mode: 'READY',
+        dryRun: false,
+        ready: true,
+        enabled: true,
+        path: '/master_api/guests/balance/phone',
+        rewardTypes: ['BONUS'],
+        limit: 50,
+        maxAttempts: 5,
+        retryMinutes: 1,
+        staleLockMinutes: 15,
+      },
+      access,
+    );
+
+    expect(confirmEntry).toHaveBeenCalledWith(
+      user.id,
+      entry,
+      expect.objectContaining({
+        phone: '+7 *** **-33',
+      }),
+      {
+        status: true,
+        phoneNumber: '***2233',
+        phone_number: '***6655',
+        nested: [
+          {
+            mobile_phone: '***2233',
+            safe: 'keep-me',
+          },
+          {
+            contactPhone: '***4422',
+            details: {
+              tel: '***1144',
+              contact_number: '***1100',
+            },
+          },
+          {
+            mobile: '***2211',
+            mobileApp: 'do-not-mask',
+            hotel: 'also-do-not-mask',
+          },
+        ],
+      },
+    );
+  });
+
   it.each([
     {
       ledgerId: 'ledger-negative-bonus-1',
@@ -1804,6 +2678,83 @@ describe('GuestBonusLedgerService', () => {
     },
   );
 
+  it('atomically marks the delivered reward PAID and its wallet item CLAIMED', async () => {
+    const { service, prisma } = createService();
+    const tx = ledgerTransactionMock();
+    const entry = ledgerEntry({
+      status: 'PROCESSING',
+      attempts: 1,
+      metadata: { rewardType: 'BONUS', langameBalanceType: 'bonus_balance' },
+    });
+
+    tx.guestBonusBalanceCurrent.findUnique.mockResolvedValue(null);
+    tx.guestGameReward.findFirst.mockResolvedValue({
+      id: 'reward-1',
+      status: 'APPROVED',
+      tenantId: user.tenantId,
+      profileId: 'profile-1',
+      guestId: 'guest-1',
+      lootBoxId: null,
+      missionId: 'mission-1',
+      seasonId: null,
+      rewardLabel: '25 bonuses',
+      rewardCode: 'LP-25',
+      approvedByUserId: null,
+      claimRequired: false,
+      deliveryRequestedAt: null,
+      claimExpiresAt: null,
+      expiresAt: null,
+    });
+    tx.guestGameRewardWalletItem.updateMany.mockResolvedValue({ count: 1 });
+    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+
+    await (service as any).confirmEntry(
+      user.id,
+      entry,
+      { phone: '+7 *** **-33', type: 'bonus_balance', sum: 25 },
+      { status: true },
+    );
+
+    expect(tx.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'ledger-1',
+          tenantId: user.tenantId,
+          status: 'DISPATCHING',
+        },
+        data: expect.objectContaining({ status: 'CONFIRMED' }),
+      }),
+    );
+    expect(tx.guestGameReward.update).toHaveBeenCalledWith({
+      where: { id: 'reward-1' },
+      data: {
+        status: 'PAID',
+        paidAt: expect.any(Date),
+        approvedByUserId: user.id,
+      },
+    });
+    expect(tx.guestGameRewardWalletItem.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: user.tenantId,
+        rewardId: 'reward-1',
+        kind: 'REWARD',
+        status: 'PROCESSING',
+      },
+      data: {
+        status: 'CLAIMED',
+        claimedAt: expect.any(Date),
+      },
+    });
+    expect(tx.guestGameEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: 'REWARD_PAID',
+          externalId: 'bonus-ledger:ledger-1',
+        }),
+      }),
+    );
+  });
+
   it('confirms negative bonus balance entries by reducing GuestBonusBalanceCurrent', async () => {
     const { service, prisma } = createService();
     const tx = ledgerTransactionMock();
@@ -1839,10 +2790,14 @@ describe('GuestBonusLedgerService', () => {
     expect(currentUpdate.data.bonusBalance.toString()).toBe('15');
     expect(tx.guestBonusBalanceCurrent.create).not.toHaveBeenCalled();
 
-    const ledgerUpdate = tx.guestBonusLedgerEntry.update.mock.calls[0][0];
+    const ledgerUpdate = tx.guestBonusLedgerEntry.updateMany.mock.calls[0][0];
     expect(ledgerUpdate).toEqual(
       expect.objectContaining({
-        where: { id: 'ledger-negative-bonus-1' },
+        where: {
+          id: 'ledger-negative-bonus-1',
+          tenantId: user.tenantId,
+          status: 'DISPATCHING',
+        },
         data: expect.objectContaining({
           status: 'CONFIRMED',
           balanceBefore: expect.any(Prisma.Decimal),
@@ -1879,9 +2834,13 @@ describe('GuestBonusLedgerService', () => {
     expect(tx.guestBonusBalanceCurrent.findFirst).not.toHaveBeenCalled();
     expect(tx.guestBonusBalanceCurrent.update).not.toHaveBeenCalled();
     expect(tx.guestBonusBalanceCurrent.create).not.toHaveBeenCalled();
-    expect(tx.guestBonusLedgerEntry.update).toHaveBeenCalledWith(
+    expect(tx.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'ledger-negative-money-1' },
+        where: {
+          id: 'ledger-negative-money-1',
+          tenantId: user.tenantId,
+          status: 'DISPATCHING',
+        },
         data: expect.objectContaining({
           status: 'CONFIRMED',
           balanceBefore: null,
@@ -1901,6 +2860,7 @@ describe('GuestBonusLedgerService', () => {
     });
 
     prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue(entry);
+    prisma.guestGameReward.findFirst.mockResolvedValueOnce(null);
     prisma.guestGameReward.updateMany.mockResolvedValue({ count: 1 });
     prisma.guestGameDelivery.findMany.mockResolvedValue([
       {
@@ -1922,9 +2882,13 @@ describe('GuestBonusLedgerService', () => {
       reason: 'Wrong guest match',
     });
 
-    expect(prisma.guestBonusLedgerEntry.update).toHaveBeenCalledWith(
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'ledger-cancel-1' },
+        where: {
+          id: 'ledger-cancel-1',
+          tenantId: user.tenantId,
+          status: 'PENDING',
+        },
         data: expect.objectContaining({
           status: 'CANCELED',
           processedByUserId: user.id,
@@ -2019,9 +2983,83 @@ describe('GuestBonusLedgerService', () => {
       }),
     ).rejects.toThrow('обрабатывается');
 
-    expect(prisma.guestBonusLedgerEntry.update).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.updateMany).not.toHaveBeenCalled();
     expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
     expect(prisma.guestGameDelivery.updateMany).not.toHaveBeenCalled();
     expect(prisma.guestGameDeliveryEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the ledger row under lock and cannot cancel a concurrent dispatch', async () => {
+    const { service, prisma } = createService();
+    const pending = ledgerEntry({
+      id: 'ledger-race-1',
+      rewardId: 'reward-race-1',
+      status: 'PENDING',
+    });
+    const dispatching = {
+      ...pending,
+      status: 'DISPATCHING',
+      lockedAt: new Date(),
+    };
+    prisma.guestBonusLedgerEntry.findFirst
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(dispatching);
+
+    await expect(
+      service.cancelEntry(user, 'ledger-race-1', {
+        reason: 'Operator cancellation',
+      }),
+    ).rejects.toThrow('обрабатывается worker-ом');
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.guestBonusLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guestGameDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite an operator cancellation with a late pre-dispatch failure', async () => {
+    const { service, prisma } = createService();
+    const tx = ledgerTransactionMock();
+    const lockedAt = new Date('2026-06-10T10:00:00.000Z');
+    const entry = ledgerEntry({
+      id: 'ledger-cancel-won',
+      rewardId: 'reward-cancel-won',
+      status: 'PROCESSING',
+      attempts: 2,
+      lockedAt,
+    });
+
+    // The operator cancellation committed first, so the PROCESSING generation
+    // no longer exists when the delayed worker error tries to persist.
+    tx.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+
+    const transitioned = await (service as any).failEntry(
+      user.id,
+      entry,
+      {
+        maxAttempts: 5,
+        retryMinutes: 1,
+      },
+      new Error('late phone resolution failure'),
+    );
+
+    expect(transitioned).toBe(false);
+    expect(tx.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'ledger-cancel-won',
+          tenantId: user.tenantId,
+          status: 'PROCESSING',
+          attempts: 2,
+          lockedAt,
+        },
+        data: expect.objectContaining({
+          status: 'FAILED',
+          errorCode: 'LANGAME_WRITE_FAILED',
+        }),
+      }),
+    );
+    expect(tx.guestGameRewardWalletItem.updateMany).not.toHaveBeenCalled();
   });
 });

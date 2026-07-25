@@ -32,9 +32,11 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
 import {
   GuestGamificationService,
+  guestGameRewardUsesBonusLedger,
   type GuestGameCheckInResult,
   type GuestGameProcessEventResult,
 } from '../guest-gamification/guest-gamification.service';
+import { acquireGuestGameLootBoxRuleLock } from '../guest-gamification/guest-game-loot-box-lock';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
@@ -121,6 +123,22 @@ const GAME_APP_OPEN_EVENT_TYPE = 'APP_OPEN';
 const GAME_APP_OPEN_SOURCE_KIND = 'GUEST_APP_OPEN_RULES_V2';
 const GAME_APP_OPEN_EXTERNAL_DOMAIN = 'leetplus-guest-portal';
 const GAME_LOOT_BOX_OPEN_SOURCE_KIND = 'GUEST_LOOT_BOX_OPEN';
+const GUEST_PORTAL_AUTOMATIC_XP_EVENT_SOURCES = [
+  'LANGAME',
+  'API_IMPORT',
+  'SYSTEM',
+  'CHECK_IN',
+] as const;
+const GUEST_PORTAL_LEGACY_PROCESS_EVENT_SOURCE =
+  'guest_gamification_process_event';
+const GUEST_PORTAL_PROCESS_EVENT_ORIGIN_PREFIX = 'ggo:v1:';
+const REWARD_WALLET_RETENTION_DAYS = 30;
+const REWARD_WALLET_RETENTION_MS =
+  REWARD_WALLET_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const REWARD_EFFECT_GUEST_RETRY_MAX_ATTEMPTS = 5;
+const REWARD_WALLET_OPENING_STALE_MS = 5 * 60 * 1000;
+const GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE =
+  'Подарочный лутбокс можно открыть только по выданному праву.';
 const GAME_PROFILE_STAFF_TEST_REASON_STAFF_PHONE = 'STAFF_PHONE_MATCH';
 const GAME_PROFILE_STAFF_TEST_REASON_LANGAME_STAFF_PHONE =
   'LANGAME_STAFF_PHONE_MATCH';
@@ -883,6 +901,52 @@ export type GuestPortalCompletionNotificationAcknowledgeResponse = {
   acknowledgedAt: string;
 };
 
+export type GuestPortalRewardWalletItem = {
+  id: string;
+  kind: 'REWARD' | 'LOOT_BOX_ENTITLEMENT';
+  status: 'PENDING' | 'PROCESSING' | 'FAILED' | 'OPENING';
+  sourceKind: 'CHECK_IN' | 'MISSION' | 'BATTLE_PASS' | 'LOOT_BOX' | 'MANUAL';
+  sourceId: string | null;
+  storeId: string | null;
+  storeName: string | null;
+  lootBoxId: string | null;
+  title: string;
+  rewardLabel: string;
+  availableAt: string;
+  claimedAt: string | null;
+  expiresAt: string;
+  action: 'CLAIM_REWARD' | 'OPEN_LOOT_BOX' | null;
+  errorHint: string | null;
+};
+
+export type GuestPortalRewardWalletHistoryItem = {
+  id: string;
+  walletItemId: string;
+  rewardId: string | null;
+  eventId: string | null;
+  entitlementId: string | null;
+  kind: 'REWARD' | 'LOOT_BOX_ENTITLEMENT';
+  status: 'PENDING' | 'PROCESSING' | 'FAILED' | 'OPENING' | 'CLAIMED';
+  sourceKind: 'CHECK_IN' | 'MISSION' | 'BATTLE_PASS' | 'LOOT_BOX' | 'MANUAL';
+  sourceId: string | null;
+  storeId: string | null;
+  storeName: string | null;
+  lootBoxId: string | null;
+  title: string;
+  rewardLabel: string;
+  availableAt: string;
+  claimedAt: string | null;
+  expiresAt: string;
+};
+
+export type GuestPortalRewardWallet = {
+  pendingCount: number;
+  nextExpiresAt: string | null;
+  retentionDays: number;
+  items: GuestPortalRewardWalletItem[];
+  history: GuestPortalRewardWalletHistoryItem[];
+};
+
 export type GuestPortalGameSummary = {
   generatedAt: string;
   tenant: GuestPortalPayload['tenant'];
@@ -928,9 +992,13 @@ export type GuestPortalGameSummary = {
         | 'sourceId'
         | 'sourceKind'
         | 'sourceLabel'
+        | 'status'
+        | 'storeId'
+        | 'storeName'
         | 'rewardCode'
         | 'claimPayload'
         | 'qualifiedAt'
+        | 'claimedAt'
         | 'expiresAt'
       >
     >;
@@ -940,6 +1008,7 @@ export type GuestPortalGameSummary = {
       items: GuestPortalBonusHistoryItem[];
     };
   };
+  rewardWallet: GuestPortalRewardWallet;
   completionNotifications: {
     pending: GuestPortalCompletionNotification[];
   };
@@ -1315,6 +1384,8 @@ export type GuestPortalLootBoxReward = {
   id: string;
   walletState:
     | 'WAITING_APPROVAL'
+    | 'WAITING_CLAIM'
+    | 'DELIVERY_PROCESSING'
     | 'READY'
     | 'REDEEMED'
     | 'CANCELED'
@@ -1458,6 +1529,8 @@ export type GuestPortalReward = {
   status: string;
   walletState:
     | 'WAITING_APPROVAL'
+    | 'WAITING_CLAIM'
+    | 'DELIVERY_PROCESSING'
     | 'READY'
     | 'REDEEMED'
     | 'CANCELED'
@@ -1471,9 +1544,12 @@ export type GuestPortalReward = {
   sourceId: string | null;
   sourceKind: 'LOOT_BOX' | 'MISSION' | 'BATTLE_PASS' | 'MANUAL';
   sourceLabel: string | null;
+  storeId: string | null;
+  storeName: string | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
+  claimedAt: string | null;
   expiresAt: string | null;
 };
 
@@ -1627,6 +1703,7 @@ type GuestPortalBonusLedgerRow = {
   reward: {
     rewardLabel: string;
     rewardType: string;
+    qualifiedAt: Date;
     lootBoxId: string | null;
     missionId: string | null;
     seasonId: string | null;
@@ -1639,7 +1716,13 @@ type GuestPortalBonusLedgerRow = {
 
 type GuestPortalRewardRow = {
   id: string;
+  tenantId: string;
+  profileId: string | null;
+  storeId: string | null;
   status: string;
+  claimRequired: boolean;
+  deliveryRequestedAt: Date | null;
+  claimExpiresAt: Date | null;
   lootBoxId: string | null;
   missionId: string | null;
   seasonId: string | null;
@@ -1653,9 +1736,19 @@ type GuestPortalRewardRow = {
   evidence: Prisma.JsonValue | null;
   qualifiedAt: Date;
   expiresAt: Date | null;
+  paidAt: Date | null;
   lootBox?: { name: string } | null;
   mission?: { name: string } | null;
   season?: { name: string } | null;
+  store?: { id: string; name: string } | null;
+  walletItems?: Array<{
+    tenantId: string;
+    profileId: string;
+    rewardId: string | null;
+    kind: string;
+    status: string;
+    claimedAt: Date | null;
+  }>;
 };
 
 type GuestPortalLootBoxUnlockEventRow = {
@@ -3713,6 +3806,25 @@ export class GuestPortalService {
   ): Promise<GuestPortalGameSummary> {
     const traceId = this.gameDebugTraceId('summary');
     const payload = await this.verifyGuestToken(authorization);
+    const activationProfile = payload.profileId
+      ? await this.prisma.guestGameProfile.findFirst({
+          where: {
+            id: payload.profileId,
+            tenantId: payload.tenantId,
+          },
+          select: {
+            id: true,
+            gameActivatedAt: true,
+          },
+        })
+      : await this.findProfile(payload, payload.guestId ?? null);
+    if (activationProfile && !activationProfile.gameActivatedAt) {
+      await this.reconcileGameActivationBoundary(
+        payload.tenantId,
+        activationProfile.id,
+        null,
+      );
+    }
     this.logGuestGameDebug('summary-request', {
       traceId,
       ...this.guestGameDebugPayloadScope(payload),
@@ -3729,19 +3841,22 @@ export class GuestPortalService {
       portal.profile.id,
       'GAME_SUMMARY',
     );
-    const [referralStats, completionNotifications] = await Promise.all([
-      this.getGameReferralStats(payload.tenantId, portal.profile.id),
-      this.getPendingCompletionNotifications(
-        payload.tenantId,
-        portal.profile.id,
-      ),
-    ]);
+    const [referralStats, completionNotifications, rewardWallet] =
+      await Promise.all([
+        this.getGameReferralStats(payload.tenantId, portal.profile.id),
+        this.getPendingCompletionNotifications(
+          payload.tenantId,
+          portal.profile.id,
+        ),
+        this.getRewardWallet(payload.tenantId, portal.profile.id),
+      ]);
 
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
       completionNotifications,
+      rewardWallet,
     });
 
     this.logGuestGameDebug('summary-result', {
@@ -3812,6 +3927,7 @@ export class GuestPortalService {
         },
         select: {
           id: true,
+          rewardId: true,
           acknowledgedAt: true,
         },
       });
@@ -3841,19 +3957,873 @@ export class GuestPortalService {
     };
   }
 
+  async claimRewardWalletItem(
+    authorization: string | undefined,
+    walletItemId: string,
+  ): Promise<GuestPortalGameSummary> {
+    const payload = await this.verifyGuestToken(authorization);
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile?.gameActivatedAt) {
+      throw new BadRequestException(
+        'Игровой модуль ещё не активирован. Сначала откройте игровой модуль.',
+      );
+    }
+
+    const id = walletItemId.trim();
+    if (!id) {
+      throw new BadRequestException('Не выбрана награда.');
+    }
+
+    await this.getRewardWallet(
+      payload.tenantId,
+      profile.id,
+      profile.gameActivatedAt,
+    );
+    await this.claimRewardWalletItemForProfile(payload, profile.id, id);
+
+    return this.getGameSummary(authorization);
+  }
+
+  async openRewardWalletLootBoxItem(
+    authorization: string | undefined,
+    walletItemId: string,
+  ): Promise<GuestPortalLootBoxOpenResponse> {
+    const id = typeof walletItemId === 'string' ? walletItemId.trim() : '';
+    if (!id) {
+      throw new BadRequestException('Не выбрана награда.');
+    }
+
+    const payload = await this.verifyGuestToken(authorization);
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+    if (!profile?.gameActivatedAt) {
+      throw new BadRequestException(
+        'Игровой модуль ещё не активирован. Сначала откройте игровой модуль.',
+      );
+    }
+
+    await this.getRewardWallet(
+      payload.tenantId,
+      profile.id,
+      profile.gameActivatedAt,
+    );
+    const now = new Date();
+    const walletItem = await this.prisma.guestGameRewardWalletItem.findFirst({
+      where: {
+        id,
+        ...guestPortalVisibleRewardWalletWhere(
+          payload.tenantId,
+          profile.id,
+          now,
+        ),
+        kind: 'LOOT_BOX_ENTITLEMENT',
+        entitlementId: { not: null },
+        entitlement: {
+          is: {
+            tenantId: payload.tenantId,
+            profileId: profile.id,
+            status: 'AVAILABLE',
+          },
+        },
+      },
+      select: {
+        storeId: true,
+        entitlementId: true,
+        entitlement: {
+          select: {
+            id: true,
+            ruleId: true,
+            storeId: true,
+          },
+        },
+      },
+    });
+
+    if (
+      !walletItem?.entitlementId ||
+      !walletItem.entitlement ||
+      walletItem.entitlement.id !== walletItem.entitlementId
+    ) {
+      throw new NotFoundException(
+        'Право на открытие не найдено, уже использовано или срок его хранения истёк.',
+      );
+    }
+
+    return this.openLootBoxForPayload(
+      payload,
+      walletItem.entitlement.ruleId,
+      walletItem.entitlement.id,
+      id,
+      walletItem.entitlement.storeId ?? walletItem.storeId ?? payload.storeId,
+    );
+  }
+
+  async claimAllRewardWalletItems(
+    authorization: string | undefined,
+  ): Promise<GuestPortalGameSummary> {
+    const payload = await this.verifyGuestToken(authorization);
+    const guest = await this.findGuest(payload);
+    const profile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!profile?.gameActivatedAt) {
+      throw new BadRequestException(
+        'Игровой модуль ещё не активирован. Сначала откройте игровой модуль.',
+      );
+    }
+
+    await this.getRewardWallet(
+      payload.tenantId,
+      profile.id,
+      profile.gameActivatedAt,
+    );
+    const now = new Date();
+    const claimable = await this.prisma.guestGameRewardWalletItem.findMany({
+      where: {
+        ...guestPortalClaimableRewardWalletWhere(
+          payload.tenantId,
+          profile.id,
+          now,
+        ),
+        kind: { not: 'LOOT_BOX_ENTITLEMENT' },
+        entitlementId: null,
+      },
+      select: { id: true },
+      orderBy: [{ availableAt: 'asc' }, { id: 'asc' }],
+      take: 1000,
+    });
+    for (const item of claimable) {
+      try {
+        await this.claimRewardWalletItemForProfile(
+          payload,
+          profile.id,
+          item.id,
+        );
+      } catch (error) {
+        if (
+          error instanceof NotFoundException ||
+          error instanceof BadRequestException ||
+          error instanceof ServiceUnavailableException
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return this.getGameSummary(authorization);
+  }
+
+  private async claimRewardWalletItemForProfile(
+    payload: GuestPortalTokenPayload,
+    profileId: string,
+    walletItemId: string,
+  ) {
+    const accepted = await this.acceptRewardWalletClaim(
+      payload.tenantId,
+      profileId,
+      walletItemId,
+    );
+    if (!accepted.rewardId || !accepted.materialize) {
+      return;
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: payload.tenantId },
+      select: { slug: true },
+    });
+    if (!tenant) {
+      await this.prisma.guestGameRewardWalletItem.updateMany({
+        where: {
+          id: walletItemId,
+          tenantId: payload.tenantId,
+          profileId,
+          status: 'PROCESSING',
+        },
+        data: { status: 'FAILED' },
+      });
+      throw new ServiceUnavailableException(
+        'Не удалось подготовить выдачу награды. Попробуйте ещё раз.',
+      );
+    }
+
+    const actor: AuthenticatedUser = {
+      id: `guest-portal:${payload.sub}`,
+      email: 'guest-portal@leetplus.local',
+      fullName: 'Гостевой портал',
+      role: UserRole.CLUB_MANAGER,
+      isPlatformAdmin: false,
+      tenantId: payload.tenantId,
+      tenantSlug: tenant.slug,
+      tenantStatus: TenantLifecycleStatus.ACTIVE,
+    };
+    try {
+      await this.guestGamificationService.materializeRewardEffects(actor, {
+        rewardId: accepted.rewardId,
+        limit: 10,
+      });
+    } catch {
+      await this.synchronizeRewardWalletDeliveryState(
+        payload.tenantId,
+        profileId,
+        walletItemId,
+        accepted.rewardId,
+      );
+      const uncertainExternalWrite =
+        await this.prisma.guestBonusLedgerEntry.findFirst({
+          where: {
+            tenantId: payload.tenantId,
+            rewardId: accepted.rewardId,
+            status: {
+              in: ['DISPATCHING', 'RECONCILIATION_REQUIRED'],
+            },
+          },
+          select: { id: true },
+        });
+      if (!uncertainExternalWrite) {
+        await this.prisma.guestGameRewardWalletItem.updateMany({
+          where: {
+            id: walletItemId,
+            tenantId: payload.tenantId,
+            profileId,
+            rewardId: accepted.rewardId,
+            status: 'PROCESSING',
+          },
+          data: { status: 'FAILED' },
+        });
+      }
+      throw new ServiceUnavailableException(
+        'Не удалось подготовить выдачу награды. Попробуйте ещё раз.',
+      );
+    }
+    await this.synchronizeRewardWalletDeliveryState(
+      payload.tenantId,
+      profileId,
+      walletItemId,
+      accepted.rewardId,
+    );
+  }
+
+  private async acceptRewardWalletClaim(
+    tenantId: string,
+    profileId: string,
+    walletItemId: string,
+  ): Promise<{ rewardId: string | null; materialize: boolean }> {
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const now = new Date();
+            const item = await tx.guestGameRewardWalletItem.findFirst({
+              where: {
+                id: walletItemId,
+                tenantId,
+                profileId,
+              },
+              select: {
+                id: true,
+                status: true,
+                kind: true,
+                entitlementId: true,
+                rewardId: true,
+                eventId: true,
+                claimXpDelta: true,
+                expiresAt: true,
+                reward: {
+                  select: {
+                    id: true,
+                    status: true,
+                    rewardType: true,
+                    rewardAmount: true,
+                    claimRequired: true,
+                    deliveryRequestedAt: true,
+                    claimExpiresAt: true,
+                  },
+                },
+                event: {
+                  select: {
+                    id: true,
+                    guestId: true,
+                    lootBoxId: true,
+                    missionId: true,
+                    seasonId: true,
+                    occurredAt: true,
+                  },
+                },
+              },
+            });
+            if (!item) {
+              throw new NotFoundException(
+                'Награда не найдена, уже получена или срок её хранения истёк.',
+              );
+            }
+            if (item.kind === 'LOOT_BOX_ENTITLEMENT' || item.entitlementId) {
+              throw new BadRequestException(
+                'Лутбокс нужно открыть отдельно. Получение всех наград не открывает лутбоксы автоматически.',
+              );
+            }
+            if (item.status === 'CLAIMED') {
+              return { rewardId: item.rewardId, materialize: false };
+            }
+            if (item.status === 'PROCESSING') {
+              return {
+                rewardId: item.rewardId,
+                materialize: item.rewardId !== null,
+              };
+            }
+            if (item.status !== 'PENDING' && item.status !== 'FAILED') {
+              throw new NotFoundException(
+                'Награда уже получена или недоступна для выдачи.',
+              );
+            }
+            if (
+              item.status === 'PENDING' &&
+              item.expiresAt.getTime() <= now.getTime()
+            ) {
+              throw new NotFoundException('Срок хранения награды истёк.');
+            }
+
+            if (item.rewardId && item.reward) {
+              const reward = item.reward;
+              const firstClaim = item.status === 'PENDING';
+              const acceptedBeforeDeadline =
+                reward.deliveryRequestedAt &&
+                reward.claimExpiresAt &&
+                reward.deliveryRequestedAt.getTime() <
+                  reward.claimExpiresAt.getTime();
+              if (
+                reward.status !== 'APPROVED' ||
+                !reward.claimRequired ||
+                !reward.claimExpiresAt ||
+                (firstClaim
+                  ? reward.deliveryRequestedAt !== null ||
+                    reward.claimExpiresAt.getTime() <= now.getTime()
+                  : !acceptedBeforeDeadline)
+              ) {
+                throw new NotFoundException(
+                  'Награда уже получена, отменена или срок её хранения истёк.',
+                );
+              }
+
+              const requestedAt = firstClaim
+                ? now
+                : reward.deliveryRequestedAt!;
+              const lockedReward = await tx.guestGameReward.updateMany({
+                where: {
+                  id: reward.id,
+                  tenantId,
+                  profileId,
+                  status: 'APPROVED',
+                  claimRequired: true,
+                  claimExpiresAt: reward.claimExpiresAt,
+                  deliveryRequestedAt: firstClaim
+                    ? null
+                    : reward.deliveryRequestedAt,
+                },
+                data: { deliveryRequestedAt: requestedAt },
+              });
+              if (lockedReward.count !== 1) {
+                throw new NotFoundException(
+                  'Состояние награды изменилось. Обновите игровой модуль.',
+                );
+              }
+
+              const needsDelivery =
+                Number(reward.rewardAmount) > 0 &&
+                guestGameRewardUsesBonusLedger(reward.rewardType);
+              if (needsDelivery) {
+                await this.prepareRewardWalletDeliveryClaim(
+                  tx,
+                  tenantId,
+                  reward.id,
+                  now,
+                );
+              }
+              const walletUpdated =
+                await tx.guestGameRewardWalletItem.updateMany({
+                  where: {
+                    id: item.id,
+                    tenantId,
+                    profileId,
+                    status: item.status,
+                    kind: 'REWARD',
+                    entitlementId: null,
+                    rewardId: reward.id,
+                    ...(firstClaim ? { expiresAt: { gt: now } } : {}),
+                  },
+                  data: needsDelivery
+                    ? { status: 'PROCESSING', claimedAt: null }
+                    : { status: 'CLAIMED', claimedAt: now },
+                });
+              if (walletUpdated.count !== 1) {
+                throw new NotFoundException(
+                  'Состояние награды изменилось. Обновите игровой модуль.',
+                );
+              }
+
+              await tx.guestGameRewardEffect.updateMany({
+                where: {
+                  tenantId,
+                  rewardId: reward.id,
+                  status: 'WAITING_CLAIM',
+                },
+                data: needsDelivery
+                  ? {
+                      status: 'PENDING',
+                      nextAttemptAt: null,
+                      lastError: null,
+                    }
+                  : {
+                      status: 'CANCELED',
+                      nextAttemptAt: null,
+                      claimExpiresAt: null,
+                      appliedAt: now,
+                      lastError: null,
+                      result: { reason: 'claimed_without_external_delivery' },
+                    },
+              });
+
+              return {
+                rewardId: reward.id,
+                materialize: needsDelivery,
+              };
+            }
+
+            if (!item.eventId || !item.event || item.claimXpDelta <= 0) {
+              throw new NotFoundException(
+                'Награда повреждена и не может быть выдана.',
+              );
+            }
+            const reserved = await tx.guestGameRewardWalletItem.updateMany({
+              where: {
+                id: item.id,
+                tenantId,
+                profileId,
+                eventId: item.eventId,
+                status: item.status,
+                ...(item.status === 'PENDING'
+                  ? { expiresAt: { gt: now } }
+                  : {}),
+              },
+              data: { status: 'PROCESSING', claimedAt: null },
+            });
+            if (reserved.count !== 1) {
+              throw new NotFoundException(
+                'Состояние награды изменилось. Обновите игровой модуль.',
+              );
+            }
+
+            const profile = await tx.guestGameProfile.findFirst({
+              where: { id: profileId, tenantId },
+              select: { xp: true, gameActivatedAt: true },
+            });
+            if (
+              !profile?.gameActivatedAt ||
+              item.event.occurredAt.getTime() <
+                profile.gameActivatedAt.getTime()
+            ) {
+              throw new NotFoundException(
+                'Эта награда появилась до активации игрового модуля.',
+              );
+            }
+            const balanceBefore = Math.max(0, profile.xp);
+            const balanceAfter = Math.min(
+              2_147_483_647,
+              balanceBefore + item.claimXpDelta,
+            );
+            const appliedDelta = balanceAfter - balanceBefore;
+            const claimEvent = await tx.guestGameEvent.create({
+              data: {
+                tenantId,
+                profileId,
+                guestId: item.event.guestId,
+                lootBoxId: item.event.lootBoxId,
+                missionId: item.event.missionId,
+                seasonId: item.event.seasonId,
+                eventType: 'REWARD_CLAIMED',
+                source: 'SYSTEM',
+                originKey: `reward-wallet-xp-claim:${item.id}`,
+                xpDelta: appliedDelta,
+                occurredAt: now,
+                payload: {
+                  source: 'reward_wallet',
+                  walletItemId: item.id,
+                  qualifiedEventId: item.event.id,
+                },
+                note: 'Получение XP из кошелька наград.',
+              },
+            });
+            await tx.guestGameXpPosting.create({
+              data: {
+                tenantId,
+                profileId,
+                eventId: claimEvent.id,
+                idempotencyKey: `guest-game-wallet-xp:${item.id}`,
+                requestedDelta: item.claimXpDelta,
+                appliedDelta,
+                balanceBefore,
+                balanceAfter,
+                evidence: {
+                  source: 'reward_wallet',
+                  walletItemId: item.id,
+                  qualifiedEventId: item.event.id,
+                },
+              },
+            });
+            await tx.guestGameProfile.update({
+              where: { id: profileId },
+              data: {
+                xp: balanceAfter,
+                level: levelFromXp(balanceAfter),
+                lastActivityAt: now,
+              },
+            });
+            const claimed = await tx.guestGameRewardWalletItem.updateMany({
+              where: {
+                id: item.id,
+                tenantId,
+                profileId,
+                status: 'PROCESSING',
+              },
+              data: { status: 'CLAIMED', claimedAt: now },
+            });
+            if (claimed.count !== 1) {
+              throw new NotFoundException(
+                'Состояние награды изменилось. Обновите игровой модуль.',
+              );
+            }
+            return { rewardId: null, materialize: false };
+          },
+          { isolationLevel: 'Serializable' },
+        );
+      } catch (error) {
+        if (
+          isGuestPortalSerializationConflict(error) &&
+          attempt < maxAttempts
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ServiceUnavailableException(
+      'Не удалось получить награду из-за одновременного обновления. Попробуйте ещё раз.',
+    );
+  }
+
+  private async synchronizeRewardWalletDeliveryState(
+    tenantId: string,
+    profileId: string,
+    walletItemId: string,
+    rewardId: string,
+  ) {
+    const row = await this.prisma.guestGameRewardWalletItem.findFirst({
+      where: {
+        id: walletItemId,
+        tenantId,
+        profileId,
+        rewardId,
+      },
+      select: {
+        status: true,
+        reward: {
+          select: {
+            status: true,
+            rewardEffects: {
+              where: {
+                tenantId,
+                effectKind: 'BONUS_LEDGER_QUEUE',
+              },
+              select: { status: true },
+            },
+            bonusLedgerEntries: {
+              where: {
+                tenantId,
+                source: 'GAMIFICATION_REWARD',
+              },
+              select: { status: true },
+            },
+          },
+        },
+      },
+    });
+    if (!row || row.status !== 'PROCESSING' || !row.reward) {
+      return;
+    }
+
+    const ledgerStatuses = row.reward.bonusLedgerEntries.map(
+      (item) => item.status,
+    );
+    const effectStatuses = row.reward.rewardEffects.map((item) => item.status);
+    if (row.reward.status === 'PAID' || ledgerStatuses.includes('CONFIRMED')) {
+      await this.prisma.guestGameRewardWalletItem.updateMany({
+        where: {
+          id: walletItemId,
+          tenantId,
+          profileId,
+          rewardId,
+          status: 'PROCESSING',
+        },
+        data: { status: 'CLAIMED', claimedAt: new Date() },
+      });
+      return;
+    }
+    if (ledgerStatuses.length > 0) {
+      if (
+        ledgerStatuses.some((status) =>
+          ['FAILED', 'CANCELED', 'BLOCKED', 'SKIPPED'].includes(status),
+        )
+      ) {
+        await this.prisma.guestGameRewardWalletItem.updateMany({
+          where: {
+            id: walletItemId,
+            tenantId,
+            profileId,
+            rewardId,
+            status: 'PROCESSING',
+          },
+          data: { status: 'FAILED' },
+        });
+      }
+      return;
+    }
+    if (
+      row.reward.status !== 'APPROVED' ||
+      effectStatuses.length === 0 ||
+      effectStatuses.some((status) =>
+        ['FAILED', 'DEAD_LETTER', 'APPLIED', 'CANCELED'].includes(status),
+      )
+    ) {
+      await this.prisma.guestGameRewardWalletItem.updateMany({
+        where: {
+          id: walletItemId,
+          tenantId,
+          profileId,
+          rewardId,
+          status: 'PROCESSING',
+        },
+        data: { status: 'FAILED' },
+      });
+      return;
+    }
+    if (
+      effectStatuses.some(
+        (status) =>
+          !['PENDING', 'WAITING_CLAIM', 'PROCESSING'].includes(status),
+      )
+    ) {
+      await this.prisma.guestGameRewardWalletItem.updateMany({
+        where: {
+          id: walletItemId,
+          tenantId,
+          profileId,
+          rewardId,
+          status: 'PROCESSING',
+        },
+        data: { status: 'FAILED' },
+      });
+    }
+  }
+
+  private async prepareRewardWalletDeliveryClaim(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    rewardId: string,
+    now: Date,
+  ) {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT ledger."id"
+      FROM "GuestBonusLedgerEntry" AS ledger
+      WHERE ledger."tenantId" = ${tenantId}
+        AND ledger."rewardId" = ${rewardId}
+        AND ledger."source" = 'GAMIFICATION_REWARD'
+      ORDER BY ledger."id"
+      FOR UPDATE
+    `);
+    const ledgerEntries = await tx.guestBonusLedgerEntry.findMany({
+      where: {
+        tenantId,
+        rewardId,
+        source: 'GAMIFICATION_REWARD',
+      },
+      select: {
+        id: true,
+        status: true,
+        lockedAt: true,
+        attempts: true,
+        errorCode: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    if (ledgerEntries.length > 0) {
+      if (ledgerEntries.length !== 1) {
+        throw new BadRequestException(
+          'Награда уже находится в обработке или больше не допускает безопасный повтор.',
+        );
+      }
+      if (
+        ledgerEntries[0].status === 'PENDING' &&
+        ledgerEntries[0].lockedAt === null
+      ) {
+        return;
+      }
+      if (
+        ledgerEntries[0].status !== 'FAILED' ||
+        ledgerEntries[0].lockedAt !== null ||
+        !['LANGAME_WRITE_FAILED', 'RECONCILIATION_NOT_APPLIED'].includes(
+          ledgerEntries[0].errorCode ?? '',
+        )
+      ) {
+        throw new BadRequestException(
+          'Награда уже находится в обработке или больше не допускает безопасный повтор.',
+        );
+      }
+      const retried = await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id: ledgerEntries[0].id,
+          tenantId,
+          rewardId,
+          source: 'GAMIFICATION_REWARD',
+          status: 'FAILED',
+          lockedAt: null,
+          attempts: ledgerEntries[0].attempts,
+          errorCode: ledgerEntries[0].errorCode,
+        },
+        data: {
+          status: 'PENDING',
+          nextAttemptAt: now,
+          lockedAt: null,
+        },
+      });
+      if (retried.count !== 1) {
+        throw new NotFoundException(
+          'Состояние выдачи награды изменилось. Обновите игровой модуль.',
+        );
+      }
+      return;
+    }
+
+    await tx.$queryRaw(Prisma.sql`
+      SELECT effect."id"
+      FROM "GuestGameRewardEffect" AS effect
+      WHERE effect."tenantId" = ${tenantId}
+        AND effect."rewardId" = ${rewardId}
+        AND effect."effectKind" = 'BONUS_LEDGER_QUEUE'
+      ORDER BY effect."id"
+      FOR UPDATE
+    `);
+    const effects = await tx.guestGameRewardEffect.findMany({
+      where: {
+        tenantId,
+        rewardId,
+        effectKind: 'BONUS_LEDGER_QUEUE',
+      },
+      select: {
+        id: true,
+        status: true,
+        leaseVersion: true,
+        attempts: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (
+      effects.length !== 1 ||
+      !['FAILED', 'PENDING', 'WAITING_CLAIM'].includes(effects[0].status) ||
+      (effects[0].status === 'FAILED' &&
+        effects[0].attempts >= REWARD_EFFECT_GUEST_RETRY_MAX_ATTEMPTS)
+    ) {
+      throw new BadRequestException(
+        'Награда больше не допускает безопасный повтор выдачи.',
+      );
+    }
+    if (effects[0].status !== 'FAILED') {
+      return;
+    }
+
+    const retried = await tx.guestGameRewardEffect.updateMany({
+      where: {
+        id: effects[0].id,
+        tenantId,
+        rewardId,
+        effectKind: 'BONUS_LEDGER_QUEUE',
+        status: 'FAILED',
+        leaseVersion: effects[0].leaseVersion,
+        attempts: effects[0].attempts,
+      },
+      data: {
+        status: 'PENDING',
+        claimExpiresAt: null,
+        nextAttemptAt: now,
+        lastError: null,
+      },
+    });
+    if (retried.count !== 1) {
+      throw new NotFoundException(
+        'Состояние подготовки награды изменилось. Обновите игровой модуль.',
+      );
+    }
+  }
+
   private async getPendingCompletionNotifications(
     tenantId: string,
     profileId: string | null,
+    gameActivatedAt?: Date | null,
   ): Promise<GuestPortalCompletionNotification[]> {
     if (!profileId) {
       return [];
     }
+
+    const activatedAt =
+      gameActivatedAt === undefined
+        ? guestPortalProfileActivationBoundary(
+            await this.prisma.guestGameProfile.findFirst({
+              where: { id: profileId, tenantId },
+              select: { gameActivatedAt: true },
+            }),
+          )
+        : guestPortalActivationBoundary(gameActivatedAt);
+    if (!activatedAt) {
+      return [];
+    }
+    const now = new Date();
+    const retentionCutoff = new Date(
+      now.getTime() - REWARD_WALLET_RETENTION_MS,
+    );
+    const visibleFrom =
+      activatedAt.getTime() > retentionCutoff.getTime()
+        ? activatedAt
+        : retentionCutoff;
 
     const rows = await this.prisma.guestGameCompletionNotification.findMany({
       where: {
         tenantId,
         profileId,
         acknowledgedAt: null,
+        reward: {
+          is: {
+            status: { notIn: ['CANCELED', 'EXPIRED'] },
+            qualifiedAt: { gte: visibleFrom },
+            OR: [
+              {
+                claimRequired: false,
+                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+              },
+              {
+                claimRequired: true,
+                OR: [
+                  {
+                    deliveryRequestedAt: null,
+                    claimExpiresAt: { gt: now },
+                  },
+                  { deliveryRequestedAt: { not: null } },
+                ],
+              },
+            ],
+          },
+        },
       },
       include: {
         reward: {
@@ -3862,6 +4832,18 @@ export class GuestPortalService {
             rewardLabel: true,
             qualifiedAt: true,
             expiresAt: true,
+            claimRequired: true,
+            deliveryRequestedAt: true,
+            claimExpiresAt: true,
+            walletItems: {
+              where: {
+                tenantId,
+                profileId,
+                kind: 'REWARD',
+              },
+              select: { status: true },
+              take: 1,
+            },
             evidence: true,
             mission: { select: { id: true, name: true } },
             season: { select: { id: true, name: true, levels: true } },
@@ -3873,7 +4855,11 @@ export class GuestPortalService {
     });
 
     return rows.flatMap<GuestPortalCompletionNotification>((row) => {
-      const state = rewardWalletState(row.reward.status, row.reward.expiresAt);
+      const state = rewardWalletState(
+        row.reward.status,
+        row.reward.expiresAt,
+        row.reward,
+      );
       const statusLabel = completionNotificationRewardStatusLabel(state);
 
       if (row.kind === 'MISSION' && row.reward.mission) {
@@ -3940,6 +4926,767 @@ export class GuestPortalService {
     });
   }
 
+  private async getRewardWallet(
+    tenantId: string,
+    profileId: string | null,
+    gameActivatedAt?: Date | null,
+  ): Promise<GuestPortalRewardWallet> {
+    if (!profileId) {
+      return emptyGuestPortalRewardWallet();
+    }
+    const activatedAt =
+      gameActivatedAt === undefined
+        ? ((
+            await this.prisma.guestGameProfile.findFirst({
+              where: { id: profileId, tenantId },
+              select: { gameActivatedAt: true },
+            })
+          )?.gameActivatedAt ?? null)
+        : gameActivatedAt;
+    if (!activatedAt) {
+      return emptyGuestPortalRewardWallet();
+    }
+
+    const now = new Date();
+    const retentionCutoff = new Date(
+      now.getTime() - REWARD_WALLET_RETENTION_MS,
+    );
+
+    await this.recoverStalePortalLootBoxOpeningReservations(
+      tenantId,
+      profileId,
+      now,
+    );
+    await this.expireAndDeleteRewardWalletItems(tenantId, profileId, now);
+    await this.reactivateRecoverableExpiredLootBoxEntitlements(
+      tenantId,
+      profileId,
+      activatedAt,
+      retentionCutoff,
+      now,
+    );
+    await this.upgradeHistoricalRewardWalletClaims(
+      tenantId,
+      profileId,
+      activatedAt,
+      retentionCutoff,
+      now,
+    );
+
+    const [missingRewards, missingEntitlements] = await Promise.all([
+      this.prisma.guestGameReward.findMany({
+        where: {
+          tenantId,
+          profileId,
+          status: 'APPROVED',
+          claimRequired: true,
+          deliveryRequestedAt: null,
+          OR: [{ claimExpiresAt: { gt: now } }, { claimExpiresAt: null }],
+          rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
+          qualifiedAt: {
+            gt: retentionCutoff,
+            gte: activatedAt,
+            lte: now,
+          },
+          walletItems: { none: { tenantId, profileId } },
+          deliveries: { none: {} },
+        },
+        include: {
+          lootBox: { select: { id: true, name: true } },
+          mission: { select: { id: true, name: true } },
+          season: { select: { id: true, name: true } },
+        },
+        orderBy: [{ qualifiedAt: 'asc' }, { id: 'asc' }],
+        take: 100,
+      }),
+      this.prisma.guestGameEntitlement.findMany({
+        where: {
+          tenantId,
+          profileId,
+          ruleType: 'LOOT_BOX',
+          OR: [
+            { status: 'AVAILABLE' },
+            {
+              status: 'EXPIRED',
+              validUntil: { not: null, lte: now },
+            },
+          ],
+          consumedAt: null,
+          canceledAt: null,
+          rewardId: null,
+          qualifiedAt: {
+            gt: retentionCutoff,
+            gte: activatedAt,
+            lte: now,
+          },
+          walletItems: { none: { tenantId, profileId } },
+        },
+        select: {
+          id: true,
+          storeId: true,
+          ruleId: true,
+          ruleName: true,
+          status: true,
+          qualifiedAt: true,
+          validUntil: true,
+          evidence: true,
+        },
+        orderBy: [{ qualifiedAt: 'asc' }, { id: 'asc' }],
+        take: 100,
+      }),
+    ]);
+
+    const activeMissingEntitlementRules =
+      missingEntitlements.length > 0
+        ? await this.prisma.guestGameLootBox.findMany({
+            where: {
+              tenantId,
+              status: 'ACTIVE',
+              id: {
+                in: [
+                  ...new Set(missingEntitlements.map((item) => item.ruleId)),
+                ],
+              },
+            },
+            select: { id: true },
+          })
+        : [];
+    const activeMissingEntitlementRuleIds = new Set(
+      activeMissingEntitlementRules.map((rule) => rule.id),
+    );
+    const eligibleMissingEntitlements = missingEntitlements.filter(
+      (entitlement) => activeMissingEntitlementRuleIds.has(entitlement.ruleId),
+    );
+
+    await Promise.all(
+      missingRewards
+        .filter((reward) => reward.claimExpiresAt === null)
+        .map((reward) =>
+          this.prisma.guestGameReward.updateMany({
+            where: {
+              id: reward.id,
+              tenantId,
+              profileId,
+              claimRequired: true,
+              claimExpiresAt: null,
+            },
+            data: {
+              claimExpiresAt: new Date(
+                reward.qualifiedAt.getTime() + REWARD_WALLET_RETENTION_MS,
+              ),
+            },
+          }),
+        ),
+    );
+
+    const rewardWalletBackfillRows: Prisma.GuestGameRewardWalletItemCreateManyInput[] =
+      [
+        ...missingRewards.map((reward) => {
+          const source =
+            reward.missionId && reward.mission
+              ? {
+                  sourceKind: 'MISSION',
+                  sourceId: reward.missionId,
+                  title: reward.mission.name,
+                }
+              : reward.seasonId && reward.season
+                ? {
+                    sourceKind: 'BATTLE_PASS',
+                    sourceId: reward.seasonId,
+                    title: reward.season.name,
+                  }
+                : reward.lootBoxId && reward.lootBox
+                  ? {
+                      sourceKind: 'LOOT_BOX',
+                      sourceId: reward.lootBoxId,
+                      title: reward.lootBox.name,
+                    }
+                  : {
+                      sourceKind: 'MANUAL',
+                      sourceId: reward.id,
+                      title: 'Награда',
+                    };
+          return {
+            tenantId,
+            profileId,
+            storeId: reward.storeId,
+            rewardId: reward.id,
+            kind: 'REWARD',
+            ...source,
+            rewardLabel: reward.rewardLabel,
+            availableAt: reward.qualifiedAt,
+            expiresAt:
+              reward.claimExpiresAt ??
+              new Date(
+                reward.qualifiedAt.getTime() + REWARD_WALLET_RETENTION_MS,
+              ),
+          };
+        }),
+        ...eligibleMissingEntitlements.map((entitlement) => {
+          const evidence = jsonRecord(entitlement.evidence);
+          const missionId = stringField(evidence.missionId);
+          const seasonId = stringField(evidence.seasonId);
+          const sourceKind = missionId
+            ? 'MISSION'
+            : seasonId
+              ? 'BATTLE_PASS'
+              : 'LOOT_BOX';
+          const sourceId = missionId ?? seasonId ?? entitlement.ruleId;
+
+          return {
+            tenantId,
+            profileId,
+            storeId: entitlement.storeId,
+            entitlementId: entitlement.id,
+            kind: 'LOOT_BOX_ENTITLEMENT',
+            sourceKind,
+            sourceId,
+            title: entitlement.ruleName ?? 'Лутбокс',
+            rewardLabel: '1 попытка открытия',
+            availableAt: entitlement.qualifiedAt,
+            expiresAt: new Date(
+              entitlement.qualifiedAt.getTime() + REWARD_WALLET_RETENTION_MS,
+            ),
+          };
+        }),
+      ];
+    if (rewardWalletBackfillRows.length > 0) {
+      await this.prisma.guestGameRewardWalletItem.createMany({
+        data: rewardWalletBackfillRows,
+        skipDuplicates: true,
+      });
+    }
+    if (
+      eligibleMissingEntitlements.some(
+        (entitlement) => entitlement.status === 'EXPIRED',
+      )
+    ) {
+      await this.reactivateRecoverableExpiredLootBoxEntitlements(
+        tenantId,
+        profileId,
+        activatedAt,
+        retentionCutoff,
+        now,
+      );
+    }
+
+    const visibleWhere = guestPortalVisibleRewardWalletWhere(
+      tenantId,
+      profileId,
+      now,
+    );
+    const [rows, pendingCount, nextExpiringItem, historyRows] =
+      await Promise.all([
+        this.prisma.guestGameRewardWalletItem.findMany({
+          where: visibleWhere,
+          include: {
+            entitlement: { select: { ruleId: true } },
+            store: { select: { id: true, name: true } },
+          },
+          orderBy: [{ availableAt: 'desc' }, { id: 'desc' }],
+          take: 100,
+        }),
+        this.prisma.guestGameRewardWalletItem.count({
+          where: visibleWhere,
+        }),
+        this.prisma.guestGameRewardWalletItem.findFirst({
+          where: {
+            ...visibleWhere,
+            status: 'PENDING',
+          },
+          select: { expiresAt: true },
+          orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
+        }),
+        this.prisma.guestGameRewardWalletItem.findMany({
+          where: {
+            tenantId,
+            profileId,
+            availableAt: { gte: activatedAt, lte: now },
+          },
+          include: {
+            entitlement: { select: { ruleId: true } },
+            store: { select: { id: true, name: true } },
+          },
+          orderBy: [{ availableAt: 'desc' }, { id: 'desc' }],
+          take: 100,
+        }),
+      ]);
+    const items = rows.map<GuestPortalRewardWalletItem>((row) => ({
+      id: row.id,
+      kind:
+        row.kind === 'LOOT_BOX_ENTITLEMENT' ? 'LOOT_BOX_ENTITLEMENT' : 'REWARD',
+      sourceKind: guestPortalRewardWalletSourceKind(row.sourceKind),
+      sourceId: row.sourceId,
+      storeId: row.storeId,
+      storeName: row.store?.name ?? null,
+      lootBoxId: row.entitlement?.ruleId ?? null,
+      title: row.title,
+      rewardLabel: row.rewardLabel,
+      status: guestPortalRewardWalletItemStatus(row.status),
+      availableAt: row.availableAt.toISOString(),
+      claimedAt: iso(row.claimedAt),
+      expiresAt: row.expiresAt.toISOString(),
+      action:
+        row.status === 'PENDING' && row.kind === 'LOOT_BOX_ENTITLEMENT'
+          ? 'OPEN_LOOT_BOX'
+          : (row.status === 'PENDING' || row.status === 'FAILED') &&
+              row.kind !== 'LOOT_BOX_ENTITLEMENT'
+            ? 'CLAIM_REWARD'
+            : null,
+      errorHint:
+        row.status === 'PROCESSING'
+          ? 'Проверяем начисление'
+          : row.status === 'FAILED'
+            ? 'Не удалось выдать награду. Нажмите, чтобы повторить.'
+            : row.status === 'OPENING'
+              ? 'Лутбокс открывается'
+              : null,
+    }));
+    const history = historyRows.map<GuestPortalRewardWalletHistoryItem>(
+      (row) => ({
+        id: row.rewardId ?? row.eventId ?? row.entitlementId ?? row.id,
+        walletItemId: row.id,
+        rewardId: row.rewardId,
+        eventId: row.eventId,
+        entitlementId: row.entitlementId,
+        kind:
+          row.kind === 'LOOT_BOX_ENTITLEMENT'
+            ? 'LOOT_BOX_ENTITLEMENT'
+            : 'REWARD',
+        status: guestPortalRewardWalletHistoryStatus(row.status),
+        sourceKind: guestPortalRewardWalletSourceKind(row.sourceKind),
+        sourceId: row.sourceId,
+        storeId: row.storeId,
+        storeName: row.store?.name ?? null,
+        lootBoxId: row.entitlement?.ruleId ?? null,
+        title: row.title,
+        rewardLabel: row.rewardLabel,
+        availableAt: row.availableAt.toISOString(),
+        claimedAt: iso(row.claimedAt),
+        expiresAt: row.expiresAt.toISOString(),
+      }),
+    );
+    return {
+      pendingCount,
+      nextExpiresAt: nextExpiringItem?.expiresAt.toISOString() ?? null,
+      retentionDays: REWARD_WALLET_RETENTION_DAYS,
+      items,
+      history,
+    };
+  }
+
+  private async reactivateRecoverableExpiredLootBoxEntitlements(
+    tenantId: string,
+    profileId: string,
+    activatedAt: Date,
+    retentionCutoff: Date,
+    now: Date,
+  ) {
+    await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE "GuestGameEntitlement" AS entitlement
+      SET
+        "status" = 'AVAILABLE',
+        "validUntil" = NULL,
+        "updatedAt" = ${now}
+      WHERE entitlement."tenantId" = ${tenantId}
+        AND entitlement."profileId" = ${profileId}
+        AND entitlement."ruleType" = 'LOOT_BOX'
+        AND entitlement."status" = 'EXPIRED'
+        AND entitlement."consumedAt" IS NULL
+        AND entitlement."canceledAt" IS NULL
+        AND entitlement."rewardId" IS NULL
+        AND entitlement."validUntil" IS NOT NULL
+        AND entitlement."validUntil" <= ${now}
+        AND entitlement."qualifiedAt" > ${retentionCutoff}
+        AND entitlement."qualifiedAt" >= ${activatedAt}
+        AND entitlement."qualifiedAt" <= ${now}
+        AND EXISTS (
+          SELECT 1
+          FROM "GuestGameLootBox" AS loot_box
+          WHERE loot_box."tenantId" = entitlement."tenantId"
+            AND loot_box."id" = entitlement."ruleId"
+            AND loot_box."status" = 'ACTIVE'
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM "GuestGameRewardWalletItem" AS wallet
+          WHERE wallet."tenantId" = entitlement."tenantId"
+            AND wallet."profileId" = entitlement."profileId"
+            AND wallet."entitlementId" = entitlement."id"
+            AND wallet."kind" = 'LOOT_BOX_ENTITLEMENT'
+            AND wallet."status" = 'PENDING'
+            AND wallet."expiresAt" > ${now}
+        )
+    `);
+  }
+
+  private async upgradeHistoricalRewardWalletClaims(
+    tenantId: string,
+    profileId: string,
+    activatedAt: Date,
+    retentionCutoff: Date,
+    now: Date,
+  ) {
+    await this.prisma.$executeRaw(Prisma.sql`
+      WITH reward_candidates AS MATERIALIZED (
+        SELECT reward."id"
+        FROM "GuestGameReward" AS reward
+        WHERE reward."tenantId" = ${tenantId}
+          AND reward."profileId" = ${profileId}
+          AND reward."status" = 'APPROVED'
+          AND reward."claimRequired" = FALSE
+          AND reward."deliveryRequestedAt" IS NULL
+          AND reward."qualifiedAt" >= ${activatedAt}
+          AND reward."qualifiedAt" > ${retentionCutoff}
+          AND reward."qualifiedAt" <= ${now}
+          AND UPPER(COALESCE(reward."rewardType", '')) NOT IN (
+            'LOOT_BOX',
+            'LOOTBOX',
+            'LOOT_BOX_ENTITLEMENT'
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "GuestGameDelivery" AS delivery
+            WHERE delivery."tenantId" = reward."tenantId"
+              AND delivery."rewardId" = reward."id"
+          )
+        ORDER BY reward."qualifiedAt", reward."id"
+        LIMIT 100
+        FOR UPDATE OF reward
+      ),
+      locked_ledger AS MATERIALIZED (
+        SELECT
+          ledger."id",
+          ledger."rewardId",
+          ledger."status"
+        FROM "GuestBonusLedgerEntry" AS ledger
+        INNER JOIN reward_candidates AS candidate
+          ON candidate."id" = ledger."rewardId"
+        WHERE ledger."tenantId" = ${tenantId}
+          AND ledger."source" = 'GAMIFICATION_REWARD'
+        ORDER BY ledger."rewardId", ledger."id"
+        FOR UPDATE OF ledger
+      ),
+      eligible AS MATERIALIZED (
+        SELECT candidate."id"
+        FROM reward_candidates AS candidate
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM locked_ledger AS ledger
+          WHERE ledger."rewardId" = candidate."id"
+            AND ledger."status" NOT IN ('PENDING', 'FAILED')
+        )
+      )
+      UPDATE "GuestGameReward" AS reward
+      SET
+        "claimRequired" = TRUE,
+        "deliveryRequestedAt" = NULL,
+        "claimExpiresAt" =
+          reward."qualifiedAt" + (${REWARD_WALLET_RETENTION_DAYS} * INTERVAL '1 day'),
+        "updatedAt" = NOW()
+      FROM eligible
+      WHERE reward."id" = eligible."id"
+        AND reward."tenantId" = ${tenantId}
+        AND reward."profileId" = ${profileId}
+        AND reward."status" = 'APPROVED'
+        AND reward."claimRequired" = FALSE
+        AND reward."deliveryRequestedAt" IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "GuestGameDelivery" AS delivery
+          WHERE delivery."tenantId" = reward."tenantId"
+            AND delivery."rewardId" = reward."id"
+        )
+    `);
+  }
+
+  private async expireAndDeleteRewardWalletItems(
+    tenantId: string,
+    profileId: string,
+    cutoff: Date,
+  ) {
+    const batchSize = 100;
+    const maxBatches = 10;
+    let cursor: { expiresAt: Date; id: string } | null = null;
+
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+      const rows = await this.prisma.guestGameRewardWalletItem.findMany({
+        where: {
+          tenantId,
+          profileId,
+          status: { in: ['PENDING', 'CLAIMED'] },
+          AND: [
+            { expiresAt: { lte: cutoff } },
+            ...(cursor
+              ? [
+                  {
+                    OR: [
+                      {
+                        expiresAt: {
+                          gt: cursor.expiresAt,
+                          lte: cutoff,
+                        },
+                      },
+                      {
+                        expiresAt: cursor.expiresAt,
+                        id: { gt: cursor.id },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+            {
+              OR: [
+                { status: 'CLAIMED' },
+                {
+                  status: 'PENDING',
+                  kind: 'REWARD',
+                  rewardId: null,
+                  entitlementId: null,
+                  eventId: { not: null },
+                },
+                {
+                  status: 'PENDING',
+                  kind: 'REWARD',
+                  reward: {
+                    is: {
+                      OR: [
+                        {
+                          status: 'APPROVED',
+                          claimRequired: true,
+                          deliveryRequestedAt: null,
+                          claimExpiresAt: { lte: cutoff },
+                        },
+                        {
+                          status: {
+                            in: ['PAID', 'CANCELED', 'EXPIRED'],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+                {
+                  status: 'PENDING',
+                  kind: 'LOOT_BOX_ENTITLEMENT',
+                  entitlement: {
+                    is: {
+                      OR: [
+                        {
+                          status: 'AVAILABLE',
+                          consumedAt: null,
+                          canceledAt: null,
+                          rewardId: null,
+                        },
+                        {
+                          status: {
+                            in: ['CONSUMED', 'CANCELED', 'EXPIRED'],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          status: true,
+          rewardId: true,
+          entitlementId: true,
+          eventId: true,
+          expiresAt: true,
+        },
+        orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
+        take: batchSize,
+      });
+      if (rows.length === 0) {
+        break;
+      }
+      const lastRow = rows[rows.length - 1];
+      cursor = { expiresAt: lastRow.expiresAt, id: lastRow.id };
+
+      const entitlementIds = rows
+        .map((row) => row.entitlementId)
+        .filter((id): id is string => Boolean(id));
+      const rewardIds = rows
+        .filter((row) => row.status === 'PENDING')
+        .map((row) => row.rewardId)
+        .filter((id): id is string => Boolean(id));
+      await this.prisma.$transaction(async (tx) => {
+        const deleteIds = new Set<string>(
+          rows
+            .filter(
+              (row) =>
+                row.status === 'CLAIMED' ||
+                (row.status === 'PENDING' && Boolean(row.eventId)),
+            )
+            .map((row) => String(row.id)),
+        );
+        if (rewardIds.length > 0) {
+          await tx.guestGameReward.updateMany({
+            where: {
+              id: { in: rewardIds },
+              tenantId,
+              profileId,
+              status: 'APPROVED',
+              claimRequired: true,
+              deliveryRequestedAt: null,
+              claimExpiresAt: { lte: cutoff },
+            },
+            data: { status: 'EXPIRED' },
+          });
+          const expiredRewards = await tx.guestGameReward.findMany({
+            where: {
+              id: { in: rewardIds },
+              tenantId,
+              profileId,
+              status: { in: ['PAID', 'CANCELED', 'EXPIRED'] },
+            },
+            select: { id: true, status: true },
+          });
+          const expiredRewardIds = expiredRewards.map((reward) => reward.id);
+          const terminalUnclaimedRewardIds = expiredRewards
+            .filter((reward) => reward.status !== 'PAID')
+            .map((reward) => reward.id);
+          if (terminalUnclaimedRewardIds.length > 0) {
+            await tx.guestGameRewardEffect.updateMany({
+              where: {
+                tenantId,
+                rewardId: { in: terminalUnclaimedRewardIds },
+                status: 'WAITING_CLAIM',
+              },
+              data: {
+                status: 'CANCELED',
+                nextAttemptAt: null,
+                claimExpiresAt: null,
+                appliedAt: cutoff,
+                lastError: null,
+                result: { reason: 'wallet_claim_expired' },
+              },
+            });
+          }
+          if (expiredRewardIds.length > 0) {
+            rows.forEach((row) => {
+              if (row.rewardId && expiredRewardIds.includes(row.rewardId)) {
+                deleteIds.add(String(row.id));
+              }
+            });
+          }
+        }
+        if (entitlementIds.length > 0) {
+          await tx.guestGameEntitlement.updateMany({
+            where: {
+              id: { in: entitlementIds },
+              tenantId,
+              profileId,
+              status: 'AVAILABLE',
+              consumedAt: null,
+              canceledAt: null,
+              rewardId: null,
+            },
+            data: {
+              status: 'EXPIRED',
+              validUntil: cutoff,
+            },
+          });
+          const expiredEntitlements = await tx.guestGameEntitlement.findMany({
+            where: {
+              id: { in: entitlementIds },
+              tenantId,
+              profileId,
+              status: {
+                in: ['CONSUMED', 'CANCELED', 'EXPIRED'],
+              },
+            },
+            select: { id: true },
+          });
+          const expiredEntitlementIds = new Set(
+            expiredEntitlements.map((entitlement) => entitlement.id),
+          );
+          rows.forEach((row) => {
+            if (
+              row.entitlementId &&
+              expiredEntitlementIds.has(row.entitlementId)
+            ) {
+              deleteIds.add(String(row.id));
+            }
+          });
+        }
+        if (deleteIds.size === 0) return;
+        await tx.guestGameRewardWalletItem.deleteMany({
+          where: {
+            id: { in: [...deleteIds] },
+            tenantId,
+            profileId,
+            expiresAt: { lte: cutoff },
+            status: { in: ['PENDING', 'CLAIMED'] },
+          },
+        });
+      });
+
+      if (rows.length < batchSize) {
+        break;
+      }
+    }
+  }
+
+  private async recoverStalePortalLootBoxOpeningReservations(
+    tenantId: string,
+    profileId: string,
+    now: Date,
+  ) {
+    const batchSize = 100;
+    const maxBatches = 10;
+    const staleBefore = new Date(
+      now.getTime() - REWARD_WALLET_OPENING_STALE_MS,
+    );
+
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+      const rows = await this.prisma.guestGameRewardWalletItem.findMany({
+        where: {
+          tenantId,
+          profileId,
+          kind: 'LOOT_BOX_ENTITLEMENT',
+          status: 'OPENING',
+          updatedAt: { lte: staleBefore },
+          entitlementId: { not: null },
+        },
+        select: {
+          entitlementId: true,
+          entitlement: { select: { ruleId: true } },
+        },
+        orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+        take: batchSize,
+      });
+      if (rows.length === 0) {
+        break;
+      }
+
+      let recovered = 0;
+      for (const row of rows) {
+        if (!row.entitlementId || !row.entitlement?.ruleId) {
+          continue;
+        }
+        const outcome = await this.recoverPortalLootBoxOpeningReservation({
+          tenantId,
+          profileId,
+          lootBoxId: row.entitlement.ruleId,
+          entitlementId: row.entitlementId,
+          now,
+        });
+        if (outcome !== 'ACTIVE' && outcome !== 'MISSING') {
+          recovered += 1;
+        }
+      }
+      if (rows.length < batchSize || recovered === 0) {
+        break;
+      }
+    }
+  }
+
   async updateProfile(
     authorization: string | undefined,
     dto: { displayName?: unknown },
@@ -3986,18 +5733,22 @@ export class GuestPortalService {
       profileId: profile.id,
     };
     const portal = await this.buildPortalPayload(nextPayload);
-    const [referralStats, completionNotifications] = await Promise.all([
-      this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
-      this.getPendingCompletionNotifications(
-        nextPayload.tenantId,
-        portal.profile.id,
-      ),
-    ]);
+    const [referralStats, completionNotifications, rewardWallet] =
+      await Promise.all([
+        this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
+        this.getPendingCompletionNotifications(
+          nextPayload.tenantId,
+          portal.profile.id,
+          profile.gameActivatedAt,
+        ),
+        this.getRewardWallet(nextPayload.tenantId, portal.profile.id),
+      ]);
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
       completionNotifications,
+      rewardWallet,
     });
 
     return {
@@ -4025,32 +5776,88 @@ export class GuestPortalService {
       );
     }
 
+    const openedAt = new Date();
+    const existingActivation = profile.gameActivatedAt
+      ? new Date(profile.gameActivatedAt)
+      : null;
+    const previousXp = Number.isFinite(Number(profile.xp))
+      ? Number(profile.xp)
+      : 0;
+    const previousLevel = Number.isFinite(Number(profile.level))
+      ? Number(profile.level)
+      : 1;
+    const activation = await this.reconcileGameActivationBoundary(
+      payload.tenantId,
+      profile.id,
+      openedAt,
+    );
+    const reconciledLegacyProgress =
+      Boolean(activation?.excludedDelta) &&
+      (previousXp !== 0 || previousLevel !== 1);
+    if (reconciledLegacyProgress) {
+      this.recordGameAuditEvent({
+        tenantId: context.tenant.id,
+        profileId: profile.id,
+        guestId: guest?.id ?? profile.guestId ?? null,
+        storeId: context.store.id,
+        entityType: 'PROFILE',
+        entityId: profile.id,
+        action: 'GAME_ACTIVATION_PROGRESS_RECONCILED',
+        status: 'SUCCESS',
+        reasonCode: 'PRE_ACTIVATION_PROGRESS',
+        happenedAt: openedAt,
+        payload: {
+          previousXp,
+          previousLevel,
+          strategy: 'AUTOMATIC_EVENT_XP_ONLY',
+          manualAndNonEventXpPreserved: true,
+        },
+      });
+    }
+    const activationBoundary =
+      activation?.gameActivatedAt ??
+      (existingActivation &&
+      !Number.isNaN(existingActivation.getTime()) &&
+      existingActivation.getTime() < openedAt.getTime()
+        ? existingActivation
+        : openedAt);
+
     const nextPayload: GuestPortalTokenPayload = {
       ...payload,
       guestId: guest?.id ?? profile.guestId ?? null,
       profileId: profile.id,
     };
-    const [previousPortal, referralStats, previousCompletionNotifications] =
-      await Promise.all([
-        this.buildPortalPayload(nextPayload),
-        this.getGameReferralStats(nextPayload.tenantId, profile.id),
-        this.getPendingCompletionNotifications(
-          nextPayload.tenantId,
-          profile.id,
-        ),
-      ]);
+    const [
+      previousPortal,
+      referralStats,
+      previousCompletionNotifications,
+      previousRewardWallet,
+    ] = await Promise.all([
+      this.buildPortalPayload(nextPayload),
+      this.getGameReferralStats(nextPayload.tenantId, profile.id),
+      this.getPendingCompletionNotifications(
+        nextPayload.tenantId,
+        profile.id,
+        activationBoundary,
+      ),
+      this.getRewardWallet(
+        nextPayload.tenantId,
+        profile.id,
+        activationBoundary,
+      ),
+    ]);
     const previousSummary = buildGameSummaryFromPortal(previousPortal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
       completionNotifications: previousCompletionNotifications,
+      rewardWallet: previousRewardWallet,
     });
 
     const liveSessionStartResult =
       await this.processLiveSessionStartForPayload(nextPayload);
     this.scheduleGuestActivityLedgerSync(nextPayload, profile.id, 'APP_OPEN');
 
-    const openedAt = new Date();
     const openedDate = openedAt.toISOString().slice(0, 10);
     const surface = guestPortalAppOpenSurface(dto.surface);
     const sourceFactId = [profile.id, context.store.id, openedDate].join(':');
@@ -4084,7 +5891,6 @@ export class GuestPortalService {
         externalId: eventExternalId,
         activeRulesOnly: true,
         suppressLootBoxRewards: true,
-        suppressLootBoxEntitlements: true,
         payload: {
           source: 'guest_portal_app_open',
           sourceFactId,
@@ -4102,16 +5908,24 @@ export class GuestPortalService {
     const portal = await this.buildPortalPayload(nextPayload, {
       liveSessionStartResult,
     });
-    const completionNotifications =
-      await this.getPendingCompletionNotifications(
+    const [completionNotifications, rewardWallet] = await Promise.all([
+      this.getPendingCompletionNotifications(
         nextPayload.tenantId,
         profile.id,
-      );
+        activationBoundary,
+      ),
+      this.getRewardWallet(
+        nextPayload.tenantId,
+        profile.id,
+        activationBoundary,
+      ),
+    ]);
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
       completionNotifications,
+      rewardWallet,
     });
 
     this.recordGameAuditEvent({
@@ -4266,22 +6080,29 @@ export class GuestPortalService {
   private async openLootBoxForPayload(
     payload: GuestPortalTokenPayload,
     id: string,
+    requiredEntitlementId: string | null = null,
+    requiredWalletItemId: string | null = null,
+    entitlementStoreId: string | null = null,
   ): Promise<GuestPortalLootBoxOpenResponse> {
     const traceId = this.gameDebugTraceId('open');
     this.logGuestGameDebug('open-request', {
       traceId,
       ...this.guestGameDebugPayloadScope(payload),
       lootBoxId: id,
+      requiredEntitlementId,
     });
-    const liveSessionStartResult = await this.processLiveSessionStartForPayload(
-      payload,
-      traceId,
+    const exactWalletOpen = Boolean(
+      requiredEntitlementId && requiredWalletItemId && entitlementStoreId,
     );
-
-    const context = await this.getTenantStoreByIds(
-      payload.tenantId,
-      payload.storeId,
-    );
+    const liveSessionStartResult = exactWalletOpen
+      ? null
+      : await this.processLiveSessionStartForPayload(payload, traceId);
+    const context = exactWalletOpen
+      ? await this.getTenantStoreByIdsIncludingInactive(
+          payload.tenantId,
+          entitlementStoreId!,
+        )
+      : await this.getTenantStoreByIds(payload.tenantId, payload.storeId);
     const guest = await this.findGuest(payload);
     const profile = await this.findProfile(payload, guest?.id ?? null);
 
@@ -4411,7 +6232,10 @@ export class GuestPortalService {
       profileId: profile.id,
       lootBoxId: lootBox.id,
     });
-    const entitlementReadMode = entitlementRollout.effectiveMode;
+    // Guest-portal opens are entitlement-authoritative. Rollout flags remain
+    // useful for diagnostics and background dual-write, but an interactive
+    // open must always be backed by one live, 30-day wallet right.
+    const entitlementReadMode = 'PRIMARY' as const;
     this.recordGameAuditEvent({
       tenantId: context.tenant.id,
       profileId: profile.id,
@@ -4436,37 +6260,37 @@ export class GuestPortalService {
           context.store.id,
           ownerGuestId,
           profile.id,
+          profile.gameActivatedAt,
         ),
         this.findPortalLootBoxUnlockEvents(
           context.tenant.id,
           ownerGuestId,
           profile.id,
+          profile.gameActivatedAt,
         ),
         this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
       ],
     );
-    let entitlement =
-      entitlementReadMode === 'OFF'
-        ? null
-        : await this.findReconciledPortalLootBoxEntitlement(
-            context.tenant.id,
-            ownerGuestId,
-            profile.id,
-            context.store.id,
-            lootBox.id,
-            lootBox.limits,
-            context.store.timeZone,
-            openedAt,
-          );
-    if (
-      entitlement &&
-      !portalLootBoxEntitlementMatchesUsage(lootBox, entitlement)
-    ) {
-      entitlement = null;
+    let entitlement = await this.findReconciledPortalLootBoxEntitlement(
+      context.tenant.id,
+      ownerGuestId,
+      profile.id,
+      context.store.id,
+      lootBox.id,
+      lootBox.limits,
+      context.store.timeZone,
+      openedAt,
+      profile.gameActivatedAt,
+      requiredEntitlementId,
+    );
+    if (requiredEntitlementId && !entitlement) {
+      throw new NotFoundException(
+        'Право на открытие не найдено, уже использовано или больше недоступно.',
+      );
     }
     if (
-      entitlementReadMode === 'PRIMARY' &&
       !entitlement &&
+      !requiredEntitlementId &&
       portalLootBoxVisibleInCatalog(lootBox)
     ) {
       const backfilled = await this.backfillPortalLootBoxEntitlementFromLegacy({
@@ -4475,6 +6299,7 @@ export class GuestPortalService {
         profileId: profile.id,
         storeId: context.store.id,
         storeTimeZone: context.store.timeZone,
+        gameActivatedAt: profile.gameActivatedAt,
         lootBox,
         unlockEvents,
       });
@@ -4488,10 +6313,7 @@ export class GuestPortalService {
           ? backfilled.entitlement
           : null;
     }
-    if (
-      !portalLootBoxVisibleInCatalog(lootBox) &&
-      !(entitlementReadMode === 'PRIMARY' && entitlement)
-    ) {
+    if (!entitlement) {
       this.recordGameAuditEvent({
         tenantId: context.tenant.id,
         profileId: profile.id,
@@ -4501,7 +6323,7 @@ export class GuestPortalService {
         entityId: lootBox.id,
         action: 'LOOT_BOX_OPEN',
         status: 'BLOCKED',
-        reasonCode: 'reward_template_entitlement_required',
+        reasonCode: 'live_wallet_entitlement_required',
         reasonText:
           'Подарочный лутбокс доступен после выполнения задания или шага Battle Pass.',
         traceId,
@@ -4516,30 +6338,22 @@ export class GuestPortalService {
           traceId,
           ...this.guestGameDebugPayloadScope(payload),
           lootBox: guestGameDebugLootBoxRule(lootBox),
-          reason: 'loot_box_reward_template_entitlement_required',
+          reason: 'live_wallet_entitlement_required',
           entitlementRollout,
         },
         'warn',
       );
       throw new BadRequestException(
-        'Подарочный лутбокс можно открыть только по выданному праву.',
+        GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE,
       );
     }
     const entitlementUnlockEvent =
-      entitlementReadMode === 'PRIMARY' && entitlement
-        ? guestGameEntitlementToUnlockEvent(entitlement)
-        : null;
+      guestGameEntitlementToUnlockEvent(entitlement);
     const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
       liveSessionStartResult,
     );
-    const effectiveUnlockEvents =
-      entitlementReadMode === 'PRIMARY'
-        ? entitlementUnlockEvent
-          ? [entitlementUnlockEvent]
-          : []
-        : unlockEvents;
-    const effectiveLiveSessionStartUnlockEvent =
-      entitlementReadMode === 'PRIMARY' ? null : liveSessionStartUnlockEvent;
+    const effectiveUnlockEvents = [entitlementUnlockEvent];
+    const effectiveLiveSessionStartUnlockEvent = null;
     const openState = buildLootBoxOpenState(
       lootBox,
       currentRewards,
@@ -4548,6 +6362,7 @@ export class GuestPortalService {
       context.store.timeZone,
       effectiveLiveSessionStartUnlockEvent,
       audienceMemberIds,
+      true,
     );
     const unlockEvent = findLootBoxUnlockEvent(
       lootBox,
@@ -4560,15 +6375,7 @@ export class GuestPortalService {
       ? portalEventToProgressEvent(unlockEvent)
       : null;
     const ruleOccurredAt = unlockEvent?.occurredAt ?? openedAt;
-    const entitlementToConsume =
-      entitlementReadMode === 'PRIMARY'
-        ? entitlement
-        : entitlementReadMode === 'SHADOW' &&
-            entitlement &&
-            unlockEvent &&
-            portalEntitlementMatchesUnlockEvent(entitlement, unlockEvent)
-          ? entitlement
-          : null;
+    const entitlementToConsume = entitlement;
 
     this.logGuestGameDebug('open-state', {
       traceId,
@@ -4660,19 +6467,7 @@ export class GuestPortalService {
       );
     }
 
-    const sourceFactId =
-      entitlementReadMode === 'PRIMARY' && entitlement
-        ? `guest-game-entitlement:${entitlement.id}`
-        : await this.buildLootBoxOpenSourceFactId(
-            context.tenant.id,
-            profile.id,
-            ownerGuestId,
-            context.store.id,
-            lootBox.id,
-            lootBox.triggerKind,
-            lootBox.limits,
-            openedAt,
-          );
+    const sourceFactId = `guest-game-entitlement:${entitlement.id}`;
     const actor: AuthenticatedUser = {
       id: `guest-portal:${payload.sub}`,
       email: 'guest-portal@leetplus.local',
@@ -4682,6 +6477,13 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+    };
+    const prequalifiedLootBoxOpen = {
+      tenantId: context.tenant.id,
+      entitlementId: entitlement.id,
+      ruleId: lootBox.id,
+      profileId: profile.id,
+      storeId: context.store.id,
     };
     const processDto = {
       traceId,
@@ -4719,6 +6521,7 @@ export class GuestPortalService {
     const dryRun = await this.guestGamificationService.dryRun(
       actor,
       processDto,
+      { prequalifiedLootBoxOpen },
     );
     const rule = dryRun.rules.find(
       (item) => item.kind === 'LOOT_BOX' && item.id === lootBox.id,
@@ -4802,27 +6605,60 @@ export class GuestPortalService {
       );
     }
 
-    const processResult = await this.guestGamificationService.processEvent(
-      actor,
-      processDto,
-    );
-    if (entitlementToConsume) {
-      const rewardId = processResult.rewards[0]?.id;
+    await this.reservePortalLootBoxEntitlement({
+      tenantId: context.tenant.id,
+      profileId: profile.id,
+      storeId: context.store.id,
+      lootBoxId: lootBox.id,
+      entitlementId: entitlementToConsume.id,
+      walletItemId: requiredWalletItemId,
+      reservedAt: openedAt,
+    });
+    let processResult: GuestGameProcessEventResult;
+    let materializedRewardId: string | null = null;
+    try {
+      processResult = await this.guestGamificationService.processEvent(
+        actor,
+        processDto,
+        { prequalifiedLootBoxOpen },
+      );
+      materializedRewardId = processResult.rewards[0]?.id ?? null;
 
-      if (!rewardId) {
+      if (!materializedRewardId) {
         throw new ServiceUnavailableException(
           'Награда по праву открытия не была сохранена. Повторите попытку: право не погашено.',
         );
       }
 
-      await this.bindPortalLootBoxEntitlementToReward({
+      await this.finalizePortalLootBoxEntitlement({
         tenantId: context.tenant.id,
         profileId: profile.id,
         lootBoxId: lootBox.id,
         entitlementId: entitlementToConsume.id,
-        rewardId,
+        rewardId: materializedRewardId,
         consumedAt: openedAt,
       });
+    } catch (error) {
+      try {
+        await this.recoverPortalLootBoxOpeningReservation({
+          tenantId: context.tenant.id,
+          profileId: profile.id,
+          lootBoxId: lootBox.id,
+          entitlementId: entitlementToConsume.id,
+          now: new Date(),
+          knownRewardId: materializedRewardId,
+          force: true,
+        });
+      } catch (recoveryError) {
+        this.logger.error(
+          `Failed to recover loot-box opening reservation ${entitlementToConsume.id}: ${
+            recoveryError instanceof Error
+              ? recoveryError.message
+              : String(recoveryError)
+          }`,
+        );
+      }
+      throw error;
     }
     const nextPayload: GuestPortalTokenPayload = {
       ...payload,
@@ -4832,18 +6668,22 @@ export class GuestPortalService {
     const portal = await this.buildPortalPayload(nextPayload, {
       liveSessionStartResult,
     });
-    const [referralStats, completionNotifications] = await Promise.all([
-      this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
-      this.getPendingCompletionNotifications(
-        nextPayload.tenantId,
-        portal.profile.id,
-      ),
-    ]);
+    const [referralStats, completionNotifications, rewardWallet] =
+      await Promise.all([
+        this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
+        this.getPendingCompletionNotifications(
+          nextPayload.tenantId,
+          portal.profile.id,
+          profile.gameActivatedAt,
+        ),
+        this.getRewardWallet(nextPayload.tenantId, portal.profile.id),
+      ]);
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
       completionNotifications,
+      rewardWallet,
     });
 
     this.logGuestGameDebug('open-success', {
@@ -5016,18 +6856,22 @@ export class GuestPortalService {
     };
     const token = await this.signGuestPortalToken(nextPayload);
     const portal = await this.buildPortalPayload(nextPayload);
-    const [referralStats, completionNotifications] = await Promise.all([
-      this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
-      this.getPendingCompletionNotifications(
-        nextPayload.tenantId,
-        portal.profile.id,
-      ),
-    ]);
+    const [referralStats, completionNotifications, rewardWallet] =
+      await Promise.all([
+        this.getGameReferralStats(nextPayload.tenantId, portal.profile.id),
+        this.getPendingCompletionNotifications(
+          nextPayload.tenantId,
+          portal.profile.id,
+          targetProfile.gameActivatedAt,
+        ),
+        this.getRewardWallet(nextPayload.tenantId, portal.profile.id),
+      ]);
     const summary = buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
       referralStats,
       completionNotifications,
+      rewardWallet,
     });
     const clubId = `${context.tenant.slug}:${
       context.store.publicSlug ?? context.store.id
@@ -5300,6 +7144,54 @@ export class GuestPortalService {
         reasonText: safeCheckInError(error),
       });
       throw error;
+    }
+
+    const checkInProfileId =
+      checkIn.processResult.event.profile?.id ?? payload.profileId ?? null;
+    if (
+      checkInProfileId &&
+      checkIn.processResult.summary.appliedXpDelta > 0 &&
+      checkIn.processResult.rewards.length === 0
+    ) {
+      const checkInProfile = await this.prisma.guestGameProfile.findFirst({
+        where: {
+          id: checkInProfileId,
+          tenantId: context.tenant.id,
+        },
+        select: { gameActivatedAt: true },
+      });
+      const availableAt = new Date(checkIn.processResult.event.occurredAt);
+
+      if (
+        checkInProfile?.gameActivatedAt &&
+        !Number.isNaN(availableAt.getTime()) &&
+        availableAt.getTime() >= checkInProfile.gameActivatedAt.getTime()
+      ) {
+        await this.prisma.guestGameRewardWalletItem.upsert({
+          where: {
+            tenantId_eventId: {
+              tenantId: context.tenant.id,
+              eventId: checkIn.processResult.event.id,
+            },
+          },
+          create: {
+            tenantId: context.tenant.id,
+            profileId: checkInProfileId,
+            storeId: context.store.id,
+            eventId: checkIn.processResult.event.id,
+            kind: 'REWARD',
+            sourceKind: 'CHECK_IN',
+            sourceId: checkIn.processResult.event.id,
+            title: 'Ежедневный чекин',
+            rewardLabel: `+${checkIn.processResult.summary.appliedXpDelta} XP`,
+            availableAt,
+            expiresAt: new Date(
+              availableAt.getTime() + REWARD_WALLET_RETENTION_MS,
+            ),
+          },
+          update: {},
+        });
+      }
     }
 
     this.recordGameAuditEvent({
@@ -8149,7 +10041,12 @@ export class GuestPortalService {
     storeId: string,
     guestId: string | null,
     profileId: string | null,
+    gameActivatedAt?: Date | null,
   ): Promise<GuestPortalRewardRow[]> {
+    const activatedAt = guestPortalActivationBoundary(gameActivatedAt);
+    if (!activatedAt) {
+      return [];
+    }
     const ownerFilters: Prisma.GuestGameRewardWhereInput[] = [
       ...(guestId ? [{ guestId }] : []),
       ...(profileId ? [{ profileId }] : []),
@@ -8162,6 +10059,7 @@ export class GuestPortalService {
     return this.prisma.guestGameReward.findMany({
       where: {
         tenantId,
+        qualifiedAt: { gte: activatedAt },
         AND: [
           { OR: ownerFilters },
           {
@@ -8173,6 +10071,23 @@ export class GuestPortalService {
         lootBox: { select: { name: true } },
         mission: { select: { name: true } },
         season: { select: { name: true } },
+        store: { select: { id: true, name: true } },
+        walletItems: {
+          where: {
+            tenantId,
+            ...(profileId ? { profileId } : {}),
+            kind: 'REWARD',
+          },
+          select: {
+            tenantId: true,
+            profileId: true,
+            rewardId: true,
+            kind: true,
+            status: true,
+            claimedAt: true,
+          },
+          take: 1,
+        },
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
       take: 1000,
@@ -8183,7 +10098,12 @@ export class GuestPortalService {
     tenantId: string,
     guestId: string | null,
     profileId: string | null,
+    gameActivatedAt?: Date | null,
   ): Promise<GuestPortalLootBoxUnlockEventRow[]> {
+    const activatedAt = guestPortalActivationBoundary(gameActivatedAt);
+    if (!activatedAt) {
+      return [];
+    }
     const ownerFilters: Prisma.GuestGameEventWhereInput[] = [
       ...(guestId ? [{ guestId }] : []),
       ...(profileId ? [{ profileId }] : []),
@@ -8197,6 +10117,7 @@ export class GuestPortalService {
       where: {
         tenantId,
         eventType: { not: GAME_APP_OPEN_EVENT_TYPE },
+        occurredAt: { gte: activatedAt },
         OR: ownerFilters,
       },
       select: {
@@ -8300,52 +10221,74 @@ export class GuestPortalService {
     limits: Prisma.JsonValue | null,
     _storeTimeZone: string | null,
     now: Date,
+    gameActivatedAt?: Date | null,
+    requiredEntitlementId: string | null = null,
   ) {
+    const activatedAt = guestPortalActivationBoundary(gameActivatedAt);
+    if (!activatedAt) {
+      return null;
+    }
+    const retentionCutoff = new Date(
+      now.getTime() - REWARD_WALLET_RETENTION_MS,
+    );
     const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
       { profileId },
       ...(guestId ? [{ guestId }] : []),
     ];
-    const isDaily =
-      lootBoxPeriodicLimitPeriod(jsonRecord(limits).periodicLimit) === 'DAILY';
-
-    if (isDaily) {
-      await this.prisma.guestGameEntitlement.updateMany({
-        where: {
-          tenantId,
-          ruleType: 'LOOT_BOX',
-          ruleId: lootBoxId,
-          status: 'EXPIRED',
-          consumedAt: null,
-          canceledAt: null,
-          rewardId: null,
-          validUntil: { lte: now },
-          evidence: {
-            path: ['entitlementPeriod', 'kind'],
-            equals: 'DAILY',
+    void limits;
+    await this.prisma.guestGameEntitlement.updateMany({
+      where: {
+        tenantId,
+        ...(requiredEntitlementId ? { id: requiredEntitlementId } : {}),
+        ruleType: 'LOOT_BOX',
+        ruleId: lootBoxId,
+        status: 'EXPIRED',
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        qualifiedAt: {
+          gt: retentionCutoff,
+          gte: activatedAt,
+          lte: now,
+        },
+        walletItems: {
+          some: {
+            tenantId,
+            profileId,
+            status: 'PENDING',
+            expiresAt: { gt: now },
           },
-          AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
         },
-        data: {
-          status: 'AVAILABLE',
-          validUntil: null,
-        },
-      });
-    }
+        AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
+      },
+      data: {
+        status: 'AVAILABLE',
+        validUntil: null,
+      },
+    });
 
     return this.prisma.guestGameEntitlement.findFirst({
       where: {
         tenantId,
+        ...(requiredEntitlementId ? { id: requiredEntitlementId } : {}),
         ruleType: 'LOOT_BOX',
         ruleId: lootBoxId,
         status: 'AVAILABLE',
-        qualifiedAt: { lte: now },
+        qualifiedAt: {
+          gt: retentionCutoff,
+          gte: activatedAt,
+          lte: now,
+        },
+        walletItems: {
+          some: {
+            tenantId,
+            ...(profileId ? { profileId } : {}),
+            status: 'PENDING',
+            expiresAt: { gt: now },
+          },
+        },
         OR: ownerFilters,
-        AND: [
-          { OR: [{ storeId: null }, { storeId }] },
-          ...(isDaily
-            ? []
-            : [{ OR: [{ validUntil: null }, { validUntil: { gt: now } }] }]),
-        ],
+        AND: [{ OR: [{ storeId: null }, { storeId }] }],
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
     });
@@ -8360,6 +10303,8 @@ export class GuestPortalService {
     limits: Prisma.JsonValue | null,
     storeTimeZone: string | null,
     now: Date,
+    gameActivatedAt?: Date | null,
+    requiredEntitlementId: string | null = null,
   ): Promise<GuestGameEntitlement | null> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const entitlement = await this.findPortalLootBoxEntitlement(
@@ -8371,6 +10316,8 @@ export class GuestPortalService {
         limits,
         storeTimeZone,
         now,
+        gameActivatedAt,
+        requiredEntitlementId,
       );
       if (!entitlement) return null;
 
@@ -8516,6 +10463,18 @@ export class GuestPortalService {
           },
         });
         if (updated.count === 1) {
+          await tx.guestGameRewardWalletItem.updateMany({
+            where: {
+              tenantId: entitlement.tenantId,
+              profileId: rewardProfileId,
+              entitlementId: entitlement.id,
+              status: { in: ['PENDING', 'OPENING'] },
+            },
+            data: {
+              status: 'CLAIMED',
+              claimedAt: reward.qualifiedAt,
+            },
+          });
           return {
             entitlement: {
               ...entitlement,
@@ -8536,6 +10495,18 @@ export class GuestPortalService {
           },
         });
         if (current?.status === 'CONSUMED' && current.rewardId === reward.id) {
+          await tx.guestGameRewardWalletItem.updateMany({
+            where: {
+              tenantId: entitlement.tenantId,
+              profileId: rewardProfileId,
+              entitlementId: entitlement.id,
+              status: { in: ['PENDING', 'OPENING'] },
+            },
+            data: {
+              status: 'CLAIMED',
+              claimedAt: reward.qualifiedAt,
+            },
+          });
           return { entitlement: current, outcome: 'IDEMPOTENT' };
         }
 
@@ -8575,6 +10546,18 @@ export class GuestPortalService {
         current.rewardId === matchedRewardId &&
         existingBinding?.id === entitlement.id
       ) {
+        await this.prisma.guestGameRewardWalletItem.updateMany({
+          where: {
+            tenantId: entitlement.tenantId,
+            profileId: rewardProfileId,
+            entitlementId: entitlement.id,
+            status: { in: ['PENDING', 'OPENING'] },
+          },
+          data: {
+            status: 'CLAIMED',
+            claimedAt: current.consumedAt ?? entitlement.qualifiedAt,
+          },
+        });
         return { entitlement: current, outcome: 'IDEMPOTENT' };
       }
 
@@ -8591,13 +10574,26 @@ export class GuestPortalService {
     profileId: string;
     storeId: string;
     storeTimeZone: string | null;
+    gameActivatedAt?: Date | null;
     lootBox: {
       id: string;
       name: string;
+      updatedAt: Date;
+      audienceId: string | null;
+      usageKind: string;
       triggerKind: string;
+      rewardType: string;
+      rewardAmount: Prisma.Decimal | null;
+      rewardLabel: string | null;
+      segment: string | null;
       sessionType?: string | null;
+      storeIds: Prisma.JsonValue | null;
       limits: Prisma.JsonValue | null;
       periodRules: Prisma.JsonValue | null;
+      probabilityRules: Prisma.JsonValue;
+      budgetAmount: Prisma.Decimal | null;
+      antiFraudRules: Prisma.JsonValue | null;
+      manualApprovalRequired: boolean;
     };
     unlockEvents: GuestPortalLootBoxUnlockEventRow[];
   }): Promise<GuestPortalEntitlementReconciliationResult | null> {
@@ -8608,27 +10604,21 @@ export class GuestPortalService {
       input.storeTimeZone,
     );
     if (!unlockEvent?.id) return null;
-
-    const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
-      { profileId: input.profileId },
-      ...(input.guestId ? [{ guestId: input.guestId }] : []),
-    ];
-    const existing = await this.prisma.guestGameEntitlement.findFirst({
-      where: {
-        tenantId: input.tenantId,
-        eventId: unlockEvent.id,
-        ruleType: 'LOOT_BOX',
-        ruleId: input.lootBox.id,
-        OR: ownerFilters,
-        AND: [{ OR: [{ storeId: null }, { storeId: input.storeId }] }],
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
-    if (existing) {
-      return this.reconcilePortalLootBoxEntitlementFromLegacy(
-        existing,
-        input.profileId,
-      );
+    const prefetchedRuleFingerprint = portalLootBoxEntitlementRuleFingerprint(
+      input.lootBox,
+    );
+    const activatedAt = guestPortalActivationBoundary(input.gameActivatedAt);
+    if (
+      !activatedAt ||
+      unlockEvent.occurredAt.getTime() < activatedAt.getTime()
+    ) {
+      return null;
+    }
+    if (
+      unlockEvent.occurredAt.getTime() <=
+      Date.now() - REWARD_WALLET_RETENTION_MS
+    ) {
+      return null;
     }
 
     const limits = jsonRecord(input.lootBox.limits);
@@ -8710,16 +10700,109 @@ export class GuestPortalService {
     } satisfies Prisma.GuestGameEntitlementUncheckedCreateInput;
 
     try {
-      const entitlement = await this.prisma.guestGameEntitlement.upsert({
-        where: {
-          tenantId_idempotencyKey: {
+      const entitlement = await this.prisma.$transaction(async (tx) => {
+        await acquireGuestGameLootBoxRuleLock(
+          tx,
+          input.tenantId,
+          input.lootBox.id,
+        );
+        const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
+          { profileId: input.profileId },
+          ...(input.guestId ? [{ guestId: input.guestId }] : []),
+        ];
+        let entitlement = await tx.guestGameEntitlement.findFirst({
+          where: {
             tenantId: input.tenantId,
-            idempotencyKey,
+            eventId: unlockEvent.id,
+            ruleType: 'LOOT_BOX',
+            ruleId: input.lootBox.id,
+            OR: ownerFilters,
+            AND: [{ OR: [{ storeId: null }, { storeId: input.storeId }] }],
           },
-        },
-        create,
-        update: {},
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        });
+
+        if (!entitlement) {
+          const liveLootBox = await tx.guestGameLootBox.findFirst({
+            where: {
+              id: input.lootBox.id,
+              tenantId: input.tenantId,
+              status: 'ACTIVE',
+            },
+            select: {
+              id: true,
+              name: true,
+              updatedAt: true,
+              audienceId: true,
+              usageKind: true,
+              triggerKind: true,
+              rewardType: true,
+              rewardAmount: true,
+              rewardLabel: true,
+              segment: true,
+              sessionType: true,
+              limits: true,
+              periodRules: true,
+              probabilityRules: true,
+              budgetAmount: true,
+              antiFraudRules: true,
+              manualApprovalRequired: true,
+              storeIds: true,
+            },
+          });
+          if (
+            !liveLootBox ||
+            portalLootBoxEntitlementRuleFingerprint(liveLootBox) !==
+              prefetchedRuleFingerprint ||
+            !matchesStore(liveLootBox.storeIds, input.storeId)
+          ) {
+            return null;
+          }
+          entitlement = await tx.guestGameEntitlement.upsert({
+            where: {
+              tenantId_idempotencyKey: {
+                tenantId: input.tenantId,
+                idempotencyKey,
+              },
+            },
+            create: {
+              ...create,
+              ruleName: liveLootBox.name,
+            },
+            update: {},
+          });
+        }
+
+        if (entitlement.status === 'AVAILABLE') {
+          await tx.guestGameRewardWalletItem.upsert({
+            where: {
+              tenantId_entitlementId: {
+                tenantId: input.tenantId,
+                entitlementId: entitlement.id,
+              },
+            },
+            create: {
+              tenantId: input.tenantId,
+              profileId: input.profileId,
+              storeId: entitlement.storeId,
+              entitlementId: entitlement.id,
+              kind: 'LOOT_BOX_ENTITLEMENT',
+              sourceKind: 'LOOT_BOX',
+              sourceId: input.lootBox.id,
+              title: entitlement.ruleName ?? input.lootBox.name,
+              rewardLabel: '1 попытка открытия',
+              availableAt: entitlement.qualifiedAt,
+              expiresAt: new Date(
+                entitlement.qualifiedAt.getTime() + REWARD_WALLET_RETENTION_MS,
+              ),
+            },
+            update: {},
+          });
+        }
+
+        return entitlement;
       });
+      if (!entitlement) return null;
       return this.reconcilePortalLootBoxEntitlementFromLegacy(
         entitlement,
         input.profileId,
@@ -8739,7 +10822,15 @@ export class GuestPortalService {
     storeId: string,
     lootBoxes: Array<{ id: string; limits: Prisma.JsonValue | null }>,
     now: Date,
+    gameActivatedAt?: Date | null,
   ) {
+    const activatedAt = guestPortalActivationBoundary(gameActivatedAt);
+    if (!activatedAt) {
+      return [];
+    }
+    const retentionCutoff = new Date(
+      now.getTime() - REWARD_WALLET_RETENTION_MS,
+    );
     const ownerFilters: Prisma.GuestGameEntitlementWhereInput[] = [
       ...(profileId ? [{ profileId }] : []),
       ...(guestId ? [{ guestId }] : []),
@@ -8748,64 +10839,116 @@ export class GuestPortalService {
       return [];
     }
 
-    const dailyLootBoxIds = lootBoxes
-      .filter(
-        (lootBox) =>
-          lootBoxPeriodicLimitPeriod(
-            jsonRecord(lootBox.limits).periodicLimit,
-          ) === 'DAILY',
-      )
-      .map((lootBox) => lootBox.id);
-
-    if (dailyLootBoxIds.length > 0) {
-      await this.prisma.guestGameEntitlement.updateMany({
-        where: {
-          tenantId,
-          ruleType: 'LOOT_BOX',
-          ruleId: { in: dailyLootBoxIds },
-          status: 'EXPIRED',
-          consumedAt: null,
-          canceledAt: null,
-          rewardId: null,
-          validUntil: { lte: now },
-          evidence: {
-            path: ['entitlementPeriod', 'kind'],
-            equals: 'DAILY',
+    const lootBoxIds = lootBoxes.map((lootBox) => lootBox.id);
+    await this.prisma.guestGameEntitlement.updateMany({
+      where: {
+        tenantId,
+        ruleType: 'LOOT_BOX',
+        ruleId: { in: lootBoxIds },
+        status: 'EXPIRED',
+        consumedAt: null,
+        canceledAt: null,
+        rewardId: null,
+        qualifiedAt: {
+          gt: retentionCutoff,
+          gte: activatedAt,
+          lte: now,
+        },
+        walletItems: {
+          some: {
+            tenantId,
+            ...(profileId ? { profileId } : {}),
+            status: 'PENDING',
+            expiresAt: { gt: now },
           },
-          AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
         },
-        data: {
-          status: 'AVAILABLE',
-          validUntil: null,
-        },
-      });
-    }
+        AND: [{ OR: ownerFilters }, { OR: [{ storeId: null }, { storeId }] }],
+      },
+      data: {
+        status: 'AVAILABLE',
+        validUntil: null,
+      },
+    });
 
-    const dailyLootBoxIdSet = new Set(dailyLootBoxIds);
     return this.prisma.guestGameEntitlement.findMany({
       where: {
         tenantId,
         ruleType: 'LOOT_BOX',
         status: 'AVAILABLE',
-        qualifiedAt: { lte: now },
+        qualifiedAt: {
+          gt: retentionCutoff,
+          gte: activatedAt,
+          lte: now,
+        },
+        walletItems: {
+          some: {
+            tenantId,
+            ...(profileId ? { profileId } : {}),
+            status: 'PENDING',
+            expiresAt: { gt: now },
+          },
+        },
         AND: [
           { OR: ownerFilters },
           { OR: [{ storeId: null }, { storeId }] },
-          {
-            OR: lootBoxes.map((lootBox) => ({
-              ruleId: lootBox.id,
-              ...(dailyLootBoxIdSet.has(lootBox.id)
-                ? {}
-                : { OR: [{ validUntil: null }, { validUntil: { gt: now } }] }),
-            })),
-          },
+          { ruleId: { in: lootBoxIds } },
         ],
       },
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
     });
   }
 
-  private async bindPortalLootBoxEntitlementToReward(input: {
+  private async reservePortalLootBoxEntitlement(input: {
+    tenantId: string;
+    profileId: string;
+    storeId: string;
+    lootBoxId: string;
+    entitlementId: string;
+    walletItemId: string | null;
+    reservedAt: Date;
+  }): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const reservedWalletItem = await tx.guestGameRewardWalletItem.updateMany({
+        where: {
+          ...(input.walletItemId ? { id: input.walletItemId } : {}),
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          entitlementId: input.entitlementId,
+          kind: 'LOOT_BOX_ENTITLEMENT',
+          status: 'PENDING',
+          availableAt: { lte: input.reservedAt },
+          expiresAt: { gt: input.reservedAt },
+          OR: [{ storeId: null }, { storeId: input.storeId }],
+        },
+        data: { status: 'OPENING' },
+      });
+      if (reservedWalletItem.count !== 1) {
+        throw new NotFoundException(
+          'Право на открытие уже используется, погашено или срок его хранения истёк.',
+        );
+      }
+
+      const reservedEntitlement = await tx.guestGameEntitlement.updateMany({
+        where: {
+          id: input.entitlementId,
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          ruleType: 'LOOT_BOX',
+          ruleId: input.lootBoxId,
+          status: 'AVAILABLE',
+          OR: [{ storeId: null }, { storeId: input.storeId }],
+        },
+        data: { status: 'OPENING' },
+      });
+      if (reservedEntitlement.count !== 1) {
+        throw new NotFoundException(
+          'Право на открытие уже используется, погашено или больше недоступно.',
+        );
+      }
+    });
+  }
+
+  private async finalizePortalLootBoxEntitlement(input: {
     tenantId: string;
     profileId: string;
     lootBoxId: string;
@@ -8837,10 +10980,7 @@ export class GuestPortalService {
           profileId: input.profileId,
           ruleType: 'LOOT_BOX',
           ruleId: input.lootBoxId,
-          status: 'AVAILABLE',
-          consumedAt: null,
-          canceledAt: null,
-          rewardId: null,
+          status: 'OPENING',
         },
         data: {
           status: 'CONSUMED',
@@ -8850,6 +10990,18 @@ export class GuestPortalService {
       });
 
       if (consumed.count === 1) {
+        await tx.guestGameRewardWalletItem.updateMany({
+          where: {
+            tenantId: input.tenantId,
+            profileId: input.profileId,
+            entitlementId: input.entitlementId,
+            status: 'OPENING',
+          },
+          data: {
+            status: 'CLAIMED',
+            claimedAt: input.consumedAt,
+          },
+        });
         return;
       }
 
@@ -8862,12 +11014,192 @@ export class GuestPortalService {
       });
 
       if (current?.status === 'CONSUMED' && current.rewardId === reward.id) {
+        await tx.guestGameRewardWalletItem.updateMany({
+          where: {
+            tenantId: input.tenantId,
+            profileId: input.profileId,
+            entitlementId: input.entitlementId,
+            status: 'OPENING',
+          },
+          data: {
+            status: 'CLAIMED',
+            claimedAt: input.consumedAt,
+          },
+        });
         return;
       }
 
       throw new BadRequestException(
         'Право на открытие уже погашено или больше недоступно. Обновите состояние кейса.',
       );
+    });
+  }
+
+  private async recoverPortalLootBoxOpeningReservation(input: {
+    tenantId: string;
+    profileId: string;
+    lootBoxId: string;
+    entitlementId: string;
+    now: Date;
+    knownRewardId?: string | null;
+    force?: boolean;
+  }): Promise<'ACTIVE' | 'FINALIZED' | 'RESTORED' | 'EXPIRED' | 'MISSING'> {
+    return this.prisma.$transaction(async (tx) => {
+      const walletItem = await tx.guestGameRewardWalletItem.findFirst({
+        where: {
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          entitlementId: input.entitlementId,
+          kind: 'LOOT_BOX_ENTITLEMENT',
+          status: 'OPENING',
+        },
+        select: {
+          id: true,
+          expiresAt: true,
+          updatedAt: true,
+          entitlement: {
+            select: {
+              id: true,
+              status: true,
+              rewardId: true,
+              ruleId: true,
+            },
+          },
+        },
+      });
+      if (!walletItem?.entitlement) {
+        return 'MISSING';
+      }
+
+      let rewardId = input.knownRewardId ?? walletItem.entitlement.rewardId;
+      if (!rewardId) {
+        const event = await tx.guestGameEvent.findFirst({
+          where: {
+            tenantId: input.tenantId,
+            profileId: input.profileId,
+            lootBoxId: input.lootBoxId,
+            externalId: {
+              endsWith: `:guest-game-entitlement:${input.entitlementId}`,
+            },
+          },
+          select: {
+            rewardIntents: {
+              where: {
+                tenantId: input.tenantId,
+                profileId: input.profileId,
+                ruleType: 'LOOT_BOX',
+                ruleId: input.lootBoxId,
+                rewardId: { not: null },
+              },
+              select: { rewardId: true },
+              orderBy: [{ processedAt: 'desc' }, { createdAt: 'desc' }],
+              take: 1,
+            },
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        });
+        rewardId = event?.rewardIntents[0]?.rewardId ?? null;
+      }
+
+      if (rewardId) {
+        const reward = await tx.guestGameReward.findFirst({
+          where: {
+            id: rewardId,
+            tenantId: input.tenantId,
+            profileId: input.profileId,
+            lootBoxId: input.lootBoxId,
+          },
+          select: { id: true },
+        });
+        if (reward) {
+          if (walletItem.entitlement.status === 'OPENING') {
+            const finalized = await tx.guestGameEntitlement.updateMany({
+              where: {
+                id: input.entitlementId,
+                tenantId: input.tenantId,
+                profileId: input.profileId,
+                ruleType: 'LOOT_BOX',
+                ruleId: input.lootBoxId,
+                status: 'OPENING',
+              },
+              data: {
+                status: 'CONSUMED',
+                consumedAt: input.now,
+                rewardId: reward.id,
+              },
+            });
+            if (finalized.count !== 1) {
+              return 'ACTIVE';
+            }
+          } else if (
+            walletItem.entitlement.status !== 'CONSUMED' ||
+            walletItem.entitlement.rewardId !== reward.id
+          ) {
+            return 'ACTIVE';
+          }
+
+          await tx.guestGameRewardWalletItem.updateMany({
+            where: { id: walletItem.id, status: 'OPENING' },
+            data: { status: 'CLAIMED', claimedAt: input.now },
+          });
+          return 'FINALIZED';
+        }
+      }
+
+      const staleBefore = new Date(
+        input.now.getTime() - REWARD_WALLET_OPENING_STALE_MS,
+      );
+      if (!input.force && walletItem.updatedAt > staleBefore) {
+        return 'ACTIVE';
+      }
+
+      if (walletItem.expiresAt > input.now) {
+        const restored = await tx.guestGameEntitlement.updateMany({
+          where: {
+            id: input.entitlementId,
+            tenantId: input.tenantId,
+            profileId: input.profileId,
+            ruleType: 'LOOT_BOX',
+            ruleId: input.lootBoxId,
+            status: 'OPENING',
+            rewardId: null,
+          },
+          data: {
+            status: 'AVAILABLE',
+            consumedAt: null,
+            canceledAt: null,
+            validUntil: null,
+          },
+        });
+        if (restored.count !== 1) {
+          return 'ACTIVE';
+        }
+        await tx.guestGameRewardWalletItem.updateMany({
+          where: { id: walletItem.id, status: 'OPENING' },
+          data: { status: 'PENDING', claimedAt: null },
+        });
+        return 'RESTORED';
+      }
+
+      await tx.guestGameEntitlement.updateMany({
+        where: {
+          id: input.entitlementId,
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          ruleType: 'LOOT_BOX',
+          ruleId: input.lootBoxId,
+          status: 'OPENING',
+          rewardId: null,
+        },
+        data: {
+          status: 'EXPIRED',
+          validUntil: input.now,
+        },
+      });
+      await tx.guestGameRewardWalletItem.deleteMany({
+        where: { id: walletItem.id, status: 'OPENING' },
+      });
+      return 'EXPIRED';
     });
   }
 
@@ -9154,6 +11486,204 @@ export class GuestPortalService {
     };
   }
 
+  private async reconcileGameActivationBoundary(
+    tenantId: string,
+    profileId: string,
+    observedAt: Date | null,
+  ): Promise<{
+    gameActivatedAt: Date;
+    excludedDelta: number;
+  } | null> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        gameActivatedAt: Date;
+        excludedDelta: number;
+      }>
+    >(Prisma.sql`
+      WITH "activationProfile" AS MATERIALIZED (
+        SELECT
+          profile."id",
+          profile."tenantId",
+          profile."xp",
+          profile."gameActivatedAt",
+          profile."preActivationXpExcluded",
+          (
+            SELECT MIN(event."occurredAt")
+            FROM "GuestGameEvent" AS event
+            WHERE event."tenantId" = profile."tenantId"
+              AND event."profileId" = profile."id"
+              AND event."eventType" = 'APP_OPEN'
+              AND event."externalProvider" = 'LANGAME'
+              AND event."externalDomain" = 'leetplus-guest-portal'
+              AND event."externalId" LIKE
+                'guest-game:GUEST_APP_OPEN_RULES_V2:APP_OPEN:%'
+              AND event."payload"->>'sourceFactKind' =
+                'GUEST_APP_OPEN_RULES_V2'
+              AND event."payload"->'extra'->>'source' =
+                'guest_portal_app_open'
+          ) AS "earliestAttestedOpen"
+        FROM "GuestGameProfile" AS profile
+        WHERE profile."tenantId" = ${tenantId}
+          AND profile."id" = ${profileId}
+        FOR UPDATE
+      ),
+      "activationBoundary" AS (
+        SELECT
+          source.*,
+          CASE
+            WHEN ${observedAt}::timestamp IS NULL THEN
+              CASE
+                WHEN source."gameActivatedAt" IS NULL
+                  AND source."earliestAttestedOpen" IS NULL THEN NULL
+                ELSE LEAST(
+                  COALESCE(
+                    source."gameActivatedAt",
+                    source."earliestAttestedOpen"
+                  ),
+                  COALESCE(
+                    source."earliestAttestedOpen",
+                    source."gameActivatedAt"
+                  )
+                )
+              END
+            ELSE LEAST(
+              COALESCE(source."gameActivatedAt", ${observedAt}),
+              COALESCE(source."earliestAttestedOpen", ${observedAt}),
+              ${observedAt}
+            )
+          END AS "targetBoundary"
+        FROM "activationProfile" AS source
+      ),
+      "activationXpBaseline" AS (
+        SELECT
+          boundary."id",
+          boundary."xp",
+          boundary."gameActivatedAt",
+          boundary."preActivationXpExcluded",
+          boundary."targetBoundary",
+          LEAST(
+            2147483647::bigint,
+            GREATEST(
+              -2147483648::bigint,
+              COALESCE(
+                SUM(
+                  COALESCE(
+                    posting."appliedDelta",
+                    event."xpDelta"
+                  )::bigint
+                ),
+                0::bigint
+              )
+            )
+          ) AS "invalidXp"
+        FROM "activationBoundary" AS boundary
+        LEFT JOIN "GuestGameEvent" AS event
+          ON event."tenantId" = boundary."tenantId"
+          AND event."profileId" = boundary."id"
+          AND ${guestPortalAutomaticXpEventPredicate()}
+          AND event."occurredAt" < boundary."targetBoundary"
+        LEFT JOIN "GuestGameXpPosting" AS posting
+          ON posting."tenantId" = boundary."tenantId"
+          AND posting."profileId" = boundary."id"
+          AND posting."eventId" = event."id"
+        WHERE boundary."targetBoundary" IS NOT NULL
+        GROUP BY
+          boundary."id",
+          boundary."xp",
+          boundary."gameActivatedAt",
+          boundary."preActivationXpExcluded",
+          boundary."targetBoundary"
+      ),
+      "activationXpProjection" AS (
+        SELECT
+          baseline.*,
+          LEAST(
+            2147483647::bigint,
+            GREATEST(
+              0::bigint,
+              baseline."xp"::bigint - (
+                baseline."invalidXp" -
+                baseline."preActivationXpExcluded"::bigint
+              )
+            )
+          )::integer AS "nextXp"
+        FROM "activationXpBaseline" AS baseline
+      )
+      UPDATE "GuestGameProfile" AS profile
+      SET
+        "gameActivatedAt" = projection."targetBoundary",
+        "preActivationXpExcluded" = projection."invalidXp"::integer,
+        "xp" = projection."nextXp",
+        "level" = FLOOR(projection."nextXp" / 500.0)::integer + 1,
+        "updatedAt" = NOW()
+      FROM "activationXpProjection" AS projection
+      WHERE profile."id" = projection."id"
+        AND (
+          profile."gameActivatedAt" IS DISTINCT FROM
+            projection."targetBoundary"
+          OR profile."preActivationXpExcluded" IS DISTINCT FROM
+            projection."invalidXp"::integer
+        )
+      RETURNING
+        profile."gameActivatedAt" AS "gameActivatedAt",
+        (
+          projection."invalidXp" -
+          projection."preActivationXpExcluded"::bigint
+        )::integer AS "excludedDelta"
+    `);
+
+    const row = rows[0];
+    if (!row?.gameActivatedAt) {
+      return null;
+    }
+
+    return {
+      gameActivatedAt: new Date(row.gameActivatedAt),
+      excludedDelta: guestPortalSignedXp(row.excludedDelta),
+    };
+  }
+
+  private async getInvalidPreActivationXp(
+    tenantId: string,
+    profileId: string,
+    gameActivatedAt: Date | null,
+  ): Promise<number> {
+    if (!gameActivatedAt) {
+      return 0;
+    }
+
+    const rows = await this.prisma.$queryRaw<Array<{ invalidXp: number }>>`
+      SELECT
+        LEAST(
+          2147483647::bigint,
+          GREATEST(
+            -2147483648::bigint,
+            COALESCE(
+              SUM(
+                COALESCE(
+                  posting."appliedDelta",
+                  event."xpDelta"
+                )::bigint
+              ),
+              0::bigint
+            )
+          )
+        )::integer AS "invalidXp"
+      FROM "GuestGameEvent" AS event
+      LEFT JOIN "GuestGameXpPosting" AS posting
+        ON posting."tenantId" = event."tenantId"
+        AND posting."profileId" = event."profileId"
+        AND posting."eventId" = event."id"
+      WHERE
+        event."tenantId" = ${tenantId}
+        AND event."profileId" = ${profileId}
+        AND ${guestPortalAutomaticXpEventPredicate()}
+        AND event."occurredAt" < ${gameActivatedAt}
+    `;
+
+    return guestPortalSignedXp(rows[0]?.invalidXp);
+  }
+
   private async buildPortalPayload(
     tokenPayload: GuestPortalTokenPayload,
     options: GuestPortalBuildOptions = {},
@@ -9176,6 +11706,7 @@ export class GuestPortalService {
       profile = await this.findProfileByLead(context.tenant.id, crmLead.id);
     }
     const balanceScope = this.portalBalanceScope(context.store, guest);
+    const gameActivatedAt = guestPortalProfileActivationBoundary(profile);
     const [
       groups,
       balanceSnapshot,
@@ -9192,6 +11723,7 @@ export class GuestPortalService {
       lootBoxUnlockEvents,
       audienceMemberIds,
       activity,
+      invalidPreActivationXp,
     ] = await Promise.all([
       this.prisma.guestGroup.findMany({
         where: { tenantId: context.tenant.id },
@@ -9272,6 +11804,7 @@ export class GuestPortalService {
         context.store.id,
         guest?.id ?? null,
         profile?.id ?? null,
+        profile ? profile.gameActivatedAt : null,
       ),
       guest || profile
         ? this.prisma.guestBonusLedgerEntry.findMany({
@@ -9305,6 +11838,7 @@ export class GuestPortalService {
                 select: {
                   rewardLabel: true,
                   rewardType: true,
+                  qualifiedAt: true,
                   lootBoxId: true,
                   missionId: true,
                   seasonId: true,
@@ -9342,12 +11876,25 @@ export class GuestPortalService {
         context.tenant.id,
         guest?.id ?? null,
         profile?.id ?? null,
+        profile ? profile.gameActivatedAt : null,
       ),
       this.findPortalAudienceMemberIds(context.tenant.id, guest, profile),
       this.buildActivity(context.tenant.id, context.store.id, guest, profile),
+      profile
+        ? this.getInvalidPreActivationXp(
+            context.tenant.id,
+            profile.id,
+            gameActivatedAt,
+          )
+        : 0,
     ]);
 
-    const xp = Math.max(0, profile?.xp ?? 0);
+    const xp = guestPortalEffectiveXp({
+      rawXp: profile?.xp ?? 0,
+      gameActivatedAt,
+      invalidPreActivationXp,
+      preActivationXpExcluded: profile?.preActivationXpExcluded ?? 0,
+    });
     const level = levelFromXp(xp);
     const currentLevelXp = (level - 1) * 500;
     const nextLevelXp = level * 500;
@@ -9380,6 +11927,10 @@ export class GuestPortalService {
       ready: checkInReadiness.ready,
       blockedReason: checkInReadiness.message,
     });
+    const visibleBonusLedgerRows = guestPortalVisibleBonusLedgerRows(
+      bonusLedgerRows,
+      guestPortalProfileActivationBoundary(profile),
+    );
     const missionRules = storeMissions;
     const missionProgress = await this.buildMissionProgress(
       context.tenant.id,
@@ -9398,22 +11949,14 @@ export class GuestPortalService {
       )
       .slice(0, 6);
     const portalRewards = rewards.map(mapReward).sort(comparePortalRewards);
-    const bonusHistory = this.buildBonusHistory(bonusLedgerRows);
-    const liveSessionStartUnlockEvent = liveSessionStartResultToUnlockEvent(
-      options.liveSessionStartResult,
-    );
+    const bonusHistory = this.buildBonusHistory(visibleBonusLedgerRows);
     const storeLootBoxRows = lootBoxes.filter((item) =>
       matchesStore(item.storeIds, context.store.id),
     );
-    const entitlementPrimaryLootBoxes = storeLootBoxRows.filter(
-      (item) =>
-        this.gameEntitlementRollout({
-          tenantId: context.tenant.id,
-          storeId: context.store.id,
-          profileId: profile?.id ?? '',
-          lootBoxId: item.id,
-        }).effectiveMode === 'PRIMARY',
-    );
+    // The guest-facing catalog and the open endpoint share one source of
+    // truth: a live wallet entitlement within the 30-day retention window.
+    // Rollout flags remain diagnostics for background migration only.
+    const entitlementPrimaryLootBoxes = storeLootBoxRows;
     const rawEntitlementRows = await this.findPortalLootBoxEntitlements(
       context.tenant.id,
       guest?.id ?? null,
@@ -9421,17 +11964,14 @@ export class GuestPortalService {
       context.store.id,
       entitlementPrimaryLootBoxes,
       new Date(),
+      profile ? profile.gameActivatedAt : null,
     );
     const lootBoxById = new Map(
       storeLootBoxRows.map((lootBox) => [lootBox.id, lootBox]),
     );
-    const entitlementRows = rawEntitlementRows.filter((entitlement) => {
-      const lootBox = lootBoxById.get(entitlement.ruleId);
-
-      return (
-        !!lootBox && portalLootBoxEntitlementMatchesUsage(lootBox, entitlement)
-      );
-    });
+    const entitlementRows = rawEntitlementRows.filter((entitlement) =>
+      lootBoxById.has(entitlement.ruleId),
+    );
     if (profile) {
       const entitledRuleIds = new Set(
         entitlementRows.map((entitlement) => entitlement.ruleId),
@@ -9447,6 +11987,7 @@ export class GuestPortalService {
               profileId: profile.id,
               storeId: context.store.id,
               storeTimeZone: context.store.timeZone,
+              gameActivatedAt: profile.gameActivatedAt,
               lootBox,
               unlockEvents: lootBoxUnlockEvents,
             }),
@@ -9487,31 +12028,36 @@ export class GuestPortalService {
       )
       .slice(0, 6);
     const portalLootBoxes = portalLootBoxRows.map((item) => {
-      const entitlementReadMode = this.gameEntitlementRollout({
-        tenantId: context.tenant.id,
-        storeId: context.store.id,
-        profileId: profile?.id ?? '',
-        lootBoxId: item.id,
-      }).effectiveMode;
-      const effectiveUnlockEvents =
-        entitlementReadMode === 'PRIMARY'
-          ? entitlementRows
-              .filter((entitlement) => entitlement.ruleId === item.id)
-              .map(guestGameEntitlementToUnlockEvent)
-          : lootBoxUnlockEvents;
-
-      return mapLootBox(
+      const liveEntitlements = entitlementRows.filter(
+        (entitlement) => entitlement.ruleId === item.id,
+      );
+      const mapped = mapLootBox(
         item,
         rewards,
-        effectiveUnlockEvents,
+        liveEntitlements.map(guestGameEntitlementToUnlockEvent),
         context.store.id,
         context.store.timeZone,
-        entitlementReadMode === 'PRIMARY' ? null : liveSessionStartUnlockEvent,
+        null,
         audienceMemberIds,
+        liveEntitlements.length > 0,
       );
+
+      return liveEntitlements.length > 0
+        ? mapped
+        : {
+            ...mapped,
+            openState: 'WAITING_EVENT' as const,
+            openable: false,
+            openBlocker: GUEST_PORTAL_LOOT_BOX_ENTITLEMENT_REQUIRED_MESSAGE,
+          };
     });
     const portalMissions = visibleMissions.map((item) =>
-      mapMission(item, missionProgress.get(item.id), rewards, bonusLedgerRows),
+      mapMission(
+        item,
+        missionProgress.get(item.id),
+        rewards,
+        visibleBonusLedgerRows,
+      ),
     );
     const portalSeasons = seasons
       .filter((item) => matchesStore(item.storeIds, context.store.id))
@@ -9595,7 +12141,7 @@ export class GuestPortalService {
   private async buildMissionProgress(
     tenantId: string,
     guest: { id: string } | null,
-    profile: { id: string } | null,
+    profile: { id: string; gameActivatedAt?: Date | null } | null,
     missions: Array<{
       id: string;
       createdAt: Date;
@@ -9610,7 +12156,8 @@ export class GuestPortalService {
     }>,
     timeZone: string | null,
   ): Promise<Map<string, GuestPortalMissionProgress>> {
-    if ((!guest && !profile) || missions.length === 0) {
+    const activatedAt = guestPortalProfileActivationBoundary(profile);
+    if (!profile || !activatedAt || missions.length === 0) {
       return new Map();
     }
 
@@ -9631,6 +12178,7 @@ export class GuestPortalService {
       this.prisma.guestGameEvent.findMany({
         where: {
           tenantId,
+          occurredAt: { gte: activatedAt },
           OR: eventScope,
         },
         select: {
@@ -9646,6 +12194,7 @@ export class GuestPortalService {
         where: {
           tenantId,
           missionId: { in: missionIds },
+          qualifiedAt: { gte: activatedAt },
           OR: rewardScope,
           status: { not: 'CANCELED' },
         },
@@ -9714,7 +12263,7 @@ export class GuestPortalService {
     tenantId: string,
     storeId: string,
     guest: { id: string } | null,
-    profile: { id: string } | null,
+    profile: { id: string; gameActivatedAt?: Date | null } | null,
   ): Promise<GuestPortalPayload['activity']> {
     const empty = emptyActivity();
 
@@ -9722,10 +12271,10 @@ export class GuestPortalService {
       return empty;
     }
 
-    const gameEventScope = [
-      ...(guest ? [{ guestId: guest.id }] : []),
-      ...(profile ? [{ profileId: profile.id }] : []),
-    ];
+    const gameActivatedAt = guestPortalProfileActivationBoundary(profile);
+    const gameEventScope = gameActivatedAt
+      ? [...(guest ? [{ guestId: guest.id }] : []), { profileId: profile!.id }]
+      : [];
 
     const [
       sessionStats,
@@ -9782,14 +12331,22 @@ export class GuestPortalService {
         : [],
       gameEventScope.length
         ? this.prisma.guestGameEvent.aggregate({
-            where: { tenantId, OR: gameEventScope },
+            where: {
+              tenantId,
+              occurredAt: { gte: gameActivatedAt! },
+              OR: gameEventScope,
+            },
             _count: { id: true },
             _max: { occurredAt: true },
           })
         : null,
       gameEventScope.length
         ? this.prisma.guestGameEvent.findMany({
-            where: { tenantId, OR: gameEventScope },
+            where: {
+              tenantId,
+              occurredAt: { gte: gameActivatedAt! },
+              OR: gameEventScope,
+            },
             include: {
               lootBox: { select: { name: true } },
               mission: { select: { name: true } },
@@ -10254,6 +12811,7 @@ export class GuestPortalService {
   private async getTenantStoreByIds(
     tenantId: string,
     storeId: string,
+    includeInactive = false,
   ): Promise<TenantStoreContext> {
     const tenant = await this.prisma.tenant.findFirst({
       where: {
@@ -10268,7 +12826,7 @@ export class GuestPortalService {
         stores: {
           where: {
             id: storeId,
-            isActive: true,
+            ...(includeInactive ? {} : { isActive: true }),
           },
           select: {
             id: true,
@@ -10302,6 +12860,13 @@ export class GuestPortalService {
       },
       store,
     };
+  }
+
+  private getTenantStoreByIdsIncludingInactive(
+    tenantId: string,
+    storeId: string,
+  ) {
+    return this.getTenantStoreByIds(tenantId, storeId, true);
   }
 
   private phoneIdentity(value: unknown): GuestPortalPhoneIdentity {
@@ -11040,7 +13605,8 @@ export class GuestPortalService {
       }
 
       const providerStatusChanged =
-        challenge.providerStatusCode !== providerStatusData.providerStatusCode ||
+        challenge.providerStatusCode !==
+          providerStatusData.providerStatusCode ||
         challenge.providerStatusText !== providerStatusData.providerStatusText;
       const pendingChallenge = providerStatusChanged
         ? await this.prisma.guestPortalOtpChallenge.update({
@@ -12110,10 +14676,12 @@ function telegramBotFeaturedMissions(missions: GuestPortalMission[]) {
 function telegramBotFeaturedRewards(rewards: GuestPortalReward[]) {
   const rank: Record<GuestPortalReward['walletState'], number> = {
     READY: 0,
-    WAITING_APPROVAL: 1,
-    REDEEMED: 2,
-    EXPIRED: 3,
-    CANCELED: 4,
+    WAITING_CLAIM: 1,
+    DELIVERY_PROCESSING: 2,
+    WAITING_APPROVAL: 3,
+    REDEEMED: 4,
+    EXPIRED: 5,
+    CANCELED: 6,
   };
 
   return rewards.slice().sort((left, right) => {
@@ -12184,13 +14752,17 @@ function telegramBotRewardStateLabel(state: GuestPortalReward['walletState']) {
   switch (state) {
     case 'READY':
       return 'готово';
+    case 'WAITING_CLAIM':
+      return 'нужно забрать';
+    case 'DELIVERY_PROCESSING':
+      return 'выдаётся';
     case 'WAITING_APPROVAL':
       return 'на проверке';
     case 'REDEEMED':
       return 'получено';
     case 'EXPIRED':
       return 'истекло';
-    default:
+    case 'CANCELED':
       return 'отменено';
   }
 }
@@ -12219,6 +14791,7 @@ function buildGameSummaryFromPortal(
     webUrl: string;
     referralStats: GuestPortalReferralStats;
     completionNotifications?: GuestPortalCompletionNotification[];
+    rewardWallet?: GuestPortalRewardWallet;
   },
 ): GuestPortalGameSummary {
   const recentRewards = [...portal.gamification.rewards]
@@ -12229,6 +14802,7 @@ function buildGameSummaryFromPortal(
     .slice(0, 50)
     .map((reward) => ({
       id: reward.id,
+      status: reward.status,
       walletState: reward.walletState,
       rewardType: reward.rewardType,
       rewardAmount: reward.rewardAmount,
@@ -12239,9 +14813,12 @@ function buildGameSummaryFromPortal(
       sourceId: reward.sourceId,
       sourceKind: reward.sourceKind,
       sourceLabel: reward.sourceLabel,
+      storeId: reward.storeId,
+      storeName: reward.storeName,
       rewardCode: reward.rewardCode,
       claimPayload: reward.claimPayload,
       qualifiedAt: reward.qualifiedAt,
+      claimedAt: reward.claimedAt,
       expiresAt: reward.expiresAt,
     }));
   const featuredLootBoxes = [...portal.gamification.lootBoxes]
@@ -12326,6 +14903,7 @@ function buildGameSummaryFromPortal(
         items: portal.gamification.bonusHistory.items.slice(0, 5),
       },
     },
+    rewardWallet: options.rewardWallet ?? emptyGuestPortalRewardWallet(),
     completionNotifications: {
       pending: options.completionNotifications ?? [],
     },
@@ -13243,11 +15821,16 @@ function normalizeUserCallProvider(value: string): GuestPortalUserCallProvider {
   return USER_CALL_PROVIDER_MANUAL;
 }
 
-function userCallAuthTerminalMessage(challenge: Pick<
-  GuestPortalOtpChallenge,
-  'status' | 'providerName' | 'providerStatusCode'
->) {
-  if (challenge.status === 'EXPIRED' || challenge.providerStatusCode === '402') {
+function userCallAuthTerminalMessage(
+  challenge: Pick<
+    GuestPortalOtpChallenge,
+    'status' | 'providerName' | 'providerStatusCode'
+  >,
+) {
+  if (
+    challenge.status === 'EXPIRED' ||
+    challenge.providerStatusCode === '402'
+  ) {
     return 'Срок ожидания звонка истек. Создайте новый вход по звонку и повторите попытку.';
   }
 
@@ -14373,33 +16956,6 @@ function portalLootBoxVisibleInCatalog(rule: { usageKind?: string | null }) {
   return usageKind === 'STANDALONE' || usageKind === 'BOTH';
 }
 
-function portalLootBoxEntitlementMatchesUsage(
-  rule: { usageKind?: string | null },
-  entitlement: {
-    evidence?: Prisma.JsonValue | null;
-    sourceEventType?: string | null;
-  },
-) {
-  if (portalLootBoxVisibleInCatalog(rule)) {
-    return true;
-  }
-
-  const evidence = jsonRecord(entitlement.evidence);
-  const source = stringField(evidence.source);
-  const sourceEventType = stringField(entitlement.sourceEventType);
-
-  return (
-    source === 'mission_reward' ||
-    source === 'mission_reward_admin_approval' ||
-    source === 'battle_pass_reward_auto' ||
-    source === 'battle_pass_reward_admin_approval' ||
-    sourceEventType === 'MISSION_REWARD_APPROVED' ||
-    sourceEventType === 'BATTLE_PASS_REWARD_APPROVED' ||
-    Boolean(stringField(evidence.missionId)) ||
-    Boolean(stringField(evidence.seasonId))
-  );
-}
-
 function filterLootBoxesByVisualRefs<T extends { id: string; name: string }>(
   rows: T[],
   refs: GuestPortalVisualLootBoxRef[] | null,
@@ -14467,16 +17023,6 @@ function liveSessionStartResultToUnlockEvent(
   };
 }
 
-function portalEntitlementMatchesUnlockEvent(
-  entitlement: { eventId: string | null; originKey: string | null },
-  unlockEvent: GuestPortalLootBoxUnlockEventRow,
-) {
-  return Boolean(
-    (entitlement.eventId && entitlement.eventId === unlockEvent.id) ||
-    (entitlement.originKey && entitlement.originKey === unlockEvent.originKey),
-  );
-}
-
 function guestGameEntitlementToUnlockEvent(entitlement: {
   ruleId: string;
   sourceEventType: string | null;
@@ -14527,6 +17073,7 @@ function mapLootBox(
   storeTimeZone: string | null,
   liveSessionStartUnlockEvent: GuestPortalLootBoxUnlockEventRow | null = null,
   audienceMemberIds: Set<string> = new Set(),
+  hasLiveWalletEntitlement = false,
 ): GuestPortalLootBox {
   const rewardState = buildLootBoxRewardState(row.id, rewards);
   const openState = buildLootBoxOpenState(
@@ -14537,6 +17084,7 @@ function mapLootBox(
     storeTimeZone,
     liveSessionStartUnlockEvent,
     audienceMemberIds,
+    hasLiveWalletEntitlement,
   );
   const caseRarity = lootBoxCaseRarity(row.probabilityRules);
 
@@ -14701,6 +17249,7 @@ function buildLootBoxOpenState(
   storeTimeZone: string | null = null,
   liveSessionStartUnlockEvent: GuestPortalLootBoxUnlockEventRow | null = null,
   audienceMemberIds: Set<string> = new Set(),
+  prequalifiedExactEntitlement = false,
 ): Pick<
   GuestPortalLootBox,
   | 'openState'
@@ -14757,6 +17306,20 @@ function buildLootBoxOpenState(
           ),
         )
       : null;
+
+  if (prequalifiedExactEntitlement) {
+    return {
+      openState: 'OPENABLE',
+      openable: true,
+      openBlocker: null,
+      weeklyOpenedCount,
+      weeklyLimit,
+      dailyOpenedCount,
+      dailyLimit,
+      periodicLimitPeriod,
+      periodicOpenedCount,
+    };
+  }
 
   if (row.audienceId && !audienceMemberIds.has(row.audienceId)) {
     return {
@@ -15272,11 +17835,11 @@ function buildLootBoxRewardState(
       (left, right) => right.qualifiedAt.getTime() - left.qualifiedAt.getTime(),
     );
   const mappedStates = lootBoxRewards.map((reward) =>
-    rewardWalletState(reward.status, reward.expiresAt),
+    rewardWalletState(reward.status, reward.expiresAt, reward),
   );
   const latest = lootBoxRewards[0] ?? null;
   const latestState = latest
-    ? rewardWalletState(latest.status, latest.expiresAt)
+    ? rewardWalletState(latest.status, latest.expiresAt, latest)
     : null;
 
   return {
@@ -15296,9 +17859,13 @@ function buildLootBoxRewardState(
             rewardRarity: latest.rewardRarity,
             rewardRarityLabel: latest.rewardRarityLabel,
             rewardDropChance: decimalNumber(latest.rewardDropChance),
-            rewardCode: latest.rewardCode,
+            rewardCode: rewardCodeVisibleAfterClaim(latest)
+              ? latest.rewardCode
+              : null,
             claimPayload:
-              latest.rewardCode && latestState === 'READY'
+              latest.rewardCode &&
+              latestState === 'READY' &&
+              rewardCodeVisibleAfterClaim(latest)
                 ? buildRewardClaimPayload(latest.id, latest.rewardCode)
                 : null,
             qualifiedAt: latest.qualifiedAt.toISOString(),
@@ -15329,6 +17896,19 @@ function shouldShowGuestPortalMission(
 
   return rewards.some(
     (reward) => reward.missionId === mission.id && reward.status !== 'CANCELED',
+  );
+}
+
+export function guestPortalVisibleBonusLedgerRows<
+  T extends { reward: { qualifiedAt: Date } | null },
+>(rows: T[], gameActivatedAt: Date | null): T[] {
+  return rows.filter(
+    (row) =>
+      !row.reward ||
+      Boolean(
+        gameActivatedAt &&
+        row.reward.qualifiedAt.getTime() >= gameActivatedAt.getTime(),
+      ),
   );
 }
 
@@ -15728,6 +18308,7 @@ function missionWalletRewardStatus(
   const rewardWalletStateValue = rewardWalletState(
     reward.status,
     reward.expiresAt,
+    reward,
   );
   const base = {
     rewardLabel: reward.rewardLabel,
@@ -15854,6 +18435,20 @@ function missionQuestSteps(
     .slice(0, 5);
 }
 
+type GuestPortalSeasonReward = Pick<
+  GuestPortalRewardRow,
+  | 'seasonId'
+  | 'status'
+  | 'expiresAt'
+  | 'claimRequired'
+  | 'deliveryRequestedAt'
+  | 'claimExpiresAt'
+  | 'walletItems'
+  | 'rewardLabel'
+  | 'qualifiedAt'
+  | 'evidence'
+>;
+
 function mapSeason(
   row: {
     id: string;
@@ -15865,14 +18460,7 @@ function mapSeason(
     levels: Prisma.JsonValue;
   },
   xp: number,
-  rewards: Array<{
-    seasonId: string | null;
-    status: string;
-    expiresAt: Date | null;
-    rewardLabel: string;
-    qualifiedAt: Date;
-    evidence?: Prisma.JsonValue | null;
-  }>,
+  rewards: GuestPortalSeasonReward[],
   lootBoxes: Array<{
     id: string;
     name: string;
@@ -15941,27 +18529,16 @@ function mapPromoCard(row: {
   };
 }
 
-function mapReward(row: {
-  id: string;
-  status: string;
-  lootBoxId: string | null;
-  missionId: string | null;
-  seasonId: string | null;
-  rewardType: string;
-  rewardAmount: Prisma.Decimal;
-  rewardLabel: string;
-  rewardRarity: string | null;
-  rewardRarityLabel: string | null;
-  rewardDropChance: Prisma.Decimal | null;
-  rewardCode: string | null;
-  qualifiedAt: Date;
-  expiresAt: Date | null;
-  lootBox?: { name: string } | null;
-  mission?: { name: string } | null;
-  season?: { name: string } | null;
-}): GuestPortalReward {
-  const walletState = rewardWalletState(row.status, row.expiresAt);
+function mapReward(row: GuestPortalRewardRow): GuestPortalReward {
+  const walletState = rewardWalletState(row.status, row.expiresAt, row);
   const source = rewardSource(row);
+  const rewardCode = rewardCodeVisibleAfterClaim(row) ? row.rewardCode : null;
+  const claimedAt =
+    row.walletItems?.find((item) => item.status === 'CLAIMED')?.claimedAt ??
+    row.paidAt;
+  const authoritativeExpiresAt = row.claimRequired
+    ? row.claimExpiresAt
+    : row.expiresAt;
 
   return {
     id: row.id,
@@ -15976,13 +18553,16 @@ function mapReward(row: {
     sourceId: row.lootBoxId ?? row.missionId ?? row.seasonId ?? null,
     sourceKind: source.sourceKind,
     sourceLabel: source.sourceLabel,
-    rewardCode: row.rewardCode,
+    storeId: row.storeId,
+    storeName: row.store?.name ?? null,
+    rewardCode,
     claimPayload:
-      row.rewardCode && walletState === 'READY'
-        ? buildRewardClaimPayload(row.id, row.rewardCode)
+      rewardCode && walletState === 'READY'
+        ? buildRewardClaimPayload(row.id, rewardCode)
         : null,
     qualifiedAt: row.qualifiedAt.toISOString(),
-    expiresAt: iso(row.expiresAt),
+    claimedAt: iso(claimedAt),
+    expiresAt: iso(authoritativeExpiresAt),
   };
 }
 
@@ -16819,14 +19399,18 @@ function walletStateRank(state: GuestPortalReward['walletState']) {
   switch (state) {
     case 'READY':
       return 0;
-    case 'WAITING_APPROVAL':
+    case 'WAITING_CLAIM':
       return 1;
-    case 'REDEEMED':
+    case 'DELIVERY_PROCESSING':
       return 2;
-    case 'EXPIRED':
+    case 'WAITING_APPROVAL':
       return 3;
-    case 'CANCELED':
+    case 'REDEEMED':
       return 4;
+    case 'EXPIRED':
+      return 5;
+    case 'CANCELED':
+      return 6;
   }
 }
 
@@ -17353,6 +19937,12 @@ function mapXpHistory(row: {
 function rewardWalletState(
   status: string,
   expiresAt: Date | null,
+  claim?: {
+    claimRequired: boolean;
+    deliveryRequestedAt: Date | null;
+    claimExpiresAt: Date | null;
+    walletItems?: Array<{ status: string }>;
+  },
 ): GuestPortalReward['walletState'] {
   if (status === 'PAID') {
     return 'REDEEMED';
@@ -17364,16 +19954,377 @@ function rewardWalletState(
 
   if (
     status === 'EXPIRED' ||
-    (expiresAt !== null && expiresAt.getTime() < Date.now())
+    (claim?.claimRequired !== true &&
+      expiresAt !== null &&
+      expiresAt.getTime() < Date.now()) ||
+    (claim?.claimRequired === true &&
+      claim.deliveryRequestedAt === null &&
+      claim.claimExpiresAt !== null &&
+      claim.claimExpiresAt.getTime() <= Date.now())
   ) {
     return 'EXPIRED';
   }
 
   if (status === 'APPROVED') {
+    if (claim?.claimRequired === true) {
+      const walletStatus = claim.walletItems?.[0]?.status ?? null;
+      if (walletStatus === 'CLAIMED') {
+        return 'READY';
+      }
+      if (claim.deliveryRequestedAt) {
+        return 'DELIVERY_PROCESSING';
+      }
+      return 'WAITING_CLAIM';
+    }
     return 'READY';
   }
 
   return 'WAITING_APPROVAL';
+}
+
+function guestPortalAutomaticXpEventPredicate() {
+  return Prisma.sql`(
+    event."source" IN (
+      ${Prisma.join(GUEST_PORTAL_AUTOMATIC_XP_EVENT_SOURCES)}
+    )
+    OR (
+      event."source" = ${'MANUAL'}
+      AND (
+        event."originKey" LIKE
+          ${`${GUEST_PORTAL_PROCESS_EVENT_ORIGIN_PREFIX}%`}
+        OR event."payload"->>'source' =
+          ${GUEST_PORTAL_LEGACY_PROCESS_EVENT_SOURCE}
+        OR EXISTS (
+          SELECT 1
+          FROM "GuestGameRewardIntent" AS intent
+          WHERE intent."tenantId" = event."tenantId"
+            AND intent."eventId" = event."id"
+        )
+        OR (
+          event."externalProvider" = ${IntegrationProvider.LANGAME}
+          AND event."externalId" LIKE ${'guest-game:%'}
+          AND NULLIF(event."payload"->>'sourceFactKind', '') IS NOT NULL
+        )
+      )
+    )
+  )`;
+}
+
+export type GuestPortalRewardCodeVisibilityInput = {
+  id: string;
+  tenantId: string;
+  profileId: string | null;
+  status: string;
+  claimRequired: boolean;
+  deliveryRequestedAt: Date | null;
+  claimExpiresAt: Date | null;
+  walletItems?: Array<{
+    tenantId: string;
+    profileId: string;
+    rewardId: string | null;
+    kind: string;
+    status: string;
+  }>;
+};
+
+export function rewardCodeVisibleAfterClaim(
+  reward: GuestPortalRewardCodeVisibilityInput,
+) {
+  if (!reward.claimRequired) return true;
+  if (
+    (reward.status !== 'APPROVED' && reward.status !== 'PAID') ||
+    !reward.deliveryRequestedAt ||
+    !reward.claimExpiresAt ||
+    reward.deliveryRequestedAt.getTime() >= reward.claimExpiresAt.getTime()
+  ) {
+    return false;
+  }
+
+  return (
+    reward.walletItems?.some(
+      (item) =>
+        item.tenantId === reward.tenantId &&
+        item.profileId === reward.profileId &&
+        item.rewardId === reward.id &&
+        item.kind === 'REWARD' &&
+        item.status === 'CLAIMED',
+    ) ?? false
+  );
+}
+
+function portalLootBoxEntitlementRuleFingerprint(rule: {
+  updatedAt?: Date | string | null;
+  audienceId?: string | null;
+  usageKind?: string | null;
+  triggerKind?: string | null;
+  rewardType?: string | null;
+  rewardAmount?: Prisma.Decimal | number | string | null;
+  rewardLabel?: string | null;
+  segment?: string | null;
+  sessionType?: string | null;
+  storeIds?: Prisma.JsonValue | null;
+  limits?: Prisma.JsonValue | null;
+  periodRules?: Prisma.JsonValue | null;
+  probabilityRules?: Prisma.JsonValue;
+  budgetAmount?: Prisma.Decimal | number | string | null;
+  antiFraudRules?: Prisma.JsonValue | null;
+  manualApprovalRequired?: boolean | null;
+}) {
+  const updatedAt =
+    rule.updatedAt instanceof Date
+      ? rule.updatedAt.toISOString()
+      : typeof rule.updatedAt === 'string'
+        ? rule.updatedAt
+        : null;
+  return stablePortalJson({
+    updatedAt,
+    audienceId: rule.audienceId ?? null,
+    usageKind: rule.usageKind ?? null,
+    triggerKind: rule.triggerKind ?? null,
+    rewardType: rule.rewardType ?? null,
+    rewardAmount:
+      rule.rewardAmount === null || rule.rewardAmount === undefined
+        ? null
+        : String(rule.rewardAmount),
+    rewardLabel: rule.rewardLabel ?? null,
+    segment: rule.segment ?? null,
+    sessionType: rule.sessionType ?? null,
+    storeIds: rule.storeIds ?? null,
+    limits: rule.limits ?? null,
+    periodRules: rule.periodRules ?? null,
+    probabilityRules: rule.probabilityRules ?? null,
+    budgetAmount:
+      rule.budgetAmount === null || rule.budgetAmount === undefined
+        ? null
+        : String(rule.budgetAmount),
+    antiFraudRules: rule.antiFraudRules ?? null,
+    manualApprovalRequired: rule.manualApprovalRequired ?? null,
+  });
+}
+
+function stablePortalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stablePortalJson(item)).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stablePortalJson(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+function emptyGuestPortalRewardWallet(): GuestPortalRewardWallet {
+  return {
+    pendingCount: 0,
+    nextExpiresAt: null,
+    retentionDays: REWARD_WALLET_RETENTION_DAYS,
+    items: [],
+    history: [],
+  };
+}
+
+function guestPortalRewardWalletSourceKind(
+  value: string,
+): GuestPortalRewardWalletItem['sourceKind'] {
+  if (
+    value === 'CHECK_IN' ||
+    value === 'MISSION' ||
+    value === 'BATTLE_PASS' ||
+    value === 'LOOT_BOX' ||
+    value === 'MANUAL'
+  ) {
+    return value;
+  }
+
+  return 'MANUAL';
+}
+
+function guestPortalActivationBoundary(value?: Date | null): Date | null {
+  return value === undefined ? new Date(0) : value;
+}
+
+function guestPortalProfileActivationBoundary(
+  profile: { gameActivatedAt?: Date | null } | null,
+): Date | null {
+  if (profile && profile.gameActivatedAt === undefined) {
+    return new Date(0);
+  }
+
+  return profile?.gameActivatedAt ?? null;
+}
+
+function guestPortalSignedXp(value: unknown): number {
+  const numeric =
+    typeof value === 'bigint'
+      ? Number(value)
+      : typeof value === 'number'
+        ? value
+        : Number(value ?? 0);
+
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  return Math.max(-2147483648, Math.min(2147483647, Math.trunc(numeric)));
+}
+
+export function guestPortalEffectiveXp(input: {
+  rawXp: unknown;
+  gameActivatedAt: Date | null;
+  invalidPreActivationXp: unknown;
+  preActivationXpExcluded: unknown;
+}): number {
+  if (!input.gameActivatedAt) {
+    return 0;
+  }
+
+  const rawXp = Math.max(0, guestPortalSignedXp(input.rawXp));
+  const invalidPreActivationXp = guestPortalSignedXp(
+    input.invalidPreActivationXp,
+  );
+  const preActivationXpExcluded = guestPortalSignedXp(
+    input.preActivationXpExcluded,
+  );
+  const pendingExclusion = invalidPreActivationXp - preActivationXpExcluded;
+
+  return Math.max(0, Math.min(2147483647, rawXp - pendingExclusion));
+}
+
+function guestPortalVisibleRewardWalletWhere(
+  tenantId: string,
+  profileId: string,
+  now: Date,
+): Prisma.GuestGameRewardWalletItemWhereInput {
+  const retentionCutoff = new Date(now.getTime() - REWARD_WALLET_RETENTION_MS);
+  const pendingSources: Prisma.GuestGameRewardWalletItemWhereInput[] = [
+    { eventId: { not: null } },
+    {
+      reward: {
+        is: {
+          status: 'APPROVED',
+          claimRequired: true,
+          deliveryRequestedAt: null,
+          claimExpiresAt: { gt: now },
+        },
+      },
+    },
+    {
+      entitlement: {
+        is: {
+          status: 'AVAILABLE',
+          qualifiedAt: { gt: retentionCutoff, lte: now },
+        },
+      },
+    },
+  ];
+
+  return {
+    tenantId,
+    profileId,
+    OR: [
+      {
+        status: 'PENDING',
+        availableAt: { lte: now },
+        expiresAt: { gt: now },
+        AND: [{ OR: pendingSources }],
+      },
+      {
+        status: { in: ['PROCESSING', 'FAILED'] },
+        reward: {
+          is: {
+            status: 'APPROVED',
+            claimRequired: true,
+            deliveryRequestedAt: { not: null },
+            claimExpiresAt: { not: null },
+          },
+        },
+      },
+      {
+        status: 'OPENING',
+        entitlement: {
+          is: {
+            status: 'OPENING',
+          },
+        },
+      },
+    ],
+  };
+}
+
+function guestPortalClaimableRewardWalletWhere(
+  tenantId: string,
+  profileId: string,
+  now: Date,
+): Prisma.GuestGameRewardWalletItemWhereInput {
+  return {
+    tenantId,
+    profileId,
+    kind: 'REWARD',
+    entitlementId: null,
+    OR: [
+      {
+        status: 'PENDING',
+        availableAt: { lte: now },
+        expiresAt: { gt: now },
+        OR: [
+          { eventId: { not: null }, claimXpDelta: { gt: 0 } },
+          {
+            reward: {
+              is: {
+                status: 'APPROVED',
+                claimRequired: true,
+                deliveryRequestedAt: null,
+                claimExpiresAt: { gt: now },
+              },
+            },
+          },
+        ],
+      },
+      {
+        status: 'FAILED',
+        reward: {
+          is: {
+            status: 'APPROVED',
+            claimRequired: true,
+            deliveryRequestedAt: { not: null },
+            claimExpiresAt: { not: null },
+          },
+        },
+      },
+    ],
+  };
+}
+
+function guestPortalRewardWalletItemStatus(
+  status: string,
+): GuestPortalRewardWalletItem['status'] {
+  if (status === 'PROCESSING' || status === 'FAILED' || status === 'OPENING') {
+    return status;
+  }
+  return 'PENDING';
+}
+
+function guestPortalRewardWalletHistoryStatus(
+  status: string,
+): GuestPortalRewardWalletHistoryItem['status'] {
+  if (
+    status === 'PROCESSING' ||
+    status === 'FAILED' ||
+    status === 'OPENING' ||
+    status === 'CLAIMED'
+  ) {
+    return status;
+  }
+  return 'PENDING';
+}
+
+function isGuestPortalSerializationConflict(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2034'
+  );
 }
 
 function completionNotificationRewardStatusLabel(
@@ -17381,6 +20332,8 @@ function completionNotificationRewardStatusLabel(
 ) {
   const labels: Record<GuestPortalReward['walletState'], string> = {
     WAITING_APPROVAL: 'Награда ожидает подтверждения',
+    WAITING_CLAIM: 'Награда ждёт получения',
+    DELIVERY_PROCESSING: 'Награда выдаётся',
     READY: 'Награда добавлена в историю',
     REDEEMED: 'Награда получена',
     EXPIRED: 'Срок награды истёк',
@@ -17761,14 +20714,7 @@ function seasonLevels(value: Prisma.JsonValue) {
 function buildSeasonProgress(
   levels: GuestPortalSeasonLevel[],
   _xp: number,
-  rewards: Array<{
-    seasonId: string | null;
-    status: string;
-    expiresAt: Date | null;
-    rewardLabel: string;
-    qualifiedAt: Date;
-    evidence?: Prisma.JsonValue | null;
-  }>,
+  rewards: GuestPortalSeasonReward[],
   season: { id: string; periodFrom: Date | null; periodTo: Date | null },
 ): Omit<
   GuestPortalSeason,
@@ -17790,7 +20736,7 @@ function buildSeasonProgress(
     seasonRewardMatchesLevelReward(reward, levelRewardLabels),
   );
   const mappedRewards = levelRewards.map((reward) =>
-    rewardWalletState(reward.status, reward.expiresAt),
+    rewardWalletState(reward.status, reward.expiresAt, reward),
   );
   const reachedLevelNumbers = seasonReachedLevelNumbers(levels, levelRewards);
   let reachedLevelCount = 0;
@@ -17832,7 +20778,9 @@ function buildSeasonProgress(
     progressPercent,
     reachedLevels: reachedLevelCount,
     totalLevels: levels.length,
-    readyRewards: mappedRewards.filter((state) => state === 'READY').length,
+    readyRewards: mappedRewards.filter(
+      (state) => state === 'READY' || state === 'WAITING_CLAIM',
+    ).length,
     waitingApprovalRewards: mappedRewards.filter(
       (state) => state === 'WAITING_APPROVAL',
     ).length,
@@ -17849,7 +20797,11 @@ function seasonRewardStateCountsAsReachedLevel(
   state: GuestPortalReward['walletState'],
 ) {
   return (
-    state === 'WAITING_APPROVAL' || state === 'READY' || state === 'REDEEMED'
+    state === 'WAITING_APPROVAL' ||
+    state === 'WAITING_CLAIM' ||
+    state === 'DELIVERY_PROCESSING' ||
+    state === 'READY' ||
+    state === 'REDEEMED'
   );
 }
 
@@ -17868,17 +20820,12 @@ function seasonRewardWithinPeriod(
 
 function seasonReachedLevelNumbers(
   levels: GuestPortalSeasonLevel[],
-  rewards: Array<{
-    status: string;
-    expiresAt: Date | null;
-    rewardLabel: string;
-    evidence?: Prisma.JsonValue | null;
-  }>,
+  rewards: GuestPortalSeasonReward[],
 ) {
   const reachedLevelNumbers = new Set<number>();
 
   rewards.forEach((reward) => {
-    const state = rewardWalletState(reward.status, reward.expiresAt);
+    const state = rewardWalletState(reward.status, reward.expiresAt, reward);
 
     if (!seasonRewardStateCountsAsReachedLevel(state)) {
       return;

@@ -27,6 +27,8 @@ import {
   type GuestGameBonusLedgerDispatchResult,
   type GuestGameBonusLedgerQueueDto,
   type GuestGameBonusLedgerQueueResult,
+  type GuestGameBonusLedgerReconciliationResolveDto,
+  type GuestGameBonusLedgerReconciliationResolveResult,
   type GuestGameBonusLedgerStatus,
 } from './guest-bonus-ledger.service';
 import {
@@ -854,6 +856,18 @@ export class GuestGamificationController {
     @Body() dto: GuestGameBonusLedgerDispatchDto,
   ): Promise<GuestGameBonusLedgerDispatchResult> {
     return this.bonusLedgerService.dispatch(user, dto);
+  }
+
+  @Post('bonus-ledger/:id/reconciliation/resolve')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN)
+  @UseGuards(StrictRolesGuard)
+  resolveBonusLedgerReconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestGameBonusLedgerReconciliationResolveDto,
+  ): Promise<GuestGameBonusLedgerReconciliationResolveResult> {
+    return this.bonusLedgerService.resolveReconciliation(user, id, dto);
   }
 
   @Post('bonus-ledger/:id/cancel')

@@ -51,6 +51,7 @@ type BonusLedgerItemStatus =
   | 'FAILED'
   | 'SKIPPED'
   | 'CANCELED'
+  | 'RECONCILIATION_REQUIRED'
   | 'BLOCKED';
 type LangameBalanceType = 'balance' | 'bonus_balance';
 
@@ -76,6 +77,23 @@ export type GuestGameScheduledBonusLedgerDispatchDto =
 export type GuestGameBonusLedgerCancelDto = {
   reason?: string | null;
 };
+
+export type GuestGameBonusLedgerReconciliationOutcome =
+  | 'CONFIRMED'
+  | 'NOT_APPLIED';
+
+export type GuestGameBonusLedgerReconciliationResolveDto = {
+  outcome?: GuestGameBonusLedgerReconciliationOutcome | string | null;
+  note?: string | null;
+  confirmation?: boolean | string | null;
+};
+
+export type GuestGameBonusLedgerReconciliationResolveResult =
+  GuestGameBonusLedgerDispatchItem & {
+    outcome: GuestGameBonusLedgerReconciliationOutcome;
+    resolvedAt: string;
+    operatorNote: string;
+  };
 
 export type GuestGameBonusLedgerStatus = {
   mode: BonusLedgerMode;
@@ -195,14 +213,90 @@ type ClaimedBonusLedgerEntry = {
   status: string;
   amount: Prisma.Decimal;
   attempts: number;
+  lockedAt: Date | null;
   reason: string | null;
   metadata: Prisma.JsonValue | null;
   createdAt: Date;
 };
 
+type StaleDispatchingBonusLedgerEntry = {
+  id: string;
+  tenantId: string;
+  rewardId: string | null;
+  status: string;
+  attempts: number;
+  lockedAt: Date | null;
+  updatedAt: Date;
+  errorCode: string | null;
+  errorMessage: string | null;
+  metadata: Prisma.JsonValue | null;
+};
+
 type TenantAccess = Awaited<
   ReturnType<LangameSettingsService['resolveTenantAccess']>
 >;
+
+type BonusLedgerDeliveryRevalidation = {
+  ready: boolean;
+  status: 'BLOCKED' | 'CANCELED' | null;
+  note: string | null;
+};
+
+type BonusLedgerReconciliationAudit = {
+  outcome: GuestGameBonusLedgerReconciliationOutcome;
+  note: string;
+  confirmation: true;
+  actorUserId: string;
+  resolvedAt: string;
+  previousStatus: 'RECONCILIATION_REQUIRED';
+  previousErrorCode: string | null;
+  previousErrorMessage: string | null;
+  previousAttempts: number;
+};
+
+function bonusLedgerRewardDeliveryGate(
+  now: Date,
+  claimExpiresAtField: Prisma.GuestGameRewardFieldRefs['claimExpiresAt'],
+): Prisma.GuestGameRewardWhereInput {
+  return {
+    OR: [
+      {
+        claimRequired: false,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      {
+        claimRequired: true,
+        deliveryRequestedAt: {
+          not: null,
+          lt: claimExpiresAtField,
+        },
+        claimExpiresAt: { not: null },
+        walletItems: {
+          some: {
+            kind: 'REWARD',
+            status: { in: ['PROCESSING', 'FAILED'] },
+          },
+        },
+      },
+    ],
+  };
+}
+
+function acceptedRewardClaimBeforeDeadline(reward: {
+  claimRequired: boolean;
+  deliveryRequestedAt: Date | null;
+  claimExpiresAt: Date | null;
+}) {
+  if (!reward.claimRequired) {
+    return true;
+  }
+
+  return Boolean(
+    reward.deliveryRequestedAt &&
+    reward.claimExpiresAt &&
+    reward.deliveryRequestedAt.getTime() < reward.claimExpiresAt.getTime(),
+  );
+}
 
 @Injectable()
 export class GuestBonusLedgerService {
@@ -245,7 +339,10 @@ export class GuestBonusLedgerService {
       rewardTypes: config.rewardTypes,
       pendingApprovedRewards,
       pending: counts.get('PENDING') ?? 0,
-      processing: counts.get('PROCESSING') ?? 0,
+      processing:
+        (counts.get('PROCESSING') ?? 0) +
+        (counts.get('DISPATCHING') ?? 0) +
+        (counts.get('RECONCILIATION_REQUIRED') ?? 0),
       confirmed: counts.get('CONFIRMED') ?? 0,
       failed: counts.get('FAILED') ?? 0,
       canceled: counts.get('CANCELED') ?? 0,
@@ -266,6 +363,7 @@ export class GuestBonusLedgerService {
     const limit = positiveInt(dto.limit, 500, 1000);
     const staffTestRewardAccrualEnabled =
       this.isStaffTestRewardAccrualEnabled();
+    const now = new Date();
 
     if (rewardTypes.length === 0) {
       return {
@@ -288,6 +386,12 @@ export class GuestBonusLedgerService {
         OR: rewardTypes.map((type) => ({
           rewardType: { equals: type, mode: 'insensitive' as const },
         })),
+        AND: [
+          bonusLedgerRewardDeliveryGate(
+            now,
+            this.prisma.guestGameReward.fields.claimExpiresAt,
+          ),
+        ],
         bonusLedgerEntries: {
           none: {
             tenantId: user.tenantId,
@@ -535,12 +639,17 @@ export class GuestBonusLedgerService {
       };
     }
 
+    const actorUserId = ledgerActorUserId(user);
+    await this.promoteStaleDispatchingEntries(
+      user.tenantId,
+      actorUserId,
+      config,
+    );
     const access = await this.langameSettingsService.resolveTenantAccess(
       user.tenantId,
     );
     const entries = await this.claimReadyEntries(user.tenantId, config);
     const items: GuestGameBonusLedgerDispatchItem[] = [];
-    const actorUserId = ledgerActorUserId(user);
 
     for (const entry of entries) {
       items.push(
@@ -565,7 +674,9 @@ export class GuestBonusLedgerService {
       queued,
       checked: entries.length,
       confirmed: items.filter((item) => item.status === 'CONFIRMED').length,
-      failed: items.filter((item) => item.status === 'FAILED').length,
+      failed: items.filter((item) =>
+        ['FAILED', 'RECONCILIATION_REQUIRED'].includes(item.status),
+      ).length,
       skipped: items.filter((item) =>
         ['SKIPPED', 'CANCELED'].includes(item.status),
       ).length,
@@ -576,40 +687,232 @@ export class GuestBonusLedgerService {
     };
   }
 
+  async resolveReconciliation(
+    user: Pick<AuthenticatedUser, 'id' | 'tenantId'>,
+    id: string,
+    dto: GuestGameBonusLedgerReconciliationResolveDto,
+  ): Promise<GuestGameBonusLedgerReconciliationResolveResult> {
+    const outcome = nullableString(dto?.outcome)?.toUpperCase();
+    if (outcome !== 'CONFIRMED' && outcome !== 'NOT_APPLIED') {
+      throw new BadRequestException(
+        'Укажите итог сверки: CONFIRMED или NOT_APPLIED.',
+      );
+    }
+    const note = nullableString(dto?.note);
+    if (!note) {
+      throw new BadRequestException(
+        'Для ручного разрешения сверки обязателен комментарий оператора.',
+      );
+    }
+    if (!booleanValue(dto?.confirmation, false)) {
+      throw new BadRequestException(
+        'Ручное разрешение сверки требует явного подтверждения.',
+      );
+    }
+
+    const resolvedAt = new Date();
+    const rowHint = await this.prisma.guestBonusLedgerEntry.findFirst({
+      where: {
+        id,
+        tenantId: user.tenantId,
+      },
+      select: { rewardId: true },
+    });
+    if (!rowHint) {
+      throw new BadRequestException('Ledger-запись не найдена.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (rowHint.rewardId) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "GuestGameReward"
+          WHERE "id" = ${rowHint.rewardId}
+            AND "tenantId" = ${user.tenantId}
+          FOR UPDATE
+        `);
+      }
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id"
+        FROM "GuestBonusLedgerEntry"
+        WHERE "id" = ${id}
+          AND "tenantId" = ${user.tenantId}
+        FOR UPDATE
+      `);
+      const entry = await tx.guestBonusLedgerEntry.findFirst({
+        where: {
+          id,
+          tenantId: user.tenantId,
+        },
+      });
+
+      if (!entry) {
+        throw new BadRequestException('Ledger-запись не найдена.');
+      }
+      if (entry.rewardId !== rowHint.rewardId) {
+        throw new BadRequestException(
+          'Связь ledger-записи с наградой изменилась. Обновите страницу.',
+        );
+      }
+      if (entry.status !== 'RECONCILIATION_REQUIRED') {
+        throw new BadRequestException(
+          'Ручное разрешение доступно только для ledger-записи в статусе RECONCILIATION_REQUIRED.',
+        );
+      }
+
+      const audit: BonusLedgerReconciliationAudit = {
+        outcome,
+        note: truncate(note, 1000),
+        confirmation: true,
+        actorUserId: user.id,
+        resolvedAt: resolvedAt.toISOString(),
+        previousStatus: 'RECONCILIATION_REQUIRED',
+        previousErrorCode: entry.errorCode,
+        previousErrorMessage: entry.errorMessage,
+        previousAttempts: entry.attempts,
+      };
+      const metadata = {
+        ...jsonRecord(entry.metadata),
+        reconciliationResolution: audit,
+      };
+
+      if (outcome === 'CONFIRMED') {
+        await this.confirmEntryInTransaction(
+          tx,
+          user.id,
+          entry,
+          entry.langameRequest ?? {},
+          {
+            operatorResolution: audit,
+            previousLangameResponse: entry.langameResponse ?? null,
+          },
+          'RECONCILIATION_REQUIRED',
+          metadata,
+          audit,
+          resolvedAt,
+        );
+      } else {
+        await this.markReconciliationNotAppliedInTransaction(
+          tx,
+          user,
+          entry,
+          metadata,
+          note,
+          resolvedAt,
+        );
+      }
+
+      return {
+        ledgerEntryId: entry.id,
+        rewardId: entry.rewardId,
+        status: outcome === 'CONFIRMED' ? 'CONFIRMED' : 'FAILED',
+        amount: decimalToNumber(entry.amount),
+        externalDomain: entry.externalDomain,
+        externalGuestId: entry.externalGuestId,
+        note,
+        outcome,
+        resolvedAt: resolvedAt.toISOString(),
+        operatorNote: note,
+      };
+    });
+  }
+
   async cancelEntry(
     user: Pick<AuthenticatedUser, 'id' | 'tenantId'>,
     id: string,
     dto: GuestGameBonusLedgerCancelDto = {},
   ): Promise<GuestGameBonusLedgerDispatchItem> {
     const reason = nullableString(dto.reason) ?? 'Отменено вручную.';
-    const row = await this.prisma.guestBonusLedgerEntry.findFirst({
+    const rowHint = await this.prisma.guestBonusLedgerEntry.findFirst({
       where: { id, tenantId: user.tenantId },
+      select: { rewardId: true },
     });
 
-    if (!row) {
+    if (!rowHint) {
       throw new BadRequestException('Ledger-запись не найдена.');
     }
 
-    if (row.status === 'CONFIRMED') {
-      throw new BadRequestException(
-        'Подтвержденную ledger-запись нельзя отменить без обратной операции.',
-      );
-    }
-
     const config = this.resolveConfig();
-    if (
-      row.status === 'PROCESSING' &&
-      bonusLedgerLockIsFresh(row.lockedAt, config.staleLockMinutes)
-    ) {
-      throw new BadRequestException(
-        'Ledger-запись сейчас обрабатывается worker-ом. Дождитесь завершения или протухания lock перед отменой.',
-      );
-    }
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Match the worker lock order (reward -> ledger). The pre-read is only
+      // a lock-order hint; all authorization and status decisions use the
+      // row fetched again under FOR UPDATE.
+      if (rowHint.rewardId) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "GuestGameReward"
+          WHERE "id" = ${rowHint.rewardId}
+            AND "tenantId" = ${user.tenantId}
+          FOR UPDATE
+        `);
+      }
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id"
+        FROM "GuestBonusLedgerEntry"
+        WHERE "id" = ${id}
+          AND "tenantId" = ${user.tenantId}
+        FOR UPDATE
+      `);
+      const row = await tx.guestBonusLedgerEntry.findFirst({
+        where: { id, tenantId: user.tenantId },
+      });
+      if (!row) {
+        throw new BadRequestException('Ledger-запись не найдена.');
+      }
+      if (row.rewardId !== rowHint.rewardId) {
+        throw new BadRequestException(
+          'Связь ledger-записи с наградой изменилась. Обновите страницу.',
+        );
+      }
+      if (row.status === 'CONFIRMED') {
+        throw new BadRequestException(
+          'Подтвержденную ledger-запись нельзя отменить без обратной операции.',
+        );
+      }
+      if (
+        row.status === 'DISPATCHING' ||
+        row.status === 'RECONCILIATION_REQUIRED' ||
+        (row.status === 'PROCESSING' &&
+          bonusLedgerLockIsFresh(row.lockedAt, config.staleLockMinutes))
+      ) {
+        throw new BadRequestException(
+          'Ledger-запись сейчас обрабатывается worker-ом. Дождитесь завершения или протухания lock перед отменой.',
+        );
+      }
+      if (row.rewardId) {
+        const acceptedWalletDelivery =
+          await tx.guestGameReward.findFirst({
+            where: {
+              id: row.rewardId,
+              tenantId: user.tenantId,
+              claimRequired: true,
+              deliveryRequestedAt: { not: null },
+              walletItems: {
+                some: {
+                  kind: 'REWARD',
+                  status: { in: ['PROCESSING', 'FAILED'] },
+                },
+              },
+            },
+            select: { id: true },
+          });
+        if (acceptedWalletDelivery) {
+          throw new BadRequestException(
+            'Награда уже принята гостем и ожидает сверки выдачи. Отмена запрещена.',
+          );
+        }
+      }
 
-    const canceled = await this.prisma.$transaction(async (tx) => {
       const canceledAt = new Date();
-      await tx.guestBonusLedgerEntry.update({
-        where: { id },
+      const canceledEntry = await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id,
+          tenantId: user.tenantId,
+          status: row.status,
+          ...(row.status === 'PROCESSING'
+            ? { lockedAt: row.lockedAt }
+            : {}),
+        },
         data: {
           status: 'CANCELED',
           processedByUserId: user.id,
@@ -619,9 +922,17 @@ export class GuestBonusLedgerService {
           errorMessage: reason,
         },
       });
+      if (canceledEntry.count !== 1) {
+        throw new BadRequestException(
+          'Состояние ledger-записи изменилось. Обновите страницу.',
+        );
+      }
 
       if (!row.rewardId) {
-        return { rewards: 0, deliveries: 0 };
+        return {
+          row,
+          canceled: { rewards: 0, deliveries: 0 },
+        };
       }
 
       const rewards = await tx.guestGameReward.updateMany({
@@ -696,17 +1007,20 @@ export class GuestBonusLedgerService {
         }
       }
 
-      return { rewards: rewards.count, deliveries: deliveryCount };
+      return {
+        row,
+        canceled: { rewards: rewards.count, deliveries: deliveryCount },
+      };
     });
 
     return {
-      ledgerEntryId: row.id,
-      rewardId: row.rewardId,
+      ledgerEntryId: result.row.id,
+      rewardId: result.row.rewardId,
       status: 'CANCELED',
-      amount: decimalToNumber(row.amount),
-      externalDomain: row.externalDomain,
-      externalGuestId: row.externalGuestId,
-      note: bonusLedgerCancelNote(reason, canceled),
+      amount: decimalToNumber(result.row.amount),
+      externalDomain: result.row.externalDomain,
+      externalGuestId: result.row.externalGuestId,
+      note: bonusLedgerCancelNote(reason, result.canceled),
     };
   }
 
@@ -807,6 +1121,8 @@ export class GuestBonusLedgerService {
     rewardTypes: string[],
     storeId: string | null,
   ) {
+    const now = new Date();
+
     return this.prisma.guestGameReward.count({
       where: {
         tenantId,
@@ -817,6 +1133,10 @@ export class GuestBonusLedgerService {
           rewardType: { equals: type, mode: 'insensitive' as const },
         })),
         AND: [
+          bonusLedgerRewardDeliveryGate(
+            now,
+            this.prisma.guestGameReward.fields.claimExpiresAt,
+          ),
           {
             OR: [
               { profileId: null },
@@ -838,16 +1158,150 @@ export class GuestBonusLedgerService {
     tenantId: string,
     config: BonusLedgerConfig,
   ) {
+    const now = new Date();
+
     return this.prisma.guestBonusLedgerEntry.findMany({
       where: {
         tenantId,
         ...(config.storeId ? { storeId: config.storeId } : {}),
         ...(config.rewardId ? { rewardId: config.rewardId } : {}),
         status: { in: ['PENDING', 'FAILED'] },
-        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+        AND: [
+          {
+            OR: [
+              { source: { not: 'GAMIFICATION_REWARD' } },
+              {
+                reward: {
+                  is: bonusLedgerRewardDeliveryGate(
+                    now,
+                    this.prisma.guestGameReward.fields.claimExpiresAt,
+                  ),
+                },
+              },
+            ],
+          },
+        ],
       },
       orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
       take: config.limit,
+    });
+  }
+
+  private async promoteStaleDispatchingEntries(
+    tenantId: string,
+    actorUserId: string | null,
+    config: BonusLedgerConfig,
+  ) {
+    const promotedAt = new Date();
+    const cutoff = new Date(
+      promotedAt.getTime() - config.staleLockMinutes * 60 * 1000,
+    );
+    const storeFilter = config.storeId
+      ? Prisma.sql`AND ledger."storeId" = ${config.storeId}`
+      : Prisma.empty;
+    const rewardFilter = config.rewardId
+      ? Prisma.sql`AND ledger."rewardId" = ${config.rewardId}`
+      : Prisma.empty;
+    const limit = Math.max(config.limit, 100);
+
+    return this.prisma.$transaction(async (tx) => {
+      const candidates = await tx.$queryRaw<StaleDispatchingBonusLedgerEntry[]>(
+        Prisma.sql`
+          SELECT
+            ledger."id",
+            ledger."tenantId",
+            ledger."rewardId",
+            ledger."status",
+            ledger."attempts",
+            ledger."lockedAt",
+            ledger."updatedAt",
+            ledger."errorCode",
+            ledger."errorMessage",
+            ledger."metadata"
+          FROM "GuestBonusLedgerEntry" AS ledger
+          WHERE ledger."tenantId" = ${tenantId}
+            AND ledger."status" = 'DISPATCHING'
+            ${storeFilter}
+            ${rewardFilter}
+            AND GREATEST(
+              COALESCE(ledger."lockedAt", ledger."createdAt"),
+              ledger."updatedAt"
+            ) <= ${cutoff}
+          ORDER BY
+            GREATEST(
+              COALESCE(ledger."lockedAt", ledger."createdAt"),
+              ledger."updatedAt"
+            ),
+            ledger."id"
+          LIMIT ${limit}
+          FOR UPDATE SKIP LOCKED
+        `,
+      );
+      let promoted = 0;
+
+      for (const candidate of candidates) {
+        if (
+          candidate.status !== 'DISPATCHING' ||
+          !(candidate.updatedAt instanceof Date)
+        ) {
+          continue;
+        }
+        const latestActivityAt = new Date(
+          Math.max(
+            new Date(candidate.updatedAt).getTime(),
+            candidate.lockedAt
+              ? new Date(candidate.lockedAt).getTime()
+              : Number.NEGATIVE_INFINITY,
+          ),
+        );
+        // Keep a defensive freshness check even though the SQL predicate
+        // already filters candidates. It protects tests/mocks and any future
+        // query refactor from promoting a live provider request.
+        if (latestActivityAt.getTime() > cutoff.getTime()) {
+          continue;
+        }
+
+        const audit = {
+          promotedAt: promotedAt.toISOString(),
+          promotedByUserId: actorUserId,
+          previousStatus: 'DISPATCHING',
+          previousLockedAt: candidate.lockedAt?.toISOString() ?? null,
+          previousUpdatedAt: candidate.updatedAt.toISOString(),
+          previousErrorCode: candidate.errorCode,
+          previousErrorMessage: candidate.errorMessage,
+          attempts: candidate.attempts,
+          staleThresholdMinutes: config.staleLockMinutes,
+          reason: 'DISPATCH_CRASH_OR_HTTP_OUTCOME_UNKNOWN',
+        };
+        const updated = await tx.guestBonusLedgerEntry.updateMany({
+          where: {
+            id: candidate.id,
+            tenantId,
+            status: 'DISPATCHING',
+            attempts: candidate.attempts,
+            lockedAt: candidate.lockedAt,
+            updatedAt: candidate.updatedAt,
+          },
+          data: {
+            status: 'RECONCILIATION_REQUIRED',
+            processedByUserId: actorUserId,
+            lockedAt: null,
+            failedAt: promotedAt,
+            nextAttemptAt: null,
+            errorCode: 'STALE_DISPATCH_OUTCOME_UNKNOWN',
+            errorMessage:
+              'Dispatch завис в момент внешней записи. Автоповтор запрещён до ручной сверки.',
+            metadata: {
+              ...jsonRecord(candidate.metadata),
+              staleDispatchPromotion: audit,
+            },
+          },
+        });
+        promoted += updated.count;
+      }
+
+      return promoted;
     });
   }
 
@@ -856,46 +1310,97 @@ export class GuestBonusLedgerService {
     config: BonusLedgerConfig,
   ): Promise<ClaimedBonusLedgerEntry[]> {
     const storeFilter = config.storeId
-      ? Prisma.sql`AND "storeId" = ${config.storeId}`
+      ? Prisma.sql`AND candidate."storeId" = ${config.storeId}`
       : Prisma.empty;
     const rewardFilter = config.rewardId
-      ? Prisma.sql`AND "rewardId" = ${config.rewardId}`
+      ? Prisma.sql`AND candidate."rewardId" = ${config.rewardId}`
       : Prisma.empty;
 
     return this.prisma.$queryRaw<ClaimedBonusLedgerEntry[]>(Prisma.sql`
-      UPDATE "GuestBonusLedgerEntry"
+      UPDATE "GuestBonusLedgerEntry" AS ledger
       SET
         "status" = 'PROCESSING',
         "lockedAt" = NOW(),
         "processedAt" = NOW(),
         "attempts" = "attempts" + 1,
         "updatedAt" = NOW()
-      WHERE "id" IN (
-        SELECT "id"
-        FROM "GuestBonusLedgerEntry"
-        WHERE "tenantId" = ${tenantId}
+      WHERE ledger."id" IN (
+        SELECT candidate."id"
+        FROM "GuestBonusLedgerEntry" AS candidate
+        WHERE candidate."tenantId" = ${tenantId}
           ${storeFilter}
           ${rewardFilter}
           AND (
-            "status" = 'PENDING'
+            candidate."status" = 'PENDING'
             OR (
-              "status" = 'FAILED'
-              AND "attempts" < ${config.maxAttempts}
-              AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= NOW())
+              candidate."status" = 'FAILED'
+              AND candidate."attempts" < ${config.maxAttempts}
+              AND (
+                candidate."nextAttemptAt" IS NULL
+                OR candidate."nextAttemptAt" <= NOW()
+              )
             )
             OR (
-              "status" = 'PROCESSING'
-              AND "attempts" < ${config.maxAttempts}
-              AND "lockedAt" < NOW() - (${config.staleLockMinutes} * INTERVAL '1 minute')
+              candidate."status" = 'PROCESSING'
+              AND candidate."attempts" < ${config.maxAttempts}
+              AND candidate."lockedAt" < NOW() - (${config.staleLockMinutes} * INTERVAL '1 minute')
             )
             OR (
-              "status" = 'FAILED'
-              AND "attempts" >= ${config.maxAttempts}
-              AND "externalDomain" = ${guestPortalExternalDomain}
-              AND "errorMessage" ILIKE ${`%${guestPortalExternalDomain}%`}
+              candidate."status" = 'FAILED'
+              AND candidate."attempts" >= ${config.maxAttempts}
+              AND candidate."externalDomain" = ${guestPortalExternalDomain}
+              AND candidate."errorMessage" ILIKE ${`%${guestPortalExternalDomain}%`}
+            )
+            OR (
+              candidate."status" = 'FAILED'
+              AND candidate."attempts" >= ${config.maxAttempts}
+              AND candidate."source" = 'GAMIFICATION_REWARD'
+              AND EXISTS (
+                SELECT 1
+                FROM "GuestGameRewardWalletItem" AS retry_wallet
+                WHERE retry_wallet."tenantId" = candidate."tenantId"
+                  AND retry_wallet."rewardId" = candidate."rewardId"
+                  AND retry_wallet."kind" = 'REWARD'
+                  AND retry_wallet."status" = 'PROCESSING'
+              )
             )
           )
-        ORDER BY COALESCE("nextAttemptAt", "createdAt"), "createdAt"
+          AND (
+            candidate."source" <> 'GAMIFICATION_REWARD'
+            OR EXISTS (
+              SELECT 1
+              FROM "GuestGameReward" AS reward
+              WHERE reward."id" = candidate."rewardId"
+                AND reward."tenantId" = candidate."tenantId"
+                AND reward."status" = 'APPROVED'
+                AND (
+                  (
+                    reward."claimRequired" = FALSE
+                    AND (
+                      reward."expiresAt" IS NULL
+                      OR reward."expiresAt" > NOW()
+                    )
+                  )
+                  OR (
+                    reward."claimRequired" = TRUE
+                    AND reward."deliveryRequestedAt" IS NOT NULL
+                    AND reward."claimExpiresAt" IS NOT NULL
+                    AND reward."deliveryRequestedAt" < reward."claimExpiresAt"
+                    AND EXISTS (
+                      SELECT 1
+                      FROM "GuestGameRewardWalletItem" AS wallet
+                      WHERE wallet."tenantId" = reward."tenantId"
+                        AND wallet."rewardId" = reward."id"
+                        AND wallet."kind" = 'REWARD'
+                        AND wallet."status" IN ('PROCESSING', 'FAILED')
+                    )
+                  )
+                )
+            )
+          )
+        ORDER BY
+          COALESCE(candidate."nextAttemptAt", candidate."createdAt"),
+          candidate."createdAt"
         LIMIT ${config.limit}
         FOR UPDATE SKIP LOCKED
       )
@@ -915,6 +1420,7 @@ export class GuestBonusLedgerService {
         "status",
         "amount",
         "attempts",
+        "lockedAt",
         "reason",
         "metadata",
         "createdAt"
@@ -928,6 +1434,7 @@ export class GuestBonusLedgerService {
     access: TenantAccess,
   ): Promise<GuestGameBonusLedgerDispatchItem> {
     let sourcedEntry = entry;
+    let dispatchStarted = false;
 
     try {
       const source = await this.resolveEntrySource(entry, access);
@@ -968,6 +1475,40 @@ export class GuestBonusLedgerService {
             }
           : {}),
       };
+      const delivery = await this.revalidateClaimedEntryForDelivery(
+        actorUserId,
+        sourcedEntry,
+      );
+
+      if (!delivery.ready) {
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: delivery.status ?? 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note:
+            delivery.note ?? 'Награда больше не готова к внешнему начислению.',
+        };
+      }
+
+      dispatchStarted = await this.markEntryDispatching(
+        actorUserId,
+        sourcedEntry,
+        auditPayload,
+      );
+      if (!dispatchStarted) {
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: 'Ledger-запись не перешла в стадию отправки. Внешнее начисление не выполнялось.',
+        };
+      }
       const response = await this.langameClient.adjustGuestBalanceByPhone(
         source.baseUrl,
         access.apiKey,
@@ -992,18 +1533,259 @@ export class GuestBonusLedgerService {
         note: langameBalanceConfirmationNote(sourcedEntry),
       };
     } catch (error) {
-      await this.failEntry(actorUserId, sourcedEntry, config, error);
+      let stateTransitioned = true;
+      if (dispatchStarted) {
+        await this.markEntryReconciliationRequired(
+          actorUserId,
+          sourcedEntry,
+          error,
+        );
+      } else {
+        stateTransitioned = await this.failEntry(
+          actorUserId,
+          sourcedEntry,
+          config,
+          error,
+        );
+      }
 
       return {
         ledgerEntryId: sourcedEntry.id,
         rewardId: sourcedEntry.rewardId,
-        status: 'FAILED',
+        status: dispatchStarted
+          ? 'RECONCILIATION_REQUIRED'
+          : stateTransitioned
+            ? 'FAILED'
+            : 'BLOCKED',
         amount: decimalToNumber(sourcedEntry.amount),
         externalDomain: sourcedEntry.externalDomain,
         externalGuestId: sourcedEntry.externalGuestId,
-        note: errorMessage(error),
+        note: stateTransitioned
+          ? errorMessage(error)
+          : 'Ledger-запись уже изменилась; поздняя ошибка не перезаписала состояние.',
       };
     }
+  }
+
+  private async revalidateClaimedEntryForDelivery(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+  ): Promise<BonusLedgerDeliveryRevalidation> {
+    if (entry.source !== 'GAMIFICATION_REWARD' || !entry.rewardId) {
+      return {
+        ready: true,
+        status: null,
+        note: null,
+      };
+    }
+
+    const now = new Date();
+    const rewardId = entry.rewardId;
+
+    return this.prisma.$transaction(async (tx) => {
+      const readyReward = await tx.guestGameReward.findFirst({
+        where: {
+          id: rewardId,
+          tenantId: entry.tenantId,
+          status: 'APPROVED',
+          AND: [
+            bonusLedgerRewardDeliveryGate(
+              now,
+              tx.guestGameReward.fields.claimExpiresAt,
+            ),
+          ],
+        },
+        select: {
+          id: true,
+          claimRequired: true,
+          deliveryRequestedAt: true,
+          claimExpiresAt: true,
+        },
+      });
+
+      if (
+        readyReward &&
+        acceptedRewardClaimBeforeDeadline(readyReward) &&
+        !readyReward.claimRequired
+      ) {
+        return {
+          ready: true,
+          status: null,
+          note: null,
+        };
+      }
+
+      if (
+        readyReward &&
+        acceptedRewardClaimBeforeDeadline(readyReward) &&
+        readyReward.claimRequired
+      ) {
+        const wallet = await tx.guestGameRewardWalletItem.updateMany({
+          where: {
+            tenantId: entry.tenantId,
+            rewardId,
+            kind: 'REWARD',
+            status: { in: ['PROCESSING', 'FAILED'] },
+          },
+          data: {
+            status: 'PROCESSING',
+          },
+        });
+
+        if (wallet.count > 0) {
+          return {
+            ready: true,
+            status: null,
+            note: null,
+          };
+        }
+      }
+
+      const reward = await tx.guestGameReward.findFirst({
+        where: {
+          id: rewardId,
+          tenantId: entry.tenantId,
+        },
+        select: {
+          status: true,
+          claimRequired: true,
+          deliveryRequestedAt: true,
+          claimExpiresAt: true,
+        },
+      });
+      const waitsForClaim =
+        reward?.status === 'APPROVED' &&
+        reward.claimRequired &&
+        reward.deliveryRequestedAt === null &&
+        (reward.claimExpiresAt === null ||
+          reward.claimExpiresAt.getTime() > now.getTime());
+      const blockedByWalletState =
+        reward?.status === 'APPROVED' &&
+        reward.claimRequired &&
+        acceptedRewardClaimBeforeDeadline(reward);
+      const status =
+        waitsForClaim || blockedByWalletState ? 'PENDING' : 'CANCELED';
+      const itemStatus = status === 'PENDING' ? 'BLOCKED' : 'CANCELED';
+      const note =
+        status === 'PENDING'
+          ? 'Внешнее начисление ожидает подтвержденного получения награды в кошельке.'
+          : 'Внешнее начисление отменено: награда отменена, просрочена или не была получена до срока.';
+
+      await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id: entry.id,
+          tenantId: entry.tenantId,
+          status: 'PROCESSING',
+        },
+        data: {
+          status,
+          processedByUserId: actorUserId,
+          lockedAt: null,
+          nextAttemptAt: null,
+          canceledAt: status === 'CANCELED' ? now : null,
+          errorCode:
+            status === 'PENDING'
+              ? 'WAITING_REWARD_CLAIM'
+              : 'REWARD_NOT_DELIVERABLE',
+          errorMessage: note,
+        },
+      });
+
+      return {
+        ready: false,
+        status: itemStatus,
+        note,
+      };
+    });
+  }
+
+  private async markEntryDispatching(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    request: Record<string, unknown>,
+  ) {
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      if (entry.rewardId) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "GuestGameReward"
+          WHERE "id" = ${entry.rewardId}
+            AND "tenantId" = ${entry.tenantId}
+          FOR UPDATE
+        `);
+        const reward = await tx.guestGameReward.findFirst({
+          where: {
+            id: entry.rewardId,
+            tenantId: entry.tenantId,
+          },
+          select: {
+            id: true,
+            status: true,
+            claimRequired: true,
+            deliveryRequestedAt: true,
+            claimExpiresAt: true,
+            expiresAt: true,
+          },
+        });
+
+        if (
+          !reward ||
+          reward.status !== 'APPROVED' ||
+          (reward.claimRequired
+            ? !acceptedRewardClaimBeforeDeadline(reward)
+            : Boolean(
+                reward.expiresAt &&
+                  reward.expiresAt.getTime() <= now.getTime(),
+              ))
+        ) {
+          return false;
+        }
+
+        if (reward.claimRequired) {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id"
+            FROM "GuestGameRewardWalletItem"
+            WHERE "tenantId" = ${entry.tenantId}
+              AND "rewardId" = ${entry.rewardId}
+              AND "kind" = 'REWARD'
+            FOR UPDATE
+          `);
+          const wallet = await tx.guestGameRewardWalletItem.findFirst({
+            where: {
+              tenantId: entry.tenantId,
+              rewardId: entry.rewardId,
+              kind: 'REWARD',
+              status: 'PROCESSING',
+            },
+            select: { id: true },
+          });
+          if (!wallet) {
+            return false;
+          }
+        }
+      }
+
+      const dispatching = await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id: entry.id,
+          tenantId: entry.tenantId,
+          status: 'PROCESSING',
+        },
+        data: {
+          status: 'DISPATCHING',
+          processedByUserId: actorUserId,
+          lockedAt: now,
+          nextAttemptAt: null,
+          errorCode: null,
+          errorMessage: null,
+          langameRequest: request as Prisma.InputJsonValue,
+        },
+      });
+
+      return dispatching.count === 1;
+    });
   }
 
   private async confirmEntry(
@@ -1012,12 +1794,111 @@ export class GuestBonusLedgerService {
     request: Record<string, unknown>,
     response: unknown,
   ) {
-    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      if (entry.rewardId) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "GuestGameReward"
+          WHERE "id" = ${entry.rewardId}
+            AND "tenantId" = ${entry.tenantId}
+          FOR UPDATE
+        `);
+      }
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id"
+        FROM "GuestBonusLedgerEntry"
+        WHERE "id" = ${entry.id}
+          AND "tenantId" = ${entry.tenantId}
+        FOR UPDATE
+      `);
+      await this.confirmEntryInTransaction(
+        tx,
+        actorUserId,
+        entry,
+        request,
+        response,
+        'DISPATCHING',
+      );
+    });
+  }
+
+  private async confirmEntryInTransaction(
+    tx: Prisma.TransactionClient,
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    request: unknown,
+    response: unknown,
+    expectedStatus: 'DISPATCHING' | 'RECONCILIATION_REQUIRED',
+    metadata?: Prisma.InputJsonValue,
+    reconciliationAudit?: BonusLedgerReconciliationAudit,
+    now = new Date(),
+  ) {
     const amount = toDecimal(entry.amount);
     const langameBalanceType = langameBalanceTypeForEntry(entry);
 
-    await this.prisma.$transaction(async (tx) => {
-      const tracksBonusBalance = langameBalanceType === 'bonus_balance';
+    if (entry.rewardId) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "GuestGameReward"
+          WHERE "id" = ${entry.rewardId}
+            AND "tenantId" = ${entry.tenantId}
+          FOR UPDATE
+        `);
+        const deliveryReward = await tx.guestGameReward.findFirst({
+          where: {
+            id: entry.rewardId,
+            tenantId: entry.tenantId,
+          },
+          select: {
+            id: true,
+            status: true,
+            claimRequired: true,
+            deliveryRequestedAt: true,
+            claimExpiresAt: true,
+            expiresAt: true,
+          },
+        });
+        if (
+          !deliveryReward ||
+          deliveryReward.status !== 'APPROVED' ||
+          (deliveryReward.claimRequired
+            ? !acceptedRewardClaimBeforeDeadline(deliveryReward)
+            : Boolean(
+                deliveryReward.expiresAt &&
+                  deliveryReward.expiresAt.getTime() <= now.getTime(),
+              ))
+        ) {
+          throw new BadRequestException(
+            'Награда больше не находится в состоянии, допускающем подтверждение внешней выдачи.',
+          );
+        }
+        if (deliveryReward.claimRequired) {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id"
+            FROM "GuestGameRewardWalletItem"
+            WHERE "tenantId" = ${entry.tenantId}
+              AND "rewardId" = ${entry.rewardId}
+              AND "kind" = 'REWARD'
+            FOR UPDATE
+          `);
+          const wallet = await tx.guestGameRewardWalletItem.findFirst({
+            where: {
+              tenantId: entry.tenantId,
+              rewardId: entry.rewardId,
+              kind: 'REWARD',
+              status: 'PROCESSING',
+            },
+            select: { id: true },
+          });
+          if (!wallet) {
+            throw new BadRequestException(
+              'Кошелек наград больше не ожидает подтверждения этой выдачи.',
+            );
+          }
+        }
+    }
+
+    const tracksBonusBalance = langameBalanceType === 'bonus_balance';
       const current = tracksBonusBalance
         ? await this.findCurrentBalance(tx, entry)
         : null;
@@ -1057,8 +1938,12 @@ export class GuestBonusLedgerService {
         });
       }
 
-      await tx.guestBonusLedgerEntry.update({
-        where: { id: entry.id },
+      const confirmedLedger = await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id: entry.id,
+          tenantId: entry.tenantId,
+          status: expectedStatus,
+        },
         data: {
           status: 'CONFIRMED',
           processedByUserId: actorUserId,
@@ -1073,10 +1958,16 @@ export class GuestBonusLedgerService {
           errorMessage: null,
           balanceBefore,
           balanceAfter,
-          langameRequest: request as Prisma.InputJsonValue,
+          langameRequest: jsonValue(request),
           langameResponse: jsonValue(response),
+          ...(metadata ? { metadata } : {}),
         },
       });
+      if (confirmedLedger.count !== 1) {
+        throw new BadRequestException(
+          'Ledger-запись потеряла право подтвердить внешнюю выдачу.',
+        );
+      }
 
       if (entry.rewardId) {
         const reward = await tx.guestGameReward.findFirst({
@@ -1096,6 +1987,7 @@ export class GuestBonusLedgerService {
             rewardLabel: true,
             rewardCode: true,
             approvedByUserId: true,
+            claimRequired: true,
           },
         });
 
@@ -1108,6 +2000,24 @@ export class GuestBonusLedgerService {
               approvedByUserId: reward.approvedByUserId ?? actorUserId,
             },
           });
+          const claimedWallet =
+            await tx.guestGameRewardWalletItem.updateMany({
+            where: {
+              tenantId: reward.tenantId,
+              rewardId: reward.id,
+              kind: 'REWARD',
+              status: 'PROCESSING',
+            },
+            data: {
+              status: 'CLAIMED',
+              claimedAt: now,
+            },
+          });
+          if (reward.claimRequired && claimedWallet.count !== 1) {
+            throw new BadRequestException(
+              'Кошелек наград не подтвердил единственную принятую выдачу.',
+            );
+          }
           await tx.guestGameEvent.create({
             data: {
               tenantId: reward.tenantId,
@@ -1131,13 +2041,135 @@ export class GuestBonusLedgerService {
                 balanceType: langameBalanceType,
                 balanceBefore: decimalToNullableNumber(balanceBefore),
                 balanceAfter: decimalToNullableNumber(balanceAfter),
+                ...(reconciliationAudit
+                  ? { reconciliationResolution: reconciliationAudit }
+                  : {}),
               },
               note: `${reward.rewardLabel} · ${reward.rewardCode ?? entry.idempotencyKey}`,
             },
           });
         }
       }
+  }
+
+  private async markReconciliationNotAppliedInTransaction(
+    tx: Prisma.TransactionClient,
+    user: Pick<AuthenticatedUser, 'id' | 'tenantId'>,
+    entry: ClaimedBonusLedgerEntry,
+    metadata: Prisma.InputJsonValue,
+    note: string,
+    now: Date,
+  ) {
+    let claimRequired = false;
+
+    if (entry.rewardId) {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id"
+        FROM "GuestGameReward"
+        WHERE "id" = ${entry.rewardId}
+          AND "tenantId" = ${entry.tenantId}
+        FOR UPDATE
+      `);
+      const reward = await tx.guestGameReward.findFirst({
+        where: {
+          id: entry.rewardId,
+          tenantId: entry.tenantId,
+        },
+        select: {
+          id: true,
+          status: true,
+          claimRequired: true,
+          deliveryRequestedAt: true,
+          claimExpiresAt: true,
+          expiresAt: true,
+        },
+      });
+      if (
+        !reward ||
+        reward.status !== 'APPROVED' ||
+        (reward.claimRequired
+          ? !acceptedRewardClaimBeforeDeadline(reward)
+          : Boolean(
+              reward.expiresAt && reward.expiresAt.getTime() <= now.getTime(),
+            ))
+      ) {
+        throw new BadRequestException(
+          'Награда больше не допускает безопасную повторную выдачу.',
+        );
+      }
+
+      claimRequired = reward.claimRequired;
+      if (claimRequired) {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "GuestGameRewardWalletItem"
+          WHERE "tenantId" = ${entry.tenantId}
+            AND "rewardId" = ${entry.rewardId}
+            AND "kind" = 'REWARD'
+          FOR UPDATE
+        `);
+        const wallet = await tx.guestGameRewardWalletItem.findFirst({
+          where: {
+            tenantId: entry.tenantId,
+            rewardId: entry.rewardId,
+            kind: 'REWARD',
+            status: 'PROCESSING',
+          },
+          select: { id: true },
+        });
+        if (!wallet) {
+          throw new BadRequestException(
+            'Кошелёк наград больше не ожидает результата этой выдачи.',
+          );
+        }
+      }
+    }
+
+    const failed = await tx.guestBonusLedgerEntry.updateMany({
+      where: {
+        id: entry.id,
+        tenantId: user.tenantId,
+        status: 'RECONCILIATION_REQUIRED',
+      },
+      data: {
+        status: 'FAILED',
+        processedByUserId: user.id,
+        lockedAt: null,
+        processedAt: now,
+        confirmedAt: null,
+        failedAt: now,
+        canceledAt: null,
+        attempts: 0,
+        nextAttemptAt: now,
+        errorCode: 'RECONCILIATION_NOT_APPLIED',
+        errorMessage: truncate(note, 1000),
+        metadata,
+      },
     });
+    if (failed.count !== 1) {
+      throw new BadRequestException(
+        'Ledger-запись уже была разрешена другим оператором.',
+      );
+    }
+
+    if (entry.rewardId) {
+      const wallet = await tx.guestGameRewardWalletItem.updateMany({
+        where: {
+          tenantId: entry.tenantId,
+          rewardId: entry.rewardId,
+          kind: 'REWARD',
+          status: 'PROCESSING',
+        },
+        data: {
+          status: 'FAILED',
+        },
+      });
+      if (claimRequired && wallet.count !== 1) {
+        throw new BadRequestException(
+          'Кошелёк наград не подтвердил перевод выдачи в повторяемую ошибку.',
+        );
+      }
+    }
   }
 
   private async failEntry(
@@ -1152,19 +2184,87 @@ export class GuestBonusLedgerService {
       ? null
       : new Date(now.getTime() + config.retryMinutes * 60 * 1000);
 
-    await this.prisma.guestBonusLedgerEntry.update({
-      where: { id: entry.id },
-      data: {
-        status: 'FAILED',
-        processedByUserId: actorUserId,
-        externalProvider: entry.externalProvider,
-        externalDomain: entry.externalDomain,
-        lockedAt: null,
-        failedAt: now,
-        nextAttemptAt,
-        errorCode: terminal ? 'MAX_ATTEMPTS_REACHED' : 'LANGAME_WRITE_FAILED',
-        errorMessage: truncate(errorMessage(error), 1000),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const failed = await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id: entry.id,
+          tenantId: entry.tenantId,
+          status: 'PROCESSING',
+          attempts: entry.attempts,
+          lockedAt: entry.lockedAt,
+        },
+        data: {
+          status: 'FAILED',
+          processedByUserId: actorUserId,
+          externalProvider: entry.externalProvider,
+          externalDomain: entry.externalDomain,
+          lockedAt: null,
+          failedAt: now,
+          nextAttemptAt,
+          errorCode: terminal ? 'MAX_ATTEMPTS_REACHED' : 'LANGAME_WRITE_FAILED',
+          errorMessage: truncate(errorMessage(error), 1000),
+        },
+      });
+      if (failed.count !== 1) {
+        return false;
+      }
+
+      if (entry.rewardId) {
+        await tx.guestGameRewardWalletItem.updateMany({
+          where: {
+            tenantId: entry.tenantId,
+            rewardId: entry.rewardId,
+            kind: 'REWARD',
+            status: 'PROCESSING',
+          },
+          data: {
+            status: 'FAILED',
+          },
+        });
+      }
+
+      return true;
+    });
+  }
+
+  private async markEntryReconciliationRequired(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    error: unknown,
+  ) {
+    const now = new Date();
+    const message =
+      'Ответ Langame после попытки начисления не получен однозначно. Автоповтор отключён до сверки баланса.';
+    await this.prisma.$transaction(async (tx) => {
+      await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id: entry.id,
+          tenantId: entry.tenantId,
+          status: 'DISPATCHING',
+        },
+        data: {
+          status: 'RECONCILIATION_REQUIRED',
+          processedByUserId: actorUserId,
+          externalProvider: entry.externalProvider,
+          externalDomain: entry.externalDomain,
+          lockedAt: null,
+          failedAt: now,
+          nextAttemptAt: null,
+          errorCode: 'LANGAME_WRITE_OUTCOME_UNKNOWN',
+          errorMessage: truncate(`${message} ${errorMessage(error)}`, 1000),
+        },
+      });
+      if (entry.rewardId) {
+        await tx.guestGameRewardWalletItem.updateMany({
+          where: {
+            tenantId: entry.tenantId,
+            rewardId: entry.rewardId,
+            kind: 'REWARD',
+            status: 'PROCESSING',
+          },
+          data: { status: 'PROCESSING' },
+        });
+      }
     });
   }
 
@@ -1902,21 +3002,52 @@ function sanitizeLangameBalanceResponse(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [
       key,
-      isPhoneLikeKey(key) && typeof entry === 'string'
-        ? maskPhoneForAudit(entry)
+      isPhoneLikeKey(key)
+        ? sanitizePhoneFieldValue(entry)
         : sanitizeLangameBalanceResponse(entry),
     ]),
   );
 }
 
 function isPhoneLikeKey(key: string) {
-  const normalized = key.toLowerCase();
+  const tokens = key
+    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z\d]+/)
+    .filter(Boolean);
+  const compact = tokens.join('');
 
   return (
-    normalized === 'phone' ||
-    normalized === 'phone_number' ||
-    normalized === 'tel'
+    compact.includes('phone') ||
+    compact.includes('telephone') ||
+    tokens.includes('tel') ||
+    (tokens.includes('mobile') &&
+      (tokens.length === 1 ||
+        tokens.includes('number') ||
+        tokens.includes('no') ||
+        tokens.includes('contact'))) ||
+    (tokens.includes('contact') &&
+      (tokens.includes('number') || tokens.includes('no')))
   );
+}
+
+function sanitizePhoneFieldValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'bigint'
+  ) {
+    return maskPhoneForAudit(String(value));
+  }
+
+  // A structured value under a phone-like key may still contain raw digits
+  // behind generic child keys. Redact it as a whole instead of recursing.
+  return '***';
 }
 
 function jsonRecord(value: Prisma.JsonValue | null) {

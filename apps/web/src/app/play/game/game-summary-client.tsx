@@ -9669,9 +9669,18 @@ function mergeRewardHistoryItems(
   current: GameRewardHistoryItem,
   next: GameRewardHistoryItem,
 ) {
+  const settledItem =
+    next.walletState === "REDEEMED"
+      ? next
+      : current.walletState === "REDEEMED"
+        ? current
+        : null;
+
   return {
     ...current,
     ...next,
+    status: settledItem?.status ?? next.status,
+    walletState: settledItem?.walletState ?? next.walletState,
     rewardType:
       next.rewardType === "REWARD" ? current.rewardType : next.rewardType,
     rewardAmount:
@@ -9687,7 +9696,7 @@ function mergeRewardHistoryItems(
     storeName: next.storeName ?? current.storeName,
     rewardCode: next.rewardCode ?? current.rewardCode,
     claimPayload: next.claimPayload ?? current.claimPayload,
-    claimedAt: next.claimedAt ?? current.claimedAt,
+    claimedAt: settledItem?.claimedAt ?? next.claimedAt ?? current.claimedAt,
     expiresAt: next.expiresAt ?? current.expiresAt,
   } satisfies GameRewardHistoryItem;
 }

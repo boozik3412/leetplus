@@ -776,6 +776,10 @@ const lootBoxRewardTypeOptions = rewardTypeOptions.filter(
 
 const battlePassStepRewardTypeOptions = [
   { value: "", label: "Без награды" },
+  {
+    value: "BATTLE_PASS_COMPLETION_MARKER",
+    label: "Служебный этап (без выдачи)",
+  },
   { value: "BONUS_BALANCE", label: "Бонусы Langame" },
   { value: "PROMOCODE", label: "Промокод" },
   { value: "LOOT_BOX", label: "Лутбокс" },
@@ -1221,6 +1225,14 @@ const defaultSeasonLevelSteps: SeasonLevelStepForm[] = [
     description: "Первый шаг запускает последовательный прогресс гостя.",
     freeReward: "Старт сезона",
     premiumReward: "",
+    conditionV2: {
+      ...defaultBattlePassStepCondition,
+      taskType: "APP_OPEN",
+      target: 1,
+    },
+    freeRewardType: "BATTLE_PASS_COMPLETION_MARKER",
+    freeRewardLabel: "Старт сезона",
+    freeRewardDelivery: "AUTO",
   },
   {
     id: "level-2",
@@ -11843,6 +11855,23 @@ function SeasonStepRewardFields({
               } as Partial<SeasonLevelStepForm>)
             }
           />
+        </Field>
+      ) : null}
+      {rewardType === "BATTLE_PASS_COMPLETION_MARKER" ? (
+        <Field label="Название этапа в истории">
+          <input
+            className={fieldClass}
+            value={step[labelKey] ?? step[legacyKey] ?? ""}
+            onChange={(event) =>
+              patchReward({
+                [labelKey]: event.target.value,
+              } as Partial<SeasonLevelStepForm>)
+            }
+          />
+          <OptionHelp>
+            Этап будет отмечен как полученный сразу после выполнения, без
+            отдельной выдачи и без уведомления о неполученной награде.
+          </OptionHelp>
         </Field>
       ) : null}
     </div>

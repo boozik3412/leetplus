@@ -45,6 +45,10 @@ import {
   guestGameRewardMaterializerClaimsAllowed,
   resolveGuestGameRewardMaterializerPolicy,
 } from './guest-game-reward-materializer-policy';
+import {
+  GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+  guestGameRewardIsBattlePassCompletionMarker,
+} from './guest-reward-wallet-rules';
 import { acquireGuestGameLootBoxRuleLock } from './guest-game-loot-box-lock';
 import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
 import {
@@ -17270,6 +17274,14 @@ export class GuestGamificationService {
               : (rule.rewardType ?? 'reward'),
         });
       const qualifiedAt = processRewardQualifiedAt(dto, dryRun, rule);
+      const rewardType =
+        rule.rewardType ??
+        (rule.kind === 'SEASON' ? 'BATTLE_PASS_REWARD' : 'PROMOCODE');
+      const rewardAmount = rule.rewardAmount ?? 0;
+      const completionMarker = guestGameRewardIsBattlePassCompletionMarker({
+        rewardType,
+        rewardAmount,
+      });
 
       try {
         const reward = await this.createReward(
@@ -17288,10 +17300,8 @@ export class GuestGamificationService {
             externalDomain: eventReference?.externalDomain ?? null,
             externalId,
             guestExternalId,
-            rewardType:
-              rule.rewardType ??
-              (rule.kind === 'SEASON' ? 'BATTLE_PASS_REWARD' : 'PROMOCODE'),
-            rewardAmount: rule.rewardAmount ?? 0,
+            rewardType,
+            rewardAmount,
             rewardLabel:
               rule.selectedRewardLabel ??
               rule.rewardLabel ??
@@ -17345,10 +17355,12 @@ export class GuestGamificationService {
           {
             originKey,
             idempotencyKey,
-            claimRequired: true,
-            claimExpiresAt: new Date(
-              Date.parse(qualifiedAt) + guestRewardWalletRetentionMs,
-            ),
+            claimRequired: !completionMarker,
+            claimExpiresAt: completionMarker
+              ? null
+              : new Date(
+                  Date.parse(qualifiedAt) + guestRewardWalletRetentionMs,
+                ),
           },
         );
         rewards.push(reward);
@@ -23630,8 +23642,9 @@ async function upsertRewardWalletItem(
   ) {
     return;
   }
+  const completionMarker = guestGameRewardIsBattlePassCompletionMarker(reward);
   if (
-    !reward.claimRequired ||
+    (!reward.claimRequired && !completionMarker) ||
     !reward.profileId ||
     !reward.profile?.gameActivatedAt ||
     reward.qualifiedAt.getTime() < reward.profile.gameActivatedAt.getTime() ||
@@ -23684,11 +23697,17 @@ async function upsertRewardWalletItem(
       kind: 'REWARD',
       ...source,
       rewardLabel: reward.rewardLabel,
-      status: 'PENDING',
+      status: completionMarker ? 'CLAIMED' : 'PENDING',
       availableAt: reward.qualifiedAt,
       expiresAt,
+      claimedAt: completionMarker ? reward.qualifiedAt : null,
     },
-    update: {},
+    update: completionMarker
+      ? {
+          status: 'CLAIMED',
+          claimedAt: reward.qualifiedAt,
+        }
+      : {},
   });
 }
 
@@ -31338,7 +31357,10 @@ function dryRunSeasonStepRewardLabel(level: DryRunSeasonLevel) {
 }
 
 type DryRunSeasonFreeRewardPlan = {
-  rewardType: 'BONUS_BALANCE' | 'LOOT_BOX_ENTITLEMENT';
+  rewardType:
+    | 'BONUS_BALANCE'
+    | 'LOOT_BOX_ENTITLEMENT'
+    | typeof GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE;
   rewardAmount: number;
   rewardLabel: string;
   delivery: 'AUTO' | 'ADMIN';
@@ -31359,6 +31381,27 @@ function dryRunSeasonFreeRewardPlan(
   const premiumRewardType = dryRunString(
     level.premiumRewardDetails.type,
   )?.toUpperCase();
+  const rawDelivery =
+    dryRunString(level.freeRewardDetails.delivery)?.toUpperCase() ?? 'AUTO';
+
+  if (
+    rewardType === GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE &&
+    rawDelivery === 'AUTO' &&
+    !premiumRewardConfigured
+  ) {
+    return {
+      rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+      rewardAmount: 0,
+      rewardLabel:
+        dryRunString(level.freeRewardDetails.label) ??
+        level.freeReward ??
+        level.title ??
+        `Battle Pass С€Р°Рі ${level.sequence}`,
+      delivery: 'AUTO',
+      rewardTrack: 'FREE',
+      rewardLootBoxId: null,
+    };
+  }
 
   // Premium eligibility and multi-reward delivery are not represented by the
   // current season runtime. Keep those steps on the legacy generic path until
@@ -31376,8 +31419,6 @@ function dryRunSeasonFreeRewardPlan(
     return null;
   }
 
-  const rawDelivery =
-    dryRunString(level.freeRewardDetails.delivery)?.toUpperCase() ?? 'AUTO';
   if (rawDelivery !== 'AUTO' && rawDelivery !== 'ADMIN') {
     blockers.push(
       `Для награды шага ${level.sequence} выберите автоматическую выдачу или подтверждение администратора`,

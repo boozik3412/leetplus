@@ -36,6 +36,14 @@ import {
   type GuestGameCheckInResult,
   type GuestGameProcessEventResult,
 } from '../guest-gamification/guest-gamification.service';
+import {
+  GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+  GUEST_GAME_SETTLED_DELIVERY_STATUS,
+  GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE,
+  GUEST_GAME_SETTLED_LEDGER_SOURCE,
+  GUEST_GAME_SETTLED_LEDGER_STATUS,
+  guestGameRewardIsBattlePassCompletionMarker,
+} from '../guest-gamification/guest-reward-wallet-rules';
 import { acquireGuestGameLootBoxRuleLock } from '../guest-gamification/guest-game-loot-box-lock';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
@@ -4829,6 +4837,8 @@ export class GuestPortalService {
         reward: {
           select: {
             status: true,
+            rewardType: true,
+            rewardAmount: true,
             rewardLabel: true,
             qualifiedAt: true,
             expiresAt: true,
@@ -4957,6 +4967,7 @@ export class GuestPortalService {
       profileId,
       now,
     );
+    await this.reconcileCompletedRewardWalletItems(tenantId, profileId);
     await this.expireAndDeleteRewardWalletItems(tenantId, profileId, now);
     await this.reactivateRecoverableExpiredLootBoxEntitlements(
       tenantId,
@@ -4981,8 +4992,15 @@ export class GuestPortalService {
           status: 'APPROVED',
           claimRequired: true,
           deliveryRequestedAt: null,
+          paidAt: null,
           OR: [{ claimExpiresAt: { gt: now } }, { claimExpiresAt: null }],
           rewardType: { not: 'LOOT_BOX_ENTITLEMENT' },
+          NOT: [
+            {
+              rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+              rewardAmount: { equals: 0 },
+            },
+          ],
           qualifiedAt: {
             gt: retentionCutoff,
             gte: activatedAt,
@@ -4990,6 +5008,13 @@ export class GuestPortalService {
           },
           walletItems: { none: { tenantId, profileId } },
           deliveries: { none: {} },
+          bonusLedgerEntries: {
+            none: {
+              status: GUEST_GAME_SETTLED_LEDGER_STATUS,
+              source: GUEST_GAME_SETTLED_LEDGER_SOURCE,
+              entryType: GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE,
+            },
+          },
         },
         include: {
           lootBox: { select: { id: true, name: true } },
@@ -5336,6 +5361,7 @@ export class GuestPortalService {
           AND reward."status" = 'APPROVED'
           AND reward."claimRequired" = FALSE
           AND reward."deliveryRequestedAt" IS NULL
+          AND reward."paidAt" IS NULL
           AND reward."qualifiedAt" >= ${activatedAt}
           AND reward."qualifiedAt" > ${retentionCutoff}
           AND reward."qualifiedAt" <= ${now}
@@ -5343,6 +5369,11 @@ export class GuestPortalService {
             'LOOT_BOX',
             'LOOTBOX',
             'LOOT_BOX_ENTITLEMENT'
+          )
+          AND NOT (
+            UPPER(BTRIM(COALESCE(reward."rewardType", ''))) =
+              ${GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE}
+            AND reward."rewardAmount" = 0
           )
           AND NOT EXISTS (
             SELECT 1
@@ -5363,7 +5394,8 @@ export class GuestPortalService {
         INNER JOIN reward_candidates AS candidate
           ON candidate."id" = ledger."rewardId"
         WHERE ledger."tenantId" = ${tenantId}
-          AND ledger."source" = 'GAMIFICATION_REWARD'
+          AND ledger."source" = ${GUEST_GAME_SETTLED_LEDGER_SOURCE}
+          AND ledger."entryType" = ${GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE}
         ORDER BY ledger."rewardId", ledger."id"
         FOR UPDATE OF ledger
       ),
@@ -5397,6 +5429,284 @@ export class GuestPortalService {
           WHERE delivery."tenantId" = reward."tenantId"
             AND delivery."rewardId" = reward."id"
         )
+    `);
+  }
+
+  private async reconcileCompletedRewardWalletItems(
+    tenantId: string,
+    profileId: string,
+  ) {
+    await this.prisma.$executeRaw(Prisma.sql`
+      WITH confirmed_rewards AS MATERIALIZED (
+        SELECT
+          reward."id",
+          MAX(
+            COALESCE(
+              ledger."confirmedAt",
+              ledger."processedAt",
+              ledger."updatedAt"
+            )
+          ) AS "settledAt"
+        FROM "GuestGameReward" AS reward
+        INNER JOIN "GuestBonusLedgerEntry" AS ledger
+          ON ledger."tenantId" = reward."tenantId"
+         AND ledger."rewardId" = reward."id"
+        WHERE reward."tenantId" = ${tenantId}
+          AND reward."profileId" = ${profileId}
+          AND ledger."status" = ${GUEST_GAME_SETTLED_LEDGER_STATUS}
+          AND ledger."source" = ${GUEST_GAME_SETTLED_LEDGER_SOURCE}
+          AND ledger."entryType" = ${GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE}
+        GROUP BY reward."id"
+      )
+      UPDATE "GuestGameReward" AS reward
+      SET
+        "status" = 'PAID',
+        "paidAt" = COALESCE(
+          reward."paidAt",
+          confirmed_rewards."settledAt",
+          reward."qualifiedAt"
+        ),
+        "updatedAt" = NOW()
+      FROM confirmed_rewards
+      WHERE reward."id" = confirmed_rewards."id"
+        AND reward."tenantId" = ${tenantId}
+        AND reward."profileId" = ${profileId}
+        AND (
+          reward."status" <> 'PAID'
+          OR reward."paidAt" IS NULL
+        )
+    `);
+
+    await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE "GuestGameReward" AS reward
+      SET
+        "claimRequired" = FALSE,
+        "deliveryRequestedAt" = NULL,
+        "claimExpiresAt" = NULL,
+        "updatedAt" = NOW()
+      WHERE reward."tenantId" = ${tenantId}
+        AND reward."profileId" = ${profileId}
+        AND UPPER(BTRIM(COALESCE(reward."rewardType", ''))) =
+          ${GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE}
+        AND reward."rewardAmount" = 0
+        AND reward."status" IN ('APPROVED', 'PAID')
+        AND (
+          reward."claimRequired" = TRUE
+          OR reward."deliveryRequestedAt" IS NOT NULL
+          OR reward."claimExpiresAt" IS NOT NULL
+        )
+    `);
+
+    await this.prisma.$executeRaw(Prisma.sql`
+      WITH settled_wallet_items AS MATERIALIZED (
+        SELECT
+          wallet."id",
+          COALESCE(
+            wallet."claimedAt",
+            reward."paidAt",
+            (
+              SELECT MAX(
+                COALESCE(
+                  ledger."confirmedAt",
+                  ledger."processedAt",
+                  ledger."updatedAt"
+                )
+              )
+              FROM "GuestBonusLedgerEntry" AS ledger
+              WHERE ledger."tenantId" = reward."tenantId"
+                AND ledger."rewardId" = reward."id"
+                AND ledger."status" = ${GUEST_GAME_SETTLED_LEDGER_STATUS}
+                AND ledger."source" = ${GUEST_GAME_SETTLED_LEDGER_SOURCE}
+                AND ledger."entryType" = ${GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE}
+            ),
+            (
+              SELECT MAX(
+                COALESCE(delivery."sentAt", delivery."updatedAt")
+              )
+              FROM "GuestGameDelivery" AS delivery
+              WHERE delivery."tenantId" = reward."tenantId"
+                AND delivery."rewardId" = reward."id"
+                AND delivery."status" = ${GUEST_GAME_SETTLED_DELIVERY_STATUS}
+            ),
+            reward."qualifiedAt"
+          ) AS "settledAt"
+        FROM "GuestGameRewardWalletItem" AS wallet
+        INNER JOIN "GuestGameReward" AS reward
+          ON reward."tenantId" = wallet."tenantId"
+         AND reward."id" = wallet."rewardId"
+        WHERE wallet."tenantId" = ${tenantId}
+          AND wallet."profileId" = ${profileId}
+          AND wallet."kind" = 'REWARD'
+          AND wallet."status" IN ('PENDING', 'PROCESSING', 'FAILED')
+          AND (
+            reward."status" = 'PAID'
+            OR reward."paidAt" IS NOT NULL
+            OR (
+              UPPER(BTRIM(COALESCE(reward."rewardType", ''))) =
+                ${GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE}
+              AND reward."rewardAmount" = 0
+              AND reward."status" IN ('APPROVED', 'PAID')
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM "GuestBonusLedgerEntry" AS ledger
+              WHERE ledger."tenantId" = reward."tenantId"
+                AND ledger."rewardId" = reward."id"
+                AND ledger."status" = ${GUEST_GAME_SETTLED_LEDGER_STATUS}
+                AND ledger."source" = ${GUEST_GAME_SETTLED_LEDGER_SOURCE}
+                AND ledger."entryType" = ${GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE}
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM "GuestGameDelivery" AS delivery
+              WHERE delivery."tenantId" = reward."tenantId"
+                AND delivery."rewardId" = reward."id"
+                AND delivery."status" = ${GUEST_GAME_SETTLED_DELIVERY_STATUS}
+            )
+          )
+        FOR UPDATE OF wallet
+      )
+      UPDATE "GuestGameRewardWalletItem" AS wallet
+      SET
+        "status" = 'CLAIMED',
+        "claimedAt" = settled_wallet_items."settledAt",
+        "updatedAt" = NOW()
+      FROM settled_wallet_items
+      WHERE wallet."id" = settled_wallet_items."id"
+        AND wallet."tenantId" = ${tenantId}
+        AND wallet."profileId" = ${profileId}
+        AND wallet."status" IN ('PENDING', 'PROCESSING', 'FAILED')
+    `);
+
+    await this.prisma.$executeRaw(Prisma.sql`
+      INSERT INTO "GuestGameRewardWalletItem" (
+        "id",
+        "tenantId",
+        "profileId",
+        "storeId",
+        "rewardId",
+        "kind",
+        "sourceKind",
+        "sourceId",
+        "title",
+        "rewardLabel",
+        "status",
+        "availableAt",
+        "expiresAt",
+        "claimedAt",
+        "createdAt",
+        "updatedAt"
+      )
+      SELECT
+        gen_random_uuid()::text,
+        reward."tenantId",
+        reward."profileId",
+        reward."storeId",
+        reward."id",
+        'REWARD',
+        CASE
+          WHEN reward."missionId" IS NOT NULL THEN 'MISSION'
+          WHEN reward."seasonId" IS NOT NULL THEN 'BATTLE_PASS'
+          WHEN reward."lootBoxId" IS NOT NULL THEN 'LOOT_BOX'
+          ELSE 'MANUAL'
+        END,
+        COALESCE(
+          reward."missionId",
+          reward."seasonId",
+          reward."lootBoxId",
+          reward."id"
+        ),
+        COALESCE(
+          mission."name",
+          season."name",
+          loot_box."name",
+          reward."rewardLabel"
+        ),
+        reward."rewardLabel",
+        'CLAIMED',
+        reward."qualifiedAt",
+        reward."qualifiedAt" +
+          (${REWARD_WALLET_RETENTION_DAYS} * INTERVAL '1 day'),
+        COALESCE(
+          reward."paidAt",
+          (
+            SELECT MAX(
+              COALESCE(
+                ledger."confirmedAt",
+                ledger."processedAt",
+                ledger."updatedAt"
+              )
+            )
+            FROM "GuestBonusLedgerEntry" AS ledger
+            WHERE ledger."tenantId" = reward."tenantId"
+              AND ledger."rewardId" = reward."id"
+              AND ledger."status" = ${GUEST_GAME_SETTLED_LEDGER_STATUS}
+              AND ledger."source" = ${GUEST_GAME_SETTLED_LEDGER_SOURCE}
+              AND ledger."entryType" =
+                ${GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE}
+          ),
+          (
+            SELECT MAX(
+              COALESCE(delivery."sentAt", delivery."updatedAt")
+            )
+            FROM "GuestGameDelivery" AS delivery
+            WHERE delivery."tenantId" = reward."tenantId"
+              AND delivery."rewardId" = reward."id"
+              AND delivery."status" = ${GUEST_GAME_SETTLED_DELIVERY_STATUS}
+          ),
+          reward."qualifiedAt"
+        ),
+        NOW(),
+        NOW()
+      FROM "GuestGameReward" AS reward
+      INNER JOIN "GuestGameProfile" AS profile
+        ON profile."tenantId" = reward."tenantId"
+       AND profile."id" = reward."profileId"
+      LEFT JOIN "GuestGameMission" AS mission
+        ON mission."tenantId" = reward."tenantId"
+       AND mission."id" = reward."missionId"
+      LEFT JOIN "GuestGameSeason" AS season
+        ON season."tenantId" = reward."tenantId"
+       AND season."id" = reward."seasonId"
+      LEFT JOIN "GuestGameLootBox" AS loot_box
+        ON loot_box."tenantId" = reward."tenantId"
+       AND loot_box."id" = reward."lootBoxId"
+      WHERE reward."tenantId" = ${tenantId}
+        AND reward."profileId" = ${profileId}
+        AND reward."rewardType" <> 'LOOT_BOX_ENTITLEMENT'
+        AND profile."gameActivatedAt" IS NOT NULL
+        AND reward."qualifiedAt" >= profile."gameActivatedAt"
+        AND reward."qualifiedAt" >
+          NOW() - (${REWARD_WALLET_RETENTION_DAYS} * INTERVAL '1 day')
+        AND reward."qualifiedAt" <= NOW()
+        AND (
+          reward."status" = 'PAID'
+          OR reward."paidAt" IS NOT NULL
+          OR (
+            UPPER(BTRIM(COALESCE(reward."rewardType", ''))) =
+              ${GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE}
+            AND reward."rewardAmount" = 0
+            AND reward."status" IN ('APPROVED', 'PAID')
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM "GuestBonusLedgerEntry" AS ledger
+            WHERE ledger."tenantId" = reward."tenantId"
+              AND ledger."rewardId" = reward."id"
+              AND ledger."status" = ${GUEST_GAME_SETTLED_LEDGER_STATUS}
+              AND ledger."source" = ${GUEST_GAME_SETTLED_LEDGER_SOURCE}
+              AND ledger."entryType" =
+                ${GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE}
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM "GuestGameDelivery" AS delivery
+            WHERE delivery."tenantId" = reward."tenantId"
+              AND delivery."rewardId" = reward."id"
+              AND delivery."status" = ${GUEST_GAME_SETTLED_DELIVERY_STATUS}
+          )
+        )
+      ON CONFLICT ("tenantId", "rewardId") DO NOTHING
     `);
   }
 
@@ -19941,6 +20251,8 @@ function rewardWalletState(
     claimRequired: boolean;
     deliveryRequestedAt: Date | null;
     claimExpiresAt: Date | null;
+    rewardType?: string | null;
+    rewardAmount?: Prisma.Decimal | number | string | null;
     walletItems?: Array<{ status: string }>;
   },
 ): GuestPortalReward['walletState'] {
@@ -19952,8 +20264,19 @@ function rewardWalletState(
     return 'CANCELED';
   }
 
+  if (status === 'EXPIRED') {
+    return 'EXPIRED';
+  }
+
   if (
-    status === 'EXPIRED' ||
+    status === 'APPROVED' &&
+    claim &&
+    guestGameRewardIsBattlePassCompletionMarker(claim)
+  ) {
+    return 'REDEEMED';
+  }
+
+  if (
     (claim?.claimRequired !== true &&
       expiresAt !== null &&
       expiresAt.getTime() < Date.now()) ||
@@ -20207,7 +20530,22 @@ function guestPortalVisibleRewardWalletWhere(
           status: 'APPROVED',
           claimRequired: true,
           deliveryRequestedAt: null,
+          paidAt: null,
           claimExpiresAt: { gt: now },
+          NOT: [
+            {
+              rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+              rewardAmount: { equals: 0 },
+            },
+          ],
+          deliveries: { none: {} },
+          bonusLedgerEntries: {
+            none: {
+              status: GUEST_GAME_SETTLED_LEDGER_STATUS,
+              source: GUEST_GAME_SETTLED_LEDGER_SOURCE,
+              entryType: GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE,
+            },
+          },
         },
       },
     },
@@ -20238,7 +20576,24 @@ function guestPortalVisibleRewardWalletWhere(
             status: 'APPROVED',
             claimRequired: true,
             deliveryRequestedAt: { not: null },
+            paidAt: null,
             claimExpiresAt: { not: null },
+            NOT: [
+              {
+                rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+                rewardAmount: { equals: 0 },
+              },
+            ],
+            deliveries: {
+              none: { status: GUEST_GAME_SETTLED_DELIVERY_STATUS },
+            },
+            bonusLedgerEntries: {
+              none: {
+                status: GUEST_GAME_SETTLED_LEDGER_STATUS,
+                source: GUEST_GAME_SETTLED_LEDGER_SOURCE,
+                entryType: GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE,
+              },
+            },
           },
         },
       },
@@ -20277,7 +20632,22 @@ function guestPortalClaimableRewardWalletWhere(
                 status: 'APPROVED',
                 claimRequired: true,
                 deliveryRequestedAt: null,
+                paidAt: null,
                 claimExpiresAt: { gt: now },
+                NOT: [
+                  {
+                    rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+                    rewardAmount: { equals: 0 },
+                  },
+                ],
+                deliveries: { none: {} },
+                bonusLedgerEntries: {
+                  none: {
+                    status: GUEST_GAME_SETTLED_LEDGER_STATUS,
+                    source: GUEST_GAME_SETTLED_LEDGER_SOURCE,
+                    entryType: GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE,
+                  },
+                },
               },
             },
           },
@@ -20290,7 +20660,24 @@ function guestPortalClaimableRewardWalletWhere(
             status: 'APPROVED',
             claimRequired: true,
             deliveryRequestedAt: { not: null },
+            paidAt: null,
             claimExpiresAt: { not: null },
+            NOT: [
+              {
+                rewardType: GUEST_GAME_BATTLE_PASS_COMPLETION_MARKER_TYPE,
+                rewardAmount: { equals: 0 },
+              },
+            ],
+            deliveries: {
+              none: { status: GUEST_GAME_SETTLED_DELIVERY_STATUS },
+            },
+            bonusLedgerEntries: {
+              none: {
+                status: GUEST_GAME_SETTLED_LEDGER_STATUS,
+                source: GUEST_GAME_SETTLED_LEDGER_SOURCE,
+                entryType: GUEST_GAME_SETTLED_LEDGER_ENTRY_TYPE,
+              },
+            },
           },
         },
       },

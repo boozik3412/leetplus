@@ -3156,6 +3156,8 @@ describe('GuestPortalService', () => {
       expect(sql).toContain('FOR UPDATE OF reward');
       expect(sql).toContain('FOR UPDATE OF ledger');
       expect(sql).toContain(`reward."claimRequired" = FALSE`);
+      expect(sql).toContain(`reward."paidAt" IS NULL`);
+      expect(sql).toContain(`reward."rewardAmount" = 0`);
       expect(sql).toContain(`ledger."status" NOT IN ('PENDING', 'FAILED')`);
       expect(sql.match(/FROM "GuestGameDelivery" AS delivery/g)).toHaveLength(
         2,
@@ -3172,8 +3174,62 @@ describe('GuestPortalService', () => {
           retentionCutoff,
           now,
           30,
+          'BATTLE_PASS_COMPLETION_MARKER',
+          'GAMIFICATION_REWARD',
+          'EARN',
         ]),
       );
+    });
+
+    it('reconciles settled rewards into claimed wallet history without deleting them', async () => {
+      const { prisma, service } = createService();
+
+      await (service as any).reconcileCompletedRewardWalletItems(
+        'tenant-1',
+        'profile-1',
+      );
+
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
+      const calls = prisma.$executeRaw.mock.calls.map(([query]) => {
+        const sqlQuery = query as {
+          strings?: readonly string[];
+          values?: unknown[];
+        };
+        return {
+          sql: (sqlQuery.strings ?? []).join(' '),
+          values: sqlQuery.values ?? [],
+        };
+      });
+      const combinedSql = calls.map(({ sql }) => sql).join(' ');
+      const combinedValues = calls.flatMap(({ values }) => values);
+
+      expect(combinedSql).toMatch(/SET\s+"status"\s*=\s*'PAID'/);
+      expect(combinedSql).toContain(`"claimRequired" = FALSE`);
+      expect(combinedSql).toContain(
+        `wallet."status" IN ('PENDING', 'PROCESSING', 'FAILED')`,
+      );
+      expect(combinedSql).toContain(`"status" = 'CLAIMED'`);
+      expect(combinedSql).toContain(`"claimedAt" =`);
+      expect(combinedSql).toContain(
+        `INSERT INTO "GuestGameRewardWalletItem"`,
+      );
+      expect(combinedSql).toContain(
+        `ON CONFLICT ("tenantId", "rewardId") DO NOTHING`,
+      );
+      expect(combinedValues).toEqual(
+        expect.arrayContaining([
+          'tenant-1',
+          'profile-1',
+          'CONFIRMED',
+          'BATTLE_PASS_COMPLETION_MARKER',
+          'SENT',
+          'GAMIFICATION_REWARD',
+          'EARN',
+        ]),
+      );
+      expect(
+        prisma.guestGameRewardWalletItem.deleteMany,
+      ).not.toHaveBeenCalled();
     });
 
     it('does not materialize quarantined rewards before the first game activation', async () => {
@@ -3214,7 +3270,21 @@ describe('GuestPortalService', () => {
             status: 'APPROVED',
             claimRequired: true,
             deliveryRequestedAt: null,
+            paidAt: null,
             deliveries: { none: {} },
+            NOT: [
+              {
+                rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
+                rewardAmount: { equals: 0 },
+              },
+            ],
+            bonusLedgerEntries: {
+              none: {
+                status: 'CONFIRMED',
+                source: 'GAMIFICATION_REWARD',
+                entryType: 'EARN',
+              },
+            },
             qualifiedAt: expect.objectContaining({
               gte: activatedAt,
             }),
@@ -3338,7 +3408,7 @@ describe('GuestPortalService', () => {
           ],
           skipDuplicates: true,
         });
-        expect(prisma.$executeRaw).toHaveBeenCalledTimes(3);
+        expect(prisma.$executeRaw).toHaveBeenCalledTimes(7);
         const reactivationSql = prisma.$executeRaw.mock.calls
           .map((call) =>
             ((call[0] as { strings?: readonly string[] }).strings ?? []).join(
@@ -9954,14 +10024,14 @@ describe('GuestPortalService', () => {
         {
           id: 'current-wallet-season-reward',
           status: 'APPROVED',
-          claimRequired: true,
+          claimRequired: false,
           deliveryRequestedAt: null,
-          claimExpiresAt: new Date('2026-08-09T12:00:00.000Z'),
-          walletItems: [{ status: 'PENDING' }],
+          claimExpiresAt: null,
+          walletItems: [{ status: 'CLAIMED' }],
           lootBoxId: null,
           missionId: null,
           seasonId: 'season-1',
-          rewardType: 'BATTLE_PASS_REWARD',
+          rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
           rewardAmount: new Prisma.Decimal(0),
           rewardLabel: '0 XP',
           rewardRarity: null,
@@ -9973,6 +10043,30 @@ describe('GuestPortalService', () => {
           // The legacy deadline is intentionally stale. Wallet claims use
           // claimExpiresAt and must preserve the reached Battle Pass step.
           expiresAt: new Date('2026-07-11T12:00:00.000Z'),
+          lootBox: null,
+          mission: null,
+          season: { name: 'Season 67' },
+        },
+        {
+          id: 'canceled-season-marker',
+          status: 'CANCELED',
+          claimRequired: false,
+          deliveryRequestedAt: null,
+          claimExpiresAt: null,
+          walletItems: [],
+          lootBoxId: null,
+          missionId: null,
+          seasonId: 'season-1',
+          rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
+          rewardAmount: new Prisma.Decimal(0),
+          rewardLabel: '0 XP',
+          rewardRarity: null,
+          rewardRarityLabel: null,
+          rewardDropChance: null,
+          rewardCode: null,
+          evidence: { level: 1 },
+          qualifiedAt: new Date('2026-07-10T12:10:00.000Z'),
+          expiresAt: null,
           lootBox: null,
           mission: null,
           season: { name: 'Season 67' },
@@ -9994,7 +10088,7 @@ describe('GuestPortalService', () => {
         currentLevel: 2,
         progressPercent: 33,
         reachedLevels: 1,
-        readyRewards: 1,
+        readyRewards: 0,
         rewardOverview: {
           ranges: [
             expect.objectContaining({
@@ -10028,8 +10122,16 @@ describe('GuestPortalService', () => {
             reward.id === 'current-wallet-season-reward',
         ),
       ).toMatchObject({
-        walletState: 'WAITING_CLAIM',
-        expiresAt: '2026-08-09T12:00:00.000Z',
+        walletState: 'REDEEMED',
+        expiresAt: '2026-07-11T12:00:00.000Z',
+      });
+      expect(
+        portal.gamification.rewards.find(
+          (reward: { id: string }) =>
+            reward.id === 'canceled-season-marker',
+        ),
+      ).toMatchObject({
+        walletState: 'CANCELED',
       });
     });
   });

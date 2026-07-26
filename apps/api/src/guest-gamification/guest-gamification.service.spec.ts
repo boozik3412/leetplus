@@ -9748,6 +9748,161 @@ describe('GuestGamificationService', () => {
       expect(result.summary.estimatedRewardAmount).toBe(100);
     });
 
+    it('classifies an explicit Battle Pass completion step as a non-deliverable marker', async () => {
+      const { service } = createService();
+      mockSingleSeasonDryRun(
+        service,
+        seasonRow({
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Start',
+              freeReward: 'Start of season',
+              freeRewardDetails: {
+                type: 'BATTLE_PASS_COMPLETION_MARKER',
+                label: 'Start of season',
+                delivery: 'AUTO',
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                metric: {
+                  aggregation: 'exists',
+                  eventTypes: ['APP_OPEN'],
+                  target: 1,
+                },
+              },
+            },
+          ],
+        }),
+      );
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
+        rewardAmount: 0,
+        rewardLabel: 'Start of season',
+        selectedRewardLabel: 'Start of season',
+        battlePassRewardTrack: 'FREE',
+        manualApprovalRequired: false,
+      });
+    });
+
+    it('keeps an automatic ADMIN_OTHER prize on the generic claimable path', async () => {
+      const { service } = createService();
+      mockSingleSeasonDryRun(
+        service,
+        seasonRow({
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Welcome prize',
+              freeReward: 'Physical welcome gift',
+              freeRewardDetails: {
+                type: 'ADMIN_OTHER',
+                label: 'Physical welcome gift',
+                delivery: 'AUTO',
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                metric: {
+                  aggregation: 'exists',
+                  eventTypes: ['APP_OPEN'],
+                  target: 1,
+                },
+              },
+            },
+          ],
+        }),
+      );
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardAmount: 0,
+        rewardLabel: 'Physical welcome gift',
+        selectedRewardLabel: 'Physical welcome gift',
+        battlePassRewardTrack: null,
+      });
+    });
+
+    it('keeps a multi-track Battle Pass reward on the generic claimable path', async () => {
+      const { service } = createService();
+      mockSingleSeasonDryRun(
+        service,
+        seasonRow({
+          premiumEnabled: true,
+          manualApprovalRequired: false,
+          storeIds: [],
+          levels: [
+            {
+              level: 1,
+              title: 'Start',
+              freeReward: 'Start of season',
+              premiumReward: 'Premium reward',
+              freeRewardDetails: {
+                type: 'ADMIN_OTHER',
+                label: 'Start of season',
+                delivery: 'AUTO',
+              },
+              premiumRewardDetails: {
+                type: 'ADMIN_OTHER',
+                label: 'Premium reward',
+                delivery: 'AUTO',
+              },
+              activationRules: {
+                schemaVersion: 2,
+                taskType: 'APP_OPEN',
+                triggerKind: 'APP_OPEN',
+                evaluationPolicy: 'LIVE_PRIMARY',
+                metric: {
+                  aggregation: 'exists',
+                  eventTypes: ['APP_OPEN'],
+                  target: 1,
+                },
+              },
+            },
+          ],
+        }),
+      );
+
+      const result = await service.dryRun(user, {
+        eventType: 'APP_OPEN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        kind: 'SEASON',
+        eligible: true,
+        rewardType: 'BATTLE_PASS_REWARD',
+        rewardAmount: 0,
+        rewardLabel: 'Start of season + Premium reward',
+        selectedRewardLabel: 'Start of season + Premium reward',
+        battlePassRewardTrack: null,
+      });
+    });
+
     it('blocks a Battle Pass bonus reward with a non-positive amount', async () => {
       const { service } = createService();
       mockSingleSeasonDryRun(
@@ -15592,6 +15747,54 @@ describe('GuestGamificationService', () => {
       );
     });
 
+    it('stores a zero-value Battle Pass completion marker as non-claimable history', async () => {
+      const { service } = createService();
+      const markerDryRun = battlePassDryRun(1);
+      markerDryRun.rules[0] = {
+        ...markerDryRun.rules[0],
+        rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
+      };
+
+      jest.spyOn(service as any, 'createReward').mockResolvedValue(
+        rewardResult({
+          status: 'APPROVED',
+          rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
+          rewardAmount: 0,
+          claimRequired: false,
+          claimExpiresAt: null,
+        }),
+      );
+
+      await (service as any).createProcessRewards(
+        user,
+        {
+          eventType: 'PLAY_HOUR',
+          storeId: null,
+        },
+        markerDryRun,
+        'profile-1',
+        {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-1',
+        },
+      );
+
+      expect((service as any).createReward).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          status: 'APPROVED',
+          seasonId: 'season-1',
+          rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
+          rewardAmount: 0,
+        }),
+        expect.objectContaining({
+          claimRequired: false,
+          claimExpiresAt: null,
+        }),
+      );
+    });
+
     it('records guest lootbox openings at the actual open time for periodic limits', async () => {
       const { service } = createService();
       const unlockedAt = '2026-06-09T08:00:00.000Z';
@@ -17378,6 +17581,71 @@ describe('GuestGamificationService', () => {
         id: 'reward-mission-pending',
         status: 'APPROVED',
         rewardType: 'BONUS_BALANCE',
+      });
+    });
+
+    it('keeps an approved zero-value Battle Pass marker in history as claimed', async () => {
+      const { service, prisma } = createService();
+      const season = {
+        id: 'season-1',
+        name: 'Club season',
+        status: 'ACTIVE',
+      };
+      const profile = {
+        id: 'profile-1',
+        displayName: 'Guest One',
+        contactMasked: '+7 *** **-11',
+        xp: 120,
+        level: 2,
+        gameActivatedAt: new Date('2026-06-01T00:00:00.000Z'),
+      };
+      const pending = rewardRow({
+        id: 'reward-season-marker',
+        status: 'PENDING',
+        claimRequired: false,
+        seasonId: 'season-1',
+        season,
+        rewardType: 'BATTLE_PASS_COMPLETION_MARKER',
+        rewardAmount: new Prisma.Decimal(0),
+        rewardLabel: 'Start of season',
+        rewardCode: null,
+        profile,
+      });
+      const approved = rewardRow({
+        ...pending,
+        status: 'APPROVED',
+        approvedByUserId: user.id,
+        profile,
+      });
+
+      prisma.guestGameReward.findFirst.mockResolvedValue(pending);
+      prisma.guestGameReward.update.mockResolvedValue(approved);
+
+      await service.updateReward(user, 'reward-season-marker', {
+        status: 'APPROVED',
+      });
+
+      expect(prisma.guestGameRewardWalletItem.upsert).toHaveBeenCalledWith({
+        where: {
+          tenantId_rewardId: {
+            tenantId: user.tenantId,
+            rewardId: 'reward-season-marker',
+          },
+        },
+        create: expect.objectContaining({
+          tenantId: user.tenantId,
+          profileId: 'profile-1',
+          rewardId: 'reward-season-marker',
+          sourceKind: 'BATTLE_PASS',
+          sourceId: 'season-1',
+          title: 'Club season',
+          status: 'CLAIMED',
+          claimedAt: now,
+        }),
+        update: {
+          status: 'CLAIMED',
+          claimedAt: now,
+        },
       });
     });
   });

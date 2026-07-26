@@ -137,7 +137,7 @@ Deployment-порядок для fallback-входа закреплен в `docs
 
 `game-summary` также отдает guest-safe блок `journey`: регистрация, связь с Langame, активность/чекин, квест, награда и начисление бонуса. `/play/game` показывает этот маршрут как `Путь к бонусу` с процентом готовности, следующим шагом и ссылками к нужному блоку экрана или в гостевой кабинет к `#langame-match`, чтобы игрок и QA видели полный путь от `/play` до подтвержденного бонуса без live-запросов, raw phone и участия админа.
 
-Для рефералок `GET /guest-portal/session/game-summary` отдает блок `referral`: opaque HMAC-код, ссылку `/play?clubId=...&ref=...`, share-text, подсказку канала и safe `stats` по принятым/eligible регистрациям. `/play/game` показывает карточку `Рефералка` с копированием ссылки, native share/fallback, Telegram share-url и текущим статусом приглашений, а `/play` при входе по `ref` показывает безопасный баннер приглашения. Код строится от отдельного `GuestGameProfile` и клуба, статистика считается из `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` по `inviterProfileId`; raw phone, secret, сырой profile id и общий массив `Guest` не раскрываются и не используются для публичного статуса. Eligible-регистрация по ссылке попадает в Guest Game Hub как `GUEST_GAME_REFERRAL`, а для production можно задать `GUEST_GAME_REFERRAL_SECRET`, иначе используется `JWT_SECRET`/`APP_ENCRYPTION_KEY`.
+Для рефералок `GET /guest-portal/session/game-summary` отдает блок `referral`: opaque HMAC-код, ссылку `/play?clubId=...&ref=...`, share-text, подсказку канала и safe `stats` по принятым/eligible регистрациям. `/play/game` показывает карточку `Рефералка` с копированием ссылки, native share/fallback, Telegram share-url и текущим статусом приглашений, а `/play` при входе по `ref` показывает безопасный баннер приглашения. Код строится от отдельного `GuestGameProfile` и клуба, статистика считается из `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` по `inviterProfileId`; raw phone, secret, сырой profile id и общий массив `Guest` не раскрываются и не используются для публичного статуса. Eligible-регистрация по ссылке попадает в Guest Game Hub как `GUEST_GAME_REFERRAL`. В production обязателен отдельный `GUEST_GAME_REFERRAL_SECRET`; fallback на JWT/encryption key допускается только в local/test.
 
 Внутренний Guest Game Hub на `/guests/gamification` показывает пилотный чек-лист готовности клуба к первому бонусу: 1337 выбирается приоритетно, далее проверяются `/play`, OTP, игровой профиль, связка с Langame, активные правила, наличие сохраненных `guests/logs` raw-типов, тестовое событие, очередь наград, bonus ledger и обязательная сверка баланса после первого production-начисления. Пункт `Факты guests/logs` показывает количество сохраненных логов, типов, источников и следующее действие для `/sync`; пустой каталог остается data-риском для будущих правил и anti-fraud, но не блокирует dry-run, пока активные правила не используют `guestLogTypes`/`blockedGuestLogTypes` или XP `guestLog`. Если последняя успешная foundation-синхронизация уже запускалась с `includeGuestLogs=true`, но Langame вернул `0` логов, runbook показывает `проверено: 0` / `0 после sync` и ведет на диагностику, а не предлагает слепо повторять тот же sync. Если активное правило зависит от `guests/logs`, этот пункт становится prerequisite-блокером runbook и ведет оператора на `/sync?includeGuestLogs=1` до разбора endpoint или временного снятия зависимости правила; обычный `/sync` остается легким, а deeplink сразу включает расширенную проверку событий. Каждый пункт checklist дополнительно может отдавать безопасные `actionHref/actionLabel`, поэтому UI показывает кликабельный следующий шаг к `/stores`, `/play`, гостевому кабинету, `/sync?includeGuestLogs=1`, правилам или CSV-export каталога без нового API-запроса. Поверх чек-листа есть runbook-стадия `Стоп / Dry-run / Canary / Live write / Сверка / Готово`: она показывает, можно ли сейчас запускать dry-run, canary, live-write или только сверку, и дает следующий безопасный шаг без live-запросов в Langame и без раскрытия ПДн. Runbook также возвращает action-list для оператора: открыть dry-run/process-event, поставить approved bonus-награду в ledger, выполнить ledger dry-run, запустить защищенный canary live dispatch и перейти к сверке баланса; web UI вызывает только существующие guarded handlers и не добавляет отдельный путь записи в Langame. Canary dispatch дополнительно защищен backend-флагом `canary=true`: сервер обрабатывает максимум одну уже подготовленную ledger-запись и не ставит новые approved rewards в очередь внутри live dispatch. Перед live-write runbook выполняет scoped preflight по клубу 1337: считает claimable ledger-записи (`PENDING`, retry-ready `FAILED`, stale `PROCESSING`), показывает безопасный preview первых claim-кандидатов и разблокирует canary только если готова ровно одна запись. Из preview оператор с правом на награды может отменить показанную pending/failed/stale-processing запись через существующий cancel API: backend не дает отменить свежий `PROCESSING` lock и сохраняет каскадную отмену linked reward/delivery. Действия runbook передают `storeId` выбранного пилотного клуба, поэтому постановка в ledger, dry-run preview, status counts и live claim ограничены клубом 1337, а общий batch dispatch в карточке bonus ledger остается без такого scope. Финальный gate `firstBonusReconciliation` отдельно ищет первую подтвержденную положительную `bonus_balance` операцию по клубу 1337, игнорирует денежные `balance` записи и переводит пилот в `Сверка` или `Готово` только после сверки `balanceAfter` с последующим `GuestBonusBalanceSnapshot`.
 
@@ -475,7 +475,7 @@ MAIL_SECURE="false"
 MAIL_USER=""
 MAIL_PASS=""
 MAIL_FROM="LeetPlus <no-reply@leetplus.ru>"
-SYNC_SERVICE_TOKEN="change_me_for_cron"
+SYNC_SERVICE_TOKEN="<unique-strong-scheduler-secret>"
 REPORT_DIGEST_SCHEDULER_ENABLED="false"
 REPORT_DIGEST_SCHEDULER_TIMEZONE_OFFSET_MINUTES="300"
 REPORT_DIGEST_DAILY_TIME="09:00"
@@ -490,7 +490,19 @@ REPORT_DIGEST_SCHEDULER_INTERVAL_MS="60000"
 работать только при поднятом локальном Mailpit/SMTP-сервисе.
 Если `REPORT_DIGEST_SCHEDULER_ENABLED` не задан явно, scheduler включается только при `NODE_ENV=production` и настроенном `SYNC_SERVICE_TOKEN`.
 
-`APP_ENCRYPTION_KEY` нужно задать до первого сохранения реальных ключей интеграции. Если заменить его без процедуры ротации, сохраненные API-ключи нельзя будет расшифровать.
+В production API запускается только при наличии независимых секретов
+`JWT_SECRET`, `GUEST_PORTAL_JWT_SECRET`, `USER_INVITE_TOKEN_SECRET`,
+`GUEST_GAME_REFERRAL_SECRET`, `APP_ENCRYPTION_KEY`,
+`INTEGRATION_ENCRYPTION_KEY` и `SYNC_SERVICE_TOKEN`. Каждый секрет должен
+содержать не менее 32 символов, не быть placeholder и не совпадать с другим.
+
+До первого релиза с разделёнными ключами нужно проверить, каким фактическим
+ключом зашифрованы существующие PII и credentials интеграций. Если раньше
+использовался fallback на `JWT_SECRET`, сначала необходимы legacy keyring,
+dual-read и контролируемая миграция ciphertext/HMAC. Простая замена ключа
+сделает старые данные нечитаемыми. Смена signing-secret также инвалидирует
+текущие гостевые сессии, приглашения и referral-ссылки, если не реализован
+переход с dual verification.
 
 Установка зависимостей:
 
@@ -569,6 +581,14 @@ systemctl restart leetplus-web.service
 
 Запуск защищен через `flock`, чтобы два деплоя не выполнялись параллельно.
 
+Этот legacy auto-deploy не является допустимым release-механизмом для открытой
+beta. Перед внешним тестом production должен получать только проверенный
+immutable artifact. Для каждого release обязательны полный `RELEASE_SHA`,
+UTC `BUILD_TIME`, точное имя `EXPECTED_DATABASE_MIGRATION` и количество
+`EXPECTED_DATABASE_MIGRATION_COUNT`. API публикует эти данные через `/version`
+и `/health/live`, а `/health/ready` дополнительно проверяет БД и ожидаемую
+revision/count миграций.
+
 Быстрая проверка production:
 
 ```powershell
@@ -605,21 +625,54 @@ pnpm --filter database exec prisma migrate status
 Demo seed:
 
 ```powershell
+$env:DEMO_SEED_ENABLED = "true"
+$env:DEMO_SEED_TARGET_ENVIRONMENT = "development"
 pnpm --filter database db:seed
+Remove-Item Env:DEMO_SEED_ENABLED
+Remove-Item Env:DEMO_SEED_TARGET_ENVIRONMENT
 ```
 
-Seed создает demo tenant, справочники, товары, клубы, продажи, остатки, списания и возвраты.
+Seed предназначен только для локальной или явно подтвержденной удаленной development-БД. При
+`NODE_ENV=production`, другом production environment marker или production-маркере в адресе БД
+он всегда завершается до изменений. По умолчанию seed создает tenant `local-demo`, справочники,
+товары, клубы, продажи, остатки, списания и возвраты.
+Даже для loopback-БД требуется положительная аттестация
+`DEMO_SEED_TARGET_ENVIRONMENT=development`; operational slugs `demo` и `public-demo`
+зарезервированы и этим seed не обслуживаются.
 
-Тестовый пользователь:
+OWNER email и пароль генерируются случайно при каждом запуске и выводятся один раз в локальную
+консоль. Seed никогда не выдает этому пользователю `isPlatformAdmin`. Для воспроизводимого
+локального входа можно задать `DEMO_SEED_OWNER_EMAIL` и пароль длиной не менее 16 символов через
+`DEMO_SEED_OWNER_PASSWORD`; такие значения нельзя хранить в репозитории или использовать в
+production.
 
-```text
-Логин: 123@123.ru
-Пароль: 12345678
-Роль: OWNER
-Tenant: demo
-```
+Повторный запуск, который очистит существующий tenant, дополнительно требует
+`DEMO_SEED_RESET_EXISTING=true`, fingerprint именно этой БД в
+`DEMO_SEED_DATABASE_FINGERPRINT` и точный ID tenant в `DEMO_SEED_CONFIRM_TENANT_ID`. Отказ
+seed выводит необходимые несекретные значения. Для удаленной development-БД также требуется
+`DEMO_SEED_ALLOW_REMOTE_DATABASE=true`; не переносите подтверждения между окружениями.
 
 ## Проверки
+
+GitHub Actions запускает frozen install, Prisma validate/generate, read-only lint
+границы security/health/config, focused и полный API test, API/web typecheck и build,
+web lint, а также разворачивает все миграции с нуля в отдельном PostgreSQL 16.
+
+```powershell
+pnpm --filter api lint:ci:boundary
+pnpm --filter api test:ci:focused
+pnpm --filter api test:ci
+pnpm --filter api typecheck
+pnpm --filter web typecheck
+```
+
+Временное ограничение baseline: полный API lint пока не является merge gate из-за
+исторического backlog ошибок. `pnpm --filter api lint` содержит `--fix` и предназначен
+только для осознанного локального форматирования; в CI его запускать нельзя.
+`pnpm --filter api lint:check` проверяет весь API без изменения файлов, но до погашения
+legacy debt обязательным остаётся расширяемый `lint:ci:boundary`. В нём временно отключена
+только проверка Prettier, чтобы line-ending различия Windows/Linux не скрывали смысловые
+ошибки ESLint.
 
 Для обычного изменения кода перед push:
 

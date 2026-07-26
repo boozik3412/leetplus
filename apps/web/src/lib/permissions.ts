@@ -17,6 +17,7 @@ export type Capability =
   | "view_guest_gamification"
   | "manage_guest_game_rules"
   | "approve_guest_game_rewards"
+  | "operate_guest_game_ledger"
   | "view_guest_game_pii"
   | "view_marketing"
   | "manage_marketing"
@@ -215,6 +216,12 @@ export const capabilityOptions: CapabilityOption[] = [
     label: "Геймификация: награды",
     description:
       "Создание, подтверждение, экспорт и кассирское погашение наград гостей.",
+  },
+  {
+    key: "operate_guest_game_ledger",
+    label: "Геймификация: bonus ledger",
+    description:
+      "Постановка, canary-проверка, отправка и отмена внешних бонусных начислений.",
   },
   {
     key: "view_guest_game_pii",
@@ -460,6 +467,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
+    "operate_guest_game_ledger",
     "view_guest_game_pii",
     "view_marketing",
     "manage_marketing",
@@ -483,6 +491,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
+    "operate_guest_game_ledger",
     "view_guest_game_pii",
     "view_marketing",
     "manage_marketing",
@@ -506,6 +515,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
+    "operate_guest_game_ledger",
     "view_guest_game_pii",
     "view_marketing",
     "manage_marketing",

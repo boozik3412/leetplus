@@ -1,13 +1,26 @@
-import { PrismaClient, StockMovementType, UserRole } from "@prisma/client";
+import {
+  Prisma,
+  PrismaClient,
+  StockMovementType,
+  UserRole,
+} from "@prisma/client";
 import { randomBytes, scrypt } from "node:crypto";
 import { promisify } from "node:util";
+import {
+  assertDemoSeedEnvironment,
+  assertExistingTenantResetAllowed,
+  createDemoSeedCredentials,
+  inspectSeedDatabaseTarget,
+  resolveDemoSeedTenantSlug,
+} from "./seed-safety";
 
-const prisma = new PrismaClient();
 const scryptAsync = promisify(scrypt);
+const databaseTarget = inspectSeedDatabaseTarget(process.env.DATABASE_URL);
+assertDemoSeedEnvironment(process.env, databaseTarget);
 
-const tenantSlug = "demo";
-const testUserEmail = "123@123.ru";
-const testUserPassword = "12345678";
+const client = new PrismaClient();
+const tenantSlug = resolveDemoSeedTenantSlug(process.env);
+const demoOwnerCredentials = createDemoSeedCredentials(process.env);
 
 const categories = [
   "Энергетики",
@@ -405,21 +418,42 @@ async function hashPassword(password: string) {
   return `scrypt$${salt}$${derivedKey.toString("hex")}`;
 }
 
-async function main() {
-  console.log("Start seeding LeetPlus demo data...");
+async function seed(prisma: Prisma.TransactionClient) {
+  console.log(
+    `Preparing LeetPlus local demo seed for ${databaseTarget.descriptor} ` +
+      `(fingerprint ${databaseTarget.fingerprint})...`,
+  );
+
+  const existingTenant = await prisma.tenant.findUnique({
+    where: {
+      slug: tenantSlug,
+    },
+    select: {
+      id: true,
+      slug: true,
+    },
+  });
+
+  if (existingTenant) {
+    assertExistingTenantResetAllowed(
+      process.env,
+      databaseTarget,
+      existingTenant,
+    );
+  }
 
   const tenant = await prisma.tenant.upsert({
     where: {
       slug: tenantSlug,
     },
     update: {
-      name: "Demo Cyber Club",
-      domain: "demo.leetplus.ru",
+      name: "Local Demo Cyber Club",
+      domain: `${tenantSlug}.localhost`,
     },
     create: {
-      name: "Demo Cyber Club",
+      name: "Local Demo Cyber Club",
       slug: tenantSlug,
-      domain: "demo.leetplus.ru",
+      domain: `${tenantSlug}.localhost`,
     },
   });
 
@@ -462,11 +496,6 @@ async function main() {
   await prisma.user.deleteMany({
     where: {
       tenantId: tenant.id,
-    },
-  });
-  await prisma.user.deleteMany({
-    where: {
-      email: testUserEmail,
     },
   });
 
@@ -518,24 +547,19 @@ async function main() {
     createdSuppliers.set(supplierData.name, supplier.id);
   }
 
-  const testUserPasswordHash = await hashPassword(testUserPassword);
+  const demoOwnerPasswordHash = await hashPassword(
+    demoOwnerCredentials.password,
+  );
 
   await prisma.user.createMany({
     data: [
       {
         tenantId: tenant.id,
-        email: "owner@demo.leetplus.ru",
-        fullName: "Demo Owner",
+        email: demoOwnerCredentials.email,
+        fullName: "Local Demo Owner",
         role: UserRole.OWNER,
-        passwordHash: "dev_seed_password_hash_not_for_auth",
-      },
-      {
-        tenantId: tenant.id,
-        email: testUserEmail,
-        fullName: "Тестовый пользователь",
-        role: UserRole.OWNER,
-        isPlatformAdmin: true,
-        passwordHash: testUserPasswordHash,
+        isPlatformAdmin: false,
+        passwordHash: demoOwnerPasswordHash,
         emailVerifiedAt: new Date(),
       },
     ],
@@ -689,7 +713,7 @@ async function main() {
 
       const writeOffQuantity = index + 1;
       const returnQuantity = index % 2 === 0 ? 1 : 0;
-      const movements = [
+      const movements: Prisma.StockMovementCreateManyInput[] = [
         {
           tenantId: tenant.id,
           storeId: primaryStore.id,
@@ -719,13 +743,37 @@ async function main() {
     }),
   });
 
-  console.log("Seed completed successfully.");
+  console.log("Seed data prepared successfully.");
   console.log(`Tenant: ${tenant.name}`);
+  console.log(`Tenant slug: ${tenant.slug}`);
   console.log(`Domain: ${tenant.domain}`);
-  console.log("Demo user: owner@demo.leetplus.ru");
-  console.log(`Test user: ${testUserEmail} / ${testUserPassword}`);
+  console.log(`Local demo owner email: ${demoOwnerCredentials.email}`);
+  if (demoOwnerCredentials.generatedPassword) {
+    console.log(`Local demo owner password: ${demoOwnerCredentials.password}`);
+  } else {
+    console.log(
+      "Local demo owner password: configured through the environment (not printed)",
+    );
+  }
+  console.log("Platform Admin: no");
+  if (
+    demoOwnerCredentials.generatedEmail ||
+    demoOwnerCredentials.generatedPassword
+  ) {
+    console.log(
+      "Credentials were generated for this run. Store them only in your local password manager; rerunning the seed generates new values.",
+    );
+  }
   console.log(`Products created: ${products.length}`);
   console.log("Sales, inventory and stock movements created for reports.");
+}
+
+async function main() {
+  await client.$transaction((transaction) => seed(transaction), {
+    maxWait: 10_000,
+    timeout: 300_000,
+  });
+  console.log("Seed transaction committed successfully.");
 }
 
 main()
@@ -735,5 +783,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await client.$disconnect();
   });

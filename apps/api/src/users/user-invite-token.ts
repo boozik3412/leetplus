@@ -1,16 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { resolveSecuritySecret } from '../config/environment-validation';
 
-const DEV_INVITE_TOKEN_SECRET =
-  'leetplus-dev-jwt-secret-change-before-production';
 const SIGNED_INVITE_TOKEN_PREFIX = 'invite_v2';
 
 function inviteTokenSecret(configService: ConfigService) {
-  return (
-    configService.get<string>('USER_INVITE_TOKEN_SECRET')?.trim() ||
-    configService.get<string>('JWT_SECRET')?.trim() ||
-    DEV_INVITE_TOKEN_SECRET
-  );
+  return resolveSecuritySecret(configService, 'USER_INVITE_TOKEN_SECRET', [
+    'JWT_SECRET',
+  ]);
 }
 
 function signInviteId(inviteId: string, configService: ConfigService) {

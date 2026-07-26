@@ -11,7 +11,6 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
@@ -24,36 +23,42 @@ import type {
   UpdateProductDto,
 } from './products.dto';
 
+const TENANT_USER_ROLES = Object.values(UserRole);
+
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('summary')
-  async getSummary(@CurrentUser() user?: AuthenticatedUser) {
+  async getSummary(@CurrentUser() user: AuthenticatedUser) {
     return this.productsService.getSummary(user);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('catalog')
   async getCatalog(
     @Query() query: ProductCatalogQuery,
-    @CurrentUser() user?: AuthenticatedUser,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.productsService.getCatalog(query, user);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get()
-  async findAll(@CurrentUser() user?: AuthenticatedUser) {
+  async findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.productsService.findAll(user);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get(':id')
   async findById(
     @Param('id') id: string,
-    @CurrentUser() user?: AuthenticatedUser,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.productsService.findById(id, user);
   }

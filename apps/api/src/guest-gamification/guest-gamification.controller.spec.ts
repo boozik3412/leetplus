@@ -16,6 +16,11 @@ type ReplayHandlerName =
   | 'previewLootBoxEntitlementOverLimitRepair'
   | 'applyLootBoxEntitlementOverLimitRepair';
 
+type LedgerHandlerName =
+  | 'queueBonusLedger'
+  | 'dispatchBonusLedger'
+  | 'cancelBonusLedgerEntry';
+
 const replayHandlerNames: ReplayHandlerName[] = [
   'previewBattlePassRuleReplay',
   'applyBattlePassRuleReplay',
@@ -25,6 +30,12 @@ const replayHandlerNames: ReplayHandlerName[] = [
   'applyLootBoxEntitlementReconciliation',
   'previewLootBoxEntitlementOverLimitRepair',
   'applyLootBoxEntitlementOverLimitRepair',
+];
+
+const ledgerHandlerNames: LedgerHandlerName[] = [
+  'queueBonusLedger',
+  'dispatchBonusLedger',
+  'cancelBonusLedgerEntry',
 ];
 
 function replayContext(
@@ -39,6 +50,26 @@ function replayContext(
         user: {
           role,
           permissions: ['manage_guest_game_rules'],
+        },
+      }),
+    }),
+  } as unknown as ExecutionContext;
+}
+
+function ledgerContext(
+  methodName: LedgerHandlerName,
+  role: UserRole,
+): ExecutionContext {
+  return {
+    getHandler: () => GuestGamificationController.prototype[methodName],
+    getClass: () => GuestGamificationController,
+    switchToHttp: () => ({
+      getRequest: () => ({
+        user: {
+          role,
+          customRoleId: 'custom-role',
+          hasRoleOverride: true,
+          permissions: ['operate_guest_game_ledger'],
         },
       }),
     }),
@@ -77,6 +108,40 @@ describe('GuestGamificationController replay authorization', () => {
     (methodName) => {
       expect(() =>
         guard.canActivate(replayContext(methodName, UserRole.MARKETER)),
+      ).toThrow(ForbiddenException);
+    },
+  );
+});
+
+describe('GuestGamificationController bonus ledger authorization', () => {
+  const guard = new StrictRolesGuard(new Reflector());
+
+  it.each(ledgerHandlerNames)(
+    'protects %s with an OWNER/ADMIN/MANAGER hard ceiling',
+    (methodName) => {
+      const handler = GuestGamificationController.prototype[methodName];
+
+      expect(Reflect.getMetadata(STRICT_ROLES_KEY, handler)).toEqual([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+      ]);
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toContain(
+        StrictRolesGuard,
+      );
+    },
+  );
+
+  it.each(ledgerHandlerNames)(
+    'denies custom or overridden lower roles on %s despite ledger capability',
+    (methodName) => {
+      expect(() =>
+        guard.canActivate(
+          ledgerContext(methodName, UserRole.CLUB_ADMINISTRATOR),
+        ),
+      ).toThrow(ForbiddenException);
+      expect(() =>
+        guard.canActivate(ledgerContext(methodName, UserRole.MARKETER)),
       ).toThrow(ForbiddenException);
     },
   );

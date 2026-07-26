@@ -29,6 +29,10 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  isProductionConfig,
+  resolveSecuritySecret,
+} from '../config/environment-validation';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
 import {
   GuestGamificationService,
@@ -3233,7 +3237,10 @@ export class GuestPortalService {
     void iat;
     void nbf;
 
+    const guestJwtSecret = this.guestPortalJwtSecret();
+
     return this.jwtService.signAsync(signablePayload, {
+      ...(guestJwtSecret ? { secret: guestJwtSecret } : {}),
       expiresIn: (this.configService.get<string>(
         'GUEST_PORTAL_JWT_EXPIRES_IN',
       ) ?? GUEST_TOKEN_EXPIRES_IN) as JwtExpiresIn,
@@ -13050,8 +13057,11 @@ export class GuestPortalService {
     }
 
     try {
-      const payload =
-        await this.jwtService.verifyAsync<GuestPortalTokenPayload>(token);
+      const guestJwtSecret = this.guestPortalJwtSecret();
+      const payload = await this.jwtService.verifyAsync<GuestPortalTokenPayload>(
+        token,
+        guestJwtSecret ? { secret: guestJwtSecret } : undefined,
+      );
 
       if (payload.purpose !== GUEST_PORTAL_PURPOSE) {
         throw new UnauthorizedException('Invalid guest token');
@@ -13197,7 +13207,7 @@ export class GuestPortalService {
   }
 
   private encryptPhone(phone: GuestPortalPhoneIdentity) {
-    return this.secretEncryptionService.encrypt(phone.normalized);
+    return this.secretEncryptionService.encrypt(phone.normalized, 'pii');
   }
 
   private phoneIdentityFromEncrypted(
@@ -13208,7 +13218,9 @@ export class GuestPortalService {
     }
 
     try {
-      return this.phoneIdentity(this.secretEncryptionService.decrypt(value));
+      return this.phoneIdentity(
+        this.secretEncryptionService.decrypt(value, 'pii'),
+      );
     } catch {
       return null;
     }
@@ -14397,24 +14409,29 @@ export class GuestPortalService {
   }
 
   private piiSecret() {
-    const secret =
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim();
-
-    if (!secret) {
-      throw new BadRequestException('APP_ENCRYPTION_KEY is not configured');
-    }
-
-    return secret;
+    return resolveSecuritySecret(this.configService, 'APP_ENCRYPTION_KEY', [
+      'JWT_SECRET',
+    ]);
   }
 
   private referralSecret() {
-    return (
-      this.configService.get<string>('GUEST_GAME_REFERRAL_SECRET')?.trim() ||
-      this.configService.get<string>('JWT_SECRET')?.trim() ||
-      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
-      'guest-game-referral-local-secret'
+    return resolveSecuritySecret(
+      this.configService,
+      'GUEST_GAME_REFERRAL_SECRET',
+      ['JWT_SECRET', 'APP_ENCRYPTION_KEY'],
     );
+  }
+
+  private guestPortalJwtSecret() {
+    const secret = this.configService
+      .get<string>('GUEST_PORTAL_JWT_SECRET')
+      ?.trim();
+
+    if (!secret && isProductionConfig(this.configService)) {
+      throw new Error('GUEST_PORTAL_JWT_SECRET is required in production');
+    }
+
+    return secret || null;
   }
 
   private publicWebUrl() {

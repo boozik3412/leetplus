@@ -20,6 +20,10 @@ export class RolesGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? [];
+    const handlerRoles = this.reflector.get<UserRole[]>(
+      ROLES_KEY,
+      context.getHandler(),
+    );
 
     if (allowedRoles.length === 0) {
       return true;
@@ -59,19 +63,31 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
+    const capability = this.resolveRequiredCapability(request, role);
     const mustUseCapabilityDecision = Boolean(
       user?.customRoleId ||
       user?.hasRoleOverride ||
       user?.role === UserRole.TRAINEE,
     );
 
-    if (role && allowedRoles.includes(role) && !mustUseCapabilityDecision) {
-      return true;
+    if (capability) {
+      const roleAllowsCapability =
+        mustUseCapabilityDecision ||
+        !handlerRoles?.length ||
+        Boolean(role && handlerRoles.includes(role));
+
+      if (roleAllowsCapability && hasCapability(user, capability)) {
+        return true;
+      }
+
+      throw new ForbiddenException('Insufficient role permissions');
     }
 
-    const capability = this.resolveRequiredCapability(request, role);
-
-    if (capability && hasCapability(user, capability)) {
+    if (
+      role &&
+      allowedRoles.includes(role) &&
+      !mustUseCapabilityDecision
+    ) {
       return true;
     }
 
@@ -87,6 +103,10 @@ export class RolesGuard implements CanActivate {
 
     if (path.startsWith('/settings')) {
       return 'manage_integrations';
+    }
+
+    if (path.startsWith('/dashboard')) {
+      return 'view_dashboard';
     }
 
     if (path.startsWith('/integrations/langame/settings')) {
@@ -329,6 +349,12 @@ export class RolesGuard implements CanActivate {
     path: string,
     method: string,
   ): AccessCapability {
+    if (path.startsWith('/guests/gamification/bonus-ledger')) {
+      return this.isReadMethod(method)
+        ? 'view_guest_gamification'
+        : 'operate_guest_game_ledger';
+    }
+
     if (this.isReadMethod(method)) {
       if (path.startsWith('/guests/gamification/rewards/export')) {
         return 'approve_guest_game_rewards';

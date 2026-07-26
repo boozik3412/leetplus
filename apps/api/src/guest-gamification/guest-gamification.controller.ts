@@ -842,6 +842,8 @@ export class GuestGamificationController {
 
   @Post('bonus-ledger/queue')
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(StrictRolesGuard)
   queueBonusLedger(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GuestGameBonusLedgerQueueDto,
@@ -851,6 +853,8 @@ export class GuestGamificationController {
 
   @Post('bonus-ledger/dispatch')
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(StrictRolesGuard)
   dispatchBonusLedger(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GuestGameBonusLedgerDispatchDto,
@@ -872,6 +876,8 @@ export class GuestGamificationController {
 
   @Post('bonus-ledger/:id/cancel')
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @StrictRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(StrictRolesGuard)
   cancelBonusLedgerEntry(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

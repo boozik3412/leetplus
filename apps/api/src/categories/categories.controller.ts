@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
@@ -25,6 +24,8 @@ import type {
 } from './categories.dto';
 import { ProductCategoryCatalogService } from './product-category-catalog.service';
 
+const TENANT_USER_ROLES = Object.values(UserRole);
+
 @Controller('categories')
 export class CategoriesController {
   constructor(
@@ -32,15 +33,17 @@ export class CategoriesController {
     private readonly productCategoryCatalogService: ProductCategoryCatalogService,
   ) {}
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get()
-  findAll(@CurrentUser() user?: AuthenticatedUser) {
+  findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.categoriesService.findAll(user);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @Roles(...TENANT_USER_ROLES)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Get('langame/overview')
-  getLangameOverview(@CurrentUser() user?: AuthenticatedUser) {
+  getLangameOverview(@CurrentUser() user: AuthenticatedUser) {
     return this.productCategoryCatalogService.getLangameOverview(user);
   }
 

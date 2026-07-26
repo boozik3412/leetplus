@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci?schema=public
+  NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+
+jobs:
+  application:
+    name: Application checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm --filter database db:validate
+
+      - name: Generate Prisma client
+        run: pnpm --filter database db:generate
+
+      - name: Type-check database scripts
+        run: pnpm --filter database typecheck
+
+      - name: Test database seed safety
+        run: pnpm --filter database test:seed-safety
+
+      - name: Lint API security, health, and configuration boundary
+        run: pnpm --filter api lint:ci:boundary
+
+      - name: Run focused API security tests
+        run: pnpm --filter api test:ci:focused
+
+      - name: Run full API test suite
+        run: pnpm --filter api test:ci
+
+      - name: Type-check API
+        run: pnpm --filter api typecheck
+
+      - name: Build API
+        run: pnpm --filter api build
+
+      - name: Validate production startup contract
+        run: pnpm --filter api config:validate:production
+        env:
+          NODE_ENV: production
+          JWT_SECRET: ci-contract-jwt-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          GUEST_PORTAL_JWT_SECRET: ci-contract-guest-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          USER_INVITE_TOKEN_SECRET: ci-contract-invite-cccccccccccccccccccccccccccccccc
+          GUEST_GAME_REFERRAL_SECRET: ci-contract-referral-ddddddddddddddddddddddddddddddd
+          APP_ENCRYPTION_KEY: ci-contract-pii-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          INTEGRATION_ENCRYPTION_KEY: ci-contract-integration-ffffffffffffffffffffffffffffffff
+          SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
+          RELEASE_SHA: ${{ github.sha }}
+          BUILD_TIME: '2026-07-26T00:00:00Z'
+          EXPECTED_DATABASE_MIGRATION: 20260726110000_reconcile_completed_reward_wallet
+          EXPECTED_DATABASE_MIGRATION_COUNT: '150'
+
+      - name: Lint web
+        run: pnpm --filter web lint
+
+      - name: Type-check web
+        run: pnpm --filter web typecheck
+
+      - name: Build web
+        run: pnpm --filter web build
+
+  migration-smoke:
+    name: PostgreSQL migration smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=120000
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: leetplus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d leetplus_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm --filter database db:validate
+
+      - name: Generate Prisma client
+        run: pnpm --filter database db:generate
+
+      - name: Apply all migrations to a clean database
+        run: pnpm --filter database db:deploy
+
+      - name: Verify database connectivity and migration state
+        run: pnpm --filter database db:smoke

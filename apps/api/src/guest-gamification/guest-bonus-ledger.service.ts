@@ -2311,7 +2311,7 @@ export class GuestBonusLedgerService {
 
     try {
       phone = normalizeLangamePhone(
-        this.secretEncryptionService.decrypt(entity.phoneEncrypted),
+        this.secretEncryptionService.decrypt(entity.phoneEncrypted, 'pii'),
       );
     } catch {
       phone = null;

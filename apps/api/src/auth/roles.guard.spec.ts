@@ -27,12 +27,14 @@ function createContext(request: RequestWithUser): ExecutionContext {
 
 describe('RolesGuard', () => {
   let reflector: {
+    get: jest.Mock;
     getAllAndOverride: jest.Mock;
   };
   let guard: RolesGuard;
 
   beforeEach(() => {
     reflector = {
+      get: jest.fn(),
       getAllAndOverride: jest.fn(),
     };
     guard = new RolesGuard(reflector as unknown as Reflector);
@@ -57,6 +59,144 @@ describe('RolesGuard', () => {
 
     expect(() =>
       guard.canActivate(createContext({ user: { role: UserRole.BUYER } })),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does not let a custom role fall back to its base role on an unmapped route', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.MARKETER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/unmapped-module',
+          user: {
+            role: UserRole.MARKETER,
+            customRoleId: 'custom-role-1',
+            permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does not let a standard buyer role bypass guest capabilities', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.BUYER,
+      UserRole.MARKETER,
+      UserRole.CLUB_MANAGER,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests',
+          user: {
+            role: UserRole.BUYER,
+            permissions: resolveUserCapabilities({ role: UserRole.BUYER }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('requires the dashboard capability from every authenticated role', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/dashboard/summary',
+          user: {
+            role: UserRole.TRAINEE,
+            permissions: resolveUserCapabilities({ role: UserRole.TRAINEE }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/dashboard/summary',
+          user: {
+            role: UserRole.BUYER,
+            permissions: resolveUserCapabilities({ role: UserRole.BUYER }),
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps trainee access outside the assortment boundary', () => {
+    reflector.getAllAndOverride.mockReturnValue(Object.values(UserRole));
+    const permissions = resolveUserCapabilities({ role: UserRole.TRAINEE });
+
+    expect(permissions).not.toContain('view_assortment_products');
+    expect(permissions).not.toContain('view_assortment_stores');
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/products',
+          user: { role: UserRole.TRAINEE, permissions },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/stores',
+          user: { role: UserRole.TRAINEE, permissions },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does not let a standard marketer role bypass guest export capability', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.BUYER,
+      UserRole.MARKETER,
+      UserRole.CLUB_MANAGER,
+    ]);
+    const permissions = resolveUserCapabilities({ role: UserRole.MARKETER });
+
+    expect(permissions).toContain('view_guests');
+    expect(permissions).not.toContain('export_guests');
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests',
+          user: {
+            role: UserRole.MARKETER,
+            permissions,
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests/export',
+          user: {
+            role: UserRole.MARKETER,
+            permissions,
+          },
+        }),
+      ),
     ).toThrow(ForbiddenException);
   });
 
@@ -612,6 +752,55 @@ describe('RolesGuard', () => {
         }),
       ),
     ).toThrow(ForbiddenException);
+  });
+
+  it('keeps bonus-ledger writes behind both the endpoint role and ledger capability', () => {
+    const endpointRoles = [
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+    ];
+    reflector.getAllAndOverride.mockReturnValue(endpointRoles);
+    reflector.get.mockReturnValue(endpointRoles);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/bonus-ledger/dispatch',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: resolveUserCapabilities({ role: UserRole.MARKETER }),
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/bonus-ledger/dispatch',
+          user: {
+            role: UserRole.MANAGER,
+            permissions: ['manage_guest_game_rules'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/bonus-ledger/dispatch',
+          user: {
+            role: UserRole.MANAGER,
+            permissions: ['operate_guest_game_ledger'],
+          },
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('lets senior and club administrators approve rewards without viewing or managing game rules', () => {

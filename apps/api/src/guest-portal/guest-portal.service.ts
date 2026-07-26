@@ -20001,7 +20001,8 @@ function guestPortalAutomaticXpEventPredicate() {
             AND intent."eventId" = event."id"
         )
         OR (
-          event."externalProvider" = ${IntegrationProvider.LANGAME}
+          event."externalProvider" =
+            ${IntegrationProvider.LANGAME}::"IntegrationProvider"
           AND event."externalId" LIKE ${'guest-game:%'}
           AND NULLIF(event."payload"->>'sourceFactKind', '') IS NOT NULL
         )

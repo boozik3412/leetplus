@@ -1515,6 +1515,7 @@ describe('GuestPortalService', () => {
           'guest-game:%',
         ]),
       );
+      expect(automaticPredicateSql).toContain('::"IntegrationProvider"');
       expect(queryCall[4]).toEqual(activatedAt);
     });
   });

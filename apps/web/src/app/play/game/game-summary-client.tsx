@@ -5612,7 +5612,14 @@ function PlayerProfilePanel({
           pulsing={rewardWalletPulsing}
           onOpen={onRewardWalletOpen}
         />
-      ) : null}
+      ) : (
+        <Link
+          href="/game/rewards"
+          className="lp-club-reward-wallet-history is-standalone"
+        >
+          История наград
+        </Link>
+      )}
 
       {checkInAvailable || pendingCheckInItem ? (
         <section className="lp-club-checkin-card" aria-label="Чекин в клубе">
@@ -14360,6 +14367,10 @@ const clubHomeCss = `
   background: rgba(196, 224, 225, 0.025);
 }
 
+.lp-club-reward-wallet-history.is-standalone {
+  margin-top: 16px;
+}
+
 .lp-club-reward-wallet > small {
   color: var(--quiet);
   font-size: 9px;
@@ -16040,6 +16051,10 @@ const clubHomeCss = `
   }
 
   .lp-club-reward-wallet {
+    margin-top: 0;
+  }
+
+  .lp-club-reward-wallet-history.is-standalone {
     margin-top: 0;
   }
 

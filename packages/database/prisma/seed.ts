@@ -488,6 +488,33 @@ async function seed(prisma: Prisma.TransactionClient) {
     },
   });
 
+  // Staff task catalog rows intentionally restrict physical Store deletion.
+  // Local demo reset removes the dependent graph explicitly; production uses
+  // Store.isActive=false and never reaches this seed-only cleanup path.
+  await prisma.staffTaskRecurringRuleRun.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+
+  await prisma.staffTask.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+
+  await prisma.staffTaskRecurringRule.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+
+  await prisma.staffTaskTemplate.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+
   await prisma.store.deleteMany({
     where: {
       tenantId: tenant.id,

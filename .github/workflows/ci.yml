@@ -58,6 +58,9 @@ jobs:
       - name: Validate staff task integrity inventory command
         run: pnpm --filter database check:staff-task-integrity-inventory
 
+      - name: Validate staff task integrity EXPAND smoke command
+        run: pnpm --filter database check:staff-task-integrity-expand-smoke
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -88,8 +91,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260727120000_staff_task_catalog_audit_expand
-          EXPECTED_DATABASE_MIGRATION_COUNT: "156"
+          EXPECTED_DATABASE_MIGRATION: 20260727131000_staff_task_integrity_expand
+          EXPECTED_DATABASE_MIGRATION_COUNT: "162"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -170,6 +173,11 @@ jobs:
         run: pnpm --filter database db:smoke:staff-task-catalog-audit
         env:
           STAFF_TASK_CATALOG_AUDIT_SMOKE_CONFIRM: run-staff-task-catalog-audit-fixtures
+
+      - name: Rehearse staff task same-tenant EXPAND with legacy rows
+        run: pnpm --filter database db:smoke:staff-task-integrity-expand
+        env:
+          STAFF_TASK_INTEGRITY_EXPAND_SMOKE_CONFIRM: run-staff-task-integrity-expand-fixtures
 
       - name: Verify staff task and recurring-rule transaction security with PostgreSQL
         run: pnpm --filter api test:integration:staff-task-security:pg

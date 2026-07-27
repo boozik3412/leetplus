@@ -420,6 +420,7 @@ model User {
   targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
   platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
 
+  @@unique([tenantId, id], map: "user_tenant_id_uidx")
   @@index([tenantId])
   @@index([tenantId, role])
   @@index([tenantId, accessScope])
@@ -632,6 +633,7 @@ model Store {
   userAccesses                    UserStoreAccess[]
   langameProductConfigurations    LangameClubProductConfiguration[]
 
+  @@unique([tenantId, id], map: "store_tenant_id_uidx")
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@unique([tenantId, publicSlug], map: "store_tenant_public_slug_uidx")
   @@index([tenantId])
@@ -3284,19 +3286,24 @@ model StaffTask {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  // DB-native same-tenant FKs for the template, rule, and User references live
+  // in 20260727131000_staff_task_integrity_expand. Prisma 6.19 cannot model
+  // their partial SET NULL actions; do not db push or accept generated DROP
+  // CONSTRAINT statements without the integrity runbook review.
   tenant                    Tenant                      @relation(fields: [tenantId], references: [id])
-  store                     Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  store                     Store?                      @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "StaffTask_tenantId_storeId_fkey")
   shift                     GuestWorkingShift?          @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  sourceTemplate            StaffTaskTemplate?          @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
-  sourceRecurringRule       StaffTaskRecurringRule?     @relation("StaffTaskRecurringRuleTasks", fields: [sourceRecurringRuleId], references: [id], onDelete: SetNull)
-  createdByUser             User?                       @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser            User?                       @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  sourceTemplate            StaffTaskTemplate?          @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  sourceRecurringRule       StaffTaskRecurringRule?     @relation("StaffTaskRecurringRuleTasks", fields: [sourceRecurringRuleId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  createdByUser             User?                       @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  assignedToUser            User?                       @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
   lastRecurringRuleRuns     StaffTaskRecurringRule[]    @relation("StaffTaskRecurringRuleLastTask")
   recurringRuleScheduleRuns StaffTaskRecurringRuleRun[]
   observers                 StaffTaskObserver[]
   comments                  StaffTaskComment[]
   auditEvents               StaffTaskAuditEvent[]
 
+  @@unique([tenantId, id], map: "staff_task_tenant_id_uidx")
   @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
   @@index([tenantId, createdAt], map: "staff_task_created_idx")
   @@index([storeId], map: "staff_task_store_idx")
@@ -3339,12 +3346,15 @@ model StaffTaskTemplate {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  // The createdByUser same-tenant FK and temporary simple Store RESTRICT FK
+  // are DB-native contracts from 20260727131000_staff_task_integrity_expand.
   tenant         Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  store          Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser  User?                    @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  store          Store?                   @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "StaffTaskTemplate_tenantId_storeId_fkey")
+  createdByUser  User?                    @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
   tasks          StaffTask[]
   recurringRules StaffTaskRecurringRule[]
 
+  @@unique([tenantId, id], map: "staff_task_template_tenant_id_uidx")
   @@index([tenantId, status, type], map: "staff_task_template_status_type_idx")
   @@index([tenantId, createdAt], map: "staff_task_template_created_idx")
   @@index([storeId], map: "staff_task_template_store_idx")
@@ -3377,15 +3387,19 @@ model StaffTaskRecurringRule {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  // DB-native same-tenant FKs for template, actor, assignee, and last task,
+  // plus the temporary simple Store RESTRICT FK, live in the integrity EXPAND
+  // migration. Prisma 6.19 cannot express their partial SET NULL actions.
   tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  template        StaffTaskTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  store           Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser   User?                       @relation("StaffTaskRecurringRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser  User?                       @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  lastCreatedTask StaffTask?                  @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull)
+  template        StaffTaskTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  store           Store?                      @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "StaffTaskRecurringRule_tenantId_storeId_fkey")
+  createdByUser   User?                       @relation("StaffTaskRecurringRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  assignedToUser  User?                       @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull, onUpdate: Restrict)
+  lastCreatedTask StaffTask?                  @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull, onUpdate: Restrict)
   generatedTasks  StaffTask[]                 @relation("StaffTaskRecurringRuleTasks")
   scheduleRuns    StaffTaskRecurringRuleRun[]
 
+  @@unique([tenantId, id], map: "staff_task_rule_tenant_id_uidx")
   @@index([tenantId, status, cadence], map: "staff_task_rule_status_cadence_idx")
   @@index([tenantId, nextRunAt], map: "staff_task_rule_next_run_idx")
   @@index([templateId], map: "staff_task_rule_template_idx")
@@ -3409,9 +3423,11 @@ model StaffTaskRecurringRuleRun {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // DB-native same-tenant FKs for rule and createdTask live in the integrity
+  // EXPAND migration; Prisma 6.19 cannot express partial SET NULL here.
   tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  rule        StaffTaskRecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  createdTask StaffTask?             @relation(fields: [createdTaskId], references: [id], onDelete: SetNull)
+  rule        StaffTaskRecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  createdTask StaffTask?             @relation(fields: [createdTaskId], references: [id], onDelete: SetNull, onUpdate: Restrict)
 
   @@unique([ruleId, scheduledFor], map: "staff_task_rule_run_unique")
   @@index([tenantId, status, scheduledFor], map: "staff_task_rule_run_status_idx")

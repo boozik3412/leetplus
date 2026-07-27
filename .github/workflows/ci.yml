@@ -83,8 +83,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: '2026-07-26T00:00:00Z'
-          EXPECTED_DATABASE_MIGRATION: 20260726110000_reconcile_completed_reward_wallet
-          EXPECTED_DATABASE_MIGRATION_COUNT: '150'
+          EXPECTED_DATABASE_MIGRATION: 20260727090000_access_scope_expand
+          EXPECTED_DATABASE_MIGRATION_COUNT: '151'
 
       - name: Lint web
         run: pnpm --filter web lint
@@ -148,3 +148,8 @@ jobs:
 
       - name: Verify database connectivity and migration state
         run: pnpm --filter database db:smoke
+
+      - name: Verify AccessScope database invariants
+        run: pnpm --filter database db:smoke:access-scope
+        env:
+          ACCESS_SCOPE_SMOKE_CONFIRM: run-access-scope-fixtures

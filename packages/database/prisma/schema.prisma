@@ -21,6 +21,11 @@ enum UserRole {
   TRAINEE
 }
 
+enum UserAccessScope {
+  NETWORK
+  STORES
+}
+
 enum StockMovementType {
   WRITEOFF
   RETURN
@@ -282,6 +287,7 @@ model User {
   passwordHash    String
   fullName        String?
   role            UserRole  @default(OWNER)
+  accessScope     UserAccessScope?
   customRoleId    String?
   isActive        Boolean   @default(true)
   isPlatformAdmin Boolean   @default(false)
@@ -382,6 +388,7 @@ model User {
 
   @@index([tenantId])
   @@index([tenantId, role])
+  @@index([tenantId, accessScope])
   @@index([tenantId, isActive])
   @@index([customRoleId])
 }
@@ -445,6 +452,7 @@ model UserInvite {
   email            String?
   fullName         String?
   role             UserRole
+  accessScope      UserAccessScope?
   customRoleId     String?
   storeIds         String[]  @default([])
   tokenHash        String    @unique
@@ -461,6 +469,7 @@ model UserInvite {
   acceptedBy User?           @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
+  @@index([tenantId, accessScope])
   @@index([tenantId, acceptedAt])
   @@index([expiresAt])
   @@index([customRoleId])

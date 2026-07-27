@@ -8,6 +8,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:smoke": "node scripts/ci-smoke.mjs",
+    "db:smoke:access-scope": "node scripts/access-scope-smoke.mjs",
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",

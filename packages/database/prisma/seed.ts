@@ -2,6 +2,7 @@ import {
   Prisma,
   PrismaClient,
   StockMovementType,
+  UserAccessScope,
   UserRole,
 } from "@prisma/client";
 import { randomBytes, scrypt } from "node:crypto";
@@ -558,6 +559,7 @@ async function seed(prisma: Prisma.TransactionClient) {
         email: demoOwnerCredentials.email,
         fullName: "Local Demo Owner",
         role: UserRole.OWNER,
+        accessScope: UserAccessScope.NETWORK,
         isPlatformAdmin: false,
         passwordHash: demoOwnerPasswordHash,
         emailVerifiedAt: new Date(),

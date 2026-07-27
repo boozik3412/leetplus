@@ -61,7 +61,11 @@
     пять concurrent parent indexes, 14 composite + 14 simple compatibility
     `NOT VALID` FK, archive-first/global-existence Store protection, immutable
     parent IDs и порядок дальнейших `VALIDATE/CONTRACT`.
-13. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+13. [Runbook aggregate reconciliation plan](../security/access-scope/v1/staff-task-integrity-reconciliation-plan-runbook.md) —
+    read-only классификация `8 proposal + 29 operator + 6 review`, exact
+    schema-first gate, actionable cap, `contentDigest`/`executionDigest` и
+    exits `0/1/2/3`.
+14. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
     какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
@@ -94,9 +98,27 @@
   IDs и future-migration guard для 28 DB-native constraints; staged real
   PostgreSQL smoke подтвердил 14 benign legacy updates, 5 UUID + 5 tenant
   move rejections и scoped `prismaDriftDrops=14`; expanded DDL guard пройден,
-  но
-  production-like inventory/reconciliation, `VALIDATE`, `CONTRACT` и
-  deployment не выполнялись.
+  а усиленная rehearsal строит пять concurrent indexes на populated legacy
+  baseline 156 и применяет ровно шесть migrations `157..162`.
+- aggregate-only StaffTask reconciliation planner
+  `2c74c663780b3f183be708a01431c22efe57a723` — not deployed: полный каталог
+  из 43 кодов классифицирован как `8 proposal + 29 operator + 6 review`;
+  обязательны одна read-only `REPEATABLE READ` transaction, exact target /
+  confirmation / production attestation / 40-hex SHA / HMAC и expected
+  database binding. Schema-first gate требует
+  `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
+0 index mismatch`; expected/actual database names не выводятся, а
+  domain-separated HMAC `databaseIdentityDigest` связывает evidence с
+  database name, PostgreSQL cluster и database OID без раскрытия raw identity.
+  Proposal не является authorization, apply path отсутствует, output
+  aggregate-only без identifiers. Инвариант
+  `inventoryExecuted === schema.ready` проверяется fail-closed. Стабильный
+  `contentDigest` и timestamp-bound `executionDigest` не являются
+  row-stable/CAS authorization. Contract tests, clean real PostgreSQL planner
+  и adversarial disposable-clone smoke для неверного FK/index contract прошли.
+- production-like inventory/planner, reconciliation dry-run/apply,
+  `VALIDATE`, `CONTRACT` и deployment не выполнялись.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный
@@ -139,6 +161,21 @@ credentials, encryption keys и необработанные выгрузки.
 - tenant/store IDOR, PII, exports, files, jobs и BFF regression зелёные;
 - staff task integrity inventory имеет zero blocking findings; все review-only
   findings имеют owner и принятое решение;
+- aggregate reconciliation planner запущен на том же production-like
+  snapshot и прошёл exact schema-first gate:
+  `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
+0 index mismatch`;
+  `databaseIdentityMatched=true`, `databaseIdentityDigest` зафиксирован,
+  `inventoryExecuted === schema.ready`, actionable cap не превышен;
+  `proposal` не считается authorization, `contentDigest`/`executionDigest` не
+  используются как row-level/CAS token;
+- adversarial catalog smoke на disposable local/CI clone при сохранении всех
+  28 expected FK отклонил дополнительный конфликтующий FK с другим именем и
+  неверный parent index с `SCHEMA_MISMATCH`, не запустил inventory и не
+  изменил source database;
+- отдельные reconciliation dry-run, approved apply и повторный zero-diff
+  завершены до `VALIDATE`;
 - все 14 StaffTask catalog constraints валидированы после production-like
   reconciliation; три Store delete restrictions и N/N-1 rollback проверены;
 - все 14 simple compatibility FK не удалены до отдельного CONTRACT; rollback

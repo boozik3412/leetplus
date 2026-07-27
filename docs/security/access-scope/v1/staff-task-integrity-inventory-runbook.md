@@ -1,14 +1,14 @@
 # Staff task catalog integrity: inventory и DB-invariant runbook
 
-| Поле                  | Значение                                                                            |
-| --------------------- | ----------------------------------------------------------------------------------- |
-| Статус                | Inventory и DB EXPAND implementation candidates; production inventory не выполнялся |
-| Версия                | 1.1.0                                                                               |
-| Дата                  | 27.07.2026                                                                          |
-| Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                |
-| Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                           |
-| Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)    |
-| Следующий checkpoint  | [StaffTask integrity EXPAND](./staff-task-integrity-expand-runbook.md)              |
+| Поле                  | Значение                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| Статус                | Inventory, aggregate planner и DB EXPAND candidates; production inventory не выполнялся |
+| Версия                | 1.3.0                                                                                   |
+| Дата                  | 27.07.2026                                                                              |
+| Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                    |
+| Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                               |
+| Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)        |
+| Следующий checkpoint  | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)  |
 
 Документ задаёт безопасный порядок проверки legacy-данных `StaffTask`,
 `StaffTaskTemplate`, `StaffTaskRecurringRule` и
@@ -104,6 +104,8 @@ credentials.
 - active Rule у неактивного Store или неактивного Tenant;
 - Platform Admin, inactive, unresolved-scope или out-of-store assignee у
   active Rule либо незавершённой Task;
+- `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID`: незавершённая tenant-global Task
+  назначена пользователю с `STORES` scope;
 - stale `STARTED` Run;
 - повторяющиеся `FAILED` Run выше зафиксированного порога.
 
@@ -133,10 +135,26 @@ Review-находка не должна маскироваться как док
 5. Сохранить только aggregate JSON, SHA, время, target label и exit code в
    защищённый release evidence.
 6. Назначить owner каждому non-zero reason code.
-7. Подготовить отдельный idempotent reconciliation tool с dry-run и
-   обязательным explicit apply. Scanner не превращается в apply-команду.
-8. Повторять scanner после reconciliation до объяснённого zero critical diff.
-9. Только затем репетировать EXPAND/VALIDATE migration.
+7. Запустить отдельный
+   [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md)
+   на exact schema-first gate:
+   `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
+0 index mismatch`; подтвердить hidden expected/actual database identity,
+   domain-separated HMAC `databaseIdentityDigest`,
+   `inventoryExecuted === schema.ready`, `8 proposal + 29 operator + 6 review`,
+   actionable cap и HMAC evidence.
+8. На disposable local/CI clone выполнить adversarial catalog smoke для
+   дополнительного конфликтующего FK с другим именем и index с неверным
+   порядком колонок; оба обязаны дать `SCHEMA_MISMATCH`/exit `3` до inventory,
+   не меняя source database.
+9. Не использовать planner proposal, `contentDigest` или `executionDigest` как
+   authorization. Подготовить отдельный idempotent row-level reconciliation
+   tool с dry-run, обязательным explicit apply, locks/recheck, audit и rollback.
+10. Повторять scanner/planner после reconciliation до объяснённого zero
+    critical diff.
+11. Только затем репетировать отдельный `VALIDATE`; `CONTRACT` выполняется
+    после N-1 window.
 
 Production запуск выполняется отдельно операционным владельцем после backup и
 restore rehearsal. Эта ветка его не выполняет.
@@ -250,6 +268,36 @@ decision: NO-GO | RECONCILE | READY_FOR_EXPAND_REHEARSAL
   расширенный future-migration DDL guard; scoped Prisma drift внутри smoke
   подтвердил `prismaDriftDrops=14` без credentials в argv.
 
+Для aggregate planner candidate
+`2c74c663780b3f183be708a01431c22efe57a723` дополнительно подтверждено:
+
+- planner contract unit suite — `PASS`;
+- clean real PostgreSQL schema 162 вернула `PASS` с exact schema-first
+  catalog: latest migration, unfinished `0`, 14 composite exact, 14 simple
+  exact, `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes
+  exact и `0` index mismatch;
+- классификация полного манифеста равна
+  `8 proposal + 29 operator + 6 review`;
+- `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` является `BLOCKING`;
+- actionable cap исключает review-only counts;
+- одно соединение/read-only RepeatableRead, strict target/confirmation/
+  production attestation/40-hex SHA/HMAC, expected database binding и exits
+  `0/1/2/3` проверены; expected/actual DB names не выводятся;
+  `databaseIdentityDigest` привязан к database/cluster/OID, а
+  `inventoryExecuted === schema.ready` enforced fail-closed;
+- aggregate-only output не содержит row identifiers; proposal не является
+  authorization, apply path отсутствует; `contentDigest` стабилен по content,
+  `executionDigest` привязан к timestamp, оба не являются row-stable/CAS
+  authorization;
+- adversarial disposable-clone smoke добавляет конфликтующий FK с другим
+  именем при сохранении всех 28 expected FK и отдельно подменяет index column
+  order; оба mismatch отклоняются до inventory, source database не меняется.
+
+EXPAND rehearsal теперь использует populated legacy baseline 156 и применяет
+ровно шесть migrations `157..162`; все пять concurrent indexes строятся на
+заполненных parent-таблицах. После EXPAND остаются 14 legacy rows и проходят
+все существующие проверки 14 composite + 14 simple compatibility FK.
+
 Неавтоматизированные остатки P2:
 
 - CI выполняет реальный clean scan, но ещё не создаёт fixtures для каждого из
@@ -277,6 +325,16 @@ Inventory slice считается реализованным, когда:
 
 ## 10. Changelog
 
+- `1.3.0`, 27.07.2026 — planner связан с exact schema-first gate, включая
+  `unexpectedProtectedForeignKeyCount=0`, hidden database identity,
+  `contentDigest`/`executionDigest` и adversarial disposable-clone extra-FK/
+  wrong-index smoke. Output aggregate-only, apply/authorization отсутствуют,
+  внешний beta остаётся `NO-GO`.
+- `1.2.0`, 27.07.2026 — связан aggregate-only reconciliation planner:
+  `8 proposal + 29 operator + 6 review`, exact schema gate, actionable cap,
+  exits `0/1/2/3` и HMAC evidence без
+  apply authorization; EXPAND rehearsal усилена populated baseline
+  `156 → 157..162`.
 - `1.1.0`, 27.07.2026 — связан реализованный schema-only EXPAND candidate:
   162 migrations, пять concurrent parent indexes, 14 composite + 14 simple
   compatibility `NOT VALID` FK, immutable parent IDs,

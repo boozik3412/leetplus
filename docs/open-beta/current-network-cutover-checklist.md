@@ -3,6 +3,8 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
+| Версия          | 1.2.0                                              |
+| Дата            | 27.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
 | External access | Запрещён до успешного Gate 2                       |
@@ -21,6 +23,9 @@
       обновлены после отдельного VALIDATE/CONTRACT.
 - [ ] EXPAND source checkpoint:
       `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — не production deployment.
+- [ ] Reconciliation planner source checkpoint:
+      `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only, no apply,
+      не production deployment.
 - [ ] API/web/edge показывают тот же SHA/build time.
 - [ ] Required CI checks зелёные.
 - [ ] Release decision owner и change window назначены.
@@ -37,6 +42,21 @@
 - [ ] Cross-tenant `UserStoreAccess` count равен `0`.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
+- [ ] Aggregate reconciliation planner выполнен на том же snapshot,
+      release SHA и thresholds; schema-first gate равен
+      `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
+0 index mismatch`, actionable cap не превышен.
+- [ ] Ожидаемое имя БД связано с target и совпало с фактическим
+      `current_database()` (`databaseIdentityMatched=true`); ни одно имя БД не
+      попало в report/evidence.
+- [ ] Evidence содержит domain-separated HMAC `databaseIdentityDigest`,
+      привязанный к database name, PostgreSQL `system_identifier` и database
+      OID без вывода raw identity.
+- [ ] Planner evidence содержит `8 proposal + 29 operator + 6 review`;
+      `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` классифицирован как `BLOCKING`.
+- [ ] Planner proposal не используется как authorization, а `contentDigest` и
+      `executionDigest` — как row-level checksum или CAS token.
 - [ ] Template/Rule/Task/Run inventory evidence содержит только aggregate
       counts и alias `Tenant A / Store A1..A4`, без production ID.
 - [ ] Public/QR/Telegram links проинвентаризированы.
@@ -67,6 +87,9 @@
 - [ ] Backup непосредственно перед изменением успешен.
 - [ ] Restore rehearsal в отдельную БД успешен; RPO/RTO записаны.
 - [ ] Schema-only EXPAND rehearsal успешен с timeout/lock evidence.
+- [ ] EXPAND rehearsal начинается с populated legacy baseline 156 и применяет
+      ровно шесть migration `157..162`; пять concurrent indexes строятся на
+      заполненных parent-таблицах.
 - [ ] Все пять StaffTask parent indexes существуют в ожидаемой schema,
       unique/valid/ready и имеют точный порядок `(tenantId, id)`.
 - [ ] Все 14 same-tenant StaffTask catalog FK присутствуют как `NOT VALID` и
@@ -84,6 +107,30 @@
       cross-tenant row и не допускают dangling `storeId`.
 - [ ] Production-like StaffTask inventory имеет `blockingTotal=0`; выполнены
       отдельные reconciliation dry-run, explicit apply и zero-diff dry-run.
+- [ ] Planner использовал одно соединение и одну
+      `READ ONLY REPEATABLE READ` transaction; exact target/confirmation,
+      production attestation, 40-hex SHA, expected database binding и HMAC
+      contract подтверждены.
+- [ ] Planner output aggregate-only: UUID, row identifiers, database names,
+      URL, credentials и PII отсутствуют.
+- [ ] Planner exit contract `0/1/2/3` и actionable cap проверены; review-only
+      occurrences не расходуют cap.
+- [ ] `summary.inventoryExecuted === schema.ready`; любое противоречие
+      отклонено как safety-contract error/exit `1`.
+- [ ] Row-level reconciliation имела отдельные protected evidence,
+      authorization, locks/recheck, audit и rollback; `contentDigest`/
+      `executionDigest` не использовались вместо них.
+- [ ] `contentDigest` стабилен для одинакового aggregate content, а
+      `executionDigest` меняется вместе с snapshot `generatedAt`; смена БД или
+      PostgreSQL cluster меняет `databaseIdentityDigest` и оба evidence digest.
+- [ ] Adversarial catalog smoke на disposable local/CI clone сохранил все 28
+      expected FK, отдельно отклонил дополнительный конфликтующий FK с другим
+      именем и неверный порядок колонок parent index с
+      `SCHEMA_MISMATCH`/exit `3`; inventory не запускался, source database не
+      изменялась, clone удалён.
+- [ ] URL с `schema=pg_catalog` прочитал migration state только из
+      `public._prisma_migrations`, вернул `SCHEMA_MISMATCH`/exit `3` и не
+      запустил inventory.
 - [ ] Все 14 same-tenant FK валидированы отдельным управляемым шагом;
       `convalidated=true` подтверждён по каждому constraint.
 - [ ] Prisma schema содержит `onUpdate: Restrict` для 11 simple non-Store
@@ -97,8 +144,14 @@
       `staff-task-integrity-expand-runbook.md`, хотя Prisma не отражает
       `convalidated`.
 - [ ] Offline self-test/future-migration guard защищает все 28 DB-native FK от
-      DROP/RENAME и запрещает destructive table/column DDL, DROP/ALTER пяти
-      parent indexes, DROP SCHEMA и неожиданные migration directory names.
+      DROP/RENAME/ALTER, `DROP NOT NULL` contract-колонок, trigger/
+      `session_replication_role` bypass и запрещает destructive table/column
+      DDL, DROP/ALTER пяти parent indexes, DROP SCHEMA и неожиданные migration
+      directory names.
+- [ ] Exact artifact guard подтвердил пять one-statement
+      `CREATE UNIQUE INDEX CONCURRENTLY` migrations `157..161` и финальную
+      migration `162` с transaction/timeouts/lock order/`28 ADD + 14 DROP +
+28 NOT VALID`.
 - [ ] Migration создана create-only и прошла ручной SQL review.
 - [ ] Пять parent UUID update и пять parent `tenantId` move сценариев
       отклонены; identifiers и tenant ownership immutable.
@@ -123,6 +176,8 @@
 - [ ] Staff recurring legacy integrity — scanner exit `0`,
       `blockingTotal=0`, review findings приняты; stale `STARTED` и
       repeated-`FAILED` разобраны.
+- [ ] Staff reconciliation planner — exit `0`, schema ready, cap соблюдён;
+      proposal/operator decisions завершены отдельным approved workflow.
 - [ ] Communications — chat, mentions, receipts, notifications, contact tasks.
 - [ ] Users/roles — delegation, revoke и scope работают сразу.
 - [ ] Attachments `ENFORCED`; inventory/backfill/reconciliation zero-diff.
@@ -176,4 +231,20 @@ Cutover немедленно останавливается при cross-scope �
 несовпадении tenant/store topology, повреждении totals, failed backup/restore,
 неожиданном migration lock, недоступном rollback, attachment mismatch,
 необъяснимом reward/ledger расхождении, отклонении exact Prisma drift,
-ошибке future-migration DDL guard или недоставленном critical alert.
+ошибке future-migration DDL/artifact guard, planner schema/database identity
+mismatch, catalog mismatch/cap exceeded, попытке считать proposal,
+`contentDigest` или `executionDigest` разрешением на apply либо недоставленном
+critical alert.
+
+## Changelog
+
+- `1.2.0`, 27.07.2026 — planner gate расширен до exact schema/catalog и
+  скрытой expected/actual database identity binding; evidence разделена на
+  стабильный `contentDigest` и timestamp-bound `executionDigest`; добавлен
+  adversarial disposable-clone smoke для неверного FK/index contract и exact
+  EXPAND artifact guard. Apply/authorization отсутствуют, внешний beta
+  остаётся `NO-GO`.
+- `1.1.0`, 27.07.2026 — добавлены aggregate reconciliation planner gate,
+  classification `8 + 29 + 6`, schema contract,
+  non-authorization HMAC/proposal rules и populated baseline
+  `156 → 157..162` rehearsal; cutover и внешний beta остаются `NO-GO`.

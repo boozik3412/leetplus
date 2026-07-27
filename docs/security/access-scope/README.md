@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.10.0                                                                                              |
+| Версия контракта               | 1.12.0                                                                                              |
 | Дата                           | 27.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -15,6 +15,7 @@
 | Recurring actor HTTP           | `cbd7a6b426c4e9fd9e29c085eeb8547d88249ca5` — not deployed                                           |
 | Staff task integrity inventory | `56d615437ecfcb90db252016d3e5b83f3f545578` — not run on production                                  |
 | Staff task integrity EXPAND    | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — 162 migrations / 28 guarded FK; not deployed           |
+| Staff reconciliation planner   | `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only; no apply; not deployed                 |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -72,6 +73,10 @@ invite-only открытому тесту. Она отвечает на вопр
     пять concurrent parent indexes, 14 composite + 14 simple compatibility
     `NOT VALID` FK, archive-first/global-existence Store protection, immutable
     parent IDs, staged PostgreSQL smoke и порядок `VALIDATE → CONTRACT`.
+14. [Staff task aggregate reconciliation plan](./v1/staff-task-integrity-reconciliation-plan-runbook.md) —
+    классификация 43 aggregate codes, exact schema-first gate, actionable cap,
+    `contentDigest`/`executionDigest` и безопасный порядок отдельного
+    reconciliation.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -184,17 +189,48 @@ DROP: 11 non-Store composite и три temporary simple Store FK; 11 simple
 non-Store FK он больше не меняет. Unrelated pre-existing ADD/index-rename
 drift учитывается отдельно. Diff запускается внутри staged smoke через
 `--from-schema-datasource`/scoped env без URL или пароля в argv. Offline
-self-test защищает 28 FK от DROP/RENAME и запрещает destructive
-table/column DDL, DROP/ALTER пяти parent indexes, DROP SCHEMA и неожиданные
-migration directory names; разрешены только create-only SQL review,
-`db push` запрещён.
-Staged real PostgreSQL smoke подтвердил baseline 161 → migration 162, все пять
-indexes, каталог 14 composite + 14 simple compatibility FK, 14 отклонённых
-новых invalid writes, три same-tenant и три legacy Store delete protections,
-delete actions, 14 benign legacy updates, пять отклонённых parent UUID,
+self-test защищает 28 FK от DROP/RENAME/ALTER, `DROP NOT NULL`
+contract-колонок, trigger/`session_replication_role` bypass и запрещает
+destructive table/column DDL, DROP/ALTER пяти parent indexes, DROP SCHEMA и
+неожиданные migration directory names. Exact artifact guard отдельно фиксирует
+пять one-statement `CREATE UNIQUE INDEX CONCURRENTLY` и финальную transaction
+с timeouts/lock order/`28 ADD + 14 DROP + 28 NOT VALID`; разрешены только
+create-only SQL review, `db push` запрещён.
+Staged real PostgreSQL smoke теперь начинает с populated legacy baseline 156,
+затем применяет ровно шесть migrations `157..162`. Все пять concurrent indexes
+строятся на заполненных parent-таблицах; сохраняются 14 legacy rows и проходят
+прежние проверки каталога 14 composite + 14 simple compatibility FK,
+14 отклонённых новых invalid writes, три same-tenant и три legacy Store delete
+protections, delete actions, benign updates, пять отклонённых parent UUID,
 пять tenant moves и `prismaDriftDrops=14`.
-Production-like inventory/reconciliation, `VALIDATE`, `CONTRACT`, deployment
-и production cutover не выполнялись.
+
+Следующим bounded candidate реализован aggregate-only reconciliation planner
+`2c74c663780b3f183be708a01431c22efe57a723`. Он использует одно соединение и
+одну `READ ONLY REPEATABLE READ` transaction, требует exact
+target/confirmation, production attestation, 40-hex release SHA, HMAC и
+expected database name. Ожидаемое имя связано с target и сравнивается с
+фактическим `current_database()` внутри snapshot; оба имени не выводятся.
+Domain-separated HMAC `databaseIdentityDigest` дополнительно связывает
+evidence с database name, PostgreSQL `system_identifier` и database OID без
+вывода raw identity.
+Полный каталог из 43 reason codes классифицирован как `8 proposal +
+29 operator + 6 review`; `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` является
+`BLOCKING`. Schema-first gate требует exact
+`162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
+0 index mismatch` и `databaseIdentityMatched=true`. Exits — `0/1/2/3`,
+actionable cap исключает review-only counts. Proposal не является
+authorization, apply path отсутствует, output aggregate-only без
+identifiers/database names. Инвариант
+`summary.inventoryExecuted === schema.ready` проверяется fail-closed.
+`contentDigest` стабилен по content, `executionDigest` привязан к
+`generatedAt`; оба не являются row-stable checksum или CAS authorization.
+Contract suite, clean real PostgreSQL planner и adversarial disposable-clone
+smoke для дополнительного конфликтующего FK/неверного index contract прошли;
+`schema=pg_catalog` также fail-closed отклоняется до inventory.
+
+Production-like inventory/planner, reconciliation dry-run/apply, `VALIDATE`,
+`CONTRACT`, deployment и production cutover не выполнялись.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -212,6 +248,17 @@ Production-like inventory/reconciliation, `VALIDATE`, `CONTRACT`, deployment
 
 ## Changelog
 
+- `1.12.0`, 27.07.2026 — reconciliation contract усилен schema-first exact
+  gate, скрытой expected/actual database identity binding,
+  `contentDigest`/`executionDigest` и adversarial disposable-clone smoke для
+  неверного FK/index; EXPAND guard фиксирует exact migration artifacts и
+  дополнительные DDL bypass. Apply/authorization отсутствуют, внешний beta
+  остаётся `NO-GO`.
+- `1.11.0`, 27.07.2026 — добавлен aggregate-only reconciliation planner:
+  classification `8 proposal + 29 operator + 6 review`, exact schema gate,
+  exits `0/1/2/3`, actionable cap и HMAC evidence с явным
+  запретом использовать proposal/HMAC evidence как apply authorization; EXPAND smoke
+  усилен populated baseline `156 → 157..162`.
 - `1.10.0`, 27.07.2026 — добавлен schema-only StaffTask integrity EXPAND:
   162 migrations, пять concurrent parent indexes, 14 composite + 14 simple
   compatibility `NOT VALID` FK, archive-first/global-existence protection,

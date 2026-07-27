@@ -1,18 +1,19 @@
 # Staff task integrity EXPAND: rollout и validation runbook
 
-| Поле                    | Значение                                                                           |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed |
-| Версия                  | 1.0.0                                                                              |
-| Дата                    | 27.07.2026                                                                         |
-| Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                               |
-| Migration count         | 162                                                                                |
-| Latest migration        | `20260727131000_staff_task_integrity_expand`                                       |
-| DB-native guard         | 28 FK: 14 composite + 14 simple compatibility                                      |
-| Compatibility catalog   | 14 simple `NOT VALID`: 11 non-Store + 3 Store                                      |
-| Candidate SHA           | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed                          |
-| Предыдущий этап         | [Integrity inventory](./staff-task-integrity-inventory-runbook.md)                 |
-| Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)               |
+| Поле                    | Значение                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed     |
+| Версия                  | 1.2.0                                                                                  |
+| Дата                    | 27.07.2026                                                                             |
+| Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                   |
+| Migration count         | 162                                                                                    |
+| Latest migration        | `20260727131000_staff_task_integrity_expand`                                           |
+| DB-native guard         | 28 FK: 14 composite + 14 simple compatibility                                          |
+| Compatibility catalog   | 14 simple `NOT VALID`: 11 non-Store + 3 Store                                          |
+| Candidate SHA           | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed                              |
+| Предыдущий этап         | [Integrity inventory](./staff-task-integrity-inventory-runbook.md)                     |
+| Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md) |
+| Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)                   |
 
 Документ описывает schema-only фазу `EXPAND` для same-tenant ссылок
 `StaffTaskTemplate`, `StaffTaskRecurringRule`, `StaffTaskRecurringRuleRun` и
@@ -189,14 +190,25 @@ security contract.
 добавляется в migration chain. `prisma db push` запрещён: schema diff не
 представляет manual constraints полностью и может предложить удалить защиту.
 Offline self-test сканирует все последующие migration SQL и падает при попытке
-`DROP CONSTRAINT` или `RENAME CONSTRAINT` любого из 28 DB-native FK. Guard
-также запрещает:
+`DROP CONSTRAINT`, `RENAME CONSTRAINT` или `ALTER CONSTRAINT` любого из 28
+DB-native FK. Guard также запрещает:
 
 - `DROP TABLE`, rename protected table и `DROP COLUMN` на шести участвующих
   таблицах;
+- `DROP NOT NULL` обязательных contract-колонок, `DISABLE TRIGGER` и
+  `session_replication_role`;
 - `DROP INDEX` или `ALTER INDEX` для пяти parent indexes;
 - `DROP SCHEMA`;
 - migration directories с неожиданным именем вне frozen naming contract.
+
+Exact artifact contract дополнительно требует:
+
+- migrations `157..161` содержат ровно по одному executable
+  `CREATE UNIQUE INDEX CONCURRENTLY` с точным именем, parent table и
+  `(tenantId, id)`;
+- migration `162` остаётся одной explicit transaction с `lock_timeout=5s`,
+  `statement_timeout=2min`, фиксированным lock order, ровно 28 ожидаемыми
+  `ADD CONSTRAINT`, 14 compatibility `DROP CONSTRAINT` и 28 `NOT VALID`.
 
 ## 5. Локальная и CI rehearsal
 
@@ -215,9 +227,14 @@ checks. Smoke обязан работать в собственной случа
 
 Подтверждённый локальный contract:
 
-- baseline из 161 migration применяется отдельно, затем накатывается только
-  финальный EXPAND; полный clean path содержит 162/162 migration;
-- до EXPAND создаются 14 контролируемых legacy violations;
+- populated legacy baseline из 156 migrations применяется отдельно, затем
+  по порядку накатываются ровно шесть migrations `157..162`; полный clean path
+  содержит 162/162 migration;
+- до migration 157 создаётся заполненный graph и 14 контролируемых legacy
+  violations;
+- пять concurrent indexes действительно строятся на populated parent-таблицах
+  `Store`, `User`, `StaffTaskTemplate`, `StaffTaskRecurringRule` и
+  `StaffTask`;
 - после EXPAND все 14 legacy invalid rows проходят benign non-FK update и
   остаются на месте;
 - все пять parent indexes имеют точный key contract;
@@ -246,6 +263,16 @@ checks. Smoke обязан работать в собственной случа
   clean schema; inventory возвращает 43 reason code и zero blocking/review.
 - exact scoped Prisma drift check возвращает `prismaDriftDrops=14`; URL и
   credentials не попадают в argv.
+- aggregate planner проходит schema-first exact gate
+  `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
+0 index mismatch`; migration state читается из
+  `public._prisma_migrations`.
+- adversarial catalog smoke на disposable local/CI clone сохраняет все 28
+  expected FK, добавляет дополнительный конфликтующий FK с другим именем и
+  отдельно создаёт parent index с неверным порядком колонок; оба сценария
+  отклоняются с `SCHEMA_MISMATCH`/exit `3` до inventory, source database не
+  меняется, clone удаляется.
 
 Проверка намеренно доказывает свойства migration contract, а не качество
 production-данных.
@@ -259,19 +286,30 @@ production-данных.
 2. восстановить свежий production-like snapshot в отдельную БД;
 3. выполнить guarded read-only inventory и сохранить только aggregate
    evidence;
-4. назначить owner всем review findings и получить
-   `blockingTotal=0`;
-5. выполнить отдельный idempotent reconciliation dry-run, explicit apply и
-   повторный zero-diff dry-run;
-6. проверить backup restore, long transactions, свободное место, replication
+4. на exact schema 162 выполнить
+   [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md):
+   latest migration, unfinished `0`, 14 composite exact, 14 simple exact,
+   `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes exact,
+   `0` index mismatch, hidden expected/actual database identity,
+   domain-separated HMAC `databaseIdentityDigest`,
+   `inventoryExecuted === schema.ready`,
+   classification `8 proposal + 29 operator + 6 review`, actionable cap и exit
+   contract;
+5. назначить owner всем review/operator/proposal findings и получить
+   `blockingTotal=0`; proposal, `contentDigest` и `executionDigest` не считать
+   authorization;
+6. выполнить отдельный idempotent row-level reconciliation dry-run, explicit
+   apply и повторный zero-diff dry-run;
+7. проверить backup restore, long transactions, свободное место, replication
    health и change window;
-7. прогнать baseline → EXPAND и N/N-1 application compatibility;
-8. измерить concurrent index duration и metadata lock duration;
-9. проверить abort/retry и application rollback без удаления принятых
-   constraints;
-10. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
+8. прогнать populated baseline 156 → exact six migrations 157..162 и N/N-1
+   application compatibility;
+9. измерить concurrent index duration и metadata lock duration;
+10. проверить abort/retry и application rollback без удаления принятых
+    constraints;
+11. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
     знает нового archive-first delete order и не является rollback-шагом;
-11. получить явное решение `GO` для schema-only release.
+12. получить явное решение `GO` для schema-only release.
 
 Ни один шаг не выполняется автоматически из этого документа.
 
@@ -359,6 +397,21 @@ unrelated_add_index_rename_drift_classified:
 legacy_benign_non_fk_updates: 0/14
 inventory_blocking_total:
 inventory_review_total:
+reconciliation_planner_sha:
+reconciliation_planner_exit:
+reconciliation_candidate_occurrences:
+databaseIdentityMatched: true
+databaseIdentityDigest:
+reconciliation_inventoryExecuted: true
+compositeContractMatchCount: 0/14
+simpleContractMatchCount: 0/14
+foreignKeyContractMismatchCount: 0
+unexpectedProtectedForeignKeyCount: 0
+parentIndexContractMatchCount: 0/5
+parentIndexContractMismatchCount: 0
+reconciliation_contentDigest:
+reconciliation_executionDigest:
+proposal_is_authorization: false
 store_delete_restrict_checks: 0/3
 legacy_store_delete_protection_checks: 0/3
 parentIdentifierUpdatesRejected: 0/5
@@ -373,3 +426,18 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 В git сохраняются только aliases, counts, timings, exact SHA и ссылки на
 защищённые evidence. Production ID, database URLs, credentials и raw rows
 запрещены.
+
+## 11. Changelog
+
+- `1.2.0`, 27.07.2026 — добавлены exact EXPAND artifact и future-DDL guards;
+  planner gate усилен hidden database identity, exact FK/index catalog,
+  `unexpectedProtectedForeignKeyCount=0`, `contentDigest`/`executionDigest` и
+  adversarial disposable-clone extra-FK/wrong-index smoke. Output
+  aggregate-only, apply/authorization отсутствуют, внешний beta остаётся
+  `NO-GO`.
+- `1.1.0`, 27.07.2026 — rehearsal усилена до populated legacy baseline 156 с
+  применением ровно шести migrations `157..162` и реальной concurrent index
+  build на заполненных parent-таблицах; добавлен aggregate reconciliation
+  planner gate с явным запретом использовать proposal или HMAC evidence как
+  apply authorization.
+- `1.0.0`, 27.07.2026 — создан schema-only EXPAND rollout/validation runbook.

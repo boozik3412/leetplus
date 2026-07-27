@@ -1,12 +1,12 @@
 # Staff task templates и recurring rules: AccessScope adoption plan
 
-| Поле           | Значение                                                                                                    |
-| -------------- | ----------------------------------------------------------------------------------------------------------- |
-| Статус         | templates, recurring actor HTTP, integrity inventory и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.5.0                                                                                                       |
-| Дата           | 27.07.2026                                                                                                  |
-| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                        |
-| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                      |
+| Поле           | Значение                                                                                                  |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| Статус         | templates, recurring actor HTTP, inventory/planner и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
+| Версия         | 1.7.0                                                                                                     |
+| Дата           | 27.07.2026                                                                                                |
+| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                      |
+| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                    |
 
 Документ фиксирует route/action/job inventory для шаблонов и регулярных задач.
 Template CRUD/launch уже реализован отдельным bounded candidate, описанным в
@@ -15,6 +15,8 @@ Recurring actor HTTP реализован следующим
 [checkpoint](./staff-task-recurring-http-implementation-checkpoint.md).
 Same-tenant schema-only EXPAND описан отдельным
 [rollout/validation runbook](./staff-task-integrity-expand-runbook.md).
+Aggregate-only классификация будущей reconciliation описана в
+[reconciliation plan runbook](./staff-task-integrity-reconciliation-plan-runbook.md).
 Scheduler и scheduled all-tenant HTTP не зарегистрированы и всё ещё не
 применяют system execution contract, поэтому весь catalog slice и внешний тест
 остаются `NO-GO`.
@@ -61,7 +63,8 @@ Scheduler и scheduled all-tenant HTTP не зарегистрированы и 
 9. Template/Rule domain audit реализован; retention/system denied attempts ещё
    требуют общей политики.
 10. Unit и PG race/rollback suite добавлены; guarded inventory candidate готов,
-    но production-like scan/reconciliation, API/BFF/browser и scheduler lease
+    aggregate-only reconciliation planner также реализован, но
+    production-like scan/reconciliation, API/BFF/browser и scheduler lease
     suite ещё обязательны.
 11. Store-bound actor schedule использует IANA timezone/DST policy. Global Rule
     имеет UTC fallback и не допускается в первую внешнюю когорту до persisted
@@ -179,16 +182,49 @@ Schema-only EXPAND реализован отдельным bounded candidate
   три temporary simple Store FK; 11 simple non-Store FK он не меняет,
   unrelated ADD/index-rename drift рассматривается отдельно; smoke получает
   diff через `--from-schema-datasource`/scoped env без URL или пароля в argv;
-- offline self-test защищает 28 FK от DROP/RENAME и запрещает destructive
-  table/column DDL, DROP/ALTER пяти parent indexes, DROP SCHEMA и неожиданные
-  migration directory names; разрешены только create-only generation и ручной
-  SQL review, `db push` запрещён;
+- offline self-test защищает 28 FK от DROP/RENAME/ALTER,
+  `DROP NOT NULL` contract-колонок, trigger/`session_replication_role` bypass и
+  запрещает destructive table/column DDL, DROP/ALTER пяти parent indexes,
+  DROP SCHEMA и неожиданные migration directory names; exact artifact guard
+  фиксирует пять one-statement concurrent index migrations и финальную
+  transaction/timeouts/lock order/`28 ADD + 14 DROP + 28 NOT VALID`;
+  разрешены только create-only generation и ручной SQL review, `db push`
+  запрещён;
 - полная схема содержит 162 migration, latest —
   `20260727131000_staff_task_integrity_expand`.
 
 Порядок rehearsal, `VALIDATE`, `CONTRACT` и rollback зафиксирован в
 [EXPAND runbook](./staff-task-integrity-expand-runbook.md). Наличие candidate
 не отменяет обязательный production-like inventory и reconciliation.
+
+Aggregate-only reconciliation planner реализован candidate
+`2c74c663780b3f183be708a01431c22efe57a723` и описан в отдельном
+[runbook](./staff-task-integrity-reconciliation-plan-runbook.md):
+
+- использует одно соединение и одну `READ ONLY REPEATABLE READ` transaction;
+- требует exact target/confirmation, production attestation, 40-hex
+  `RELEASE_SHA`, HMAC key и expected database binding; expected/actual DB
+  names не выводятся; domain-separated HMAC `databaseIdentityDigest` связывает
+  evidence с database name, PostgreSQL cluster и database OID без raw identity;
+- принимает только полный каталог из 43 кодов:
+  `8 proposal + 29 operator + 6 review`;
+- считает actionable cap только по proposal/operator, исключая review-only
+  counts;
+- выполняет schema-first exact gate
+  `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
+0 index mismatch`;
+- использует exits `0/1/2/3`;
+- считает `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` blocking;
+- fail-closed требует `inventoryExecuted === schema.ready`;
+- не имеет apply path; proposal не является authorization; aggregate-only
+  output не содержит row identifiers/database names; стабильный
+  `contentDigest` и timestamp-bound `executionDigest` не являются row-stable
+  checksum или CAS/apply token.
+
+Planner только оценивает объём и классы работы. Row-level evidence,
+idempotent dry-run/apply, locks/recheck, audit, rollback и повторный zero-diff
+остаются отдельным следующим P0.
 
 ## 5. Обязательная test topology
 
@@ -211,11 +247,20 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
   recurring 5/5, реализована и обязательна в CI;
 - integrity inventory contract — 9/9; clean PostgreSQL со 162 миграциями
   `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
-- staged real PostgreSQL EXPAND smoke: baseline 161 → migration 162, пять
-  parent indexes, 14 composite + 14 simple compatibility `NOT VALID` FK,
-  14 benign legacy updates, 14 rejected new invalid writes, три archive-first,
-  три legacy Store delete protections, пять rejected UUID + пять tenant moves
-  и `prismaDriftDrops=14` — pass;
+- aggregate reconciliation planner contract — pass; clean real PostgreSQL
+  schema прошла exact gate `162/latest/0 + 14/14/0/0 + 5/0` и вернула `PASS`;
+- identity/inventory contract подтверждает HMAC `databaseIdentityDigest`,
+  различие evidence между БД/кластерами и отклонение противоречивого
+  `inventoryExecuted`;
+- adversarial catalog smoke на disposable local/CI clone сохранил все expected
+  FK, отклонил дополнительный конфликтующий FK и неверный порядок колонок
+  index до inventory; source database не изменена, clone удалён;
+- staged real PostgreSQL EXPAND smoke: populated legacy baseline 156 → ровно
+  шесть migrations `157..162`; пять parent indexes построены на заполненных
+  таблицах, 14 legacy rows сохранены, 14 composite + 14 simple compatibility
+  `NOT VALID` FK, 14 benign legacy updates, 14 rejected new invalid writes,
+  три archive-first, три legacy Store delete protections, пять rejected UUID
+  - пять tenant moves и `prismaDriftDrops=14` — pass;
 - API/BFF/browser negative journeys.
 
 Текущий recurring checkpoint: focused 27 suites/375 tests и full API
@@ -239,12 +284,26 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
    staging/production-like rehearsal.
 9. После N-1 rollback window отдельный CONTRACT удалил ровно 14 simple
    compatibility FK и сохранил guard для 14 composite FK.
+10. Aggregate planner на production-like snapshot прошёл exact schema gate и
+    cap; proposal/operator обработаны отдельным approved reconciliation
+    workflow, `contentDigest`/`executionDigest` не использовались как
+    row-level/CAS authorization.
 
 `VERIFIED` требует staging/canary evidence, exact release SHA, scheduler
 ownership и общий Gate 2.
 
 ## 7. Changelog
 
+- `1.7.0`, 27.07.2026 — planner усилен schema-first exact gate, скрытой
+  expected/actual database identity binding, aggregate-only/no-ID contract,
+  `contentDigest`/`executionDigest` и adversarial disposable-clone FK/index
+  smoke; EXPAND получил exact artifact/future-DDL guards. Apply/authorization
+  отсутствуют, внешний beta остаётся `NO-GO`.
+- `1.6.0`, 27.07.2026 — добавлен aggregate-only reconciliation planner:
+  `8 proposal + 29 operator + 6 review`, exact schema gate, exits `0/1/2/3`,
+  actionable cap и HMAC evidence с
+  запретом использовать proposal/HMAC evidence как apply authorization; EXPAND
+  rehearsal усилена populated baseline `156 → 157..162`.
 - `1.5.0`, 27.07.2026 — добавлен same-tenant schema-only EXPAND candidate:
   пять concurrent parent indexes, 14 composite и 14 simple compatibility
   `NOT VALID` FK, archive-first/global-existence Store protection, immutable

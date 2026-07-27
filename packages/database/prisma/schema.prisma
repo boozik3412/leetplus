@@ -26,6 +26,36 @@ enum UserAccessScope {
   STORES
 }
 
+enum StaffAttachmentState {
+  PENDING
+  BOUND
+  UNRESOLVED
+  QUARANTINED
+}
+
+enum StaffAttachmentBindingState {
+  BOUND
+  UNRESOLVED
+  QUARANTINED
+}
+
+enum StaffAttachmentResourceKind {
+  CHAT_MESSAGE
+  STAFF_TASK
+  CHECKLIST_RUN
+  KNOWLEDGE_ARTICLE
+  SHIFT_REGULATION
+  TRAINING_COURSE
+  ONBOARDING_PLAN
+}
+
+enum StaffAttachmentBindingSource {
+  NATIVE
+  CHAT_RELATION_BACKFILL
+  LEGACY_REFERENCE_BACKFILL
+  MANUAL_RECONCILIATION
+}
+
 enum StockMovementType {
   WRITEOFF
   RETURN
@@ -259,6 +289,7 @@ model Tenant {
   staffChecklistTemplates              StaffChecklistTemplate[]
   staffChecklistRuns                   StaffChecklistRun[]
   staffAttachments                     StaffAttachment[]
+  staffAttachmentBindings              StaffAttachmentBinding[]
   staffDisciplinePolicies              StaffDisciplinePolicy[]
   staffDisciplineRules                 StaffDisciplineRule[]
   staffDisciplineRecords               StaffDisciplineRecord[]
@@ -381,6 +412,7 @@ model User {
   staffChatMentions                    StaffChatMention[]                    @relation("StaffChatMentionUser")
   staffChatReadReceipts                StaffChatReadReceipt[]
   uploadedStaffAttachments             StaffAttachment[]                     @relation("StaffAttachmentUploadedBy")
+  createdStaffAttachmentBindings       StaffAttachmentBinding[]              @relation("StaffAttachmentBindingCreatedBy")
   acknowledgedStaffNotifications       StaffNotification[]                   @relation("StaffNotificationAcknowledgedBy")
   resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
   targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
@@ -3425,21 +3457,57 @@ model StaffTaskAuditEvent {
 }
 
 model StaffAttachment {
-  id               String   @id @default(uuid())
-  tenantId         String
-  uploadedByUserId String?
-  fileName         String
-  contentType      String
-  byteSize         Int
-  data             Bytes
-  createdAt        DateTime @default(now())
+  id                 String               @id @default(uuid())
+  tenantId           String
+  uploadedByUserId   String?
+  fileName           String
+  contentType        String
+  byteSize           Int
+  data               Bytes
+  state              StaffAttachmentState @default(UNRESOLVED)
+  pendingExpiresAt   DateTime?
+  stateReasonCode    String?              @default("LEGACY_UNCLASSIFIED")
+  stateChangedAt     DateTime             @default(now())
+  createdAt          DateTime             @default(now())
 
   tenant         Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   uploadedByUser User?                        @relation("StaffAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   chatMessages   StaffChatMessageAttachment[]
+  bindings       StaffAttachmentBinding[]
 
   @@index([tenantId, createdAt], map: "staff_attachment_tenant_created_idx")
   @@index([uploadedByUserId], map: "staff_attachment_uploaded_by_idx")
+  @@index([tenantId, state, createdAt, id], map: "staff_attachment_tenant_state_created_idx")
+}
+
+model StaffAttachmentBinding {
+  id                    String                       @id @default(uuid())
+  tenantId              String
+  attachmentId          String?
+  candidateAttachmentId String
+  resourceKind          StaffAttachmentResourceKind
+  resourceId            String
+  resourceStoreId       String?
+  state                 StaffAttachmentBindingState @default(UNRESOLVED)
+  source                StaffAttachmentBindingSource
+  sourceKey             String
+  createdByUserId       String?
+  reasonCode            String?
+  resolvedAt            DateTime?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attachment   StaffAttachment? @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  createdByUser User?           @relation("StaffAttachmentBindingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, resourceKind, resourceId, sourceKey], map: "staff_attachment_binding_source_unique")
+  @@index([tenantId, attachmentId, state], map: "staff_attachment_binding_attachment_state_idx")
+  @@index([tenantId, resourceKind, resourceId, state], map: "staff_attachment_binding_resource_state_idx")
+  @@index([tenantId, candidateAttachmentId, state], map: "staff_attachment_binding_candidate_state_idx")
+  @@index([tenantId, state, createdAt], map: "staff_attachment_binding_tenant_state_created_idx")
+  @@index([attachmentId], map: "staff_attachment_binding_attachment_fk_idx")
+  @@index([createdByUserId], map: "staff_attachment_binding_created_by_idx")
 }
 
 model StaffKnowledgeSettings {

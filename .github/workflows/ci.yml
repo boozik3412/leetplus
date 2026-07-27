@@ -82,8 +82,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: '2026-07-26T00:00:00Z'
-          EXPECTED_DATABASE_MIGRATION: 20260727090000_access_scope_expand
-          EXPECTED_DATABASE_MIGRATION_COUNT: '151'
+          EXPECTED_DATABASE_MIGRATION: 20260727112000_staff_attachment_pending_expiry_index
+          EXPECTED_DATABASE_MIGRATION_COUNT: '154'
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
 
       - name: Lint web
@@ -153,3 +153,8 @@ jobs:
         run: pnpm --filter database db:smoke:access-scope
         env:
           ACCESS_SCOPE_SMOKE_CONFIRM: run-access-scope-fixtures
+
+      - name: Verify staff attachment ACL database invariants
+        run: pnpm --filter database db:smoke:attachment-acl
+        env:
+          STAFF_ATTACHMENT_ACL_SMOKE_CONFIRM: run-staff-attachment-acl-fixtures

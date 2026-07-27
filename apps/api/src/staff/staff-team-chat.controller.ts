@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
-import { from, interval, map, startWith, switchMap } from 'rxjs';
+import { from, map } from 'rxjs';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -54,11 +54,9 @@ export class StaffTeamChatController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: StaffTeamChatQuery,
   ) {
-    return interval(TEAM_CHAT_EVENTS_INTERVAL_MS).pipe(
-      startWith(0),
-      switchMap(() =>
-        from(this.staffTeamChatService.getLiveState(user, query)),
-      ),
+    // One event per connection makes every browser retry pass through
+    // JwtAuthGuard again, so scope revocation applies on the next poll.
+    return from(this.staffTeamChatService.getLiveState(user, query)).pipe(
       map((data) => ({
         type: 'team-chat-state',
         retry: TEAM_CHAT_EVENTS_INTERVAL_MS,

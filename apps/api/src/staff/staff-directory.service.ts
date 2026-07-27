@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -11,6 +12,7 @@ import { parseLangameDate as parseLangameDateValue } from '../integrations/langa
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { LangameWorkingShift } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
 const memberStatuses = [
@@ -215,8 +217,29 @@ const staffMemberInclude = {
   createdByUser: { select: { id: true, email: true, fullName: true } },
 } satisfies Prisma.StaffMemberInclude;
 
+const staffDirectoryUserSelect = {
+  id: true,
+  tenantId: true,
+  email: true,
+  fullName: true,
+  role: true,
+  accessScope: true,
+  isActive: true,
+  isPlatformAdmin: true,
+  storeAccesses: {
+    select: {
+      storeId: true,
+      store: { select: { tenantId: true } },
+    },
+  },
+} satisfies Prisma.UserSelect;
+
 type StaffMemberRow = Prisma.StaffMemberGetPayload<{
   include: typeof staffMemberInclude;
+}>;
+
+type StaffDirectoryUserRow = Prisma.UserGetPayload<{
+  select: typeof staffDirectoryUserSelect;
 }>;
 
 @Injectable()
@@ -226,16 +249,25 @@ export class StaffDirectoryService {
     private readonly tenantContextService: TenantContextService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
+    private readonly accessScopeService: AccessScopeService,
   ) {}
 
   async getDirectory(
     user: AuthenticatedUser,
     query: StaffDirectoryQuery = {},
   ): Promise<StaffDirectoryReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    await this.ensureAccountBackedStaffMembers(tenantId);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const actorScope = this.accessScopeService.resolve(user);
     const filters = this.resolveFilters(query);
-    const where = this.buildWhere(tenantId, filters);
+    const visibleStoreIds =
+      this.accessScopeService.resolveRequestedStoreIds(user);
+
+    if (filters.storeId) {
+      await this.assertRequestedStore(user, tenantId, filters.storeId);
+    }
+
+    await this.ensureAccountBackedStaffMembers(tenantId, user);
+    const where = this.buildWhere(tenantId, filters, visibleStoreIds);
     const canManageDirectory = this.canManageDirectory(user);
 
     const [rows, stores, users, legacyMappings, langameUsers] =
@@ -247,32 +279,36 @@ export class StaffDirectoryService {
           take: 300,
         }),
         this.prisma.store.findMany({
-          where: { tenantId },
+          where: {
+            tenantId,
+            ...(visibleStoreIds ? { id: { in: [...visibleStoreIds] } } : {}),
+          },
           select: { id: true, name: true, isActive: true },
           orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         }),
         this.prisma.user.findMany({
-          where: { tenantId },
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            role: true,
-            isActive: true,
-          },
+          where: this.buildVisibleUserWhere(user, tenantId),
+          select: staffDirectoryUserSelect,
           orderBy: [
             { isActive: 'desc' },
             { fullName: 'asc' },
             { email: 'asc' },
           ],
         }),
-        this.getLegacyMappings(tenantId),
-        this.getLangameUsers(tenantId),
+        actorScope.mode === 'NETWORK'
+          ? this.getLegacyMappings(tenantId)
+          : Promise.resolve([]),
+        actorScope.mode === 'NETWORK'
+          ? this.getLangameUsers(tenantId)
+          : Promise.resolve([]),
       ]);
     const langameUsersByKey = this.langameUsersByKey(langameUsers);
     const responseRows = rows.map((row) =>
       this.toMemberResponse(row, this.findLangameUser(row, langameUsersByKey)),
     );
+    const visibleUsers = users
+      .filter((account) => this.isVisibleUserTarget(user, account))
+      .map((account) => this.toDirectoryUser(account));
 
     return {
       filters,
@@ -280,18 +316,21 @@ export class StaffDirectoryService {
       summary: this.buildSummary(responseRows),
       rows: responseRows,
       stores,
-      users,
+      users: visibleUsers,
       legacyMappings: this.attachMappedMembers(responseRows, legacyMappings),
       langameUsers: this.attachMappedLangameUsers(responseRows, langameUsers),
     };
   }
 
   async getCurrentMember(user: AuthenticatedUser) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    await this.ensureAccountBackedStaffMembers(tenantId, user.id);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const visibleStoreIds =
+      this.accessScopeService.resolveRequestedStoreIds(user);
+    await this.ensureAccountBackedStaffMembers(tenantId, user, user.id);
     const rows = await this.prisma.staffMember.findMany({
       where: {
         tenantId,
+        ...(visibleStoreIds ? { storeId: { in: [...visibleStoreIds] } } : {}),
         OR: [
           { userId: user.id },
           { user: { email: user.email } },
@@ -309,7 +348,7 @@ export class StaffDirectoryService {
       null;
 
     const langameUser = row
-      ? await this.getLangameUserForMember(tenantId, row)
+      ? await this.getVisibleLangameUserForMember(user, tenantId, row)
       : null;
 
     return {
@@ -317,18 +356,43 @@ export class StaffDirectoryService {
     };
   }
 
+  async getMember(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<StaffMemberResponse> {
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const row = await this.prisma.staffMember.findFirst({
+      where: { id, tenantId },
+      include: staffMemberInclude,
+    });
+
+    if (!row) {
+      throw new NotFoundException('Staff member not found');
+    }
+
+    this.assertMemberResourceVisible(user, row.storeId);
+    const langameUser = await this.getVisibleLangameUserForMember(
+      user,
+      tenantId,
+      row,
+    );
+
+    return this.toMemberResponse(row, langameUser);
+  }
+
   async getActiveShiftCandidates(
     user: AuthenticatedUser,
     query: StaffActiveShiftQuery = {},
   ): Promise<StaffActiveShiftCandidatesReport> {
     this.assertCanManageDirectory(user);
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const storeId = this.cleanString(query.storeId);
 
     if (!storeId) {
       throw new BadRequestException('Store is required');
     }
 
+    await this.assertRequestedStore(user, tenantId, storeId);
     const store = await this.prisma.store.findFirst({
       where: { id: storeId, tenantId },
       select: {
@@ -343,7 +407,7 @@ export class StaffDirectoryService {
     });
 
     if (!store) {
-      throw new NotFoundException('Store not found');
+      throw new ForbiddenException('Store is outside your access scope');
     }
 
     const checkedAt = new Date();
@@ -444,8 +508,10 @@ export class StaffDirectoryService {
 
   async createMember(user: AuthenticatedUser, dto: StaffMemberDto) {
     this.assertCanManageDirectory(user);
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const data = await this.normalizeMemberData(tenantId, dto, true);
+    const { tenantId } = this.tenantContextService.resolve(user);
+    this.assertLangameIdentityCreateScope(user, dto);
+    const data = await this.normalizeMemberData(user, tenantId, dto, true);
+    this.assertMemberMutationScope(user, undefined, this.dataStoreId(data));
     const created = await this.prisma.staffMember.create({
       data: {
         ...(data as Prisma.StaffMemberUncheckedCreateInput),
@@ -455,31 +521,76 @@ export class StaffDirectoryService {
       include: staffMemberInclude,
     });
 
-    const langameUser = await this.getLangameUserForMember(tenantId, created);
+    const langameUser = await this.getVisibleLangameUserForMember(
+      user,
+      tenantId,
+      created,
+    );
 
     return this.toMemberResponse(created, langameUser);
   }
 
   async updateMember(user: AuthenticatedUser, id: string, dto: StaffMemberDto) {
     this.assertCanManageDirectory(user);
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { tenantId } = this.tenantContextService.resolve(user);
     const current = await this.prisma.staffMember.findFirst({
       where: { id, tenantId },
-      select: { id: true },
+      select: {
+        id: true,
+        storeId: true,
+        externalDomain: true,
+        externalUserId: true,
+        updatedAt: true,
+      },
     });
 
     if (!current) {
       throw new NotFoundException('Staff member not found');
     }
 
-    const data = await this.normalizeMemberData(tenantId, dto, false);
-    const updated = await this.prisma.staffMember.update({
-      where: { id: current.id },
-      data,
-      include: staffMemberInclude,
-    });
+    this.assertMemberResourceVisible(user, current.storeId);
+    this.assertLangameIdentityUpdateScope(user, dto);
+    const data = await this.normalizeMemberData(
+      user,
+      tenantId,
+      dto,
+      false,
+      current,
+    );
+    this.assertMemberMutationScope(
+      user,
+      current.storeId,
+      this.dataStoreId(data),
+    );
+    let updated: StaffMemberRow;
 
-    const langameUser = await this.getLangameUserForMember(tenantId, updated);
+    try {
+      updated = await this.prisma.staffMember.update({
+        where: {
+          id: current.id,
+          tenantId,
+          storeId: current.storeId,
+          updatedAt: current.updatedAt,
+        },
+        data,
+        include: staffMemberInclude,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('Staff member not found');
+      }
+
+      throw error;
+    }
+
+    const langameUser = await this.getVisibleLangameUserForMember(
+      user,
+      tenantId,
+      updated,
+    );
 
     return this.toMemberResponse(updated, langameUser);
   }
@@ -511,12 +622,17 @@ export class StaffDirectoryService {
   private buildWhere(
     tenantId: string,
     filters: StaffDirectoryReport['filters'],
+    visibleStoreIds: readonly string[] | null,
   ): Prisma.StaffMemberWhereInput {
     return {
       tenantId,
       ...(filters.status === 'all' ? {} : { status: filters.status }),
       ...(filters.role === 'all' ? {} : { role: filters.role }),
-      ...(filters.storeId ? { storeId: filters.storeId } : {}),
+      ...(filters.storeId
+        ? { storeId: filters.storeId }
+        : visibleStoreIds
+          ? { storeId: { in: [...visibleStoreIds] } }
+          : {}),
       ...(filters.search
         ? {
             OR: [
@@ -545,14 +661,24 @@ export class StaffDirectoryService {
   }
 
   private async normalizeMemberData(
+    actor: AuthenticatedUser,
     tenantId: string,
     dto: StaffMemberDto,
     requireName: boolean,
+    currentMember?: {
+      storeId: string | null;
+      externalDomain: string | null;
+      externalUserId: string | null;
+    },
   ): Promise<
     | Prisma.StaffMemberUncheckedCreateInput
     | Prisma.StaffMemberUncheckedUpdateInput
   > {
-    const user = await this.resolveUser(tenantId, dto.userId);
+    const storeId =
+      dto.storeId === undefined && !requireName
+        ? (currentMember?.storeId ?? null)
+        : await this.resolveStoreId(actor, tenantId, dto.storeId);
+    const user = await this.resolveUser(actor, tenantId, dto.userId);
     const displayName =
       this.cleanString(dto.displayName) ??
       user?.fullName ??
@@ -563,8 +689,16 @@ export class StaffDirectoryService {
       throw new BadRequestException('Staff member name is required');
     }
 
-    const externalDomain = this.cleanString(dto.externalDomain);
-    const externalUserId = this.cleanString(dto.externalUserId);
+    const externalIdentityProvided =
+      dto.externalDomain !== undefined || dto.externalUserId !== undefined;
+    const externalDomain =
+      dto.externalDomain === undefined && !requireName
+        ? (currentMember?.externalDomain ?? null)
+        : this.cleanString(dto.externalDomain);
+    const externalUserId =
+      dto.externalUserId === undefined && !requireName
+        ? (currentMember?.externalUserId ?? null)
+        : this.cleanString(dto.externalUserId);
     const compensationType = this.resolveCompensationType(dto.compensationType);
     const compensationAmount = this.resolveCompensationAmount(
       dto.compensationAmount,
@@ -580,8 +714,9 @@ export class StaffDirectoryService {
     }
 
     if (
-      (externalDomain && !externalUserId) ||
-      (!externalDomain && externalUserId)
+      (requireName || externalIdentityProvided) &&
+      ((externalDomain && !externalUserId) ||
+        (!externalDomain && externalUserId))
     ) {
       throw new BadRequestException(
         'Langame domain and user_id should be filled together',
@@ -600,17 +735,27 @@ export class StaffDirectoryService {
       phone: this.cleanString(dto.phone),
       hiredAt: this.parseDate(dto.hiredAt),
       dismissedAt: this.parseDate(dto.dismissedAt),
-      storeId: await this.resolveStoreId(tenantId, dto.storeId),
+      storeId,
       userId: user?.id ?? null,
-      externalProvider:
-        externalDomain && externalUserId ? IntegrationProvider.LANGAME : null,
-      externalDomain,
-      externalUserId,
+      ...(requireName || externalIdentityProvided
+        ? {
+            externalProvider:
+              externalDomain && externalUserId
+                ? IntegrationProvider.LANGAME
+                : null,
+            externalDomain,
+            externalUserId,
+          }
+        : {}),
       note: this.cleanString(dto.note, 1000),
     };
   }
 
-  private async resolveUser(tenantId: string, userId?: string | null) {
+  private async resolveUser(
+    actor: AuthenticatedUser,
+    tenantId: string,
+    userId?: string | null,
+  ) {
     const cleanUserId = this.cleanString(userId);
 
     if (!cleanUserId) {
@@ -619,33 +764,175 @@ export class StaffDirectoryService {
 
     const user = await this.prisma.user.findFirst({
       where: { id: cleanUserId, tenantId },
-      select: { id: true, email: true, fullName: true },
+      select: staffDirectoryUserSelect,
     });
 
     if (!user) {
       throw new BadRequestException('Selected user account is not available');
     }
 
+    if (!this.isVisibleUserTarget(actor, user)) {
+      throw new ForbiddenException(
+        'Selected user account is outside your access scope',
+      );
+    }
+
     return user;
   }
 
-  private async resolveStoreId(tenantId: string, storeId?: string | null) {
+  private async resolveStoreId(
+    actor: AuthenticatedUser,
+    tenantId: string,
+    storeId?: string | null,
+  ) {
     const cleanStoreId = this.cleanString(storeId);
 
     if (!cleanStoreId) {
       return null;
     }
 
+    this.accessScopeService.assertStoreAllowed(actor, cleanStoreId);
     const store = await this.prisma.store.findFirst({
       where: { id: cleanStoreId, tenantId },
       select: { id: true },
     });
 
     if (!store) {
-      throw new BadRequestException('Selected store is not available');
+      throw new ForbiddenException('Store is outside your access scope');
     }
 
     return store.id;
+  }
+
+  private async assertRequestedStore(
+    actor: AuthenticatedUser,
+    tenantId: string,
+    storeId: string,
+  ) {
+    await this.resolveStoreId(actor, tenantId, storeId);
+  }
+
+  private assertMemberResourceVisible(
+    actor: AuthenticatedUser,
+    storeId: string | null,
+  ) {
+    if (!storeId) {
+      if (this.accessScopeService.resolve(actor).mode !== 'NETWORK') {
+        throw new NotFoundException('Staff member not found');
+      }
+
+      return;
+    }
+
+    this.accessScopeService.assertResourceStoreAllowed(actor, storeId);
+  }
+
+  private assertMemberMutationScope(
+    actor: AuthenticatedUser,
+    currentStoreId: string | null | undefined,
+    nextStoreId: string | null,
+  ) {
+    if (!nextStoreId) {
+      this.accessScopeService.assertNetwork(actor);
+      return;
+    }
+
+    this.accessScopeService.assertStoreAllowed(actor, nextStoreId);
+
+    if (
+      currentStoreId !== undefined &&
+      (currentStoreId === null || currentStoreId !== nextStoreId)
+    ) {
+      this.accessScopeService.assertNetwork(actor);
+    }
+  }
+
+  private assertLangameIdentityCreateScope(
+    actor: AuthenticatedUser,
+    dto: StaffMemberDto,
+  ) {
+    if (
+      this.cleanString(dto.externalDomain) ||
+      this.cleanString(dto.externalUserId)
+    ) {
+      this.accessScopeService.assertNetwork(actor);
+    }
+  }
+
+  private assertLangameIdentityUpdateScope(
+    actor: AuthenticatedUser,
+    dto: StaffMemberDto,
+  ) {
+    if (dto.externalDomain !== undefined || dto.externalUserId !== undefined) {
+      this.accessScopeService.assertNetwork(actor);
+    }
+  }
+
+  private isVisibleUserTarget(
+    actor: AuthenticatedUser,
+    target: StaffDirectoryUserRow,
+  ) {
+    if (target.isPlatformAdmin) {
+      return false;
+    }
+
+    try {
+      const targetScope = this.accessScopeService.fromPersisted({
+        tenantId: target.tenantId,
+        accessScope: target.accessScope,
+        storeAccesses: target.storeAccesses,
+      });
+
+      return this.accessScopeService.isVisibleTarget(actor, targetScope);
+    } catch (error) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof ForbiddenException
+      ) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private buildVisibleUserWhere(
+    actor: AuthenticatedUser,
+    tenantId: string,
+  ): Prisma.UserWhereInput {
+    const scope = this.accessScopeService.resolve(actor);
+
+    return {
+      tenantId,
+      isPlatformAdmin: false,
+      ...(scope.mode === 'STORES'
+        ? {
+            accessScope: 'STORES',
+            storeAccesses: {
+              some: { storeId: { in: [...scope.allowedStoreIds] } },
+              every: { storeId: { in: [...scope.allowedStoreIds] } },
+            },
+          }
+        : {}),
+    };
+  }
+
+  private toDirectoryUser(user: StaffDirectoryUserRow) {
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      isActive: user.isActive,
+    };
+  }
+
+  private dataStoreId(
+    data:
+      | Prisma.StaffMemberUncheckedCreateInput
+      | Prisma.StaffMemberUncheckedUpdateInput,
+  ) {
+    return typeof data.storeId === 'string' ? data.storeId : null;
   }
 
   private resolveRole(role: UserRole) {
@@ -765,35 +1052,53 @@ export class StaffDirectoryService {
 
   private async ensureAccountBackedStaffMembers(
     tenantId: string,
+    actor: AuthenticatedUser,
     userId?: string,
   ) {
     const accounts = await this.prisma.user.findMany({
       where: {
-        tenantId,
+        ...this.buildVisibleUserWhere(actor, tenantId),
         ...(userId ? { id: userId } : {}),
         role: { in: [...accountBackedStaffRoles] },
         staffMember: { is: null },
       },
       select: {
         id: true,
+        tenantId: true,
         email: true,
         fullName: true,
         role: true,
+        accessScope: true,
         isActive: true,
+        isPlatformAdmin: true,
         storeAccesses: {
-          select: { storeId: true },
+          select: {
+            storeId: true,
+            store: { select: { tenantId: true } },
+          },
           orderBy: { createdAt: 'asc' },
         },
       },
       take: userId ? 1 : 300,
     });
 
-    if (accounts.length === 0) {
+    const actorScope = this.accessScopeService.resolve(actor);
+    const visibleAccounts = accounts.filter((account) => {
+      if (!this.isVisibleUserTarget(actor, account)) {
+        return false;
+      }
+
+      return (
+        actorScope.mode === 'NETWORK' || account.storeAccesses.length === 1
+      );
+    });
+
+    if (visibleAccounts.length === 0) {
       return;
     }
 
     await this.prisma.staffMember.createMany({
-      data: accounts.map((account) => {
+      data: visibleAccounts.map((account) => {
         const storeIds = account.storeAccesses.map((access) => access.storeId);
 
         return {
@@ -1138,6 +1443,18 @@ export class StaffDirectoryService {
     });
 
     return rows.map((row) => this.toLangameUserOption(row));
+  }
+
+  private async getVisibleLangameUserForMember(
+    actor: AuthenticatedUser,
+    tenantId: string,
+    member: StaffMemberRow,
+  ): Promise<StaffLangameUserOption | null> {
+    if (this.accessScopeService.resolve(actor).mode !== 'NETWORK') {
+      return null;
+    }
+
+    return this.getLangameUserForMember(tenantId, member);
   }
 
   private async getLangameUserForMember(

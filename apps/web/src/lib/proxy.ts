@@ -56,8 +56,8 @@ export async function proxyFileRequest(
 
   if (!headers.Authorization) {
     return NextResponse.json(
-      { message: "РќРµРѕР±С…РѕРґРёРјРѕ РІРѕР№С‚Рё РІ Р°РєРєР°СѓРЅС‚" },
-      { status: 401 },
+      { message: "Необходимо войти в аккаунт" },
+      { status: 401, headers: PRIVATE_FILE_RESPONSE_HEADERS },
     );
   }
 
@@ -77,17 +77,68 @@ export async function proxyFileRequest(
       errorBody = { message: rawError || "Ошибка запроса" };
     }
 
-    return NextResponse.json(errorBody, { status: response.status });
+    return NextResponse.json(errorBody, {
+      status: response.status,
+      headers: PRIVATE_FILE_RESPONSE_HEADERS,
+    });
   }
+
+  const contentType =
+    response.headers.get("content-type") ?? "application/octet-stream";
+  const contentDisposition = safeFileDisposition(
+    response.headers.get("content-disposition"),
+    contentType,
+    fallbackFileName,
+  );
 
   return new Response(await response.arrayBuffer(), {
     status: response.status,
     headers: {
-      "Content-Type":
-        response.headers.get("content-type") ?? "application/octet-stream",
-      "Content-Disposition":
-        response.headers.get("content-disposition") ??
-        `attachment; filename="${fallbackFileName}"`,
+      "Content-Type": contentType,
+      "Content-Disposition": contentDisposition,
+      ...PRIVATE_FILE_RESPONSE_HEADERS,
     },
   });
+}
+
+const PRIVATE_FILE_RESPONSE_HEADERS = {
+  "Cache-Control": "private, no-store, max-age=0",
+  Pragma: "no-cache",
+  Vary: "Cookie, Authorization",
+  "X-Content-Type-Options": "nosniff",
+  "Cross-Origin-Resource-Policy": "same-origin",
+} as const;
+
+const SAFE_INLINE_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+]);
+
+function safeFileDisposition(
+  upstreamValue: string | null,
+  contentType: string,
+  fallbackFileName: string,
+) {
+  const normalizedType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  const safeFallback = fallbackFileName.replace(/[\r\n"]/g, "_");
+  const fallback = `attachment; filename="${safeFallback || "attachment"}"`;
+  const sanitized = upstreamValue?.replace(/[\r\n]/g, "").trim();
+
+  if (!sanitized) {
+    return fallback;
+  }
+
+  if (normalizedType && SAFE_INLINE_CONTENT_TYPES.has(normalizedType)) {
+    return sanitized;
+  }
+
+  if (/^inline\b/i.test(sanitized)) {
+    return sanitized.replace(/^inline\b/i, "attachment");
+  }
+
+  return /^attachment\b/i.test(sanitized) ? sanitized : fallback;
 }

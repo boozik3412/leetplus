@@ -3,10 +3,11 @@
 | Поле                  | Значение                                                                   |
 | --------------------- | -------------------------------------------------------------------------- |
 | Статус                | `IMPLEMENTED_CANDIDATE`; только read-only planning; не deployed            |
-| Версия                | 1.3.0                                                                      |
+| Версия                | 1.4.0                                                                      |
 | Дата                  | 27.07.2026                                                                 |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                       |
 | Candidate SHA         | `2c74c663780b3f183be708a01431c22efe57a723` — not deployed                  |
+| Proposal dry-run SHA  | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — SYNTHETIC only; not deployed  |
 | Report schema version | 1                                                                          |
 | Требуемая DB schema   | 162 migrations; latest `20260727131000_staff_task_integrity_expand`        |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) |
@@ -32,8 +33,9 @@ snapshot admission в состоянии `EXPAND_162`.
 - первая внешняя invite-only когорта после Gate 2 получает полные
   геймификацию, ассортимент/товары, сотрудников, in-app коммуникации и
   users/roles только внутри своего tenant и разрешённых Store;
-- production-like inventory, reconciliation dry-run/apply, `VALIDATE`,
-  `CONTRACT`, deployment и внешний beta-доступ остаются `PENDING / NO-GO`.
+- production-like inventory/planner/proposal dry-run, standalone dry-run,
+  apply, `VALIDATE`, `CONTRACT`, deployment и внешний beta-доступ остаются
+  `PENDING / NO-GO`.
 
 ## 2. Команда и обязательный runtime contract
 
@@ -276,9 +278,13 @@ row identifiers в git запрещены.
    review, как `operator`, и ничего не применяет автоматически.
 9. В защищённом контуре получить row-level evidence и утвердить решение по
    каждой строке; raw identifiers не переносить в git.
-10. Реализовать отдельный idempotent reconciliation tool: dry-run, explicit
-    apply, immutable input evidence, row locks/recheck, audit и rollback.
-11. Выполнить dry-run, отдельный approved apply и повторный zero-diff dry-run.
+10. Не переносить `SYNTHETIC` proposal dry-run в production-like контур: он
+    принимает только подписанную disposable harness provenance и формирует
+    предложения без apply authority.
+11. Для production-like reconciliation реализовать отдельный approved
+    idempotent workflow: protected row evidence, explicit apply, immutable
+    input evidence, row locks/recheck, audit и rollback; затем выполнить
+    отдельный approved apply и повторный zero-diff dry-run.
 12. Повторить inventory и planner; blocking должен быть `0`, review findings
     должны иметь owner и принятое решение.
 13. Только после этого отдельно репетировать `VALIDATE`; `CONTRACT` и deploy
@@ -327,12 +333,23 @@ compatibility FK, invalid writes, delete policies, immutable parent IDs/tenant
 ownership и Prisma drift.
 
 Snapshot admission candidate
-`7d67333b22f171c6e79f723190647cdd2454b128` прошёл `16` unit, `34` offline и
-`9` staged PostgreSQL 16 smoke-сценариев с точным переходом
+`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` прошёл `16` unit, `36` offline и
+`14` staged PostgreSQL 16.14 smoke-сценариев с точным переходом
 `BASELINE_156 → 157..162 → EXPAND_162`. Проверялись exact Git blobs, девять
 SELECT-relations, DML/DDL/trigger denial, tamper rejection и cleanup.
 
-Production-like inventory/planner, reconciliation dry-run/apply,
+SYNTHETIC proposal dry-run candidate
+`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` прошёл self-test `20`, unit
+`14/14` и integrated disposable PostgreSQL 16.14 smoke. Он допускает только
+подписанную harness-БД в `SYNTHETIC EXPAND_162`, повторно проверяет
+admission/release/schema/catalog/RLS/privileges в read-only snapshot и
+формирует pseudonymous `REFERENCE_CLEAR_CANDIDATE` только для точных восьми
+proposal-кодов. Все 29 operator + 6 review кодов остаются aggregate-only.
+PostgreSQL smoke содержит один positive proposal predicate; fixtures для
+остальных семи и coalescing остаются P1.
+
+Production-like inventory/planner/proposal dry-run, standalone dry-run,
+reconciliation apply,
 `VALIDATE`, `CONTRACT`, deployment и production cutover не выполнялись.
 Release decision остаётся `NO-GO`.
 
@@ -342,7 +359,7 @@ Release decision остаётся `NO-GO`.
 release_sha:
 target:
 executed_at:
-snapshot_admission_sha: 7d67333b22f171c6e79f723190647cdd2454b128
+snapshot_admission_sha: dee25393ae7bff171bdd74a49f2d01cdef9ce4ee
 baseline_admission_decision:
 baseline_admission_database_identity_digest:
 baseline_admission_content_digest:
@@ -386,6 +403,14 @@ release_decision: NO-GO | RECONCILE | READY_FOR_VALIDATE_REHEARSAL
 
 ## 11. Changelog
 
+- `1.4.0`, 27.07.2026 — добавлен строго SYNTHETIC proposal dry-run candidate
+  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`: signed disposable harness
+  provenance, exact 8 proposal codes, aggregate-only 29 operator + 6 review,
+  read-only/HMAC/coalescing contract и no-apply boundary. Пройдены self-test
+  20, unit 14/14 и integrated PostgreSQL 16.14 smoke 14 scenarios; один
+  positive PG predicate покрыт, оставшиеся 7 + coalescing — P1.
+  Production-like/standalone/apply/`VALIDATE`/`CONTRACT`/deploy/external beta
+  остаются `NO-GO`.
 - `1.3.0`, 27.07.2026 — Git-bound snapshot admission `EXPAND_162` сделан
   обязательным prerequisite planner; зафиксирован synthetic candidate
   `7d67333b22f171c6e79f723190647cdd2454b128` с `16` unit, `34` offline и `9`

@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.13.0                                                                                              |
+| Версия контракта               | 1.14.0                                                                                              |
 | Дата                           | 27.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -16,7 +16,8 @@
 | Staff task integrity inventory | `56d615437ecfcb90db252016d3e5b83f3f545578` — not run on production                                  |
 | Staff task integrity EXPAND    | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — 162 migrations / 28 guarded FK; not deployed           |
 | Staff reconciliation planner   | `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only; no apply; not deployed                 |
-| Staff snapshot admission       | `7d67333b22f171c6e79f723190647cdd2454b128` — synthetic verified; production-like not executed       |
+| Staff snapshot admission       | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — synthetic verified; production-like not executed       |
+| Staff proposal dry-run         | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — SYNTHETIC harness only; no apply; not deployed         |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -82,6 +83,10 @@ invite-only открытому тесту. Она отвечает на вопр
     обязательный fail-closed вход для production-like snapshot: PostgreSQL 16,
     exact release/migration/catalog state и отдельная роль с SELECT только к
     девяти таблицам.
+16. [Staff task SYNTHETIC proposal dry-run](./v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
+    подписанная disposable harness-fixture, повторный admission, read-only
+    row evidence только для восьми proposal codes и явный запрет
+    standalone/production-like/apply.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -236,20 +241,37 @@ smoke для дополнительного конфликтующего FK/не
 
 Следующим обязательным checkpoint реализован
 [StaffTask snapshot admission](./v1/staff-task-integrity-snapshot-admission-runbook.md)
-`7d67333b22f171c6e79f723190647cdd2454b128` —
+`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
 `IMPLEMENTED_CANDIDATE`, not deployed. Он допускает только изолированную
 loopback PostgreSQL 16 копию в точном `BASELINE_156` либо `EXPAND_162`,
 сверяет ordered migration names/checksums из exact Git blob, FK/index/trigger
 catalog и отдельную `LOGIN NOINHERIT` роль с exact SELECT к девяти таблицам,
 без write, DDL, TEMP, membership и ownership. Локально прошли 16 unit,
-34 offline smoke и 9 real PostgreSQL scenarios, включая
+36 offline smoke и 14 real PostgreSQL 16.14 scenarios, включая
 `baseline 156 → ровно шесть migrations → expand 162`,
 privilege/tamper/privacy/cleanup guards.
 
-Выполнен только `SYNTHETIC` rehearsal. Remote CI, production-like
-acquisition/restore/admission, inventory/planner, reconciliation
-dry-run/apply, `VALIDATE`, `CONTRACT`, deployment и production cutover не
-выполнялись.
+Следующим bounded candidate реализован
+[StaffTask SYNTHETIC proposal dry-run](./v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
+`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — not deployed. Он допускает
+только подписанную harness-created `SYNTHETIC EXPAND_162` disposable fixture,
+повторно проверяет admission/release/migrations/catalog/RLS/privileges внутри
+read-only `REPEATABLE READ` snapshot, заранее получает `ACCESS SHARE` locks и
+формирует unlinkable HMAC-псевдонимизированные
+`REFERENCE_CLEAR_CANDIDATE` только для точных восьми proposal codes.
+Все 29 operator + 6 review codes остаются aggregate-only; apply path
+отсутствует. Пройдены self-test 20, unit 14/14 и integrated PostgreSQL 16.14
+smoke 14 scenarios.
+
+PostgreSQL smoke пока имеет positive fixture для одного proposal predicate.
+Оставшиеся семь и coalescing двух last-task причин — P1. Provenance вне
+доверенного harness не является независимой аттестацией, а table-wide `User`
+SELECT требует сужения перед production-like использованием.
+
+Выполнен только `SYNTHETIC` rehearsal. Standalone dry-run, remote CI,
+production-like acquisition/restore/admission, inventory/planner/row dry-run,
+reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
+не выполнялись.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -267,6 +289,14 @@ dry-run/apply, `VALIDATE`, `CONTRACT`, deployment и production cutover не
 
 ## Changelog
 
+- `1.14.0`, 27.07.2026 — добавлен строго SYNTHETIC StaffTask proposal dry-run
+  candidate `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`: signed disposable
+  harness provenance, повторный admission, ранние relation locks, exact
+  `8 proposal / 29 operator / 6 review`, bounded unlinkable HMAC evidence и
+  no-apply boundary. Пройдены self-test 20, unit 14/14 и PostgreSQL 16.14
+  smoke 14 scenarios; оставшиеся 7 positive fixtures + coalescing,
+  production-like trust boundary и column-scoped `User` evidence — P1.
+  Production-like/standalone/apply/deploy/external beta остаются `NO-GO`.
 - `1.13.0`, 27.07.2026 — добавлен обязательный StaffTask snapshot admission
   candidate `7d67333b22f171c6e79f723190647cdd2454b128`: PostgreSQL 16, exact
   `BASELINE_156 | EXPAND_162`, Git-blob migration manifest/catalog и

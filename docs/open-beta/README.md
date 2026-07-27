@@ -69,7 +69,11 @@
     обязательный fail-closed checkpoint перед production-like inventory и
     planner: PostgreSQL 16, exact `BASELINE_156 | EXPAND_162`, release
     manifest, catalog и отдельная SELECT-only роль.
-15. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+15. [Runbook SYNTHETIC reconciliation proposal dry-run](../security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
+    read-only row-evidence rehearsal только для подписанной disposable
+    harness-БД: восемь proposal-кодов, HMAC-токены, coalescing и явный запрет
+    standalone/production-like/apply.
+16. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
     какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
@@ -122,18 +126,29 @@
   row-stable/CAS authorization. Contract tests, clean real PostgreSQL planner
   и adversarial disposable-clone smoke для неверного FK/index contract прошли.
 - StaffTask snapshot admission
-  `7d67333b22f171c6e79f723190647cdd2454b128` —
+  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
   `IMPLEMENTED_CANDIDATE`, not deployed. Он принимает только изолированную
   loopback PostgreSQL 16 копию в точном `BASELINE_156` или `EXPAND_162`,
   сверяет ordered migration names/checksums, exact catalog и отдельную
   `LOGIN NOINHERIT` роль с SELECT только к девяти таблицам, без write, DDL,
-  TEMP, membership и ownership. Локально подтверждены 16 unit, 34 offline
-  smoke и real PostgreSQL smoke из 9 сценариев: exact Git blob baseline 156 →
-  ровно шесть migrations → expand 162, а также
+  TEMP, membership и ownership. Локально подтверждены 16 unit, 36 offline
+  smoke и интегрированный real PostgreSQL 16.14 smoke из 14 сценариев: exact
+  Git blob baseline 156 → ровно шесть migrations → expand 162, а также
   trigger/privilege/tamper/privacy/cleanup guards. Выполнен только
   `SYNTHETIC` rehearsal; remote CI и production-like admission не
   выполнялись.
-- production-like inventory/planner, reconciliation dry-run/apply,
+- StaffTask reconciliation proposal dry-run
+  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
+  `IMPLEMENTED_CANDIDATE`, not deployed. Он работает только внутри
+  `SYNTHETIC EXPAND_162` disposable harness с подписанной provenance, в одной
+  read-only `REPEATABLE READ` transaction и без apply-path. Ровно восемь
+  proposal-кодов могут сформировать pseudonymous
+  `REFERENCE_CLEAR_CANDIDATE`; 29 operator и 6 review кодов остаются только
+  aggregate. Пройдены self-test `20`, unit `14/14` и один positive
+  PostgreSQL predicate в smoke. PostgreSQL fixtures для остальных семи
+  proposal predicates и coalescing остаются P1 до расширения rehearsal.
+- production-like inventory/planner/proposal dry-run, standalone dry-run,
+  reconciliation apply,
   `VALIDATE`, `CONTRACT` и deployment не выполнялись.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
@@ -192,6 +207,10 @@ credentials, encryption keys и необработанные выгрузки.
   `inventoryExecuted === schema.ready`, actionable cap не превышен;
   `proposal` не считается authorization, `contentDigest`/`executionDigest` не
   используются как row-level/CAS token;
+- текущий proposal dry-run candidate не засчитывается как production-like
+  reconciliation: он допускает только подписанную `SYNTHETIC` harness-БД;
+  отдельные protected production-like row evidence, owner approval,
+  locks/recheck, audit и rollback по-прежнему обязательны;
 - adversarial catalog smoke на disposable local/CI clone при сохранении всех
   28 expected FK отклонил дополнительный конфликтующий FK с другим именем и
   неверный parent index с `SCHEMA_MISMATCH`, не запустил inventory и не

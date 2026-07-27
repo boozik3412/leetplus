@@ -10,6 +10,13 @@ LeetPlus - SaaS-платформа для операционного управ�
 Четыре текущих клуба считаются одной сетью и сохраняются четырьмя `Store`
 одного существующего `Tenant`.
 
+Текущий StaffTask hardening checkpoint —
+[SYNTHETIC reconciliation proposal dry-run](./docs/security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
+на SHA `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`. Он прошёл disposable
+PostgreSQL 16.14 smoke, работает только внутри подписанного CI/harness
+snapshot, не содержит apply-пути и не разрешает production-like запуск,
+deployment или внешний beta.
+
 ## Текущий статус
 
 На 27.06.2026 проект находится в production-стадии ранней операционной платформы: рабочий контур развернут на VDS, подключен к реальным источникам Langame и развивается быстрыми итерациями от пользовательских сценариев. LeetPlus уже покрывает дашборд сети, ассортимент, гостей/CRM, маркетинг, игровой модуль, выдачу доступа сотрудникам и большой блок `Персонал` с задачами, регламентами, чек-листами, обучением, дисциплиной и коммуникациями.
@@ -699,6 +706,18 @@ pnpm --filter api test:ci:focused
 pnpm --filter api test:ci
 pnpm --filter api typecheck
 pnpm --filter web typecheck
+pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
+```
+
+Полный StaffTask admission/proposal PostgreSQL rehearsal запускается только на
+выделенном одноразовом local/CI PostgreSQL 16, поскольку smoke создаёт и
+удаляет временные database, role и fixtures:
+
+```powershell
+$env:DATABASE_URL = "<disposable local/CI PostgreSQL 16 URL>"
+$env:RELEASE_SHA = "<exact clean 40-character lowercase Git SHA>"
+$env:STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_SMOKE_CONFIRM = "run-staff-task-integrity-snapshot-admission-smoke"
+pnpm --filter database db:smoke:staff-task-integrity-snapshot-admission
 ```
 
 Временное ограничение baseline: полный API lint пока не является merge gate из-за

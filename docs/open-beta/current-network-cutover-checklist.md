@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.3.0                                              |
+| Версия          | 1.4.0                                              |
 | Дата            | 27.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -27,8 +27,11 @@
       `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only, no apply,
       не production deployment.
 - [ ] Snapshot admission source checkpoint:
-      `7d67333b22f171c6e79f723190647cdd2454b128` —
+      `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
       `IMPLEMENTED_CANDIDATE`, не production deployment.
+- [ ] SYNTHETIC reconciliation proposal dry-run source checkpoint:
+      `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — read-only harness-only,
+      no apply, не production deployment.
 - [ ] API/web/edge показывают тот же SHA/build time.
 - [ ] Required CI checks зелёные.
 - [ ] Release decision owner и change window назначены.
@@ -70,6 +73,10 @@
       `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` классифицирован как `BLOCKING`.
 - [ ] Planner proposal не используется как authorization, а `contentDigest` и
       `executionDigest` — как row-level checksum или CAS token.
+- [ ] SYNTHETIC proposal dry-run evidence не засчитывается как production-like
+      reconciliation: standalone target запрещён; для production-like
+      необходимы отдельные protected row evidence, approval, locks/recheck,
+      audit и rollback.
 - [ ] Template/Rule/Task/Run inventory evidence содержит только aggregate
       counts и alias `Tenant A / Store A1..A4`, без production ID.
 - [ ] Public/QR/Telegram links проинвентаризированы.
@@ -140,6 +147,14 @@
 - [ ] Row-level reconciliation имела отдельные protected evidence,
       authorization, locks/recheck, audit и rollback; `contentDigest`/
       `executionDigest` не использовались вместо них.
+- [ ] Synthetic rehearsal proposal dry-run привязан к exact
+      `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`, подписанной
+      `SYNTHETIC EXPAND_162` disposable harness provenance и read-only
+      transaction; output содержит cases только для 8 proposal-кодов, а
+      29 operator + 6 review остаются aggregate-only.
+- [ ] До production-like шага synthetic PostgreSQL fixtures покрывают все 8
+      proposal predicates и coalescing; текущий candidate подтверждает один
+      positive PG predicate, оставшиеся 7 + coalescing являются P1.
 - [ ] `contentDigest` стабилен для одинакового aggregate content, а
       `executionDigest` меняется вместе с snapshot `generatedAt`; смена БД или
       PostgreSQL cluster меняет `databaseIdentityDigest` и оба evidence digest.
@@ -198,6 +213,9 @@
       repeated-`FAILED` разобраны.
 - [ ] Staff reconciliation planner — exit `0`, schema ready, cap соблюдён;
       proposal/operator decisions завершены отдельным approved workflow.
+- [ ] Staff SYNTHETIC proposal dry-run — self-test `20`, unit `14/14` и
+      disposable PostgreSQL 16.14 smoke `14 scenarios` подтверждены; это не
+      production-like evidence и не apply authorization.
 - [ ] Communications — chat, mentions, receipts, notifications, contact tasks.
 - [ ] Users/roles — delegation, revoke и scope работают сразу.
 - [ ] Attachments `ENFORCED`; inventory/backfill/reconciliation zero-diff.
@@ -254,10 +272,17 @@ Cutover немедленно останавливается при cross-scope �
 ошибке future-migration DDL/artifact guard, planner schema/database identity
 mismatch, catalog mismatch/cap exceeded, попытке считать proposal,
 `contentDigest` или `executionDigest` разрешением на apply либо недоставленном
-critical alert.
+critical alert, а также попытке запустить SYNTHETIC proposal dry-run на
+standalone/production-like target или без подписанной harness provenance.
 
 ## Changelog
 
+- `1.4.0`, 27.07.2026 — добавлен exact SYNTHETIC proposal dry-run checkpoint
+  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`: read-only signed-harness
+  boundary, 8 proposal-кодов, aggregate-only 29 operator + 6 review, self-test
+  20, unit 14/14 и PostgreSQL 16.14 smoke 14 scenarios. Покрыт один positive
+  PG predicate; оставшиеся 7 + coalescing — P1. Production-like/standalone,
+  apply, `VALIDATE`, `CONTRACT`, deploy и внешний beta остаются `NO-GO`.
 - `1.3.0`, 27.07.2026 — добавлен обязательный snapshot admission checkpoint
   `7d67333b22f171c6e79f723190647cdd2454b128`: PostgreSQL 16, exact Git blob
   `BASELINE_156 → 6 migrations → EXPAND_162`, девять SELECT-only relations,

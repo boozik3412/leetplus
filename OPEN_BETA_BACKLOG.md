@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.19
+- Версия: 1.20
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
@@ -245,19 +245,19 @@
 
 ### 5.8. Обязательный модуль: сотрудники
 
-| ID                 | Приоритет | Статус        | Задача                                              | Критерии приёмки                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Зависимости                      |
-| ------------------ | --------- | ------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
-| BETA-MOD-STAFF-001 | P0        | Запланировано | Провести полный route/action inventory staff        | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | BETA-TEN-002, BETA-IAM-001       |
-| BETA-MOD-STAFF-002 | P0        | Запланировано | Закрыть directory и identity mapping                | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | BETA-SEC-006, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-003 | P0        | В работе      | Закрыть задачи, templates и recurring rules         | Direct tasks, templates CRUD/launch, recurring actor HTTP, guarded integrity inventory, aggregate-only reconciliation planner, schema-only DB EXPAND и snapshot admission имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options/mutation responses, Tenant/Rule/Template/Store/participant lock/recheck, shared materializer, Store-timezone interactive due, atomic task/run/catalog audit, 43-code read-only legacy gate, classification `8 proposal + 29 operator + 6 review`, exact Git-bound states `BASELINE_156 / EXPAND_162`, schema gate `162/latest/unfinished 0 + 14 composite exact + 14 simple exact + 0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact + 0 index mismatch`, четыре enabled internal trigger на каждый expected FK, пять concurrent parent indexes и 28 `NOT VALID` FK. Admission требует loopback-only isolated snapshot и exact 9-table SELECT role; proposal/admission evidence не являются authorization, apply path отсутствует, identifiers/database names не выводятся. PostgreSQL race, clean inventory/planner, adversarial catalog, staged EXPAND и baseline→expand admission smoke обязательны в CI. Scheduler/all-tenant HTTP и production-like execution остаются `NO-GO`. До `Готово` остаются approved production-like admission/inventory/reconciliation/apply, VALIDATE/CONTRACT/deploy, scheduler lease/lifecycle/entitlement, global timezone policy, task/shift DB invariant и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-004 | P0        | Запланировано | Закрыть shift workspace и shift reports             | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BETA-MOD-STAFF-002, BETA-IAM-002 |
-| BETA-MOD-STAFF-005 | P0        | Запланировано | Закрыть регламенты и чек-листы                      | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | BETA-MOD-STAFF-001               |
-| BETA-MOD-STAFF-006 | P0        | Запланировано | Закрыть знания, обучение и аттестации               | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BETA-MOD-STAFF-001, BETA-IAM-002 |
-| BETA-MOD-STAFF-007 | P0        | Запланировано | Закрыть контроль, рейтинги, мотивацию и дисциплину  | Staff-control, operations dashboard, ratings, signals, warnings и penalties имеют понятный источник, право просмотра/изменения, комментарий и audit; нет автоматических внешних санкций или Langame write-back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | BETA-MOD-STAFF-002, BETA-SEC-005 |
-| BETA-MOD-STAFF-008 | P0        | Запланировано | Закрыть salary planning                             | Schemes, periods, rows, adjustments и exports tenant/store-scoped; расчёт воспроизводим; изменения денег аудируются; доступ отделён отдельной capability; система не выполняет выплаты                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | BETA-MOD-STAFF-001, BETA-SEC-005 |
-| BETA-MOD-STAFF-009 | P0        | В работе      | Защитить attachments и evidence                     | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | BETA-MOD-STAFF-001, BETA-SEC-006 |
-| BETA-MOD-STAFF-010 | P0        | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | BETA-MOD-STAFF-001               |
-| BETA-MOD-STAFF-011 | P0        | Запланировано | Добавить staff end-to-end regression                | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-SEC-006, BETA-OPS-003       |
+| ID                 | Приоритет | Статус        | Задача                                              | Критерии приёмки                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Зависимости                      |
+| ------------------ | --------- | ------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| BETA-MOD-STAFF-001 | P0        | Запланировано | Провести полный route/action inventory staff        | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | BETA-TEN-002, BETA-IAM-001       |
+| BETA-MOD-STAFF-002 | P0        | Запланировано | Закрыть directory и identity mapping                | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BETA-SEC-006, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-003 | P0        | В работе      | Закрыть задачи, templates и recurring rules         | Direct tasks, templates CRUD/launch, recurring actor HTTP, guarded integrity inventory, aggregate-only reconciliation planner, schema-only DB EXPAND, snapshot admission и SYNTHETIC proposal dry-run имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options/mutation responses, Tenant/Rule/Template/Store/participant lock/recheck, shared materializer, Store-timezone interactive due, atomic task/run/catalog audit, 43-code read-only legacy gate, classification `8 proposal + 29 operator + 6 review`, exact Git-bound states `BASELINE_156 / EXPAND_162`, schema gate `162/latest/unfinished 0 + 14 composite exact + 14 simple exact + 0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact + 0 index mismatch`, четыре enabled internal trigger на каждый expected FK, пять concurrent parent indexes и 28 `NOT VALID` FK. Admission требует loopback-only isolated snapshot и exact 9-table SELECT role; planner/admission/dry-run evidence не являются authorization, apply path отсутствует, identifiers/database names не выводятся. PostgreSQL race, clean inventory/planner, adversarial catalog, staged EXPAND, baseline→expand admission и proposal dry-run smoke обязательны в CI. Scheduler/all-tenant HTTP и production-like execution остаются `NO-GO`. До `Готово` остаются approved production-like admission/inventory/reconciliation/apply, VALIDATE/CONTRACT/deploy, scheduler lease/lifecycle/entitlement, global timezone policy, task/shift DB invariant и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-004 | P0        | Запланировано | Закрыть shift workspace и shift reports             | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | BETA-MOD-STAFF-002, BETA-IAM-002 |
+| BETA-MOD-STAFF-005 | P0        | Запланировано | Закрыть регламенты и чек-листы                      | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | BETA-MOD-STAFF-001               |
+| BETA-MOD-STAFF-006 | P0        | Запланировано | Закрыть знания, обучение и аттестации               | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | BETA-MOD-STAFF-001, BETA-IAM-002 |
+| BETA-MOD-STAFF-007 | P0        | Запланировано | Закрыть контроль, рейтинги, мотивацию и дисциплину  | Staff-control, operations dashboard, ratings, signals, warnings и penalties имеют понятный источник, право просмотра/изменения, комментарий и audit; нет автоматических внешних санкций или Langame write-back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | BETA-MOD-STAFF-002, BETA-SEC-005 |
+| BETA-MOD-STAFF-008 | P0        | Запланировано | Закрыть salary planning                             | Schemes, periods, rows, adjustments и exports tenant/store-scoped; расчёт воспроизводим; изменения денег аудируются; доступ отделён отдельной capability; система не выполняет выплаты                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-MOD-STAFF-001, BETA-SEC-005 |
+| BETA-MOD-STAFF-009 | P0        | В работе      | Защитить attachments и evidence                     | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | BETA-MOD-STAFF-001, BETA-SEC-006 |
+| BETA-MOD-STAFF-010 | P0        | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | BETA-MOD-STAFF-001               |
+| BETA-MOD-STAFF-011 | P0        | Запланировано | Добавить staff end-to-end regression                | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | BETA-SEC-006, BETA-OPS-003       |
 
 ### 5.9. Обязательный модуль: коммуникации
 
@@ -1176,7 +1176,8 @@ mismatch имеет `schema.ready=false`, `inventoryExecuted=false`,
 ```text
 aggregate reconciliation planner = IMPLEMENTED_CANDIDATE / READ-ONLY
 production-like inventory/plan   = PENDING / NO-GO
-row-level reconciliation dry-run = PENDING
+SYNTHETIC proposal dry-run        = IMPLEMENTED_CANDIDATE / PASS
+PRODUCTION_LIKE row dry-run       = PENDING / NO-GO
 explicit apply / zero-diff       = PENDING
 VALIDATE / CONTRACT / deploy     = PENDING
 external beta                    = NO-GO
@@ -1193,8 +1194,9 @@ external beta                    = NO-GO
    проверить `inventoryExecuted === schema.ready`, DB identity binding и
    protected HMAC evidence без raw identity;
 4. назначить owner всем non-zero codes; не считать `proposal` разрешением;
-5. спроектировать отдельный idempotent row-level reconciliation dry-run/apply
-   с explicit approval, row locks/recheck, audit и rollback;
+5. использовать реализованный synthetic-only proposal dry-run как design
+   checkpoint; отдельно спроектировать production-like row dry-run и
+   idempotent apply с explicit approval, row locks/recheck, audit и rollback;
 6. выполнить dry-run → approved apply → zero-diff dry-run, затем повторить
    inventory/planner;
 7. только при zero blocking и принятых review findings репетировать отдельный
@@ -1214,8 +1216,10 @@ Release decision остаётся `NO-GO`.
 любой inventory/reconciliation-репетицией. Операционный контракт зафиксирован
 в
 [snapshot admission runbook](./docs/security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md).
-Exact candidate SHA:
-`7d67333b22f171c6e79f723190647cdd2454b128` — not deployed.
+Исходный admission candidate:
+`7d67333b22f171c6e79f723190647cdd2454b128`. Текущий проверенный
+интегрированный release SHA:
+`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — not deployed.
 
 Admission candidate:
 
@@ -1265,8 +1269,8 @@ catalog mismatch даже при совпадающей строке `pg_constra
 Verification exact SHA:
 
 - admission contract unit suite: `16/16` — `PASS`;
-- offline smoke/source guards: `34` checks — `PASS`;
-- реальный PostgreSQL 16 disposable rehearsal: `9` scenarios — `PASS`;
+- offline smoke/source guards: `36` checks — `PASS`;
+- реальный PostgreSQL 16 disposable rehearsal: `14` scenarios — `PASS`;
 - из commit blobs применены первые 156 migrations, admission
   `BASELINE_156`, затем ровно migrations `157..162` и admission
   `EXPAND_162`;
@@ -1276,7 +1280,9 @@ Verification exact SHA:
 - source aggregate fingerprint не изменился; PUBLIC CONNECT ACL восстановлен;
   advisory lock освобождён; disposable DB, role и migration artifact удалены;
 - CI contract и real PostgreSQL smoke добавлены в обязательные jobs;
-- финальный independent security rereview exact candidate не обнаружил P0/P1.
+- финальный independent security rereview integrated release не обнаружил P0;
+  оставшиеся P1 относятся к полноте восьми positive fixtures, provenance trust
+  boundary вне harness и table-wide `User` SELECT для production-like роли.
 
 Оставшиеся P2/operational ограничения: ACL cleanup smoke выполняется
 in-process и допускается только на одноразовом CI-кластере; encryption,
@@ -1292,7 +1298,9 @@ remote admission                   = NO-GO
 PRODUCTION_LIKE acquisition/restore = NOT EXECUTED
 PRODUCTION_LIKE admission          = PENDING / NO-GO
 inventory / planner on snapshot    = PENDING
-row-level dry-run / apply          = PENDING / NO-GO
+SYNTHETIC proposal dry-run         = IMPLEMENTED_CANDIDATE / PASS
+PRODUCTION_LIKE row dry-run        = PENDING / NO-GO
+explicit apply / zero-diff         = PENDING / NO-GO
 VALIDATE / CONTRACT / deploy       = PENDING / NO-GO
 external beta                      = NO-GO
 ```
@@ -1309,12 +1317,139 @@ external beta                      = NO-GO
    `admission(EXPAND_162)`;
 6. только после второго admission запускать read-only inventory и aggregate
    planner, назначать owner каждому non-zero code;
-7. row-level dry-run/apply, zero-diff, `VALIDATE`, `CONTRACT` и deploy
-   проектировать и утверждать как отдельные последующие фазы.
+7. использовать synthetic proposal dry-run только как проверенный design
+   checkpoint; production-like row dry-run, apply, zero-diff, `VALIDATE`,
+   `CONTRACT` и deploy проектировать и утверждать как отдельные последующие
+   фазы.
 
 Топология и обязательный beta scope неизменны: четыре текущих клуба остаются
 четырьмя `Store` одной сети в одном `Tenant`; каждая внешняя сеть получает
 отдельный Tenant. После полного Gate 2 первая внешняя когорта получает полные
+геймификацию, ассортимент/товары, сотрудников, in-app коммуникации и
+users/roles только внутри собственного tenant и разрешённых Store.
+
+Release decision остаётся `NO-GO`.
+
+### 5.23. Staff task SYNTHETIC reconciliation proposal dry-run candidate — 27.07.2026
+
+Реализован следующий bounded checkpoint и создан отдельный
+[proposal dry-run runbook](./docs/security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md).
+Exact integrated release SHA:
+`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — clean, not deployed.
+
+Инструмент:
+
+- принимает только harness-managed `SYNTHETIC` fixture в exact `EXPAND_162`;
+- запрещает `PRODUCTION_LIKE`, production process, remote target, произвольную
+  локальную копию, caller URL options и любой `--apply`;
+- повторно выполняет полный Git-bound snapshot admission;
+- в отдельной `READ ONLY REPEATABLE READ` transaction получает cluster
+  advisory lock и ранние `ACCESS SHARE` locks на все девять relations;
+- повторно сверяет exact migration names/checksums, PostgreSQL 16,
+  database identity, catalog/FK/index/trigger state, RLS и least privilege;
+- требует подписанный отдельным harness-ключом synthetic provenance manifest,
+  связанный с release SHA, DB identity, случайным creation nonce, fixture
+  profile, database marker и TTL не более двух часов;
+- применяет cap до row evidence, получает не более `maxCases + 1` rows и
+  отклоняет aggregate/row count mismatch;
+- строит HMAC-псевдонимизированные, execution-unlinkable proposal только для
+  восьми разрешённых reason codes;
+- объединяет две причины для одного
+  `StaffTaskRecurringRule.lastCreatedTaskId`;
+- никогда не выводит raw database/tenant/store/user/template/rule/task/run
+  identity, PII, URL, credentials, nonce или ключи;
+- отклоняет report больше 8 MiB целиком и не выводит partial evidence.
+
+Разрешённые proposal:
+
+```text
+TEMPLATE_CREATOR_CROSS_TENANT
+RULE_TEMPLATE_CROSS_TENANT
+RULE_CREATOR_CROSS_TENANT
+RULE_LAST_TASK_CROSS_TENANT
+TASK_TEMPLATE_CROSS_TENANT
+TASK_RULE_CROSS_TENANT
+TASK_CREATOR_CROSS_TENANT
+RULE_LAST_TASK_SOURCE_MISMATCH
+```
+
+Каждый proposal имеет только символическое действие
+`REFERENCE_CLEAR_CANDIDATE`. Оно означает «owner может рассмотреть очистку
+nullable reference», а не SQL, mutation, approval, CAS token или разрешение на
+apply. Остальные `29 operator` и `6 review` codes остаются aggregate-only.
+
+Exit contract:
+
+```text
+0 = completed, blocking operator/proposal findings отсутствуют
+1 = CLI/runtime/query/evidence/report-integrity error
+2 = blocking findings
+3 = admission/schema/privilege/identity/catalog/RLS/cap gate rejected
+```
+
+Verification exact integrated SHA:
+
+- dry-run self-test: `20` checks — `PASS`;
+- dry-run contract unit suite: `14/14` — `PASS`;
+- admission contract unit suite: `16/16` — `PASS`;
+- admission offline smoke/source guards: `36` — `PASS`;
+- aggregate planner `11/11` и inventory `9/9` — `PASS`;
+- database typecheck, Prisma validate, format/diff checks — `PASS`;
+- официальный PostgreSQL 16.14 disposable rehearsal: `14` scenarios —
+  `PASS`;
+- подтверждены findings/cap/RLS/concurrent-lock exits, signed provenance,
+  tamper rejection, execution unlinkability, protected output, неизменность
+  source aggregate fingerprint и полный cleanup disposable DB/role/artifact;
+- independent architecture/security review не обнаружил P0.
+
+Оставшиеся P1 и stop conditions:
+
+1. PostgreSQL smoke имеет positive fixture только для
+   `TEMPLATE_CREATOR_CROSS_TENANT`; добавить positive fixture для остальных
+   семи codes и overlap/coalescing двух last-task причин.
+2. Provenance доказывает владение harness-ключом, но не является независимой
+   аттестацией, когда caller контролирует env и DB `COMMENT`; standalone и
+   production-like запуск запрещены до out-of-band/asymmetric trust boundary.
+3. Admission-role пока читает `User` table-wide; до production-like rehearsal
+   перейти на column-scoped privilege либо reviewed views.
+4. Apply path отсутствует намеренно. Будущий write должен быть отдельным
+   idempotent binary с owner approval, immutable input evidence, row
+   lock/recheck, audit, rollback и повторным zero-diff.
+
+Статус:
+
+```text
+SYNTHETIC proposal dry-run candidate = IMPLEMENTED_CANDIDATE
+SYNTHETIC PostgreSQL rehearsal       = PASS / 14 scenarios
+all 8 positive PostgreSQL fixtures   = PENDING
+standalone/operator-run dry-run      = NO-GO
+PRODUCTION_LIKE dry-run              = PENDING / NO-GO
+explicit apply / zero-diff           = PENDING / NO-GO
+VALIDATE / CONTRACT / deploy         = PENDING / NO-GO
+external beta                        = NO-GO
+```
+
+Следующий P0-порядок:
+
+1. добавить exhaustive PostgreSQL fixture matrix для всех восьми proposal и
+   overlap/coalescing case;
+2. получить зелёный remote CI exact integrated SHA и независимый rereview;
+3. спроектировать out-of-band provenance и column-scoped evidence access для
+   production-like контура;
+4. только после отдельного approval восстановить свежий disposable
+   production-like snapshot и пройти
+   `BASELINE_156 admission → migrations 157..162 → EXPAND_162 admission`;
+5. выполнить production-like read-only inventory и aggregate planner,
+   назначить owner всем non-zero codes;
+6. отдельно спроектировать production-like row dry-run и ещё отдельно —
+   idempotent apply;
+7. выполнить
+   `approved dry-run → approved apply → zero-diff → inventory/planner`,
+   затем отдельные `VALIDATE`, N-1 window, `CONTRACT` и deploy decisions.
+
+Топология и обязательный beta scope неизменны: четыре текущих клуба — четыре
+`Store` одной сети в одном `Tenant`; каждая внешняя сеть получает отдельный
+Tenant. После полного Gate 2 первая внешняя когорта получает полные
 геймификацию, ассортимент/товары, сотрудников, in-app коммуникации и
 users/roles только внутри собственного tenant и разрешённых Store.
 
@@ -1366,9 +1501,8 @@ Release decision остаётся `NO-GO`.
 ## 7. Рекомендуемая последовательность разработки
 
 1. Получить зелёные обязательные CI checks и независимый review exact
-   snapshot-admission SHA
-   `7d67333b22f171c6e79f723190647cdd2454b128`; bundle не передавать в
-   auto-deploy `main`.
+   integrated SHA `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`; bundle не
+   передавать в auto-deploy `main`.
 2. Оформить отдельные approval/minimization/encryption/no-egress/TTL/destruction
    controls, затем восстановить свежий production-like snapshot baseline в
    одноразовый loopback PostgreSQL 16. Remote target и production process
@@ -1392,23 +1526,27 @@ Release decision остаётся `NO-GO`.
    `databaseIdentityDigest`, стабильный `contentDigest` и timestamp-bound
    `executionDigest` только как aggregate evidence, не как row-level/CAS
    authorization; raw database identity не сохранять.
-6. Назначить owner всем non-zero codes и разработать отдельный idempotent
-   row-level reconciliation tool: protected dry-run, explicit apply,
-   immutable input evidence, row locks/recheck, audit, rollback и повторный
-   zero-diff. Ни один `proposal` planner не применять автоматически.
-7. На disposable production-like/staging data выполнить
-   `dry-run → approved apply → zero-diff dry-run`, повторить inventory/planner
-   и только при zero blocking и принятых review findings репетировать
-   отдельный `VALIDATE` всех 14 composite FK. После N-1 window подготовить
-   отдельный reviewed `CONTRACT` для 14 simple compatibility FK; production
-   deploy остаётся отдельным GO.
-8. На staging классифицировать persisted `NETWORK|STORES` для tenant одной сети
+6. Расширить реальный PostgreSQL smoke positive fixtures с одного до всех
+   восьми proposal codes и добавить overlap/coalescing case. Использовать
+   реализованный synthetic-only dry-run только как design evidence; он не
+   является production-like admission или apply authorization.
+7. Назначить owner всем non-zero codes, спроектировать out-of-band provenance
+   и column-scoped evidence role, затем отдельные production-like row dry-run
+   и idempotent apply инструменты с immutable input evidence, row
+   locks/recheck, audit, rollback и повторным zero-diff.
+8. На disposable production-like/staging data после отдельного approval
+   выполнить `dry-run → approved apply → zero-diff dry-run`, повторить
+   inventory/planner и только при zero blocking и принятых review findings
+   репетировать отдельный `VALIDATE` всех 14 composite FK. После N-1 window
+   подготовить отдельный reviewed `CONTRACT` для 14 simple compatibility FK;
+   production deploy остаётся отдельным GO.
+9. На staging классифицировать persisted `NETWORK|STORES` для tenant одной сети
    с четырьмя клубами; strict AccessScope разрешить только при нуле unresolved
    active users/invites.
-9. Запустить read-only attachment inventory, затем реализовать отдельный
-   idempotent apply/backfill/reconciliation tool с explicit apply,
-   quarantine и повторным zero-diff dry-run.
-10. Сохранить scheduler/all-tenant route незарегистрированными до
+10. Запустить read-only attachment inventory, затем реализовать отдельный
+    idempotent apply/backfill/reconciliation tool с explicit apply,
+    quarantine и повторным zero-diff dry-run.
+11. Сохранить scheduler/all-tenant route незарегистрированными до
     lifecycle/entitlement, system identity и durable lease/fencing; реализовать
     оставшиеся task-shift/Store/provenance invariants, global timezone policy и
     полную production-like A1/A2/B API/BFF/browser/file evidence; продолжить
@@ -1416,31 +1554,31 @@ Release decision остаётся `NO-GO`.
     `KNOWLEDGE_ARTICLE/SHIFT_REGULATION`, затем
     `TRAINING_COURSE/ONBOARDING_PLAN`; для каждого добавлять atomic bind, live
     parent ACL, revoke и A1/A2/B tests.
-11. Использовать реализованный process-wide `SHADOW` для mismatch evidence,
+12. Использовать реализованный process-wide `SHADOW` для mismatch evidence,
     добавить tenant/store canary orchestration и aggregate gate, затем включить
     `ENFORCED`; пройти browser/BFF/file regression и rollback drill.
-12. Завершить оставшиеся staff/communications surfaces, включая membership,
+13. Завершить оставшиеся staff/communications surfaces, включая membership,
     mentions, receipts, SSE, notifications, PII и background execution.
-13. Завершить IAM: resend/revoke audit, session revoke и 100-way accept
+14. Завершить IAM: resend/revoke audit, session revoke и 100-way accept
     concurrency.
-14. Последовательно подключить единый scope к gamification/ledger, затем к
+15. Последовательно подключить единый scope к gamification/ledger, затем к
     assortment/reports/imports и пройти store-level negative suites.
-15. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
+16. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
     контуров.
-16. Реализовать customer stage, обязательный beta entitlement profile,
+17. Реализовать customer stage, обязательный beta entitlement profile,
     provisioning, suspend/offboarding и `TenantExecutionPolicy`.
-17. Завершить эксплуатационный контур: immutable artifact, versioned
+18. Завершить эксплуатационный контур: immutable artifact, versioned
     infrastructure, external probes/alerts, scheduler ownership,
     backup/restore и rollback drills.
-18. Провести legacy-key audit и безопасный secret/session/invite/referral
+19. Провести legacy-key audit и безопасный secret/session/invite/referral
     cutover.
-19. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
+20. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
     сети из четырёх клубов без смены `tenantId`.
-20. Выполнить cutover, staged Langame sync, full-scope acceptance и семь дней
+21. Выполнить cutover, staged Langame sync, full-scope acceptance и семь дней
     internal alpha.
-21. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
+22. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
     14-дневный pilot.
-22. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
+23. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
     лимиты.
 
 ## 8. Метрики запуска

@@ -3,10 +3,10 @@
 | Поле                  | Значение                                                                        |
 | --------------------- | ------------------------------------------------------------------------------- |
 | Статус                | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE NOT EXECUTED |
-| Версия                | 0.2.2                                                                           |
+| Версия                | 0.3.0                                                                           |
 | Дата                  | 27.07.2026                                                                      |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`            |
-| Candidate code SHA    | `7d67333b22f171c6e79f723190647cdd2454b128`                                      |
+| Candidate code SHA    | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`                                      |
 | Report schema version | 1                                                                               |
 | PostgreSQL            | Только major version `16`                                                       |
 | Разрешённая schema    | Только `public`                                                                 |
@@ -56,8 +56,8 @@ Candidate:
 ```text
 implementation candidate               = IMPLEMENTED_CANDIDATE
 unit contract                           = PASS (16/16)
-offline source/safety contract          = PASS (34 checks)
-SYNTHETIC real PostgreSQL verification = PASS (9 scenarios)
+offline source/safety contract          = PASS (36 checks)
+SYNTHETIC real PostgreSQL verification = PASS (14 scenarios; PostgreSQL 16.14)
 PRODUCTION_LIKE acquisition/restore/run = NOT EXECUTED
 remote admission                        = NO-GO
 production apply/VALIDATE/deploy        = NO-GO
@@ -671,6 +671,13 @@ acquisition approval
 Для `SYNTHETIC` эта последовательность является только engineering/CI
 rehearsal и никогда не удовлетворяет Gate 2.
 
+Реализованный
+[proposal dry-run](./staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
+покрывает только `SYNTHETIC EXPAND_162` disposable harness с подписанной
+provenance. Он не является будущим production-like шагом из схемы выше:
+standalone target отклоняется, предложения не авторизуют apply, а 29 operator
+и 6 review кодов остаются aggregate-only.
+
 Для будущего `PRODUCTION_LIKE` каждый переход требует отдельного operational
 approval/evidence. Нельзя:
 
@@ -717,12 +724,23 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
 4. выполнить первый `PRODUCTION_LIKE` admission только на loopback disposable
    cluster;
 5. уничтожить snapshot по TTL и сохранить destruction evidence.
+6. расширить synthetic PostgreSQL rehearsal proposal dry-run: кроме уже
+   проверенного одного positive predicate покрыть оставшиеся семь proposal
+   predicates и coalescing; это P1 test evidence, а не разрешение
+   production-like запуска.
 
 Ни один из этих пунктов сам по себе не разрешает apply, `VALIDATE`, deploy или
 внешний beta-доступ.
 
 ## 18. Changelog
 
+- `0.3.0`, 27.07.2026 — release authority обновлена до exact candidate
+  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`; admission сохраняет 16/16 unit,
+  offline contract расширен до 36 checks, integrated disposable PostgreSQL
+  16.14 smoke — до 14 scenarios. Добавлен downstream proposal dry-run, строго
+  ограниченный подписанной `SYNTHETIC EXPAND_162` harness provenance;
+  production-like/standalone/apply/`VALIDATE`/`CONTRACT`/deploy/external beta
+  остаются `NO-GO`.
 - `0.2.2`, 27.07.2026 — зафиксирован финальный security rereview без P0/P1 и
   оставшиеся P2: in-process ACL cleanup только для disposable CI, operational
   attestation границы и запрет loopback tunnel/proxy к remote target.

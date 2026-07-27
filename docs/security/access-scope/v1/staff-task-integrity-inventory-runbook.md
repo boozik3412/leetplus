@@ -1,13 +1,14 @@
 # Staff task catalog integrity: inventory и DB-invariant runbook
 
-| Поле                  | Значение                                                                         |
-| --------------------- | -------------------------------------------------------------------------------- |
-| Статус                | Implementation candidate; production inventory не выполнялся                     |
-| Версия                | 1.0.0                                                                            |
-| Дата                  | 27.07.2026                                                                       |
-| Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                             |
-| Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                        |
-| Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md) |
+| Поле                  | Значение                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| Статус                | Inventory и DB EXPAND implementation candidates; production inventory не выполнялся |
+| Версия                | 1.1.0                                                                               |
+| Дата                  | 27.07.2026                                                                          |
+| Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                |
+| Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                           |
+| Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)    |
+| Следующий checkpoint  | [StaffTask integrity EXPAND](./staff-task-integrity-expand-runbook.md)              |
 
 Документ задаёт безопасный порядок проверки legacy-данных `StaffTask`,
 `StaffTaskTemplate`, `StaffTaskRecurringRule` и
@@ -140,7 +141,25 @@ Review-находка не должна маскироваться как док
 Production запуск выполняется отдельно операционным владельцем после backup и
 restore rehearsal. Эта ветка его не выполняет.
 
-## 6. Политика будущих DB-инвариантов
+## 6. DB-invariant lifecycle
+
+Schema-only EXPAND уже реализован как неприменённый candidate: пять parent
+keys создаются concurrent migrations, а 14 composite FK добавляются как
+`NOT VALID`. Три Store relations используют composite `RESTRICT`; под
+прежними именами также создаются три temporary simple Store
+`RESTRICT/RESTRICT NOT VALID`, сохраняющие global existence для legacy
+cross-tenant rows. Одиннадцать paired legacy non-Store FK swap/re-add’ятся как
+`NOT VALID`: сохраняют delete actions, но используют `ON UPDATE RESTRICT`.
+Итого contract содержит 14 composite + 14 simple compatibility `NOT VALID` FK.
+Store/User/Template/Rule/Task identifiers immutable; N/N-1 runtime
+compatibility не включает их update. Полный migration set содержит 162
+migration, latest —
+`20260727131000_staff_task_integrity_expand`.
+
+Точный contract, staged smoke, порядок применения и ограничения описаны в
+[EXPAND runbook](./staff-task-integrity-expand-runbook.md). Это не отменяет
+production-like inventory/reconciliation перед production APPLY и отдельный
+`VALIDATE`.
 
 ### EXPAND
 
@@ -148,6 +167,11 @@ restore rehearsal. Эта ветка его не выполняет.
 - добавить новые ограничения так, чтобы N-1 приложение продолжало работать;
 - критические FK сначала вводить как `NOT VALID`, чтобы новые writes уже
   проверялись, а legacy rows валидировались отдельно;
+- заменить три Store `SET NULL` временными simple `RESTRICT` параллельно с
+  composite `RESTRICT`, чтобы legacy cross-tenant row не потеряла
+  global-existence protection;
+- swap/re-add 11 non-Store simple FK с прежними delete actions, но
+  `ON UPDATE RESTRICT`; parent identifiers объявить immutable;
 - задать короткий `lock_timeout` и bounded `statement_timeout`;
 - не совмещать длительную index build/validation с application deployment;
 - запретить физическое удаление Store, если существуют store-bound
@@ -169,12 +193,15 @@ constraint-trigger design с concurrency tests.
 - проверены lock duration, long transactions, replication/backup health и
   N/N-1 compatibility;
 - Prisma schema/migration drift объяснён и проверен.
+- future-migration guard подтверждает отсутствие DROP всех 28 DB-native FK;
+  migration создаётся create-only с ручным SQL review, `db push` запрещён.
 
 ### CONTRACT
 
 Старые простые FK, временные triggers/indexes и compatibility code удаляются
 только после staging/canary evidence. Rollback приложения не должен требовать
-отката уже принятого same-tenant ограничения.
+отката уже принятого same-tenant ограничения и не должен запускать старый seed
+или обновлять immutable parent identifiers.
 
 ## 7. Evidence template
 
@@ -199,11 +226,14 @@ decision: NO-GO | RECONCILE | READY_FOR_EXPAND_REHEARSAL
 
 ## 8. Implementation evidence
 
-Для candidate `56d615437ecfcb90db252016d3e5b83f3f545578` подтверждено:
+Для inventory candidate
+`56d615437ecfcb90db252016d3e5b83f3f545578` и текущего EXPAND candidate
+`dc26568d94d76b886f1d1b79c36b1bd9f00ac401` подтверждено:
 
 - syntax/help/self-test и Node contract suite — 9/9;
 - Prisma schema validation и database script typecheck — pass;
-- clean PostgreSQL schema — 156/156 migrations;
+- исходный inventory checkpoint — clean PostgreSQL 156/156 migrations;
+- текущий полный clean path — 162/162 migrations;
 - реальный clean scan — 43 reason code, `PASS`, zero blocking/review;
 - намеренная cross-tenant Template→Store fixture — `BLOCKED`, exit `2`;
 - после безопасной reconciliation той же fixture остался только review
@@ -211,6 +241,14 @@ decision: NO-GO | RECONCILE | READY_FOR_EXPAND_REHEARSAL
 - оба отчёта не содержали fixture Tenant/Store/Template identifiers;
 - обе временные test schema удалены; `public` не изменялся;
 - независимый read-only review не нашёл P0/P1.
+- staged real PostgreSQL EXPAND smoke подтвердил пять parent indexes,
+  14 composite + 14 simple compatibility `NOT VALID` FK, 14 benign legacy
+  updates, 14 отклонённых новых invalid writes, три Store
+  `RESTRICT`/archive-first, три legacy Store delete protection, пять UUID и
+  пять tenant move rejection сценариев;
+- offline self-test проверил safe target, migration partition и
+  расширенный future-migration DDL guard; scoped Prisma drift внутри smoke
+  подтвердил `prismaDriftDrops=14` без credentials в argv.
 
 Неавтоматизированные остатки P2:
 
@@ -234,5 +272,15 @@ Inventory slice считается реализованным, когда:
 6. production-like запуск и reconciliation остаются отдельными явными
    операционными шагами.
 
-Это повышает только readiness к EXPAND rehearsal. Внешний beta остаётся
-`NO-GO` до полного Gate 2.
+Это повышает только readiness к production-like EXPAND/VALIDATE rehearsal.
+Внешний beta остаётся `NO-GO` до полного Gate 2.
+
+## 10. Changelog
+
+- `1.1.0`, 27.07.2026 — связан реализованный schema-only EXPAND candidate:
+  162 migrations, пять concurrent parent indexes, 14 composite + 14 simple
+  compatibility `NOT VALID` FK, immutable parent IDs,
+  global-existence/expanded DDL guards, scoped Prisma drift и staged
+  PostgreSQL smoke;
+  production-like reconciliation/VALIDATE/deploy остаются pending.
+- `1.0.0`, 27.07.2026 — создан guarded read-only inventory contract.

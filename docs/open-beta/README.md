@@ -57,7 +57,11 @@
 11. [Runbook integrity inventory staff tasks](../security/access-scope/v1/staff-task-integrity-inventory-runbook.md) —
     guarded read-only проверка legacy Template/Rule/Task/Run перед
     same-tenant EXPAND/VALIDATE.
-12. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+12. [Runbook StaffTask integrity EXPAND](../security/access-scope/v1/staff-task-integrity-expand-runbook.md) —
+    пять concurrent parent indexes, 14 composite + 14 simple compatibility
+    `NOT VALID` FK, archive-first/global-existence Store protection, immutable
+    parent IDs и порядок дальнейших `VALIDATE/CONTRACT`.
+13. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
     какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
@@ -82,8 +86,17 @@
   зарегистрированы и остаются `NO-GO`.
 - guarded staff task integrity inventory: 43 aggregate reason code, одна
   read-only `REPEATABLE READ` snapshot, fail-closed exit `1/2` и обязательный
-  clean-schema CI run; production inventory и DB constraints ещё не
-  выполнялись.
+  clean-schema CI run; production inventory не выполнялся.
+- same-tenant StaffTask catalog EXPAND candidate
+  `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed: 162 migrations,
+  пять concurrent parent indexes, 14 composite + 14 simple compatibility
+  `NOT VALID` FK, archive-first/global-existence protection, immutable parent
+  IDs и future-migration guard для 28 DB-native constraints; staged real
+  PostgreSQL smoke подтвердил 14 benign legacy updates, 5 UUID + 5 tenant
+  move rejections и scoped `prismaDriftDrops=14`; expanded DDL guard пройден,
+  но
+  production-like inventory/reconciliation, `VALIDATE`, `CONTRACT` и
+  deployment не выполнялись.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный
@@ -126,6 +139,14 @@ credentials, encryption keys и необработанные выгрузки.
 - tenant/store IDOR, PII, exports, files, jobs и BFF regression зелёные;
 - staff task integrity inventory имеет zero blocking findings; все review-only
   findings имеют owner и принятое решение;
+- все 14 StaffTask catalog constraints валидированы после production-like
+  reconciliation; три Store delete restrictions и N/N-1 rollback проверены;
+- все 14 simple compatibility FK не удалены до отдельного CONTRACT; rollback
+  не запускает старый seed или parent ID updates, `db push` запрещён;
+- expanded future-migration DDL guard и scoped
+  `prismaDriftDrops=14` check зелёные; credentials отсутствуют в argv;
+- после закрытия N-1 window CONTRACT удалил ровно 14 simple compatibility FK
+  и оставил future guard на 14 validated composite FK;
 - exact SHA виден в API/web/edge;
 - backup restore, alert и rollback drills подтверждены;
 - gamification write-back включается отдельно по Store через

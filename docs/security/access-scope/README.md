@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.9.0                                                                                               |
+| Версия контракта               | 1.10.0                                                                                              |
 | Дата                           | 27.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -14,6 +14,7 @@
 | `STAFF_TASK` adoption          | `f0a6bccfdd26d5b782c03f0b23445a3d23080058` — not deployed                                           |
 | Recurring actor HTTP           | `cbd7a6b426c4e9fd9e29c085eeb8547d88249ca5` — not deployed                                           |
 | Staff task integrity inventory | `56d615437ecfcb90db252016d3e5b83f3f545578` — not run on production                                  |
+| Staff task integrity EXPAND    | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — 162 migrations / 28 guarded FK; not deployed           |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -67,6 +68,10 @@ invite-only открытому тесту. Она отвечает на вопр
 12. [Staff task catalog integrity inventory](./v1/staff-task-integrity-inventory-runbook.md) —
     read-only legacy scan, reason-code gate и порядок
     `INVENTORY → RECONCILE → EXPAND → VALIDATE`.
+13. [Staff task integrity EXPAND](./v1/staff-task-integrity-expand-runbook.md) —
+    пять concurrent parent indexes, 14 composite + 14 simple compatibility
+    `NOT VALID` FK, archive-first/global-existence Store protection, immutable
+    parent IDs, staged PostgreSQL smoke и порядок `VALIDATE → CONTRACT`.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -85,8 +90,8 @@ candidate нельзя передавать в auto-deploy как единый p
 классификация, и только при нуле unresolved active subjects включается strict
 reader.
 
-Текущий общий schema candidate содержит 156 миграций, latest —
-`20260727120000_staff_task_catalog_audit_expand`; attachment ACL checkpoint
+Текущий общий schema candidate содержит 162 миграции, latest —
+`20260727131000_staff_task_integrity_expand`; attachment ACL checkpoint
 завершается миграцией
 `20260727113000_staff_attachment_acl_invariant_hardening`. Native bind и
 parent-aware reader реализованы для chat и новых shift-report uploads.
@@ -146,18 +151,50 @@ Recurring actor candidate прошёл focused CI 27 suites / 375 tests, full AP
 2 suites / 8 tests. Пять recurring race-сценариев подтверждают фактическую
 блокировку и post-wait rollback для Template, Store и participant revoke.
 Scheduler/all-tenant route не зарегистрированы; tenant-global timezone,
-production-like legacy reconciliation, DB constraints и browser evidence
-остаются `NO-GO`.
+production-like legacy reconciliation, DB validation/deploy и browser
+evidence остаются `NO-GO`.
 
 Staff task integrity inventory реализован отдельным candidate
 `56d615437ecfcb90db252016d3e5b83f3f545578`. Он проверяет 43 aggregate
 same-tenant/store/assignee/schedule/run/deletion reason code в одной
 read-only `REPEATABLE READ` snapshot, не возвращает row identifiers и
-различает ошибки (`1`) и blocking findings (`2`). Clean schema со всеми 156
-миграциями дала `PASS`; локальная намеренно cross-tenant fixture дала
+различает ошибки (`1`) и blocking findings (`2`). На inventory checkpoint
+clean schema со всеми 156 миграциями дала `PASS`; локальная намеренно
+cross-tenant fixture дала
 `BLOCKED` без утечки ID. Production/production-like scan и reconciliation не
 выполнялись, поэтому это implementation evidence, а не разрешение внешнего
 доступа.
+
+Same-tenant StaffTask catalog EXPAND также реализован как неприменённый
+candidate: пять composite parent keys создаются отдельными concurrent
+миграциями, затем 14 composite FK вводятся как `NOT VALID`. Три Store FK
+используют composite `RESTRICT` и фиксируют archive-first lifecycle. Под
+прежними именами также остаются три temporary simple Store
+`RESTRICT/RESTRICT NOT VALID`: они не дают legacy cross-tenant row потерять
+global-existence защиту и получить dangling `storeId`. Одиннадцать
+соответствующих non-Store FK swap/re-add’ятся как `NOT VALID`: delete actions
+сохраняются, но `ON UPDATE` становится `RESTRICT`. Store/User/Template/Rule/
+Task identifiers считаются immutable; N/N-1 runtime compatibility не включает
+ID update или старый seed. Prisma 6.19 представляет parent keys и Store
+relations, а также явный `onUpdate: Restrict` 11 simple non-Store relations.
+Manual composite drift включает 10 partial-`SET NULL` и один Run→Rule
+`CASCADE`; `NOT VALID`/coexistence всех 14 simple compatibility FK остаётся
+DB-native contract. Exact fresh-162 Prisma diff предлагает ровно 14 security
+DROP: 11 non-Store composite и три temporary simple Store FK; 11 simple
+non-Store FK он больше не меняет. Unrelated pre-existing ADD/index-rename
+drift учитывается отдельно. Diff запускается внутри staged smoke через
+`--from-schema-datasource`/scoped env без URL или пароля в argv. Offline
+self-test защищает 28 FK от DROP/RENAME и запрещает destructive
+table/column DDL, DROP/ALTER пяти parent indexes, DROP SCHEMA и неожиданные
+migration directory names; разрешены только create-only SQL review,
+`db push` запрещён.
+Staged real PostgreSQL smoke подтвердил baseline 161 → migration 162, все пять
+indexes, каталог 14 composite + 14 simple compatibility FK, 14 отклонённых
+новых invalid writes, три same-tenant и три legacy Store delete protections,
+delete actions, 14 benign legacy updates, пять отклонённых parent UUID,
+пять tenant moves и `prismaDriftDrops=14`.
+Production-like inventory/reconciliation, `VALIDATE`, `CONTRACT`, deployment
+и production cutover не выполнялись.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -175,6 +212,12 @@ read-only `REPEATABLE READ` snapshot, не возвращает row identifiers 
 
 ## Changelog
 
+- `1.10.0`, 27.07.2026 — добавлен schema-only StaffTask integrity EXPAND:
+  162 migrations, пять concurrent parent indexes, 14 composite + 14 simple
+  compatibility `NOT VALID` FK, archive-first/global-existence protection,
+  immutable parent IDs, expanded DDL guard, scoped Prisma drift и staged
+  PostgreSQL smoke; production-like reconciliation/VALIDATE/deploy остаются
+  `NO-GO`.
 - `1.9.0`, 27.07.2026 — добавлен guarded staff task integrity inventory:
   43 reason code, read-only RepeatableRead, deterministic exit gate,
   clean-schema CI и runbook будущих same-tenant/Store deletion constraints.

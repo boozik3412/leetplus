@@ -16,7 +16,11 @@
 - [ ] Candidate branch clean.
 - [ ] Full candidate SHA:
 - [ ] `origin/main` relation зафиксирован:
-- [ ] Migration revision/count:
+- [ ] EXPAND revision/count: `162`, latest —
+      `20260727131000_staff_task_integrity_expand`; final cutover count/revision
+      обновлены после отдельного VALIDATE/CONTRACT.
+- [ ] EXPAND source checkpoint:
+      `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — не production deployment.
 - [ ] API/web/edge показывают тот же SHA/build time.
 - [ ] Required CI checks зелёные.
 - [ ] Release decision owner и change window назначены.
@@ -63,8 +67,43 @@
 - [ ] Backup непосредственно перед изменением успешен.
 - [ ] Restore rehearsal в отдельную БД успешен; RPO/RTO записаны.
 - [ ] Schema-only EXPAND rehearsal успешен с timeout/lock evidence.
-- [ ] Same-tenant StaffTask catalog constraints вводятся только после
-      zero-blocking inventory и отдельного reconciliation dry-run.
+- [ ] Все пять StaffTask parent indexes существуют в ожидаемой schema,
+      unique/valid/ready и имеют точный порядок `(tenantId, id)`.
+- [ ] Все 14 same-tenant StaffTask catalog FK присутствуют как `NOT VALID` и
+      уже отклоняют новые invalid writes.
+- [ ] Одиннадцать paired legacy non-Store FK swap/re-add’ены как `NOT VALID`:
+      прежние delete actions сохранены, `ON UPDATE RESTRICT` подтверждён.
+- [ ] Три legacy Store FK под прежними именами существуют как temporary
+      simple `RESTRICT/RESTRICT NOT VALID`; прежняя `SET NULL` семантика
+      отсутствует.
+- [ ] Каталог содержит ровно 14 composite + 14 simple compatibility
+      `NOT VALID` FK.
+- [ ] Все 14 legacy invalid rows после EXPAND проходят benign non-FK update;
+      migration не замораживает их до reconciliation.
+- [ ] Три temporary Store FK блокируют удаление Store даже для legacy
+      cross-tenant row и не допускают dangling `storeId`.
+- [ ] Production-like StaffTask inventory имеет `blockingTotal=0`; выполнены
+      отдельные reconciliation dry-run, explicit apply и zero-diff dry-run.
+- [ ] Все 14 same-tenant FK валидированы отдельным управляемым шагом;
+      `convalidated=true` подтверждён по каждому constraint.
+- [ ] Prisma schema содержит `onUpdate: Restrict` для 11 simple non-Store
+      relations; exact destructive diff содержит только 11 non-Store
+      composite + три simple Store FK, а unrelated ADD/index-rename drift
+      классифицирован отдельно.
+- [ ] Staged smoke получил `prismaDriftDrops=14` через
+      `--from-schema-datasource` и scoped env; database URL/пароль отсутствуют
+      в argv.
+- [ ] Операционный `NOT VALID`/coexistence contract всех 14 simple FK сверён с
+      `staff-task-integrity-expand-runbook.md`, хотя Prisma не отражает
+      `convalidated`.
+- [ ] Offline self-test/future-migration guard защищает все 28 DB-native FK от
+      DROP/RENAME и запрещает destructive table/column DDL, DROP/ALTER пяти
+      parent indexes, DROP SCHEMA и неожиданные migration directory names.
+- [ ] Migration создана create-only и прошла ручной SQL review.
+- [ ] Пять parent UUID update и пять parent `tenantId` move сценариев
+      отклонены; identifiers и tenant ownership immutable.
+- [ ] `prisma db push` не используется; N-1 rollback не запускает старый seed
+      или identifier updates.
 - [ ] Физическое удаление Store блокируется при store-bound
       Task/Template/Rule; штатный путь — deactivate/archive.
 - [ ] `_prisma_migrations` без pending/failed/unfinished rows.
@@ -106,6 +145,13 @@
 - [ ] Контрольные counts/checksums до cutover сохранены.
 - [ ] Application writes/jobs остановлены либо совместимы с фазой.
 - [ ] Schema EXPAND применена и проверена.
+- [ ] StaffTask catalog revision равна
+      `20260727131000_staff_task_integrity_expand`; все 28 FK прошли
+      post-apply catalog check.
+- [ ] Pre-CONTRACT evidence подтверждает все 14 simple compatibility
+      `NOT VALID` FK и зелёный 28-FK guard.
+- [ ] Отдельный CONTRACT после N-1 window удалил ровно 14 simple FK и перевёл
+      guard manifest на 14 surviving composite FK.
 - [ ] Accounts/invites классифицированы.
 - [ ] Strict application candidate активирован по плану.
 - [ ] Модули переведены `SHADOW → ENFORCED` только при zero mismatch.
@@ -129,4 +175,5 @@
 Cutover немедленно останавливается при cross-scope выдаче, unknown active scope,
 несовпадении tenant/store topology, повреждении totals, failed backup/restore,
 неожиданном migration lock, недоступном rollback, attachment mismatch,
-необъяснимом reward/ledger расхождении или недоставленном critical alert.
+необъяснимом reward/ledger расхождении, отклонении exact Prisma drift,
+ошибке future-migration DDL guard или недоставленном critical alert.

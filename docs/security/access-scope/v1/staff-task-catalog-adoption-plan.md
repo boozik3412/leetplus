@@ -1,18 +1,20 @@
 # Staff task templates и recurring rules: AccessScope adoption plan
 
-| Поле           | Значение                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------ |
-| Статус         | templates, recurring actor HTTP и integrity inventory `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.4.0                                                                                            |
-| Дата           | 27.07.2026                                                                                       |
-| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                             |
-| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                           |
+| Поле           | Значение                                                                                                    |
+| -------------- | ----------------------------------------------------------------------------------------------------------- |
+| Статус         | templates, recurring actor HTTP, integrity inventory и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
+| Версия         | 1.5.0                                                                                                       |
+| Дата           | 27.07.2026                                                                                                  |
+| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                        |
+| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                      |
 
 Документ фиксирует route/action/job inventory для шаблонов и регулярных задач.
 Template CRUD/launch уже реализован отдельным bounded candidate, описанным в
 [implementation checkpoint](./staff-task-catalog-implementation-checkpoint.md).
 Recurring actor HTTP реализован следующим
 [checkpoint](./staff-task-recurring-http-implementation-checkpoint.md).
+Same-tenant schema-only EXPAND описан отдельным
+[rollout/validation runbook](./staff-task-integrity-expand-runbook.md).
 Scheduler и scheduled all-tenant HTTP не зарегистрированы и всё ещё не
 применяют system execution contract, поэтому весь catalog slice и внешний тест
 остаются `NO-GO`.
@@ -50,10 +52,12 @@ Scheduler и scheduled all-tenant HTTP не зарегистрированы и 
 7. Unique `(ruleId, scheduledFor)` уменьшает дубли, но stale `STARTED` run после
    crash system-path пока не reclaim-ится; actor path пишет occurrence и task в
    одном commit.
-8. Same-tenant DB invariants отсутствуют для связей
-   rule/template/run/store/user/task; `Store.onDelete=SetNull` может превратить
-   store-bound resource в tenant-global. Guarded read-only inventory уже
-   реализован, но production-like reconciliation ещё не выполнялся.
+8. Same-tenant DB EXPAND реализован candidate для 14 связей
+   rule/template/run/store/user/task. Три опасных `Store.onDelete=SetNull`
+   заменены парой composite + temporary simple `RESTRICT`: simple FK сохраняет
+   global existence legacy cross-tenant Store references, штатный путь —
+   archive/deactivate. Production-like inventory/reconciliation и `VALIDATE`
+   ещё не выполнялись.
 9. Template/Rule domain audit реализован; retention/system denied attempts ещё
    требуют общей политики.
 10. Unit и PG race/rollback suite добавлены; guarded inventory candidate готов,
@@ -149,9 +153,42 @@ Read-only inventory считает:
 
 Scanner использует одну read-only `REPEATABLE READ` snapshot, возвращает 43
 стабильных aggregate reason code без ID/PII и различает database/contract
-failure (`1`) и blocking finding (`2`). Contract migration добавляется только
-после production-like inventory и reconciliation plan. Destructive auto-fix
-запрещён.
+failure (`1`) и blocking finding (`2`). Destructive auto-fix запрещён.
+
+Schema-only EXPAND реализован отдельным bounded candidate
+`dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed:
+
+- пять parent keys создаются отдельными
+  `CREATE UNIQUE INDEX CONCURRENTLY`;
+- 14 composite same-tenant FK добавляются как `NOT VALID`: новые invalid
+  writes уже запрещены, legacy rows допускаются до reconciliation;
+- 11 соответствующих legacy non-Store FK swap/re-add’ятся как `NOT VALID`:
+  сохраняют 10 `ON DELETE SET NULL` и один `CASCADE`, но переходят на
+  `ON UPDATE RESTRICT`;
+- три legacy Store `SET NULL` FK пересоздаются под прежними именами как
+  temporary simple `RESTRICT/RESTRICT NOT VALID`, параллельно с composite
+  Store `RESTRICT`; это защищает legacy cross-tenant rows от dangling
+  `storeId`;
+- parent identifiers Store/User/Template/Rule/Task immutable; N/N-1 runtime
+  compatibility не разрешает ID update или запуск старого seed;
+- Prisma 6.19 отражает parent keys, Store relations и `onUpdate: Restrict`
+  всех 11 simple non-Store relations; manual composite drift включает
+  10 partial-`SET NULL` и один Run→Rule `CASCADE`, а `NOT VALID`/coexistence
+  всех 14 simple compatibility FK остаётся DB-native;
+- exact fresh-162 diff предлагает 14 security DROP: 11 non-Store composite и
+  три temporary simple Store FK; 11 simple non-Store FK он не меняет,
+  unrelated ADD/index-rename drift рассматривается отдельно; smoke получает
+  diff через `--from-schema-datasource`/scoped env без URL или пароля в argv;
+- offline self-test защищает 28 FK от DROP/RENAME и запрещает destructive
+  table/column DDL, DROP/ALTER пяти parent indexes, DROP SCHEMA и неожиданные
+  migration directory names; разрешены только create-only generation и ручной
+  SQL review, `db push` запрещён;
+- полная схема содержит 162 migration, latest —
+  `20260727131000_staff_task_integrity_expand`.
+
+Порядок rehearsal, `VALIDATE`, `CONTRACT` и rollback зафиксирован в
+[EXPAND runbook](./staff-task-integrity-expand-runbook.md). Наличие candidate
+не отменяет обязательный production-like inventory и reconciliation.
 
 ## 5. Обязательная test topology
 
@@ -172,8 +209,13 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
   candidate;
 - real PostgreSQL race/rollback integration — 2 suites/8 tests, включая
   recurring 5/5, реализована и обязательна в CI;
-- integrity inventory contract — 9/9; clean PostgreSQL со 156 миграциями
+- integrity inventory contract — 9/9; clean PostgreSQL со 162 миграциями
   `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
+- staged real PostgreSQL EXPAND smoke: baseline 161 → migration 162, пять
+  parent indexes, 14 composite + 14 simple compatibility `NOT VALID` FK,
+  14 benign legacy updates, 14 rejected new invalid writes, три archive-first,
+  три legacy Store delete protections, пять rejected UUID + пять tenant moves
+  и `prismaDriftDrops=14` — pass;
 - API/BFF/browser negative journeys.
 
 Текущий recurring checkpoint: focused 27 suites/375 tests и full API
@@ -182,22 +224,33 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 
 ## 6. Exit criteria
 
-Templates/recurring часть `BETA-MOD-STAFF-003` может перейти в
-`IMPLEMENTED_CANDIDATE`, когда:
+Для перехода всей templates/recurring/EXPAND части `BETA-MOD-STAFF-003` из
+`IMPLEMENTED_CANDIDATE` в `VERIFIED` должны одновременно выполняться условия:
 
 1. Все HTTP и system paths используют persisted scope.
 2. Нельзя материализовать task в чужом Store или для недоступного assignee.
 3. Interactive audit сохраняет реального actor.
 4. Suspended/non-entitled tenant не обрабатывается.
 5. Parent lock/recheck и rollback доказаны real PostgreSQL тестом.
-6. Production-like legacy inventory имеет объяснённый zero critical mismatch.
+6. Production-like legacy inventory и reconciliation имеют объяснённый zero
+   critical mismatch.
 7. Focused/full CI и production builds зелёные.
+8. Все 14 composite FK валидированы в управляемом
+   staging/production-like rehearsal.
+9. После N-1 rollback window отдельный CONTRACT удалил ровно 14 simple
+   compatibility FK и сохранил guard для 14 composite FK.
 
 `VERIFIED` требует staging/canary evidence, exact release SHA, scheduler
 ownership и общий Gate 2.
 
 ## 7. Changelog
 
+- `1.5.0`, 27.07.2026 — добавлен same-tenant schema-only EXPAND candidate:
+  пять concurrent parent indexes, 14 composite и 14 simple compatibility
+  `NOT VALID` FK, archive-first/global-existence Store protection, immutable
+  parent IDs, expanded DDL guard, scoped Prisma drift, staged PostgreSQL smoke
+  и отдельный runbook;
+  production-like reconciliation/VALIDATE/deploy остаются `NO-GO`.
 - `1.4.0`, 27.07.2026 — реализован guarded read-only integrity inventory,
   добавлены 43 aggregate reason code, deterministic exit gate, clean-schema CI
   и отдельный runbook будущих DB constraints.

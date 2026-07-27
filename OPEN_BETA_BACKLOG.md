@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.16
+- Версия: 1.17
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
@@ -245,19 +245,19 @@
 
 ### 5.8. Обязательный модуль: сотрудники
 
-| ID                 | Приоритет | Статус        | Задача                                              | Критерии приёмки                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Зависимости                      |
-| ------------------ | --------- | ------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| BETA-MOD-STAFF-001 | P0        | Запланировано | Провести полный route/action inventory staff        | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | BETA-TEN-002, BETA-IAM-001       |
-| BETA-MOD-STAFF-002 | P0        | Запланировано | Закрыть directory и identity mapping                | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | BETA-SEC-006, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-003 | P0        | В работе      | Закрыть задачи, templates и recurring rules         | Direct tasks, templates CRUD/launch, recurring actor HTTP и guarded integrity inventory имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options/mutation responses, Tenant/Rule/Template/Store/participant lock/recheck, shared materializer, Store-timezone interactive due, atomic task/run/catalog audit и 43-code read-only legacy gate. PostgreSQL race и clean inventory обязательны в CI. Scheduler/all-tenant HTTP не зарегистрированы и остаются `NO-GO`. До `Готово` остаются production-like inventory/reconciliation, same-tenant/Store deletion constraints, scheduler lease/lifecycle/entitlement, global timezone policy, task/shift DB invariant и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-004 | P0        | Запланировано | Закрыть shift workspace и shift reports             | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | BETA-MOD-STAFF-002, BETA-IAM-002 |
-| BETA-MOD-STAFF-005 | P0        | Запланировано | Закрыть регламенты и чек-листы                      | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BETA-MOD-STAFF-001               |
-| BETA-MOD-STAFF-006 | P0        | Запланировано | Закрыть знания, обучение и аттестации               | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | BETA-MOD-STAFF-001, BETA-IAM-002 |
-| BETA-MOD-STAFF-007 | P0        | Запланировано | Закрыть контроль, рейтинги, мотивацию и дисциплину  | Staff-control, operations dashboard, ratings, signals, warnings и penalties имеют понятный источник, право просмотра/изменения, комментарий и audit; нет автоматических внешних санкций или Langame write-back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-MOD-STAFF-002, BETA-SEC-005 |
-| BETA-MOD-STAFF-008 | P0        | Запланировано | Закрыть salary planning                             | Schemes, periods, rows, adjustments и exports tenant/store-scoped; расчёт воспроизводим; изменения денег аудируются; доступ отделён отдельной capability; система не выполняет выплаты                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | BETA-MOD-STAFF-001, BETA-SEC-005 |
-| BETA-MOD-STAFF-009 | P0        | В работе      | Защитить attachments и evidence                     | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md`                                                                                                                                                                                                                                                                                                                                                                                                          | BETA-MOD-STAFF-001, BETA-SEC-006 |
-| BETA-MOD-STAFF-010 | P0        | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-MOD-STAFF-001               |
-| BETA-MOD-STAFF-011 | P0        | Запланировано | Добавить staff end-to-end regression                | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | BETA-SEC-006, BETA-OPS-003       |
+| ID                 | Приоритет | Статус        | Задача                                              | Критерии приёмки                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Зависимости                      |
+| ------------------ | --------- | ------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| BETA-MOD-STAFF-001 | P0        | Запланировано | Провести полный route/action inventory staff        | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | BETA-TEN-002, BETA-IAM-001       |
+| BETA-MOD-STAFF-002 | P0        | Запланировано | Закрыть directory и identity mapping                | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | BETA-SEC-006, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-003 | P0        | В работе      | Закрыть задачи, templates и recurring rules         | Direct tasks, templates CRUD/launch, recurring actor HTTP, guarded integrity inventory и schema-only DB EXPAND имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options/mutation responses, Tenant/Rule/Template/Store/participant lock/recheck, shared materializer, Store-timezone interactive due, atomic task/run/catalog audit, 43-code read-only legacy gate, пять concurrent parent indexes, 14 composite и 14 simple compatibility `NOT VALID` FK. PostgreSQL race, clean inventory и staged EXPAND smoke обязательны в CI. Scheduler/all-tenant HTTP не зарегистрированы и остаются `NO-GO`. До `Готово` остаются production-like inventory/reconciliation, VALIDATE/CONTRACT/deploy, scheduler lease/lifecycle/entitlement, global timezone policy, task/shift DB invariant и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-004 | P0        | Запланировано | Закрыть shift workspace и shift reports             | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | BETA-MOD-STAFF-002, BETA-IAM-002 |
+| BETA-MOD-STAFF-005 | P0        | Запланировано | Закрыть регламенты и чек-листы                      | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | BETA-MOD-STAFF-001               |
+| BETA-MOD-STAFF-006 | P0        | Запланировано | Закрыть знания, обучение и аттестации               | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | BETA-MOD-STAFF-001, BETA-IAM-002 |
+| BETA-MOD-STAFF-007 | P0        | Запланировано | Закрыть контроль, рейтинги, мотивацию и дисциплину  | Staff-control, operations dashboard, ratings, signals, warnings и penalties имеют понятный источник, право просмотра/изменения, комментарий и audit; нет автоматических внешних санкций или Langame write-back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | BETA-MOD-STAFF-002, BETA-SEC-005 |
+| BETA-MOD-STAFF-008 | P0        | Запланировано | Закрыть salary planning                             | Schemes, periods, rows, adjustments и exports tenant/store-scoped; расчёт воспроизводим; изменения денег аудируются; доступ отделён отдельной capability; система не выполняет выплаты                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | BETA-MOD-STAFF-001, BETA-SEC-005 |
+| BETA-MOD-STAFF-009 | P0        | В работе      | Защитить attachments и evidence                     | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | BETA-MOD-STAFF-001, BETA-SEC-006 |
+| BETA-MOD-STAFF-010 | P0        | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | BETA-MOD-STAFF-001               |
+| BETA-MOD-STAFF-011 | P0        | Запланировано | Добавить staff end-to-end regression                | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | BETA-SEC-006, BETA-OPS-003       |
 
 ### 5.9. Обязательный модуль: коммуникации
 
@@ -879,7 +879,7 @@ Production/production-like inventory, data repair и production migration не
 - `git diff --check` и Prettier — pass;
 - независимый read-only review не нашёл P0/P1.
 
-Статус:
+Статус на момент inventory checkpoint:
 
 ```text
 inventory implementation     = IMPLEMENTED_CANDIDATE
@@ -898,14 +898,154 @@ external beta                = NO-GO
 - выполнить scanner на восстановленном production-like snapshot;
 - разработать отдельный idempotent reconciliation dry-run/apply tool; scanner
   никогда не получает apply-режим;
-- после объяснённого zero blocking diff реализовать и отрепетировать
+- после объяснённого zero blocking diff перейти к отдельным
   `EXPAND → VALIDATE → CONTRACT` для same-tenant references и archive-first
-  Store deletion policy.
+  Store deletion policy; текущий EXPAND candidate зафиксирован следующим
+  разделом 5.20, но production-like `VALIDATE/CONTRACT` ещё не выполнялись.
 
 Топология и состав первой когорты не изменились: четыре текущих клуба —
 четыре `Store` одного `Tenant`; внешняя сеть получает отдельный Tenant; после
 Gate 2 доступны полные геймификация, ассортимент/товары, сотрудники,
 коммуникации и users/roles только в своём tenant/allowed stores.
+
+Release decision остаётся `NO-GO`.
+
+### 5.20. Staff task same-tenant DB EXPAND candidate — 27.07.2026
+
+Реализован неприменённый schema-only candidate и создан операционный
+`docs/security/access-scope/v1/staff-task-integrity-expand-runbook.md`.
+Локальный checkpoint:
+`dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed. Production-like
+inventory/reconciliation, `VALIDATE`, `CONTRACT`, deployment и production
+cutover не выполнялись.
+
+Состав migration:
+
+- пять parent keys создаются пятью отдельными однооператорными
+  `CREATE UNIQUE INDEX CONCURRENTLY` migrations для
+  `Store`, `User`, `StaffTaskTemplate`, `StaffTaskRecurringRule` и
+  `StaffTask` по `(tenantId, id)`;
+- финальная migration `20260727131000_staff_task_integrity_expand` добавляет
+  14 composite same-tenant FK как `NOT VALID`; новые invalid writes
+  блокируются сразу, а legacy rows остаются доступными для controlled
+  reconciliation;
+- migration использует deterministic table locks, `lock_timeout=5s`,
+  `statement_timeout=2min` и одну короткую transaction;
+- 11 paired legacy non-Store FK swap/re-add’ятся под прежними именами как
+  `NOT VALID`: сохраняются 10 `ON DELETE SET NULL` и один
+  `Run→Rule ON DELETE CASCADE`, но `ON UPDATE` меняется с `CASCADE` на
+  `RESTRICT`;
+- идентификаторы Store/User/Template/Rule/Task считаются immutable: прежний
+  update cascade мог обойти composite `RESTRICT` при смене parent UUID;
+- три legacy Store `SET NULL` FK под прежними именами атомарно пересозданы как
+  temporary simple `RESTRICT/RESTRICT NOT VALID` и работают вместе с тремя
+  composite `RESTRICT`: same-tenant writes защищены, а legacy cross-tenant
+  rows не теряют global-existence защиту и не получают dangling `storeId`;
+- прежняя Store `SET NULL` семантика отсутствует; штатный lifecycle-путь —
+  deactivate/archive;
+- nullable links используют PostgreSQL 15+ column-list
+  `ON DELETE SET NULL`, который очищает reference ID, но сохраняет tenant;
+  Run→Rule использует composite `CASCADE`;
+- Prisma schema отражает пять parent keys, три composite Store relations и
+  явный `onUpdate: Restrict` всех 11 simple non-Store relations. Manual
+  composite drift Prisma 6.19 включает 11 FK — десять partial `SET NULL` и
+  один Run→Rule `CASCADE`; `NOT VALID`/coexistence всех 14 simple
+  compatibility FK, включая три temporary Store, остаётся DB-native contract;
+- exact diff на свежей 162-migration schema предлагает ровно 14 destructive
+  security DROP: 11 non-Store composite + три temporary simple Store FK; он
+  не предлагает менять 11 simple non-Store FK. Unrelated pre-existing
+  ADD/index-rename drift учитывается отдельно;
+- staged smoke запускает diff через `--from-schema-datasource` со scoped env:
+  database URL/пароль не передаются в argv, output фиксирует
+  `prismaDriftDrops=14`;
+- application CI выполняет offline self-test и сканирует все будущие migration
+  SQL: guard блокирует DROP/RENAME любого из 28 FK, destructive
+  DROP/RENAME/DROP COLUMN на protected tables, DROP/ALTER пяти parent indexes,
+  DROP SCHEMA и неожиданные имена migration directories;
+- для будущих изменений обязательны create-only generation и ручной SQL
+  review; `prisma db push` запрещён.
+
+Текущий schema contract:
+
+```text
+migration count                = 162
+latest migration               = 20260727131000_staff_task_integrity_expand
+concurrent parent indexes      = 5
+composite NOT VALID FK         = 14
+simple compatibility NOT VALID = 14 (11 non-Store + 3 Store)
+legacy Store SET NULL policy   = 0
+guarded DB-native FK           = 28
+Store delete protections       = 3 same-tenant + 3 legacy
+immutable parent ID checks     = 5
+immutable parent tenant checks = 5
+legacy benign update checks    = 14
+exact Prisma drift DROP        = 14
+```
+
+Локальная verification:
+
+- clean PostgreSQL path применил 162/162 migration;
+- database smoke подтвердил exact latest/count; catalog audit smoke — 5/5;
+- read-only integrity inventory на clean schema проверил 43 reason code и
+  вернул `PASS`, blocking/review `0/0`;
+- staged real PostgreSQL smoke отдельно применил baseline 161, создал
+  14 контролируемых legacy violations и затем применил только EXPAND;
+- все 14 legacy invalid rows после EXPAND успешно прошли benign non-FK update;
+- catalog assertions подтвердили пять unique/valid/ready parent indexes,
+  14 точных composite и 14 simple compatibility `NOT VALID` FK, delete/update
+  actions и parent namespaces/indexes;
+- попытка `VALIDATE` каждого из 14 composite FK ожидаемо обнаружила
+  соответствующую legacy fixture, а 14 новых invalid writes были отклонены;
+- валидный Template→Rule→Task→Run graph, partial `SET NULL` и Run→Rule
+  `CASCADE` прошли;
+- три Store delete restrictions/archive-first path и ещё три legacy
+  cross-tenant Store delete protections прошли без dangling `storeId`;
+- пять parent identifier update попыток отклонены: Store/User/Template/Rule/
+  Task ID считаются immutable;
+- пять parent `tenantId` move попыток также отклонены
+  (`parentTenantUpdatesRejected=5`);
+- offline self-test подтвердил safety target, migration partition и
+  расширенный future-migration DDL guard; unexpected migration directory names
+  также запрещены;
+- scoped exact Prisma diff внутри smoke подтвердил `prismaDriftDrops=14`;
+  unrelated ADD/index-rename drift не включён в security contract, credentials
+  отсутствуют в argv;
+- seed cleanup повторно проверен на заполненном
+  Template→Rule→Task→Run graph;
+- Prisma validate/generate, database/API typecheck, seed-safety 9/9,
+  focused API 27 suites/375 tests, full API 80 suites/1 599 pass/2 todo и
+  boundary lint прошли.
+
+Осознанно не входит:
+
+- production-like inventory и объяснённый reconciliation zero-diff;
+- `VALIDATE CONSTRAINT` для 14 FK и последующий `CONTRACT`;
+- `StaffTask.shiftId` и DB equality Task↔Shift Store;
+- Rule↔Template Store equality и полная source provenance equality;
+- динамические assignee active/platform/UserStoreAccess invariants;
+- tenant lifecycle/staff entitlement, global timezone и scheduler
+  lease/fencing;
+- deployment, production migration и выдача внешнего доступа;
+- N-1 application rollback не запускает старый seed; `db push` не является
+  допустимым release или recovery path; N-1 runtime compatibility не включает
+  обновление immutable parent identifiers.
+
+Статус:
+
+```text
+same-tenant DB EXPAND       = IMPLEMENTED_CANDIDATE / NOT DEPLOYED
+production-like inventory  = PENDING / NO-GO
+reconciliation             = PENDING
+VALIDATE / CONTRACT        = PENDING
+scheduler/all-tenant HTTP  = NO-GO / UNREGISTERED
+external beta              = NO-GO
+```
+
+Топология и продуктовый состав неизменны: четыре текущих клуба — четыре
+`Store` одной сети в одном `Tenant`; каждая внешняя сеть получает отдельный
+Tenant. После полного Gate 2 первая внешняя когорта получает полные
+геймификацию, ассортимент/товары, сотрудников, in-app коммуникации и
+users/roles только внутри собственного tenant и разрешённых Store.
 
 Release decision остаётся `NO-GO`.
 
@@ -958,21 +1098,28 @@ Release decision остаётся `NO-GO`.
    зафиксировать exact SHA и включить CI как required check; strict bundle не
    передавать в auto-deploy `main`.
 2. Отрепетировать отдельный schema-only EXPAND release на production-like
-   snapshot: все 156 migrations с session `PGOPTIONS`, ready/valid concurrent
-   indexes, N-1 compatibility, abort/retry и rollback evidence.
+   snapshot: все 162 migrations до
+   `20260727131000_staff_task_integrity_expand`, пять ready/valid concurrent
+   indexes, 14 composite и 14 simple compatibility `NOT VALID` FK, 14 benign
+   legacy updates, пять UUID + пять tenant-move rejection checks, scoped
+   `prismaDriftDrops=14`, N/N-1 runtime compatibility без старого seed,
+   expanded future-migration DDL guard, abort/retry и rollback evidence;
+   `db push` запрещён.
 3. На staging классифицировать persisted `NETWORK|STORES` для tenant одной сети
    с четырьмя клубами; strict AccessScope разрешить только при нуле unresolved
    active users/invites.
 4. Запустить read-only attachment inventory, затем реализовать отдельный
    idempotent apply/backfill/reconciliation tool с explicit apply,
    quarantine и повторным zero-diff dry-run.
-5. Использовать готовые template/catalog, actor-scoped recurring HTTP и
-   guarded integrity inventory candidates; сохранить scheduler/all-tenant
-   route незарегистрированными до lifecycle/entitlement, system identity и
-   durable lease/fencing; выполнить inventory на production-like snapshot,
-   подготовить explicit reconciliation, затем добавить/валидировать
-   same-tenant/task-shift/Store-deletion DB invariants, global timezone policy
-   и полную production-like A1/A2/B API/BFF/browser/file evidence; продолжить
+5. Использовать готовые template/catalog, actor-scoped recurring HTTP,
+   guarded integrity inventory и same-tenant EXPAND candidates; сохранить
+   scheduler/all-tenant route незарегистрированными до lifecycle/entitlement,
+   system identity и durable lease/fencing; выполнить inventory на
+   production-like snapshot, подготовить explicit reconciliation, затем
+   отдельно валидировать 14 StaffTask composite FK, после N-1 window выполнить
+   reviewed CONTRACT для 14 simple compatibility FK и реализовать оставшиеся
+   task-shift/Store/provenance invariants, global timezone policy и полную
+   production-like A1/A2/B API/BFF/browser/file evidence; продолжить
    parent adoption в порядке `CHECKLIST_RUN → KNOWLEDGE_ARTICLE/SHIFT_REGULATION →
 TRAINING_COURSE/ONBOARDING_PLAN`, для каждого добавляя atomic bind, live
    parent ACL, revoke и A1/A2/B tests.

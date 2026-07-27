@@ -44,12 +44,20 @@ const MIGRATION_TIMEOUT_MS = 10 * 60 * 1000;
 const ADVISORY_LOCK_CLASS = 1_279_349_841;
 const ADVISORY_LOCK_OBJECT = 162;
 const HMAC_KEY = "synthetic-snapshot-admission-smoke-hmac-key-aaaaaaaaaaaaaaaa";
+const PROPOSAL_DRY_RUN_HMAC_KEY = randomBytes(48).toString("base64url");
+const PROVENANCE_HMAC_KEY = randomBytes(48).toString("base64url");
 const APPROVAL_REFERENCE = "synthetic-admission-smoke";
 const ADMISSION_SCRIPT_PATH = fileURLToPath(
   new URL("./staff-task-integrity-snapshot-admission.mjs", import.meta.url),
 );
 const PLANNER_SCRIPT_PATH = fileURLToPath(
   new URL("./staff-task-integrity-reconciliation-plan.mjs", import.meta.url),
+);
+const PROPOSAL_DRY_RUN_SCRIPT_PATH = fileURLToPath(
+  new URL(
+    "./staff-task-integrity-reconciliation-proposal-dry-run.mjs",
+    import.meta.url,
+  ),
 );
 
 const READER_SELECT_RELATIONS = Object.freeze([
@@ -72,9 +80,10 @@ Local/CI-only PostgreSQL smoke for the guarded StaffTask snapshot admission
 command. It creates a random disposable database from template0, deploys the
 exact committed migration baseline through Prisma, admits BASELINE_156,
 deploys exactly migrations 157..162, and admits EXPAND_162 through a dedicated
-least-privilege login. It then injects synthetic cross-tenant legacy fixtures
-only into the disposable database and destroys the database and login in a
-finally block.
+least-privilege login. It then injects synthetic cross-tenant legacy fixtures,
+binds a signed short-lived provenance manifest to the disposable database, and
+exercises the read-only row-level proposal dry-run. The generated database and
+login are destroyed in a finally block.
 
 Usage:
   node scripts/staff-task-integrity-snapshot-admission-smoke.mjs [options]
@@ -199,6 +208,13 @@ function readerDatabaseUrl(sourceUrl, databaseName, roleName, password) {
   const target = databaseUrlFor(sourceUrl, databaseName);
   target.username = roleName;
   target.password = password;
+  return target.toString();
+}
+
+function proposalDryRunDatabaseUrl(readerUrl) {
+  const target = new URL(readerUrl);
+  target.search = "";
+  target.searchParams.set("schema", "public");
   return target.toString();
 }
 
@@ -883,13 +899,21 @@ async function assertReaderCannotWrite(readerUrl, forbiddenSelectRelation) {
 }
 
 async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
+  const suffix = randomBytes(6).toString("hex");
+  const canaries = {
+    userEmail: `snapshot-admission-user-${suffix}@example.invalid`,
+    passwordHash: `synthetic-not-a-credential-${suffix}`,
+    templateTitle: `Synthetic cross-tenant creator template ${suffix}`,
+  };
   const fixtureIds = {
     tenantA: randomUUID(),
     tenantB: randomUUID(),
     storeB: randomUUID(),
+    userB: randomUUID(),
+    templateA: randomUUID(),
     tasks: [randomUUID(), randomUUID()],
+    canaries: Object.freeze(Object.values(canaries)),
   };
-  const suffix = randomBytes(6).toString("hex");
   const now = new Date();
   const cloneAdmin = prismaClient(cloneDatabaseUrl);
   try {
@@ -939,6 +963,42 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
             ${now}
           )
         `;
+        await transaction.$executeRaw`
+          INSERT INTO public."User" (
+            "id", "tenantId", "email", "passwordHash", "role",
+            "accessScope", "isActive", "isPlatformAdmin",
+            "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.userB},
+            ${fixtureIds.tenantB},
+            ${canaries.userEmail},
+            ${canaries.passwordHash},
+            'OWNER',
+            'NETWORK',
+            true,
+            false,
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTaskTemplate" (
+            "id", "tenantId", "createdByUserId", "title", "type",
+            "priority", "status", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.templateA},
+            ${fixtureIds.tenantA},
+            ${fixtureIds.userB},
+            ${canaries.templateTitle},
+            'SHIFT',
+            'NORMAL',
+            'DRAFT',
+            ${now},
+            ${now}
+          )
+        `;
         for (let index = 0; index < fixtureIds.tasks.length; index += 1) {
           await transaction.$executeRaw`
             INSERT INTO public."StaffTask" (
@@ -976,6 +1036,21 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
     );
     assert.equal(rows.length, 1);
     assert.equal(rows[0].count, "2");
+    const proposalRows = await cloneAdmin.$queryRawUnsafe(
+      `SELECT COUNT(*)::text AS count
+       FROM public."StaffTaskTemplate" AS template
+       JOIN public."User" AS creator
+         ON creator."id" = template."createdByUserId"
+       WHERE template."id" = $1
+         AND template."tenantId" <> creator."tenantId"`,
+      fixtureIds.templateA,
+    );
+    assert.equal(proposalRows.length, 1);
+    assert.equal(
+      proposalRows[0].count,
+      "1",
+      "The synthetic proposal fixture was not preserved.",
+    );
     return fixtureIds;
   } finally {
     await cloneAdmin.$disconnect();
@@ -1040,6 +1115,27 @@ function plannerEnvironment({
     STAFF_TASK_INTEGRITY_RECONCILIATION_HMAC_KEY: HMAC_KEY,
     STAFF_TASK_INTEGRITY_RECONCILIATION_EXPECTED_DATABASE: cloneDatabaseName,
     STAFF_TASK_INTEGRITY_RECONCILIATION_MAX_CANDIDATES: String(maxCandidates),
+  };
+}
+
+function proposalDryRunEnvironment({
+  admission,
+  readerUrl,
+  runConfirmation,
+  provenanceManifest,
+  maxCases,
+}) {
+  return {
+    ...admission,
+    DATABASE_URL: proposalDryRunDatabaseUrl(readerUrl),
+    STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_CONFIRM: runConfirmation,
+    STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_HMAC_KEY:
+      PROPOSAL_DRY_RUN_HMAC_KEY,
+    STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_PROVENANCE_HMAC_KEY:
+      PROVENANCE_HMAC_KEY,
+    STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_PROVENANCE_MANIFEST:
+      provenanceManifest,
+    STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_MAX_CASES: String(maxCases),
   };
 }
 
@@ -1129,6 +1225,7 @@ function assertOutputSafe(
     readerRoleName,
     readerPassword,
     fixtureIds = null,
+    protectedValues = [],
   },
 ) {
   const forbiddenValues = [
@@ -1136,12 +1233,16 @@ function assertOutputSafe(
     cloneDatabaseName,
     readerRoleName,
     readerPassword,
+    ...protectedValues,
     ...(fixtureIds
       ? [
           fixtureIds.tenantA,
           fixtureIds.tenantB,
           fixtureIds.storeB,
+          fixtureIds.userB,
+          fixtureIds.templateA,
           ...fixtureIds.tasks,
+          ...fixtureIds.canaries,
         ]
       : []),
   ].filter((value) => typeof value === "string" && value.length > 0);
@@ -1162,6 +1263,82 @@ function assertOutputSafe(
     /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
   );
   assert.equal(serialized.includes(HMAC_KEY), false);
+  assert.equal(serialized.includes(PROPOSAL_DRY_RUN_HMAC_KEY), false);
+  assert.equal(serialized.includes(PROVENANCE_HMAC_KEY), false);
+}
+
+async function installSyntheticProvenance({
+  cloneDatabaseUrl,
+  cloneDatabaseName,
+  releaseSha,
+  dryRunModule,
+  plannerModule,
+}) {
+  const cloneAdmin = prismaClient(cloneDatabaseUrl);
+  try {
+    const snapshotRows = await cloneAdmin.$queryRawUnsafe(
+      plannerModule.SNAPSHOT_STATE_SQL,
+    );
+    assert.equal(
+      snapshotRows.length,
+      1,
+      "Synthetic provenance requires one database identity row.",
+    );
+    const databaseIdentityDigest = plannerModule.computeDatabaseIdentityDigest(
+      snapshotRows[0],
+      PROVENANCE_HMAC_KEY,
+    );
+    const creationNonce = randomBytes(32).toString("hex");
+    const createdAt = new Date().toISOString();
+    const expiresAt = new Date(
+      Date.parse(createdAt) + 60 * 60 * 1000,
+    ).toISOString();
+    const manifest = dryRunModule.buildSyntheticProvenanceManifest(
+      {
+        releaseSha,
+        databaseIdentityDigest,
+        creationNonce,
+        createdAt,
+        expiresAt,
+      },
+      PROVENANCE_HMAC_KEY,
+    );
+    const encodedManifest =
+      dryRunModule.encodeSyntheticProvenanceManifest(manifest);
+    const databaseMarker =
+      dryRunModule.syntheticProvenanceDatabaseMarker(creationNonce);
+    assert.match(
+      databaseMarker,
+      /^LEETPLUS_SYNTHETIC_PROVENANCE_V1:[0-9a-f]{64}$/,
+    );
+    await cloneAdmin.$executeRawUnsafe(
+      `COMMENT ON DATABASE ${quoteIdentifier(
+        cloneDatabaseName,
+      )} IS '${databaseMarker}'`,
+    );
+    const markerRows = await cloneAdmin.$queryRawUnsafe(
+      `SELECT pg_catalog.shobj_description(
+         database_row.oid,
+         'pg_database'
+       )::text AS database_comment
+       FROM pg_catalog.pg_database AS database_row
+       WHERE database_row.datname = pg_catalog.current_database()`,
+    );
+    assert.equal(markerRows.length, 1);
+    assert.equal(
+      markerRows[0].database_comment,
+      databaseMarker,
+      "The disposable database did not retain its synthetic marker.",
+    );
+    return {
+      encodedManifest,
+      creationNonce,
+      databaseMarker,
+      databaseIdentityDigest,
+    };
+  } finally {
+    await cloneAdmin.$disconnect();
+  }
 }
 
 function spawnAdmission(childEnvironment) {
@@ -1207,6 +1384,144 @@ function spawnPlanner(childEnvironment) {
     exitCode: result.status,
     plannerExitCode: reportedPlannerExitCode(parsed.report, result.status),
   };
+}
+
+function spawnProposalDryRun(childEnvironment) {
+  const result = spawnSync(process.execPath, [PROPOSAL_DRY_RUN_SCRIPT_PATH], {
+    cwd: dirname(PROPOSAL_DRY_RUN_SCRIPT_PATH),
+    env: childEnvironment,
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: ADMISSION_TIMEOUT_MS,
+    windowsHide: true,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  assert.equal(
+    result.signal,
+    null,
+    "Proposal dry-run CLI was terminated by a signal.",
+  );
+  const parsed = parseChildJson(result, "Proposal dry-run CLI");
+  return {
+    ...parsed,
+    exitCode: result.status,
+  };
+}
+
+function assertProposalDryRunFindings(report) {
+  assert.equal(report?.summary?.capExceeded, false);
+  assert.equal(report?.summary?.proposalOccurrences, 1);
+  assert.equal(report?.summary?.uniqueProposalCases, 1);
+  assert.equal(
+    report?.provenanceBinding?.profile,
+    "STAFF_TASK_INTEGRITY_DISPOSABLE_V1",
+  );
+  assert.match(
+    String(report?.provenanceBinding?.fixtureContractDigest ?? ""),
+    /^[0-9a-f]{64}$/,
+  );
+  assert.match(
+    String(report?.provenanceBinding?.bindingDigest ?? ""),
+    /^[0-9a-f]{64}$/,
+  );
+  assert.equal(report?.safety?.databaseWrites, false);
+  assert.equal(report?.safety?.applySupported, false);
+  assert.equal(report?.safety?.outputContainsRawIdentifiers, false);
+  assert.equal(report?.safety?.suggestionsAuthorizeApply, false);
+  assert.equal(report?.safety?.caseTokensLinkableAcrossExecutions, false);
+  assert.equal(
+    report?.safety?.coLocatedFindingsRequireFullInvariantReview,
+    true,
+  );
+  assert.equal(report?.safety?.operatorCodesProposed, false);
+  assert.equal(report?.safety?.reviewCodesProposed, false);
+  assert.equal(Array.isArray(report?.cases), true);
+  assert.equal(report.cases.length, 1);
+  assert.match(String(report.cases[0]?.caseToken ?? ""), /^[0-9a-f]{64}$/);
+  assert.match(
+    String(report.cases[0]?.preconditionDigest ?? ""),
+    /^[0-9a-f]{64}$/,
+  );
+  assert.deepEqual(report.cases[0]?.target, {
+    resourceType: "StaffTaskTemplate",
+    column: "createdByUserId",
+  });
+  assert.deepEqual(report.cases[0]?.suggestion, {
+    kind: "REFERENCE_CLEAR_CANDIDATE",
+    reasonCodes: ["TEMPLATE_CREATOR_CROSS_TENANT"],
+    ownerApprovalRequired: true,
+    fullInvariantRecheckRequired: true,
+  });
+}
+
+function assertProposalDryRunRejection(result, expectedCode) {
+  assert.equal(result.exitCode, 3);
+  assert.equal(
+    findFirstField(result.report, ["code"]),
+    expectedCode,
+    `Proposal dry-run did not reject with ${expectedCode}.`,
+  );
+}
+
+async function withTemplateRlsEnabled(cloneDatabaseUrl, operation) {
+  const cloneAdmin = prismaClient(cloneDatabaseUrl);
+  try {
+    await cloneAdmin.$executeRawUnsafe(
+      `ALTER TABLE public."StaffTaskTemplate" ENABLE ROW LEVEL SECURITY`,
+    );
+    return await operation();
+  } finally {
+    await cloneAdmin
+      .$executeRawUnsafe(
+        `ALTER TABLE public."StaffTaskTemplate" DISABLE ROW LEVEL SECURITY`,
+      )
+      .finally(() => cloneAdmin.$disconnect());
+  }
+}
+
+async function holdProposalDryRunAdvisoryLock(
+  cloneDatabaseUrl,
+  namespace,
+  resource,
+) {
+  assert(Number.isInteger(namespace));
+  assert(Number.isInteger(resource));
+  const blocker = prismaClient(cloneDatabaseUrl);
+  try {
+    const rows = await blocker.$queryRawUnsafe(
+      `SELECT pg_try_advisory_lock($1::integer, $2::integer) AS acquired`,
+      namespace,
+      resource,
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(
+      rows[0].acquired,
+      true,
+      "The smoke could not acquire the proposal dry-run blocker lock.",
+    );
+    return async () => {
+      try {
+        const released = await blocker.$queryRawUnsafe(
+          `SELECT pg_advisory_unlock($1::integer, $2::integer) AS released`,
+          namespace,
+          resource,
+        );
+        assert.equal(released.length, 1);
+        assert.equal(
+          released[0].released,
+          true,
+          "The smoke lost the proposal dry-run blocker lock.",
+        );
+      } finally {
+        await blocker.$disconnect();
+      }
+    };
+  } catch (error) {
+    await blocker.$disconnect();
+    throw error;
+  }
 }
 
 async function tamperLatestMigration(cloneDatabaseUrl) {
@@ -1276,6 +1591,10 @@ function assertSourceGuards() {
   assert.equal(
     basename(PLANNER_SCRIPT_PATH),
     "staff-task-integrity-reconciliation-plan.mjs",
+  );
+  assert.equal(
+    basename(PROPOSAL_DRY_RUN_SCRIPT_PATH),
+    "staff-task-integrity-reconciliation-proposal-dry-run.mjs",
   );
 }
 
@@ -1349,6 +1668,13 @@ export async function runSelfTest() {
   assert.match(first.readerRoleName, SAFE_READER_PATTERN);
   assert.notEqual(first.cloneDatabaseName, second.cloneDatabaseName);
   assert.notEqual(first.readerRoleName, second.readerRoleName);
+  const strictProposalUrl = new URL(
+    proposalDryRunDatabaseUrl(
+      "postgresql://reader:secret@127.0.0.1:5432/leetplus_ci?schema=public&connection_limit=1&options=unsafe",
+    ),
+  );
+  assert.deepEqual([...strictProposalUrl.searchParams.keys()], ["schema"]);
+  assert.equal(strictProposalUrl.searchParams.get("schema"), "public");
   assertSourceGuards();
   const migrationPlan = await readMigrationPlan();
   assert.equal(
@@ -1360,7 +1686,7 @@ export async function runSelfTest() {
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    checks: 34,
+    checks: 36,
     localCiOnly: true,
     disposableDatabaseOnly: true,
     selectOnlyAdmissionRole: true,
@@ -1544,15 +1870,34 @@ export async function runSmoke(environment = process.env) {
       await import("./staff-task-integrity-snapshot-admission.mjs");
     const plannerModule =
       await import("./staff-task-integrity-reconciliation-plan.mjs");
+    const dryRunModule =
+      await import("./staff-task-integrity-reconciliation-proposal-dry-run.mjs");
     const runConfirmation = admissionModule.RUN_CONFIRMATION;
     const isolationAttestation = admissionModule.ISOLATION_ATTESTATION;
     const plannerRunConfirmation = plannerModule.RUN_CONFIRMATION;
+    const proposalDryRunConfirmation = dryRunModule.RUN_CONFIRMATION;
     assert.equal(typeof runConfirmation, "string");
     assert(runConfirmation.length > 0);
     assert.equal(typeof isolationAttestation, "string");
     assert(isolationAttestation.length > 0);
     assert.equal(typeof plannerRunConfirmation, "string");
     assert(plannerRunConfirmation.length > 0);
+    assert.equal(typeof proposalDryRunConfirmation, "string");
+    assert(proposalDryRunConfirmation.length > 0);
+    assert.equal(
+      typeof dryRunModule.buildSyntheticProvenanceManifest,
+      "function",
+    );
+    assert.equal(
+      typeof dryRunModule.encodeSyntheticProvenanceManifest,
+      "function",
+    );
+    assert.equal(
+      typeof dryRunModule.syntheticProvenanceDatabaseMarker,
+      "function",
+    );
+    assert(Number.isInteger(dryRunModule.ADVISORY_LOCK_NAMESPACE));
+    assert(Number.isInteger(dryRunModule.ADVISORY_LOCK_RESOURCE));
 
     const restoredAt = new Date().toISOString();
     const acquiredAt = restoredAt;
@@ -1697,6 +2042,127 @@ export async function runSmoke(environment = process.env) {
       fixtureIds,
     });
 
+    const syntheticProvenance = await installSyntheticProvenance({
+      cloneDatabaseUrl,
+      cloneDatabaseName,
+      releaseSha: environment.RELEASE_SHA,
+      dryRunModule,
+      plannerModule,
+    });
+    const dryRunProtectedValues = [
+      syntheticProvenance.encodedManifest,
+      syntheticProvenance.creationNonce,
+      syntheticProvenance.databaseMarker,
+      syntheticProvenance.databaseIdentityDigest,
+    ];
+    const dryRunEnvironmentFor = (maxCases) =>
+      proposalDryRunEnvironment({
+        admission: admissionEnvironment({
+          ...baseAdmissionEnvironment,
+          expectedState: EXPAND_STATE,
+        }),
+        readerUrl,
+        runConfirmation: proposalDryRunConfirmation,
+        provenanceManifest: syntheticProvenance.encodedManifest,
+        maxCases,
+      });
+
+    const proposalFirst = spawnProposalDryRun(dryRunEnvironmentFor(10_000));
+    assert.equal(proposalFirst.exitCode, 2);
+    assertProposalDryRunFindings(proposalFirst.report);
+    assert.equal(proposalFirst.report.summary.operatorOccurrences, 2);
+    assert.equal(proposalFirst.report.summary.blockingTotal, 3);
+    assertOutputSafe(proposalFirst.serialized, {
+      ...privacyContext,
+      fixtureIds,
+      protectedValues: dryRunProtectedValues,
+    });
+
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    const proposalSecond = spawnProposalDryRun(dryRunEnvironmentFor(10_000));
+    assert.equal(proposalSecond.exitCode, 2);
+    assertProposalDryRunFindings(proposalSecond.report);
+    assertOutputSafe(proposalSecond.serialized, {
+      ...privacyContext,
+      fixtureIds,
+      protectedValues: dryRunProtectedValues,
+    });
+    assert.deepEqual(
+      proposalSecond.report.cases.map(({ target, suggestion }) => ({
+        target,
+        suggestion,
+      })),
+      proposalFirst.report.cases.map(({ target, suggestion }) => ({
+        target,
+        suggestion,
+      })),
+    );
+    assert.notEqual(
+      proposalSecond.report.cases[0].caseToken,
+      proposalFirst.report.cases[0].caseToken,
+    );
+    assert.notEqual(
+      proposalSecond.report.cases[0].preconditionDigest,
+      proposalFirst.report.cases[0].preconditionDigest,
+    );
+    assert.notEqual(
+      evidenceDigest(proposalFirst.report, "contentDigest"),
+      evidenceDigest(proposalSecond.report, "contentDigest"),
+    );
+    assert.notEqual(
+      evidenceDigest(proposalFirst.report, "executionDigest"),
+      evidenceDigest(proposalSecond.report, "executionDigest"),
+    );
+
+    const proposalCap = spawnProposalDryRun(dryRunEnvironmentFor(2));
+    assert.equal(proposalCap.exitCode, 3);
+    assert.equal(proposalCap.report?.summary?.capExceeded, true);
+    assert.equal(proposalCap.report?.summary?.blockingTotal, 3);
+    assert.equal(proposalCap.report?.summary?.proposalOccurrences, 1);
+    assert.equal(proposalCap.report?.summary?.operatorOccurrences, 2);
+    assert.equal(proposalCap.report?.summary?.uniqueProposalCases, 0);
+    assert.deepEqual(proposalCap.report?.cases, []);
+    assertOutputSafe(proposalCap.serialized, {
+      ...privacyContext,
+      fixtureIds,
+      protectedValues: dryRunProtectedValues,
+    });
+
+    const proposalRlsRejected = await withTemplateRlsEnabled(
+      cloneDatabaseUrl,
+      () => spawnProposalDryRun(dryRunEnvironmentFor(10_000)),
+    );
+    assertProposalDryRunRejection(
+      proposalRlsRejected,
+      "DRY_RUN_RELEASE_GATE_REJECTED",
+    );
+    assertOutputSafe(proposalRlsRejected.serialized, {
+      ...privacyContext,
+      fixtureIds,
+      protectedValues: dryRunProtectedValues,
+    });
+
+    const releaseProposalBlocker = await holdProposalDryRunAdvisoryLock(
+      cloneDatabaseUrl,
+      dryRunModule.ADVISORY_LOCK_NAMESPACE,
+      dryRunModule.ADVISORY_LOCK_RESOURCE,
+    );
+    let proposalLockRejected;
+    try {
+      proposalLockRejected = spawnProposalDryRun(dryRunEnvironmentFor(10_000));
+    } finally {
+      await releaseProposalBlocker();
+    }
+    assertProposalDryRunRejection(
+      proposalLockRejected,
+      "CONCURRENT_DRY_RUN_REJECTED",
+    );
+    assertOutputSafe(proposalLockRejected.serialized, {
+      ...privacyContext,
+      fixtureIds,
+      protectedValues: dryRunProtectedValues,
+    });
+
     const tamperedAdmission = spawnAdmission(
       admissionEnvironment({
         ...baseAdmissionEnvironment,
@@ -1773,7 +2239,7 @@ export async function runSmoke(environment = process.env) {
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    scenarios: 9,
+    scenarios: 14,
     classification: SNAPSHOT_CLASSIFICATION,
     admittedStates: [BASELINE_STATE, EXPAND_STATE],
     baselineMigrationsApplied: BASELINE_MIGRATION_COUNT,
@@ -1790,6 +2256,12 @@ export async function runSmoke(environment = process.env) {
     internalFkTriggerDisableDenied: true,
     plannerFindingsExitVerified: 2,
     plannerCapExitVerified: 3,
+    proposalDryRunFindingsExitVerified: 2,
+    proposalDryRunCapExitVerified: 3,
+    proposalDryRunRlsExitVerified: 3,
+    proposalDryRunAdvisoryLockExitVerified: 3,
+    proposalDryRunExecutionUnlinkabilityVerified: true,
+    signedSyntheticProvenanceVerified: true,
     stableContentDigestVerified: true,
     timestampBoundExecutionDigestVerified: true,
     tamperedAdmissionRejected: true,

@@ -52,7 +52,9 @@ const MAX_PRODUCTION_LIKE_LIFETIME_MS = 72 * 60 * 60 * 1_000;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 const RELEASE_SOURCE_PATHS = Object.freeze([
   "packages/database/scripts/staff-task-integrity-snapshot-admission.mjs",
+  "packages/database/scripts/staff-task-integrity-snapshot-admission-smoke.mjs",
   "packages/database/scripts/staff-task-integrity-reconciliation-plan.mjs",
+  "packages/database/scripts/staff-task-integrity-reconciliation-proposal-dry-run.mjs",
   "packages/database/scripts/staff-task-integrity-inventory.mjs",
   "packages/database/prisma/migrations",
 ]);
@@ -1442,7 +1444,7 @@ function expandCatalogState(row) {
   };
 }
 
-function privilegeState(row) {
+export function privilegeState(row) {
   const actual = {
     sessionRoleUnchanged: safeBoolean(
       row?.session_role_unchanged,
@@ -1998,7 +2000,7 @@ export function runSelfTest() {
   };
 }
 
-async function inspectDatabase(environment, config) {
+export async function inspectDatabase(environment, config) {
   const expectedMigrationManifest = await loadExpectedMigrationManifest(
     config.expectedState,
     config.releaseSha,

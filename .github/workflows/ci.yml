@@ -64,6 +64,9 @@ jobs:
       - name: Validate staff task snapshot admission
         run: pnpm --filter database check:staff-task-integrity-snapshot-admission
 
+      - name: Validate synthetic staff task reconciliation proposal dry-run
+        run: pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
+
       - name: Validate staff task integrity EXPAND smoke command
         run: pnpm --filter database check:staff-task-integrity-expand-smoke
 

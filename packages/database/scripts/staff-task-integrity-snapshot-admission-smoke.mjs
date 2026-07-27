@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { cp, copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path, { basename, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -268,7 +268,52 @@ async function readMigrationPlan() {
   };
 }
 
-async function copyMigrationArtifact(tempRoot, migrationPlan, stage) {
+function readReleaseBlob(repositoryRoot, releaseSha, releasePath) {
+  assert.match(
+    releaseSha,
+    RELEASE_SHA_PATTERN,
+    "The staged artifact requires an exact release SHA.",
+  );
+  assert.match(
+    releasePath,
+    /^[A-Za-z0-9_./-]+$/,
+    "The staged artifact release path is invalid.",
+  );
+  const result = spawnSync("git", ["show", `${releaseSha}:${releasePath}`], {
+    cwd: repositoryRoot,
+    encoding: null,
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 30_000,
+    windowsHide: true,
+  });
+  assert.equal(
+    result.error,
+    undefined,
+    "Git failed to read the release artifact.",
+  );
+  assert.equal(
+    result.signal,
+    null,
+    "Git release artifact lookup was terminated by a signal.",
+  );
+  assert.equal(
+    result.status,
+    0,
+    "A required file is missing from the release artifact.",
+  );
+  assert(
+    Buffer.isBuffer(result.stdout) && result.stdout.length > 0,
+    "Git returned an empty release artifact.",
+  );
+  return result.stdout;
+}
+
+async function copyMigrationArtifact(
+  tempRoot,
+  migrationPlan,
+  stage,
+  releaseSha,
+) {
   assert(
     stage === "baseline" || stage === "expand",
     "Unknown staged migration phase.",
@@ -280,25 +325,39 @@ async function copyMigrationArtifact(tempRoot, migrationPlan, stage) {
     stage === "baseline"
       ? migrationPlan.baselineMigrations
       : migrationPlan.expandMigrations;
+  const repositoryRoot = path.resolve(
+    migrationPlan.sourcePrismaDir,
+    "../../..",
+  );
+  const releasePrismaPath = "packages/database/prisma";
 
   await mkdir(targetMigrationsDir, { recursive: true });
-  await copyFile(
-    path.join(migrationPlan.sourcePrismaDir, "schema.prisma"),
+  await writeFile(
     path.join(targetPrismaDir, "schema.prisma"),
-  );
-  await copyFile(
-    path.join(
-      migrationPlan.sourcePrismaDir,
-      "migrations",
-      "migration_lock.toml",
+    readReleaseBlob(
+      repositoryRoot,
+      releaseSha,
+      `${releasePrismaPath}/schema.prisma`,
     ),
+  );
+  await writeFile(
     path.join(targetMigrationsDir, "migration_lock.toml"),
+    readReleaseBlob(
+      repositoryRoot,
+      releaseSha,
+      `${releasePrismaPath}/migrations/migration_lock.toml`,
+    ),
   );
   for (const migrationName of selectedMigrations) {
-    await cp(
-      path.join(migrationPlan.sourcePrismaDir, "migrations", migrationName),
-      path.join(targetMigrationsDir, migrationName),
-      { recursive: true },
+    const targetMigrationDir = path.join(targetMigrationsDir, migrationName);
+    await mkdir(targetMigrationDir, { recursive: true });
+    await writeFile(
+      path.join(targetMigrationDir, "migration.sql"),
+      readReleaseBlob(
+        repositoryRoot,
+        releaseSha,
+        `${releasePrismaPath}/migrations/${migrationName}/migration.sql`,
+      ),
     );
   }
   return path.join(targetPrismaDir, "schema.prisma");
@@ -1025,13 +1084,8 @@ function assertAdmissionShape(report, expectedState) {
     findFirstField(report, ["expectedState", "expectedSnapshotState"]),
     expectedState,
   );
-  assert.equal(
-    findFirstField(report, [
-      "databaseIdentityMatched",
-      "expectedDatabaseMatched",
-    ]),
-    true,
-  );
+  assert.equal(report?.database?.databaseNameMatched, true);
+  assert.equal(report?.database?.databaseIdentityDigestMatched, true);
 }
 
 function assertOutputSafe(
@@ -1177,6 +1231,8 @@ function assertSourceGuards() {
     source,
     /GRANT CONNECT ON DATABASE \$\{quoteCatalogDatabaseIdentifier\(/,
   );
+  assert.match(source, /\["show", `\$\{releaseSha\}:\$\{releasePath\}`\]/);
+  assert.doesNotMatch(source, /await cp\(/);
   assert.match(source, /DISABLE TRIGGER \$\{quoteIdentifier\(/);
   assert.equal(
     basename(ADMISSION_SCRIPT_PATH),
@@ -1237,15 +1293,20 @@ export async function runSelfTest() {
   assert.equal(quoteCatalogDatabaseIdentifier('safe"quoted'), '"safe""quoted"');
   assert.throws(() => quoteCatalogDatabaseIdentifier("unsafe\0database"));
   assert.throws(() => quoteCatalogDatabaseIdentifier("x".repeat(64)));
-  assert.doesNotThrow(() =>
-    assertSafePublicConnectMutationTarget("postgres"),
-  );
+  assert.doesNotThrow(() => assertSafePublicConnectMutationTarget("postgres"));
   assert.doesNotThrow(() =>
     assertSafePublicConnectMutationTarget("another-ci-database"),
   );
   assert.throws(
     () => assertSafePublicConnectMutationTarget("customer-production"),
     { code: "ISOLATED_CI_CLUSTER_REQUIRED" },
+  );
+  assert.throws(() =>
+    readReleaseBlob(
+      path.resolve("."),
+      "not-a-release-sha",
+      "packages/database/prisma/schema.prisma",
+    ),
   );
   const first = generatedNames();
   const second = generatedNames();
@@ -1264,11 +1325,12 @@ export async function runSelfTest() {
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    checks: 30,
+    checks: 32,
     localCiOnly: true,
     disposableDatabaseOnly: true,
     selectOnlyAdmissionRole: true,
     exactSelectRelations: READER_SELECT_RELATIONS.length,
+    committedReleaseArtifactOnly: true,
     baselineMigrations: migrationPlan.baselineMigrations.length,
     expandMigrations: migrationPlan.expandMigrations.length,
     sourceDatabaseWrites: false,
@@ -1396,6 +1458,7 @@ export async function runSmoke(environment = process.env) {
       tempRoot,
       migrationPlan,
       "baseline",
+      environment.RELEASE_SHA,
     );
     runMigrateDeploy(migrationSchemaPath, cloneDatabaseUrl, environment);
     await assertAppliedMigrations(
@@ -1484,7 +1547,12 @@ export async function runSmoke(environment = process.env) {
     assertAdmissionShape(baselineAdmission.report, BASELINE_STATE);
     assertOutputSafe(baselineAdmission.serialized, privacyContext);
 
-    await copyMigrationArtifact(tempRoot, migrationPlan, "expand");
+    await copyMigrationArtifact(
+      tempRoot,
+      migrationPlan,
+      "expand",
+      environment.RELEASE_SHA,
+    );
     runMigrateDeploy(migrationSchemaPath, cloneDatabaseUrl, environment);
     await assertAppliedMigrations(
       cloneDatabaseUrl,
@@ -1664,6 +1732,7 @@ export async function runSmoke(environment = process.env) {
     admittedStates: [BASELINE_STATE, EXPAND_STATE],
     baselineMigrationsApplied: BASELINE_MIGRATION_COUNT,
     expandMigrationsApplied: EXPAND_MIGRATIONS.length,
+    committedReleaseArtifactOnly: true,
     exactSelectRelations: READER_SELECT_RELATIONS.length,
     otherDatabasePublicConnectRevoked: revokedPublicConnectDatabases.length,
     otherDatabasePublicConnectRestored: true,

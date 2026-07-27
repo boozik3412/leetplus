@@ -58,6 +58,9 @@ jobs:
       - name: Validate staff task integrity inventory command
         run: pnpm --filter database check:staff-task-integrity-inventory
 
+      - name: Validate staff task integrity reconciliation planner
+        run: pnpm --filter database check:staff-task-integrity-reconciliation-plan
+
       - name: Validate staff task integrity EXPAND smoke command
         run: pnpm --filter database check:staff-task-integrity-expand-smoke
 
@@ -195,3 +198,18 @@ jobs:
         env:
           STAFF_TASK_INTEGRITY_INVENTORY_TARGET: development
           STAFF_TASK_INTEGRITY_INVENTORY_CONFIRM: run-staff-task-integrity-inventory
+
+      - name: Build read-only staff task reconciliation plan
+        run: pnpm --filter database db:plan:staff-task-integrity-reconciliation
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          STAFF_TASK_INTEGRITY_RECONCILIATION_TARGET: development
+          STAFF_TASK_INTEGRITY_RECONCILIATION_CONFIRM: run-staff-task-integrity-reconciliation-plan
+          STAFF_TASK_INTEGRITY_RECONCILIATION_HMAC_KEY: ci-reconciliation-plan-hmac-aaaaaaaaaaaaaaaa
+          STAFF_TASK_INTEGRITY_RECONCILIATION_EXPECTED_DATABASE: leetplus_ci
+
+      - name: Reject adversarial staff task catalog drift
+        run: pnpm --filter database db:smoke:staff-task-integrity-reconciliation-catalog
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          STAFF_TASK_INTEGRITY_RECONCILIATION_CATALOG_SMOKE_CONFIRM: run-staff-task-integrity-reconciliation-catalog-smoke

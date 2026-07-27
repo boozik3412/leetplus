@@ -16,8 +16,18 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const REQUIRED_CONFIRMATION = "run-staff-task-integrity-expand-fixtures";
-const BASELINE_LAST_MIGRATION = "20260727130500_staff_task_tenant_key";
-const FINAL_MIGRATION = "20260727131000_staff_task_integrity_expand";
+const BASELINE_LAST_MIGRATION =
+  "20260727120000_staff_task_catalog_audit_expand";
+const EXPECTED_BASELINE_MIGRATION_COUNT = 156;
+const EXPAND_MIGRATIONS = [
+  "20260727130100_staff_task_store_tenant_key",
+  "20260727130200_staff_task_user_tenant_key",
+  "20260727130300_staff_task_template_tenant_key",
+  "20260727130400_staff_task_recurring_rule_tenant_key",
+  "20260727130500_staff_task_tenant_key",
+  "20260727131000_staff_task_integrity_expand",
+];
+const FINAL_MIGRATION = EXPAND_MIGRATIONS.at(-1);
 const SAFE_SCHEMA_PREFIX = "staff_task_test_integrity_expand_";
 const SAFE_SCHEMA_PATTERN = /^staff_task_test_integrity_expand_[a-f0-9]{16}$/;
 const MIGRATION_PATTERN = /^\d{14}_[a-z0-9_]+$/;
@@ -298,6 +308,23 @@ const DB_NATIVE_TABLE_NAMES = [
   ),
 ].sort();
 
+const DB_NATIVE_REQUIRED_COLUMNS = Object.freeze([
+  { table: "Store", columns: ["id", "tenantId"] },
+  { table: "User", columns: ["id", "tenantId"] },
+  { table: "StaffTaskTemplate", columns: ["id", "tenantId"] },
+  { table: "StaffTaskRecurringRule", columns: ["id", "tenantId"] },
+  {
+    table: "StaffTaskRecurringRuleRun",
+    columns: ["id", "tenantId", "ruleId"],
+  },
+  { table: "StaffTask", columns: ["id", "tenantId"] },
+]);
+
+const EXPECTED_COMPATIBILITY_CONSTRAINT_NAMES = [
+  ...LEGACY_STORE_CONSTRAINTS.map((constraint) => constraint.name),
+  ...LEGACY_COMPATIBILITY_CONSTRAINTS.map((constraint) => constraint.name),
+].sort();
+
 class SmokeContractError extends Error {}
 
 function assert(condition, message) {
@@ -554,20 +581,39 @@ async function readMigrationPlan() {
   const migrationEntries = migrationDirectories;
 
   const baselineIndex = migrationEntries.indexOf(BASELINE_LAST_MIGRATION);
-  const finalIndex = migrationEntries.indexOf(FINAL_MIGRATION);
   assert(
     baselineIndex >= 0,
     "The staged integrity baseline migration is missing.",
   );
+  const baselineMigrations = migrationEntries.slice(0, baselineIndex + 1);
   assert(
-    finalIndex === baselineIndex + 1,
-    "The staff task integrity EXPAND migration must immediately follow its frozen baseline.",
+    baselineMigrations.length === EXPECTED_BASELINE_MIGRATION_COUNT,
+    `The fixture baseline must remain migration ${EXPECTED_BASELINE_MIGRATION_COUNT}.`,
+  );
+
+  const expandStartIndex = baselineIndex + 1;
+  const expandMigrations = migrationEntries.slice(
+    expandStartIndex,
+    expandStartIndex + EXPAND_MIGRATIONS.length,
+  );
+  assertEqualArray(
+    expandMigrations,
+    EXPAND_MIGRATIONS,
+    "The six staff task integrity EXPAND migrations must remain contiguous and ordered immediately after the frozen fixture baseline.",
+  );
+  const finalIndex = expandStartIndex + EXPAND_MIGRATIONS.length - 1;
+  assert(
+    migrationEntries[finalIndex] === FINAL_MIGRATION,
+    "The staff task integrity FK migration must remain the final staged EXPAND migration.",
   );
 
   return {
     sourcePrismaDir,
-    baselineMigrations: migrationEntries.slice(0, baselineIndex + 1),
-    baselineCount: baselineIndex + 1,
+    baselineMigrations,
+    baselineCount: baselineMigrations.length,
+    expandMigrations,
+    expandCount: expandMigrations.length,
+    stagedCount: finalIndex + 1,
     futureMigrations: migrationEntries.slice(finalIndex + 1),
   };
 }
@@ -588,6 +634,12 @@ function assertNoNativeContractRemoval(migrationName, migrationSql) {
       ),
       `${migrationName}: refuses to rename DB-native constraint ${constraintName}.`,
     );
+    assert(
+      !new RegExp(`ALTER\\s+CONSTRAINT\\s+"${escapedName}"`, "iu").test(
+        migrationSql,
+      ),
+      `${migrationName}: refuses to alter DB-native constraint ${constraintName}.`,
+    );
   }
 
   const statements = migrationSql.split(";");
@@ -605,6 +657,29 @@ function assertNoNativeContractRemoval(migrationName, migrationSql) {
         ),
         `${migrationName}: refuses destructive DDL for DB-native table ${tableName}.`,
       );
+      assert(
+        !(referencesTable && /\bDISABLE\s+TRIGGER\b/iu.test(statement)),
+        `${migrationName}: refuses trigger disabling for DB-native table ${tableName}.`,
+      );
+    }
+  }
+
+  for (const required of DB_NATIVE_REQUIRED_COLUMNS) {
+    const quotedTable = `"${required.table}"`;
+    for (const columnName of required.columns) {
+      const escapedColumn = columnName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      for (const statement of statements) {
+        assert(
+          !(
+            statement.includes(quotedTable) &&
+            new RegExp(
+              `ALTER\\s+(?:COLUMN\\s+)?"${escapedColumn}"\\s+DROP\\s+NOT\\s+NULL`,
+              "iu",
+            ).test(statement)
+          ),
+          `${migrationName}: refuses DROP NOT NULL for ${required.table}.${columnName}.`,
+        );
+      }
     }
   }
 
@@ -625,6 +700,10 @@ function assertNoNativeContractRemoval(migrationName, migrationSql) {
     !/\bDROP\s+SCHEMA\b/iu.test(migrationSql),
     `${migrationName}: refuses DROP SCHEMA after the DB-native contract.`,
   );
+  assert(
+    !/\bsession_replication_role\b/iu.test(migrationSql),
+    `${migrationName}: refuses session_replication_role changes after the DB-native contract.`,
+  );
 }
 
 async function assertNativeConstraintMigrationGuard(migrationPlan) {
@@ -642,16 +721,140 @@ async function assertNativeConstraintMigrationGuard(migrationPlan) {
   }
 }
 
+function executableMigrationSql(migrationSql) {
+  return migrationSql.replace(/--.*$/gmu, "").trim();
+}
+
+function executableStatements(migrationSql) {
+  return executableMigrationSql(migrationSql)
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+}
+
+function assertConcurrentParentIndexArtifact(
+  migrationName,
+  migrationSql,
+  expectedIndex,
+) {
+  const statements = executableStatements(migrationSql);
+  assert(
+    statements.length === 1,
+    `${migrationName}: concurrent parent-index migration must contain exactly one executable statement.`,
+  );
+  const escapedIndex = expectedIndex.name.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  const escapedTable = expectedIndex.table.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  assert(
+    new RegExp(
+      `^CREATE\\s+UNIQUE\\s+INDEX\\s+CONCURRENTLY\\s+"${escapedIndex}"\\s+ON\\s+"${escapedTable}"\\s*\\(\\s*"tenantId"\\s*,\\s*"id"\\s*\\)$`,
+      "iu",
+    ).test(statements[0]),
+    `${migrationName}: parent index must retain exact UNIQUE CONCURRENTLY table/column contract.`,
+  );
+}
+
+function assertFinalExpandArtifact(migrationName, migrationSql) {
+  const executableSql = executableMigrationSql(migrationSql);
+  const statements = executableStatements(migrationSql);
+  assert(
+    statements[0]?.toUpperCase() === "BEGIN" &&
+      statements.at(-1)?.toUpperCase() === "COMMIT",
+    `${migrationName}: final EXPAND must remain one explicit transaction.`,
+  );
+  assert(
+    (executableSql.match(/\bBEGIN\b/giu) ?? []).length === 1 &&
+      (executableSql.match(/\bCOMMIT\b/giu) ?? []).length === 1,
+    `${migrationName}: final EXPAND transaction boundary changed.`,
+  );
+  assert(
+    /\bSET\s+LOCAL\s+lock_timeout\s*=\s*'5s'/iu.test(executableSql) &&
+      /\bSET\s+LOCAL\s+statement_timeout\s*=\s*'2min'/iu.test(executableSql),
+    `${migrationName}: bounded lock/statement timeouts changed.`,
+  );
+
+  const normalizedSql = executableSql.replace(/\s+/gu, " ");
+  assert(
+    normalizedSql.includes(
+      'LOCK TABLE "Store", "User", "StaffTaskTemplate", "StaffTaskRecurringRule", "StaffTaskRecurringRuleRun", "StaffTask" IN SHARE ROW EXCLUSIVE MODE',
+    ),
+    `${migrationName}: deterministic table lock order changed.`,
+  );
+
+  const addedConstraintNames = [
+    ...executableSql.matchAll(/ADD\s+CONSTRAINT\s+"([^"]+)"/giu),
+  ]
+    .map((match) => match[1])
+    .sort();
+  const droppedConstraintNames = [
+    ...executableSql.matchAll(/DROP\s+CONSTRAINT\s+"([^"]+)"/giu),
+  ]
+    .map((match) => match[1])
+    .sort();
+  assertEqualArray(
+    addedConstraintNames,
+    [...DB_NATIVE_CONSTRAINT_NAMES].sort(),
+    `${migrationName}: exact 28-constraint ADD contract changed.`,
+  );
+  assertEqualArray(
+    droppedConstraintNames,
+    EXPECTED_COMPATIBILITY_CONSTRAINT_NAMES,
+    `${migrationName}: exact 14-constraint compatibility swap changed.`,
+  );
+  assert(
+    (executableSql.match(/\bNOT\s+VALID\b/giu) ?? []).length ===
+      DB_NATIVE_CONSTRAINT_NAMES.length,
+    `${migrationName}: every DB-native FK must remain NOT VALID in EXPAND.`,
+  );
+}
+
+async function assertExpandMigrationArtifactContract(migrationPlan) {
+  assert(
+    PARENT_INDEXES.length === EXPAND_MIGRATIONS.length - 1,
+    "Frozen parent-index migration manifest changed unexpectedly.",
+  );
+  for (const [
+    index,
+    migrationName,
+  ] of migrationPlan.expandMigrations.entries()) {
+    const migrationSql = await readFile(
+      join(
+        migrationPlan.sourcePrismaDir,
+        "migrations",
+        migrationName,
+        "migration.sql",
+      ),
+      "utf8",
+    );
+    if (index < PARENT_INDEXES.length) {
+      assertConcurrentParentIndexArtifact(
+        migrationName,
+        migrationSql,
+        PARENT_INDEXES[index],
+      );
+    } else {
+      assertFinalExpandArtifact(migrationName, migrationSql);
+    }
+  }
+}
+
 async function copyMigrationArtifact(tempRoot, migrationPlan, stage) {
   const targetPrismaDir = join(tempRoot, "prisma");
   const targetMigrationsDir = join(targetPrismaDir, "migrations");
-  const selectedMigrations =
-    stage === "baseline" ? migrationPlan.baselineMigrations : [FINAL_MIGRATION];
 
   assert(
     stage === "baseline" || stage === "expand",
     "Unknown staged migration phase.",
   );
+  const selectedMigrations =
+    stage === "baseline"
+      ? migrationPlan.baselineMigrations
+      : migrationPlan.expandMigrations;
 
   await mkdir(targetMigrationsDir, { recursive: true });
   await copyFile(
@@ -1247,8 +1450,8 @@ async function assertConstraintContract(prisma) {
   }
 }
 
-async function assertParentIndexes(prisma) {
-  const rows = await prisma.$queryRaw`
+async function readParentIndexRows(prisma) {
+  return prisma.$queryRaw`
     SELECT
       index_table.relname AS name,
       parent_table.relname AS parent_table,
@@ -1272,6 +1475,47 @@ async function assertParentIndexes(prisma) {
       ON parent_table.oid = index_row.indrelid
     WHERE index_table.relnamespace = current_schema()::regnamespace
   `;
+}
+
+async function assertExpandPreconditions(prisma, legacyIds) {
+  const parentRowCounts = await Promise.all([
+    prisma.store.count(),
+    prisma.user.count(),
+    prisma.staffTaskTemplate.count(),
+    prisma.staffTaskRecurringRule.count(),
+    prisma.staffTask.count(),
+  ]);
+  assert(
+    parentRowCounts.length === PARENT_INDEXES.length &&
+      parentRowCounts.every((count) => count > 0),
+    "Every concurrent parent index must be rehearsed against a populated legacy table.",
+  );
+
+  const legacyRowCount = Object.values(legacyIds).flat().length;
+  assert(
+    legacyRowCount === CONSTRAINTS.length,
+    "Legacy rows must exist before the six EXPAND migrations are applied.",
+  );
+
+  const protectedIndexNames = new Set(
+    PARENT_INDEXES.map((index) => index.name),
+  );
+  const existingProtectedIndexes = (await readParentIndexRows(prisma))
+    .map((row) => row.name)
+    .filter((name) => protectedIndexNames.has(name));
+  assert(
+    existingProtectedIndexes.length === 0,
+    `Concurrent parent indexes already existed at the fixture baseline: ${existingProtectedIndexes.join(",")}.`,
+  );
+
+  return {
+    populatedParentTables: parentRowCounts.length,
+    legacyRows: legacyRowCount,
+  };
+}
+
+async function assertParentIndexes(prisma) {
+  const rows = await readParentIndexRows(prisma);
   const byName = new Map(rows.map((row) => [row.name, row]));
 
   for (const expected of PARENT_INDEXES) {
@@ -2152,6 +2396,44 @@ async function runOfflineSelfTest() {
       'ALTER TABLE "StaffTask" RENAME CONSTRAINT "StaffTask_tenantId_createdByUserId_fkey" TO "unsafe";',
     ),
   );
+  expectOfflineContractFailure("DB-native ALTER CONSTRAINT guard", () =>
+    assertNoNativeContractRemoval(
+      "future_migration",
+      'ALTER TABLE "StaffTask" ALTER CONSTRAINT "StaffTask_tenantId_createdByUserId_fkey" DEFERRABLE;',
+    ),
+  );
+  expectOfflineContractFailure("DB-native DROP NOT NULL guard", () =>
+    assertNoNativeContractRemoval(
+      "future_migration",
+      'ALTER TABLE "StaffTask" ALTER COLUMN "tenantId" DROP NOT NULL;',
+    ),
+  );
+  expectOfflineContractFailure("DB-native trigger guard", () =>
+    assertNoNativeContractRemoval(
+      "future_migration",
+      'ALTER TABLE "StaffTask" DISABLE TRIGGER ALL;',
+    ),
+  );
+  expectOfflineContractFailure("DB-native replication-role guard", () =>
+    assertNoNativeContractRemoval(
+      "future_migration",
+      "SET session_replication_role = replica;",
+    ),
+  );
+  expectOfflineContractFailure("non-concurrent parent index artifact", () =>
+    assertConcurrentParentIndexArtifact(
+      EXPAND_MIGRATIONS[0],
+      'CREATE UNIQUE INDEX "store_tenant_id_uidx" ON "Store"("tenantId", "id");',
+      PARENT_INDEXES[0],
+    ),
+  );
+  expectOfflineContractFailure("multi-statement parent index artifact", () =>
+    assertConcurrentParentIndexArtifact(
+      EXPAND_MIGRATIONS[0],
+      'CREATE UNIQUE INDEX CONCURRENTLY "store_tenant_id_uidx" ON "Store"("tenantId", "id"); SELECT 1;',
+      PARENT_INDEXES[0],
+    ),
+  );
   expectOfflineContractFailure("DB-native table guard", () =>
     assertNoNativeContractRemoval(
       "future_migration",
@@ -2171,18 +2453,34 @@ async function runOfflineSelfTest() {
 
   const migrationPlan = await readMigrationPlan();
   await assertNativeConstraintMigrationGuard(migrationPlan);
+  await assertExpandMigrationArtifactContract(migrationPlan);
   assert(
     migrationPlan.baselineMigrations.at(-1) === BASELINE_LAST_MIGRATION,
     "Frozen baseline partition is incorrect.",
+  );
+  assertEqualArray(
+    migrationPlan.expandMigrations,
+    EXPAND_MIGRATIONS,
+    "Frozen EXPAND partition is incorrect.",
+  );
+  assert(
+    migrationPlan.expandCount === EXPAND_MIGRATIONS.length &&
+      migrationPlan.stagedCount ===
+        EXPECTED_BASELINE_MIGRATION_COUNT + EXPAND_MIGRATIONS.length,
+    "Frozen staged migration counts are incorrect.",
   );
 
   process.stdout.write(
     `${JSON.stringify({
       ok: true,
       baselineMigrations: migrationPlan.baselineCount,
-      expandMigration: FINAL_MIGRATION,
+      expandMigrations: migrationPlan.expandCount,
+      expandMigrationNames: migrationPlan.expandMigrations,
+      stagedMigrations: migrationPlan.stagedCount,
+      finalMigration: FINAL_MIGRATION,
       futureMigrationsGuarded: migrationPlan.futureMigrations.length,
       nativeConstraintsGuarded: DB_NATIVE_CONSTRAINT_NAMES.length,
+      expandMigrationArtifactsGuarded: migrationPlan.expandCount,
     })}\n`,
   );
 }
@@ -2204,6 +2502,7 @@ async function main() {
   const { databaseName } = assertSafeTarget(databaseUrl);
   const migrationPlan = await readMigrationPlan();
   await assertNativeConstraintMigrationGuard(migrationPlan);
+  await assertExpandMigrationArtifactContract(migrationPlan);
 
   const schemaName = `${SAFE_SCHEMA_PREFIX}${randomBytes(8).toString("hex")}`;
   assert(
@@ -2245,6 +2544,10 @@ async function main() {
       "Baseline migration count is incorrect.",
     );
     const fixtures = await createLegacyFixtures(fixtureClient, fixtureId);
+    const expandPreconditions = await assertExpandPreconditions(
+      fixtureClient,
+      fixtures.legacyIds,
+    );
     await fixtureClient.$disconnect();
     fixtureClient = undefined;
 
@@ -2254,8 +2557,8 @@ async function main() {
     fixtureClient = prismaClient(scopedUrl);
     await assertScopedConnection(fixtureClient, databaseName, schemaName);
     assert(
-      (await migrationCount(fixtureClient)) === migrationPlan.baselineCount + 1,
-      "Final migration count is incorrect.",
+      (await migrationCount(fixtureClient)) === migrationPlan.stagedCount,
+      "Staged EXPAND migration count is incorrect.",
     );
     await assertLegacyRowsRemain(fixtureClient, fixtures.legacyIds);
     await assertConstraintContract(fixtureClient);
@@ -2275,13 +2578,19 @@ async function main() {
 
     result = {
       ok: true,
-      migrations: migrationPlan.baselineCount + 1,
+      migrations: migrationPlan.stagedCount,
+      fixtureBaselineMigrations: migrationPlan.baselineCount,
+      expandMigrations: migrationPlan.expandCount,
       constraints: CONSTRAINTS.length,
       compatibilityConstraints:
         LEGACY_STORE_CONSTRAINTS.length +
         LEGACY_COMPATIBILITY_CONSTRAINTS.length,
       parentIndexes: PARENT_INDEXES.length,
+      concurrentIndexesBuiltAfterLegacyFixtures: PARENT_INDEXES.length,
+      populatedParentTablesBeforeExpand:
+        expandPreconditions.populatedParentTables,
       legacyRows: CONSTRAINTS.length,
+      legacyRowsBeforeExpand: expandPreconditions.legacyRows,
       invalidWritesRejected: CONSTRAINTS.length,
       storeDeletePolicies: 3,
       legacyStoreDeletePolicies: LEGACY_STORE_CONSTRAINTS.length,

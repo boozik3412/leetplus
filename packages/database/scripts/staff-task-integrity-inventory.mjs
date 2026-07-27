@@ -401,7 +401,7 @@ WITH findings AS (
   )::bigint
 
   UNION ALL
-  SELECT 'TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID', '${REVIEW}', (
+  SELECT 'TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID', '${BLOCKING}', (
     SELECT COUNT(*)
     FROM "StaffTask" AS task
     JOIN "User" AS assignee ON assignee."id" = task."assignedToUserId"

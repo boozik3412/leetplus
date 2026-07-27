@@ -2,22 +2,46 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | `INVENTORY` |
+| Статус | `INVENTORY` с bounded `IMPLEMENTED_CANDIDATE` checkpoint |
 | Дата | 27.07.2026 |
-| Версия контракта | 1.0.0 |
+| Версия контракта | 1.1.0 |
 | Область | staff, attachments, team chat, notifications |
 | Исходный baseline | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2` |
+| Candidate второго прикладного среза | `764a9d7d7d5712e0283e0fca787a75829f95a240` (не deployed) |
+| Проверки candidate | focused 16/16 suites, 191/191 tests; full API 70/70 suites, 1 432 passed, 2 todo; API boundary lint/typecheck/build; web lint 0 errors/30 existing warnings, typecheck/build; production env contract — pass |
 | Связанный backlog | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-MOD-STAFF-001..011`, `BETA-MOD-COMMS-001..005` |
 
 Документ фиксирует текущие поверхности и обязательные изменения для принятия
-`AccessScope` модулем персонала и коммуникаций. Он не подтверждает наличие
-реализации, production enforcement или готовность к внешнему тесту.
+`AccessScope` модулем персонала и коммуникаций. Bounded checkpoint ниже
+подтверждает наличие части реализации только в локальном candidate; он не
+подтверждает production enforcement, полноту родительских модулей или
+готовность к внешнему тесту.
 
 Нормативный источник правил — [AccessScope contract v1](./access-scope-contract.md).
 Авторитетная область доступа должна разрешаться из актуального состояния БД на
 каждом запросе: `NETWORK` либо `STORES` с явным `allowedStoreIds`.
 Отсутствующий или пустой `STORES` scope не повышается до `NETWORK` и
 обрабатывается fail-closed.
+
+Четыре текущих клуба являются четырьмя `Store` одной сети в одном `Tenant`.
+Первоначальный cohort v1 не сужается: обязательными остаются вся
+геймификация, весь ассортимент и товары, весь контур сотрудников, in-app
+коммуникации, а также users/roles в пределах своей сети или разрешённых
+клубов. Release decision остаётся `NO-GO`.
+
+## Bounded implementation checkpoint
+
+| Surface | Реализовано в candidate | Не закрыто этим срезом | Статус |
+|---|---|---|---|
+| Staff directory | Актуальный `AccessScope` применяется к list, summary, store/user options, direct member lookup, active shifts и create/update. Explicit чужой store даёт `403`; direct out-of-scope member — `404`; current/next store проверяются, null/network staff и cross-store move требуют `NETWORK`. Langame identity mutation разрешена только `NETWORK`; для `STORES` полный Langame detail не запрашивается. Mutation использует CAS по tenant/store/updatedAt и маскирует stale write как `404`. | Политика PII/reveal, аудит/backfill существующих Langame bindings, надёжная store-привязка legacy/Langame selectors, real PostgreSQL/API IDOR и browser regression. | `IMPLEMENTED_CANDIDATE` только для scoped directory core |
+| Staff notifications | List, summary, store options, acknowledge/resolve ограничены allowed stores; direct deny маскируется `404`; interactive tenant-wide sync разрешён только `NETWORK`; actor `STORES` read не запускает tenant-wide generation. | Выделенный system/worker execution context, фактическое подключение background producers, aggregate source parity, PostgreSQL/API/job/suspend tests. | `IMPLEMENTED_CANDIDATE` только для actor notification core |
+| Team-chat core | Scope применяется к channel list/report/direct/live state и message list/count/latest/unread/read/create/update; client store не расширяет доступ; `STORES` видит `CUSTOM` только при explicit membership, а message audience остаётся store-bound; SSE отдаёт bounded state, а reconnect повторно проходит guard. | Полный lifecycle custom membership, member/mention recipients, attachment ACL, reconciliation старых messages/store/audience, frontend controls, API/BFF/browser/SSE regression. | `IMPLEMENTED_CANDIDATE` только для channel/message core |
+| Attachment response/content | API и BFF выставляют private/no-store и nosniff policy; inline разрешён только для безопасного allow-list, active/unknown content принудительно скачивается. | Attachment-to-resource ACL/link schema, uploader-only pending TTL, dry-run backfill, reconciliation/quarantine, parent-based `404`, real file IDOR tests. До этого strict download authorization включать нельзя. | `IMPLEMENTED_CANDIDATE` только для response hardening |
+
+Candidate прошёл финальный bounded security-review с вердиктом
+`COMMIT-SAFE`. Это не включает generic attachment ACL и не изменяет release
+decision `NO-GO`. Ни одна широкая строка `STAFF-01..04` или `COMMS-01..02`
+не повышается выше `INVENTORY`.
 
 ## Инвентаризация поверхностей
 

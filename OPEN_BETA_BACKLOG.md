@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.4
+- Версия: 1.5
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
@@ -426,6 +426,70 @@ tenant:
 - нормативные audit reason codes и same-tenant нормализация invite store IDs на
   уровне БД ещё не завершены;
 - внешний доступ по-прежнему `NO-GO`.
+
+### 5.14. Bounded implementation checkpoint — staff и communications
+
+Candidate второго прикладного среза:
+`764a9d7d7d5712e0283e0fca787a75829f95a240` (не deployed).
+
+Проверки candidate:
+
+- focused security/API: 16/16 suites, 191/191 tests — pass;
+- full API: 70/70 suites, 1 432 passed, 2 todo, 1 434 total — pass;
+- API boundary lint, typecheck и production build — pass;
+- web targeted/full lint — 0 errors, 30 ранее существовавших warnings;
+- web typecheck и production build — pass;
+- production environment contract — pass;
+- финальный независимый security-review: `COMMIT-SAFE` для bounded-среза.
+
+Срез не меняет продуктовую модель запуска: четыре текущих клуба остаются
+четырьмя `Store` одной сети в одном `Tenant`; состав первой внешней когорты
+остаётся полным и включает геймификацию, ассортимент и товары, сотрудников,
+in-app коммуникации, а также пользователей и роли только в пределах своей
+сети или разрешённых клубов.
+
+В bounded candidate реализовано:
+
+- staff directory: server-side `AccessScope` для list, summary, store/user
+  options, direct member lookup, active shifts и create/update; запрещённый
+  explicit store filter возвращает `403`, out-of-scope member маскируется
+  `404`, переход в чужой/null store требует `NETWORK`; Langame identity
+  создаётся, меняется или очищается только `NETWORK`, а полный Langame detail
+  для `STORES` не запрашивается; update защищён CAS по tenant/store/updatedAt;
+- staff notifications: store predicate для list, summary, options,
+  acknowledge/resolve; interactive tenant-wide sync разрешён только
+  `NETWORK`, а actor endpoint не запускает tenant-wide generation для
+  `STORES`;
+- team-chat core: единый актуальный scope для channel list/report/direct/live
+  state и message list/count/latest/unread/read/create/update; store membership
+  и client filter не расширяют разрешённые клубы; `STORES` получает
+  `CUSTOM`-канал только через membership; SSE reconnect выполняет повторную
+  HTTP-аутентификацию;
+- attachment delivery hardening: private/no-store и nosniff headers в API/BFF,
+  безопасный inline allow-list, принудительный download для active/unknown
+  content types.
+
+Это только `IMPLEMENTED_CANDIDATE`, а не завершение модульных строк и не
+разрешение внешнего доступа. Открыты как минимум:
+
+- универсальная attachment-to-resource ACL/link schema, dry-run backfill,
+  reconciliation, quarantine orphan/unresolved ссылок и строгий download
+  authorization;
+- lifecycle custom channel membership, полный member/mention recipient
+  policy и доказательство того, что membership не открывает чужие сообщения
+  или вложения;
+- audit/backfill существующих Langame identity bindings и отдельная
+  PII/reveal policy;
+- отдельный system/worker execution context и фактическое подключение
+  background producers уведомлений;
+- reconciliation старых chat messages и их store/audience;
+- frontend controls, BFF/browser/SSE/file regression;
+- real PostgreSQL и API IDOR tests на topology двух tenant и нескольких
+  stores.
+
+Широкие строки `STAFF-01..04` и `COMMS-01..02` остаются `INVENTORY`, пока не
+закрыты все их route/action/job/file поверхности и required evidence.
+Release decision остаётся `NO-GO`.
 
 ## 6. Release gates
 

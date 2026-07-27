@@ -3,7 +3,7 @@
 | Поле | Значение |
 |---|---|
 | Статус | Active |
-| Версия | 1.0.0 |
+| Версия | 1.1.0 |
 | Дата | 27.07.2026 |
 | Владелец | LeetPlus engineering |
 
@@ -19,7 +19,8 @@ capability, entitlement, PII, audit event, owner, test и release SHA.
 
 Детальная инвентаризация строк `STAFF-01..04` и `COMMS-01..02` зафиксирована в
 [плане внедрения для персонала и коммуникаций](./staff-communications-adoption-plan.md).
-Документ имеет статус `INVENTORY` и сам по себе не изменяет статусы этой матрицы.
+Широкие модульные строки остаются `INVENTORY`; bounded подстроки ниже фиксируют
+только уже реализованный candidate и не означают полноту родительского модуля.
 
 | ID | Module / surface | Operations and resource class | Scope rule | Required evidence | Status |
 |---|---|---|---|---|---|
@@ -27,6 +28,10 @@ capability, entitlement, PII, audit event, owner, test и release SHA.
 | IAM-01 | `/users`, accounts service | list/detail/mutation, `USER_STAFF` | target exact/subset; Platform Admin hidden; global role mutation only NETWORK; retain an active system NETWORK OWNER | unit incl. owner invariant; API IDOR + browser + audit pending | IMPLEMENTED_CANDIDATE |
 | IAM-02 | invites / accept | create/update/cancel/accept, `USER_STAFF` | email-bound opaque token; rotate on update; exact scope; CAS accept/update/cancel | unit; PG accept/CAS + 100-way concurrency pending | IMPLEMENTED_CANDIDATE |
 | IAM-03 | custom/system roles | list/mutation, `TENANT_GLOBAL` | read safe projection; mutation NETWORK; effective capabilities cannot exceed actor | unit; audit/browser pending | IMPLEMENTED_CANDIDATE |
+| STAFF-01A | staff directory scoped core | list/summary/options/detail/active shifts/create/update, `USER_STAFF` | rows and current/next stores must be inside actor scope; null/network staff, cross-store move and Langame identity mutation require NETWORK; STORES Langame detail is suppressed; update uses scope CAS | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; PG/API/browser/PII/backfill evidence pending | IMPLEMENTED_CANDIDATE |
+| STAFF-ATT-01A | attachment response/content hardening | API/BFF download response | private/no-store + nosniff; safe inline allow-list; active/unknown content forced to attachment | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; header/content unit in focused 16 suites/191 tests; ACL/backfill/file IDOR pending | IMPLEMENTED_CANDIDATE |
+| COMMS-01A | team-chat scoped core | channel list/report/direct/live; message list/count/latest/unread/read/create/update; SSE reconnect | allowed store predicate is authoritative; filter cannot widen; STORES requires membership for CUSTOM; reconnect re-authenticates | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; membership lifecycle/mentions, old-message reconciliation, API/browser/SSE pending | IMPLEMENTED_CANDIDATE |
+| COMMS-02A | staff notifications actor core | list/summary/options/acknowledge/resolve/interactive sync | store rows filtered before response/mutation; direct deny `404`; tenant-wide interactive sync NETWORK-only | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; system producer context + PG/API/jobs pending | IMPLEMENTED_CANDIDATE |
 | STAFF-01 | staff directory/control | list/detail/aggregate/mutation, `USER_STAFF` | employee/store subset before aggregates | unit + PG + API + browser | INVENTORY |
 | STAFF-02 | tasks/shifts/checklists | list/detail/mutation/files/jobs, mixed | every linked store subset; null-store hidden from STORES | unit + PG + files/jobs | INVENTORY |
 | STAFF-03 | regulations/knowledge/training | list/detail/mutation/files, mixed | tenant-global writes NETWORK; club assignments subset | unit + PG + files/browser | INVENTORY |
@@ -73,4 +78,7 @@ PII-флагом, audit event, именами тестов, owner и release SHA
 
 ## Changelog
 
+- `1.1.0` — добавлен bounded implementation checkpoint для directory,
+  notifications, team-chat core и безопасной выдачи attachments; широкие
+  модульные строки и release decision не повышены.
 - `1.0.0` — создана исходная матрица первого внешнего теста.

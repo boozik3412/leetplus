@@ -304,6 +304,20 @@ FROM pg_catalog.pg_database AS database_row
 WHERE database_row.datname = pg_catalog.current_database()
 `.trim();
 
+export const RELATION_LOCK_SQL = `
+LOCK TABLE
+  public."_prisma_migrations",
+  public."StaffTask",
+  public."StaffTaskRecurringRule",
+  public."StaffTaskRecurringRuleRun",
+  public."StaffTaskTemplate",
+  public."Store",
+  public."Tenant",
+  public."User",
+  public."UserStoreAccess"
+IN ACCESS SHARE MODE
+`.trim();
+
 export const HELP = `
 ${SCRIPT_NAME}
 
@@ -1642,6 +1656,8 @@ export function runSelfTest() {
     MUTATING_KEYWORD_PATTERN.test(SYNTHETIC_PROVENANCE_STATE_SQL),
     false,
   );
+  assert.equal(MUTATING_KEYWORD_PATTERN.test(RELATION_LOCK_SQL), false);
+  assert.match(RELATION_LOCK_SQL, /IN ACCESS SHARE MODE$/u);
   assert.doesNotMatch(PROPOSAL_ROWS_SQL, /SELECT\s+\*/iu);
   assert.throws(() => parseArguments(["--apply"]), {
     code: "CLI_ARGUMENT_UNSUPPORTED",
@@ -1787,6 +1803,7 @@ export async function scanDatabase(
             3,
           );
         }
+        await transaction.$executeRawUnsafe(RELATION_LOCK_SQL);
 
         const snapshotRows =
           await transaction.$queryRawUnsafe(SNAPSHOT_STATE_SQL);

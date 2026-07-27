@@ -22,6 +22,7 @@ import {
   PROPOSAL_ACTIONS,
   PROPOSAL_CODES,
   PROPOSAL_ROWS_SQL,
+  RELATION_LOCK_SQL,
   RLS_STATE_SQL,
   RUN_CONFIRMATION,
   buildDryRunReport,
@@ -589,12 +590,13 @@ test("the catalog exposes exactly eight nullable-reference suggestions and exclu
   }
 });
 
-test("row and RLS SQL are bounded read-only projections without direct PII fields", () => {
-  for (const sql of [PROPOSAL_ROWS_SQL, RLS_STATE_SQL]) {
+test("row, RLS, and relation-lock SQL stay bounded and read-only", () => {
+  for (const sql of [PROPOSAL_ROWS_SQL, RLS_STATE_SQL, RELATION_LOCK_SQL]) {
     assert.equal(MUTATING_KEYWORD_PATTERN.test(sql), false);
     assert.doesNotMatch(sql, /SELECT\s+\*/iu);
     assert.doesNotMatch(sql, /;\s*\S/iu);
   }
+  assert.match(RELATION_LOCK_SQL, /IN ACCESS SHARE MODE$/u);
   assert.doesNotMatch(
     PROPOSAL_ROWS_SQL,
     /"(?:email|phone|passwordHash|firstName|lastName|username|telegramId|title|description)"/iu,
@@ -615,6 +617,7 @@ test("row and RLS SQL are bounded read-only projections without direct PII field
     "StaffTask",
   ]) {
     assert.match(RLS_STATE_SQL, new RegExp(`'${relation}'`, "u"));
+    assert.match(RELATION_LOCK_SQL, new RegExp(`"${relation}"`, "u"));
   }
 });
 

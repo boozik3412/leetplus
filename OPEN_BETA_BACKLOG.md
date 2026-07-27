@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.5
+- Версия: 1.8
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
@@ -253,7 +253,7 @@
 | BETA-MOD-STAFF-006 | P0 | Запланировано | Закрыть знания, обучение и аттестации | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены | BETA-MOD-STAFF-001, BETA-IAM-002 |
 | BETA-MOD-STAFF-007 | P0 | Запланировано | Закрыть контроль, рейтинги, мотивацию и дисциплину | Staff-control, operations dashboard, ratings, signals, warnings и penalties имеют понятный источник, право просмотра/изменения, комментарий и audit; нет автоматических внешних санкций или Langame write-back | BETA-MOD-STAFF-002, BETA-SEC-005 |
 | BETA-MOD-STAFF-008 | P0 | Запланировано | Закрыть salary planning | Schemes, periods, rows, adjustments и exports tenant/store-scoped; расчёт воспроизводим; изменения денег аудируются; доступ отделён отдельной capability; система не выполняет выплаты | BETA-MOD-STAFF-001, BETA-SEC-005 |
-| BETA-MOD-STAFF-009 | P0 | Запланировано | Защитить attachments и evidence | Upload/download/delete проверяют tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; retention определён | BETA-MOD-STAFF-001, BETA-SEC-006 |
+| BETA-MOD-STAFF-009 | P0 | В работе | Защитить attachments и evidence | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md` | BETA-MOD-STAFF-001, BETA-SEC-006 |
 | BETA-MOD-STAFF-010 | P0 | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения | BETA-MOD-STAFF-001 |
 | BETA-MOD-STAFF-011 | P0 | Запланировано | Добавить staff end-to-end regression | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny | BETA-SEC-006, BETA-OPS-003 |
 
@@ -262,7 +262,7 @@
 | ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
 |---|---|---|---|---|---|
 | BETA-MOD-COMMS-001 | P0 | Запланировано | Провести полный route/action inventory коммуникаций | Overview, team chat, channels, messages, notifications, events и CRM contact tasks имеют entitlement, capability, tenant/store scope, audit и тест | BETA-TEN-002, BETA-IAM-001 |
-| BETA-MOD-COMMS-002 | P0 | Запланировано | Закрыть audience, membership и message scope | Для network announcements задана явная audience policy: при необходимости они могут читаться store staff того же tenant, но не дают NETWORK-полномочий; store/custom channel ограничен разрешёнными clubs/members; UUID, SSE, mentions, receipts, attachments и task-from-chat не раскрывают чужие объекты и не создают задачу для всей сети/чужого store | BETA-SEC-006, BETA-MOD-COMMS-001 |
+| BETA-MOD-COMMS-002 | P0 | В работе | Закрыть audience, membership и message scope | Для network announcements задана явная audience policy: при необходимости они могут читаться store staff того же tenant, но не дают NETWORK-полномочий; store/custom channel ограничен разрешёнными clubs/members; UUID, SSE, mentions, receipts, attachments и task-from-chat не раскрывают чужие объекты и не создают задачу для всей сети/чужого store | BETA-SEC-006, BETA-MOD-COMMS-001 |
 | BETA-MOD-COMMS-003 | P0 | Запланировано | Закрыть notifications и background delivery | Generate/read/acknowledge/resolve соблюдают scope и lifecycle; suspend останавливает внешнюю доставку; повтор не дублирует сообщение | BETA-TEN-004, BETA-OPS-008 |
 | BETA-MOD-COMMS-004 | P0 | Запланировано | Защитить CRM contact tasks и PII | Contact data masked by default; reveal/export — отдельные capabilities и audit; пользователь не получает гостя или задачу другого store | BETA-SEC-005, BETA-MOD-COMMS-001 |
 | BETA-MOD-COMMS-005 | P0 | Запланировано | Добавить communications end-to-end regression | Проверены chat send/read, channel boundaries, notifications, contact task, suspend и reconnect для network/club/staff roles | BETA-OPS-003, BETA-MOD-COMMS-002, BETA-MOD-COMMS-003 |
@@ -472,9 +472,9 @@ in-app коммуникации, а также пользователей и р�
 Это только `IMPLEMENTED_CANDIDATE`, а не завершение модульных строк и не
 разрешение внешнего доступа. Открыты как минимум:
 
-- универсальная attachment-to-resource ACL/link schema, dry-run backfill,
-  reconciliation, quarantine orphan/unresolved ссылок и строгий download
-  authorization;
+- attachment-to-resource ACL schema и read-only inventory теперь реализованы в
+  следующем checkpoint, но apply-backfill/reconciliation, adoption всех parent
+  kinds, quarantine workflow и staged strict activation остаются открыты;
 - lifecycle custom channel membership, полный member/mention recipient
   policy и доказательство того, что membership не открывает чужие сообщения
   или вложения;
@@ -489,6 +489,103 @@ in-app коммуникации, а также пользователей и р�
 
 Широкие строки `STAFF-01..04` и `COMMS-01..02` остаются `INVENTORY`, пока не
 закрыты все их route/action/job/file поверхности и required evidence.
+Release decision остаётся `NO-GO`.
+
+### 5.15. Attachment ACL implementation checkpoint — 27.07.2026
+
+Создан канонический checkpoint:
+`docs/security/access-scope/v1/attachment-acl-implementation-checkpoint.md`.
+Candidate не deployed, exact release SHA будет назначен после review/commit.
+
+Топология и продуктовый scope не менялись:
+
+- четыре текущих клуба — четыре `Store` одного `Tenant`;
+- первый внешний tenant должен получить полный контур геймификации,
+  ассортимента/товаров, сотрудников, in-app коммуникаций и users/roles;
+- каждый actor ограничен своим tenant и `NETWORK` либо явными
+  `allowedStoreIds`;
+- изолированные внешние сети создаются отдельными tenant.
+
+Реализовано в текущем attachment candidate:
+
+- fail-closed lifecycle `PENDING/BOUND/UNRESOLVED/QUARANTINED`,
+  many-to-many parent binding, same-tenant parent/blob checks, deferred
+  cardinality invariant и serialization concurrent delete;
+- четыре последовательные attachment migrations
+  `20260727110000`, `20260727111000`, `20260727112000`,
+  `20260727113000`; полный artifact содержит 155 миграций, latest —
+  `20260727113000_staff_attachment_acl_invariant_hardening`;
+- upload создаёт exact-uploader `PENDING` с TTL 24 часа;
+- chat create/update и новые shift-report uploads транзакционно dual-write
+  legacy relation + `CHAT_MESSAGE` binding и compare-and-set
+  `PENDING → BOUND`;
+- download сначала проверяет metadata/lifecycle/live parent ACL и только потом
+  читает blob; foreign/out-of-scope/orphan/unresolved/quarantined маскируются
+  одинаковым `404`;
+- shift-report draft/send больше не расширяет store scope; frontend передаёт в
+  binder только свежие uploads текущей editor session, а legacy URL остаётся
+  неавторитетной текстовой копией;
+- generic attachment route использует union только attachment-related
+  capabilities, после чего всё равно выполняется parent ACL;
+- реализован всегда read-only inventory scanner: одна read-only
+  `REPEATABLE READ` snapshot transaction, bounded keyset pages, secondary
+  coverage chat body/task description/checklist/checklist answers, production
+  attestation и privacy-safe aggregate output;
+- добавлен process-wide
+  `STAFF_ATTACHMENT_ACL_MODE=LEGACY|SHADOW|ENFORCED`: production требует
+  explicit mode, local/test default — `ENFORCED`, CI startup contract —
+  `SHADOW`;
+- `LEGACY` сохраняет tenant-only read только для внутреннего перехода;
+  `SHADOW` вычисляет strict decision и пишет safe mismatch, но отдаёт legacy
+  result и не quarantine expired pending; `ENFORCED` включает parent ACL и TTL
+  quarantine;
+- CI проверяет scanner contract, все 155 migrations, ready/valid concurrent
+  indexes, lifecycle/tenant invariants и реальную гонку удаления последних
+  bindings.
+
+Текущая chat policy, которую attachment reader наследует без упрощения:
+
+- `NETWORK` manager-level actor видит non-gamification `CUSTOM` channel без
+  membership;
+- gamification `CUSTOM` требует membership;
+- `STORES` actor видит `CUSTOM` только через membership, которое не расширяет
+  allowed stores;
+- `STORE` message обязан соответствовать store канала.
+
+Проверки candidate:
+
+- focused API: 19 suites, 230/230 tests — pass;
+- full API: 73 suites, 1 471 passed, 2 todo, 1 473 total — pass;
+- API boundary lint, typecheck и production build — pass;
+- web typecheck/build — pass; lint: 0 errors, 30 существующих warnings;
+- clean PostgreSQL schema: 155/155 migrations — pass;
+- exact migration/latest smoke, AccessScope smoke и attachment ACL smoke,
+  включая two-client concurrent-delete race — pass;
+- read-only inventory на clean schema — pass; временная schema удалена.
+
+P0 остаётся `В работе`:
+
+- strict reader реализован только для `CHAT_MESSAGE`; shift report использует
+  этот parent;
+- `STAFF_TASK`, `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`,
+  `SHIFT_REGULATION`, `TRAINING_COURSE`, `ONBOARDING_PLAN` имеют schema и
+  inventory coverage, но их producer bind и authoritative reader pending;
+- apply-backfill/reconciliation command, production-like inventory текущего
+  tenant, manual quarantine resolution, retention/delete/revoke,
+  tenant/store canary orchestration, mismatch aggregate gate и full
+  API/BFF/browser A1/A2/B suite ещё отсутствуют;
+- `ENFORCED` нельзя активировать до inventory/backfill/adoption/canary: legacy
+  blobs имеют `UNRESOLVED` и будут закрыты, а unsupported parent kinds останутся
+  недоступны;
+- внешний beta запрещён в `LEGACY` и `SHADOW`.
+
+Операционная деталь: concurrent-index migrations запускаются с session
+`PGOPTIONS="-c lock_timeout=5000 -c statement_timeout=120000"`. После deploy
+оба индекса обязаны иметь `indisready=true` и `indisvalid=true`. Invalid index
+удаляется только точной `DROP INDEX CONCURRENTLY` вне transaction, после чего
+exact failed Prisma migration помечается rolled back и повторяется. Полный
+runbook находится в attachment checkpoint.
+
 Release decision остаётся `NO-GO`.
 
 ## 6. Release gates
@@ -517,7 +614,7 @@ Release decision остаётся `NO-GO`.
 
 - Gamification: для каждого включённого store пройдены readiness, shadow, one-user canary и reconciliation; нет unresolved ledger posting; kill switch проверен.
 - Assortment: 4/4 stores сопоставлены; initial sync и backfill приняты; остатки, операции и выручка сверены; freshness видна.
-- Staff: пройдены сценарии OWNER, network manager, club manager, senior/admin и trainee; attachments защищены; salary остаётся planning-only; автоматических санкций нет.
+- Staff: пройдены сценарии OWNER, network manager, club manager, senior/admin и trainee; attachments работают в `ENFORCED` после adoption/backfill/canary; `LEGACY/SHADOW` запрещены для внешнего beta; salary остаётся planning-only; автоматических санкций нет.
 - Communications: проверены network/store channels, messages, mentions, read receipts, notifications, CRM contact tasks, SSE/reconnect и PII policy.
 - Users and roles: actor не может выдать scope или capability шире собственного; revoke действует немедленно; Platform Admin недоступен tenant users.
 
@@ -536,32 +633,47 @@ Release decision остаётся `NO-GO`.
 
 ## 7. Рекомендуемая последовательность разработки
 
-1. Завершить review candidate, зафиксировать SHA и включить CI как required
-   check; не сливать strict bundle в auto-deploy `main`.
-2. Выделить и отрепетировать отдельный schema-only EXPAND release, реализовать
-   classification-команду/evidence manifest и проверить полный rollback/abort.
-3. На staging классифицировать tenant одной сети с четырьмя клубами; включение
-   strict application разрешить только при нуле unresolved active users/invites.
-4. Завершить IAM: resend/revoke audit, session revoke и 100-way accept
+1. Завершить независимый review текущего AccessScope/attachment candidate,
+   зафиксировать exact SHA и включить CI как required check; strict bundle не
+   передавать в auto-deploy `main`.
+2. Отрепетировать отдельный schema-only EXPAND release на production-like
+   snapshot: все 155 migrations с session `PGOPTIONS`, ready/valid concurrent
+   indexes, N-1 compatibility, abort/retry и rollback evidence.
+3. На staging классифицировать persisted `NETWORK|STORES` для tenant одной сети
+   с четырьмя клубами; strict AccessScope разрешить только при нуле unresolved
+   active users/invites.
+4. Запустить read-only attachment inventory, затем реализовать отдельный
+   idempotent apply/backfill/reconciliation tool с explicit apply,
+   quarantine и повторным zero-diff dry-run.
+5. Завершить attachment parent adoption в порядке:
+   `STAFF_TASK → CHECKLIST_RUN → KNOWLEDGE_ARTICLE/SHIFT_REGULATION →
+   TRAINING_COURSE/ONBOARDING_PLAN`; для каждого добавить atomic bind, live
+   parent ACL, revoke и A1/A2/B tests.
+6. Использовать реализованный process-wide `SHADOW` для mismatch evidence,
+   добавить tenant/store canary orchestration и aggregate gate, затем включить
+   `ENFORCED`; пройти browser/BFF/file regression и rollback drill.
+7. Завершить оставшиеся staff/communications surfaces, включая membership,
+   mentions, receipts, SSE, notifications, PII и background execution.
+8. Завершить IAM: resend/revoke audit, session revoke и 100-way accept
    concurrency.
-5. Последовательно подключить единый scope к staff/attachments/chat, затем к
-   gamification/ledger и после этого к assortment/reports/imports.
-6. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
-   контуров.
-7. Реализовать customer stage, обязательный beta entitlement profile,
-   provisioning, suspend/offboarding и `TenantExecutionPolicy`.
-8. Завершить эксплуатационный контур: immutable artifact, versioned
-   infrastructure, external probes/alerts, scheduler ownership,
-   backup/restore и rollback drills.
-9. Провести legacy-key audit и безопасный secret/session/invite/referral
-   cutover.
-10. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
-   сети из четырёх клубов без смены `tenantId`.
-11. Выполнить cutover, staged Langame sync, full-scope acceptance и семь дней
+9. Последовательно подключить единый scope к gamification/ledger, затем к
+   assortment/reports/imports и пройти store-level negative suites.
+10. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
+    контуров.
+11. Реализовать customer stage, обязательный beta entitlement profile,
+    provisioning, suspend/offboarding и `TenantExecutionPolicy`.
+12. Завершить эксплуатационный контур: immutable artifact, versioned
+    infrastructure, external probes/alerts, scheduler ownership,
+    backup/restore и rollback drills.
+13. Провести legacy-key audit и безопасный secret/session/invite/referral
+    cutover.
+14. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
+    сети из четырёх клубов без смены `tenantId`.
+15. Выполнить cutover, staged Langame sync, full-scope acceptance и семь дней
     internal alpha.
-12. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
+16. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
     14-дневный pilot.
-13. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
+17. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
     лимиты.
 
 ## 8. Метрики запуска

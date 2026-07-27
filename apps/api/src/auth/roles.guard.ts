@@ -10,6 +10,16 @@ import { AuthenticatedRequest } from './auth.types';
 import { AccessCapability, hasCapability } from './capabilities';
 import { ROLES_KEY } from './roles.decorator';
 
+const staffAttachmentCapabilities: readonly AccessCapability[] = [
+  'view_communications',
+  'view_staff_shift_workspace',
+  'view_staff_tasks',
+  'view_staff_standards',
+  'view_staff_training',
+  'view_staff_knowledge',
+  'approve_guest_game_rewards',
+];
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -61,6 +71,18 @@ export class RolesGuard implements CanActivate {
       hasCapability(user, 'approve_guest_game_rewards')
     ) {
       return true;
+    }
+
+    if (this.isStaffAttachmentPath(request)) {
+      if (
+        staffAttachmentCapabilities.some((capability) =>
+          hasCapability(user, capability),
+        )
+      ) {
+        return true;
+      }
+
+      throw new ForbiddenException('Insufficient role permissions');
     }
 
     const capability = this.resolveRequiredCapability(request, role);
@@ -413,6 +435,10 @@ export class RolesGuard implements CanActivate {
 
   private isStaffSalaryPath(request: AuthenticatedRequest) {
     return this.normalizePath(request).startsWith('/staff/salary');
+  }
+
+  private isStaffAttachmentPath(request: AuthenticatedRequest) {
+    return this.normalizePath(request).startsWith('/staff/attachments');
   }
 
   private isStaffSalaryRole(role: UserRole | null | undefined) {

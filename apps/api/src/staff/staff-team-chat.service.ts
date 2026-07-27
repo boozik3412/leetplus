@@ -20,6 +20,7 @@ import {
   type ResolvedAccessScope,
 } from '../tenancy/access-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 
 const channelScopes = ['NETWORK', 'STORE', 'ROLE', 'CUSTOM'] as const;
 const messageKinds = ['MESSAGE', 'ANNOUNCEMENT', 'INCIDENT'] as const;
@@ -340,6 +341,7 @@ export class StaffTeamChatService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly accessScopeService: AccessScopeService,
+    private readonly staffAttachmentBindingsService: StaffAttachmentBindingsService,
   ) {}
 
   async getReport(
@@ -659,9 +661,7 @@ export class StaffTeamChatService {
       );
     }
 
-    const attachmentIds = await this.resolveMessageAttachmentIds(
-      tenantId,
-      user.id,
+    const attachmentIds = this.normalizeMessageAttachmentIds(
       dto.attachmentIds,
     );
     const data = await this.normalizeMessageData(
@@ -689,16 +689,14 @@ export class StaffTeamChatService {
       });
 
       if (attachmentIds.length > 0) {
-        await Promise.all(
-          attachmentIds.map((attachmentId) =>
-            tx.staffChatMessageAttachment.create({
-              data: {
-                tenantId,
-                messageId: created.id,
-                attachmentId,
-              },
-            }),
-          ),
+        await this.staffAttachmentBindingsService.bindPendingChatAttachments(
+          tx,
+          {
+            tenantId,
+            actorUserId: user.id,
+            messageId: created.id,
+            attachmentIds,
+          },
         );
       }
 
@@ -845,6 +843,62 @@ export class StaffTeamChatService {
     return message;
   }
 
+  async canReadAnyAttachmentMessage(
+    user: AuthenticatedUser,
+    messageIds: readonly string[],
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const ids = Array.from(new Set(messageIds.filter(Boolean)));
+
+    if (
+      ids.length === 0 ||
+      (!hasCapability(user, 'view_communications') &&
+        !hasCapability(user, 'manage_communications') &&
+        !hasCapability(user, 'approve_guest_game_rewards'))
+    ) {
+      return false;
+    }
+
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const accessWhere = this.buildAccessibleChannelWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
+    const audienceWhere = this.buildMessageAudienceWhere(
+      user,
+      tenantId,
+      accessScope,
+    );
+    const messages = await client.staffChatMessage.findMany({
+      where: {
+        AND: [
+          { id: { in: ids }, tenantId },
+          audienceWhere,
+          { channel: { is: accessWhere } },
+        ],
+      },
+      select: {
+        storeId: true,
+        channel: {
+          select: {
+            scope: true,
+            storeId: true,
+          },
+        },
+      },
+      take: ids.length,
+    });
+
+    return messages.some(
+      (message) =>
+        message.channel.scope !== 'STORE' ||
+        (message.channel.storeId !== null &&
+          message.storeId === message.channel.storeId),
+    );
+  }
+
   async updateMessage(
     user: AuthenticatedUser,
     id: string,
@@ -900,9 +954,7 @@ export class StaffTeamChatService {
     const channel = message.channel;
     const updateData: Prisma.StaffChatMessageUncheckedUpdateInput = {};
     const hasBodyUpdate = 'body' in dto;
-    const attachmentIds = await this.resolveMessageAttachmentIds(
-      tenantId,
-      user.id,
+    const attachmentIds = this.normalizeMessageAttachmentIds(
       dto.attachmentIds,
     );
     const hasAttachmentUpdate = attachmentIds.length > 0;
@@ -957,14 +1009,15 @@ export class StaffTeamChatService {
       }
 
       if (hasAttachmentUpdate) {
-        await tx.staffChatMessageAttachment.createMany({
-          data: attachmentIds.map((attachmentId) => ({
+        await this.staffAttachmentBindingsService.bindPendingChatAttachments(
+          tx,
+          {
             tenantId,
+            actorUserId: user.id,
             messageId: message.id,
-            attachmentId,
-          })),
-          skipDuplicates: true,
-        });
+            attachmentIds,
+          },
+        );
       }
 
       const result =
@@ -2320,9 +2373,7 @@ export class StaffTeamChatService {
     };
   }
 
-  private async resolveMessageAttachmentIds(
-    tenantId: string,
-    userId: string,
+  private normalizeMessageAttachmentIds(
     values: string[] | null | undefined,
   ) {
     const requestedIds = Array.isArray(values)
@@ -2343,20 +2394,6 @@ export class StaffTeamChatService {
 
     if (requestedIds.length === 0) {
       return [];
-    }
-
-    const rows = await this.prisma.staffAttachment.findMany({
-      where: {
-        tenantId,
-        uploadedByUserId: userId,
-        id: { in: requestedIds },
-      },
-      select: { id: true },
-    });
-    const availableIds = new Set(rows.map((row) => row.id));
-
-    if (requestedIds.some((id) => !availableIds.has(id))) {
-      throw new BadRequestException('Attachment is not available');
     }
 
     return requestedIds;

@@ -224,13 +224,17 @@ function createHarness(options?: {
       tenantSlug: 'tenant-a',
     }),
   };
+  const staffAttachmentBindingsService = {
+    bindPendingChatAttachments: jest.fn(),
+  };
   const service = new StaffTeamChatService(
     prisma as never,
     tenantContextService,
     new AccessScopeService(),
+    staffAttachmentBindingsService as never,
   );
 
-  return { prisma, service };
+  return { prisma, service, staffAttachmentBindingsService };
 }
 
 type RecordedMock = {
@@ -610,6 +614,96 @@ describe('StaffTeamChatService AccessScope boundary', () => {
         messageId: 'message-a2',
       }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('reuses the live channel and audience predicates for attachment parents', async () => {
+    const actor = {
+      ...storeActor,
+      permissions: ['view_communications'],
+    } satisfies AuthenticatedUser;
+    const { prisma, service } = createHarness({
+      reportMessages: [
+        {
+          storeId: 'a1',
+          channel: { scope: 'STORE', storeId: 'a1' },
+        },
+      ],
+    });
+
+    await expect(
+      service.canReadAnyAttachmentMessage(actor, ['message-a1'], prisma as never),
+    ).resolves.toBe(true);
+
+    const query = serializedCall(prisma.staffChatMessage.findMany, 0);
+    expect(query).toContain('"id":{"in":["message-a1"]}');
+    expect(query).toContain('"tenantId":"tenant-a"');
+    expect(query).toContain('"storeId":{"in":["a1"]}');
+    expect(query).not.toContain('"a2"');
+  });
+
+  it('does not let a non-chat attachment capability read a chat parent', async () => {
+    const actor = {
+      ...storeActor,
+      permissions: ['view_staff_tasks'],
+    } satisfies AuthenticatedUser;
+    const { prisma, service } = createHarness({
+      reportMessages: [
+        {
+          storeId: 'a1',
+          channel: { scope: 'STORE', storeId: 'a1' },
+        },
+      ],
+    });
+
+    await expect(
+      service.canReadAnyAttachmentMessage(actor, ['message-a1'], prisma as never),
+    ).resolves.toBe(false);
+    expect(prisma.staffChatMessage.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an inconsistent STORE-channel message attachment', async () => {
+    const actor = {
+      ...storeActor,
+      permissions: ['view_communications'],
+    } satisfies AuthenticatedUser;
+    const { prisma, service } = createHarness({
+      reportMessages: [
+        {
+          storeId: 'a2',
+          channel: { scope: 'STORE', storeId: 'a1' },
+        },
+      ],
+    });
+
+    await expect(
+      service.canReadAnyAttachmentMessage(actor, ['message-a1'], prisma as never),
+    ).resolves.toBe(false);
+  });
+
+  it('preserves the authoritative NETWORK-manager CUSTOM predicate for attachment parents', async () => {
+    const actor = {
+      ...networkActor,
+      permissions: ['view_communications'],
+    } satisfies AuthenticatedUser;
+    const { prisma, service } = createHarness({
+      reportMessages: [
+        {
+          storeId: null,
+          channel: { scope: 'CUSTOM', storeId: null },
+        },
+      ],
+    });
+
+    await expect(
+      service.canReadAnyAttachmentMessage(
+        actor,
+        ['custom-message'],
+        prisma as never,
+      ),
+    ).resolves.toBe(true);
+    expect(serializedCall(prisma.staffChatMessage.findMany, 0)).toContain(
+      '"name":{"not":',
+    );
   });
 });
 

@@ -381,6 +381,79 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
+  it.each([
+    'view_communications',
+    'view_staff_shift_workspace',
+    'view_staff_tasks',
+    'view_staff_standards',
+    'view_staff_training',
+    'view_staff_knowledge',
+    'approve_guest_game_rewards',
+  ])(
+    'allows %s through the staff attachment guard boundary',
+    (permission) => {
+      reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'GET',
+            path: '/staff/attachments/attachment-1',
+            user: {
+              role: UserRole.MARKETER,
+              permissions: [permission],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('does not turn task-only attachment admission into team-chat route access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+    const user = {
+      role: UserRole.MARKETER,
+      permissions: ['view_staff_tasks'],
+    };
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/attachments/attachment-1',
+          user,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/team-chat',
+          user,
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('rejects unrelated capabilities at the staff attachment boundary', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/attachments/attachment-1',
+          user: {
+            role: UserRole.OWNER,
+            permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('allows reward approvers to read the gamification approval chat only', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 

@@ -7,6 +7,7 @@ import { StaffAiAssistantController } from './staff-ai-assistant.controller';
 import { StaffAiAssistantService } from './staff-ai-assistant.service';
 import { StaffAssessmentsController } from './staff-assessments.controller';
 import { StaffAssessmentsService } from './staff-assessments.service';
+import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 import { StaffAttachmentsController } from './staff-attachments.controller';
 import { StaffAttachmentsService } from './staff-attachments.service';
 import { StaffChecklistTemplatesController } from './staff-checklist-templates.controller';
@@ -94,6 +95,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffOperationsDashboardService,
     StaffOnboardingPlansService,
     StaffAssessmentsService,
+    StaffAttachmentBindingsService,
     StaffAttachmentsService,
     StaffShiftRegulationsService,
     StaffShiftReportsService,

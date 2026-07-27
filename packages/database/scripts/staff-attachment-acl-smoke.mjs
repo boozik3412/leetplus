@@ -16,6 +16,8 @@ if (process.env.STAFF_ATTACHMENT_ACL_SMOKE_CONFIRM !== REQUIRED_CONFIRMATION) {
 }
 
 const prisma = new PrismaClient();
+const concurrentDeleteClientA = new PrismaClient();
+const concurrentDeleteClientB = new PrismaClient();
 const fixtureId = randomUUID();
 const tenantIds = [];
 const storeIds = [];
@@ -108,6 +110,31 @@ try {
         constraint.conname === 'StaffAttachment_state_shape_check',
     )?.convalidated === false,
     'Existing attachment rows must remain in the staged NOT VALID expand state.',
+  );
+
+  const concurrentIndexes = await prisma.$queryRaw`
+    SELECT
+      index_class.relname AS index_name,
+      index_metadata.indisready,
+      index_metadata.indisvalid
+    FROM pg_index AS index_metadata
+    JOIN pg_class AS index_class
+      ON index_class.oid = index_metadata.indexrelid
+    JOIN pg_namespace AS index_namespace
+      ON index_namespace.oid = index_class.relnamespace
+    WHERE index_namespace.oid = current_schema()::regnamespace
+      AND index_class.relname IN (
+        'staff_attachment_tenant_state_created_idx',
+        'staff_attachment_pending_expiry_idx'
+      )
+    ORDER BY index_class.relname
+  `;
+  assert(
+    concurrentIndexes.length === 2 &&
+      concurrentIndexes.every(
+        (index) => index.indisready === true && index.indisvalid === true,
+      ),
+    'Both concurrent StaffAttachment indexes must be ready and valid.',
   );
 
   const tenantA = await prisma.tenant.create({
@@ -345,6 +372,148 @@ try {
     'Atomic bind must derive the parent store and finish in BOUND state.',
   );
 
+  await expectConstraintFailure(
+    'BOUND attachment tenant mutation',
+    () =>
+      prisma.staffAttachment.update({
+        where: { id: pendingAttachment.id },
+        data: { tenantId: tenantB.id },
+      }),
+    'Staff attachment and all BOUND bindings must share a tenant',
+  );
+
+  const concurrentDeleteAttachment = await prisma.staffAttachment.create({
+    data: {
+      tenantId: tenantA.id,
+      uploadedByUserId: userA.id,
+      fileName: 'attachment-acl-concurrent-delete.txt',
+      contentType: 'text/plain',
+      byteSize: 8,
+      data: Uint8Array.from(Buffer.from('parallel')),
+      state: 'PENDING',
+      pendingExpiresAt: new Date(Date.now() + 60_000),
+      stateReasonCode: null,
+    },
+  });
+  attachmentIds.push(concurrentDeleteAttachment.id);
+
+  const concurrentBindingIds = [randomUUID(), randomUUID()];
+  bindingIds.push(...concurrentBindingIds);
+  await prisma.$transaction(async (transaction) => {
+    for (const [index, concurrentBindingId] of
+      concurrentBindingIds.entries()) {
+      await transaction.staffAttachmentBinding.create({
+        data: {
+          id: concurrentBindingId,
+          tenantId: tenantA.id,
+          attachmentId: concurrentDeleteAttachment.id,
+          candidateAttachmentId: concurrentDeleteAttachment.id,
+          resourceKind: 'CHAT_MESSAGE',
+          resourceId: messageA.id,
+          state: 'BOUND',
+          source: 'NATIVE',
+          sourceKey: sourceKey(
+            `parallel-delete:${fixtureId}:${String(index)}`,
+          ),
+          createdByUserId: userA.id,
+          resolvedAt: new Date(),
+        },
+      });
+    }
+    await transaction.staffAttachment.update({
+      where: { id: concurrentDeleteAttachment.id },
+      data: {
+        state: 'BOUND',
+        pendingExpiresAt: null,
+        stateReasonCode: null,
+        stateChangedAt: new Date(),
+      },
+    });
+  });
+
+  let signalFirstDelete;
+  const firstDeleteReached = new Promise((resolve) => {
+    signalFirstDelete = resolve;
+  });
+  const firstDelete = concurrentDeleteClientA
+    .$transaction(
+      async (transaction) => {
+        await transaction.staffAttachmentBinding.delete({
+          where: { id: concurrentBindingIds[0] },
+        });
+        signalFirstDelete();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      },
+      { maxWait: 5_000, timeout: 10_000 },
+    )
+    .catch((error) => {
+      signalFirstDelete();
+      throw error;
+    });
+
+  await firstDeleteReached;
+  const secondDelete = concurrentDeleteClientB.$transaction(
+    (transaction) =>
+      transaction.staffAttachmentBinding.delete({
+        where: { id: concurrentBindingIds[1] },
+      }),
+    { maxWait: 5_000, timeout: 10_000 },
+  );
+  const parallelDeleteResults = await Promise.allSettled([
+    firstDelete,
+    secondDelete,
+  ]);
+  const successfulDeletes = parallelDeleteResults.filter(
+    (result) => result.status === 'fulfilled',
+  );
+  const rejectedDeletes = parallelDeleteResults.filter(
+    (result) => result.status === 'rejected',
+  );
+  assert(
+    successfulDeletes.length === 1 && rejectedDeletes.length === 1,
+    'Concurrent deletion of the last two BOUND links must allow exactly one transaction.',
+  );
+  assert(
+    String(rejectedDeletes[0]?.reason).includes(
+      'Staff attachment BOUND state must match the existence of a BOUND binding',
+    ),
+    `Concurrent deletion failed for an unexpected reason: ${String(
+      rejectedDeletes[0]?.reason,
+    )}`,
+  );
+
+  const remainingConcurrentBindings =
+    await prisma.staffAttachmentBinding.findMany({
+      where: {
+        id: { in: concurrentBindingIds },
+        attachmentId: concurrentDeleteAttachment.id,
+        state: 'BOUND',
+      },
+    });
+  assert(
+    remainingConcurrentBindings.length === 1,
+    'Concurrent deletion must leave one BOUND binding committed.',
+  );
+  await prisma.$transaction(async (transaction) => {
+    await transaction.staffAttachmentBinding.update({
+      where: { id: remainingConcurrentBindings[0].id },
+      data: {
+        attachmentId: null,
+        state: 'QUARANTINED',
+        reasonCode: 'SMOKE_CONCURRENT_DELETE_COMPLETE',
+        resolvedAt: null,
+      },
+    });
+    await transaction.staffAttachment.update({
+      where: { id: concurrentDeleteAttachment.id },
+      data: {
+        state: 'QUARANTINED',
+        stateReasonCode: 'SMOKE_CONCURRENT_DELETE_COMPLETE',
+        stateChangedAt: new Date(),
+      },
+    });
+  });
+
   await prisma.$transaction(async (transaction) => {
     await transaction.staffAttachmentBinding.update({
       where: { id: bindingId },
@@ -366,9 +535,36 @@ try {
   });
 
   console.log(
-    'Staff attachment ACL PostgreSQL smoke passed: fail-closed defaults, lifecycle shapes, same-tenant parent/blob checks, deferred atomic bind, derived store snapshot, and quarantine transition are enforced.',
+    'Staff attachment ACL PostgreSQL smoke passed: fail-closed defaults, lifecycle shapes, valid concurrent indexes, same-tenant parent/blob checks, deferred atomic bind, tenant mutation rejection, serialized concurrent delete, derived store snapshot, and quarantine transition are enforced.',
   );
 } finally {
+  if (bindingIds.length > 0 && attachmentIds.length > 0) {
+    await prisma.$transaction(async (transaction) => {
+      await transaction.staffAttachmentBinding.updateMany({
+        where: {
+          id: { in: bindingIds },
+          state: 'BOUND',
+        },
+        data: {
+          attachmentId: null,
+          state: 'QUARANTINED',
+          reasonCode: 'SMOKE_CLEANUP',
+          resolvedAt: null,
+        },
+      });
+      await transaction.staffAttachment.updateMany({
+        where: {
+          id: { in: attachmentIds },
+          state: 'BOUND',
+        },
+        data: {
+          state: 'QUARANTINED',
+          stateReasonCode: 'SMOKE_CLEANUP',
+          stateChangedAt: new Date(),
+        },
+      });
+    });
+  }
   if (bindingIds.length > 0) {
     await prisma.staffAttachmentBinding.deleteMany({
       where: { id: { in: bindingIds } },
@@ -404,5 +600,7 @@ try {
       where: { id: { in: tenantIds } },
     });
   }
+  await concurrentDeleteClientA.$disconnect();
+  await concurrentDeleteClientB.$disconnect();
   await prisma.$disconnect();
 }

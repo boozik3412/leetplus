@@ -3,6 +3,7 @@ import {
   PRODUCTION_SECRET_KEYS,
   resolveAccessScopeEnforcementMode,
   resolveSecuritySecret,
+  resolveStaffAttachmentAclMode,
   validateEnvironment,
 } from './environment-validation';
 
@@ -20,6 +21,7 @@ function validProductionEnvironment() {
     EXPECTED_DATABASE_MIGRATION: '20260727090000_access_scope_expand',
     EXPECTED_DATABASE_MIGRATION_COUNT: '151',
     ACCESS_SCOPE_ENFORCEMENT_MODE: 'SHADOW',
+    STAFF_ATTACHMENT_ACL_MODE: 'SHADOW',
   };
 }
 
@@ -118,6 +120,23 @@ describe('validateEnvironment', () => {
       /ACCESS_SCOPE_ENFORCEMENT_MODE must be SHADOW or ENFORCED/,
     );
   });
+
+  it('requires an explicit staff attachment ACL rollout mode in production', () => {
+    const missing = validProductionEnvironment();
+    delete (missing as Partial<ReturnType<typeof validProductionEnvironment>>)
+      .STAFF_ATTACHMENT_ACL_MODE;
+    const invalid = {
+      ...validProductionEnvironment(),
+      STAFF_ATTACHMENT_ACL_MODE: 'optional',
+    };
+
+    expect(() => validateEnvironment(missing)).toThrow(
+      /STAFF_ATTACHMENT_ACL_MODE is required/,
+    );
+    expect(() => validateEnvironment(invalid)).toThrow(
+      /STAFF_ATTACHMENT_ACL_MODE must be LEGACY, SHADOW, or ENFORCED/,
+    );
+  });
 });
 
 describe('resolveAccessScopeEnforcementMode', () => {
@@ -130,6 +149,21 @@ describe('resolveAccessScopeEnforcementMode', () => {
   it('rejects unknown modes', () => {
     expect(() => resolveAccessScopeEnforcementMode('legacy')).toThrow(
       /must be SHADOW or ENFORCED/,
+    );
+  });
+});
+
+describe('resolveStaffAttachmentAclMode', () => {
+  it('defaults to fail-closed enforcement outside a rollout override', () => {
+    expect(resolveStaffAttachmentAclMode(undefined)).toBe('ENFORCED');
+    expect(resolveStaffAttachmentAclMode(' enforced ')).toBe('ENFORCED');
+    expect(resolveStaffAttachmentAclMode('legacy')).toBe('LEGACY');
+    expect(resolveStaffAttachmentAclMode('shadow')).toBe('SHADOW');
+  });
+
+  it('rejects unknown modes', () => {
+    expect(() => resolveStaffAttachmentAclMode('optional')).toThrow(
+      /must be LEGACY, SHADOW, or ENFORCED/,
     );
   });
 });

@@ -52,6 +52,9 @@ jobs:
       - name: Type-check database scripts
         run: pnpm --filter database typecheck
 
+      - name: Validate attachment inventory command
+        run: pnpm --filter database check:attachment-inventory
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -82,9 +85,10 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: '2026-07-26T00:00:00Z'
-          EXPECTED_DATABASE_MIGRATION: 20260727112000_staff_attachment_pending_expiry_index
-          EXPECTED_DATABASE_MIGRATION_COUNT: '154'
+          EXPECTED_DATABASE_MIGRATION: 20260727113000_staff_attachment_acl_invariant_hardening
+          EXPECTED_DATABASE_MIGRATION_COUNT: '155'
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
+          STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
       - name: Lint web
         run: pnpm --filter web lint
@@ -158,3 +162,8 @@ jobs:
         run: pnpm --filter database db:smoke:attachment-acl
         env:
           STAFF_ATTACHMENT_ACL_SMOKE_CONFIRM: run-staff-attachment-acl-fixtures
+
+      - name: Run read-only attachment inventory
+        run: pnpm --filter database db:inventory:attachment-acl
+        env:
+          STAFF_ATTACHMENT_BACKFILL_TARGET: development

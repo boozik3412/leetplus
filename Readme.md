@@ -479,6 +479,7 @@ WEB_URL="http://localhost:3000"
 API_URL="http://localhost:4000"
 NEXT_PUBLIC_API_URL="http://localhost:4000"
 ACCESS_SCOPE_ENFORCEMENT_MODE="ENFORCED"
+STAFF_ATTACHMENT_ACL_MODE="ENFORCED"
 ```
 
 Дополнительно для почты и сервисной синхронизации:
@@ -514,6 +515,20 @@ REPORT_DIGEST_SCHEDULER_INTERVAL_MS="60000"
 `SHADOW` только пишет диагностику неклассифицированных аккаунтов и всё равно
 отказывает им в доступе; `ENFORCED` является штатным режимом после
 классификации.
+
+Для download staff-вложений production также требует явный
+`STAFF_ATTACHMENT_ACL_MODE`:
+
+- `LEGACY` сохраняет tenant-only read без parent ACL и предназначен только для
+  краткого внутреннего перехода;
+- `SHADOW` вычисляет strict parent decision и пишет privacy-safe mismatch, но
+  возвращает legacy result и не переводит expired pending в quarantine;
+- `ENFORCED` делает parent ACL авторитетным и включает TTL quarantine.
+
+Если переменная отсутствует локально или в test, используется `ENFORCED`. CI
+production startup contract проверяет явный `SHADOW`. Внешний beta запрещён в
+`LEGACY/SHADOW`; `ENFORCED` включается только после завершения parent adoption,
+inventory/backfill и canary.
 
 До первого релиза с разделёнными ключами нужно проверить, каким фактическим
 ключом зашифрованы существующие PII и credentials интеграций. Если раньше

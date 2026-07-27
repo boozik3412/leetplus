@@ -34,6 +34,15 @@ export const ACCESS_SCOPE_ENFORCEMENT_MODES = ['SHADOW', 'ENFORCED'] as const;
 export type AccessScopeEnforcementMode =
   (typeof ACCESS_SCOPE_ENFORCEMENT_MODES)[number];
 
+export const STAFF_ATTACHMENT_ACL_MODES = [
+  'LEGACY',
+  'SHADOW',
+  'ENFORCED',
+] as const;
+
+export type StaffAttachmentAclMode =
+  (typeof STAFF_ATTACHMENT_ACL_MODES)[number];
+
 const PLACEHOLDER_SECRET_PATTERNS = [
   /^change[\s_-]*me(?:[\s_-].*)?$/i,
   /^replace[\s_-]*me(?:[\s_-].*)?$/i,
@@ -65,6 +74,28 @@ export function resolveAccessScopeEnforcementMode(
   }
 
   throw new Error('ACCESS_SCOPE_ENFORCEMENT_MODE must be SHADOW or ENFORCED');
+}
+
+export function resolveStaffAttachmentAclMode(
+  value: unknown,
+): StaffAttachmentAclMode {
+  const normalized = stringValue(value).toUpperCase();
+
+  if (!normalized) {
+    return 'ENFORCED';
+  }
+
+  if (
+    normalized === 'LEGACY' ||
+    normalized === 'SHADOW' ||
+    normalized === 'ENFORCED'
+  ) {
+    return normalized;
+  }
+
+  throw new Error(
+    'STAFF_ATTACHMENT_ACL_MODE must be LEGACY, SHADOW, or ENFORCED',
+  );
 }
 
 function productionEnvironment(config: EnvironmentValues) {
@@ -133,7 +164,11 @@ export function validateEnvironment(config: EnvironmentValues) {
   const configuredAccessScopeMode = stringValue(
     config.ACCESS_SCOPE_ENFORCEMENT_MODE,
   );
+  const configuredStaffAttachmentAclMode = stringValue(
+    config.STAFF_ATTACHMENT_ACL_MODE,
+  );
   let accessScopeEnforcementMode: AccessScopeEnforcementMode = 'ENFORCED';
+  let staffAttachmentAclMode: StaffAttachmentAclMode = 'ENFORCED';
 
   if (!configuredAccessScopeMode) {
     errors.push('ACCESS_SCOPE_ENFORCEMENT_MODE is required');
@@ -144,6 +179,20 @@ export function validateEnvironment(config: EnvironmentValues) {
       );
     } catch {
       errors.push('ACCESS_SCOPE_ENFORCEMENT_MODE must be SHADOW or ENFORCED');
+    }
+  }
+
+  if (!configuredStaffAttachmentAclMode) {
+    errors.push('STAFF_ATTACHMENT_ACL_MODE is required');
+  } else {
+    try {
+      staffAttachmentAclMode = resolveStaffAttachmentAclMode(
+        configuredStaffAttachmentAclMode,
+      );
+    } catch {
+      errors.push(
+        'STAFF_ATTACHMENT_ACL_MODE must be LEGACY, SHADOW, or ENFORCED',
+      );
     }
   }
 
@@ -184,6 +233,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     EXPECTED_DATABASE_MIGRATION: expectedMigration,
     EXPECTED_DATABASE_MIGRATION_COUNT: expectedMigrationCount,
     ACCESS_SCOPE_ENFORCEMENT_MODE: accessScopeEnforcementMode,
+    STAFF_ATTACHMENT_ACL_MODE: staffAttachmentAclMode,
   };
 }
 

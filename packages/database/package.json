@@ -10,6 +10,8 @@
     "db:smoke": "node scripts/ci-smoke.mjs",
     "db:smoke:access-scope": "node scripts/access-scope-smoke.mjs",
     "db:smoke:attachment-acl": "node scripts/staff-attachment-acl-smoke.mjs",
+    "db:inventory:attachment-acl": "node scripts/staff-attachment-backfill-dry-run.mjs",
+    "check:attachment-inventory": "node --check scripts/staff-attachment-backfill-dry-run.mjs && node scripts/staff-attachment-backfill-dry-run.mjs --help && node scripts/staff-attachment-backfill-dry-run.mjs --self-test",
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",

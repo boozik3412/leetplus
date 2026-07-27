@@ -1,16 +1,21 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-- Дата фиксации: 26.07.2026
-- Версия: 1.1
+- Дата актуализации: 27.07.2026
+- Версия: 1.4
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
+- Канонический AccessScope package:
+  [docs/security/access-scope](./docs/security/access-scope/README.md)
 
 ## 1. Цель
 
 Перевести четыре действующих клуба из текущего operational tenant `demo` в полноценный рабочий tenant одной сети, затем безопасно подключать другие сети для получения обратной связи и выйти на открытый заявочный тест.
 
 Этот файл является специальным исполнимым backlog запуска. Он не заменяет общий продуктовый backlog: здесь находятся только работы, от которых зависят безопасность, надёжность, обязательный состав модулей и управляемое расширение теста.
+
+Для launch readiness этот файл и связанный release evidence имеют приоритет над
+историческими планами и заявлениями о готовности в `BACKLOG.md` и других docs.
 
 ## 2. Зафиксированные продуктовые решения
 
@@ -127,6 +132,9 @@
 - `P1` — обязателен до открытого теста; допускается завершать во время internal alpha.
 - `P2` — улучшение после первой внешней когорты, если не обнаружен связанный P0/P1 риск.
 - Статусы задач: `Запланировано`, `В работе`, `Заблокировано`, `Готово`.
+- Статус в этом файле означает launch readiness, а не наличие функциональной
+  основы: существующий широкий модуль может оставаться `Запланировано`, пока не
+  закрыты scope, entitlement, tests, operations и evidence.
 
 Задача считается готовой только когда:
 
@@ -144,7 +152,7 @@
 
 | ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
 |---|---|---|---|---|---|
-| BETA-SRC-001 | P0 | Готово | Сохранить семь текущих незакоммиченных изменений и два локальных коммита | Для каждой локальной правки определён владелец и назначение; работа сохранена в отдельной ветке/коммитах; ни одна правка не потеряна | — |
+| BETA-SRC-001 | P0 | Готово | Сохранить исходные локальные изменения и локальные коммиты | Динамический source manifest фиксирует branch, HEAD, origin/main, ahead/behind и worktree; работа сохранена в отдельной ветке/коммитах без потерь | — |
 | BETA-SRC-002 | P0 | В работе | Осознанно согласовать local `main` с `origin/main` | Один канонический clean SHA; расхождение `ahead/behind` устранено без уничтожения локальной работы | BETA-SRC-001 |
 | BETA-SRC-003 | P0 | Запланировано | Защитить `main` и ввести release freeze на новые функции | Merge возможен только после обязательных checks; до Gate 3 принимаются только launch-blockers и обязательный beta scope | BETA-SRC-002, BETA-OPS-001 |
 | BETA-SRC-004 | P1 | Запланировано | Версионировать nginx, systemd, deploy и env examples | Production-конфигурация воспроизводится из репозитория; секреты отсутствуют; review показывает точный diff инфраструктуры | BETA-SRC-002 |
@@ -154,14 +162,14 @@
 | ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
 |---|---|---|---|---|---|
 | BETA-SEC-001 | P0 | В работе | Убрать optional-auth со всех operational B2B endpoints | Anonymous dashboard, products, stores, categories, suppliers, reports, staff, communications и management отвечают `401`; BFF не обходит защиту | BETA-SRC-002 |
-| BETA-SEC-002 | P0 | Запланировано | Создать безопасную архитектуру публичного demo | Публичны только allowlist-проекции синтетического `public-demo`; отсутствуют реальные выручка, себестоимость, остатки, адреса, внешние ID, PII и secrets; есть pagination и rate limit | BETA-SEC-001 |
-| BETA-SEC-003 | P0 | Запланировано | Ввести единый server-side `AccessScope` | Каждый запрос пересекается с `tenantId` и `allowedStoreIds`; пустой или отсутствующий scope даёт deny-by-default; store-bound facts всегда фильтруются, а tenant-global write разрешён только network-scoped роли; общий механизм используется всеми обязательными модулями | BETA-SRC-002 |
+| BETA-SEC-002 | P1 | Запланировано | При необходимости создать безопасную архитектуру публичного demo | Публичны только allowlist-проекции синтетического `public-demo`; отсутствуют реальные выручка, себестоимость, остатки, адреса, внешние ID, PII и secrets; есть pagination и rate limit; задача не задерживает invite-only pilot после закрытия anonymous operational API | BETA-SEC-001 |
+| BETA-SEC-003 | P0 | В работе | Ввести единый server-side `AccessScope` | Каждый запрос пересекается с `tenantId` и `allowedStoreIds`; пустой или отсутствующий scope даёт deny-by-default; store-bound facts всегда фильтруются, а tenant-global write разрешён только network-scoped роли; общий механизм используется всеми обязательными модулями | BETA-SRC-002 |
 | BETA-SEC-004 | P0 | В работе | Сделать capabilities авторитетной endpoint-проверкой | Совпадение стандартной роли не обходит capability; capability задаётся декларативно на endpoint; frontend visibility не считается защитой | BETA-SEC-003 |
 | BETA-SEC-005 | P0 | Запланировано | Разделить просмотр бизнес-данных, PII reveal и export | PII маскирована по умолчанию; reveal/export требуют отдельных capabilities; каждое действие аудируется с tenant, store scope, user, route и request ID | BETA-SEC-004 |
-| BETA-SEC-006 | P0 | Запланировано | Добавить двухtenantную и двухклубную IDOR/integration suite | Tenant A/Store A не читает, не изменяет и не экспортирует Tenant B/Store B через list, UUID, filters, aggregates, exports, attachments, BFF или jobs | BETA-SEC-003, BETA-SEC-004, BETA-OPS-002 |
+| BETA-SEC-006 | P0 | В работе | Добавить двухtenantную и двухклубную IDOR/integration suite | Tenant A/Store A не читает, не изменяет и не экспортирует Tenant B/Store B через list, UUID, filters, aggregates, exports, attachments, BFF или jobs | BETA-SEC-003, BETA-SEC-004, BETA-OPS-002 |
 | BETA-SEC-007 | P0 | В работе | Удалить известный production QA/seed риск | Известные credentials не работают; QA не Platform Admin; все сессии отозваны; seed отказывается работать с production DB и создаёт случайные local credentials | BETA-SRC-002 |
-| BETA-SEC-008 | P0 | В работе | Добавить fail-closed startup validation и разделить secrets | Production не запускается с отсутствующими, placeholder, короткими или повторно используемыми JWT, invite, PII, HMAC, integration, referral и scheduler secrets; ротация версионирована | BETA-SRC-002 |
-| BETA-SEC-009 | P0 | Запланировано | Сделать принятие приглашения атомарным | Invite привязан к email; один conditional claim; 100 параллельных запросов создают ровно одного пользователя; изменение email/role/stores/TTL ротирует token | BETA-SEC-008 |
+| BETA-SEC-008 | P0 | В работе | Добавить fail-closed startup validation и разделить secrets | Production не запускается с отсутствующими, placeholder, короткими или повторно используемыми JWT, PII, HMAC, integration, referral и scheduler secrets; opaque invite tokens генерируются случайно и хранятся только как hash; ротация secrets версионирована | BETA-SRC-002 |
+| BETA-SEC-009 | P0 | В работе | Сделать принятие приглашения атомарным | Invite привязан к email; один conditional claim; 100 параллельных запросов создают ровно одного пользователя; изменение email/role/stores/TTL ротирует token | BETA-SEC-008 |
 | BETA-SEC-010 | P0 | Запланировано | Усилить B2B authentication | Rate limit и progressive backoff на login/invite; password reset; revoke sessions; MFA либо эквивалентное усиление Platform Admin; security headers проверяются deploy smoke | BETA-SEC-008, BETA-IAM-004 |
 
 ### 5.3. Tenant lifecycle, entitlements и provisioning
@@ -180,13 +188,14 @@
 
 | ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
 |---|---|---|---|---|---|
-| BETA-IAM-001 | P0 | Запланировано | Утвердить role/capability matrix обязательного beta scope | Для OWNER, ADMIN, network manager, club manager и сотрудников перечислены разрешённые действия во всех пяти обязательных контурах; deny-by-default | BETA-SEC-004 |
-| BETA-IAM-002 | P0 | Запланировано | Реализовать явный network-level и club-level scope | `NETWORK` и `STORES` — явные режимы; отсутствие `UserStoreAccess` не повышает пользователя до NETWORK; смена scope действует сразу на API, BFF, exports, files и активные сессии | BETA-SEC-003, BETA-IAM-001 |
-| BETA-IAM-003 | P0 | Запланировано | Ограничить полномочия управляющего actor | Store manager не может создать NETWORK user, назначить чужой store, выдать роль/capability выше собственной или управлять пользователем вне пересечения scopes; защищены self-escalation и последний OWNER | BETA-IAM-001, BETA-IAM-002 |
-| BETA-IAM-004 | P0 | Запланировано | Завершить invite/resend/revoke workflow | Только email-bound invites; send/resend/revoke/accept аудируются; TTL настраивается; actor не может выдать invite шире своего scope; revoked/expired token не работает | BETA-SEC-009, BETA-IAM-003 |
+| BETA-IAM-001 | P0 | В работе | Утвердить role/capability matrix обязательного beta scope | Для OWNER, ADMIN, network manager, club manager и сотрудников перечислены разрешённые действия во всех пяти обязательных контурах; deny-by-default | BETA-SEC-004 |
+| BETA-IAM-002 | P0 | В работе | Реализовать явный network-level и club-level scope | `NETWORK` и `STORES` — явные режимы; отсутствие `UserStoreAccess` не повышает пользователя до NETWORK; смена scope действует сразу на API, BFF, exports, files и активные сессии | BETA-SEC-003, BETA-IAM-001 |
+| BETA-IAM-003 | P0 | В работе | Ограничить полномочия управляющего actor | Store manager не может создать NETWORK user, назначить чужой store, выдать роль/capability выше собственной или управлять пользователем вне пересечения scopes; защищены self-escalation и последний OWNER | BETA-IAM-001, BETA-IAM-002 |
+| BETA-IAM-004 | P0 | В работе | Завершить invite/resend/revoke workflow | Только email-bound opaque invites; update ротирует token; send/resend/revoke/accept аудируются; TTL настраивается; actor не может выдать invite шире своего scope; revoked/expired token не работает | BETA-SEC-009, BETA-IAM-003 |
 | BETA-IAM-005 | P0 | Запланировано | Ограничить особо чувствительное повышение привилегий | Только явно разрешённая роль может назначить OWNER или чувствительные capabilities; Platform Admin нельзя назначить tenant API | BETA-IAM-001, BETA-IAM-003 |
 | BETA-IAM-006 | P0 | Запланировано | Свести backend/frontend permission maps | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization | BETA-IAM-001 |
 | BETA-IAM-007 | P0 | Запланировано | Добавить журнал доступа и управление сессиями | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии | BETA-SEC-010 |
+| BETA-IAM-008 | P1 | Запланировано | Принять multi-network identity model | Решено, может ли один email состоять в нескольких независимых tenant; глобальная уникальность `User.email` либо сохранена как явное ограничение первого pilot, либо заменена membership-моделью с миграцией | BETA-TEN-003 |
 
 ### 5.5. CI/CD, БД и эксплуатационная надёжность
 
@@ -197,7 +206,7 @@
 | BETA-OPS-003 | P0 | Запланировано | Добавить frontend browser smoke | Автоматизированы login, owner invite, store switch/scope, обязательная навигация, ключевой сценарий каждого модуля и logout | BETA-OPS-001, BETA-IAM-002 |
 | BETA-OPS-004 | P0 | Запланировано | Перейти на immutable release artifact | API, web и Telegram edge собираются один раз; release manifest содержит SHA/build time/schema; staging и production используют один artifact | BETA-OPS-001, BETA-SRC-004 |
 | BETA-OPS-005 | P0 | В работе | Реализовать live/ready/version endpoints | Liveness не зависит от Langame; readiness выполняет DB/schema/storage checks; version показывает exact SHA; внешний probe проверяет web/API/game | BETA-OPS-004 |
-| BETA-OPS-006 | P0 | В работе | Зафиксировать безопасную миграционную процедуру | Production-like rehearsal, lock/statement timeout, проверка drift и `_prisma_migrations`, backup перед deploy и postflight; схема совместима с N/N-1 либо есть fix-forward | BETA-OPS-002 |
+| BETA-OPS-006 | P0 | В работе | Зафиксировать безопасную миграционную процедуру | Migration выполняется атомарно, locks берутся до preflight, lock/statement timeout заданы; есть abort/retry smoke, production-like rehearsal, drift/`_prisma_migrations`, backup/postflight и доказанная N/N-1 либо fix-forward стратегия | BETA-OPS-002 |
 | BETA-OPS-007 | P0 | Запланировано | Ввести backup/restore и цели восстановления | Encrypted off-host backup мониторится; выполнен свежий restore в отдельную БД; зафиксированы RPO/RTO; восстановлены все stateful данные | BETA-OPS-006 |
 | BETA-OPS-008 | P0 | Запланировано | Определить единственного владельца schedulers | До выделения worker технически разрешён один scheduler owner; есть lease/heartbeat/reclaim; каждый job проверяет `TenantExecutionPolicy`; graceful shutdown включён | BETA-TEN-004 |
 | BETA-OPS-009 | P0 | Запланировано | Добавить общий reliability envelope Langame | Каждый request имеет timeout; GET retry только с backoff/jitter; неоднозначные writes не ретраятся и идут в reconciliation; ошибки upstream — 502/503; tenant/domain изолированы | BETA-OPS-008 |
@@ -230,6 +239,7 @@
 | BETA-MOD-ASSORT-006 | P0 | Запланировано | Реализовать staged Langame onboarding ассортимента | Diagnostics → выбор четырёх stores → catalog/categories → inventory/sales → 7 дней → reconciliation → 30–90 дней backfill → daily sync | BETA-OPS-009, BETA-CUT-001 |
 | BETA-MOD-ASSORT-007 | P0 | Запланировано | Ввести data-quality gate ассортимента | Для каждого клуба сверены stores, SKU, остатки, операции и выручка; freshness видна; расхождение ≤1% либо документировано доменное исключение | BETA-MOD-ASSORT-006, BETA-OPS-010 |
 | BETA-MOD-ASSORT-008 | P0 | Запланировано | Закрыть module browser QA и performance | Ключевые экраны и tables работают на production-like объёме; тяжёлые отчёты bounded/async; export имеет лимиты и понятный прогресс | BETA-OPS-003, BETA-MOD-ASSORT-005 |
+| BETA-MOD-ASSORT-009 | P0 | Запланировано | Завершить 360° карточку товара и историю | Карточка показывает идентичность, категории, поставщиков, store-level остатки/продажи/движения, историю переименований и источники; scope применяется до totals/history, deep link и export проверены | BETA-MOD-ASSORT-001, BETA-MOD-ASSORT-005 |
 
 ### 5.8. Обязательный модуль: сотрудники
 
@@ -252,7 +262,7 @@
 | ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
 |---|---|---|---|---|---|
 | BETA-MOD-COMMS-001 | P0 | Запланировано | Провести полный route/action inventory коммуникаций | Overview, team chat, channels, messages, notifications, events и CRM contact tasks имеют entitlement, capability, tenant/store scope, audit и тест | BETA-TEN-002, BETA-IAM-001 |
-| BETA-MOD-COMMS-002 | P0 | Запланировано | Закрыть channel membership и message scope | Network channel доступен только разрешённым network users; store channel — участникам store; UUID, SSE/event stream, mentions, read receipts, attachments и task-from-chat не раскрывают чужие сообщения или объекты | BETA-SEC-006, BETA-MOD-COMMS-001 |
+| BETA-MOD-COMMS-002 | P0 | Запланировано | Закрыть audience, membership и message scope | Для network announcements задана явная audience policy: при необходимости они могут читаться store staff того же tenant, но не дают NETWORK-полномочий; store/custom channel ограничен разрешёнными clubs/members; UUID, SSE, mentions, receipts, attachments и task-from-chat не раскрывают чужие объекты и не создают задачу для всей сети/чужого store | BETA-SEC-006, BETA-MOD-COMMS-001 |
 | BETA-MOD-COMMS-003 | P0 | Запланировано | Закрыть notifications и background delivery | Generate/read/acknowledge/resolve соблюдают scope и lifecycle; suspend останавливает внешнюю доставку; повтор не дублирует сообщение | BETA-TEN-004, BETA-OPS-008 |
 | BETA-MOD-COMMS-004 | P0 | Запланировано | Защитить CRM contact tasks и PII | Contact data masked by default; reveal/export — отдельные capabilities и audit; пользователь не получает гостя или задачу другого store | BETA-SEC-005, BETA-MOD-COMMS-001 |
 | BETA-MOD-COMMS-005 | P0 | Запланировано | Добавить communications end-to-end regression | Проверены chat send/read, channel boundaries, notifications, contact task, suspend и reconnect для network/club/staff roles | BETA-OPS-003, BETA-MOD-COMMS-002, BETA-MOD-COMMS-003 |
@@ -261,7 +271,7 @@
 
 | ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
 |---|---|---|---|---|---|
-| BETA-CUT-001 | P0 | Запланировано | Зафиксировать topology manifest текущей сети | Записаны current tenant ID, четыре store ID, Langame domain/mapping, users, roles, sources, public links и контрольные суммы; подтверждено, что это одна сеть | BETA-SRC-002 |
+| BETA-CUT-001 | P0 | В работе | Зафиксировать topology manifest текущей сети | Записаны current tenant ID, четыре store ID, Langame domain/mapping, users, roles, sources, public links и контрольные суммы; подтверждено, что это одна сеть | BETA-SRC-002 |
 | BETA-CUT-002 | P0 | Запланировано | Провести backup и restore rehearsal перед cutover | Snapshot успешно восстановлен отдельно; подтверждены row counts и контрольные бизнес-суммы; известны время и процедура возврата | BETA-OPS-007, BETA-CUT-001 |
 | BETA-CUT-003 | P0 | Запланировано | Подготовить cutover runbook и окно изменения | Есть owner, freeze, stop jobs, SQL/API steps, verification, rollback, коммуникация и stop conditions; dry-run выполнен | BETA-CUT-002, BETA-OPS-012 |
 | BETA-CUT-004 | P0 | Запланировано | Перевести operational `demo` в реальный tenant in place | Сохранены tenantId и все FK; изменены name/slug/domain/stage/entitlements; четыре stores, users, продажи, inventory, staff и game data не потеряны | BETA-TEN-002, BETA-TEN-007, BETA-CUT-003 |
@@ -341,6 +351,82 @@ working-tree patch. Текущий production и operational tenant с четы�
 - основной текущий P0-блокер — `BETA-SEC-003`/`BETA-IAM-002`: явный
   persisted `NETWORK|STORES` scope и единый deny-by-default `AccessScope`.
 
+### 5.13. Прогресс реализации — 27.07.2026
+
+Реализован второй P0-срез AccessScope без изменения production и operational
+tenant:
+
+- schema-only EXPAND зафиксирован отдельным локальным candidate
+  `28724008192442c03f35fcc46ff7de78cdead642`, strict application — отдельным
+  candidate `df993a9d04fdb48809868555b0d040d52848e3ee`; оба не deployed;
+- создан версионируемый пакет документации: ADR, нормативный контракт, phased
+  migration/rollback runbook, module adoption matrix, test strategy, детальный
+  staff/communications adoption plan и шаблон release evidence;
+- добавлены nullable persisted `User.accessScope` и
+  `UserInvite.accessScope` для безопасной EXPAND-фазы;
+- legacy user/invite с непустым allow-list классифицируется как `STORES`, а
+  пустой список остаётся `NULL` до явного решения; автоматического назначения
+  `NETWORK` нет;
+- PostgreSQL deferred constraints запрещают cross-tenant
+  `UserStoreAccess` и store rows у `NETWORK`; DB smoke использует два
+  синтетических tenant; migration обёрнута в одну транзакцию, берёт locks до
+  preflight и задаёт lock/statement timeout;
+- `JwtAuthGuard` перечитывает mode и store rows на каждом запросе, отвергает
+  `NULL`, `STORES[]`, противоречивый NETWORK, duplicates и cross-tenant links;
+  JWT grants не являются authority;
+- users/roles/invites стали первым enforced consumer: list ограничен exact
+  actor scope, store manager не выдаёт NETWORK/чужой store, global role writes
+  требуют NETWORK, self-scope change запрещён;
+- закрыта выдача custom/system role выше capabilities actor;
+- accept invite использует conditional compare-and-set по состоянию и
+  `updatedAt`; create/update используют email-bound opaque token, update
+  ротирует token, update/cancel используют CAS, а общий список не возвращает
+  registration URL;
+- update пользователя использует optimistic CAS по `tenantId` и `updatedAt`;
+  при конкурентном изменении API возвращает conflict вместо перезаписи;
+- последний active system `NETWORK OWNER` защищён tenant-scoped advisory
+  transaction lock: деактивация, снятие OWNER, переход в STORES и назначение
+  custom role запрещены, если другого active NETWORK OWNER нет;
+- frontend отправляет explicit scope, по умолчанию выбирает `STORES`, требует
+  хотя бы один клуб, не показывает NETWORK store-scoped actor и не открывает
+  сетевой редактор ролей club-level actor;
+- guest/Telegram synthetic actors получили exact club scope, а сетевые
+  gamification schedulers и scheduled reports выбирают только persisted
+  NETWORK actor.
+
+Проверка второго среза:
+
+- AccessScope/IAM focused: 12 suites, 153 tests — pass;
+- полный API regression: 66 suites, 1393 pass, 2 todo;
+- API production typecheck и build — pass;
+- production environment contract — pass;
+- web typecheck и production build — pass; lint: 0 errors, 30 существующих
+  warnings;
+- Prisma validate/generate — pass;
+- все 151 migration с нуля и два PostgreSQL smoke — pass;
+- временная схема удалена, локальная PostgreSQL остановлена.
+
+Оставшиеся границы до завершения `BETA-SEC-003`/`BETA-IAM-002`:
+
+- production topology manifest и ручная классификация аккаунтов четырёх клубов
+  ещё не выполнялись;
+- migration остаётся EXPAND: поля nullable до завершения classification/shadow;
+- schema-only EXPAND и strict application activation должны быть отдельными
+  releases; auto-deploy объединённого bundle запрещён до классификации;
+- `SHADOW` только журналирует попытку unclassified subject и продолжает deny;
+  общего tenant/module switch и mismatch audit ещё нет;
+- AccessScope ещё должен быть подключён ко всем staff/attachments/chat,
+  gamification, assortment/report/import surfaces;
+- inventory подтвердил tenant-wide риски generic attachments, chat/SSE,
+  shift reports, directory/PII, tasks/exports, notifications и staff
+  aggregates; точные пути, backfill и exit criteria зафиксированы в
+  `docs/security/access-scope/v1/staff-communications-adoption-plan.md`;
+- resend/revoke audit, session revoke и 100-way accept concurrency test ещё
+  не закрыты;
+- нормативные audit reason codes и same-tenant нормализация invite store IDs на
+  уровне БД ещё не завершены;
+- внешний доступ по-прежнему `NO-GO`.
+
 ## 6. Release gates
 
 ### Gate 0 — каноническая основа
@@ -386,31 +472,32 @@ working-tree patch. Текущий production и operational tenant с четы�
 
 ## 7. Рекомендуемая последовательность разработки
 
-1. Завершить `BETA-SRC-002`: review/merge текущего hardening-коммита, включить
-   workflow как required check и зафиксировать первый candidate SHA.
-2. Реализовать persisted `NETWORK|STORES` и единый deny-by-default
-   `AccessScope`; закрепить его real-PostgreSQL тестами с двумя tenant и двумя
-   stores.
-3. Первым потребителем нового scope закрыть users/roles/invites: actor scope,
-   запрет self-escalation и выдачи NETWORK/чужого store.
-4. Последовательно подключить scope к staff/attachments/chat, затем к
+1. Завершить review candidate, зафиксировать SHA и включить CI как required
+   check; не сливать strict bundle в auto-deploy `main`.
+2. Выделить и отрепетировать отдельный schema-only EXPAND release, реализовать
+   classification-команду/evidence manifest и проверить полный rollback/abort.
+3. На staging классифицировать tenant одной сети с четырьмя клубами; включение
+   strict application разрешить только при нуле unresolved active users/invites.
+4. Завершить IAM: resend/revoke audit, session revoke и 100-way accept
+   concurrency.
+5. Последовательно подключить единый scope к staff/attachments/chat, затем к
    gamification/ledger и после этого к assortment/reports/imports.
-5. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
+6. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
    контуров.
-6. Реализовать customer stage, обязательный beta entitlement profile,
+7. Реализовать customer stage, обязательный beta entitlement profile,
    provisioning, suspend/offboarding и `TenantExecutionPolicy`.
-7. Завершить эксплуатационный контур: immutable artifact, versioned
+8. Завершить эксплуатационный контур: immutable artifact, versioned
    infrastructure, external probes/alerts, scheduler ownership,
    backup/restore и rollback drills.
-8. Провести legacy-key audit и безопасный secret/session/invite/referral
+9. Провести legacy-key audit и безопасный secret/session/invite/referral
    cutover.
-9. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
+10. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
    сети из четырёх клубов без смены `tenantId`.
-10. Выполнить cutover, staged Langame sync, full-scope acceptance и семь дней
+11. Выполнить cutover, staged Langame sync, full-scope acceptance и семь дней
     internal alpha.
-11. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
+12. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
     14-дневный pilot.
-12. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
+13. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
     лимиты.
 
 ## 8. Метрики запуска

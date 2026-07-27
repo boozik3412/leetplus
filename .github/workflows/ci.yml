@@ -76,7 +76,6 @@ jobs:
           NODE_ENV: production
           JWT_SECRET: ci-contract-jwt-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           GUEST_PORTAL_JWT_SECRET: ci-contract-guest-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-          USER_INVITE_TOKEN_SECRET: ci-contract-invite-cccccccccccccccccccccccccccccccc
           GUEST_GAME_REFERRAL_SECRET: ci-contract-referral-ddddddddddddddddddddddddddddddd
           APP_ENCRYPTION_KEY: ci-contract-pii-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           INTEGRATION_ENCRYPTION_KEY: ci-contract-integration-ffffffffffffffffffffffffffffffff
@@ -85,6 +84,7 @@ jobs:
           BUILD_TIME: '2026-07-26T00:00:00Z'
           EXPECTED_DATABASE_MIGRATION: 20260727090000_access_scope_expand
           EXPECTED_DATABASE_MIGRATION_COUNT: '151'
+          ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
 
       - name: Lint web
         run: pnpm --filter web lint

@@ -4172,6 +4172,8 @@ export class GuestPortalService {
       tenantId: payload.tenantId,
       tenantSlug: tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [payload.storeId],
     };
     try {
       await this.guestGamificationService.materializeRewardEffects(actor, {
@@ -6187,6 +6189,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     const eventExternalId = buildGuestPortalGameExternalId(
       GAME_APP_OPEN_SOURCE_KIND,
@@ -6346,6 +6350,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
 
     const result = await this.guestGamificationService.processLiveSessionStart(
@@ -6794,6 +6800,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     const prequalifiedLootBoxOpen = {
       tenantId: context.tenant.id,
@@ -7439,6 +7447,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
     let checkIn: Awaited<ReturnType<GuestGamificationService['checkIn']>>;
 
@@ -8938,6 +8948,8 @@ export class GuestPortalService {
       tenantId: context.tenant.id,
       tenantSlug: context.tenant.slug,
       tenantStatus: TenantLifecycleStatus.ACTIVE,
+      accessScope: 'STORES',
+      allowedStoreIds: [context.store.id],
     };
 
     try {

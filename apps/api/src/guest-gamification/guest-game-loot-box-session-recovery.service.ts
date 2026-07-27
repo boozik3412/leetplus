@@ -201,7 +201,7 @@ export class GuestGameLootBoxSessionRecoveryService {
         slug: true,
         status: true,
         users: {
-          where: { isActive: true },
+          where: { isActive: true, accessScope: 'NETWORK' },
           select: {
             id: true,
             email: true,
@@ -253,6 +253,8 @@ export class GuestGameLootBoxSessionRecoveryService {
               tenantId: tenant.id,
               tenantSlug: tenant.slug,
               tenantStatus: tenant.status,
+              accessScope: 'NETWORK',
+              allowedStoreIds: [],
             },
             mode,
             profileId,

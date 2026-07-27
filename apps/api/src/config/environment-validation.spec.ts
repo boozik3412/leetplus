@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import {
   PRODUCTION_SECRET_KEYS,
+  resolveAccessScopeEnforcementMode,
   resolveSecuritySecret,
   validateEnvironment,
 } from './environment-validation';
@@ -10,16 +11,15 @@ function validProductionEnvironment() {
     NODE_ENV: 'production',
     JWT_SECRET: `jwt_${'a'.repeat(44)}`,
     GUEST_PORTAL_JWT_SECRET: `guest_jwt_${'b'.repeat(44)}`,
-    USER_INVITE_TOKEN_SECRET: `invite_${'c'.repeat(44)}`,
     GUEST_GAME_REFERRAL_SECRET: `referral_${'d'.repeat(44)}`,
     APP_ENCRYPTION_KEY: `pii_${'e'.repeat(44)}`,
     INTEGRATION_ENCRYPTION_KEY: `integration_${'f'.repeat(44)}`,
     SYNC_SERVICE_TOKEN: `scheduler_${'g'.repeat(44)}`,
     RELEASE_SHA: 'a'.repeat(40),
     BUILD_TIME: '2026-07-26T15:00:00.000Z',
-    EXPECTED_DATABASE_MIGRATION:
-      '20260726110000_reconcile_completed_reward_wallet',
-    EXPECTED_DATABASE_MIGRATION_COUNT: '150',
+    EXPECTED_DATABASE_MIGRATION: '20260727090000_access_scope_expand',
+    EXPECTED_DATABASE_MIGRATION_COUNT: '151',
+    ACCESS_SCOPE_ENFORCEMENT_MODE: 'SHADOW',
   };
 }
 
@@ -74,10 +74,10 @@ describe('validateEnvironment', () => {
 
   it('rejects a secret reused across security boundaries', () => {
     const environment = validProductionEnvironment();
-    environment.USER_INVITE_TOKEN_SECRET = environment.JWT_SECRET;
+    environment.GUEST_PORTAL_JWT_SECRET = environment.JWT_SECRET;
 
     expect(() => validateEnvironment(environment)).toThrow(
-      /JWT_SECRET, USER_INVITE_TOKEN_SECRET must use independent values/,
+      /JWT_SECRET, GUEST_PORTAL_JWT_SECRET must use independent values/,
     );
   });
 
@@ -99,6 +99,37 @@ describe('validateEnvironment', () => {
     );
     expect(() => validateEnvironment(environment)).toThrow(
       /EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer/,
+    );
+  });
+
+  it('requires an explicit access-scope rollout mode in production', () => {
+    const missing = validProductionEnvironment();
+    delete (missing as Partial<ReturnType<typeof validProductionEnvironment>>)
+      .ACCESS_SCOPE_ENFORCEMENT_MODE;
+    const invalid = {
+      ...validProductionEnvironment(),
+      ACCESS_SCOPE_ENFORCEMENT_MODE: 'legacy',
+    };
+
+    expect(() => validateEnvironment(missing)).toThrow(
+      /ACCESS_SCOPE_ENFORCEMENT_MODE is required/,
+    );
+    expect(() => validateEnvironment(invalid)).toThrow(
+      /ACCESS_SCOPE_ENFORCEMENT_MODE must be SHADOW or ENFORCED/,
+    );
+  });
+});
+
+describe('resolveAccessScopeEnforcementMode', () => {
+  it('defaults to fail-closed enforcement outside a rollout override', () => {
+    expect(resolveAccessScopeEnforcementMode(undefined)).toBe('ENFORCED');
+    expect(resolveAccessScopeEnforcementMode(' enforced ')).toBe('ENFORCED');
+    expect(resolveAccessScopeEnforcementMode('shadow')).toBe('SHADOW');
+  });
+
+  it('rejects unknown modes', () => {
+    expect(() => resolveAccessScopeEnforcementMode('legacy')).toThrow(
+      /must be SHADOW or ENFORCED/,
     );
   });
 });

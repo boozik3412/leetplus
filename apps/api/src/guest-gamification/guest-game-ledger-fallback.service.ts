@@ -162,7 +162,7 @@ export class GuestGameLedgerFallbackService {
         slug: true,
         status: true,
         users: {
-          where: { isActive: true },
+          where: { isActive: true, accessScope: 'NETWORK' },
           select: {
             id: true,
             email: true,
@@ -214,6 +214,8 @@ export class GuestGameLedgerFallbackService {
               tenantId: tenant.id,
               tenantSlug: tenant.slug,
               tenantStatus: tenant.status,
+              accessScope: 'NETWORK',
+              allowedStoreIds: [],
             },
             mode,
             factTypes,

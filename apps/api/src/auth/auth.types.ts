@@ -1,6 +1,7 @@
 import { UserRole } from '@prisma/client';
 import { Request } from 'express';
 import type { AccessCapability } from './capabilities';
+import type { AccessScopeMode } from '../tenancy/access-scope.service';
 
 export type AuthenticatedUser = {
   id: string;
@@ -16,6 +17,8 @@ export type AuthenticatedUser = {
   tenantId: string;
   tenantSlug: string;
   tenantStatus?: string;
+  accessScope: AccessScopeMode;
+  allowedStoreIds: readonly string[];
 };
 
 export type AuthTokenPayload = {

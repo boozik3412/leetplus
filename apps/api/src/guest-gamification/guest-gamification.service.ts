@@ -7086,6 +7086,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -7142,6 +7143,8 @@ export class GuestGamificationService {
             tenantId: tenant.id,
             tenantSlug: tenant.slug,
             tenantStatus: tenant.status,
+            accessScope: 'NETWORK',
+            allowedStoreIds: [],
           },
           dto,
         );
@@ -7188,6 +7191,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -7246,6 +7250,8 @@ export class GuestGamificationService {
               tenantId: tenant.id,
               tenantSlug: tenant.slug,
               tenantStatus: tenant.status,
+              accessScope: 'NETWORK',
+              allowedStoreIds: [],
             },
             mode,
             factTypes,
@@ -7715,6 +7721,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -7771,6 +7778,8 @@ export class GuestGamificationService {
             tenantId: tenant.id,
             tenantSlug: tenant.slug,
             tenantStatus: tenant.status,
+            accessScope: 'NETWORK',
+            allowedStoreIds: [],
           },
           {
             ...dto,
@@ -17753,6 +17762,7 @@ export class GuestGamificationService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledPipelineActorRoles] },
           },
           select: {
@@ -17797,6 +17807,8 @@ export class GuestGamificationService {
         tenantId: tenant.id,
         tenantSlug: tenant.slug,
         tenantStatus: tenant.status,
+        accessScope: 'NETWORK',
+        allowedStoreIds: [],
       },
       tenantSlug: tenant.slug,
     };

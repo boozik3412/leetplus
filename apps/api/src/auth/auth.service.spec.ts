@@ -5,7 +5,9 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { TenantLifecycleStatus, UserRole } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
 
@@ -19,6 +21,9 @@ type PrismaMock = {
   tenant: {
     findUnique: jest.Mock;
     create: jest.Mock;
+  };
+  userInvite: {
+    findUnique: jest.Mock;
   };
 };
 
@@ -43,10 +48,13 @@ function createUserWithTenant() {
     email: 'owner@club-a.leetplus.ru',
     fullName: 'Owner',
     role: UserRole.OWNER,
+    customRoleId: null,
     isActive: true,
     isPlatformAdmin: false,
     passwordHash: 'hash',
     tenantId: 'tenant-1',
+    accessScope: 'NETWORK',
+    storeAccesses: [],
     tenant: {
       slug: 'club-a',
       status: TenantLifecycleStatus.ACTIVE,
@@ -73,6 +81,9 @@ describe('AuthService', () => {
         findUnique: jest.fn(),
         create: jest.fn(),
       },
+      userInvite: {
+        findUnique: jest.fn(),
+      },
     };
     passwordService = {
       hash: jest.fn().mockResolvedValue('hash'),
@@ -92,6 +103,7 @@ describe('AuthService', () => {
       jwtService as unknown as JwtService,
       emailVerificationService as unknown as EmailVerificationService,
       { get: jest.fn() } as never,
+      new AccessScopeService(),
     );
   });
 
@@ -143,6 +155,7 @@ describe('AuthService', () => {
             fullName: 'Owner',
             passwordHash: 'hash',
             role: UserRole.OWNER,
+            accessScope: 'NETWORK',
           },
         },
       },
@@ -268,6 +281,63 @@ describe('AuthService', () => {
     ).resolves.toEqual({ ok: true });
     expect(emailVerificationService.resendByEmail).toHaveBeenCalledWith(
       'owner@club-a.leetplus.ru',
+    );
+  });
+
+  it('resolves an invite only by the hash of its opaque bearer token', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue({
+      id: 'invite-1',
+      tenantId: 'tenant-1',
+      email: 'invitee@example.test',
+      fullName: 'Invitee',
+      role: UserRole.CLUB_ADMINISTRATOR,
+      customRoleId: null,
+      customRole: null,
+      accessScope: 'NETWORK',
+      storeIds: [],
+      expiresAt: new Date(Date.now() + 60_000),
+      acceptedAt: null,
+      updatedAt: new Date(),
+      tenant: {
+        name: 'Club A',
+        slug: 'club-a',
+        status: TenantLifecycleStatus.ACTIVE,
+      },
+    });
+
+    await expect(
+      service.getInvite('opaque-bearer-token'),
+    ).resolves.toMatchObject({
+      email: 'invitee@example.test',
+      scope: 'NETWORK',
+    });
+    expect(prisma.userInvite.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tokenHash: createHash('sha256')
+            .update('opaque-bearer-token')
+            .digest('hex'),
+        },
+      }),
+    );
+  });
+
+  it('rejects a legacy invite that is not bound to email', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue({
+      id: 'invite-1',
+      tenantId: 'tenant-1',
+      email: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      acceptedAt: null,
+      tenant: {
+        name: 'Club A',
+        slug: 'club-a',
+        status: TenantLifecycleStatus.ACTIVE,
+      },
+    });
+
+    await expect(service.getInvite('opaque-bearer-token')).rejects.toThrow(
+      BadRequestException,
     );
   });
 });

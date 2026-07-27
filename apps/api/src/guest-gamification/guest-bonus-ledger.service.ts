@@ -1042,6 +1042,7 @@ export class GuestBonusLedgerService {
         users: {
           where: {
             isActive: true,
+            accessScope: 'NETWORK',
             role: { in: [...scheduledBonusLedgerActorRoles] },
           },
           select: {

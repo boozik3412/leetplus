@@ -9,16 +9,11 @@ const ENVIRONMENT_MARKER_KEYS = [
   'ENVIRONMENT',
   'VERCEL_ENV',
 ] as const;
-const PRODUCTION_ENVIRONMENT_MARKERS = new Set([
-  'prod',
-  'production',
-  'live',
-]);
+const PRODUCTION_ENVIRONMENT_MARKERS = new Set(['prod', 'production', 'live']);
 
 export const PRODUCTION_SECRET_KEYS = [
   'JWT_SECRET',
   'GUEST_PORTAL_JWT_SECRET',
-  'USER_INVITE_TOKEN_SECRET',
   'GUEST_GAME_REFERRAL_SECRET',
   'APP_ENCRYPTION_KEY',
   'INTEGRATION_ENCRYPTION_KEY',
@@ -33,6 +28,11 @@ export const PRODUCTION_RELEASE_KEYS = [
   'EXPECTED_DATABASE_MIGRATION',
   'EXPECTED_DATABASE_MIGRATION_COUNT',
 ] as const;
+
+export const ACCESS_SCOPE_ENFORCEMENT_MODES = ['SHADOW', 'ENFORCED'] as const;
+
+export type AccessScopeEnforcementMode =
+  (typeof ACCESS_SCOPE_ENFORCEMENT_MODES)[number];
 
 const PLACEHOLDER_SECRET_PATTERNS = [
   /^change[\s_-]*me(?:[\s_-].*)?$/i,
@@ -51,11 +51,25 @@ function stringValue(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+export function resolveAccessScopeEnforcementMode(
+  value: unknown,
+): AccessScopeEnforcementMode {
+  const normalized = stringValue(value).toUpperCase();
+
+  if (!normalized) {
+    return 'ENFORCED';
+  }
+
+  if (normalized === 'SHADOW' || normalized === 'ENFORCED') {
+    return normalized;
+  }
+
+  throw new Error('ACCESS_SCOPE_ENFORCEMENT_MODE must be SHADOW or ENFORCED');
+}
+
 function productionEnvironment(config: EnvironmentValues) {
   return ENVIRONMENT_MARKER_KEYS.some((key) =>
-    PRODUCTION_ENVIRONMENT_MARKERS.has(
-      stringValue(config[key]).toLowerCase(),
-    ),
+    PRODUCTION_ENVIRONMENT_MARKERS.has(stringValue(config[key]).toLowerCase()),
   );
 }
 
@@ -116,15 +130,29 @@ export function validateEnvironment(config: EnvironmentValues) {
   const expectedMigrationCount = stringValue(
     config.EXPECTED_DATABASE_MIGRATION_COUNT,
   );
+  const configuredAccessScopeMode = stringValue(
+    config.ACCESS_SCOPE_ENFORCEMENT_MODE,
+  );
+  let accessScopeEnforcementMode: AccessScopeEnforcementMode = 'ENFORCED';
+
+  if (!configuredAccessScopeMode) {
+    errors.push('ACCESS_SCOPE_ENFORCEMENT_MODE is required');
+  } else {
+    try {
+      accessScopeEnforcementMode = resolveAccessScopeEnforcementMode(
+        configuredAccessScopeMode,
+      );
+    } catch {
+      errors.push('ACCESS_SCOPE_ENFORCEMENT_MODE must be SHADOW or ENFORCED');
+    }
+  }
 
   if (!/^[0-9a-f]{40}$/i.test(releaseSha)) {
     errors.push('RELEASE_SHA must be the full 40-character Git SHA');
   }
 
   if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(
-      buildTime,
-    ) ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(buildTime) ||
     Number.isNaN(Date.parse(buildTime))
   ) {
     errors.push('BUILD_TIME must be a UTC ISO-8601 timestamp');
@@ -137,9 +165,7 @@ export function validateEnvironment(config: EnvironmentValues) {
   }
 
   if (!/^[1-9]\d*$/.test(expectedMigrationCount)) {
-    errors.push(
-      'EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer',
-    );
+    errors.push('EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer');
   }
 
   if (errors.length > 0) {
@@ -157,6 +183,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     BUILD_TIME: buildTime,
     EXPECTED_DATABASE_MIGRATION: expectedMigration,
     EXPECTED_DATABASE_MIGRATION_COUNT: expectedMigrationCount,
+    ACCESS_SCOPE_ENFORCEMENT_MODE: accessScopeEnforcementMode,
   };
 }
 

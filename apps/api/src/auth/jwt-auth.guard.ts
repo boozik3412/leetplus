@@ -2,19 +2,27 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { TenantLifecycleStatus } from '@prisma/client';
+import { resolveAccessScopeEnforcementMode } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { AuthenticatedRequest, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly accessScopeService: AccessScopeService,
+    private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -49,6 +57,16 @@ export class JwtAuthGuard implements CanActivate {
               permissions: true,
             },
           },
+          storeAccesses: {
+            select: {
+              storeId: true,
+              store: {
+                select: {
+                  tenantId: true,
+                },
+              },
+            },
+          },
         },
       });
 
@@ -76,6 +94,27 @@ export class JwtAuthGuard implements CanActivate {
               permissions: true,
             },
           });
+      const accessScopeEnforcementMode = resolveAccessScopeEnforcementMode(
+        this.configService.get<string>('ACCESS_SCOPE_ENFORCEMENT_MODE'),
+      );
+
+      if (
+        accessScopeEnforcementMode === 'SHADOW' &&
+        user.accessScope === null
+      ) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'access_scope_shadow_unclassified_subject',
+            reasonCode: 'SCOPE_MISSING',
+            decision: 'DENY',
+            userId: user.id,
+            tenantId: user.tenantId,
+            legacyStoreCount: user.storeAccesses.length,
+            releaseSha: this.configService.get<string>('RELEASE_SHA') ?? null,
+          }),
+        );
+      }
+      const accessScope = this.accessScopeService.fromPersisted(user);
 
       return {
         id: user.id,
@@ -91,6 +130,8 @@ export class JwtAuthGuard implements CanActivate {
         tenantId: user.tenantId,
         tenantSlug: user.tenant.slug,
         tenantStatus: user.tenant.status,
+        accessScope: accessScope.mode,
+        allowedStoreIds: accessScope.storeIds,
       };
     } catch {
       throw new UnauthorizedException('Invalid authorization token');

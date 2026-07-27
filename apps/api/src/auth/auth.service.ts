@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'node:crypto';
 import { TenantLifecycleStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveSignedUserInviteToken } from '../users/user-invite-token';
+import { AccessScopeService } from '../tenancy/access-scope.service';
 import { AcceptUserInviteDto, LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
@@ -34,6 +34,13 @@ type UserWithTenant = {
   isPlatformAdmin: boolean;
   passwordHash: string;
   tenantId: string;
+  accessScope: unknown;
+  storeAccesses: Array<{
+    storeId: string;
+    store: {
+      tenantId: string;
+    };
+  }>;
   tenant: {
     slug: string;
     status: TenantLifecycleStatus;
@@ -79,6 +86,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailVerificationService: EmailVerificationService,
     private readonly configService: ConfigService,
+    private readonly accessScopeService: AccessScopeService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -122,6 +130,7 @@ export class AuthService {
             fullName,
             passwordHash,
             role: UserRole.OWNER,
+            accessScope: 'NETWORK',
           },
         },
       },
@@ -152,6 +161,8 @@ export class AuthService {
       isPlatformAdmin: owner.isPlatformAdmin,
       passwordHash: owner.passwordHash,
       tenantId: owner.tenantId,
+      accessScope: owner.accessScope,
+      storeAccesses: [],
       tenant: {
         slug: tenant.slug,
         status: tenant.status,
@@ -162,10 +173,16 @@ export class AuthService {
   async getInvite(token: string): Promise<UserInvitePreview> {
     const invite = await this.resolveActiveInvite(token);
     this.assertTenantActive(invite.tenant.status);
-    const stores = await this.resolveInviteStores(
+    const storeIds = await this.resolveInviteStoreIds(
       invite.tenantId,
       invite.storeIds,
     );
+    const accessScope = this.accessScopeService.fromPersisted({
+      tenantId: invite.tenantId,
+      accessScope: invite.accessScope,
+      storeAccesses: storeIds.map((storeId) => ({ storeId })),
+    });
+    const stores = await this.resolveInviteStores(invite.tenantId, storeIds);
 
     return {
       email: invite.email,
@@ -183,7 +200,7 @@ export class AuthService {
         name: invite.tenant.name,
         slug: invite.tenant.slug,
       },
-      scope: stores.length > 0 ? 'STORES' : 'NETWORK',
+      scope: accessScope.mode,
       stores,
       expiresAt: invite.expiresAt.toISOString(),
     };
@@ -205,6 +222,11 @@ export class AuthService {
       this.prisma.user.findUnique({ where: { email } }),
       this.resolveInviteStoreIds(invite.tenantId, invite.storeIds),
     ]);
+    const inviteAccessScope = this.accessScopeService.fromPersisted({
+      tenantId: invite.tenantId,
+      accessScope: invite.accessScope,
+      storeAccesses: storeIds.map((storeId) => ({ storeId })),
+    });
 
     if (existingUser) {
       throw new ConflictException('Пользователь с таким email уже существует');
@@ -212,6 +234,7 @@ export class AuthService {
 
     const passwordHash = await this.passwordService.hash(password);
     const created = await this.prisma.$transaction(async (tx) => {
+      const acceptedAt = new Date();
       const user = await tx.user.create({
         data: {
           tenantId: invite.tenantId,
@@ -220,6 +243,7 @@ export class AuthService {
           passwordHash,
           role: invite.role,
           customRoleId: invite.customRoleId,
+          accessScope: inviteAccessScope.mode,
           isActive: true,
           emailVerifiedAt: new Date(),
         },
@@ -232,13 +256,22 @@ export class AuthService {
         });
       }
 
-      await tx.userInvite.update({
-        where: { id: invite.id },
+      const accepted = await tx.userInvite.updateMany({
+        where: {
+          id: invite.id,
+          acceptedAt: null,
+          expiresAt: { gt: acceptedAt },
+          updatedAt: invite.updatedAt,
+        },
         data: {
-          acceptedAt: new Date(),
+          acceptedAt,
           acceptedByUserId: user.id,
         },
       });
+
+      if (accepted.count !== 1) {
+        throw new ConflictException('Invite changed or was already accepted');
+      }
 
       return tx.user.findUniqueOrThrow({
         where: { id: user.id },
@@ -254,6 +287,16 @@ export class AuthService {
               id: true,
               name: true,
               permissions: true,
+            },
+          },
+          storeAccesses: {
+            select: {
+              storeId: true,
+              store: {
+                select: {
+                  tenantId: true,
+                },
+              },
             },
           },
         },
@@ -282,6 +325,16 @@ export class AuthService {
             id: true,
             name: true,
             permissions: true,
+          },
+        },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: {
+              select: {
+                tenantId: true,
+              },
+            },
           },
         },
       },
@@ -324,6 +377,16 @@ export class AuthService {
             permissions: true,
           },
         },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: {
+              select: {
+                tenantId: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -357,14 +420,8 @@ export class AuthService {
       throw new BadRequestException('Токен приглашения обязателен');
     }
 
-    const signedInviteId = resolveSignedUserInviteToken(
-      normalizedToken,
-      this.configService,
-    );
     const invite = await this.prisma.userInvite.findUnique({
-      where: signedInviteId
-        ? { id: signedInviteId }
-        : { tokenHash: this.hashInviteToken(normalizedToken) },
+      where: { tokenHash: this.hashInviteToken(normalizedToken) },
       include: {
         tenant: {
           select: {
@@ -388,6 +445,12 @@ export class AuthService {
       throw new NotFoundException('Ссылка-приглашение не найдена');
     }
 
+    if (!invite.email) {
+      throw new BadRequestException(
+        'Приглашение не привязано к email и должно быть перевыпущено',
+      );
+    }
+
     if (invite.acceptedAt) {
       throw new BadRequestException('Ссылка-приглашение уже использована');
     }
@@ -407,18 +470,19 @@ export class AuthService {
     invitedEmail: string | null,
     submittedEmail: unknown,
   ): string {
-    const email = this.normalizeEmail(invitedEmail ?? submittedEmail);
+    if (!invitedEmail) {
+      throw new BadRequestException(
+        'Приглашение не привязано к email и должно быть перевыпущено',
+      );
+    }
+
+    const email = this.normalizeEmail(invitedEmail);
     this.assertEmail(email);
 
-    if (invitedEmail) {
-      const normalizedSubmittedEmail = this.normalizeEmail(submittedEmail);
+    const normalizedSubmittedEmail = this.normalizeEmail(submittedEmail);
 
-      if (
-        normalizedSubmittedEmail &&
-        normalizedSubmittedEmail !== invitedEmail
-      ) {
-        throw new BadRequestException('Приглашение выдано на другой email');
-      }
+    if (normalizedSubmittedEmail && normalizedSubmittedEmail !== invitedEmail) {
+      throw new BadRequestException('Приглашение выдано на другой email');
     }
 
     return email;
@@ -495,6 +559,8 @@ export class AuthService {
   }
 
   private toAuthenticatedUser(user: UserWithTenant): AuthenticatedUser {
+    const accessScope = this.accessScopeService.fromPersisted(user);
+
     return {
       id: user.id,
       email: user.email,
@@ -509,6 +575,8 @@ export class AuthService {
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
       tenantStatus: user.tenant.status,
+      accessScope: accessScope.mode,
+      allowedStoreIds: [...accessScope.storeIds],
     };
   }
 

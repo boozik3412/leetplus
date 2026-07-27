@@ -59,6 +59,7 @@ export class ReportsDigestService {
       where: {
         ...(options.tenantId ? { tenantId: options.tenantId } : {}),
         isActive: true,
+        accessScope: 'NETWORK',
         role: { in: [UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER] },
       },
       include: {
@@ -360,6 +361,8 @@ export class ReportsDigestService {
       isPlatformAdmin: user.isPlatformAdmin,
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
+      accessScope: 'NETWORK',
+      allowedStoreIds: [],
     };
   }
 

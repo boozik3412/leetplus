@@ -55,6 +55,9 @@ jobs:
       - name: Validate attachment inventory command
         run: pnpm --filter database check:attachment-inventory
 
+      - name: Validate staff task integrity inventory command
+        run: pnpm --filter database check:staff-task-integrity-inventory
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -178,3 +181,9 @@ jobs:
         run: pnpm --filter database db:inventory:attachment-acl
         env:
           STAFF_ATTACHMENT_BACKFILL_TARGET: development
+
+      - name: Run read-only staff task integrity inventory
+        run: pnpm --filter database db:inventory:staff-task-integrity
+        env:
+          STAFF_TASK_INTEGRITY_INVENTORY_TARGET: development
+          STAFF_TASK_INTEGRITY_INVENTORY_CONFIRM: run-staff-task-integrity-inventory

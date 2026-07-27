@@ -65,7 +65,11 @@
     read-only классификация `8 proposal + 29 operator + 6 review`, exact
     schema-first gate, actionable cap, `contentDigest`/`executionDigest` и
     exits `0/1/2/3`.
-14. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+14. [Runbook admission StaffTask snapshot](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md) —
+    обязательный fail-closed checkpoint перед production-like inventory и
+    planner: PostgreSQL 16, exact `BASELINE_156 | EXPAND_162`, release
+    manifest, catalog и отдельная SELECT-only роль.
+15. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
     какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
@@ -117,6 +121,18 @@
   `contentDigest` и timestamp-bound `executionDigest` не являются
   row-stable/CAS authorization. Contract tests, clean real PostgreSQL planner
   и adversarial disposable-clone smoke для неверного FK/index contract прошли.
+- StaffTask snapshot admission
+  `7d67333b22f171c6e79f723190647cdd2454b128` —
+  `IMPLEMENTED_CANDIDATE`, not deployed. Он принимает только изолированную
+  loopback PostgreSQL 16 копию в точном `BASELINE_156` или `EXPAND_162`,
+  сверяет ordered migration names/checksums, exact catalog и отдельную
+  `LOGIN NOINHERIT` роль с SELECT только к девяти таблицам, без write, DDL,
+  TEMP, membership и ownership. Локально подтверждены 16 unit, 34 offline
+  smoke и real PostgreSQL smoke из 9 сценариев: exact Git blob baseline 156 →
+  ровно шесть migrations → expand 162, а также
+  trigger/privilege/tamper/privacy/cleanup guards. Выполнен только
+  `SYNTHETIC` rehearsal; remote CI и production-like admission не
+  выполнялись.
 - production-like inventory/planner, reconciliation dry-run/apply,
   `VALIDATE`, `CONTRACT` и deployment не выполнялись.
 
@@ -159,6 +175,12 @@ credentials, encryption keys и необработанные выгрузки.
 - все обязательные surfaces имеют статус `VERIFIED`;
 - `LEGACY/SHADOW` не используются как внешний attachment authorization;
 - tenant/store IDOR, PII, exports, files, jobs и BFF regression зелёные;
+- тот же production-like snapshot до inventory прошёл
+  [обязательный admission checkpoint](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
+  в `BASELINE_156`, затем после ровно шести migrations — в `EXPAND_162`;
+  подтверждены PostgreSQL 16, exact release manifest/catalog, девять
+  SELECT-only relations, HMAC/artifact/approval/TTL evidence, isolation и
+  no-egress;
 - staff task integrity inventory имеет zero blocking findings; все review-only
   findings имеют owner и принятое решение;
 - aggregate reconciliation planner запущен на том же production-like

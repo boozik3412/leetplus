@@ -1,19 +1,20 @@
 # Staff task integrity EXPAND: rollout и validation runbook
 
-| Поле                    | Значение                                                                               |
-| ----------------------- | -------------------------------------------------------------------------------------- |
-| Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed     |
-| Версия                  | 1.2.0                                                                                  |
-| Дата                    | 27.07.2026                                                                             |
-| Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                   |
-| Migration count         | 162                                                                                    |
-| Latest migration        | `20260727131000_staff_task_integrity_expand`                                           |
-| DB-native guard         | 28 FK: 14 composite + 14 simple compatibility                                          |
-| Compatibility catalog   | 14 simple `NOT VALID`: 11 non-Store + 3 Store                                          |
-| Candidate SHA           | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed                              |
-| Предыдущий этап         | [Integrity inventory](./staff-task-integrity-inventory-runbook.md)                     |
-| Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md) |
-| Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)                   |
+| Поле                    | Значение                                                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed                                                                           |
+| Версия                  | 1.3.0                                                                                                                                                        |
+| Дата                    | 27.07.2026                                                                                                                                                   |
+| Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                                                         |
+| Migration count         | 162                                                                                                                                                          |
+| Latest migration        | `20260727131000_staff_task_integrity_expand`                                                                                                                 |
+| DB-native guard         | 28 FK: 14 composite + 14 simple compatibility                                                                                                                |
+| Compatibility catalog   | 14 simple `NOT VALID`: 11 non-Store + 3 Store                                                                                                                |
+| Candidate SHA           | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed                                                                                                    |
+| Входной gate            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `BASELINE_156`                                                                    |
+| После EXPAND            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `EXPAND_162` → [Integrity inventory](./staff-task-integrity-inventory-runbook.md) |
+| Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                                                       |
+| Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)                                                                                         |
 
 Документ описывает schema-only фазу `EXPAND` для same-tenant ссылок
 `StaffTaskTemplate`, `StaffTaskRecurringRule`, `StaffTaskRecurringRuleRun` и
@@ -24,6 +25,9 @@
 исправлять production-данные, включать scheduler или выдавать внешний доступ.
 Production-like inventory, reconciliation, `VALIDATE`, deployment и
 операционный rollback drill остаются отдельными обязательными шагами.
+До production-like inventory/planner обязательны два Git-bound admission:
+`BASELINE_156` до EXPAND и `EXPAND_162` после применения exact migrations
+`157..162`.
 
 ## 1. Зафиксированный контекст запуска
 
@@ -281,12 +285,20 @@ production-данных.
 
 Перед любым staging/production применением оператор обязан:
 
-1. зафиксировать exact release SHA, migration count `162`, latest migration и
-   отношение к канонической ветке;
-2. восстановить свежий production-like snapshot в отдельную БД;
-3. выполнить guarded read-only inventory и сохранить только aggregate
+1. зафиксировать exact release SHA, зелёные CI checks, migration count `162`,
+   latest migration и отношение к канонической ветке;
+2. отдельно приобрести и восстановить свежий production-like snapshot в
+   изолированную loopback БД;
+3. по
+   [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md)
+   подтвердить `BASELINE_156`, exact committed Git artifact, TTL/attestations,
+   database identity и least-privilege роль;
+4. применить в изолированной копии только exact six migrations `157..162` по
+   утверждённому rehearsal;
+5. повторно пройти snapshot admission в состоянии `EXPAND_162`;
+6. выполнить guarded read-only inventory и сохранить только aggregate
    evidence;
-4. на exact schema 162 выполнить
+7. на exact schema 162 выполнить
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md):
    latest migration, unfinished `0`, 14 composite exact, 14 simple exact,
    `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes exact,
@@ -295,21 +307,21 @@ production-данных.
    `inventoryExecuted === schema.ready`,
    classification `8 proposal + 29 operator + 6 review`, actionable cap и exit
    contract;
-5. назначить owner всем review/operator/proposal findings и получить
+8. назначить owner всем review/operator/proposal findings и получить
    `blockingTotal=0`; proposal, `contentDigest` и `executionDigest` не считать
    authorization;
-6. выполнить отдельный idempotent row-level reconciliation dry-run, explicit
+9. выполнить отдельный idempotent row-level reconciliation dry-run, explicit
    apply и повторный zero-diff dry-run;
-7. проверить backup restore, long transactions, свободное место, replication
-   health и change window;
-8. прогнать populated baseline 156 → exact six migrations 157..162 и N/N-1
-   application compatibility;
-9. измерить concurrent index duration и metadata lock duration;
-10. проверить abort/retry и application rollback без удаления принятых
+10. проверить backup restore, long transactions, свободное место, replication
+    health и change window;
+11. отдельно повторить populated synthetic baseline
+    `156 → exact six migrations 157..162` и N/N-1 application compatibility;
+12. измерить concurrent index duration и metadata lock duration;
+13. проверить abort/retry и application rollback без удаления принятых
     constraints;
-11. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
+14. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
     знает нового archive-first delete order и не является rollback-шагом;
-12. получить явное решение `GO` для schema-only release.
+15. получить явное решение `GO` для schema-only release.
 
 Ни один шаг не выполняется автоматически из этого документа.
 
@@ -382,6 +394,15 @@ Staff-модуль до `VERIFIED` и не меняет общий release decis
 release_sha:
 target:
 executed_at:
+snapshot_admission_sha: 7d67333b22f171c6e79f723190647cdd2454b128
+baseline_admission_decision:
+baseline_admission_database_identity_digest:
+baseline_admission_content_digest:
+baseline_admission_execution_digest:
+expand_admission_decision:
+expand_admission_database_identity_digest:
+expand_admission_content_digest:
+expand_admission_execution_digest:
 database_revision_before:
 database_revision_after:
 migration_count:
@@ -429,6 +450,11 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 
 ## 11. Changelog
 
+- `1.3.0`, 27.07.2026 — перед production-like inventory/planner добавлены
+  обязательные Git-bound admissions `BASELINE_156` и `EXPAND_162`; synthetic
+  candidate `7d67333b22f171c6e79f723190647cdd2454b128` прошёл `16` unit, `34`
+  offline и `9` PostgreSQL 16 smoke-сценариев. Production-like snapshot не
+  приобретался и не восстанавливался.
 - `1.2.0`, 27.07.2026 — добавлены exact EXPAND artifact и future-DDL guards;
   planner gate усилен hidden database identity, exact FK/index catalog,
   `unexpectedProtectedForeignKeyCount=0`, `contentDigest`/`executionDigest` и

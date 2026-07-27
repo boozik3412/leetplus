@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.2.0                                              |
+| Версия          | 1.3.0                                              |
 | Дата            | 27.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -26,6 +26,9 @@
 - [ ] Reconciliation planner source checkpoint:
       `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only, no apply,
       не production deployment.
+- [ ] Snapshot admission source checkpoint:
+      `7d67333b22f171c6e79f723190647cdd2454b128` —
+      `IMPLEMENTED_CANDIDATE`, не production deployment.
 - [ ] API/web/edge показывают тот же SHA/build time.
 - [ ] Required CI checks зелёные.
 - [ ] Release decision owner и change window назначены.
@@ -40,6 +43,16 @@
 - [ ] У всех четырёх Store задан и проверен валидный IANA `timeZone`; UTC
       fallback отсутствует в принятом recurring schedule.
 - [ ] Cross-tenant `UserStoreAccess` count равен `0`.
+- [ ] Восстановленная production-like копия прошла
+      [snapshot admission](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
+      в состоянии `BASELINE_156`: exit `0`, exact release SHA, matched HMAC
+      database identity, report digests и protected evidence reference
+      зафиксированы.
+- [ ] После применения ровно шести exact migrations `157..162` та же
+      production-like копия прошла admission в состоянии `EXPAND_162`: exit
+      `0`, тот же release SHA, matched HMAC database identity, новые report
+      digests и protected evidence reference зафиксированы; remote
+      CI/synthetic evidence не засчитываются как этот Gate 2 checkpoint.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
@@ -86,6 +99,13 @@
 
 - [ ] Backup непосредственно перед изменением успешен.
 - [ ] Restore rehearsal в отдельную БД успешен; RPO/RTO записаны.
+- [ ] Admission использовал отдельную `LOGIN NOINHERIT` роль с exact SELECT
+      только к девяти разрешённым таблицам; отсутствуют write/DDL/TEMP,
+      membership, ownership и лишние privileges.
+- [ ] Exact Git blob manifest подтвердил ordered names/checksums 156
+      migrations до EXPAND и 162 после него; FK enforcement triggers,
+      artifact digest, opaque approval, HMAC evidence, TTL, isolation,
+      no-egress и cleanup evidence подтверждены.
 - [ ] Schema-only EXPAND rehearsal успешен с timeout/lock evidence.
 - [ ] EXPAND rehearsal начинается с populated legacy baseline 156 и применяет
       ровно шесть migration `157..162`; пять concurrent indexes строятся на
@@ -238,6 +258,12 @@ critical alert.
 
 ## Changelog
 
+- `1.3.0`, 27.07.2026 — добавлен обязательный snapshot admission checkpoint
+  `7d67333b22f171c6e79f723190647cdd2454b128`: PostgreSQL 16, exact Git blob
+  `BASELINE_156 → 6 migrations → EXPAND_162`, девять SELECT-only relations,
+  privilege/trigger/tamper/privacy/cleanup guards. Локально прошли 16 unit,
+  34 offline smoke и 9 real PostgreSQL scenarios; production-like admission,
+  remote CI и внешний beta остаются `NO-GO`.
 - `1.2.0`, 27.07.2026 — planner gate расширен до exact schema/catalog и
   скрытой expected/actual database identity binding; evidence разделена на
   стабильный `contentDigest` и timestamp-bound `executionDigest`; добавлен

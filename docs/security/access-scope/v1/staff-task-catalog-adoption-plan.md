@@ -1,12 +1,12 @@
 # Staff task templates и recurring rules: AccessScope adoption plan
 
-| Поле           | Значение                                                                                                  |
-| -------------- | --------------------------------------------------------------------------------------------------------- |
-| Статус         | templates, recurring actor HTTP, inventory/planner и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.7.0                                                                                                     |
-| Дата           | 27.07.2026                                                                                                |
-| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                      |
-| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                    |
+| Поле           | Значение                                                                                                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
+| Версия         | 1.8.0                                                                                                                         |
+| Дата           | 27.07.2026                                                                                                                    |
+| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                          |
+| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                        |
 
 Документ фиксирует route/action/job inventory для шаблонов и регулярных задач.
 Template CRUD/launch уже реализован отдельным bounded candidate, описанным в
@@ -17,6 +17,8 @@ Same-tenant schema-only EXPAND описан отдельным
 [rollout/validation runbook](./staff-task-integrity-expand-runbook.md).
 Aggregate-only классификация будущей reconciliation описана в
 [reconciliation plan runbook](./staff-task-integrity-reconciliation-plan-runbook.md).
+Допуск точного Git-bound snapshot перед inventory/planner обязателен по
+[snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md).
 Scheduler и scheduled all-tenant HTTP не зарегистрированы и всё ещё не
 применяют system execution contract, поэтому весь catalog slice и внешний тест
 остаются `NO-GO`.
@@ -226,6 +228,16 @@ Planner только оценивает объём и классы работы.
 idempotent dry-run/apply, locks/recheck, audit, rollback и повторный zero-diff
 остаются отдельным следующим P0.
 
+Snapshot admission реализован candidate
+`7d67333b22f171c6e79f723190647cdd2454b128`. Он допускает только loopback
+disposable clone, точный Git artifact и одно из состояний `BASELINE_156` либо
+`EXPAND_162`; для production-like требует отдельные acquisition/restore
+attestations, TTL, HMAC identity binding и роль с exact `SELECT` только на
+девять разрешённых relations. Синтетическая PostgreSQL 16 репетиция прошла
+`16` unit, `34` offline и `9` database-сценариев. Production-like snapshot этим
+candidate не приобретался и не восстанавливался, поэтому его admission,
+inventory и planner остаются `NO-GO`.
+
 ## 5. Обязательная test topology
 
 - Tenant A: Store A1 и A2;
@@ -249,6 +261,10 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
   `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
 - aggregate reconciliation planner contract — pass; clean real PostgreSQL
   schema прошла exact gate `162/latest/0 + 14/14/0/0 + 5/0` и вернула `PASS`;
+- snapshot admission contract — `16` unit и `34` offline checks; staged
+  PostgreSQL 16 smoke прошёл `9` сценариев
+  `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact девять
+  SELECT-relations и негативные privilege/trigger/tamper проверки;
 - identity/inventory contract подтверждает HMAC `databaseIdentityDigest`,
   различие evidence между БД/кластерами и отклонение противоречивого
   `inventoryExecuted`;
@@ -277,14 +293,17 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 3. Interactive audit сохраняет реального actor.
 4. Suspended/non-entitled tenant не обрабатывается.
 5. Parent lock/recheck и rollback доказаны real PostgreSQL тестом.
-6. Production-like legacy inventory и reconciliation имеют объяснённый zero
+6. Свежий production-like snapshot прошёл Git-bound admission сначала как
+   `BASELINE_156`, затем после exact migrations `157..162` как `EXPAND_162`;
+   remote target и mutable worktree artifact не использовались.
+7. Production-like legacy inventory и reconciliation имеют объяснённый zero
    critical mismatch.
-7. Focused/full CI и production builds зелёные.
-8. Все 14 composite FK валидированы в управляемом
+8. Focused/full CI и production builds зелёные.
+9. Все 14 composite FK валидированы в управляемом
    staging/production-like rehearsal.
-9. После N-1 rollback window отдельный CONTRACT удалил ровно 14 simple
-   compatibility FK и сохранил guard для 14 composite FK.
-10. Aggregate planner на production-like snapshot прошёл exact schema gate и
+10. После N-1 rollback window отдельный CONTRACT удалил ровно 14 simple
+    compatibility FK и сохранил guard для 14 composite FK.
+11. Aggregate planner на production-like snapshot прошёл exact schema gate и
     cap; proposal/operator обработаны отдельным approved reconciliation
     workflow, `contentDigest`/`executionDigest` не использовались как
     row-level/CAS authorization.
@@ -294,6 +313,12 @@ ownership и общий Gate 2.
 
 ## 7. Changelog
 
+- `1.8.0`, 27.07.2026 — добавлен обязательный Git-bound snapshot admission
+  перед production-like inventory/planner: candidate
+  `7d67333b22f171c6e79f723190647cdd2454b128`, состояния `BASELINE_156` и
+  `EXPAND_162`, exact select-only role, `16` unit, `34` offline и `9`
+  PostgreSQL 16 smoke-сценариев. Production-like acquisition/restore/admission
+  не выполнялись, внешний beta остаётся `NO-GO`.
 - `1.7.0`, 27.07.2026 — planner усилен schema-first exact gate, скрытой
   expected/actual database identity binding, aggregate-only/no-ID contract,
   `contentDigest`/`executionDigest` и adversarial disposable-clone FK/index

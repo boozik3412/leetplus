@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.12.0                                                                                              |
+| Версия контракта               | 1.13.0                                                                                              |
 | Дата                           | 27.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -16,6 +16,7 @@
 | Staff task integrity inventory | `56d615437ecfcb90db252016d3e5b83f3f545578` — not run on production                                  |
 | Staff task integrity EXPAND    | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — 162 migrations / 28 guarded FK; not deployed           |
 | Staff reconciliation planner   | `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only; no apply; not deployed                 |
+| Staff snapshot admission       | `7d67333b22f171c6e79f723190647cdd2454b128` — synthetic verified; production-like not executed       |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -77,6 +78,10 @@ invite-only открытому тесту. Она отвечает на вопр
     классификация 43 aggregate codes, exact schema-first gate, actionable cap,
     `contentDigest`/`executionDigest` и безопасный порядок отдельного
     reconciliation.
+15. [Staff task snapshot admission](./v1/staff-task-integrity-snapshot-admission-runbook.md) —
+    обязательный fail-closed вход для production-like snapshot: PostgreSQL 16,
+    exact release/migration/catalog state и отдельная роль с SELECT только к
+    девяти таблицам.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -229,8 +234,22 @@ Contract suite, clean real PostgreSQL planner и adversarial disposable-clone
 smoke для дополнительного конфликтующего FK/неверного index contract прошли;
 `schema=pg_catalog` также fail-closed отклоняется до inventory.
 
-Production-like inventory/planner, reconciliation dry-run/apply, `VALIDATE`,
-`CONTRACT`, deployment и production cutover не выполнялись.
+Следующим обязательным checkpoint реализован
+[StaffTask snapshot admission](./v1/staff-task-integrity-snapshot-admission-runbook.md)
+`7d67333b22f171c6e79f723190647cdd2454b128` —
+`IMPLEMENTED_CANDIDATE`, not deployed. Он допускает только изолированную
+loopback PostgreSQL 16 копию в точном `BASELINE_156` либо `EXPAND_162`,
+сверяет ordered migration names/checksums из exact Git blob, FK/index/trigger
+catalog и отдельную `LOGIN NOINHERIT` роль с exact SELECT к девяти таблицам,
+без write, DDL, TEMP, membership и ownership. Локально прошли 16 unit,
+34 offline smoke и 9 real PostgreSQL scenarios, включая
+`baseline 156 → ровно шесть migrations → expand 162`,
+privilege/tamper/privacy/cleanup guards.
+
+Выполнен только `SYNTHETIC` rehearsal. Remote CI, production-like
+acquisition/restore/admission, inventory/planner, reconciliation
+dry-run/apply, `VALIDATE`, `CONTRACT`, deployment и production cutover не
+выполнялись.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -248,6 +267,12 @@ Production-like inventory/planner, reconciliation dry-run/apply, `VALIDATE`,
 
 ## Changelog
 
+- `1.13.0`, 27.07.2026 — добавлен обязательный StaffTask snapshot admission
+  candidate `7d67333b22f171c6e79f723190647cdd2454b128`: PostgreSQL 16, exact
+  `BASELINE_156 | EXPAND_162`, Git-blob migration manifest/catalog и
+  девятитабличная SELECT-only role. Локально подтверждены 16 unit,
+  34 offline smoke и 9 real PostgreSQL scenarios; production-like запуск,
+  remote CI и внешний beta остаются `NO-GO`.
 - `1.12.0`, 27.07.2026 — reconciliation contract усилен schema-first exact
   gate, скрытой expected/actual database identity binding,
   `contentDigest`/`executionDigest` и adversarial disposable-clone smoke для

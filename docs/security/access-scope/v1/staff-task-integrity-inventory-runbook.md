@@ -1,20 +1,25 @@
 # Staff task catalog integrity: inventory и DB-invariant runbook
 
-| Поле                  | Значение                                                                                |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| Статус                | Inventory, aggregate planner и DB EXPAND candidates; production inventory не выполнялся |
-| Версия                | 1.3.0                                                                                   |
-| Дата                  | 27.07.2026                                                                              |
-| Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                    |
-| Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                               |
-| Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)        |
-| Следующий checkpoint  | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)  |
+| Поле                  | Значение                                                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
+| Версия                | 1.4.0                                                                                                                       |
+| Дата                  | 27.07.2026                                                                                                                  |
+| Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
+| Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                                                                   |
+| Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)                                            |
+| Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md)                                                  |
+| Следующий checkpoint  | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                      |
 
 Документ задаёт безопасный порядок проверки legacy-данных `StaffTask`,
 `StaffTaskTemplate`, `StaffTaskRecurringRule` и
-`StaffTaskRecurringRuleRun` до добавления same-tenant ограничений базы данных.
+`StaffTaskRecurringRuleRun` после schema-only EXPAND и успешного
+`EXPAND_162` admission, но до reconciliation и `VALIDATE`.
 Он не разрешает автоматическое исправление данных, production migration,
 включение scheduler или выдачу внешнего доступа.
+Production-like scanner можно запускать только после успешного admission
+точного Git-bound snapshot в требуемом состоянии; сам inventory не заменяет
+этот допуск.
 
 ## 1. Зафиксированный контекст
 
@@ -127,15 +132,22 @@ Review-находка не должна маскироваться как док
 
 ## 5. Безопасный порядок запуска
 
-1. Зафиксировать exact candidate SHA, expected migration revision/count и
+1. Зафиксировать exact release SHA, expected migration revision/count и
    target environment.
-2. Сначала выполнить `--help`, `--self-test` и локальный test suite.
+2. Сначала выполнить `--help`, `--self-test`, unit checks и локальный test
+   suite admission/inventory.
 3. Выполнить scanner на чистой CI schema; ожидается zero blocking findings.
-4. Выполнить scanner на восстановленном production-like snapshot.
-5. Сохранить только aggregate JSON, SHA, время, target label и exit code в
+4. По
+   [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md)
+   отдельно приобрести и восстановить свежий production-like snapshot в
+   loopback clone, пройти `BASELINE_156`, применить только exact migrations
+   `157..162`, затем пройти `EXPAND_162`.
+5. Только после успешного `EXPAND_162` admission выполнить scanner на том же
+   неизменённом восстановленном snapshot.
+6. Сохранить только aggregate JSON, SHA, время, target label и exit code в
    защищённый release evidence.
-6. Назначить owner каждому non-zero reason code.
-7. Запустить отдельный
+7. Назначить owner каждому non-zero reason code.
+8. Запустить отдельный
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md)
    на exact schema-first gate:
    `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
@@ -144,16 +156,16 @@ Review-находка не должна маскироваться как док
    domain-separated HMAC `databaseIdentityDigest`,
    `inventoryExecuted === schema.ready`, `8 proposal + 29 operator + 6 review`,
    actionable cap и HMAC evidence.
-8. На disposable local/CI clone выполнить adversarial catalog smoke для
+9. На disposable local/CI clone выполнить adversarial catalog smoke для
    дополнительного конфликтующего FK с другим именем и index с неверным
    порядком колонок; оба обязаны дать `SCHEMA_MISMATCH`/exit `3` до inventory,
    не меняя source database.
-9. Не использовать planner proposal, `contentDigest` или `executionDigest` как
-   authorization. Подготовить отдельный idempotent row-level reconciliation
-   tool с dry-run, обязательным explicit apply, locks/recheck, audit и rollback.
-10. Повторять scanner/planner после reconciliation до объяснённого zero
+10. Не использовать planner proposal, `contentDigest` или `executionDigest` как
+    authorization. Подготовить отдельный idempotent row-level reconciliation
+    tool с dry-run, обязательным explicit apply, locks/recheck, audit и rollback.
+11. Повторять scanner/planner после reconciliation до объяснённого zero
     critical diff.
-11. Только затем репетировать отдельный `VALIDATE`; `CONTRACT` выполняется
+12. Только затем репетировать отдельный `VALIDATE`; `CONTRACT` выполняется
     после N-1 window.
 
 Production запуск выполняется отдельно операционным владельцем после backup и
@@ -227,6 +239,12 @@ constraint-trigger design с concurrency tests.
 release_sha:
 target:
 executed_at:
+snapshot_admission_sha: 7d67333b22f171c6e79f723190647cdd2454b128
+snapshot_admission_state: EXPAND_162
+snapshot_admission_decision:
+snapshot_admission_database_identity_digest:
+snapshot_admission_content_digest:
+snapshot_admission_execution_digest:
 database_revision:
 migration_count:
 scanner_report_schema_version:
@@ -236,7 +254,7 @@ review_total:
 reason_counts:
 operator:
 evidence_location:
-decision: NO-GO | RECONCILE | READY_FOR_EXPAND_REHEARSAL
+decision: NO-GO | RECONCILE | READY_FOR_RECONCILIATION_PLANNING
 ```
 
 В evidence запрещены production identifiers и credentials. Для текущей сети
@@ -306,7 +324,10 @@ EXPAND rehearsal теперь использует populated legacy baseline 156
   только последнюю непрерывную серию; production owner должен принять
   семантику или изменить её до использования как release gate.
 
-Production и production-like inventory не выполнялись.
+Синтетический snapshot admission candidate
+`7d67333b22f171c6e79f723190647cdd2454b128` прошёл `16` unit, `34` offline и
+`9` PostgreSQL 16 smoke-сценариев. Production-like acquisition, restore,
+admission и inventory не выполнялись.
 
 ## 9. Exit criteria
 
@@ -317,14 +338,20 @@ Inventory slice считается реализованным, когда:
 3. scanner доказывает одну `REPEATABLE READ` read-only snapshot;
 4. blocking/review result детерминирован и не раскрывает row identifiers;
 5. clean-schema smoke зелёный;
-6. production-like запуск и reconciliation остаются отдельными явными
-   операционными шагами.
+6. production-like scanner запускается только после успешного Git-bound
+   `BASELINE_156 → 157..162 → EXPAND_162` admission;
+7. production-like reconciliation остаётся отдельным явным операционным шагом.
 
-Это повышает только readiness к production-like EXPAND/VALIDATE rehearsal.
+Это повышает только readiness к production-like reconciliation/VALIDATE
+rehearsal.
 Внешний beta остаётся `NO-GO` до полного Gate 2.
 
 ## 10. Changelog
 
+- `1.4.0`, 27.07.2026 — snapshot admission сделан обязательным
+  production-like prerequisite для inventory/planner; зафиксирован synthetic
+  candidate `7d67333b22f171c6e79f723190647cdd2454b128` с `16` unit, `34` offline и
+  `9` PostgreSQL 16 smoke-сценариями. Production-like контур не запускался.
 - `1.3.0`, 27.07.2026 — planner связан с exact schema-first gate, включая
   `unexpectedProtectedForeignKeyCount=0`, hidden database identity,
   `contentDigest`/`executionDigest` и adversarial disposable-clone extra-FK/

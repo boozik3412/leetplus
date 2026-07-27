@@ -163,6 +163,11 @@ jobs:
         env:
           STAFF_ATTACHMENT_ACL_SMOKE_CONFIRM: run-staff-attachment-acl-fixtures
 
+      - name: Verify staff task transaction security with PostgreSQL
+        run: pnpm --filter api test:integration:staff-task-security:pg
+        env:
+          STAFF_TASK_SECURITY_PG_CONFIRM: run-staff-task-security-postgres-fixtures
+
       - name: Run read-only attachment inventory
         run: pnpm --filter database db:inventory:attachment-acl
         env:

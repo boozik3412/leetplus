@@ -1,6 +1,12 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { AccessScopeService } from '../tenancy/access-scope.service';
+import { TenantContextService } from '../tenancy/tenant-context.service';
 import { StaffTasksService } from './staff-tasks.service';
 
 describe('StaffTasksService status review workflow', () => {
@@ -14,6 +20,15 @@ describe('StaffTasksService status review workflow', () => {
   };
   type StaffTaskUpdateMock = jest.MockedFunction<
     (args: StaffTaskUpdateArgs) => void
+  >;
+  type StaffTaskCommentCreateArgs = {
+    data: {
+      taskId: string;
+      evidenceUrl: string | null;
+    };
+  };
+  type StaffTaskCommentCreateMock = jest.MockedFunction<
+    (args: StaffTaskCommentCreateArgs) => void
   >;
   type TestWhereInput = {
     AND?: TestWhereInput[];
@@ -40,10 +55,17 @@ describe('StaffTasksService status review workflow', () => {
       tenantSlug: 'demo',
       isActive: true,
       isPlatformAdmin: false,
+      accessScope: 'NETWORK',
+      allowedStoreIds: [],
+      permissions: ['manage_staff_tasks'],
     };
   }
 
-  function taskRow(status: string, assignedToUserId = 'admin-1') {
+  function taskRow(
+    status: string,
+    assignedToUserId: string | null = 'admin-1',
+    labels: Record<string, unknown> | null = null,
+  ) {
     return {
       id: 'task-1',
       tenantId,
@@ -60,7 +82,7 @@ describe('StaffTasksService status review workflow', () => {
       priority: 'NORMAL',
       dueAt: null,
       completedAt: status === 'DONE' ? now : null,
-      labels: null,
+      labels,
       checklist: null,
       createdAt: now,
       updatedAt: now,
@@ -81,27 +103,47 @@ describe('StaffTasksService status review workflow', () => {
     };
   }
 
-  function createService(currentStatus: string, assignedToUserId = 'admin-1') {
+  function createService(
+    currentStatus: string,
+    assignedToUserId: string | null = 'admin-1',
+    labels: Record<string, unknown> | null = null,
+  ) {
     const currentTask = {
       id: 'task-1',
+      storeId: null,
+      shiftId: null,
       status: currentStatus,
       assignedToUserId,
+      labels,
+      observers: [],
     };
-    const responseTask = taskRow(currentStatus, assignedToUserId);
+    const responseTask = taskRow(currentStatus, assignedToUserId, labels);
+    const userFindMany = jest.fn(
+      (args: { where?: { id?: { in?: string[] } } }) =>
+        args.where?.id?.in?.map((id) => ({ id })) ?? [],
+    );
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: currentTask.id }]),
       staffTask: {
+        findFirst: jest.fn().mockResolvedValue(currentTask),
         update: jest.fn() as StaffTaskUpdateMock,
       },
       staffTaskComment: {
-        create: jest.fn(),
+        create: jest.fn() as StaffTaskCommentCreateMock,
       },
       staffTaskAuditEvent: {
         create: jest.fn(),
+      },
+      user: {
+        findMany: userFindMany,
       },
     };
     const prisma = {
       staffTask: {
         findFirst: jest.fn().mockResolvedValue(currentTask),
+      },
+      user: {
+        findMany: userFindMany,
       },
       $transaction: jest
         .fn()
@@ -109,16 +151,19 @@ describe('StaffTasksService status review workflow', () => {
           callback(tx),
         ),
     };
-    const tenantContextService = {
-      resolve: jest.fn().mockResolvedValue({ tenantId }),
-    };
+    const tenantContextService = new TenantContextService();
     const staffTeamChatService = {
       createSystemNotification: jest.fn().mockResolvedValue(undefined),
     };
+    const staffAttachmentBindingsService = {
+      bindPendingResourceAttachments: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new StaffTasksService(
       prisma as never,
-      tenantContextService as never,
+      tenantContextService,
       staffTeamChatService as never,
+      new AccessScopeService(),
+      staffAttachmentBindingsService as never,
     );
 
     (
@@ -127,7 +172,7 @@ describe('StaffTasksService status review workflow', () => {
       }
     ).fetchTaskOrThrow = jest.fn().mockResolvedValue(responseTask);
 
-    return { prisma, service, tx };
+    return { prisma, service, staffAttachmentBindingsService, tx };
   }
 
   function createTaskPolicyService(
@@ -196,9 +241,15 @@ describe('StaffTasksService status review workflow', () => {
         );
       },
     );
+    const createTask = jest.fn(
+      (args: { data: { status?: string; completedAt?: Date | null } }) => {
+        void args;
+        return Promise.resolve({ id: 'task-created' });
+      },
+    );
     const tx = {
       staffTask: {
-        create: jest.fn().mockResolvedValue({ id: 'task-created' }),
+        create: createTask,
       },
       staffTaskAuditEvent: {
         create: jest.fn(),
@@ -208,6 +259,7 @@ describe('StaffTasksService status review workflow', () => {
         findMany: jest.fn().mockResolvedValue([]),
         createMany: jest.fn(),
       },
+      user: { findFirst, findMany },
     };
     const responseTask = {
       ...taskRow('OPEN', 'admin-2'),
@@ -232,16 +284,18 @@ describe('StaffTasksService status review workflow', () => {
           callback(tx),
         ),
     };
-    const tenantContextService = {
-      resolve: jest.fn().mockResolvedValue({ tenantId }),
-    };
+    const tenantContextService = new TenantContextService();
     const staffTeamChatService = {
       createSystemNotification: jest.fn().mockResolvedValue(undefined),
     };
     const service = new StaffTasksService(
       prisma as never,
-      tenantContextService as never,
+      tenantContextService,
       staffTeamChatService as never,
+      new AccessScopeService(),
+      {
+        bindPendingResourceAttachments: jest.fn().mockResolvedValue(undefined),
+      } as never,
     );
 
     (
@@ -320,12 +374,18 @@ describe('StaffTasksService status review workflow', () => {
       user: { findMany: jest.fn().mockResolvedValue([]) },
       store: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    const tenantContextService = {
-      resolve: jest.fn().mockResolvedValue({ tenantId }),
+    const tenantContextService = new TenantContextService();
+    const staffTeamChatService = {
+      createSystemNotification: jest.fn().mockResolvedValue(undefined),
     };
     const service = new StaffTasksService(
       prisma as never,
-      tenantContextService as never,
+      tenantContextService,
+      staffTeamChatService as never,
+      new AccessScopeService(),
+      {
+        bindPendingResourceAttachments: jest.fn().mockResolvedValue(undefined),
+      } as never,
     );
 
     const report = await service.getTasks(actor(UserRole.CLUB_MANAGER), {
@@ -475,6 +535,176 @@ describe('StaffTasksService status review workflow', () => {
     });
   });
 
+  it.each(['IN_PROGRESS', 'ON_REVIEW', 'DONE', 'CANCELED'] as const)(
+    'rejects explicit %s status during ordinary task creation',
+    async (status) => {
+      const { prisma, service } = createTaskPolicyService([]);
+
+      await expect(
+        service.createTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), {
+          title: 'New task',
+          status,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows explicit OPEN status during ordinary task creation', async () => {
+    const { service, tx } = createTaskPolicyService([]);
+
+    await expect(
+      service.createTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), {
+        title: 'New task',
+        status: 'OPEN',
+      }),
+    ).resolves.toMatchObject({ id: 'task-created' });
+
+    const create = tx.staffTask.create.mock.calls[0]?.[0];
+    expect(create.data).toMatchObject({
+      status: 'OPEN',
+      completedAt: null,
+    });
+  });
+
+  it.each([
+    'assignmentMode',
+    'candidateUserIds',
+    'originalAssignedToUserIds',
+    'bulkTaskGroupId',
+  ] as const)(
+    'rejects client-owned creation input for server task label %s',
+    async (key) => {
+      const { prisma, service } = createTaskPolicyService([]);
+
+      await expect(
+        service.createTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), {
+          title: 'Spoofed task',
+          labels: {
+            source: 'client',
+            [key]: 'spoofed',
+          },
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    'assignmentMode',
+    'candidateUserIds',
+    'originalAssignedToUserIds',
+    'bulkTaskGroupId',
+  ] as const)('rejects update input for server task label %s', async (key) => {
+    const { prisma, service } = createService('OPEN');
+
+    await expect(
+      service.updateTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), 'task-1', {
+        labels: {
+          source: 'client',
+          [key]: 'spoofed',
+        },
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('preserves canonical assignment metadata when user labels are updated', async () => {
+    const assignmentLabels = {
+      source: 'old-source',
+      assignmentMode: 'ANY_OF',
+      candidateUserIds: ['admin-1', 'admin-2'],
+      originalAssignedToUserIds: ['admin-1', 'admin-2'],
+      bulkTaskGroupId: 'task-group-1',
+    };
+    const { service, tx } = createService('OPEN', 'admin-1', assignmentLabels);
+
+    await service.updateTask(
+      actor(UserRole.CLUB_MANAGER, 'manager-1'),
+      'task-1',
+      {
+        labels: {
+          source: 'new-source',
+          note: 'safe client metadata',
+        },
+      },
+    );
+
+    const update = tx.staffTask.update.mock.calls[0]?.[0] as {
+      data: { labels?: unknown };
+    };
+    expect(update.data.labels).toEqual({
+      source: 'new-source',
+      note: 'safe client metadata',
+      assignmentMode: 'ANY_OF',
+      candidateUserIds: ['admin-1', 'admin-2'],
+      originalAssignedToUserIds: ['admin-1', 'admin-2'],
+      bulkTaskGroupId: 'task-group-1',
+    });
+  });
+
+  it('keeps canonical assignment metadata when user labels are cleared', async () => {
+    const assignmentLabels = {
+      source: 'old-source',
+      assignmentMode: 'ANY_OF',
+      candidateUserIds: ['admin-1', 'admin-2'],
+      originalAssignedToUserIds: ['admin-1', 'admin-2'],
+    };
+    const { service, tx } = createService('OPEN', 'admin-1', assignmentLabels);
+
+    await service.updateTask(
+      actor(UserRole.CLUB_MANAGER, 'manager-1'),
+      'task-1',
+      { labels: null },
+    );
+
+    const update = tx.staffTask.update.mock.calls[0]?.[0] as {
+      data: { labels?: unknown };
+    };
+    expect(update.data.labels).toEqual({
+      assignmentMode: 'ANY_OF',
+      candidateUserIds: ['admin-1', 'admin-2'],
+      originalAssignedToUserIds: ['admin-1', 'admin-2'],
+    });
+  });
+
+  it('rejects single-assignee PATCH for a grouped task', async () => {
+    const assignmentLabels = {
+      assignmentMode: 'ANY_OF',
+      candidateUserIds: ['admin-1', 'admin-2'],
+      originalAssignedToUserIds: ['admin-1', 'admin-2'],
+    };
+    const { service, tx } = createService('OPEN', 'admin-1', assignmentLabels);
+
+    await expect(
+      service.updateTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), 'task-1', {
+        assignedToUserId: 'admin-3',
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(tx.staffTask.update).not.toHaveBeenCalled();
+  });
+
+  it('does not allow an ANY_OF candidate to be removed from observers', async () => {
+    const assignmentLabels = {
+      assignmentMode: 'ANY_OF',
+      candidateUserIds: ['admin-1', 'admin-2'],
+      originalAssignedToUserIds: ['admin-1', 'admin-2'],
+    };
+    const { service, tx } = createService('OPEN', null, assignmentLabels);
+
+    await expect(
+      service.updateTask(actor(UserRole.CLUB_MANAGER, 'manager-1'), 'task-1', {
+        observerUserIds: ['admin-1'],
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(tx.staffTask.update).not.toHaveBeenCalled();
+  });
+
   it('does not allow an assigned administrator to approve their own task', async () => {
     const { prisma, service } = createService('ON_REVIEW', 'admin-1');
 
@@ -562,6 +792,40 @@ describe('StaffTasksService status review workflow', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('does not grant manager status powers to a view-only role override', async () => {
+    const { prisma, service } = createService('ON_REVIEW', 'admin-1');
+    const viewOnlyManager: AuthenticatedUser = {
+      ...actor(UserRole.CLUB_MANAGER, 'manager-1'),
+      hasRoleOverride: true,
+      permissions: ['view_staff_tasks'],
+    };
+
+    await expect(
+      service.createTaskComment(viewOnlyManager, 'task-1', {
+        status: 'DONE',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps own task execution available with view-only task access', async () => {
+    const { service, tx } = createService('OPEN', 'trainee-1');
+    const viewOnlyAssignee: AuthenticatedUser = {
+      ...actor(UserRole.TRAINEE, 'trainee-1'),
+      hasRoleOverride: true,
+      permissions: ['view_staff_tasks'],
+    };
+
+    await expect(
+      service.createTaskComment(viewOnlyAssignee, 'task-1', {
+        status: 'IN_PROGRESS',
+      }),
+    ).resolves.toMatchObject({ id: 'task-1' });
+
+    expectTaskStatusUpdate(tx, 'IN_PROGRESS', null);
+  });
+
   it('allows a club manager to return a submitted task to work', async () => {
     const { service, tx } = createService('ON_REVIEW', 'admin-1');
 
@@ -608,5 +872,152 @@ describe('StaffTasksService status review workflow', () => {
     ).rejects.toThrow(ForbiddenException);
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('creates task evidence and binds a fresh attachment in one transaction', async () => {
+    const { service, staffAttachmentBindingsService, tx } =
+      createService('OPEN');
+
+    await expect(
+      service.createTaskComment(
+        actor(UserRole.CLUB_MANAGER, 'manager-1'),
+        'task-1',
+        {
+          body: 'Фото выполненной работы',
+          evidenceUrl: 'https://ignored.example/evidence',
+          attachmentIds: ['attachment-1'],
+        },
+      ),
+    ).resolves.toMatchObject({ id: 'task-1' });
+
+    expect(tx.staffTaskComment.create.mock.calls[0]?.[0].data).toMatchObject({
+      taskId: 'task-1',
+      evidenceUrl: '/staff/attachments/attachment-1',
+    });
+    expect(
+      staffAttachmentBindingsService.bindPendingResourceAttachments,
+    ).toHaveBeenCalledWith(tx, {
+      tenantId,
+      actorUserId: 'manager-1',
+      resourceKind: 'STAFF_TASK',
+      resourceId: 'task-1',
+      attachmentIds: ['attachment-1'],
+    });
+    expect(tx.staffTaskComment.create.mock.invocationCallOrder[0]).toBeLessThan(
+      staffAttachmentBindingsService.bindPendingResourceAttachments.mock
+        .invocationCallOrder[0],
+    );
+    expect(
+      staffAttachmentBindingsService.bindPendingResourceAttachments.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(tx.staffTaskAuditEvent.create.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps external task evidence links outside the attachment binding flow', async () => {
+    const { service, staffAttachmentBindingsService, tx } =
+      createService('OPEN');
+
+    await expect(
+      service.createTaskComment(
+        actor(UserRole.CLUB_MANAGER, 'manager-1'),
+        'task-1',
+        {
+          evidenceUrl: 'https://evidence.example/photo.jpg',
+        },
+      ),
+    ).resolves.toMatchObject({ id: 'task-1' });
+
+    expect(tx.staffTaskComment.create.mock.calls[0]?.[0].data).toMatchObject({
+      evidenceUrl: 'https://evidence.example/photo.jpg',
+    });
+    expect(
+      staffAttachmentBindingsService.bindPendingResourceAttachments,
+    ).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '/staff/attachments/attachment-1',
+    '/api/staff/attachments/attachment-1',
+    'https://leetplus.ru/api/staff/attachments/attachment-1',
+  ])('rejects an unbound internal evidence link: %s', async (evidenceUrl) => {
+    const { prisma, service } = createService('OPEN');
+
+    await expect(
+      service.createTaskComment(
+        actor(UserRole.CLUB_MANAGER, 'manager-1'),
+        'task-1',
+        { evidenceUrl },
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects more than one attachment for the scalar task evidence field', async () => {
+    const { prisma, service } = createService('OPEN');
+
+    await expect(
+      service.createTaskComment(
+        actor(UserRole.CLUB_MANAGER, 'manager-1'),
+        'task-1',
+        {
+          attachmentIds: ['attachment-1', 'attachment-2'],
+        },
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not write the audit event when attachment binding fails', async () => {
+    const { service, staffAttachmentBindingsService, tx } =
+      createService('OPEN');
+    staffAttachmentBindingsService.bindPendingResourceAttachments.mockRejectedValueOnce(
+      new BadRequestException('Attachment is not available'),
+    );
+
+    await expect(
+      service.createTaskComment(
+        actor(UserRole.CLUB_MANAGER, 'manager-1'),
+        'task-1',
+        {
+          attachmentIds: ['attachment-1'],
+        },
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(tx.staffTaskComment.create).toHaveBeenCalled();
+    expect(tx.staffTaskAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rechecks task scope after the parent row lock before binding evidence', async () => {
+    const { service, staffAttachmentBindingsService, tx } =
+      createService('OPEN');
+    tx.staffTask.findFirst
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        storeId: null,
+        shiftId: null,
+        status: 'OPEN',
+        assignedToUserId: 'admin-1',
+        labels: null,
+      })
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.createTaskComment(
+        actor(UserRole.CLUB_MANAGER, 'manager-1'),
+        'task-1',
+        {
+          body: 'Must not survive a scope change',
+          attachmentIds: ['attachment-1'],
+        },
+      ),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.staffTaskComment.create).not.toHaveBeenCalled();
+    expect(tx.staffTaskAuditEvent.create).not.toHaveBeenCalled();
+    expect(
+      staffAttachmentBindingsService.bindPendingResourceAttachments,
+    ).not.toHaveBeenCalled();
   });
 });

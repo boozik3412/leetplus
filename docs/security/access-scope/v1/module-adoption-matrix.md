@@ -3,7 +3,7 @@
 | Поле | Значение |
 |---|---|
 | Статус | Active |
-| Версия | 1.1.0 |
+| Версия | 1.3.0 |
 | Дата | 27.07.2026 |
 | Владелец | LeetPlus engineering |
 
@@ -29,6 +29,7 @@ capability, entitlement, PII, audit event, owner, test и release SHA.
 | IAM-02 | invites / accept | create/update/cancel/accept, `USER_STAFF` | email-bound opaque token; rotate on update; exact scope; CAS accept/update/cancel | unit; PG accept/CAS + 100-way concurrency pending | IMPLEMENTED_CANDIDATE |
 | IAM-03 | custom/system roles | list/mutation, `TENANT_GLOBAL` | read safe projection; mutation NETWORK; effective capabilities cannot exceed actor | unit; audit/browser pending | IMPLEMENTED_CANDIDATE |
 | STAFF-01A | staff directory scoped core | list/summary/options/detail/active shifts/create/update, `USER_STAFF` | rows and current/next stores must be inside actor scope; null/network staff, cross-store move and Langame identity mutation require NETWORK; STORES Langame detail is suppressed; update uses scope CAS | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; PG/API/browser/PII/backfill evidence pending | IMPLEMENTED_CANDIDATE |
+| STAFF-02A | staff task scoped core and evidence | task list/summary/quick views/groups/export/direct create/update/comment/status plus `STAFF_TASK` file parent | persisted scope filters rows before totals/export; denied filter is `403`, hidden UUID is `404`; STORES null-task structural patch is denied; participant scope is exact/subset and store-compatible; mutation locks/rechecks parent and final participants through the transaction client; create starts OPEN; assignment labels are server-owned; evidence bind is atomic and strict file read repeats live task ACL | working candidate, exact SHA pending; focused 21 suites/302 tests, task 63 tests, full API 74 suites/1 526 pass/2 todo, API build and web webpack build pass; clean 155-migration attachment smoke and real PG A1→A2/rollback 3 tests pass; reference-row serialization/task-shift DB invariant, recurring/templates, revoke, BFF/browser pending | IMPLEMENTED_CANDIDATE |
 | STAFF-ATT-01A | attachment response/content hardening | API/BFF download response | private/no-store + nosniff; safe inline allow-list; active/unknown content forced to attachment | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; header/content unit in focused 16 suites/191 tests; ACL/backfill/file IDOR pending | IMPLEMENTED_CANDIDATE |
 | COMMS-01A | team-chat scoped core | channel list/report/direct/live; message list/count/latest/unread/read/create/update; SSE reconnect | allowed store predicate is authoritative; filter cannot widen; STORES requires membership for CUSTOM; reconnect re-authenticates | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; membership lifecycle/mentions, old-message reconciliation, API/browser/SSE pending | IMPLEMENTED_CANDIDATE |
 | COMMS-02A | staff notifications actor core | list/summary/options/acknowledge/resolve/interactive sync | store rows filtered before response/mutation; direct deny `404`; tenant-wide interactive sync NETWORK-only | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; system producer context + PG/API/jobs pending | IMPLEMENTED_CANDIDATE |
@@ -78,6 +79,12 @@ PII-флагом, audit event, именами тестов, owner и release SHA
 
 ## Changelog
 
+- `1.3.0` — final participant/shift checks используют transaction client;
+  evidence обновлено до task 63, focused 302 и full API 1 526 passed; DB
+  serialization reference rows остаётся pending.
+- `1.2.0` — добавлен bounded `STAFF_TASK` scope/evidence candidate с
+  transaction-client parent recheck и real PostgreSQL race/rollback evidence;
+  templates/recurring, task/shift DB invariant и browser остаются pending.
 - `1.1.0` — добавлен bounded implementation checkpoint для directory,
   notifications, team-chat core и безопасной выдачи attachments; широкие
   модульные строки и release decision не повышены.

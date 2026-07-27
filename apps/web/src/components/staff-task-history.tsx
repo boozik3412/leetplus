@@ -9,13 +9,14 @@ import {
 import type { AuthUser } from "@/lib/auth";
 import type { StaffTask, StaffTaskStatus } from "@/lib/staff-tasks";
 
-const baseStatusOptions: Array<{ value: StaffTaskStatus | ""; label: string }> = [
-  { value: "", label: "Оставить текущий статус" },
-  { value: "IN_PROGRESS", label: "Перевести в работу" },
-  { value: "ON_REVIEW", label: "Передать на проверку" },
-  { value: "DONE", label: "Отметить готово" },
-  { value: "CANCELED", label: "Отменить" },
-];
+const baseStatusOptions: Array<{ value: StaffTaskStatus | ""; label: string }> =
+  [
+    { value: "", label: "Оставить текущий статус" },
+    { value: "IN_PROGRESS", label: "Перевести в работу" },
+    { value: "ON_REVIEW", label: "Передать на проверку" },
+    { value: "DONE", label: "Отметить готово" },
+    { value: "CANCELED", label: "Отменить" },
+  ];
 
 const reviewerRoles = new Set<AuthUser["role"]>([
   "OWNER",
@@ -46,6 +47,13 @@ const auditLabels: Record<string, string> = {
   EVIDENCE_ADDED: "Доказательство",
 };
 
+const legacyStaffAttachmentPath = /^\/staff\/attachments\/([^/?#]+)$/;
+
+type PendingEvidenceAttachment = {
+  id: string;
+  url: string;
+};
+
 function evidenceTypeFromAttachment(attachment: StaffAttachmentUploadResult) {
   if (attachment.contentType.startsWith("image/")) {
     return "PHOTO";
@@ -64,6 +72,14 @@ function evidenceTypeFromAttachment(attachment: StaffAttachmentUploadResult) {
   }
 
   return "OTHER";
+}
+
+function resolveEvidenceHref(value: string) {
+  const match = legacyStaffAttachmentPath.exec(value);
+
+  return match
+    ? `/api/staff/attachments/${encodeURIComponent(match[1])}`
+    : value;
 }
 
 function formatDateTime(value: string) {
@@ -149,7 +165,9 @@ function canMoveTask(
 function canCancelTask(
   currentUser: Pick<AuthUser, "role" | "isPlatformAdmin">,
 ) {
-  return currentUser.isPlatformAdmin || statusManagerRoles.has(currentUser.role);
+  return (
+    currentUser.isPlatformAdmin || statusManagerRoles.has(currentUser.role)
+  );
 }
 
 export function StaffTaskHistory({
@@ -165,6 +183,8 @@ export function StaffTaskHistory({
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [evidenceLabel, setEvidenceLabel] = useState("");
   const [evidenceType, setEvidenceType] = useState("LINK");
+  const [pendingEvidenceAttachment, setPendingEvidenceAttachment] =
+    useState<PendingEvidenceAttachment | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -187,6 +207,9 @@ export function StaffTaskHistory({
       evidenceType: String(form.get("evidenceType") ?? "").trim() || null,
       evidenceLabel: String(form.get("evidenceLabel") ?? "").trim() || null,
       status: status || undefined,
+      ...(pendingEvidenceAttachment?.url === evidenceUrl
+        ? { attachmentIds: [pendingEvidenceAttachment.id] }
+        : {}),
     };
 
     try {
@@ -200,15 +223,14 @@ export function StaffTaskHistory({
         const data = (await response.json().catch(() => null)) as {
           message?: string;
         } | null;
-        throw new Error(
-          data?.message ?? "Не удалось добавить подтверждение",
-        );
+        throw new Error(data?.message ?? "Не удалось добавить подтверждение");
       }
 
       event.currentTarget.reset();
       setEvidenceUrl("");
       setEvidenceLabel("");
       setEvidenceType("LINK");
+      setPendingEvidenceAttachment(null);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Ошибка запроса");
@@ -250,10 +272,14 @@ export function StaffTaskHistory({
               </span>
               <input
                 name="evidenceUrl"
-                type="url"
+                type="text"
+                inputMode="url"
                 value={evidenceUrl}
-                onChange={(event) => setEvidenceUrl(event.target.value)}
-                placeholder="https://..."
+                onChange={(event) => {
+                  setEvidenceUrl(event.target.value);
+                  setPendingEvidenceAttachment(null);
+                }}
+                placeholder="https://... или /staff/attachments/..."
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
               <StaffAttachmentUpload
@@ -261,6 +287,10 @@ export function StaffTaskHistory({
                 buttonLabel="Загрузить файл"
                 onUploaded={(attachment) => {
                   setEvidenceUrl(attachment.url);
+                  setPendingEvidenceAttachment({
+                    id: attachment.id,
+                    url: attachment.url,
+                  });
                   setEvidenceLabel((current) => current || attachment.fileName);
                   setEvidenceType(evidenceTypeFromAttachment(attachment));
                 }}
@@ -362,7 +392,7 @@ export function StaffTaskHistory({
                     ) : null}
                     {comment.evidenceUrl ? (
                       <a
-                        href={comment.evidenceUrl}
+                        href={resolveEvidenceHref(comment.evidenceUrl)}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-2 inline-flex text-xs font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
@@ -395,7 +425,8 @@ export function StaffTaskHistory({
                     <p className="mt-0.5 text-zinc-500">{event.message}</p>
                   ) : null}
                   <p className="mt-0.5 text-zinc-500">
-                    {userName(event.actorUser)} · {formatDateTime(event.createdAt)}
+                    {userName(event.actorUser)} ·{" "}
+                    {formatDateTime(event.createdAt)}
                   </p>
                 </div>
               ))}

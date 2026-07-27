@@ -14,6 +14,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { StaffTeamChatService } from './staff-team-chat.service';
+import { StaffTasksService } from './staff-tasks.service';
 
 export const STAFF_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 export const STAFF_ATTACHMENT_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -65,6 +66,7 @@ export class StaffAttachmentsService {
     private readonly configService: ConfigService,
     private readonly tenantContextService: TenantContextService,
     private readonly staffTeamChatService: StaffTeamChatService,
+    private readonly staffTasksService: StaffTasksService,
   ) {}
 
   async createAttachment(
@@ -261,11 +263,26 @@ export class StaffAttachmentsService {
       .filter((binding) => binding.resourceKind === 'CHAT_MESSAGE')
       .map((binding) => binding.resourceId);
 
-    return this.staffTeamChatService.canReadAnyAttachmentMessage(
-      user,
-      messageIds,
-      tx,
-    );
+    if (
+      messageIds.length > 0 &&
+      (await this.staffTeamChatService.canReadAnyAttachmentMessage(
+        user,
+        messageIds,
+        tx,
+      ))
+    ) {
+      return true;
+    }
+
+    const taskIds = metadata.bindings
+      .filter((binding) => binding.resourceKind === 'STAFF_TASK')
+      .map((binding) => binding.resourceId);
+
+    if (taskIds.length === 0) {
+      return false;
+    }
+
+    return this.staffTasksService.canReadAnyAttachmentTask(user, taskIds, tx);
   }
 
   private logShadowMismatch(

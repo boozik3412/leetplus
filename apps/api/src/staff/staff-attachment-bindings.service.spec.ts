@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { StaffAttachmentResourceKind, type Prisma } from '@prisma/client';
 import { StaffAttachmentBindingsService } from './staff-attachment-bindings.service';
 
 const now = new Date('2026-07-27T12:00:00.000Z');
@@ -138,6 +138,37 @@ describe('StaffAttachmentBindingsService', () => {
         stateChangedAt: now,
       },
     });
+  });
+
+  it('binds a non-chat parent without creating the legacy chat relation', async () => {
+    const rows = [
+      {
+        id: 'attachment-1',
+        tenantId: 'tenant-a',
+        uploadedByUserId: 'user-a',
+        state: 'PENDING',
+        pendingExpiresAt: new Date(now.getTime() + 60_000),
+      },
+    ];
+    const { service, tx, mocks, getBindingCreateArgs } = createHarness(rows);
+
+    await service.bindPendingResourceAttachments(tx, {
+      tenantId: 'tenant-a',
+      actorUserId: 'user-a',
+      resourceKind: StaffAttachmentResourceKind.STAFF_TASK,
+      resourceId: 'task-a',
+      attachmentIds: ['attachment-1'],
+    });
+
+    expect(mocks.staffChatMessageAttachment.createMany).not.toHaveBeenCalled();
+    expect(getBindingCreateArgs()?.data[0]).toMatchObject({
+      tenantId: 'tenant-a',
+      attachmentId: 'attachment-1',
+      resourceKind: 'STAFF_TASK',
+      resourceId: 'task-a',
+      source: 'NATIVE',
+    });
+    expect(mocks.staffAttachment.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it.each([

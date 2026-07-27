@@ -1,10 +1,12 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.8
+- Версия: 1.12
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
+- Пакет документации запуска:
+  [docs/open-beta](./docs/open-beta/README.md)
 - Канонический AccessScope package:
   [docs/security/access-scope](./docs/security/access-scope/README.md)
 
@@ -247,7 +249,7 @@
 |---|---|---|---|---|---|
 | BETA-MOD-STAFF-001 | P0 | Запланировано | Провести полный route/action inventory staff | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом | BETA-TEN-002, BETA-IAM-001 |
 | BETA-MOD-STAFF-002 | P0 | Запланировано | Закрыть directory и identity mapping | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются | BETA-SEC-006, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-003 | P0 | Запланировано | Закрыть задачи, templates и recurring rules | Создание, назначение, комментарии, evidence, статусы и recurring generation соблюдают role/store scope; повтор scheduler не создаёт дублей | BETA-OPS-008, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-003 | P0 | В работе | Закрыть задачи, templates и recurring rules | Direct task candidate применяет persisted `AccessScope`, server-owned assignment metadata, parent lock/recheck и atomic evidence bind; full API/build и real PG A1→A2/rollback зелёные. До `Готово` остаются templates/recurring/background по `staff-task-catalog-adoption-plan.md`, task/shift DB invariant, revoke и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
 | BETA-MOD-STAFF-004 | P0 | Запланировано | Закрыть shift workspace и shift reports | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope | BETA-MOD-STAFF-002, BETA-IAM-002 |
 | BETA-MOD-STAFF-005 | P0 | Запланировано | Закрыть регламенты и чек-листы | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема | BETA-MOD-STAFF-001 |
 | BETA-MOD-STAFF-006 | P0 | Запланировано | Закрыть знания, обучение и аттестации | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены | BETA-MOD-STAFF-001, BETA-IAM-002 |
@@ -432,7 +434,7 @@ tenant:
 Candidate второго прикладного среза:
 `764a9d7d7d5712e0283e0fca787a75829f95a240` (не deployed).
 
-Проверки candidate:
+Проверки предыдущего attachment baseline до `STAFF_TASK`-изменений:
 
 - focused security/API: 16/16 suites, 191/191 tests — pass;
 - full API: 70/70 suites, 1 432 passed, 2 todo, 1 434 total — pass;
@@ -565,11 +567,13 @@ Candidate не deployed, exact release SHA будет назначен посл�
 
 P0 остаётся `В работе`:
 
-- strict reader реализован только для `CHAT_MESSAGE`; shift report использует
-  этот parent;
-- `STAFF_TASK`, `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`,
-  `SHIFT_REGULATION`, `TRAINING_COURSE`, `ONBOARDING_PLAN` имеют schema и
-  inventory coverage, но их producer bind и authoritative reader pending;
+- strict reader реализован для `CHAT_MESSAGE`; shift report использует этот
+  parent. `STAFF_TASK` transactional bind и strict reader добавлены следующим
+  candidate; focused/full API, API/web builds, PostgreSQL smoke и real task
+  race/rollback integration пройдены;
+- `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`,
+  `TRAINING_COURSE`, `ONBOARDING_PLAN` имеют schema и inventory coverage, но их
+  producer bind и authoritative reader pending;
 - apply-backfill/reconciliation command, production-like inventory текущего
   tenant, manual quarantine resolution, retention/delete/revoke,
   tenant/store canary orchestration, mismatch aggregate gate и full
@@ -587,6 +591,77 @@ exact failed Prisma migration помечается rolled back и повторя
 runbook находится в attachment checkpoint.
 
 Release decision остаётся `NO-GO`.
+
+### 5.16. `STAFF_TASK` parent adoption candidate — 27.07.2026
+
+Следующий P0-срез реализован в рабочем candidate и проходит проверку:
+
+- task list, quick/summary/groups и export используют один persisted
+  `AccessScope`;
+- explicit запрещённый store filter отклоняется, а direct update/comment по
+  скрытому UUID маскируется как `404`;
+- для `STORES` store-bound task доступна только в `allowedStoreIds`, а
+  null-store task — только exact assignee или нормализованному observer;
+- participant target берётся только из authoritative persisted store scope:
+  для `STORES` это подмножество разрешённых actor stores с обязательным
+  доступом к конкретному task store; platform admins исключены из selector и
+  assignment;
+- direct create требует один store у task и assigned shift, а direct update
+  повторяет application-level equality check через transaction client после
+  parent lock; read fail-closed скрывает shift вне `allowedStoreIds`;
+- create/update не могут назначить store вне scope; `STORES` не может делать
+  structural PATCH null-store task, однако exact assignee/observer может
+  комментировать такую задачу и выполнять разрешённые self-service status
+  transitions;
+- manager-only status transitions требуют `manage_staff_tasks`; role без этой
+  capability не получает управляющие полномочия;
+- обычный create допускает только `OPEN`; assignment labels принадлежат серверу,
+  grouped task нельзя переназначить single-assignee PATCH, а candidate
+  `ANY_OF` нельзя удалить из observers;
+- update/comment берут row lock на parent task и после lock повторяют visibility,
+  store/shift/final-participant и status checks через transaction client;
+- freshly uploaded task evidence передаётся как `attachmentIds`, а canonical
+  internal URL без binding не принимается как новое полномочие;
+- task comment и `STAFF_TASK` binding создаются в одной транзакции; binder
+  повторно проверяет tenant, uploader, lifecycle и TTL;
+- strict attachment reader перечитывает live task и применяет тот же
+  tenant/store/assignee/observer predicate и capability;
+- web хранит ID только свежего upload текущей формы; ручное изменение URL
+  сбрасывает pending binding intent.
+
+Проверки финального task candidate:
+
+- focused CI: 21 suite, 302 tests — pass;
+- task service/access-scope tests: 63 tests — pass;
+- full API: 74 suite, 1 526 passed, 2 todo, 1 528 total — pass;
+- API boundary lint, production typecheck и build — pass;
+- web lint (0 errors, 30 existing warnings), typecheck и webpack production
+  build (203 pages) — pass;
+- clean PostgreSQL: 155 migrations и attachment ACL smoke с реальным
+  `STAFF_TASK` binding/derived store — pass;
+- real PostgreSQL task security: A1→A2 race и два transactional rollback —
+  3/3 pass; временные schema удалены.
+
+Это `IMPLEMENTED_CANDIDATE`, а не закрытие `BETA-MOD-STAFF-003` или
+`BETA-MOD-STAFF-009`. Открыты revoke/delete semantics, production-like A1/A2/B
+API/BFF/browser/file integration, templates/recurring/background paths и
+DB/inventory invariant для legacy task/shift mismatch внутри двух разрешённых
+stores. Обычный transaction-client recheck ещё не сериализует конкурентное
+изменение `GuestWorkingShift.storeId`, `User` или `UserStoreAccess`: до
+DB-контракта либо согласованных reference-row locks это остаётся P1 и не
+считается постоянным инвариантом. Route/job inventory templates/recurring
+зафиксирован в
+`docs/security/access-scope/v1/staff-task-catalog-adoption-plan.md`. Остальные parent kinds
+`CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`, `TRAINING_COURSE` и
+`ONBOARDING_PLAN` ещё не adopted.
+
+Топология и состав первой когорты неизменны: четыре текущих клуба являются
+четырьмя `Store` одного `Tenant`; первый beta tenant получает полные модули
+геймификации, ассортимента/товаров, сотрудников, in-app коммуникаций и
+users/roles только в пределах собственного tenant и разрешённых clubs.
+
+Release decision остаётся `NO-GO` до завершения остальных parent kinds,
+inventory/backfill/reconciliation, activation/operations gates и полного Gate 2.
 
 ## 6. Release gates
 
@@ -645,9 +720,12 @@ Release decision остаётся `NO-GO`.
 4. Запустить read-only attachment inventory, затем реализовать отдельный
    idempotent apply/backfill/reconciliation tool с explicit apply,
    quarantine и повторным zero-diff dry-run.
-5. Завершить attachment parent adoption в порядке:
-   `STAFF_TASK → CHECKLIST_RUN → KNOWLEDGE_ARTICLE/SHIFT_REGULATION →
-   TRAINING_COURSE/ONBOARDING_PLAN`; для каждого добавить atomic bind, live
+5. Реализовать AccessScope и безопасную materialization для
+   task templates/recurring/scheduler по отдельному adoption plan; добавить
+   task/shift DB invariant + legacy inventory, revoke/delete и полную
+   production-like A1/A2/B API/BFF/browser/file evidence; затем продолжить
+   parent adoption в порядке `CHECKLIST_RUN → KNOWLEDGE_ARTICLE/SHIFT_REGULATION →
+   TRAINING_COURSE/ONBOARDING_PLAN`, для каждого добавляя atomic bind, live
    parent ACL, revoke и A1/A2/B tests.
 6. Использовать реализованный process-wide `SHADOW` для mismatch evidence,
    добавить tenant/store canary orchestration и aggregate gate, затем включить

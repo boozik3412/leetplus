@@ -24,6 +24,7 @@ const storeIds = [];
 const userIds = [];
 const channelIds = [];
 const messageIds = [];
+const taskIds = [];
 const attachmentIds = [];
 const bindingIds = [];
 
@@ -228,6 +229,17 @@ try {
   });
   messageIds.push(messageB.id);
 
+  const taskA = await prisma.staffTask.create({
+    data: {
+      tenantId: tenantA.id,
+      storeId: storeA.id,
+      createdByUserId: userA.id,
+      assignedToUserId: userA.id,
+      title: 'Attachment ACL task smoke A',
+    },
+  });
+  taskIds.push(taskA.id);
+
   const pendingAttachment = await prisma.staffAttachment.create({
     data: {
       tenantId: tenantA.id,
@@ -370,6 +382,64 @@ try {
       boundAttachment.bindings.length === 1 &&
       boundAttachment.bindings[0]?.resourceStoreId === storeA.id,
     'Atomic bind must derive the parent store and finish in BOUND state.',
+  );
+
+  const taskPendingAttachment = await prisma.staffAttachment.create({
+    data: {
+      tenantId: tenantA.id,
+      uploadedByUserId: userA.id,
+      fileName: 'attachment-acl-task-smoke.txt',
+      contentType: 'text/plain',
+      byteSize: 4,
+      data: Uint8Array.from(Buffer.from('task')),
+      state: 'PENDING',
+      pendingExpiresAt: new Date(Date.now() + 60_000),
+      stateReasonCode: null,
+    },
+  });
+  attachmentIds.push(taskPendingAttachment.id);
+  const taskBindingId = randomUUID();
+  bindingIds.push(taskBindingId);
+
+  await prisma.$transaction(async (transaction) => {
+    await transaction.staffAttachmentBinding.create({
+      data: {
+        id: taskBindingId,
+        tenantId: tenantA.id,
+        attachmentId: taskPendingAttachment.id,
+        candidateAttachmentId: taskPendingAttachment.id,
+        resourceKind: 'STAFF_TASK',
+        resourceId: taskA.id,
+        state: 'BOUND',
+        source: 'NATIVE',
+        sourceKey: sourceKey(`native-task:${fixtureId}`),
+        createdByUserId: userA.id,
+        resolvedAt: new Date(),
+      },
+    });
+    await transaction.staffAttachment.update({
+      where: { id: taskPendingAttachment.id },
+      data: {
+        state: 'BOUND',
+        pendingExpiresAt: null,
+        stateReasonCode: null,
+        stateChangedAt: new Date(),
+      },
+    });
+  });
+
+  const taskBoundAttachment =
+    await prisma.staffAttachment.findUniqueOrThrow({
+      where: { id: taskPendingAttachment.id },
+      include: { bindings: true },
+    });
+  assert(
+    taskBoundAttachment.state === 'BOUND' &&
+      taskBoundAttachment.bindings.length === 1 &&
+      taskBoundAttachment.bindings[0]?.resourceKind === 'STAFF_TASK' &&
+      taskBoundAttachment.bindings[0]?.resourceId === taskA.id &&
+      taskBoundAttachment.bindings[0]?.resourceStoreId === storeA.id,
+    'STAFF_TASK bind must resolve the live task parent and derive its store.',
   );
 
   await expectConstraintFailure(
@@ -535,7 +605,7 @@ try {
   });
 
   console.log(
-    'Staff attachment ACL PostgreSQL smoke passed: fail-closed defaults, lifecycle shapes, valid concurrent indexes, same-tenant parent/blob checks, deferred atomic bind, tenant mutation rejection, serialized concurrent delete, derived store snapshot, and quarantine transition are enforced.',
+    'Staff attachment ACL PostgreSQL smoke passed: fail-closed defaults, lifecycle shapes, valid concurrent indexes, same-tenant parent/blob checks, deferred chat/task atomic bind, tenant mutation rejection, serialized concurrent delete, derived store snapshot, and quarantine transition are enforced.',
   );
 } finally {
   if (bindingIds.length > 0 && attachmentIds.length > 0) {
@@ -573,6 +643,11 @@ try {
   if (messageIds.length > 0) {
     await prisma.staffChatMessage.deleteMany({
       where: { id: { in: messageIds } },
+    });
+  }
+  if (taskIds.length > 0) {
+    await prisma.staffTask.deleteMany({
+      where: { id: { in: taskIds } },
     });
   }
   if (channelIds.length > 0) {

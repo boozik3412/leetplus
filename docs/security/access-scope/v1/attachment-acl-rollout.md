@@ -2,8 +2,8 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | `IMPLEMENTED_CANDIDATE` / rollout modes + EXPAND + partial dual-write |
-| Версия | 0.3.0 |
+| Статус | `IMPLEMENTED_CANDIDATE` / rollout modes + EXPAND + chat/task parent adoption |
+| Версия | 0.7.0 |
 | Дата | 27.07.2026 |
 | Владелец | LeetPlus engineering |
 | Backlog | `BETA-MOD-STAFF-009`, `BETA-MOD-COMMS-002`, `BETA-SEC-006` |
@@ -22,6 +22,12 @@
 legacy blobs после EXPAND имеют состояние `UNRESOLVED` и будут корректно
 закрыты через `404`. `LEGACY` и `SHADOW` предназначены только для внутреннего
 перехода; внешний beta в этих режимах запрещён.
+
+Зафиксированная launch topology: четыре текущих клуба являются четырьмя
+`Store` одного `Tenant`. После прохождения gates первый beta tenant получает
+полные модули геймификации, ассортимента/товаров, сотрудников, in-app
+коммуникаций и users/roles, но только в пределах собственного tenant и
+persisted `NETWORK | allowed STORES`.
 
 ## 1. Проблема и цель
 
@@ -54,7 +60,7 @@ download по `attachment.id + tenantId` допускает same-tenant IDOR: п
 | Resource kind | Канонический parent | Текущий источник ссылки | Авторитетная политика | Статус checkpoint |
 |---|---|---|---|---|
 | `CHAT_MESSAGE` | `StaffChatMessage` | `StaffChatMessageAttachment` | channel scope, message audience, membership, live `AccessScope`, communications/reward capability | Реализованы native bind и strict parent reader |
-| `STAFF_TASK` | `StaffTask` | comment `evidenceUrl` | task store/personal assignment/observer policy, `view_staff_tasks` | Schema + inventory; producer/reader pending |
+| `STAFF_TASK` | `StaffTask` | comment `evidenceUrl` + `attachmentIds` | persisted participant scope, transaction-client task/shift recheck, `view_staff_tasks`; manager status — `manage_staff_tasks` | Реализован candidate: scoped reads/mutations, parent row-lock recheck, transactional bind, strict parent reader и real PG race/rollback; reference-row serialization/DB invariant, revoke и browser pending |
 | `CHECKLIST_RUN` | `StaffChecklistRun` | `answers`, review JSON | run store или явное personal assignment, `view_staff_standards` | Schema + secondary inventory; producer/reader pending |
 | `KNOWLEDGE_ARTICLE` | `StaffKnowledgeArticle` | current/version `materials`, внутренние ссылки content | store, status, roleScope, knowledge capability | Schema + secondary inventory; producer/reader pending |
 | `SHIFT_REGULATION` | `StaffShiftRegulation` | current/version `attachments` | store, status, roleScope, standards capability | Schema + secondary inventory; producer/reader pending |
@@ -158,6 +164,11 @@ Bind выполняется только внутри транзакции из�
 повторно привязать уже `BOUND` UUID к новой audience; для этого нужен
 отдельный network-level audited workflow либо новый upload/clone.
 
+Для task evidence authoritative intent передаётся как ID только свежего upload.
+Server формирует canonical `/staff/attachments/<id>`, создаёт comment и
+`STAFF_TASK` binding в одной транзакции. Произвольный internal attachment URL
+без `attachmentIds` не создаёт binding и не расширяет доступ.
+
 ## 5. Download authorization
 
 Process-wide `STAFF_ATTACHMENT_ACL_MODE` управляет только download decision и
@@ -221,6 +232,24 @@ direct UUID после прохождения этой границы — `404`.
 - Null-store task для `STORES` доступна только exact assignee или
   нормализованному observer.
 - Creator и строка в JSON не расширяют доступ.
+- В рабочем candidate этот predicate применяется к task list/export/direct
+  paths и повторно используется strict attachment reader.
+- Participant target не выводится из staff profile или client payload:
+  authoritative source — persisted `STORES` subset пользователя и конкретный
+  task store; platform admins исключены.
+- Direct create требует один store у task и assigned shift. Direct update
+  проверяет equality до и повторно после parent lock. Read fail-closed скрывает
+  shift вне actor `allowedStoreIds`.
+- `STORES` не может выполнять structural PATCH null-store task. Exact
+  assignee/observer сохраняет comment и разрешённые self-service status
+  transitions, но не получает structural или network-level полномочия.
+- Managerial approve/cancel/return/status actions требуют
+  `manage_staff_tasks`; одной manager-like role недостаточно.
+- Update и comment берут row lock на top-level task и после lock повторяют
+  visibility, store/shift/participant и status checks.
+- Legacy A-task/B-shift остаётся возможным для multi-store actor, если оба store
+  разрешены: DB/read equality invariant и inventory такого mismatch ещё
+  pending и не могут считаться закрытыми текущим API candidate.
 
 ### Checklist run
 
@@ -326,20 +355,26 @@ pnpm --filter database db:deploy
 
 ### Phase B — dual-write
 
-- Статус checkpoint: частично реализовано для chat и новых shift-report
-  uploads; process-wide runtime modes и safe shadow mismatch реализованы,
-  application не deployed.
+- Статус checkpoint: реализовано для chat, новых shift-report uploads и нового
+  task-comment evidence; process-wide runtime modes и safe shadow mismatch
+  реализованы, application не deployed.
 - Все новые uploads создаются `PENDING`.
-- Chat и shift reports транзакционно создают legacy link и binding.
+- Chat, shift reports и task comments транзакционно создают legacy
+  representation и binding.
 - В `SHADOW` вычислять strict decision и логировать безопасный mismatch без
   изменения legacy response или lifecycle.
 
 ### Phase C — parent adoption
 
-- Статус checkpoint: `CHAT_MESSAGE` реализован; `STAFF_TASK`,
-  `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`,
-  `TRAINING_COURSE`, `ONBOARDING_PLAN` pending.
-- Применить `AccessScope` к tasks, checklists, knowledge и regulations.
+- Статус checkpoint: `CHAT_MESSAGE` реализован; `STAFF_TASK` list/export/direct
+  scope, authoritative participant validation, transaction-client shift
+  recheck после parent lock, comment
+  evidence bind и strict reader реализованы как candidate; focused/DB checks
+  пройдены. `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`,
+  `SHIFT_REGULATION`, `TRAINING_COURSE`, `ONBOARDING_PLAN` pending.
+- Завершить task templates/recurring/background paths и применить
+  `AccessScope` к checklists, knowledge и regulations.
+- Добавить DB invariant и legacy inventory для task/shift store equality.
 - Подключить bind к каждой parent mutation.
 - Запустить dry-run scanner и исправить producer paths.
 
@@ -430,12 +465,21 @@ Scanner contract дополнительно проверяет `--self-test`, е
 `REPEATABLE READ` snapshot и secondary sources chat body, task
 description/checklist и checklist answers.
 
-Текущий candidate прошёл 19 focused suites / 230 tests, 73 full API suites /
-1 471 passed + 2 todo, API lint/typecheck/build, web typecheck/build/lint,
-clean-schema deploy всех 155 migrations, AccessScope и attachment PostgreSQL
-smoke, включая реальную concurrent-delete гонку, и read-only inventory на
-пустой schema. Это не закрывает pending проверки остальных parent kinds,
-production-like inventory, BFF/browser suite и canary.
+Финальный `STAFF_TASK` candidate прошёл:
+
+- focused CI: 21 suite / 302 tests;
+- task service/access-scope: 63 tests;
+- full API: 74 suite / 1 526 passed / 2 todo;
+- API boundary lint, production typecheck и production build;
+- web lint, typecheck и webpack production build, 203 pages;
+- clean PostgreSQL deploy всех 155 migrations и attachment ACL smoke с
+  реальным `STAFF_TASK` binding и проверкой derived store; временная schema
+  удалена;
+- real PostgreSQL task security integration: A1→A2 race, foreign-uploader
+  rollback и expired rollback — 3/3; временная schema удалена.
+
+Pending: полная production-like A1/A2/B API/BFF/browser/file integration,
+revoke/delete, остальные parent kinds, inventory/backfill и canary.
 
 ## 11. Activation gates
 
@@ -457,4 +501,26 @@ production-like inventory, BFF/browser suite и canary.
 
 В особенности нельзя объединять schema EXPAND и `ENFORCED` application в один
 auto-deploy: legacy blobs имеют `UNRESOLVED`, а runtime reader пока поддерживает
-только `CHAT_MESSAGE`. Внешний beta запрещён как в `LEGACY`, так и в `SHADOW`.
+только adopted `CHAT_MESSAGE` и candidate `STAFF_TASK`; остальные parent kinds
+ещё pending. Внешний beta запрещён как в `LEGACY`, так и в `SHADOW`.
+
+## 12. Changelog
+
+- `0.7.0`, 27.07.2026 — final participants и shift повторно проверяются через
+  transaction client после parent lock; добавлены regression-тесты и явно
+  зафиксирован residual reference-row race до DB/write-contract hardening.
+- `0.6.0`, 27.07.2026 — task candidate прошёл full API и API/web production
+  builds; добавлены real PostgreSQL A1→A2/rollback evidence, OPEN-only create
+  и server-owned assignment labels.
+- `0.5.0`, 27.07.2026 — финализирован `STAFF_TASK` scope candidate:
+  authoritative participant policy, application-level task/shift recheck,
+  fail-closed structural mutations, parent row-lock/recheck, capability-gated
+  managerial status и подтверждённые focused/clean-PostgreSQL checks. Full
+  suite/build, legacy task/shift DB/read invariant, revoke/delete и real A1/A2
+  integration pending.
+- `0.4.0`, 27.07.2026 — зафиксирован `STAFF_TASK` adoption candidate:
+  persisted task scope для list/export/direct paths, transactional comment
+  evidence binding и strict task parent reader; verification, revoke и
+  production-like A1/A2/B evidence остаются открыты.
+- `0.3.0`, 27.07.2026 — добавлены process-wide rollout modes, safe shadow
+  semantics и единый RepeatableRead inventory snapshot.

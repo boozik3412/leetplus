@@ -1,11 +1,19 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, StaffAttachmentResourceKind } from '@prisma/client';
 import { createHash } from 'node:crypto';
 
 type BindPendingChatAttachmentsInput = {
   tenantId: string;
   actorUserId: string;
   messageId: string;
+  attachmentIds: readonly string[];
+};
+
+export type BindPendingResourceAttachmentsInput = {
+  tenantId: string;
+  actorUserId: string;
+  resourceKind: StaffAttachmentResourceKind;
+  resourceId: string;
   attachmentIds: readonly string[];
 };
 
@@ -23,7 +31,41 @@ export class StaffAttachmentBindingsService {
     tx: Prisma.TransactionClient,
     input: BindPendingChatAttachmentsInput,
   ) {
-    const attachmentIds = Array.from(new Set(input.attachmentIds));
+    await this.bindPendingResourceAttachmentsInternal(
+      tx,
+      {
+        tenantId: input.tenantId,
+        actorUserId: input.actorUserId,
+        resourceKind: StaffAttachmentResourceKind.CHAT_MESSAGE,
+        resourceId: input.messageId,
+        attachmentIds: input.attachmentIds,
+      },
+      async (attachmentIds) => {
+        await tx.staffChatMessageAttachment.createMany({
+          data: attachmentIds.map((attachmentId) => ({
+            tenantId: input.tenantId,
+            messageId: input.messageId,
+            attachmentId,
+          })),
+          skipDuplicates: true,
+        });
+      },
+    );
+  }
+
+  async bindPendingResourceAttachments(
+    tx: Prisma.TransactionClient,
+    input: BindPendingResourceAttachmentsInput,
+  ) {
+    await this.bindPendingResourceAttachmentsInternal(tx, input);
+  }
+
+  private async bindPendingResourceAttachmentsInternal(
+    tx: Prisma.TransactionClient,
+    input: BindPendingResourceAttachmentsInput,
+    beforeBinding?: (attachmentIds: readonly string[]) => Promise<void>,
+  ) {
+    const attachmentIds = Array.from(new Set(input.attachmentIds)).sort();
 
     if (attachmentIds.length === 0) {
       return;
@@ -60,26 +102,19 @@ export class StaffAttachmentBindingsService {
       throw new BadRequestException('Attachment is not available');
     }
 
-    await tx.staffChatMessageAttachment.createMany({
-      data: attachmentIds.map((attachmentId) => ({
-        tenantId: input.tenantId,
-        messageId: input.messageId,
-        attachmentId,
-      })),
-      skipDuplicates: true,
-    });
+    await beforeBinding?.(attachmentIds);
 
     await tx.staffAttachmentBinding.createMany({
       data: attachmentIds.map((attachmentId) => ({
         tenantId: input.tenantId,
         attachmentId,
         candidateAttachmentId: attachmentId,
-        resourceKind: 'CHAT_MESSAGE',
-        resourceId: input.messageId,
+        resourceKind: input.resourceKind,
+        resourceId: input.resourceId,
         state: 'BOUND',
         source: 'NATIVE',
         sourceKey: this.sourceKey(
-          `native:chat-message:${input.messageId}:attachment:${attachmentId}`,
+          `native:${input.resourceKind.toLowerCase()}:${input.resourceId}:attachment:${attachmentId}`,
         ),
         createdByUserId: input.actorUserId,
         resolvedAt: now,

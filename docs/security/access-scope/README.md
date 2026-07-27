@@ -3,14 +3,15 @@
 | Поле | Значение |
 |---|---|
 | Статус | Active |
-| Версия контракта | 1.2.0 |
+| Версия контракта | 1.6.0 |
 | Дата | 27.07.2026 |
 | Владелец | LeetPlus engineering |
 | Связанный backlog | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
 | Исходный baseline | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2` |
 | Schema-only candidate | `28724008192442c03f35fcc46ff7de78cdead642` — not deployed |
 | Strict application candidate | `df993a9d04fdb48809868555b0d040d52848e3ee` — not deployed |
-| Attachment ACL checkpoint | Working candidate, exact SHA pending — not deployed |
+| Attachment ACL baseline | `1207c63cacedba05937d4a96a03a8dfd11751d2e` — not deployed |
+| `STAFF_TASK` adoption | Working candidate, exact SHA pending — not deployed |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -52,13 +53,16 @@ invite-only открытому тесту. Она отвечает на вопр
 8. [ACL вложений: implementation checkpoint](./v1/attachment-acl-implementation-checkpoint.md) —
    фактически реализованные schema/runtime flows, 155 migrations, проверки,
    текущие ограничения и точные следующие шаги.
+9. [План templates/recurring tasks](./v1/staff-task-catalog-adoption-plan.md) —
+   route/action/job inventory, подтверждённые cross-store разрывы, безопасная
+   materialization policy и следующий implementation slice.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
 
 ## Текущая стадия
 
-`DESIGN ACCEPTED → IMPLEMENTED CANDIDATE / EXPAND + PARTIAL DUAL-WRITE`.
+`DESIGN ACCEPTED → IMPLEMENTED CANDIDATE / EXPAND + CHAT/TASK PARENT ADOPTION`.
 
 До завершения классификации существующих аккаунтов и модульной матрицы решение
 для внешнего доступа остаётся `NO-GO`. Отсутствующий или противоречивый scope
@@ -72,8 +76,20 @@ reader.
 
 Для attachment ACL schema candidate содержит 155 миграций, latest —
 `20260727113000_staff_attachment_acl_invariant_hardening`. Native bind и
-parent-aware reader реализованы для chat и новых shift-report uploads. Для
-`STAFF_TASK`, `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`,
+parent-aware reader реализованы для chat и новых shift-report uploads.
+`STAFF_TASK` list/export/direct scope, transactional comment evidence bind и
+strict parent reader реализованы как рабочий candidate. Participant targeting
+использует authoritative persisted store scope и конкретный task store,
+platform admins исключены. Direct create требует один store у task и shift, а
+direct update проверяет equality до и повторно после lock; read fail-closed
+скрывает shift вне actor `allowedStoreIds`. Structural PATCH null-store task
+для `STORES` запрещён, но exact assignee/observer сохраняет разрешённые
+comment/self-service status действия. Update/comment блокируют parent row и
+повторяют scope checks после lock; manager-only status требует
+`manage_staff_tasks`. Обычный create начинает task только в `OPEN`; assignment
+labels принадлежат серверу. Grouped/`ANY_OF` нельзя переназначить через
+single-assignee PATCH или лишить candidate observer membership.
+Для `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`,
 `TRAINING_COURSE`, `ONBOARDING_PLAN` producer/reader adoption остаётся pending.
 Read-only inventory реализован, apply-backfill отсутствует. Поэтому
 `STAFF_ATTACHMENT_ACL_MODE=ENFORCED` нельзя активировать до
@@ -93,6 +109,18 @@ snapshot transaction. Secondary review coverage включает chat body, task
 description/checklist, checklist answers и остальные rich-text/JSON sources;
 secondary copies не создают полномочий или automatic binding.
 
+Финальный task candidate прошёл focused CI 21 suite / 302 tests, включая 63
+task test, full API 74 suite / 1 526 passed / 2 todo, API boundary
+lint/typecheck/build, web lint/typecheck и webpack production build на 203
+страницы. Clean PostgreSQL прогон применил все 155 migrations; attachment
+smoke подтвердил реальный `STAFF_TASK` binding/derived store, а отдельная
+integration suite — A1→A2 scope race и два rollback-сценария, 3/3. Временные
+schema удалены.
+
+DB/read invariant для legacy A-task/B-shift, когда оба store входят в scope
+multi-store actor, ещё отсутствует. Его schema enforcement и inventory
+существующих mismatch являются отдельным обязательным evidence gap.
+
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
 геймификации, ассортимента, сотрудников, коммуникаций и users/roles только в
@@ -109,6 +137,21 @@ secondary copies не создают полномочий или automatic bindi
 
 ## Changelog
 
+- `1.6.0`, 27.07.2026 — final participant/business-policy checks переведены
+  на transaction client, добавлены два regression-теста и явно отделён
+  application recheck от ещё не реализованного reference-row/DB invariant.
+- `1.5.0`, 27.07.2026 — зафиксированы full API/build gates, real PostgreSQL
+  A1→A2/rollback integration, защита начального status и server-owned task
+  labels; добавлен inventory/план внедрения templates и recurring rules.
+- `1.4.0`, 27.07.2026 — уточнён финальный `STAFF_TASK` candidate: authoritative
+  participant scope, application-level task/shift recheck после parent lock,
+  fail-closed null-task mutations, capability-gated status transitions и
+  подтверждённые focused/DB проверки; full suite/build, legacy task/shift
+  invariant, revoke и real A1/A2 integration остаются открыты.
+- `1.3.0`, 27.07.2026 — зафиксирован `STAFF_TASK` adoption candidate:
+  persisted scope для task list/export/direct paths, transactional comment
+  evidence binding и strict task parent reader; verification/revoke и
+  production-like A1/A2/B evidence остаются открыты.
 - `1.2.0`, 27.07.2026 — зафиксированы attachment rollout modes, beta gates,
   safe shadow semantics и единый RepeatableRead inventory snapshot с secondary
   copies.

@@ -8,6 +8,7 @@ import {
   StaffAttachmentsService,
 } from './staff-attachments.service';
 import type { StaffTeamChatService } from './staff-team-chat.service';
+import type { StaffTasksService } from './staff-tasks.service';
 
 const user: AuthenticatedUser = {
   id: 'user-a1',
@@ -101,11 +102,14 @@ describe('StaffAttachmentsService', () => {
       return Promise.resolve(false);
     });
     const teamChat = { canReadAnyAttachmentMessage };
+    const canReadAnyAttachmentTask = jest.fn().mockReturnValue(false);
+    const staffTasks = { canReadAnyAttachmentTask };
     const service = new StaffAttachmentsService(
       prisma as unknown as PrismaService,
       config as never,
       tenantContext,
       teamChat as unknown as StaffTeamChatService,
+      staffTasks as unknown as StaffTasksService,
     );
 
     return {
@@ -119,6 +123,7 @@ describe('StaffAttachmentsService', () => {
       resolve,
       config,
       canReadAnyAttachmentMessage,
+      canReadAnyAttachmentTask,
       events,
     };
   }
@@ -428,6 +433,63 @@ describe('StaffAttachmentsService', () => {
     expect(metadataQuery?.select).not.toHaveProperty('data');
   });
 
+  it('loads a task evidence blob only after the task parent authorizer allows it', async () => {
+    const {
+      service,
+      findResults,
+      canReadAnyAttachmentMessage,
+      canReadAnyAttachmentTask,
+      tx,
+      findFirstArgs,
+    } = createSubject();
+    findResults.push(
+      pendingMetadata({
+        state: 'BOUND',
+        pendingExpiresAt: null,
+        bindings: [
+          { resourceKind: 'STAFF_TASK', resourceId: 'task-1' },
+          { resourceKind: 'STAFF_TASK', resourceId: 'task-2' },
+        ],
+      }),
+      attachmentBlob,
+    );
+    canReadAnyAttachmentTask.mockResolvedValue(true);
+
+    await expect(service.getAttachment(user, 'attachment-1')).resolves.toEqual({
+      fileName: attachmentBlob.fileName,
+      contentType: attachmentBlob.contentType,
+      buffer: Buffer.from(attachmentBlob.data),
+    });
+
+    expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();
+    expect(canReadAnyAttachmentTask).toHaveBeenCalledWith(
+      user,
+      ['task-1', 'task-2'],
+      tx,
+    );
+    expect(findFirstArgs).toHaveLength(2);
+  });
+
+  it('denies task evidence when the live task parent scope denies it', async () => {
+    const { service, findResults, canReadAnyAttachmentTask, findFirstArgs } =
+      createSubject();
+    findResults.push(
+      pendingMetadata({
+        state: 'BOUND',
+        pendingExpiresAt: null,
+        bindings: [{ resourceKind: 'STAFF_TASK', resourceId: 'task-denied' }],
+      }),
+    );
+    canReadAnyAttachmentTask.mockResolvedValue(false);
+
+    await expect(
+      service.getAttachment(user, 'attachment-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(canReadAnyAttachmentTask).toHaveBeenCalledTimes(1);
+    expect(findFirstArgs).toHaveLength(1);
+  });
+
   it.each(['UNRESOLVED', 'QUARANTINED'] as const)(
     'fails closed for a %s attachment',
     async (state) => {
@@ -524,8 +586,13 @@ describe('StaffAttachmentsService', () => {
   });
 
   it('fails closed for an orphaned BOUND attachment', async () => {
-    const { service, findResults, findFirstArgs, canReadAnyAttachmentMessage } =
-      createSubject();
+    const {
+      service,
+      findResults,
+      findFirstArgs,
+      canReadAnyAttachmentMessage,
+      canReadAnyAttachmentTask,
+    } = createSubject();
     findResults.push(
       pendingMetadata({
         state: 'BOUND',
@@ -538,11 +605,8 @@ describe('StaffAttachmentsService', () => {
       service.getAttachment(user, 'attachment-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
 
-    expect(canReadAnyAttachmentMessage).toHaveBeenCalledWith(
-      user,
-      [],
-      expect.any(Object),
-    );
+    expect(canReadAnyAttachmentMessage).not.toHaveBeenCalled();
+    expect(canReadAnyAttachmentTask).not.toHaveBeenCalled();
     expect(findFirstArgs).toHaveLength(1);
   });
 });

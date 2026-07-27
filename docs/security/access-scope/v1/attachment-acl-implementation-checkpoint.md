@@ -2,8 +2,8 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | `IMPLEMENTED_CANDIDATE` / rollout modes + partial dual-write / `NO-GO` |
-| Версия | 0.2.0 |
+| Статус | `IMPLEMENTED_CANDIDATE` / chat + `STAFF_TASK` parent adoption / `NO-GO` |
+| Версия | 0.6.0 |
 | Дата | 27.07.2026 |
 | Release SHA | Не назначен: checkpoint находится в рабочем candidate и не deployed |
 | Backlog | `BETA-MOD-STAFF-009`, `BETA-MOD-COMMS-002`, `BETA-SEC-006` |
@@ -68,7 +68,7 @@ out-of-scope, orphan, expired, unresolved и quarantined UUID маскируют
 | Состояние | Кто может читать | Допустимый переход | Текущее поведение |
 |---|---|---|---|
 | `PENDING` | Только exact uploader того же tenant до TTL | `PENDING → BOUND` в parent transaction; `PENDING → QUARANTINED` при истечении | Реализовано, TTL 24 часа |
-| `BOUND` | Только через хотя бы один доступный live parent | Может остаться `BOUND`, пока существует хотя бы один `BOUND` binding | Реализован reader только для `CHAT_MESSAGE` |
+| `BOUND` | Только через хотя бы один доступный live parent | Может остаться `BOUND`, пока существует хотя бы один `BOUND` binding | Реализован для `CHAT_MESSAGE`; `STAFF_TASK` candidate прошёл focused/full/build и bounded real-PG gates |
 | `UNRESOLVED` | Никто | После reconciliation в `BOUND` либо `QUARANTINED` | Fail-closed `404` |
 | `QUARANTINED` | Никто в обычном download flow | Только отдельное audited manual resolution | Fail-closed `404` |
 
@@ -130,10 +130,11 @@ latest migration:
 ### 4.2. API runtime
 
 - `apps/api/src/staff/staff-attachment-bindings.service.ts`
-  - единый atomic binder для pending chat attachments;
+  - единый generic atomic binder для поддерживаемых parent kinds и
+    compatibility wrapper для chat;
   - tenant/uploader/state/TTL validation под row lock;
-  - dual-write в legacy `StaffChatMessageAttachment` и новый
-    `StaffAttachmentBinding`;
+  - новый `StaffAttachmentBinding`, а для chat дополнительно dual-write в
+    legacy `StaffChatMessageAttachment`;
   - compare-and-set `PENDING → BOUND`;
   - один плохой ID откатывает parent mutation и все bindings.
 - `apps/api/src/staff/staff-attachments.service.ts`
@@ -149,7 +150,8 @@ latest migration:
     `ENFORCED`;
   - strict decision закрывает `UNRESOLVED`, `QUARANTINED`, orphan и неизвестные
     kinds; решение становится авторитетным только в `ENFORCED`;
-  - для `BOUND` сейчас реализован только parent `CHAT_MESSAGE`.
+  - для `BOUND` реализован `CHAT_MESSAGE`, а `STAFF_TASK` parent reader добавлен
+    в рабочий candidate и проходит проверку.
 - `apps/api/src/staff/staff-team-chat.service.ts`
   - create/update message выполняют bind внутри той же parent transaction;
   - attachment reader повторно применяет live channel и message audience;
@@ -159,6 +161,34 @@ latest migration:
   - direct foreign shift не получает tenant-wide fallback;
   - новый файл shift report привязывается к созданному chat message в общей
     транзакции и поэтому использует `CHAT_MESSAGE`.
+- `apps/api/src/staff/staff-tasks.service.ts`
+  - list, quick/summary/groups, export и direct mutation применяют persisted
+    `AccessScope`;
+  - запрещённый explicit store filter возвращает `403`, а скрытый direct UUID
+    для update/comment — `404`;
+  - `STORES` видит store-bound task только в `allowedStoreIds`, а null-store
+    task — только как exact assignee или нормализованный observer;
+  - participant target для `STORES` обязан быть authoritative persisted
+    `STORES` subset actor и иметь доступ к конкретному task store; platform
+    admins исключены из participant selector/assignment;
+  - direct create требует один store у task и assigned shift; direct update
+    повторяет application-level equality check через transaction client после
+    parent lock; read fail-closed скрывает shift вне actor
+    `allowedStoreIds`;
+  - create/update не назначают запрещённый store; structural PATCH null-store
+    task для `STORES` запрещён, но exact assignee/observer сохраняет
+    comment/self-service status actions;
+  - managerial status transitions требуют `manage_staff_tasks`; одной роли
+    недостаточно;
+  - create начинает task только в `OPEN`; assignment labels server-owned;
+    grouped task нельзя переназначить single-assignee PATCH, а candidate
+    `ANY_OF` нельзя удалить из observers;
+  - update/comment блокируют top-level task через `FOR UPDATE` и после lock
+    повторяют visibility, store/shift/final-participant и status checks через
+    transaction client;
+  - task comment и `STAFF_TASK` binding создаются в одной transaction;
+  - helper для attachment reader повторно применяет live task predicate и
+    `view_staff_tasks`.
 - `apps/api/src/auth/roles.guard.ts`
   - generic attachment route принимает union только attachment-related view
     capabilities; capability открывает parent ACL check, но не заменяет его.
@@ -191,15 +221,24 @@ legacy `UNRESOLVED` UUID не попадают в atomic binder и не лома
 отчёта. Текстовая копия legacy URL не создаёт binding и не является
 полномочием.
 
+`apps/web/src/components/staff-task-history.tsx` хранит ID только свежего upload
+текущей формы и передаёт его в `attachmentIds`, пока пользователь не изменил
+evidence URL вручную. Canonical relative attachment URL отображается через BFF,
+а произвольное редактирование URL сбрасывает pending binding intent.
+
 ### 4.4. Tests, tooling и CI
 
 - `apps/api/src/staff/staff-attachment-bindings.service.spec.ts`;
 - `apps/api/src/staff/staff-attachments.service.spec.ts`;
 - `apps/api/src/staff/staff-shift-reports.access-scope.spec.ts`;
+- `apps/api/src/staff/staff-tasks.service.spec.ts`;
+- `apps/api/src/staff/staff-tasks.access-scope.spec.ts`;
 - расширенные
   `apps/api/src/staff/staff-team-chat.service.spec.ts`,
   `apps/api/src/auth/roles.guard.spec.ts`;
 - `packages/database/scripts/staff-attachment-acl-smoke.mjs`;
+  - дополнительно создаёт реальный `STAFF_TASK` binding и проверяет derived
+    parent store на clean schema;
 - `packages/database/scripts/staff-attachment-backfill-dry-run.mjs`;
 - команды в `packages/database/package.json`:
   `db:smoke:attachment-acl`, `db:inventory:attachment-acl`,
@@ -217,7 +256,7 @@ legacy `UNRESOLVED` UUID не попадают в atomic binder и не лома
 ### 5.1. Rollout mode
 
 Mode управляет download decision и TTL quarantine, но не отключает schema или
-dual-write новых chat/shift attachments.
+dual-write новых chat/shift/task attachments.
 
 | Mode | Read decision | Strict evaluation | Expired pending | Допустимое применение |
 |---|---|---|---|---|
@@ -242,16 +281,20 @@ Production startup fail-closed требует явное значение. Local
 5. В `ENFORCED` до bind файл может прочитать только uploader до TTL;
    `LEGACY/SHADOW` временно сохраняют tenant-only legacy read.
 
-### 5.3. Atomic bind для chat/shift
+### 5.3. Atomic bind для chat/shift/task evidence
 
-1. Parent service проверяет live user, capability, `AccessScope`, channel,
-   audience и target store.
-2. В той же PostgreSQL transaction создаёт/изменяет message.
-3. Binder дедуплицирует IDs, сортированно блокирует exact same-tenant blobs.
-4. Каждый blob обязан быть `PENDING`, принадлежать actor и не быть просроченным.
-5. Создаются legacy relation и `CHAT_MESSAGE` binding.
-6. Все blobs переводятся compare-and-set в `BOUND`.
-7. Любое расхождение вызывает rollback всей parent mutation.
+1. Parent service проверяет live user, capability, `AccessScope` и live parent
+   policy: channel/audience/store для chat либо authoritative
+   task/store/participant policy и разрешённую shift.
+2. Task update/comment в PostgreSQL transaction блокирует top-level parent
+   через `FOR UPDATE` и повторяет scope/status checks после lock.
+3. В той же transaction создаётся/изменяется message или task comment.
+4. Binder дедуплицирует IDs, сортированно блокирует exact same-tenant blobs.
+5. Каждый blob обязан быть `PENDING`, принадлежать actor и не быть просроченным.
+6. Создаётся `CHAT_MESSAGE` или `STAFF_TASK` binding; chat также сохраняет
+   legacy relation, а task comment — canonical evidence URL.
+7. Все blobs переводятся compare-and-set в `BOUND`.
+8. Любое расхождение вызывает rollback всей parent mutation.
 
 ### 5.4. Download
 
@@ -264,9 +307,10 @@ Production startup fail-closed требует явное значение. Local
    меняет состояние.
 6. В `ENFORCED` `PENDING` разрешён только exact uploader до TTL, а expired
    pending переводится в quarantine.
-7. Для `BOUND` берутся только `BOUND` bindings; сейчас рассматриваются только
-   `CHAT_MESSAGE` parents.
-8. Chat service перечитывает live channel/message, scope и audience.
+7. Для `BOUND` берутся только `BOUND` bindings; рассматриваются adopted
+   `CHAT_MESSAGE` и candidate `STAFF_TASK` parents.
+8. Parent service перечитывает live channel/message либо task, scope,
+   assignment/observer policy и не показывает shift вне actor allowed stores.
 9. При хотя бы одном доступном parent отдельный запрос читает blob.
 10. Иначе возвращается одинаковый `404`.
 
@@ -385,24 +429,25 @@ ORDER BY index_class.relname;
 
 На текущем рабочем candidate получены следующие результаты:
 
-- focused API: 19 suites, 230/230 tests — pass;
-- full API: 73 suites, 1 471 passed, 2 todo, 1 473 total — pass;
+- focused CI: 21 suite, 302/302 tests — pass;
+- task service/access-scope: 63/63 tests — pass;
+- full API: 74 suite, 1 526 passed, 2 todo, 1 528 total — pass;
 - API boundary lint — pass;
-- API production typecheck и build — pass;
+- API production typecheck — pass;
+- API production build — pass;
+- web lint — pass;
 - web typecheck — pass;
-- web lint — 0 errors, 30 ранее существовавших warnings;
-- web production build — pass для 203 pages с обязательным
-  `NEXT_PUBLIC_API_URL`; стандартный Turbopack в этом worktree ограничен
-  локальной junction topology, webpack build подтвердил production output;
+- web webpack production build: 203 pages — pass;
 - чистая PostgreSQL schema: все 155 migrations — pass;
 - exact migration state: latest
   `20260727113000_staff_attachment_acl_invariant_hardening`, count 155 — pass;
-- AccessScope PostgreSQL smoke — pass;
 - attachment ACL PostgreSQL smoke — pass, включая ready/valid indexes,
   same-tenant checks, deferred atomic bind, tenant mutation rejection и
-  реальную гонку двух соединений при удалении последних bindings;
-- read-only inventory на пустой clean schema — pass;
-- временная test schema после проверки удалена.
+  реальную гонку двух соединений при удалении последних bindings, а также
+  реальный `STAFF_TASK` binding и derived task store;
+- отдельная real PostgreSQL suite подтвердила A1→A2 scope race, rollback
+  комментария/audit/binding для foreign uploader и expired attachment — 3/3;
+- временные test schema после проверок удалены.
 
 Эти проверки подтверждают candidate, но не заменяют production-like inventory,
 backfill, parent adoption, browser/BFF IDOR suite и canary. Evidence ещё не
@@ -415,12 +460,13 @@ P0 остаётся открытым по следующим причинам:
 1. Есть только read-only inventory; idempotent apply-backfill/reconciliation
    command отсутствует.
 2. Production-like inventory текущего tenant с четырьмя клубами не выполнен.
-3. Runtime bind и strict parent reader реализованы только для
-   `CHAT_MESSAGE`, включая новые shift-report uploads.
-4. `STAFF_TASK`, `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`,
-   `SHIFT_REGULATION`, `TRAINING_COURSE`, `ONBOARDING_PLAN` присутствуют в
-   schema, но producer binding и authoritative runtime reader для них ещё не
-   подключены.
+3. `STAFF_TASK` authoritative scope, locked mutations, comment evidence bind и
+   strict parent reader прошли focused/full/build и bounded real-PG checks, но
+   ещё требуют revoke/delete semantics и полной production-like A1/A2/B
+   API/BFF/browser/file integration.
+4. `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`,
+   `TRAINING_COURSE`, `ONBOARDING_PLAN` присутствуют в schema, но producer
+   binding и authoritative runtime reader для них ещё не подключены.
 5. Legacy/current checklist attachments, rich-text/JSON и копии URL только
    инвентаризируются; они не получают связь автоматически.
 6. Нет полного audited manual resolution/quarantine operator workflow.
@@ -431,6 +477,13 @@ P0 остаётся открытым по следующим причинам:
    gate и rollback drill.
 10. Нет полной real PostgreSQL + API/BFF/browser suite на topology
     Tenant A/Store A1/A2 и Tenant B/Store B1 для каждого parent kind.
+11. Нет DB/read equality invariant и inventory для legacy A-task/B-shift,
+    когда оба store входят в allowed scope multi-store actor. API equality
+    recheck защищает только direct create/update.
+12. Transaction-client recheck не сериализует последующее конкурентное
+    изменение `GuestWorkingShift.storeId`, `User` или `UserStoreAccess`.
+    Reference-row locks/единый write protocol либо DB invariant и отдельный
+    real PostgreSQL race test остаются P1.
 
 Следовательно, `ENFORCED` нельзя деплоить перед inventory/backfill: он ожидаемо
 закроет legacy `UNRESOLVED` files, а unsupported parent kinds останутся
@@ -451,7 +504,9 @@ P0 остаётся открытым по следующим причинам:
    aggregates/reason codes.
 5. Реализовать отдельный idempotent apply/reconciliation command с
    `dry-run → review → explicit apply`, quarantine и повторным zero-diff run.
-6. Подключить atomic bind и live parent ACL ко всем оставшимся kinds.
+6. Добавить task/shift DB invariant + legacy inventory, revoke и полную
+   A1/A2/B API/BFF/browser/file integration для `STAFF_TASK`, затем подключить
+   atomic bind и live parent ACL ко всем оставшимся kinds.
 7. Добиться нуля cross-tenant references и нуля необъяснённых internal
    references; ambiguous cases явно quarantine.
 8. Выполнить two-tenant/two-store API/BFF/browser/file regression.
@@ -482,9 +537,11 @@ P0 остаётся открытым по следующим причинам:
    обновить evidence.
 2. Реализовать apply/reconciliation tool отдельно от read-only scanner; добавить
    production guard, explicit attestation, idempotency и transaction batches.
-3. Первым подключить `STAFF_TASK`: comment evidence bind, live task
-   tenant/store/assignee/observer predicate, revoke и A1/A2/B tests.
-4. Затем подключить `CHECKLIST_RUN`: answer/evidence normalization, live run
+3. Завершить `STAFF_TASK` candidate: templates/recurring/background paths по
+   [отдельному плану](./staff-task-catalog-adoption-plan.md), task/shift DB
+   invariant + legacy inventory, revoke/delete semantics и production-like
+   A1/A2/B API/BFF/file tests.
+4. Подключить `CHECKLIST_RUN`: answer/evidence normalization, live run
    store/assignment predicate и legacy reconciliation.
 5. Подключить `KNOWLEDGE_ARTICLE` и `SHIFT_REGULATION`: current/version links,
    status, roleScope, store/network audience и history/draft policy.
@@ -499,3 +556,26 @@ P0 остаётся открытым по следующим причинам:
 10. Провести schema-only rehearsal, canary одного Store, затем 4/4 internal
     alpha. До успешного завершения этих шагов внешний доступ остаётся
     `NO-GO`.
+
+## 12. Changelog
+
+- `0.6.0`, 27.07.2026 — final participant/business-policy recheck перенесён
+  на transaction client; добавлены regression tests для store move и второго
+  shift read; task 63/63, focused 21/302, full API 74/1 526/2 todo; честно
+  зафиксирован residual reference-row race до DB/write-contract hardening.
+- `0.5.0`, 27.07.2026 — full API 74/1 524/2 todo, API/web production builds,
+  focused 21/300 и task 61 пройдены; real PostgreSQL A1→A2 и rollback 3/3;
+  создание task ограничено OPEN, assignment labels стали server-owned.
+- `0.4.0`, 27.07.2026 — финализирован authoritative `STAFF_TASK` scope:
+  persisted participant subset + concrete task store, platform-admin exclusion,
+  application-level task/shift recheck, fail-closed null-task mutations,
+  parent row lock/recheck и `manage_staff_tasks` для managerial status. Focused CI
+  21/283, task tests 44 и clean-155 PostgreSQL task-binding smoke пройдены;
+  full suite/build, legacy task/shift DB/read invariant, revoke и real A1/A2
+  integration pending.
+- `0.3.0`, 27.07.2026 — зафиксирован `STAFF_TASK` candidate: persisted scope
+  для list/export/direct task paths, transactional comment evidence binding,
+  strict task parent reader и web fresh-upload intent. Verification,
+  revoke/delete и production-like A1/A2/B evidence остаются открыты.
+- `0.2.0`, 27.07.2026 — зафиксированы rollout modes, safe shadow semantics и
+  единый RepeatableRead inventory snapshot.

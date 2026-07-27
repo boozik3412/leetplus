@@ -40,8 +40,6 @@ import { StaffShiftReportsService } from './staff-shift-reports.service';
 import { StaffShiftWorkspaceController } from './staff-shift-workspace.controller';
 import { StaffTaskCatalogAccessPolicyService } from './staff-task-catalog-access-policy.service';
 import { StaffTaskRecurringRulesController } from './staff-task-recurring-rules.controller';
-import { StaffTaskRecurringRulesScheduledController } from './staff-task-recurring-rules-scheduled.controller';
-import { StaffTaskRecurringRulesSchedulerService } from './staff-task-recurring-rules-scheduler.service';
 import { StaffTaskRecurringRulesService } from './staff-task-recurring-rules.service';
 import { StaffTaskTemplatesController } from './staff-task-templates.controller';
 import { StaffTaskTemplatesService } from './staff-task-templates.service';
@@ -62,7 +60,6 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffDirectoryController,
     StaffTaskTemplatesController,
     StaffTaskRecurringRulesController,
-    StaffTaskRecurringRulesScheduledController,
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
     StaffTrainingProfilesController,
@@ -89,7 +86,6 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTaskCatalogAccessPolicyService,
     StaffTaskTemplatesService,
     StaffTaskRecurringRulesService,
-    StaffTaskRecurringRulesSchedulerService,
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,
     StaffTrainingProfilesService,

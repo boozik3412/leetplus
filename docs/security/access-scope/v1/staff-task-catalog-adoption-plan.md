@@ -2,8 +2,8 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | templates `IMPLEMENTED_CANDIDATE`; recurring/scheduler `NO-GO` |
-| Версия | 1.1.0 |
+| Статус | templates и recurring actor HTTP `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
+| Версия | 1.3.0 |
 | Дата | 27.07.2026 |
 | Backlog | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008` |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md) |
@@ -11,8 +11,11 @@
 Документ фиксирует route/action/job inventory для шаблонов и регулярных задач.
 Template CRUD/launch уже реализован отдельным bounded candidate, описанным в
 [implementation checkpoint](./staff-task-catalog-implementation-checkpoint.md).
-Recurring HTTP и scheduler всё ещё не применяют полный контракт, поэтому весь
-catalog slice и внешний тест остаются `NO-GO`.
+Recurring actor HTTP реализован следующим
+[checkpoint](./staff-task-recurring-http-implementation-checkpoint.md).
+Scheduler и scheduled all-tenant HTTP не зарегистрированы и всё ещё не
+применяют system execution contract, поэтому весь catalog slice и внешний тест
+остаются `NO-GO`.
 
 ## 1. Инвентаризация поверхности
 
@@ -22,36 +25,41 @@ catalog slice и внешний тест остаются `NO-GO`.
 | `POST /staff/task-templates` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | fresh scope; STORES требует non-null active allowed Store |
 | `PATCH /staff/task-templates/:id` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | hidden UUID `404`; parent lock; final state; atomic catalog audit |
 | `POST /staff/task-templates/:id/tasks` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | ACTIVE-only; bound Store; shared task materializer; observers/audit |
-| `GET /staff/task-rules` | `view_staff_tasks` | tenant-wide rules/runs/users/stores | rule, run и created-task projections используют один scope |
-| `POST /staff/task-rules` | `manage_staff_tasks` | tenant-only references | allowed Store, compatible template и authoritative assignee |
-| `PATCH /staff/task-rules/:id` | `manage_staff_tasks` | direct `id + tenantId` | scoped UUID, final-state validation и row lock |
-| `POST /staff/task-rules/:id/tasks` | `manage_staff_tasks` | direct materialization | scoped parent lock/recheck, actor audit, shared safe task materializer |
-| `POST /staff/task-rules/run-due` | `manage_staff_tasks` | запускает все due rules tenant | actor-scoped rules only; не раскрывает чужие IDs/titles |
-| `POST /staff/task-rules/scheduled/run-due` | service token | tenant/all-tenant system execution | lifecycle, entitlement, store policy и system audit |
-| in-process scheduler | process config | каждый API process, все tenant | один owner/lease, ACTIVE+entitled tenants, heartbeat и stale reclaim |
+| `GET /staff/task-rules` | `view_staff_tasks` | `IMPLEMENTED_CANDIDATE` | scoped rules/runs/tasks/options/full summary и PII-safe projection |
+| `POST /staff/task-rules` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | fresh scope; active allowed Store FOR SHARE; Template/participant locks; authoritative assignee; atomic audit |
+| `PATCH /staff/task-rules/:id` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | hidden UUID `404`; Rule FOR UPDATE; Template/Store/participant recheck; scoped response/audit |
+| `POST /staff/task-rules/:id/tasks` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | bound Store; shared materializer; actor/task/catalog audit; schedule unchanged |
+| `POST /staff/task-rules/run-due` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | actor-scoped, server time, atomic Run/Task/Rule/audits, safe duplicate/error result |
+| `POST /staff/task-rules/scheduled/run-due` | service token | `NO-GO`, controller не зарегистрирован и default-off | lifecycle, entitlement, store policy, separate machine identity и system audit |
+| in-process scheduler | process config | `NO-GO`, provider не зарегистрирован и default-off | один owner/lease, ACTIVE+entitled tenants, heartbeat, timezone и stale reclaim |
 
 Отдельных detail, delete и export routes сейчас нет. Archive/pause выполняются
 через status update.
 
-## 2. Подтверждённые риски
+## 2. Подтверждённые риски и текущий статус
 
-1. `STORES[A1]` actor может читать и изменять template/rule Store A2.
-2. Tenant-wide reports раскрывают runs, task titles, users и stores вне scope.
-3. Interactive `run-due` теряет actor, пишет `actorUserId=null` и выглядит как
-   automatic system run.
-4. Template/rule materializers пишут `StaffTask` напрямую и обходят participant,
-   status, server-owned labels и task creation policy.
+1. Cross-store template/rule actor HTTP — закрыто bounded candidate.
+2. Tenant-wide actor report/runs/PII — закрыто bounded candidate.
+3. Interactive `run-due` actor loss/client time travel — закрыто bounded
+   candidate.
+4. Direct Template/Rule materialization — закрыто общим safe materializer.
 5. Scheduler не исключает `SUSPENDED/ARCHIVED` tenant и пока не имеет staff
-   entitlement gate.
-6. Due rule читается до транзакции без final parent lock/recheck; concurrent
-   pause/archive/store change не гарантирует отмену materialization.
+   entitlement gate; runtime graph поэтому не регистрирует scheduler.
+6. Actor due имеет final Rule/Template/Store/participant lock/recheck; real
+   PostgreSQL concurrent evidence 5/5 подтверждает ожидание и rollback.
 7. Unique `(ruleId, scheduledFor)` уменьшает дубли, но stale `STARTED` run после
-   crash не reclaim-ится.
+   crash system-path пока не reclaim-ится; actor path пишет occurrence и task в
+   одном commit.
 8. Same-tenant DB invariants отсутствуют для связей
    rule/template/run/store/user/task; `Store.onDelete=SetNull` может превратить
    store-bound resource в tenant-global.
-9. Нет domain audit create/update/archive template/rule.
-10. Специализированной unit/PG suite для этих сервисов и scheduler нет.
+9. Template/Rule domain audit реализован; retention/system denied attempts ещё
+   требуют общей политики.
+10. Unit и PG race/rollback suite добавлены; API/BFF/browser, legacy inventory
+    и scheduler lease suite ещё обязательны.
+11. Store-bound actor schedule использует IANA timezone/DST policy. Global Rule
+    имеет UTC fallback и не допускается в первую внешнюю когорту до persisted
+    tenant/rule timezone policy.
 
 ## 3. Нормативная модель
 
@@ -150,10 +158,15 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 
 Нужны:
 
-- unit specs обоих сервисов;
-- scheduler spec;
-- real PostgreSQL race/rollback integration;
+- unit specs templates/recurring/scheduler — реализованы для bounded actor
+  candidate;
+- real PostgreSQL race/rollback integration — 2 suites/8 tests, включая
+  recurring 5/5, реализована и обязательна в CI;
 - API/BFF/browser negative journeys.
+
+Текущий recurring checkpoint: focused 27 suites/375 tests и full API
+80 suites/1 599 pass/2 todo; real PostgreSQL 8/8 и API/web production builds
+зелёные. Это не заменяет inventory, browser и background system evidence.
 
 ## 6. Exit criteria
 

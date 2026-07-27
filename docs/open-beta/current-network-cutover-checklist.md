@@ -28,6 +28,8 @@
 - [ ] Store count равен `4`.
 - [ ] Store aliases/fingerprints и Langame mapping checksums зафиксированы.
 - [ ] Все четыре Store принадлежат одному ожидаемому Tenant.
+- [ ] У всех четырёх Store задан и проверен валидный IANA `timeZone`; UTC
+      fallback отсутствует в принятом recurring schedule.
 - [ ] Cross-tenant `UserStoreAccess` count равен `0`.
 - [ ] Public/QR/Telegram links проинвентаризированы.
 - [ ] План slug/domain rename и redirect/alias утверждён.
@@ -69,6 +71,8 @@
 - [ ] Gamification — admin, guest, Telegram, ledger и store canary.
 - [ ] Assortment — catalog, facts, imports, reports и exports, 4/4 stores.
 - [ ] Staff — control, tasks, regulations, KB, training, discipline, salary.
+- [ ] Staff recurring actor path — sparse PATCH, Store timezone, pause/revoke и
+      Template/Store/participant race acceptance пройдены; background выключен.
 - [ ] Communications — chat, mentions, receipts, notifications, contact tasks.
 - [ ] Users/roles — delegation, revoke и scope работают сразу.
 - [ ] Attachments `ENFORCED`; inventory/backfill/reconciliation zero-diff.

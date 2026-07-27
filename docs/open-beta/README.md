@@ -51,7 +51,10 @@
 9. [Checkpoint task catalog](../security/access-scope/v1/staff-task-catalog-implementation-checkpoint.md) —
    фактический template/materializer/audit candidate, проверки и остаточные
    блокеры recurring/scheduler.
-10. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+10. [Checkpoint recurring actor HTTP](../security/access-scope/v1/staff-task-recurring-http-implementation-checkpoint.md) —
+    scoped Rule CRUD/manual/interactive due candidate и явная изоляция
+    scheduler/all-tenant execution.
+11. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
    какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
@@ -70,6 +73,10 @@
 - parent-aware chat и `STAFF_TASK` attachment adoption candidate.
 - scoped task templates, shared safe task materializer и catalog audit EXPAND
   candidate.
+- scoped recurring Rule CRUD/manual/interactive due candidate со
+  Store/participant locks, sparse PATCH, IANA/DST schedule и real PostgreSQL
+  race evidence; background scheduler и all-tenant scheduled route не
+  зарегистрированы и остаются `NO-GO`.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный

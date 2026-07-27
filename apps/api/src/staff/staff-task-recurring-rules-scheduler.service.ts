@@ -92,16 +92,7 @@ export class StaffTaskRecurringRulesSchedulerService
       ?.trim()
       .toLowerCase();
 
-    if (explicit) {
-      return ['1', 'true', 'yes', 'on'].includes(explicit);
-    }
-
-    const nodeEnv = this.configService.get<string>('NODE_ENV')?.trim();
-    const syncToken = this.configService
-      .get<string>('SYNC_SERVICE_TOKEN')
-      ?.trim();
-
-    return nodeEnv === 'production' && Boolean(syncToken);
+    return explicit === 'true';
   }
 
   private getPositiveInt(key: string, fallback: number) {

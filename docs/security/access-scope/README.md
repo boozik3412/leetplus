@@ -3,7 +3,7 @@
 | Поле | Значение |
 |---|---|
 | Статус | Active |
-| Версия контракта | 1.6.0 |
+| Версия контракта | 1.8.0 |
 | Дата | 27.07.2026 |
 | Владелец | LeetPlus engineering |
 | Связанный backlog | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -12,6 +12,7 @@
 | Strict application candidate | `df993a9d04fdb48809868555b0d040d52848e3ee` — not deployed |
 | Attachment ACL baseline | `1207c63cacedba05937d4a96a03a8dfd11751d2e` — not deployed |
 | `STAFF_TASK` adoption | Working candidate, exact SHA pending — not deployed |
+| Recurring actor HTTP | Working candidate, exact SHA pending — not deployed |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -59,6 +60,9 @@ invite-only открытому тесту. Она отвечает на вопр
 10. [Task catalog: implementation checkpoint](./v1/staff-task-catalog-implementation-checkpoint.md) —
     scoped template CRUD/launch, shared materializer, catalog audit, проверки и
     оставшиеся recurring/scheduler блокеры.
+11. [Recurring actor HTTP: implementation checkpoint](./v1/staff-task-recurring-http-implementation-checkpoint.md) —
+    scoped Rule CRUD/manual/interactive due, Store/participant lock contract,
+    IANA/DST schedule, PostgreSQL race evidence и background containment.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -96,8 +100,11 @@ labels принадлежат серверу. Grouped/`ANY_OF` нельзя пе
 single-assignee PATCH или лишить candidate observer membership.
 Template CRUD/launch также имеет bounded candidate: scoped rows/count/summary
 и options, fresh persisted scope, parent lock/recheck, ACTIVE/bound Store
-policy, shared task materializer и атомарный catalog audit. Recurring HTTP и
-scheduler остаются `NO-GO`.
+policy, shared task materializer и атомарный catalog audit. Recurring actor
+HTTP также имеет bounded candidate: scoped report/CRUD/manual launch,
+Rule/Template lock/recheck, server-time interactive due и atomic
+Run/Task/Rule/audits. In-process scheduler и scheduled all-tenant controller
+не зарегистрированы, default-off и остаются `NO-GO`.
 Для `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`,
 `TRAINING_COURSE`, `ONBOARDING_PLAN` producer/reader adoption остаётся pending.
 Read-only inventory реализован, apply-backfill отсутствует. Поэтому
@@ -130,6 +137,13 @@ DB/read invariant для legacy A-task/B-shift, когда оба store вход
 multi-store actor, ещё отсутствует. Его schema enforcement и inventory
 существующих mismatch являются отдельным обязательным evidence gap.
 
+Recurring actor candidate прошёл focused CI 27 suites / 375 tests, full API
+80 suites / 1 599 passed / 2 todo и real PostgreSQL transaction security
+2 suites / 8 tests. Пять recurring race-сценариев подтверждают фактическую
+блокировку и post-wait rollback для Template, Store и participant revoke.
+Scheduler/all-tenant route не зарегистрированы; tenant-global timezone,
+legacy inventory и browser evidence остаются `NO-GO`.
+
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
 геймификации, ассортимента, сотрудников, коммуникаций и users/roles только в
@@ -146,6 +160,12 @@ multi-store actor, ещё отсутствует. Его schema enforcement и i
 
 ## Changelog
 
+- `1.8.0`, 27.07.2026 — recurring P1 закрыты Store/participant locks,
+  scoped mutation projections, sparse PATCH и Store IANA/DST schedule;
+  PostgreSQL race suite включён в обязательный CI.
+- `1.7.0`, 27.07.2026 — recurring Rule actor HTTP переведён на persisted
+  scope, Rule/Template locks, shared materializer и atomic interactive due;
+  scheduler/all-tenant route удалены из runtime graph и оставлены `NO-GO`.
 - `1.6.0`, 27.07.2026 — final participant/business-policy checks переведены
   на transaction client, добавлены два regression-теста и явно отделён
   application recheck от ещё не реализованного reference-row/DB invariant.

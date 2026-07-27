@@ -392,6 +392,53 @@ describe('StaffTaskTemplatesService access scope', () => {
     expect(tx.staffTaskTemplate.update).not.toHaveBeenCalled();
   });
 
+  it('allows an archive-only update after the bound store becomes inactive', async () => {
+    const row = templateRow({
+      store: {
+        id: allowedStoreId,
+        tenantId,
+        name: 'Club A1',
+        isActive: false,
+      },
+    });
+    const storeFindFirst: jest.MockedFunction<
+      (args: { where: unknown }) => Promise<{ id: string }>
+    > = jest.fn().mockResolvedValue({ id: allowedStoreId });
+    const tx = {
+      ...mutationScopeDelegates(),
+      staffTaskTemplate: {
+        findFirst: jest.fn().mockResolvedValue(row),
+        update: jest
+          .fn()
+          .mockResolvedValue({ ...row, status: 'ARCHIVED' }),
+      },
+      staffTaskRecurringRule: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      store: {
+        findFirst: storeFindFirst,
+      },
+      staffTaskCatalogAuditEvent: {
+        create: jest.fn().mockResolvedValue({ id: 'audit-archive' }),
+      },
+    };
+    const { service } = createService({
+      staffTaskTemplate: {
+        findFirst: jest.fn().mockResolvedValue({ id: row.id }),
+      },
+      $transaction: jest.fn((callback: (client: typeof tx) => unknown) =>
+        callback(tx),
+      ),
+    });
+
+    await expect(
+      service.updateTemplate(actor(), row.id, { status: 'ARCHIVED' }),
+    ).resolves.toMatchObject({ id: row.id, status: 'ARCHIVED' });
+    expect(JSON.stringify(storeFindFirst.mock.calls[0]?.[0].where)).not.toContain(
+      '"isActive":true',
+    );
+  });
+
   it('does not launch a draft template', async () => {
     const row = templateRow({ status: 'DRAFT' });
     const tx = {

@@ -3,6 +3,7 @@ import {
   Controller,
   Headers,
   Post,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -24,9 +25,22 @@ export class StaffTaskRecurringRulesScheduledController {
     @Headers('x-sync-service-token') token: string | undefined,
     @Body() dto: StaffTaskRecurringRuleRunDueDto,
   ): Promise<StaffTaskRecurringRuleRunDueResult> {
+    this.assertEnabled();
     this.assertToken(token);
 
     return this.staffTaskRecurringRulesService.runDueRulesForAllTenants(dto);
+  }
+
+  private assertEnabled() {
+    if (
+      this.configService.get<string>(
+        'STAFF_TASK_RULES_SCHEDULED_HTTP_ENABLED',
+      ) !== 'true'
+    ) {
+      throw new ServiceUnavailableException(
+        'Scheduled staff task rule execution is disabled',
+      );
+    }
   }
 
   private assertToken(token: string | undefined) {

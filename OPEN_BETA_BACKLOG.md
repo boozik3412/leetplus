@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.13
+- Версия: 1.15
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
@@ -249,7 +249,7 @@
 |---|---|---|---|---|---|
 | BETA-MOD-STAFF-001 | P0 | Запланировано | Провести полный route/action inventory staff | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом | BETA-TEN-002, BETA-IAM-001 |
 | BETA-MOD-STAFF-002 | P0 | Запланировано | Закрыть directory и identity mapping | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются | BETA-SEC-006, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-003 | P0 | В работе | Закрыть задачи, templates и recurring rules | Direct tasks и templates CRUD/launch имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options, parent lock/recheck, shared materializer, observers и atomic task/catalog audit; clean 156 migrations, catalog smoke и PG task race/rollback зелёные. До `Готово` остаются actor-scoped recurring, общий rule/template lock, participant revoke, scheduler lease/entitlement, task/shift DB invariant и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-003 | P0 | В работе | Закрыть задачи, templates и recurring rules | Direct tasks, templates CRUD/launch и recurring actor HTTP имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options/mutation responses, Tenant/Rule/Template/Store/participant lock/recheck, shared materializer, Store-timezone interactive due и atomic task/run/catalog audit. PostgreSQL race evidence обязательно в CI. Scheduler и all-tenant HTTP не зарегистрированы и остаются `NO-GO`. До `Готово` остаются scheduler lease/lifecycle/entitlement, global timezone policy, task/shift DB invariant, legacy inventory и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
 | BETA-MOD-STAFF-004 | P0 | Запланировано | Закрыть shift workspace и shift reports | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope | BETA-MOD-STAFF-002, BETA-IAM-002 |
 | BETA-MOD-STAFF-005 | P0 | Запланировано | Закрыть регламенты и чек-листы | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема | BETA-MOD-STAFF-001 |
 | BETA-MOD-STAFF-006 | P0 | Запланировано | Закрыть знания, обучение и аттестации | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены | BETA-MOD-STAFF-001, BETA-IAM-002 |
@@ -708,21 +708,124 @@ Production deployment не выполнялся.
 - независимый review не нашёл прямого tenant/store escape в template
   CRUD/launch.
 
-Статус ограничен `IMPLEMENTED_CANDIDATE`. P1 остаются:
+Статус ограничен `IMPLEMENTED_CANDIDATE`. Actor recurring HTTP и общий
+Rule/Template/Store/participant lock закрыты следующим checkpoint в разделе
+5.18. P1 остаются:
 
-- recurring create/update/activation не использует общий template lock и имеет
-  phantom race с archive/rebind;
-- recurring HTTP, interactive due и scheduled paths ещё не actor-scoped;
-- scheduler остаётся `NO-GO` без explicit enable, lifecycle/entitlement,
+- scheduler и all-tenant HTTP остаются `NO-GO` без lifecycle/entitlement,
   durable lease/fencing и stale reclaim;
-- participant reference revoke требует lock/recheck либо reconciliation;
-- lifecycle архивирования template неактивного Store и production-like
-  A1/A2/B browser evidence ещё не закрыты.
+- legacy inventory, same-tenant database invariants и политика физического
+  удаления Store ещё не закрыты;
+- production-like A1/A2/B API/BFF/browser evidence ещё не закрыт.
 
 Топология и состав доступа неизменны: четыре текущих клуба — четыре `Store`
 одного `Tenant`; независимые сети получают отдельные tenant; первая когорта
 получает целиком геймификацию, ассортимент/товары, сотрудников, in-app
 коммуникации и users/roles только в пределах своего tenant/scope.
+
+Release decision остаётся `NO-GO`.
+
+### 5.18. Recurring actor HTTP и background containment candidate — 27.07.2026
+
+Создан фактический checkpoint:
+`docs/security/access-scope/v1/staff-task-recurring-http-implementation-checkpoint.md`.
+Production deployment и production migration не выполнялись.
+
+Реализовано:
+
+- `GET /staff/task-rules` ограничивает rules, runs, created tasks, stores,
+  active templates, users, summary, per-rule counts и PII projections
+  persisted scope, включая create/update responses;
+- forbidden Store filter даёт `403`, hidden Rule UUID для update/launch —
+  `404`;
+- create/update перечитывают scope внутри транзакции, блокируют Tenant, Rule
+  `FOR UPDATE`, linked Template, Store, participant User и UserStoreAccess,
+  затем проверяют final Store, template status/compatibility и authoritative
+  assignee;
+- `STORES` не создаёт global Rule, inactive Store не используется для новых
+  writes, но pause/archive-only остаётся доступен для безопасной остановки;
+- create/update/status transitions пишут atomic PII-safe `RULE` catalog audit;
+- manual launch использует общий task materializer и не меняет `nextRunAt`;
+- interactive `run-due` принимает только `limit/dryRun`, использует server
+  time и actor scope, сохраняет реального actor;
+- interactive `Run + Task + task audit/notification + Rule schedule + catalog
+  audit` имеют один commit; duplicate occurrence возвращает generic `SKIPPED`;
+- raw legacy run errors и произвольный metadata не возвращаются actor;
+- template archive-only разрешён после деактивации Store при отсутствии active
+  rules;
+- Store-bound schedule вычисляется в IANA timezone клуба; DST gap сдвигается
+  вперёд, DST fold создаёт одно earliest occurrence, global/invalid timezone
+  имеет детерминированный UTC fallback;
+- чистая calendar/IANA/DST логика вынесена в отдельный
+  `staff-task-recurring-schedule.ts`; recurring service уменьшен на 387 строк
+  относительно стабилизированного pre-extraction diff;
+- UI показывает active references, сохраняет inactive legacy selection,
+  фиксирует bound Store, отправляет semantic sparse PATCH и не отправляет
+  пустые overrides как explicit null;
+- status-only pause/archive не сдвигает schedule и остаётся доступен после
+  Store/template/participant deactivation без выдачи отозванной PII;
+- scheduler provider и scheduled all-tenant controller удалены из
+  `StaffModule`, поэтому timer и route отсутствуют в runtime graph;
+- scheduler дополнительно включается только explicit
+  `STAFF_TASK_RULES_SCHEDULER_ENABLED=true`;
+- scheduled controller даже при будущем возврате требует отдельный
+  `STAFF_TASK_RULES_SCHEDULED_HTTP_ENABLED=true` до проверки token;
+- оба флага документированы safe-default `false`.
+
+Предварительные проверки bounded slice:
+
+- recurring actor service unit — 23/23 pass;
+- scheduled HTTP fail-closed unit — 6/6 pass;
+- scheduler default-off unit — 4/4 pass;
+- template lifecycle + scheduler targeted run — 16/16 pass;
+- focused API — 27 suites, 375/375 tests — pass;
+- full API — 80 suites, 1 599 pass, 2 todo (1 601 total) — pass;
+- real PostgreSQL transaction security — 2 suites, 8/8 pass, из них 5
+  recurring Rule/Template/Store/participant race/rollback; новый suite
+  обязателен в CI;
+- API/web typecheck и API boundary/targeted web lint — pass;
+- full web lint — 0 errors, 30 существующих warnings;
+- API production build — pass;
+- web webpack production build — 203 pages — pass.
+
+Initial independent review нашёл шесть launch-blocking P1; они исправлены до
+checkpoint-коммита. Финальный independent re-review по стабилизированному diff
+не нашёл P0/P1; `git diff --check` — pass.
+
+Статус:
+
+```text
+recurring actor HTTP       = IMPLEMENTED_CANDIDATE
+scheduler                  = NO-GO / UNREGISTERED
+scheduled all-tenant HTTP  = NO-GO / UNREGISTERED
+external beta              = NO-GO
+```
+
+Следующий P1:
+
+- read-only legacy inventory и same-tenant DB invariants;
+- BFF/browser A1/A2/B negative journeys;
+- отдельный system execution context, tenant lifecycle/staff entitlement,
+  durable lease/fencing/heartbeat/retry/stale reclaim до любого background
+  re-registration;
+- явная persisted timezone policy для tenant-global recurring Rule вместо UTC
+  fallback до допуска global schedule в первую внешнюю когорту.
+
+Следующий P2:
+
+- различать duplicate occurrence constraint и несвязанный Prisma `P2002`;
+- сохранять sanitized persistent FAILED evidence после rollback occurrence;
+- добавить real PostgreSQL duel двух actor `run-due` и revoke scope самого
+  actor;
+- нормализовать manual `datetime-local` через Store timezone и фильтровать UI
+  assignee options по выбранному Store;
+- заменить `Store.onDelete=SetNull` на подтверждённую inventory миграцией
+  same-tenant deletion policy.
+
+Топология и состав доступа неизменны: четыре текущих клуба — четыре `Store`
+одного `Tenant`; каждая внешняя сеть получает отдельный tenant; первая когорта
+получает полный staff-модуль вместе с геймификацией, ассортиментом,
+коммуникациями и users/roles только в своём tenant/scope после Gate 2.
 
 Release decision остаётся `NO-GO`.
 
@@ -783,11 +886,12 @@ Release decision остаётся `NO-GO`.
 4. Запустить read-only attachment inventory, затем реализовать отдельный
    idempotent apply/backfill/reconciliation tool с explicit apply,
    quarantine и повторным zero-diff dry-run.
-5. Использовать готовый template/catalog candidate и реализовать actor-scoped
-   recurring HTTP с общим template lock и safe materializer; scheduler оставить
-   явно выключенным до lifecycle/entitlement и durable lease/fencing; добавить
-   task/shift DB invariant + legacy inventory, revoke/delete и полную
-   production-like A1/A2/B API/BFF/browser/file evidence; затем продолжить
+5. Использовать готовые template/catalog и actor-scoped recurring HTTP
+   candidates; сохранить scheduler/all-tenant route незарегистрированными до
+   lifecycle/entitlement, system identity и durable lease/fencing; следующим
+   срезом после уже обязательных в CI real PG Template/Store/participant races
+   добавить task/shift DB invariant + legacy inventory, global timezone policy
+   и полную production-like A1/A2/B API/BFF/browser/file evidence; затем продолжить
    parent adoption в порядке `CHECKLIST_RUN → KNOWLEDGE_ARTICLE/SHIFT_REGULATION →
    TRAINING_COURSE/ONBOARDING_PLAN`, для каждого добавляя atomic bind, live
    parent ACL, revoke и A1/A2/B tests.

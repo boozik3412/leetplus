@@ -3,10 +3,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import type { ResolvedAccessScope } from '../tenancy/access-scope.service';
+import { StaffTaskCatalogAccessPolicyService } from './staff-task-catalog-access-policy.service';
+import {
+  resolveStaffTaskRecurringNextRunAt,
+  type StaffTaskRecurringScheduleInput,
+} from './staff-task-recurring-schedule';
+import { StaffTasksService, type StaffTaskDto } from './staff-tasks.service';
 
 const ruleStatuses = ['ACTIVE', 'PAUSED', 'ARCHIVED'] as const;
 const ruleCadences = [
@@ -72,6 +79,11 @@ export type StaffTaskRecurringRuleRunDueDto = {
   now?: string | null;
   tenantId?: string | null;
 };
+
+export type StaffTaskRecurringRuleActorRunDueDto = Pick<
+  StaffTaskRecurringRuleRunDueDto,
+  'limit' | 'dryRun'
+>;
 
 export type StaffTaskRecurringRuleRunResponse = {
   id: string;
@@ -190,10 +202,13 @@ export type StaffTaskRecurringRuleLaunchResponse = {
 };
 
 const ruleInclude = {
-  store: { select: { id: true, name: true, isActive: true } },
+  store: {
+    select: { id: true, tenantId: true, name: true, isActive: true },
+  },
   template: {
     select: {
       id: true,
+      tenantId: true,
       title: true,
       description: true,
       status: true,
@@ -205,11 +220,31 @@ const ruleInclude = {
       storeId: true,
     },
   },
-  createdByUser: { select: { id: true, email: true, fullName: true } },
-  assignedToUser: { select: { id: true, email: true, fullName: true } },
+  createdByUser: {
+    select: {
+      id: true,
+      tenantId: true,
+      isActive: true,
+      isPlatformAdmin: true,
+      email: true,
+      fullName: true,
+    },
+  },
+  assignedToUser: {
+    select: {
+      id: true,
+      tenantId: true,
+      isActive: true,
+      isPlatformAdmin: true,
+      email: true,
+      fullName: true,
+    },
+  },
   lastCreatedTask: {
     select: {
       id: true,
+      tenantId: true,
+      storeId: true,
       title: true,
       status: true,
       dueAt: true,
@@ -220,10 +255,12 @@ const ruleInclude = {
 } satisfies Prisma.StaffTaskRecurringRuleInclude;
 
 const ruleRunInclude = {
-  rule: { select: { id: true, title: true } },
+  rule: { select: { id: true, tenantId: true, storeId: true, title: true } },
   createdTask: {
     select: {
       id: true,
+      tenantId: true,
+      storeId: true,
       title: true,
       status: true,
       dueAt: true,
@@ -245,12 +282,11 @@ type StaffTaskRecurringRuleWithTemplate =
     include: { template: true };
   }>;
 
-type RuleScheduleInput = {
-  status: string;
-  cadence: string;
-  timeOfDay: string | null;
-  dayOfWeek: number | null;
-  dayOfMonth: number | null;
+type RecurringRuleStoreRow = {
+  id: string;
+  tenantId: string;
+  isActive: boolean;
+  timeZone: string | null;
 };
 
 type RunDueOptions = {
@@ -259,25 +295,79 @@ type RunDueOptions = {
   dryRun: boolean;
 };
 
+type RecurringRuleMutationRow = {
+  id: string;
+  tenantId: string;
+  templateId: string | null;
+  storeId: string | null;
+  assignedToUserId: string | null;
+  title: string;
+  description: string | null;
+  cadence: string;
+  status: string;
+  taskType: string;
+  priority: string;
+  timeOfDay: string | null;
+  dayOfWeek: number | null;
+  dayOfMonth: number | null;
+  dueOffsetMinutes: number | null;
+  nextRunAt: Date | null;
+  labels: Prisma.JsonValue | null;
+  checklist: Prisma.JsonValue | null;
+};
+
+type RecurringRuleTemplateRow = {
+  id: string;
+  tenantId: string;
+  storeId: string | null;
+  title: string;
+  description: string | null;
+  status: string;
+  type: string;
+  priority: string;
+  dueOffsetMinutes: number | null;
+  labels: Prisma.JsonValue | null;
+  checklist: Prisma.JsonValue | null;
+};
+
 @Injectable()
 export class StaffTaskRecurringRulesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly configService: ConfigService,
+    private readonly catalogAccessPolicy: StaffTaskCatalogAccessPolicyService,
+    private readonly staffTasksService: StaffTasksService,
   ) {}
 
   async getRules(
     user: AuthenticatedUser,
     query: StaffTaskRecurringRulesQuery = {},
   ): Promise<StaffTaskRecurringRulesReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const accessScope = this.catalogAccessPolicy.resolve(user);
     const filters = this.resolveFilters(query);
-    const where = this.buildWhere(tenantId, filters);
+    this.catalogAccessPolicy.assertExplicitStoreFilterAllowed(
+      accessScope,
+      filters.storeId,
+    );
+    const where = this.buildScopedRuleWhere(accessScope, filters);
+    const runWhere = this.catalogAccessPolicy.buildRunWhere(accessScope, {
+      rule: { is: where },
+    });
+    const now = new Date();
 
-    const [rows, runs, stores, users, templates] = await Promise.all([
+    const [
+      rows,
+      runs,
+      stores,
+      users,
+      templates,
+      statusCounts,
+      dueNow,
+      tasksCreated,
+    ] = await Promise.all([
       this.prisma.staffTaskRecurringRule.findMany({
         where,
-        include: ruleInclude,
+        include: this.scopedRuleInclude(accessScope),
         orderBy: [
           { status: 'asc' },
           { nextRunAt: 'asc' },
@@ -286,23 +376,25 @@ export class StaffTaskRecurringRulesService {
         take: 200,
       }),
       this.prisma.staffTaskRecurringRuleRun.findMany({
-        where: { tenantId },
+        where: runWhere,
         include: ruleRunInclude,
         orderBy: { startedAt: 'desc' },
         take: 25,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: this.catalogAccessPolicy.buildStoreSelectorWhere(accessScope),
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
+        where: this.catalogAccessPolicy.buildParticipantUserWhere(accessScope),
         select: { id: true, email: true, fullName: true },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),
       this.prisma.staffTaskTemplate.findMany({
-        where: { tenantId, status: { not: 'ARCHIVED' } },
+        where: this.catalogAccessPolicy.buildTemplateWhere(accessScope, {
+          status: 'ACTIVE',
+        }),
         select: {
           id: true,
           title: true,
@@ -314,14 +406,38 @@ export class StaffTaskRecurringRulesService {
         orderBy: [{ status: 'asc' }, { title: 'asc' }],
         take: 200,
       }),
+      this.prisma.staffTaskRecurringRule.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.staffTaskRecurringRule.count({
+        where: {
+          AND: [where, { status: 'ACTIVE', nextRunAt: { lte: now } }],
+        },
+      }),
+      this.prisma.staffTask.count({
+        where: {
+          AND: [
+            { tenantId: accessScope.tenantId },
+            ...(accessScope.mode === 'STORES'
+              ? [{ storeId: { in: [...accessScope.allowedStoreIds] } }]
+              : []),
+            { sourceRecurringRule: { is: where } },
+          ],
+        },
+      }),
     ]);
-    const responseRows = rows.map((row) => this.toRuleResponse(row));
+    const visibleUserIds = new Set(users.map((item) => item.id));
+    const responseRows = rows.map((row) =>
+      this.toRuleResponse(row, accessScope, visibleUserIds),
+    );
 
     return {
       filters,
-      summary: this.buildSummary(responseRows),
+      summary: this.buildSummaryFromCounts(statusCounts, dueNow, tasksCreated),
       rows: responseRows,
-      runs: runs.map((run) => this.toRunResponse(run)),
+      runs: runs.map((run) => this.toRunResponse(run, accessScope)),
       stores,
       users,
       templates,
@@ -329,29 +445,37 @@ export class StaffTaskRecurringRulesService {
   }
 
   async createRule(user: AuthenticatedUser, dto: StaffTaskRecurringRuleDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const data = await this.normalizeRuleData(tenantId, dto, {
-      requireTitle: true,
-    });
-    const nextRunAt = this.resolveNextRunAt({
-      status: (data.status as string | undefined) ?? 'ACTIVE',
-      cadence: (data.cadence as string | undefined) ?? 'DAILY',
-      timeOfDay: (data.timeOfDay as string | null | undefined) ?? null,
-      dayOfWeek: (data.dayOfWeek as number | null | undefined) ?? null,
-      dayOfMonth: (data.dayOfMonth as number | null | undefined) ?? null,
-    });
+    this.catalogAccessPolicy.resolve(user);
 
-    const created = await this.prisma.staffTaskRecurringRule.create({
-      data: {
-        ...(data as Prisma.StaffTaskRecurringRuleUncheckedCreateInput),
-        tenantId,
-        createdByUserId: user.id,
-        nextRunAt,
-      },
-      include: ruleInclude,
-    });
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockTenantForRecurringMutation(tx, user.tenantId);
+      const accessScope =
+        await this.catalogAccessPolicy.resolveFreshForMutation(tx, user);
+      const prepared = await this.prepareRuleMutation(tx, accessScope, dto, {
+        current: null,
+      });
+      const created = await tx.staffTaskRecurringRule.create({
+        data: {
+          ...prepared.data,
+          tenantId: accessScope.tenantId,
+          createdByUserId: user.id,
+          nextRunAt: prepared.nextRunAt,
+        },
+        include: this.scopedRuleInclude(accessScope),
+      });
 
-    return this.toRuleResponse(created);
+      await this.writeRuleAudit(tx, user, created, {
+        action: 'CREATED',
+        changedFields: this.ruleChangedFields(dto, true),
+      });
+      const visibleUserIds = await this.resolveVisibleRuleParticipantIds(
+        tx,
+        accessScope,
+        created,
+      );
+
+      return this.toRuleResponse(created, accessScope, visibleUserIds);
+    });
   }
 
   async updateRule(
@@ -359,50 +483,60 @@ export class StaffTaskRecurringRulesService {
     id: string,
     dto: StaffTaskRecurringRuleDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const accessScope = this.catalogAccessPolicy.resolve(user);
     const current = await this.prisma.staffTaskRecurringRule.findFirst({
-      where: { id, tenantId },
-      select: {
-        id: true,
-        status: true,
-        cadence: true,
-        timeOfDay: true,
-        dayOfWeek: true,
-        dayOfMonth: true,
-      },
+      where: this.buildScopedRuleLookupWhere(accessScope, id),
+      select: { id: true },
     });
 
     if (!current) {
       throw new NotFoundException('Staff task recurring rule not found');
     }
 
-    const data = await this.normalizeRuleData(tenantId, dto, {
-      requireTitle: false,
-    });
-    const nextRunAt = this.resolveNextRunAt({
-      status: (data.status as string | undefined) ?? current.status,
-      cadence: (data.cadence as string | undefined) ?? current.cadence,
-      timeOfDay:
-        data.timeOfDay === undefined
-          ? current.timeOfDay
-          : (data.timeOfDay as string | null),
-      dayOfWeek:
-        data.dayOfWeek === undefined
-          ? current.dayOfWeek
-          : (data.dayOfWeek as number | null),
-      dayOfMonth:
-        data.dayOfMonth === undefined
-          ? current.dayOfMonth
-          : (data.dayOfMonth as number | null),
-    });
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockTenantForRecurringMutation(tx, user.tenantId);
+      const freshAccessScope =
+        await this.catalogAccessPolicy.resolveFreshForMutation(tx, user);
+      const locked = await this.lockVisibleRuleForMutation(
+        tx,
+        freshAccessScope,
+        current.id,
+      );
+      const prepared = await this.prepareRuleMutation(
+        tx,
+        freshAccessScope,
+        dto,
+        { current: locked },
+      );
+      const updated = await tx.staffTaskRecurringRule.update({
+        where: { id: locked.id },
+        data: {
+          ...prepared.data,
+          nextRunAt: prepared.nextRunAt,
+        },
+        include: this.scopedRuleInclude(freshAccessScope),
+      });
 
-    const updated = await this.prisma.staffTaskRecurringRule.update({
-      where: { id: current.id },
-      data: { ...data, nextRunAt },
-      include: ruleInclude,
-    });
+      await this.writeRuleAudit(tx, user, updated, {
+        action: this.resolveRuleUpdateAuditAction(
+          locked.status,
+          updated.status,
+        ),
+        changedFields: this.ruleChangedFields(dto),
+        before: {
+          storeId: locked.storeId,
+          status: locked.status,
+          templateId: locked.templateId,
+        },
+      });
+      const visibleUserIds = await this.resolveVisibleRuleParticipantIds(
+        tx,
+        freshAccessScope,
+        updated,
+      );
 
-    return this.toRuleResponse(updated);
+      return this.toRuleResponse(updated, freshAccessScope, visibleUserIds);
+    });
   }
 
   async createTaskFromRule(
@@ -410,80 +544,97 @@ export class StaffTaskRecurringRulesService {
     id: string,
     dto: StaffTaskRecurringRuleLaunchDto,
   ): Promise<StaffTaskRecurringRuleLaunchResponse> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const accessScope = this.catalogAccessPolicy.resolve(user);
     const rule = await this.prisma.staffTaskRecurringRule.findFirst({
-      where: { id, tenantId },
-      include: { template: true },
+      where: this.buildScopedRuleLookupWhere(accessScope, id),
+      select: { id: true },
     });
 
     if (!rule) {
       throw new NotFoundException('Staff task recurring rule not found');
     }
 
-    if (rule.status === 'ARCHIVED') {
-      throw new BadRequestException('Archived rule cannot create tasks');
-    }
-
-    const taskData = await this.buildTaskDataFromRule({
-      tenantId,
-      rule,
-      dto,
-      createdByUserId: user.id,
-    });
-    const now = new Date();
-
     const created = await this.prisma.$transaction(async (tx) => {
-      const task = await tx.staffTask.create({
-        data: taskData,
-        select: { id: true, title: true, dueAt: true },
-      });
+      await this.lockTenantForRecurringMutation(tx, user.tenantId);
+      const freshAccessScope =
+        await this.catalogAccessPolicy.resolveFreshForMutation(tx, user);
+      const lockedRule = await this.lockVisibleRuleForMutation(
+        tx,
+        freshAccessScope,
+        rule.id,
+      );
 
-      await tx.staffTaskAuditEvent.create({
-        data: {
-          tenantId,
-          taskId: task.id,
-          actorUserId: user.id,
-          action: 'CREATED_FROM_RECURRING_RULE',
-          message: 'Task created from recurring rule',
-          metadata: {
-            ruleId: rule.id,
-            ruleTitle: rule.title,
-            cadence: rule.cadence,
-            templateId: rule.templateId,
-            automatic: false,
-          },
+      if (lockedRule.status === 'ARCHIVED') {
+        throw new BadRequestException('Archived rule cannot create tasks');
+      }
+
+      const template = await this.lockRuleTemplateForExecution(
+        tx,
+        freshAccessScope,
+        lockedRule,
+      );
+      const taskInput = await this.buildActorTaskInput(
+        tx,
+        freshAccessScope,
+        lockedRule,
+        template,
+        dto,
+      );
+      const freshUser = this.withFreshAccessScope(user, freshAccessScope);
+      const task = await this.staffTasksService.createCatalogTaskInTransaction(
+        tx,
+        freshUser,
+        taskInput.dto,
+        {
+          kind: 'RECURRING_RULE',
+          ruleId: lockedRule.id,
+          ruleTitle: lockedRule.title,
+          cadence: lockedRule.cadence,
+          templateId: lockedRule.templateId,
+          automatic: false,
         },
-      });
+      );
+      const now = new Date();
 
       await tx.staffTaskRecurringRule.update({
-        where: { id: rule.id },
+        where: { id: lockedRule.id },
         data: {
           lastManualRunAt: now,
           lastCreatedTaskId: task.id,
-          nextRunAt: this.resolveNextRunAt(rule, now),
         },
         select: { id: true },
       });
+      await this.writeRuleAudit(tx, user, lockedRule, {
+        action: 'TASK_LAUNCHED',
+        changedFields: ['lastManualRunAt', 'lastCreatedTaskId'],
+        effectiveStoreId: taskInput.effectiveStoreId,
+      });
 
-      return task;
+      return { task, templateId: lockedRule.templateId };
     });
 
     return {
-      id: created.id,
-      title: created.title,
-      dueAt: created.dueAt?.toISOString() ?? null,
+      id: created.task.id,
+      title: created.task.title,
+      dueAt: created.task.dueAt,
       ruleId: rule.id,
-      templateId: rule.templateId,
+      templateId: created.templateId,
     };
   }
 
   async runDueRulesForUser(
     user: AuthenticatedUser,
-    dto: StaffTaskRecurringRuleRunDueDto = {},
+    dto: StaffTaskRecurringRuleActorRunDueDto = {},
   ): Promise<StaffTaskRecurringRuleRunDueResult> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    this.assertActorRunDuePayload(dto);
+    const accessScope = this.catalogAccessPolicy.resolve(user);
+    const options: RunDueOptions = {
+      now: new Date(),
+      limit: this.normalizeRunLimit(dto.limit),
+      dryRun: this.normalizeBoolean(dto.dryRun),
+    };
 
-    return this.runDueRulesForTenant(tenantId, dto);
+    return this.runDueRulesForActor(user, accessScope, options);
   }
 
   async runDueRulesForTenant(
@@ -533,17 +684,20 @@ export class StaffTaskRecurringRulesService {
         ['all', ...ruleCadences] as const,
         'all',
       ),
-      storeId: this.normalizeOptionalString(query.storeId),
-      templateId: this.normalizeOptionalString(query.templateId),
-      search: this.normalizeOptionalString(query.search),
+      storeId: this.normalizeOptionalQueryString(query.storeId, 'storeId'),
+      templateId: this.normalizeOptionalQueryString(
+        query.templateId,
+        'templateId',
+      ),
+      search: this.normalizeOptionalQueryString(query.search, 'search'),
     };
   }
 
-  private buildWhere(
-    tenantId: string,
+  private buildScopedRuleWhere(
+    accessScope: ResolvedAccessScope,
     filters: StaffTaskRecurringRulesReport['filters'],
   ): Prisma.StaffTaskRecurringRuleWhereInput {
-    const where: Prisma.StaffTaskRecurringRuleWhereInput = { tenantId };
+    const where: Prisma.StaffTaskRecurringRuleWhereInput = {};
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -568,44 +722,284 @@ export class StaffTaskRecurringRulesService {
       ];
     }
 
-    return where;
+    return this.catalogAccessPolicy.buildRuleWhere(accessScope, {
+      AND: [where, this.buildRuleReferenceVisibilityWhere(accessScope)],
+    });
   }
 
-  private buildSummary(rows: StaffTaskRecurringRuleResponse[]) {
-    const now = Date.now();
+  private buildScopedRuleLookupWhere(
+    accessScope: ResolvedAccessScope,
+    id: string,
+  ) {
+    return this.catalogAccessPolicy.buildRuleWhere(accessScope, {
+      AND: [{ id }, this.buildRuleReferenceVisibilityWhere(accessScope)],
+    });
+  }
 
-    return rows.reduce(
-      (summary, row) => {
-        summary.total += 1;
-        summary.tasksCreated += row.tasksCreatedCount;
+  private buildScopedGeneratedTaskWhere(
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StaffTaskWhereInput {
+    return {
+      AND: [
+        { tenantId: accessScope.tenantId },
+        ...(accessScope.mode === 'STORES'
+          ? [{ storeId: { in: [...accessScope.allowedStoreIds] } }]
+          : []),
+      ],
+    };
+  }
 
-        if (row.status === 'ACTIVE') {
-          summary.active += 1;
-        } else if (row.status === 'PAUSED') {
-          summary.paused += 1;
-        } else if (row.status === 'ARCHIVED') {
-          summary.archived += 1;
-        }
+  private scopedRuleInclude(accessScope: ResolvedAccessScope) {
+    return {
+      ...ruleInclude,
+      _count: {
+        select: {
+          generatedTasks: {
+            where: this.buildScopedGeneratedTaskWhere(accessScope),
+          },
+        },
+      },
+    } satisfies Prisma.StaffTaskRecurringRuleInclude;
+  }
 
-        if (row.status === 'ACTIVE' && row.nextRunAt) {
-          const nextRunAt = new Date(row.nextRunAt).getTime();
+  private buildRuleReferenceVisibilityWhere(
+    accessScope: ResolvedAccessScope,
+  ): Prisma.StaffTaskRecurringRuleWhereInput {
+    const visibleTemplate =
+      this.catalogAccessPolicy.buildTemplateWhere(accessScope);
 
-          if (Number.isFinite(nextRunAt) && nextRunAt <= now) {
-            summary.dueNow += 1;
+    return {
+      OR: [
+        { templateId: null },
+        {
+          template: {
+            is: visibleTemplate,
+          },
+        },
+      ],
+    };
+  }
+
+  private buildSummaryFromCounts(
+    statusCounts: Array<{ status: string; _count: { _all: number } }>,
+    dueNow: number,
+    tasksCreated: number,
+  ) {
+    const summary = {
+      total: 0,
+      active: 0,
+      paused: 0,
+      archived: 0,
+      dueNow,
+      tasksCreated,
+    };
+
+    for (const row of statusCounts) {
+      summary.total += row._count._all;
+
+      if (row.status === 'ACTIVE') {
+        summary.active += row._count._all;
+      } else if (row.status === 'PAUSED') {
+        summary.paused += row._count._all;
+      } else if (row.status === 'ARCHIVED') {
+        summary.archived += row._count._all;
+      }
+    }
+
+    return summary;
+  }
+
+  private async runDueRulesForActor(
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
+    options: RunDueOptions,
+  ): Promise<StaffTaskRecurringRuleRunDueResult> {
+    const result = this.emptyRunDueResult(options);
+    const dueRules = await this.prisma.staffTaskRecurringRule.findMany({
+      where: this.catalogAccessPolicy.buildRuleWhere(accessScope, {
+        AND: [
+          this.buildRuleReferenceVisibilityWhere(accessScope),
+          {
+            status: 'ACTIVE',
+            nextRunAt: { lte: options.now },
+          },
+        ],
+      }),
+      select: {
+        id: true,
+        title: true,
+        nextRunAt: true,
+      },
+      orderBy: [{ nextRunAt: 'asc' }, { id: 'asc' }],
+      take: options.limit,
+    });
+    result.due = dueRules.length;
+
+    for (const candidate of dueRules) {
+      const candidateScheduledFor = candidate.nextRunAt ?? options.now;
+      const baseRun = {
+        ruleId: candidate.id,
+        ruleTitle: candidate.title,
+        scheduledFor: candidateScheduledFor.toISOString(),
+        taskId: null,
+      };
+
+      if (options.dryRun) {
+        result.runs.push({
+          ...baseRun,
+          status: 'DUE',
+          message: null,
+        });
+        continue;
+      }
+
+      try {
+        const outcome = await this.prisma.$transaction(async (tx) => {
+          await this.lockTenantForRecurringMutation(tx, user.tenantId);
+          const freshAccessScope =
+            await this.catalogAccessPolicy.resolveFreshForMutation(tx, user);
+          const rule = await this.lockVisibleRuleForMutation(
+            tx,
+            freshAccessScope,
+            candidate.id,
+          );
+
+          if (
+            rule.status !== 'ACTIVE' ||
+            !rule.nextRunAt ||
+            rule.nextRunAt > options.now
+          ) {
+            return { kind: 'SKIPPED' as const };
           }
+
+          const template = await this.lockRuleTemplateForExecution(
+            tx,
+            freshAccessScope,
+            rule,
+          );
+          const taskInput = await this.buildActorTaskInput(
+            tx,
+            freshAccessScope,
+            rule,
+            template,
+            {},
+          );
+          const scheduledFor = rule.nextRunAt;
+          const run = await tx.staffTaskRecurringRuleRun.create({
+            data: {
+              tenantId: freshAccessScope.tenantId,
+              ruleId: rule.id,
+              scheduledFor,
+              status: 'STARTED',
+              metadata: {
+                trigger: 'INTERACTIVE_DUE',
+                cadence: rule.cadence,
+                templateId: rule.templateId,
+              },
+            },
+            select: { id: true },
+          });
+          const freshUser = this.withFreshAccessScope(user, freshAccessScope);
+          const task =
+            await this.staffTasksService.createCatalogTaskInTransaction(
+              tx,
+              freshUser,
+              taskInput.dto,
+              {
+                kind: 'RECURRING_RULE',
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                cadence: rule.cadence,
+                templateId: rule.templateId,
+                automatic: true,
+                scheduledFor: scheduledFor.toISOString(),
+                ruleRunId: run.id,
+              },
+            );
+          const nextRunAt = this.resolveNextRunAt(
+            rule,
+            scheduledFor,
+            taskInput.storeTimeZone,
+          );
+
+          await tx.staffTaskRecurringRule.update({
+            where: { id: rule.id },
+            data: {
+              lastAutomaticRunAt: options.now,
+              lastCreatedTaskId: task.id,
+              nextRunAt,
+            },
+            select: { id: true },
+          });
+          await tx.staffTaskRecurringRuleRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'SUCCESS',
+              createdTaskId: task.id,
+              completedAt: new Date(),
+              message: 'Task created',
+            },
+            select: { id: true },
+          });
+          await this.writeRuleAudit(tx, user, rule, {
+            action: 'TASK_LAUNCHED',
+            changedFields: [
+              'lastAutomaticRunAt',
+              'lastCreatedTaskId',
+              'nextRunAt',
+            ],
+            effectiveStoreId: taskInput.effectiveStoreId,
+          });
+
+          return {
+            kind: 'SUCCESS' as const,
+            task,
+            scheduledFor,
+          };
+        });
+
+        if (outcome.kind === 'SKIPPED') {
+          result.skipped += 1;
+          result.runs.push({
+            ...baseRun,
+            status: 'SKIPPED',
+            message: 'Rule is no longer due',
+          });
+          continue;
         }
 
-        return summary;
-      },
-      {
-        total: 0,
-        active: 0,
-        paused: 0,
-        archived: 0,
-        dueNow: 0,
-        tasksCreated: 0,
-      },
-    );
+        result.created += 1;
+        result.runs.push({
+          ...baseRun,
+          scheduledFor: outcome.scheduledFor.toISOString(),
+          status: 'SUCCESS',
+          taskId: outcome.task.id,
+          message: 'Task created',
+        });
+      } catch (error) {
+        if (
+          this.isUniqueConstraintError(error) ||
+          error instanceof NotFoundException
+        ) {
+          result.skipped += 1;
+          result.runs.push({
+            ...baseRun,
+            status: 'SKIPPED',
+            message: 'Rule is no longer eligible or was already processed',
+          });
+          continue;
+        }
+
+        result.failed += 1;
+        result.runs.push({
+          ...baseRun,
+          status: 'FAILED',
+          message: 'Rule could not be processed',
+        });
+      }
+    }
+
+    return result;
   }
 
   private async runDueRules(
@@ -846,6 +1240,724 @@ export class StaffTaskRecurringRulesService {
     };
   }
 
+  private async prepareRuleMutation(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    dto: StaffTaskRecurringRuleDto,
+    options: { current: RecurringRuleMutationRow | null },
+  ) {
+    const current = options.current;
+    const status =
+      dto.status === undefined
+        ? (current?.status ?? 'ACTIVE')
+        : this.resolveOne(dto.status, ruleStatuses, 'ACTIVE');
+    const deactivationOnly =
+      Boolean(current) &&
+      (status === 'PAUSED' || status === 'ARCHIVED') &&
+      Object.keys(dto).every((field) => field === 'status');
+    const templateId =
+      dto.templateId === undefined
+        ? (current?.templateId ?? null)
+        : this.normalizeOptionalIdentifier(dto.templateId, 'templateId');
+    const template = templateId
+      ? await this.lockVisibleTemplateForRuleMutation(
+          tx,
+          accessScope,
+          templateId,
+        )
+      : null;
+
+    if (template && template.status !== 'ACTIVE' && !deactivationOnly) {
+      throw new BadRequestException(
+        'Only active templates can be used by recurring rules',
+      );
+    }
+
+    const requestedStoreId =
+      dto.storeId === undefined
+        ? current
+          ? current.storeId
+          : (template?.storeId ?? null)
+        : this.normalizeOptionalIdentifier(dto.storeId, 'storeId');
+    const store = await this.resolveRuleStoreId(
+      tx,
+      accessScope,
+      requestedStoreId,
+      {
+        allowInactive:
+          deactivationOnly && requestedStoreId === current?.storeId,
+      },
+    );
+    const storeId = store?.id ?? null;
+
+    if (template?.storeId && template.storeId !== storeId) {
+      throw new BadRequestException(
+        'Recurring rule and template must belong to the same store',
+      );
+    }
+
+    const assignedToUserId =
+      dto.assignedToUserId === undefined
+        ? (current?.assignedToUserId ?? null)
+        : this.normalizeOptionalIdentifier(
+            dto.assignedToUserId,
+            'assignedToUserId',
+          );
+
+    if (assignedToUserId && !deactivationOnly) {
+      await this.assertParticipantAllowed(
+        tx,
+        accessScope,
+        storeId,
+        assignedToUserId,
+      );
+    }
+
+    if (dto.labels !== undefined) {
+      this.catalogAccessPolicy.assertTaskLabelsWritable(dto.labels);
+    }
+
+    const cadence =
+      dto.cadence === undefined
+        ? (current?.cadence ?? 'DAILY')
+        : this.resolveOne(dto.cadence, ruleCadences, 'DAILY');
+    const timeOfDay =
+      dto.timeOfDay === undefined
+        ? (current?.timeOfDay ?? null)
+        : this.normalizeTimeOfDay(dto.timeOfDay);
+    const dayOfWeek =
+      dto.dayOfWeek === undefined
+        ? (current?.dayOfWeek ?? null)
+        : this.normalizeDayOfWeek(dto.dayOfWeek);
+    const dayOfMonth =
+      dto.dayOfMonth === undefined
+        ? (current?.dayOfMonth ?? null)
+        : this.normalizeDayOfMonth(dto.dayOfMonth);
+    const scheduleChanged =
+      !current ||
+      current.status !== status ||
+      current.cadence !== cadence ||
+      current.timeOfDay !== timeOfDay ||
+      current.dayOfWeek !== dayOfWeek ||
+      current.dayOfMonth !== dayOfMonth ||
+      current.storeId !== storeId;
+    const nextRunAt =
+      status !== 'ACTIVE'
+        ? null
+        : scheduleChanged || !current?.nextRunAt
+          ? this.resolveNextRunAt(
+              {
+                status,
+                cadence,
+                timeOfDay,
+                dayOfWeek,
+                dayOfMonth,
+              },
+              new Date(),
+              store?.timeZone,
+            )
+          : current.nextRunAt;
+    const title =
+      dto.title === undefined
+        ? (current?.title ??
+          template?.title ??
+          this.required('Rule title is required'))
+        : this.normalizeRequiredString(dto.title, 'Rule title is required');
+    const description =
+      dto.description === undefined
+        ? (current?.description ?? template?.description ?? null)
+        : this.normalizeOptionalString(dto.description);
+    const taskType =
+      dto.taskType === undefined
+        ? (current?.taskType ?? template?.type ?? 'RECURRING')
+        : this.resolveOne(dto.taskType, taskTypes, 'RECURRING');
+    const priority =
+      dto.priority === undefined
+        ? (current?.priority ?? template?.priority ?? 'NORMAL')
+        : this.resolveOne(dto.priority, taskPriorities, 'NORMAL');
+    const dueOffsetMinutes =
+      dto.dueOffsetMinutes === undefined
+        ? (current?.dueOffsetMinutes ?? template?.dueOffsetMinutes ?? null)
+        : this.normalizeDueOffset(dto.dueOffsetMinutes);
+    const labels =
+      dto.labels === undefined
+        ? (current?.labels ?? template?.labels ?? null)
+        : this.normalizeJson(dto.labels);
+    const checklist =
+      dto.checklist === undefined
+        ? (current?.checklist ?? template?.checklist ?? null)
+        : this.normalizeJson(dto.checklist);
+
+    return {
+      data: {
+        title,
+        description,
+        templateId,
+        storeId,
+        assignedToUserId,
+        cadence,
+        status,
+        taskType,
+        priority,
+        timeOfDay,
+        dayOfWeek,
+        dayOfMonth,
+        dueOffsetMinutes,
+        labels: this.toNullableJsonInput(labels),
+        checklist: this.toNullableJsonInput(checklist),
+      } satisfies Prisma.StaffTaskRecurringRuleUncheckedUpdateInput,
+      nextRunAt,
+    };
+  }
+
+  private async lockVisibleRuleForMutation(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    id: string,
+  ): Promise<RecurringRuleMutationRow> {
+    const where = this.buildScopedRuleLookupWhere(accessScope, id);
+    const visibleBeforeLock = await tx.staffTaskRecurringRule.findFirst({
+      where,
+      select: this.ruleMutationSelect(),
+    });
+
+    if (!visibleBeforeLock) {
+      throw new NotFoundException('Staff task recurring rule not found');
+    }
+
+    const lockedRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT rule."id"
+      FROM "StaffTaskRecurringRule" AS rule
+      WHERE rule."id" = ${id}
+        AND rule."tenantId" = ${accessScope.tenantId}
+      FOR UPDATE
+    `);
+
+    if (lockedRows.length !== 1) {
+      throw new NotFoundException('Staff task recurring rule not found');
+    }
+
+    const current = await tx.staffTaskRecurringRule.findFirst({
+      where,
+      select: this.ruleMutationSelect(),
+    });
+
+    if (!current) {
+      throw new NotFoundException('Staff task recurring rule not found');
+    }
+
+    return current;
+  }
+
+  private ruleMutationSelect() {
+    return {
+      id: true,
+      tenantId: true,
+      templateId: true,
+      storeId: true,
+      assignedToUserId: true,
+      title: true,
+      description: true,
+      cadence: true,
+      status: true,
+      taskType: true,
+      priority: true,
+      timeOfDay: true,
+      dayOfWeek: true,
+      dayOfMonth: true,
+      dueOffsetMinutes: true,
+      nextRunAt: true,
+      labels: true,
+      checklist: true,
+    } as const;
+  }
+
+  private async lockVisibleTemplateForRuleMutation(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    id: string,
+  ): Promise<RecurringRuleTemplateRow> {
+    const where = this.catalogAccessPolicy.buildTemplateLookupWhere(
+      accessScope,
+      id,
+    );
+    const visibleBeforeLock = await tx.staffTaskTemplate.findFirst({
+      where,
+      select: this.ruleTemplateSelect(),
+    });
+
+    if (!visibleBeforeLock) {
+      throw new BadRequestException('Staff task template not found');
+    }
+
+    const lockedRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT template."id"
+      FROM "StaffTaskTemplate" AS template
+      WHERE template."id" = ${id}
+        AND template."tenantId" = ${accessScope.tenantId}
+      FOR SHARE
+    `);
+
+    if (lockedRows.length !== 1) {
+      throw new BadRequestException('Staff task template not found');
+    }
+
+    const template = await tx.staffTaskTemplate.findFirst({
+      where,
+      select: this.ruleTemplateSelect(),
+    });
+
+    if (!template) {
+      throw new BadRequestException('Staff task template not found');
+    }
+
+    return template;
+  }
+
+  private ruleTemplateSelect() {
+    return {
+      id: true,
+      tenantId: true,
+      storeId: true,
+      title: true,
+      description: true,
+      status: true,
+      type: true,
+      priority: true,
+      dueOffsetMinutes: true,
+      labels: true,
+      checklist: true,
+    } as const;
+  }
+
+  private async lockRuleTemplateForExecution(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    rule: RecurringRuleMutationRow,
+  ) {
+    if (!rule.templateId) {
+      this.catalogAccessPolicy.assertTaskLabelsWritable(rule.labels);
+      return null;
+    }
+
+    const template = await this.lockVisibleTemplateForRuleMutation(
+      tx,
+      accessScope,
+      rule.templateId,
+    );
+
+    if (template.status !== 'ACTIVE') {
+      throw new BadRequestException(
+        'Only active templates can create recurring tasks',
+      );
+    }
+
+    if (template.storeId && template.storeId !== rule.storeId) {
+      throw new BadRequestException(
+        'Recurring rule and template must belong to the same store',
+      );
+    }
+
+    this.catalogAccessPolicy.assertTaskLabelsWritable(rule.labels);
+    this.catalogAccessPolicy.assertTaskLabelsWritable(template.labels);
+
+    return template;
+  }
+
+  private async resolveRuleStoreId(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    storeId: string | null,
+    options: { allowInactive: boolean },
+  ): Promise<RecurringRuleStoreRow | null> {
+    this.catalogAccessPolicy.assertStoreMutationAllowed(accessScope, storeId);
+
+    if (!storeId) {
+      return null;
+    }
+
+    const where: Prisma.StoreWhereInput = {
+      AND: [
+        this.catalogAccessPolicy.buildStoreSelectorWhere(accessScope),
+        {
+          id: storeId,
+          ...(options.allowInactive ? {} : { isActive: true }),
+        },
+      ],
+    };
+    const select = {
+      id: true,
+      tenantId: true,
+      isActive: true,
+      timeZone: true,
+    } satisfies Prisma.StoreSelect;
+    const visibleBeforeLock = await tx.store.findFirst({
+      where,
+      select,
+    });
+
+    if (!visibleBeforeLock) {
+      throw new BadRequestException('Store not found or inactive');
+    }
+
+    const lockedRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT store."id"
+      FROM "Store" AS store
+      WHERE store."id" = ${storeId}
+        AND store."tenantId" = ${accessScope.tenantId}
+      FOR SHARE
+    `);
+
+    if (lockedRows.length !== 1) {
+      throw new BadRequestException('Store not found or inactive');
+    }
+
+    const store = await tx.store.findFirst({
+      where: {
+        AND: [where, { tenantId: accessScope.tenantId }],
+      },
+      select,
+    });
+
+    if (!store) {
+      throw new BadRequestException('Store not found or inactive');
+    }
+
+    return store;
+  }
+
+  private async assertParticipantAllowed(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    storeId: string | null,
+    userId: string,
+  ) {
+    const where: Prisma.UserWhereInput = {
+      AND: [
+        this.catalogAccessPolicy.buildParticipantUserWhere(
+          accessScope,
+          storeId,
+        ),
+        { id: userId },
+      ],
+    };
+    const participantBeforeLock = await tx.user.findFirst({
+      where,
+      select: { id: true },
+    });
+
+    if (!participantBeforeLock) {
+      throw new BadRequestException(
+        'Assigned user is outside the effective task scope',
+      );
+    }
+
+    const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT participant."id"
+      FROM "User" AS participant
+      WHERE participant."id" = ${userId}
+        AND participant."tenantId" = ${accessScope.tenantId}
+      FOR SHARE
+    `);
+
+    if (lockedUsers.length !== 1) {
+      throw new BadRequestException(
+        'Assigned user is outside the effective task scope',
+      );
+    }
+
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT access."id"
+      FROM "UserStoreAccess" AS access
+      WHERE access."userId" = ${userId}
+      ORDER BY access."storeId", access."id"
+      FOR SHARE
+    `);
+
+    const participant = await tx.user.findFirst({
+      where: {
+        AND: [where, { tenantId: accessScope.tenantId }],
+      },
+      select: { id: true },
+    });
+
+    if (!participant) {
+      throw new BadRequestException(
+        'Assigned user is outside the effective task scope',
+      );
+    }
+  }
+
+  private async lockTenantForRecurringMutation(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ) {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT tenant."id"
+      FROM "Tenant" AS tenant
+      WHERE tenant."id" = ${tenantId}
+      FOR SHARE
+    `);
+
+    if (rows.length !== 1) {
+      throw new NotFoundException('Tenant not found');
+    }
+  }
+
+  private async resolveVisibleRuleParticipantIds(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    rule: {
+      storeId: string | null;
+      createdByUserId: string | null;
+      assignedToUserId: string | null;
+    },
+  ) {
+    const candidateIds = Array.from(
+      new Set(
+        [rule.createdByUserId, rule.assignedToUserId].filter(
+          (value): value is string => Boolean(value),
+        ),
+      ),
+    );
+
+    if (candidateIds.length === 0) {
+      return new Set<string>();
+    }
+
+    candidateIds.sort((left, right) => left.localeCompare(right));
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT participant."id"
+      FROM "User" AS participant
+      WHERE participant."tenantId" = ${accessScope.tenantId}
+        AND participant."id" IN (${Prisma.join(candidateIds)})
+      ORDER BY participant."id"
+      FOR SHARE
+    `);
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT access."id"
+      FROM "UserStoreAccess" AS access
+      WHERE access."userId" IN (${Prisma.join(candidateIds)})
+      ORDER BY access."userId", access."storeId", access."id"
+      FOR SHARE
+    `);
+
+    const visible = await tx.user.findMany({
+      where: {
+        AND: [
+          this.catalogAccessPolicy.buildParticipantUserWhere(
+            accessScope,
+            rule.storeId,
+          ),
+          { id: { in: candidateIds } },
+        ],
+      },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+
+    return new Set(visible.map((item) => item.id));
+  }
+
+  private async buildActorTaskInput(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    rule: RecurringRuleMutationRow,
+    template: RecurringRuleTemplateRow | null,
+    dto: StaffTaskRecurringRuleLaunchDto,
+  ): Promise<{
+    dto: StaffTaskDto;
+    effectiveStoreId: string | null;
+    storeTimeZone: string | null;
+  }> {
+    const boundStoreId = rule.storeId ?? template?.storeId ?? null;
+    const requestedStoreId =
+      dto.storeId === undefined
+        ? boundStoreId
+        : this.normalizeOptionalIdentifier(dto.storeId, 'storeId');
+    const store = await this.resolveRuleStoreId(
+      tx,
+      accessScope,
+      requestedStoreId,
+      { allowInactive: false },
+    );
+    const storeId = store?.id ?? null;
+
+    if (boundStoreId && storeId !== boundStoreId) {
+      throw new BadRequestException(
+        'A store-bound recurring rule can only create tasks for its own store',
+      );
+    }
+
+    const assignedToUserId =
+      dto.assignedToUserId === undefined
+        ? rule.assignedToUserId
+        : this.normalizeOptionalIdentifier(
+            dto.assignedToUserId,
+            'assignedToUserId',
+          );
+
+    if (assignedToUserId) {
+      await this.assertParticipantAllowed(
+        tx,
+        accessScope,
+        storeId,
+        assignedToUserId,
+      );
+    }
+
+    const title =
+      dto.title === undefined
+        ? rule.title.trim() ||
+          template?.title.trim() ||
+          this.required('Task title is required')
+        : this.normalizeRequiredString(dto.title, 'Task title is required');
+    const description =
+      dto.description === undefined
+        ? (rule.description ?? template?.description ?? null)
+        : this.normalizeOptionalString(dto.description);
+    const dueAt =
+      dto.dueAt === undefined
+        ? this.resolveDueDateFromOffset(
+            rule.dueOffsetMinutes ?? template?.dueOffsetMinutes ?? null,
+          )
+        : this.normalizeDateTime(dto.dueAt);
+
+    return {
+      effectiveStoreId: storeId,
+      storeTimeZone: store?.timeZone ?? null,
+      dto: {
+        title,
+        description,
+        type: rule.taskType as StaffTaskRecurringRuleTaskType,
+        priority: rule.priority as StaffTaskRecurringRulePriority,
+        status: 'OPEN',
+        storeId,
+        assignedToUserId,
+        dueAt: dueAt?.toISOString() ?? null,
+        labels: rule.labels ?? template?.labels ?? null,
+        checklist: rule.checklist ?? template?.checklist ?? null,
+      },
+    };
+  }
+
+  private withFreshAccessScope(
+    user: AuthenticatedUser,
+    accessScope: ResolvedAccessScope,
+  ): AuthenticatedUser {
+    return {
+      ...user,
+      accessScope: accessScope.mode,
+      allowedStoreIds: [...accessScope.allowedStoreIds],
+    };
+  }
+
+  private ruleChangedFields(
+    dto: StaffTaskRecurringRuleDto,
+    includeDefaults = false,
+  ) {
+    const fields = [
+      'title',
+      'description',
+      'templateId',
+      'storeId',
+      'assignedToUserId',
+      'cadence',
+      'status',
+      'taskType',
+      'priority',
+      'timeOfDay',
+      'dayOfWeek',
+      'dayOfMonth',
+      'dueOffsetMinutes',
+      'labels',
+      'checklist',
+    ] as const;
+
+    return fields.filter(
+      (field) => includeDefaults || dto[field] !== undefined,
+    );
+  }
+
+  private resolveRuleUpdateAuditAction(
+    previousStatus: string,
+    nextStatus: string,
+  ) {
+    if (previousStatus !== nextStatus && nextStatus === 'ACTIVE') {
+      return 'ACTIVATED' as const;
+    }
+
+    if (previousStatus !== nextStatus && nextStatus === 'PAUSED') {
+      return 'PAUSED' as const;
+    }
+
+    if (previousStatus !== nextStatus && nextStatus === 'ARCHIVED') {
+      return 'ARCHIVED' as const;
+    }
+
+    return 'UPDATED' as const;
+  }
+
+  private async writeRuleAudit(
+    tx: Prisma.TransactionClient,
+    user: AuthenticatedUser,
+    rule: {
+      id: string;
+      tenantId: string;
+      storeId: string | null;
+      templateId: string | null;
+      status: string;
+    },
+    input: {
+      action:
+        | 'CREATED'
+        | 'UPDATED'
+        | 'ACTIVATED'
+        | 'ARCHIVED'
+        | 'PAUSED'
+        | 'TASK_LAUNCHED';
+      changedFields: readonly string[];
+      before?: {
+        storeId: string | null;
+        templateId: string | null;
+        status: string;
+      };
+      effectiveStoreId?: string | null;
+    },
+  ) {
+    const releaseSha = this.configService.get<string>('RELEASE_SHA')?.trim();
+
+    await tx.staffTaskCatalogAuditEvent.create({
+      data: {
+        tenantId: rule.tenantId,
+        actorUserId: user.id,
+        entityKind: 'RULE',
+        entityId: rule.id,
+        action: input.action,
+        effectiveStoreId:
+          input.effectiveStoreId === undefined
+            ? rule.storeId
+            : input.effectiveStoreId,
+        changedFields: [...input.changedFields],
+        ...(input.before
+          ? {
+              beforeState: {
+                status: input.before.status,
+                storeId: input.before.storeId,
+                templateId: input.before.templateId,
+              },
+            }
+          : {}),
+        afterState: {
+          status: rule.status,
+          storeId: rule.storeId,
+          templateId: rule.templateId,
+        },
+        releaseSha: releaseSha || null,
+      },
+    });
+  }
+
   private async normalizeRuleData(
     tenantId: string,
     dto: StaffTaskRecurringRuleDto,
@@ -949,6 +2061,8 @@ export class StaffTaskRecurringRulesService {
 
   private toRuleResponse(
     row: StaffTaskRecurringRuleRow,
+    accessScope: ResolvedAccessScope,
+    visibleUserIds: ReadonlySet<string>,
   ): StaffTaskRecurringRuleResponse {
     return {
       id: row.id,
@@ -970,163 +2084,115 @@ export class StaffTaskRecurringRulesService {
       tasksCreatedCount: row._count.generatedTasks,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      store: row.store,
-      template: row.template
-        ? {
-            id: row.template.id,
-            title: row.template.title,
-            status: row.template.status,
-            type: row.template.type,
-            priority: row.template.priority,
-            dueOffsetMinutes: row.template.dueOffsetMinutes,
-            storeId: row.template.storeId,
-          }
-        : null,
-      createdByUser: row.createdByUser,
-      assignedToUser: row.assignedToUser,
-      lastCreatedTask: row.lastCreatedTask
-        ? {
-            id: row.lastCreatedTask.id,
-            title: row.lastCreatedTask.title,
-            status: row.lastCreatedTask.status,
-            dueAt: row.lastCreatedTask.dueAt?.toISOString() ?? null,
-            createdAt: row.lastCreatedTask.createdAt.toISOString(),
-          }
-        : null,
+      store:
+        row.store?.tenantId === row.tenantId &&
+        row.store.id === row.storeId &&
+        this.isStoreVisible(accessScope, row.store.id)
+          ? {
+              id: row.store.id,
+              name: row.store.name,
+              isActive: row.store.isActive,
+            }
+          : null,
+      template:
+        row.template?.tenantId === row.tenantId &&
+        row.template.id === row.templateId &&
+        this.isStoreVisible(accessScope, row.template.storeId)
+          ? {
+              id: row.template.id,
+              title: row.template.title,
+              status: row.template.status,
+              type: row.template.type,
+              priority: row.template.priority,
+              dueOffsetMinutes: row.template.dueOffsetMinutes,
+              storeId: row.template.storeId,
+            }
+          : null,
+      createdByUser:
+        row.createdByUser?.tenantId === row.tenantId &&
+        row.createdByUser.isActive &&
+        !row.createdByUser.isPlatformAdmin &&
+        visibleUserIds.has(row.createdByUser.id)
+          ? {
+              id: row.createdByUser.id,
+              email: row.createdByUser.email,
+              fullName: row.createdByUser.fullName,
+            }
+          : null,
+      assignedToUser:
+        row.assignedToUser?.tenantId === row.tenantId &&
+        row.assignedToUser.isActive &&
+        !row.assignedToUser.isPlatformAdmin &&
+        visibleUserIds.has(row.assignedToUser.id)
+          ? {
+              id: row.assignedToUser.id,
+              email: row.assignedToUser.email,
+              fullName: row.assignedToUser.fullName,
+            }
+          : null,
+      lastCreatedTask:
+        row.lastCreatedTask?.tenantId === row.tenantId &&
+        this.isStoreVisible(accessScope, row.lastCreatedTask.storeId)
+          ? {
+              id: row.lastCreatedTask.id,
+              title: row.lastCreatedTask.title,
+              status: row.lastCreatedTask.status,
+              dueAt: row.lastCreatedTask.dueAt?.toISOString() ?? null,
+              createdAt: row.lastCreatedTask.createdAt.toISOString(),
+            }
+          : null,
     };
   }
 
   private toRunResponse(
     row: StaffTaskRecurringRuleRunRow,
+    accessScope: ResolvedAccessScope,
   ): StaffTaskRecurringRuleRunResponse {
+    const ruleVisible =
+      row.rule.tenantId === row.tenantId &&
+      this.isStoreVisible(accessScope, row.rule.storeId);
+    const createdTaskVisible =
+      row.createdTask?.tenantId === row.tenantId &&
+      this.isStoreVisible(accessScope, row.createdTask.storeId);
+
     return {
       id: row.id,
       ruleId: row.ruleId,
-      ruleTitle: row.rule.title,
+      ruleTitle: ruleVisible ? row.rule.title : 'Unavailable rule',
       status: row.status,
       scheduledFor: row.scheduledFor.toISOString(),
       startedAt: row.startedAt.toISOString(),
       completedAt: row.completedAt?.toISOString() ?? null,
-      message: row.message,
-      metadata: row.metadata,
-      createdTask: row.createdTask
-        ? {
-            id: row.createdTask.id,
-            title: row.createdTask.title,
-            status: row.createdTask.status,
-            dueAt: row.createdTask.dueAt?.toISOString() ?? null,
-            createdAt: row.createdTask.createdAt.toISOString(),
-          }
-        : null,
+      message:
+        row.status === 'FAILED'
+          ? 'Rule processing failed'
+          : row.status === 'SUCCESS'
+            ? 'Task created'
+            : null,
+      metadata: this.safeRunMetadata(row.metadata),
+      createdTask:
+        row.createdTask && createdTaskVisible
+          ? {
+              id: row.createdTask.id,
+              title: row.createdTask.title,
+              status: row.createdTask.status,
+              dueAt: row.createdTask.dueAt?.toISOString() ?? null,
+              createdAt: row.createdTask.createdAt.toISOString(),
+            }
+          : null,
     };
   }
 
-  private resolveNextRunAt(input: RuleScheduleInput, from = new Date()) {
-    if (input.status !== 'ACTIVE') {
-      return null;
-    }
-
-    const { hours, minutes } = this.resolveScheduleTime(
-      input.cadence,
-      input.timeOfDay,
+  private resolveNextRunAt(
+    input: StaffTaskRecurringScheduleInput,
+    from = new Date(),
+    storeTimeZone?: string | null,
+  ) {
+    return resolveStaffTaskRecurringNextRunAt(
+      input,
+      from,
+      storeTimeZone,
     );
-
-    if (
-      input.cadence === 'DAILY' ||
-      input.cadence === 'OPENING_SHIFT' ||
-      input.cadence === 'CLOSING_SHIFT'
-    ) {
-      return this.nextDaily(from, hours, minutes);
-    }
-
-    if (input.cadence === 'WEEKLY') {
-      return this.nextWeekly(from, hours, minutes, input.dayOfWeek ?? 1);
-    }
-
-    if (input.cadence === 'MONTHLY') {
-      return this.nextMonthly(from, hours, minutes, input.dayOfMonth ?? 1);
-    }
-
-    return this.nextDaily(from, hours, minutes);
-  }
-
-  private resolveScheduleTime(cadence: string, value: string | null) {
-    const fallback =
-      cadence === 'OPENING_SHIFT'
-        ? '09:00'
-        : cadence === 'CLOSING_SHIFT'
-          ? '23:00'
-          : '10:00';
-    const [hours, minutes] = (value ?? fallback)
-      .split(':')
-      .map((part) => Number.parseInt(part, 10));
-
-    return {
-      hours: Number.isFinite(hours) ? hours : 10,
-      minutes: Number.isFinite(minutes) ? minutes : 0,
-    };
-  }
-
-  private nextDaily(now: Date, hours: number, minutes: number) {
-    const target = new Date(now);
-    target.setHours(hours, minutes, 0, 0);
-
-    if (target <= now) {
-      target.setDate(target.getDate() + 1);
-    }
-
-    return target;
-  }
-
-  private nextWeekly(
-    now: Date,
-    hours: number,
-    minutes: number,
-    dayOfWeek: number,
-  ) {
-    const target = new Date(now);
-    const jsTargetDay = dayOfWeek % 7;
-    const daysAhead = (jsTargetDay - target.getDay() + 7) % 7;
-    target.setDate(target.getDate() + daysAhead);
-    target.setHours(hours, minutes, 0, 0);
-
-    if (target <= now) {
-      target.setDate(target.getDate() + 7);
-    }
-
-    return target;
-  }
-
-  private nextMonthly(
-    now: Date,
-    hours: number,
-    minutes: number,
-    dayOfMonth: number,
-  ) {
-    const target = new Date(now);
-    this.setMonthDay(target, dayOfMonth, hours, minutes);
-
-    if (target <= now) {
-      target.setMonth(target.getMonth() + 1, 1);
-      this.setMonthDay(target, dayOfMonth, hours, minutes);
-    }
-
-    return target;
-  }
-
-  private setMonthDay(
-    target: Date,
-    dayOfMonth: number,
-    hours: number,
-    minutes: number,
-  ) {
-    const lastDay = new Date(
-      target.getFullYear(),
-      target.getMonth() + 1,
-      0,
-    ).getDate();
-    target.setDate(Math.min(Math.max(dayOfMonth, 1), lastDay));
-    target.setHours(hours, minutes, 0, 0);
   }
 
   private resolveOne<T extends readonly string[]>(
@@ -1201,6 +2267,101 @@ export class StaffTaskRecurringRulesService {
     }
 
     return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
+  private assertActorRunDuePayload(
+    value: StaffTaskRecurringRuleActorRunDueDto,
+  ) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException('Run-due body must be an object');
+    }
+
+    const allowedFields = new Set(['limit', 'dryRun']);
+    const unsupportedField = Object.keys(value).find(
+      (field) => !allowedFields.has(field),
+    );
+
+    if (unsupportedField) {
+      throw new BadRequestException(
+        `Unsupported interactive run-due field: ${unsupportedField}`,
+      );
+    }
+  }
+
+  private normalizeOptionalQueryString(value: unknown, field: string) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${field} must be a single string`);
+    }
+
+    return value.trim() || null;
+  }
+
+  private normalizeOptionalIdentifier(value: unknown, field: string) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${field} must be a string or null`);
+    }
+
+    return value.trim() || null;
+  }
+
+  private normalizeRequiredString(value: unknown, message: string) {
+    if (typeof value !== 'string') {
+      throw new BadRequestException(message);
+    }
+
+    const normalized = value.trim();
+
+    if (!normalized) {
+      throw new BadRequestException(message);
+    }
+
+    return normalized;
+  }
+
+  private toNullableJsonInput(value: unknown) {
+    if (value === null || value === undefined || value === Prisma.DbNull) {
+      return Prisma.DbNull;
+    }
+
+    return value as Prisma.InputJsonValue;
+  }
+
+  private isStoreVisible(
+    accessScope: ResolvedAccessScope,
+    storeId: string | null,
+  ) {
+    return (
+      accessScope.mode === 'NETWORK' ||
+      (Boolean(storeId) &&
+        accessScope.allowedStoreIds.includes(storeId as string))
+    );
+  }
+
+  private safeRunMetadata(value: Prisma.JsonValue | null) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const source = value as Record<string, Prisma.JsonValue>;
+    const safe: Record<string, Prisma.JsonValue> = {};
+
+    if (typeof source.trigger === 'string') {
+      safe.trigger = source.trigger;
+    }
+
+    if (typeof source.cadence === 'string') {
+      safe.cadence = source.cadence;
+    }
+
+    return Object.keys(safe).length > 0 ? safe : null;
   }
 
   private errorMessage(error: unknown) {

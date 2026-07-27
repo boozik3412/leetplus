@@ -3,7 +3,7 @@
 | Поле | Значение |
 |---|---|
 | Статус | Active |
-| Версия | 1.4.0 |
+| Версия | 1.6.0 |
 | Дата | 27.07.2026 |
 | Владелец | LeetPlus engineering |
 
@@ -31,6 +31,7 @@ capability, entitlement, PII, audit event, owner, test и release SHA.
 | STAFF-01A | staff directory scoped core | list/summary/options/detail/active shifts/create/update, `USER_STAFF` | rows and current/next stores must be inside actor scope; null/network staff, cross-store move and Langame identity mutation require NETWORK; STORES Langame detail is suppressed; update uses scope CAS | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; PG/API/browser/PII/backfill evidence pending | IMPLEMENTED_CANDIDATE |
 | STAFF-02A | staff task scoped core and evidence | task list/summary/quick views/groups/export/direct create/update/comment/status plus `STAFF_TASK` file parent | persisted scope filters rows before totals/export; denied filter is `403`, hidden UUID is `404`; STORES null-task structural patch is denied; participant scope is exact/subset and store-compatible; mutation locks/rechecks parent and final participants through the transaction client; create starts OPEN; assignment labels are server-owned; evidence bind is atomic and strict file read repeats live task ACL | working candidate, exact SHA pending; focused 21 suites/302 tests, task 63 tests, full API 74 suites/1 526 pass/2 todo, API build and web webpack build pass; clean 155-migration attachment smoke and real PG A1→A2/rollback 3 tests pass; reference-row serialization/task-shift DB invariant, recurring/templates, revoke, BFF/browser pending | IMPLEMENTED_CANDIDATE |
 | STAFF-02B | task templates and catalog materializer | template list/summary/options/create/update/launch plus task/catalog audit | persisted scope filters rows/counts/options; STORES excludes global and requires active allowed Store; UUID outside scope is `404`; mutation reloads scope, locks parent, enforces ACTIVE/bound Store and uses shared task materializer; creator projection and catalog audit are scope/PII-safe | [checkpoint](./staff-task-catalog-implementation-checkpoint.md); focused 24 suites/341 tests, full API 77 suites/1 565 pass/2 todo, clean 156 migrations, catalog audit smoke 5/5, PG task race/rollback 3/3 and API/web production builds pass; recurring lock/revoke/browser pending | IMPLEMENTED_CANDIDATE |
+| STAFF-02C | recurring task actor HTTP | scoped report/options/runs, Rule create/update/manual launch and interactive due | persisted scope; `403` forbidden Store filter; hidden UUID `404`; Tenant/Rule/Template/Store/User access locks; scoped PII/count projections; shared task materializer; sparse PATCH/manual launch preserve schedule; actor due uses server time, Store IANA timezone and atomically writes Run/Task/Rule/audits; scheduler and all-tenant route unregistered/default-off | [checkpoint](./staff-task-recurring-http-implementation-checkpoint.md); recurring unit 23, scheduled HTTP 6 and scheduler 4 pass; focused 27 suites/375 tests, full API 80 suites/1 599 pass/2 todo, real PG 2 suites/8 tests and API/web builds pass; legacy inventory, BFF/browser, global timezone and background ownership pending | IMPLEMENTED_CANDIDATE |
 | STAFF-ATT-01A | attachment response/content hardening | API/BFF download response | private/no-store + nosniff; safe inline allow-list; active/unknown content forced to attachment | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; header/content unit in focused 16 suites/191 tests; ACL/backfill/file IDOR pending | IMPLEMENTED_CANDIDATE |
 | COMMS-01A | team-chat scoped core | channel list/report/direct/live; message list/count/latest/unread/read/create/update; SSE reconnect | allowed store predicate is authoritative; filter cannot widen; STORES requires membership for CUSTOM; reconnect re-authenticates | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; membership lifecycle/mentions, old-message reconciliation, API/browser/SSE pending | IMPLEMENTED_CANDIDATE |
 | COMMS-02A | staff notifications actor core | list/summary/options/acknowledge/resolve/interactive sync | store rows filtered before response/mutation; direct deny `404`; tenant-wide interactive sync NETWORK-only | candidate `764a9d7d7d5712e0283e0fca787a75829f95a240`; focused 16 suites/191 tests and full API 70 suites/1 432 pass/2 todo; system producer context + PG/API/jobs pending | IMPLEMENTED_CANDIDATE |
@@ -80,6 +81,11 @@ PII-флагом, audit event, именами тестов, owner и release SHA
 
 ## Changelog
 
+- `1.6.0` — закрыты P1 recurring actor HTTP: scoped mutation counts/PII,
+  Store/participant locks, sparse UI PATCH и Store IANA/DST schedule; real
+  PostgreSQL Template/Store/revoke races обязательны в CI.
+- `1.5.0` — добавлен bounded recurring actor HTTP candidate и runtime
+  containment scheduler/all-tenant route.
 - `1.4.0` — добавлен bounded template/catalog candidate, scoped counts/creator,
   shared materializer и атомарный catalog audit; recurring/scheduler остаются
   `NO-GO`.

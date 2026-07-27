@@ -168,10 +168,11 @@ jobs:
         env:
           STAFF_TASK_CATALOG_AUDIT_SMOKE_CONFIRM: run-staff-task-catalog-audit-fixtures
 
-      - name: Verify staff task transaction security with PostgreSQL
+      - name: Verify staff task and recurring-rule transaction security with PostgreSQL
         run: pnpm --filter api test:integration:staff-task-security:pg
         env:
           STAFF_TASK_SECURITY_PG_CONFIRM: run-staff-task-security-postgres-fixtures
+          STAFF_TASK_RECURRING_PG_CONFIRM: run-staff-task-recurring-postgres-fixtures
 
       - name: Run read-only attachment inventory
         run: pnpm --filter database db:inventory:attachment-acl

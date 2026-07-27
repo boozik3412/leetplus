@@ -303,11 +303,17 @@ export class StaffTaskTemplatesService {
         freshAccessScope,
         nextStoreId,
       );
-      if (nextStoreId) {
-        await this.resolveStoreId(freshAccessScope, nextStoreId, tx);
-      }
       const nextStatus =
         typeof data.status === 'string' ? data.status : lockedCurrent.status;
+      const archiveOnly =
+        nextStatus === 'ARCHIVED' &&
+        Object.keys(dto).every((field) => field === 'status');
+      if (nextStoreId) {
+        await this.resolveStoreId(freshAccessScope, nextStoreId, tx, {
+          allowInactive:
+            archiveOnly && nextStoreId === lockedCurrent.storeId,
+        });
+      }
       await this.assertActiveRulesUnaffected(
         tx,
         lockedCurrent,
@@ -711,6 +717,7 @@ export class StaffTaskTemplatesService {
     accessScope: ResolvedAccessScope,
     value: string | null | undefined,
     prismaClient: StaffTaskTemplateReferenceClient = this.prisma,
+    options: { allowInactive?: boolean } = {},
   ) {
     const id = this.normalizeOptionalString(value);
 
@@ -723,7 +730,7 @@ export class StaffTaskTemplatesService {
       where: {
         AND: [
           this.catalogAccessPolicy.buildStoreSelectorWhere(accessScope),
-          { id, isActive: true },
+          { id, ...(options.allowInactive ? {} : { isActive: true }) },
         ],
       },
       select: { id: true },

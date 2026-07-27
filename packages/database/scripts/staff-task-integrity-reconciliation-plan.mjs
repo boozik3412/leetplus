@@ -766,6 +766,7 @@ WITH
   ),
   actual_fk AS (
     SELECT
+      constraint_row.oid AS constraint_oid,
       constraint_row.conname::text AS constraint_name,
       constraint_namespace.nspname::text AS constraint_schema,
       child_namespace.nspname::text AS child_schema,
@@ -778,6 +779,19 @@ WITH
       constraint_row.convalidated AS validated,
       constraint_row.condeferrable AS deferrable,
       constraint_row.condeferred AS deferred,
+      (
+        SELECT COUNT(*)::integer
+        FROM pg_trigger AS trigger_row
+        WHERE trigger_row.tgconstraint = constraint_row.oid
+      ) AS enforcement_trigger_count,
+      COALESCE(
+        (
+          SELECT bool_and(trigger_row.tgenabled = 'O')
+          FROM pg_trigger AS trigger_row
+          WHERE trigger_row.tgconstraint = constraint_row.oid
+        ),
+        false
+      ) AS enforcement_triggers_enabled,
       referenced_index_namespace.nspname::text AS referenced_index_schema,
       referenced_index.relname::text AS referenced_index_name,
       ARRAY(
@@ -852,6 +866,8 @@ WITH
         AND actual.validated = false
         AND actual.deferrable = false
         AND actual.deferred = false
+        AND actual.enforcement_trigger_count = 4
+        AND actual.enforcement_triggers_enabled
         AND actual.referenced_index_schema = 'public'
         AND (
           expected.referenced_index_name IS NULL

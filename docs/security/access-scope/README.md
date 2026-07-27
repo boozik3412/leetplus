@@ -1,18 +1,19 @@
 # AccessScope: документация открытого теста
 
-| Поле | Значение |
-|---|---|
-| Статус | Active |
-| Версия контракта | 1.8.0 |
-| Дата | 27.07.2026 |
-| Владелец | LeetPlus engineering |
-| Связанный backlog | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
-| Исходный baseline | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2` |
-| Schema-only candidate | `28724008192442c03f35fcc46ff7de78cdead642` — not deployed |
-| Strict application candidate | `df993a9d04fdb48809868555b0d040d52848e3ee` — not deployed |
-| Attachment ACL baseline | `1207c63cacedba05937d4a96a03a8dfd11751d2e` — not deployed |
-| `STAFF_TASK` adoption | Working candidate, exact SHA pending — not deployed |
-| Recurring actor HTTP | Working candidate, exact SHA pending — not deployed |
+| Поле                           | Значение                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Статус                         | Active                                                                                              |
+| Версия контракта               | 1.9.0                                                                                               |
+| Дата                           | 27.07.2026                                                                                          |
+| Владелец                       | LeetPlus engineering                                                                                |
+| Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
+| Исходный baseline              | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2`                                                          |
+| Schema-only candidate          | `28724008192442c03f35fcc46ff7de78cdead642` — not deployed                                           |
+| Strict application candidate   | `df993a9d04fdb48809868555b0d040d52848e3ee` — not deployed                                           |
+| Attachment ACL baseline        | `1207c63cacedba05937d4a96a03a8dfd11751d2e` — not deployed                                           |
+| `STAFF_TASK` adoption          | `f0a6bccfdd26d5b782c03f0b23445a3d23080058` — not deployed                                           |
+| Recurring actor HTTP           | `cbd7a6b426c4e9fd9e29c085eeb8547d88249ca5` — not deployed                                           |
+| Staff task integrity inventory | `56d615437ecfcb90db252016d3e5b83f3f545578` — not run on production                                  |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -63,6 +64,9 @@ invite-only открытому тесту. Она отвечает на вопр
 11. [Recurring actor HTTP: implementation checkpoint](./v1/staff-task-recurring-http-implementation-checkpoint.md) —
     scoped Rule CRUD/manual/interactive due, Store/participant lock contract,
     IANA/DST schedule, PostgreSQL race evidence и background containment.
+12. [Staff task catalog integrity inventory](./v1/staff-task-integrity-inventory-runbook.md) —
+    read-only legacy scan, reason-code gate и порядок
+    `INVENTORY → RECONCILE → EXPAND → VALIDATE`.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -142,7 +146,18 @@ Recurring actor candidate прошёл focused CI 27 suites / 375 tests, full AP
 2 suites / 8 tests. Пять recurring race-сценариев подтверждают фактическую
 блокировку и post-wait rollback для Template, Store и participant revoke.
 Scheduler/all-tenant route не зарегистрированы; tenant-global timezone,
-legacy inventory и browser evidence остаются `NO-GO`.
+production-like legacy reconciliation, DB constraints и browser evidence
+остаются `NO-GO`.
+
+Staff task integrity inventory реализован отдельным candidate
+`56d615437ecfcb90db252016d3e5b83f3f545578`. Он проверяет 43 aggregate
+same-tenant/store/assignee/schedule/run/deletion reason code в одной
+read-only `REPEATABLE READ` snapshot, не возвращает row identifiers и
+различает ошибки (`1`) и blocking findings (`2`). Clean schema со всеми 156
+миграциями дала `PASS`; локальная намеренно cross-tenant fixture дала
+`BLOCKED` без утечки ID. Production/production-like scan и reconciliation не
+выполнялись, поэтому это implementation evidence, а не разрешение внешнего
+доступа.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -160,6 +175,9 @@ legacy inventory и browser evidence остаются `NO-GO`.
 
 ## Changelog
 
+- `1.9.0`, 27.07.2026 — добавлен guarded staff task integrity inventory:
+  43 reason code, read-only RepeatableRead, deterministic exit gate,
+  clean-schema CI и runbook будущих same-tenant/Store deletion constraints.
 - `1.8.0`, 27.07.2026 — recurring P1 закрыты Store/participant locks,
   scoped mutation projections, sparse PATCH и Store IANA/DST schedule;
   PostgreSQL race suite включён в обязательный CI.

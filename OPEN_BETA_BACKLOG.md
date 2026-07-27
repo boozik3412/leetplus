@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.15
+- Версия: 1.16
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
@@ -152,150 +152,150 @@
 
 ### 5.1. Канонический исходный код и управление изменениями
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-SRC-001 | P0 | Готово | Сохранить исходные локальные изменения и локальные коммиты | Динамический source manifest фиксирует branch, HEAD, origin/main, ahead/behind и worktree; работа сохранена в отдельной ветке/коммитах без потерь | — |
-| BETA-SRC-002 | P0 | В работе | Осознанно согласовать local `main` с `origin/main` | Один канонический clean SHA; расхождение `ahead/behind` устранено без уничтожения локальной работы | BETA-SRC-001 |
-| BETA-SRC-003 | P0 | Запланировано | Защитить `main` и ввести release freeze на новые функции | Merge возможен только после обязательных checks; до Gate 3 принимаются только launch-blockers и обязательный beta scope | BETA-SRC-002, BETA-OPS-001 |
-| BETA-SRC-004 | P1 | Запланировано | Версионировать nginx, systemd, deploy и env examples | Production-конфигурация воспроизводится из репозитория; секреты отсутствуют; review показывает точный diff инфраструктуры | BETA-SRC-002 |
+| ID           | Приоритет | Статус        | Задача                                                     | Критерии приёмки                                                                                                                                  | Зависимости                |
+| ------------ | --------- | ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| BETA-SRC-001 | P0        | Готово        | Сохранить исходные локальные изменения и локальные коммиты | Динамический source manifest фиксирует branch, HEAD, origin/main, ahead/behind и worktree; работа сохранена в отдельной ветке/коммитах без потерь | —                          |
+| BETA-SRC-002 | P0        | В работе      | Осознанно согласовать local `main` с `origin/main`         | Один канонический clean SHA; расхождение `ahead/behind` устранено без уничтожения локальной работы                                                | BETA-SRC-001               |
+| BETA-SRC-003 | P0        | Запланировано | Защитить `main` и ввести release freeze на новые функции   | Merge возможен только после обязательных checks; до Gate 3 принимаются только launch-blockers и обязательный beta scope                           | BETA-SRC-002, BETA-OPS-001 |
+| BETA-SRC-004 | P1        | Запланировано | Версионировать nginx, systemd, deploy и env examples       | Production-конфигурация воспроизводится из репозитория; секреты отсутствуют; review показывает точный diff инфраструктуры                         | BETA-SRC-002               |
 
 ### 5.2. P0: безопасность и изоляция
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-SEC-001 | P0 | В работе | Убрать optional-auth со всех operational B2B endpoints | Anonymous dashboard, products, stores, categories, suppliers, reports, staff, communications и management отвечают `401`; BFF не обходит защиту | BETA-SRC-002 |
-| BETA-SEC-002 | P1 | Запланировано | При необходимости создать безопасную архитектуру публичного demo | Публичны только allowlist-проекции синтетического `public-demo`; отсутствуют реальные выручка, себестоимость, остатки, адреса, внешние ID, PII и secrets; есть pagination и rate limit; задача не задерживает invite-only pilot после закрытия anonymous operational API | BETA-SEC-001 |
-| BETA-SEC-003 | P0 | В работе | Ввести единый server-side `AccessScope` | Каждый запрос пересекается с `tenantId` и `allowedStoreIds`; пустой или отсутствующий scope даёт deny-by-default; store-bound facts всегда фильтруются, а tenant-global write разрешён только network-scoped роли; общий механизм используется всеми обязательными модулями | BETA-SRC-002 |
-| BETA-SEC-004 | P0 | В работе | Сделать capabilities авторитетной endpoint-проверкой | Совпадение стандартной роли не обходит capability; capability задаётся декларативно на endpoint; frontend visibility не считается защитой | BETA-SEC-003 |
-| BETA-SEC-005 | P0 | Запланировано | Разделить просмотр бизнес-данных, PII reveal и export | PII маскирована по умолчанию; reveal/export требуют отдельных capabilities; каждое действие аудируется с tenant, store scope, user, route и request ID | BETA-SEC-004 |
-| BETA-SEC-006 | P0 | В работе | Добавить двухtenantную и двухклубную IDOR/integration suite | Tenant A/Store A не читает, не изменяет и не экспортирует Tenant B/Store B через list, UUID, filters, aggregates, exports, attachments, BFF или jobs | BETA-SEC-003, BETA-SEC-004, BETA-OPS-002 |
-| BETA-SEC-007 | P0 | В работе | Удалить известный production QA/seed риск | Известные credentials не работают; QA не Platform Admin; все сессии отозваны; seed отказывается работать с production DB и создаёт случайные local credentials | BETA-SRC-002 |
-| BETA-SEC-008 | P0 | В работе | Добавить fail-closed startup validation и разделить secrets | Production не запускается с отсутствующими, placeholder, короткими или повторно используемыми JWT, PII, HMAC, integration, referral и scheduler secrets; opaque invite tokens генерируются случайно и хранятся только как hash; ротация secrets версионирована | BETA-SRC-002 |
-| BETA-SEC-009 | P0 | В работе | Сделать принятие приглашения атомарным | Invite привязан к email; один conditional claim; 100 параллельных запросов создают ровно одного пользователя; изменение email/role/stores/TTL ротирует token | BETA-SEC-008 |
-| BETA-SEC-010 | P0 | Запланировано | Усилить B2B authentication | Rate limit и progressive backoff на login/invite; password reset; revoke sessions; MFA либо эквивалентное усиление Platform Admin; security headers проверяются deploy smoke | BETA-SEC-008, BETA-IAM-004 |
+| ID           | Приоритет | Статус        | Задача                                                           | Критерии приёмки                                                                                                                                                                                                                                                            | Зависимости                              |
+| ------------ | --------- | ------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| BETA-SEC-001 | P0        | В работе      | Убрать optional-auth со всех operational B2B endpoints           | Anonymous dashboard, products, stores, categories, suppliers, reports, staff, communications и management отвечают `401`; BFF не обходит защиту                                                                                                                             | BETA-SRC-002                             |
+| BETA-SEC-002 | P1        | Запланировано | При необходимости создать безопасную архитектуру публичного demo | Публичны только allowlist-проекции синтетического `public-demo`; отсутствуют реальные выручка, себестоимость, остатки, адреса, внешние ID, PII и secrets; есть pagination и rate limit; задача не задерживает invite-only pilot после закрытия anonymous operational API    | BETA-SEC-001                             |
+| BETA-SEC-003 | P0        | В работе      | Ввести единый server-side `AccessScope`                          | Каждый запрос пересекается с `tenantId` и `allowedStoreIds`; пустой или отсутствующий scope даёт deny-by-default; store-bound facts всегда фильтруются, а tenant-global write разрешён только network-scoped роли; общий механизм используется всеми обязательными модулями | BETA-SRC-002                             |
+| BETA-SEC-004 | P0        | В работе      | Сделать capabilities авторитетной endpoint-проверкой             | Совпадение стандартной роли не обходит capability; capability задаётся декларативно на endpoint; frontend visibility не считается защитой                                                                                                                                   | BETA-SEC-003                             |
+| BETA-SEC-005 | P0        | Запланировано | Разделить просмотр бизнес-данных, PII reveal и export            | PII маскирована по умолчанию; reveal/export требуют отдельных capabilities; каждое действие аудируется с tenant, store scope, user, route и request ID                                                                                                                      | BETA-SEC-004                             |
+| BETA-SEC-006 | P0        | В работе      | Добавить двухtenantную и двухклубную IDOR/integration suite      | Tenant A/Store A не читает, не изменяет и не экспортирует Tenant B/Store B через list, UUID, filters, aggregates, exports, attachments, BFF или jobs                                                                                                                        | BETA-SEC-003, BETA-SEC-004, BETA-OPS-002 |
+| BETA-SEC-007 | P0        | В работе      | Удалить известный production QA/seed риск                        | Известные credentials не работают; QA не Platform Admin; все сессии отозваны; seed отказывается работать с production DB и создаёт случайные local credentials                                                                                                              | BETA-SRC-002                             |
+| BETA-SEC-008 | P0        | В работе      | Добавить fail-closed startup validation и разделить secrets      | Production не запускается с отсутствующими, placeholder, короткими или повторно используемыми JWT, PII, HMAC, integration, referral и scheduler secrets; opaque invite tokens генерируются случайно и хранятся только как hash; ротация secrets версионирована              | BETA-SRC-002                             |
+| BETA-SEC-009 | P0        | В работе      | Сделать принятие приглашения атомарным                           | Invite привязан к email; один conditional claim; 100 параллельных запросов создают ровно одного пользователя; изменение email/role/stores/TTL ротирует token                                                                                                                | BETA-SEC-008                             |
+| BETA-SEC-010 | P0        | Запланировано | Усилить B2B authentication                                       | Rate limit и progressive backoff на login/invite; password reset; revoke sessions; MFA либо эквивалентное усиление Platform Admin; security headers проверяются deploy smoke                                                                                                | BETA-SEC-008, BETA-IAM-004               |
 
 ### 5.3. Tenant lifecycle, entitlements и provisioning
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-TEN-001 | P0 | Запланировано | Разделить operational lifecycle и customer stage | Существуют lifecycle `ACTIVE/SUSPENDED/ARCHIVED` и отдельный stage `INTERNAL/PILOT/BETA/LIVE`; сохраняются cohort, trial dates, support owner и onboarding state | BETA-SRC-002 |
-| BETA-TEN-002 | P0 | Запланировано | Добавить tenant/store entitlements | Профиль первого теста включает `gamification`, `assortment`, `staff`, `communications`, `users_roles`; read/write/outbound управляются отдельно; изменения имеют reason, expiry и audit | BETA-TEN-001 |
-| BETA-TEN-003 | P0 | Запланировано | Реализовать idempotent Platform Admin provisioning | Одно действие создаёт tenant в `PROVISIONING`, обязательный beta entitlement profile, email-bound OWNER invite, support owner и checklist; повтор не создаёт дублей | BETA-TEN-001, BETA-TEN-002, BETA-SEC-009 |
-| BETA-TEN-004 | P0 | Запланировано | Ввести единый `TenantExecutionPolicy` | Login, invites, HTTP writes, schedulers, sync, messages, rewards и exports проверяют lifecycle, trial, entitlement и store scope; suspend останавливает обработку немедленно | BETA-TEN-002, BETA-SEC-003 |
-| BETA-TEN-005 | P1 | Запланировано | Расширить Platform Admin cockpit | Видны stage, trial, entitlement, owner invite, onboarding, stores, source freshness, sync errors, last activity, support owner и incidents | BETA-TEN-003, BETA-OPS-010 |
-| BETA-TEN-006 | P0 | Запланировано | Реализовать offboarding и retention workflow | Suspend/archive отзывает invites/sessions, выключает integrations и jobs; data export/delete/retention выполняются по утверждённой процедуре и аудируются | BETA-TEN-004 |
-| BETA-TEN-007 | P0 | Запланировано | Поддержать безопасную смену tenant slug | Старые QR, Telegram и guest URLs имеют контролируемый alias/redirect либо перевыпускаются; alias не позволяет обратиться к чужому tenant | BETA-SEC-003 |
+| ID           | Приоритет | Статус        | Задача                                             | Критерии приёмки                                                                                                                                                                        | Зависимости                              |
+| ------------ | --------- | ------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| BETA-TEN-001 | P0        | Запланировано | Разделить operational lifecycle и customer stage   | Существуют lifecycle `ACTIVE/SUSPENDED/ARCHIVED` и отдельный stage `INTERNAL/PILOT/BETA/LIVE`; сохраняются cohort, trial dates, support owner и onboarding state                        | BETA-SRC-002                             |
+| BETA-TEN-002 | P0        | Запланировано | Добавить tenant/store entitlements                 | Профиль первого теста включает `gamification`, `assortment`, `staff`, `communications`, `users_roles`; read/write/outbound управляются отдельно; изменения имеют reason, expiry и audit | BETA-TEN-001                             |
+| BETA-TEN-003 | P0        | Запланировано | Реализовать idempotent Platform Admin provisioning | Одно действие создаёт tenant в `PROVISIONING`, обязательный beta entitlement profile, email-bound OWNER invite, support owner и checklist; повтор не создаёт дублей                     | BETA-TEN-001, BETA-TEN-002, BETA-SEC-009 |
+| BETA-TEN-004 | P0        | Запланировано | Ввести единый `TenantExecutionPolicy`              | Login, invites, HTTP writes, schedulers, sync, messages, rewards и exports проверяют lifecycle, trial, entitlement и store scope; suspend останавливает обработку немедленно            | BETA-TEN-002, BETA-SEC-003               |
+| BETA-TEN-005 | P1        | Запланировано | Расширить Platform Admin cockpit                   | Видны stage, trial, entitlement, owner invite, onboarding, stores, source freshness, sync errors, last activity, support owner и incidents                                              | BETA-TEN-003, BETA-OPS-010               |
+| BETA-TEN-006 | P0        | Запланировано | Реализовать offboarding и retention workflow       | Suspend/archive отзывает invites/sessions, выключает integrations и jobs; data export/delete/retention выполняются по утверждённой процедуре и аудируются                               | BETA-TEN-004                             |
+| BETA-TEN-007 | P0        | Запланировано | Поддержать безопасную смену tenant slug            | Старые QR, Telegram и guest URLs имеют контролируемый alias/redirect либо перевыпускаются; alias не позволяет обратиться к чужому tenant                                                | BETA-SEC-003                             |
 
 ### 5.4. Пользователи и роли
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-IAM-001 | P0 | В работе | Утвердить role/capability matrix обязательного beta scope | Для OWNER, ADMIN, network manager, club manager и сотрудников перечислены разрешённые действия во всех пяти обязательных контурах; deny-by-default | BETA-SEC-004 |
-| BETA-IAM-002 | P0 | В работе | Реализовать явный network-level и club-level scope | `NETWORK` и `STORES` — явные режимы; отсутствие `UserStoreAccess` не повышает пользователя до NETWORK; смена scope действует сразу на API, BFF, exports, files и активные сессии | BETA-SEC-003, BETA-IAM-001 |
-| BETA-IAM-003 | P0 | В работе | Ограничить полномочия управляющего actor | Store manager не может создать NETWORK user, назначить чужой store, выдать роль/capability выше собственной или управлять пользователем вне пересечения scopes; защищены self-escalation и последний OWNER | BETA-IAM-001, BETA-IAM-002 |
-| BETA-IAM-004 | P0 | В работе | Завершить invite/resend/revoke workflow | Только email-bound opaque invites; update ротирует token; send/resend/revoke/accept аудируются; TTL настраивается; actor не может выдать invite шире своего scope; revoked/expired token не работает | BETA-SEC-009, BETA-IAM-003 |
-| BETA-IAM-005 | P0 | Запланировано | Ограничить особо чувствительное повышение привилегий | Только явно разрешённая роль может назначить OWNER или чувствительные capabilities; Platform Admin нельзя назначить tenant API | BETA-IAM-001, BETA-IAM-003 |
-| BETA-IAM-006 | P0 | Запланировано | Свести backend/frontend permission maps | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization | BETA-IAM-001 |
-| BETA-IAM-007 | P0 | Запланировано | Добавить журнал доступа и управление сессиями | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии | BETA-SEC-010 |
-| BETA-IAM-008 | P1 | Запланировано | Принять multi-network identity model | Решено, может ли один email состоять в нескольких независимых tenant; глобальная уникальность `User.email` либо сохранена как явное ограничение первого pilot, либо заменена membership-моделью с миграцией | BETA-TEN-003 |
+| ID           | Приоритет | Статус        | Задача                                                    | Критерии приёмки                                                                                                                                                                                            | Зависимости                |
+| ------------ | --------- | ------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| BETA-IAM-001 | P0        | В работе      | Утвердить role/capability matrix обязательного beta scope | Для OWNER, ADMIN, network manager, club manager и сотрудников перечислены разрешённые действия во всех пяти обязательных контурах; deny-by-default                                                          | BETA-SEC-004               |
+| BETA-IAM-002 | P0        | В работе      | Реализовать явный network-level и club-level scope        | `NETWORK` и `STORES` — явные режимы; отсутствие `UserStoreAccess` не повышает пользователя до NETWORK; смена scope действует сразу на API, BFF, exports, files и активные сессии                            | BETA-SEC-003, BETA-IAM-001 |
+| BETA-IAM-003 | P0        | В работе      | Ограничить полномочия управляющего actor                  | Store manager не может создать NETWORK user, назначить чужой store, выдать роль/capability выше собственной или управлять пользователем вне пересечения scopes; защищены self-escalation и последний OWNER  | BETA-IAM-001, BETA-IAM-002 |
+| BETA-IAM-004 | P0        | В работе      | Завершить invite/resend/revoke workflow                   | Только email-bound opaque invites; update ротирует token; send/resend/revoke/accept аудируются; TTL настраивается; actor не может выдать invite шире своего scope; revoked/expired token не работает        | BETA-SEC-009, BETA-IAM-003 |
+| BETA-IAM-005 | P0        | Запланировано | Ограничить особо чувствительное повышение привилегий      | Только явно разрешённая роль может назначить OWNER или чувствительные capabilities; Platform Admin нельзя назначить tenant API                                                                              | BETA-IAM-001, BETA-IAM-003 |
+| BETA-IAM-006 | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                       | BETA-IAM-001               |
+| BETA-IAM-007 | P0        | Запланировано | Добавить журнал доступа и управление сессиями             | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии                                                                                         | BETA-SEC-010               |
+| BETA-IAM-008 | P1        | Запланировано | Принять multi-network identity model                      | Решено, может ли один email состоять в нескольких независимых tenant; глобальная уникальность `User.email` либо сохранена как явное ограничение первого pilot, либо заменена membership-моделью с миграцией | BETA-TEN-003               |
 
 ### 5.5. CI/CD, БД и эксплуатационная надёжность
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-OPS-001 | P0 | В работе | Ввести обязательный CI | Frozen install, Prisma validate/generate, API tests/typecheck/build, web lint/typecheck/build и migration check обязательны для merge; CI-команды не изменяют файлы | BETA-SRC-002 |
-| BETA-OPS-002 | P0 | В работе | Добавить real PostgreSQL integration environment | Все миграции применяются с нуля; smoke использует реальную БД; проверяются tenant/store isolation, provisioning, suspend и ключевые writes | BETA-OPS-001 |
-| BETA-OPS-003 | P0 | Запланировано | Добавить frontend browser smoke | Автоматизированы login, owner invite, store switch/scope, обязательная навигация, ключевой сценарий каждого модуля и logout | BETA-OPS-001, BETA-IAM-002 |
-| BETA-OPS-004 | P0 | Запланировано | Перейти на immutable release artifact | API, web и Telegram edge собираются один раз; release manifest содержит SHA/build time/schema; staging и production используют один artifact | BETA-OPS-001, BETA-SRC-004 |
-| BETA-OPS-005 | P0 | В работе | Реализовать live/ready/version endpoints | Liveness не зависит от Langame; readiness выполняет DB/schema/storage checks; version показывает exact SHA; внешний probe проверяет web/API/game | BETA-OPS-004 |
-| BETA-OPS-006 | P0 | В работе | Зафиксировать безопасную миграционную процедуру | Migration выполняется атомарно, locks берутся до preflight, lock/statement timeout заданы; есть abort/retry smoke, production-like rehearsal, drift/`_prisma_migrations`, backup/postflight и доказанная N/N-1 либо fix-forward стратегия | BETA-OPS-002 |
-| BETA-OPS-007 | P0 | Запланировано | Ввести backup/restore и цели восстановления | Encrypted off-host backup мониторится; выполнен свежий restore в отдельную БД; зафиксированы RPO/RTO; восстановлены все stateful данные | BETA-OPS-006 |
-| BETA-OPS-008 | P0 | Запланировано | Определить единственного владельца schedulers | До выделения worker технически разрешён один scheduler owner; есть lease/heartbeat/reclaim; каждый job проверяет `TenantExecutionPolicy`; graceful shutdown включён | BETA-TEN-004 |
-| BETA-OPS-009 | P0 | Запланировано | Добавить общий reliability envelope Langame | Каждый request имеет timeout; GET retry только с backoff/jitter; неоднозначные writes не ретраятся и идут в reconciliation; ошибки upstream — 502/503; tenant/domain изолированы | BETA-OPS-008 |
-| BETA-OPS-010 | P0 | Запланировано | Добавить минимальную observability | Correlation/request ID, tenant/source/SHA, structured errors, 5xx/latency, scheduler heartbeat, sync freshness, queue age и reward reconciliation доступны оператору | BETA-OPS-005 |
-| BETA-OPS-011 | P0 | Запланировано | Добавить alerts и incident delivery | Алерты на failed deploy/readiness/backup, 5xx, stale sync, dead-letter, scheduler gap и reward anomalies доставляются ответственному; тестовая тревога подтверждена | BETA-OPS-007, BETA-OPS-010 |
-| BETA-OPS-012 | P0 | Запланировано | Реализовать атомарный deploy и rollback | API/web/schema не остаются в смешанной версии; хранится N-1 artifact; rollback drill и failed-readiness rollback фактически выполнены | BETA-OPS-004, BETA-OPS-005, BETA-OPS-006 |
+| ID           | Приоритет | Статус        | Задача                                           | Критерии приёмки                                                                                                                                                                                                                          | Зависимости                              |
+| ------------ | --------- | ------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| BETA-OPS-001 | P0        | В работе      | Ввести обязательный CI                           | Frozen install, Prisma validate/generate, API tests/typecheck/build, web lint/typecheck/build и migration check обязательны для merge; CI-команды не изменяют файлы                                                                       | BETA-SRC-002                             |
+| BETA-OPS-002 | P0        | В работе      | Добавить real PostgreSQL integration environment | Все миграции применяются с нуля; smoke использует реальную БД; проверяются tenant/store isolation, provisioning, suspend и ключевые writes                                                                                                | BETA-OPS-001                             |
+| BETA-OPS-003 | P0        | Запланировано | Добавить frontend browser smoke                  | Автоматизированы login, owner invite, store switch/scope, обязательная навигация, ключевой сценарий каждого модуля и logout                                                                                                               | BETA-OPS-001, BETA-IAM-002               |
+| BETA-OPS-004 | P0        | Запланировано | Перейти на immutable release artifact            | API, web и Telegram edge собираются один раз; release manifest содержит SHA/build time/schema; staging и production используют один artifact                                                                                              | BETA-OPS-001, BETA-SRC-004               |
+| BETA-OPS-005 | P0        | В работе      | Реализовать live/ready/version endpoints         | Liveness не зависит от Langame; readiness выполняет DB/schema/storage checks; version показывает exact SHA; внешний probe проверяет web/API/game                                                                                          | BETA-OPS-004                             |
+| BETA-OPS-006 | P0        | В работе      | Зафиксировать безопасную миграционную процедуру  | Migration выполняется атомарно, locks берутся до preflight, lock/statement timeout заданы; есть abort/retry smoke, production-like rehearsal, drift/`_prisma_migrations`, backup/postflight и доказанная N/N-1 либо fix-forward стратегия | BETA-OPS-002                             |
+| BETA-OPS-007 | P0        | Запланировано | Ввести backup/restore и цели восстановления      | Encrypted off-host backup мониторится; выполнен свежий restore в отдельную БД; зафиксированы RPO/RTO; восстановлены все stateful данные                                                                                                   | BETA-OPS-006                             |
+| BETA-OPS-008 | P0        | Запланировано | Определить единственного владельца schedulers    | До выделения worker технически разрешён один scheduler owner; есть lease/heartbeat/reclaim; каждый job проверяет `TenantExecutionPolicy`; graceful shutdown включён                                                                       | BETA-TEN-004                             |
+| BETA-OPS-009 | P0        | Запланировано | Добавить общий reliability envelope Langame      | Каждый request имеет timeout; GET retry только с backoff/jitter; неоднозначные writes не ретраятся и идут в reconciliation; ошибки upstream — 502/503; tenant/domain изолированы                                                          | BETA-OPS-008                             |
+| BETA-OPS-010 | P0        | Запланировано | Добавить минимальную observability               | Correlation/request ID, tenant/source/SHA, structured errors, 5xx/latency, scheduler heartbeat, sync freshness, queue age и reward reconciliation доступны оператору                                                                      | BETA-OPS-005                             |
+| BETA-OPS-011 | P0        | Запланировано | Добавить alerts и incident delivery              | Алерты на failed deploy/readiness/backup, 5xx, stale sync, dead-letter, scheduler gap и reward anomalies доставляются ответственному; тестовая тревога подтверждена                                                                       | BETA-OPS-007, BETA-OPS-010               |
+| BETA-OPS-012 | P0        | Запланировано | Реализовать атомарный deploy и rollback          | API/web/schema не остаются в смешанной версии; хранится N-1 artifact; rollback drill и failed-readiness rollback фактически выполнены                                                                                                     | BETA-OPS-004, BETA-OPS-005, BETA-OPS-006 |
 
 ### 5.6. Обязательный модуль: геймификация
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-MOD-GAME-001 | P0 | Запланировано | Провести полный route/action inventory геймификации | Каждый B2B/B2C/API/BFF/Telegram route сопоставлен с entitlement, capability, tenant/store scope, audit и тестом; необозначенных public writes нет | BETA-TEN-002, BETA-IAM-001 |
-| BETA-MOD-GAME-002 | P0 | Запланировано | Закрыть B2B management journey | OWNER/authorized manager создаёт, изменяет, запускает и останавливает rules, missions, Battle Pass, lootboxes и rewards только в разрешённых stores | BETA-MOD-GAME-001, BETA-SEC-006 |
-| BETA-MOD-GAME-003 | P0 | Запланировано | Закрыть guest journey | Регистрация, выбор клуба, профиль, XP, задания, Battle Pass, lootbox, wallet/reward history, unsubscribe и Telegram Mini App работают внутри выбранного active tenant/store | BETA-MOD-GAME-001, BETA-TEN-004 |
-| BETA-MOD-GAME-004 | P0 | Запланировано | Завершить безопасный reward ledger path | Idempotency, immutable reward plan, wallet, entitlement, posting, outbox, dead-letter и reconciliation исключают двойную или потерянную награду | BETA-OPS-002, BETA-OPS-009 |
-| BETA-MOD-GAME-005 | P0 | Запланировано | Сделать canary tenant/store-scoped | `OFF → SHADOW → CANARY → LIVE` и kill switch доступны по tenant/store/rule; откат не требует deploy; write-back начинается только после reconciliation gate | BETA-TEN-002, BETA-MOD-GAME-004 |
-| BETA-MOD-GAME-006 | P0 | Запланировано | Добавить game isolation and concurrency suite | Проверены cross-tenant/store, повтор события, параллельное открытие, лимиты, restart, stale leases, replay и неоднозначный Langame write | BETA-SEC-006, BETA-MOD-GAME-004 |
-| BETA-MOD-GAME-007 | P0 | Запланировано | Закрыть module browser QA и performance | Все admin/guest/mobile/Telegram критические сценарии проходят; нет unbounded responses; журнал и diagnostics позволяют расследовать событие по trace ID | BETA-OPS-003, BETA-OPS-010 |
-| BETA-MOD-GAME-008 | P0 | Запланировано | Убрать hardcoded pilot-store и сделать readiness per tenant/store | В коде и runbook нет специального поиска клуба `1337`; оператор явно выбирает tenant/store; readiness проверяет mapping, timezone/geo/public slug, auth channel, freshness facts, scheduler owner и отсутствие unresolved ledger reconciliation | BETA-MOD-GAME-001, BETA-OPS-008 |
+| ID                | Приоритет | Статус        | Задача                                                            | Критерии приёмки                                                                                                                                                                                                                                | Зависимости                     |
+| ----------------- | --------- | ------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| BETA-MOD-GAME-001 | P0        | Запланировано | Провести полный route/action inventory геймификации               | Каждый B2B/B2C/API/BFF/Telegram route сопоставлен с entitlement, capability, tenant/store scope, audit и тестом; необозначенных public writes нет                                                                                               | BETA-TEN-002, BETA-IAM-001      |
+| BETA-MOD-GAME-002 | P0        | Запланировано | Закрыть B2B management journey                                    | OWNER/authorized manager создаёт, изменяет, запускает и останавливает rules, missions, Battle Pass, lootboxes и rewards только в разрешённых stores                                                                                             | BETA-MOD-GAME-001, BETA-SEC-006 |
+| BETA-MOD-GAME-003 | P0        | Запланировано | Закрыть guest journey                                             | Регистрация, выбор клуба, профиль, XP, задания, Battle Pass, lootbox, wallet/reward history, unsubscribe и Telegram Mini App работают внутри выбранного active tenant/store                                                                     | BETA-MOD-GAME-001, BETA-TEN-004 |
+| BETA-MOD-GAME-004 | P0        | Запланировано | Завершить безопасный reward ledger path                           | Idempotency, immutable reward plan, wallet, entitlement, posting, outbox, dead-letter и reconciliation исключают двойную или потерянную награду                                                                                                 | BETA-OPS-002, BETA-OPS-009      |
+| BETA-MOD-GAME-005 | P0        | Запланировано | Сделать canary tenant/store-scoped                                | `OFF → SHADOW → CANARY → LIVE` и kill switch доступны по tenant/store/rule; откат не требует deploy; write-back начинается только после reconciliation gate                                                                                     | BETA-TEN-002, BETA-MOD-GAME-004 |
+| BETA-MOD-GAME-006 | P0        | Запланировано | Добавить game isolation and concurrency suite                     | Проверены cross-tenant/store, повтор события, параллельное открытие, лимиты, restart, stale leases, replay и неоднозначный Langame write                                                                                                        | BETA-SEC-006, BETA-MOD-GAME-004 |
+| BETA-MOD-GAME-007 | P0        | Запланировано | Закрыть module browser QA и performance                           | Все admin/guest/mobile/Telegram критические сценарии проходят; нет unbounded responses; журнал и diagnostics позволяют расследовать событие по trace ID                                                                                         | BETA-OPS-003, BETA-OPS-010      |
+| BETA-MOD-GAME-008 | P0        | Запланировано | Убрать hardcoded pilot-store и сделать readiness per tenant/store | В коде и runbook нет специального поиска клуба `1337`; оператор явно выбирает tenant/store; readiness проверяет mapping, timezone/geo/public slug, auth channel, freshness facts, scheduler owner и отсутствие unresolved ledger reconciliation | BETA-MOD-GAME-001, BETA-OPS-008 |
 
 ### 5.7. Обязательный модуль: ассортимент и товары
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-MOD-ASSORT-001 | P0 | Запланировано | Провести полный route/action inventory ассортимента | Dashboard, products, movements, categories/triage, suppliers, reports, imports и utilities имеют entitlement, capability, tenant/store scope, audit и тест | BETA-TEN-002, BETA-IAM-001 |
-| BETA-MOD-ASSORT-002 | P0 | В работе | Закрыть products/catalog legacy и pagination | Anonymous доступ отсутствует; legacy `/products` ограничен или выведен; большие списки paginated; история не агрегируется без ограничений в памяти | BETA-SEC-001, BETA-MOD-ASSORT-001 |
-| BETA-MOD-ASSORT-003 | P0 | Запланировано | Проверить категории, suppliers и массовые операции | CRUD, merge, mapping, bulk category и supplier actions tenant-scoped, обратимы где требуется и аудируются | BETA-SEC-006, BETA-MOD-ASSORT-001 |
-| BETA-MOD-ASSORT-004 | P0 | Запланировано | Закрыть imports и product parsing | Preview не изменяет данные; apply транзакционен и идемпотентен; файл и результат tenant-scoped; ошибки строк доступны без утечки данных | BETA-OPS-002, BETA-MOD-ASSORT-001 |
-| BETA-MOD-ASSORT-005 | P0 | Запланировано | Проверить все отчёты и exports по stores | OOS, ABC, LFL, turnover, matrix, recommendations, sales и supplier reports используют разрешённый scope; суммы UI/API/export совпадают | BETA-SEC-003, BETA-MOD-ASSORT-001 |
-| BETA-MOD-ASSORT-006 | P0 | Запланировано | Реализовать staged Langame onboarding ассортимента | Diagnostics → выбор четырёх stores → catalog/categories → inventory/sales → 7 дней → reconciliation → 30–90 дней backfill → daily sync | BETA-OPS-009, BETA-CUT-001 |
-| BETA-MOD-ASSORT-007 | P0 | Запланировано | Ввести data-quality gate ассортимента | Для каждого клуба сверены stores, SKU, остатки, операции и выручка; freshness видна; расхождение ≤1% либо документировано доменное исключение | BETA-MOD-ASSORT-006, BETA-OPS-010 |
-| BETA-MOD-ASSORT-008 | P0 | Запланировано | Закрыть module browser QA и performance | Ключевые экраны и tables работают на production-like объёме; тяжёлые отчёты bounded/async; export имеет лимиты и понятный прогресс | BETA-OPS-003, BETA-MOD-ASSORT-005 |
-| BETA-MOD-ASSORT-009 | P0 | Запланировано | Завершить 360° карточку товара и историю | Карточка показывает идентичность, категории, поставщиков, store-level остатки/продажи/движения, историю переименований и источники; scope применяется до totals/history, deep link и export проверены | BETA-MOD-ASSORT-001, BETA-MOD-ASSORT-005 |
+| ID                  | Приоритет | Статус        | Задача                                              | Критерии приёмки                                                                                                                                                                                      | Зависимости                              |
+| ------------------- | --------- | ------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| BETA-MOD-ASSORT-001 | P0        | Запланировано | Провести полный route/action inventory ассортимента | Dashboard, products, movements, categories/triage, suppliers, reports, imports и utilities имеют entitlement, capability, tenant/store scope, audit и тест                                            | BETA-TEN-002, BETA-IAM-001               |
+| BETA-MOD-ASSORT-002 | P0        | В работе      | Закрыть products/catalog legacy и pagination        | Anonymous доступ отсутствует; legacy `/products` ограничен или выведен; большие списки paginated; история не агрегируется без ограничений в памяти                                                    | BETA-SEC-001, BETA-MOD-ASSORT-001        |
+| BETA-MOD-ASSORT-003 | P0        | Запланировано | Проверить категории, suppliers и массовые операции  | CRUD, merge, mapping, bulk category и supplier actions tenant-scoped, обратимы где требуется и аудируются                                                                                             | BETA-SEC-006, BETA-MOD-ASSORT-001        |
+| BETA-MOD-ASSORT-004 | P0        | Запланировано | Закрыть imports и product parsing                   | Preview не изменяет данные; apply транзакционен и идемпотентен; файл и результат tenant-scoped; ошибки строк доступны без утечки данных                                                               | BETA-OPS-002, BETA-MOD-ASSORT-001        |
+| BETA-MOD-ASSORT-005 | P0        | Запланировано | Проверить все отчёты и exports по stores            | OOS, ABC, LFL, turnover, matrix, recommendations, sales и supplier reports используют разрешённый scope; суммы UI/API/export совпадают                                                                | BETA-SEC-003, BETA-MOD-ASSORT-001        |
+| BETA-MOD-ASSORT-006 | P0        | Запланировано | Реализовать staged Langame onboarding ассортимента  | Diagnostics → выбор четырёх stores → catalog/categories → inventory/sales → 7 дней → reconciliation → 30–90 дней backfill → daily sync                                                                | BETA-OPS-009, BETA-CUT-001               |
+| BETA-MOD-ASSORT-007 | P0        | Запланировано | Ввести data-quality gate ассортимента               | Для каждого клуба сверены stores, SKU, остатки, операции и выручка; freshness видна; расхождение ≤1% либо документировано доменное исключение                                                         | BETA-MOD-ASSORT-006, BETA-OPS-010        |
+| BETA-MOD-ASSORT-008 | P0        | Запланировано | Закрыть module browser QA и performance             | Ключевые экраны и tables работают на production-like объёме; тяжёлые отчёты bounded/async; export имеет лимиты и понятный прогресс                                                                    | BETA-OPS-003, BETA-MOD-ASSORT-005        |
+| BETA-MOD-ASSORT-009 | P0        | Запланировано | Завершить 360° карточку товара и историю            | Карточка показывает идентичность, категории, поставщиков, store-level остатки/продажи/движения, историю переименований и источники; scope применяется до totals/history, deep link и export проверены | BETA-MOD-ASSORT-001, BETA-MOD-ASSORT-005 |
 
 ### 5.8. Обязательный модуль: сотрудники
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-MOD-STAFF-001 | P0 | Запланировано | Провести полный route/action inventory staff | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом | BETA-TEN-002, BETA-IAM-001 |
-| BETA-MOD-STAFF-002 | P0 | Запланировано | Закрыть directory и identity mapping | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются | BETA-SEC-006, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-003 | P0 | В работе | Закрыть задачи, templates и recurring rules | Direct tasks, templates CRUD/launch и recurring actor HTTP имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options/mutation responses, Tenant/Rule/Template/Store/participant lock/recheck, shared materializer, Store-timezone interactive due и atomic task/run/catalog audit. PostgreSQL race evidence обязательно в CI. Scheduler и all-tenant HTTP не зарегистрированы и остаются `NO-GO`. До `Готово` остаются scheduler lease/lifecycle/entitlement, global timezone policy, task/shift DB invariant, legacy inventory и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-004 | P0 | Запланировано | Закрыть shift workspace и shift reports | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope | BETA-MOD-STAFF-002, BETA-IAM-002 |
-| BETA-MOD-STAFF-005 | P0 | Запланировано | Закрыть регламенты и чек-листы | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема | BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-006 | P0 | Запланировано | Закрыть знания, обучение и аттестации | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены | BETA-MOD-STAFF-001, BETA-IAM-002 |
-| BETA-MOD-STAFF-007 | P0 | Запланировано | Закрыть контроль, рейтинги, мотивацию и дисциплину | Staff-control, operations dashboard, ratings, signals, warnings и penalties имеют понятный источник, право просмотра/изменения, комментарий и audit; нет автоматических внешних санкций или Langame write-back | BETA-MOD-STAFF-002, BETA-SEC-005 |
-| BETA-MOD-STAFF-008 | P0 | Запланировано | Закрыть salary planning | Schemes, periods, rows, adjustments и exports tenant/store-scoped; расчёт воспроизводим; изменения денег аудируются; доступ отделён отдельной capability; система не выполняет выплаты | BETA-MOD-STAFF-001, BETA-SEC-005 |
-| BETA-MOD-STAFF-009 | P0 | В работе | Защитить attachments и evidence | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md` | BETA-MOD-STAFF-001, BETA-SEC-006 |
-| BETA-MOD-STAFF-010 | P0 | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения | BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-011 | P0 | Запланировано | Добавить staff end-to-end regression | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny | BETA-SEC-006, BETA-OPS-003 |
+| ID                 | Приоритет | Статус        | Задача                                              | Критерии приёмки                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Зависимости                      |
+| ------------------ | --------- | ------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| BETA-MOD-STAFF-001 | P0        | Запланировано | Провести полный route/action inventory staff        | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | BETA-TEN-002, BETA-IAM-001       |
+| BETA-MOD-STAFF-002 | P0        | Запланировано | Закрыть directory и identity mapping                | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | BETA-SEC-006, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-003 | P0        | В работе      | Закрыть задачи, templates и recurring rules         | Direct tasks, templates CRUD/launch, recurring actor HTTP и guarded integrity inventory имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options/mutation responses, Tenant/Rule/Template/Store/participant lock/recheck, shared materializer, Store-timezone interactive due, atomic task/run/catalog audit и 43-code read-only legacy gate. PostgreSQL race и clean inventory обязательны в CI. Scheduler/all-tenant HTTP не зарегистрированы и остаются `NO-GO`. До `Готово` остаются production-like inventory/reconciliation, same-tenant/Store deletion constraints, scheduler lease/lifecycle/entitlement, global timezone policy, task/shift DB invariant и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-004 | P0        | Запланировано | Закрыть shift workspace и shift reports             | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | BETA-MOD-STAFF-002, BETA-IAM-002 |
+| BETA-MOD-STAFF-005 | P0        | Запланировано | Закрыть регламенты и чек-листы                      | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BETA-MOD-STAFF-001               |
+| BETA-MOD-STAFF-006 | P0        | Запланировано | Закрыть знания, обучение и аттестации               | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | BETA-MOD-STAFF-001, BETA-IAM-002 |
+| BETA-MOD-STAFF-007 | P0        | Запланировано | Закрыть контроль, рейтинги, мотивацию и дисциплину  | Staff-control, operations dashboard, ratings, signals, warnings и penalties имеют понятный источник, право просмотра/изменения, комментарий и audit; нет автоматических внешних санкций или Langame write-back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-MOD-STAFF-002, BETA-SEC-005 |
+| BETA-MOD-STAFF-008 | P0        | Запланировано | Закрыть salary planning                             | Schemes, periods, rows, adjustments и exports tenant/store-scoped; расчёт воспроизводим; изменения денег аудируются; доступ отделён отдельной capability; система не выполняет выплаты                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | BETA-MOD-STAFF-001, BETA-SEC-005 |
+| BETA-MOD-STAFF-009 | P0        | В работе      | Защитить attachments и evidence                     | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md`                                                                                                                                                                                                                                                                                                                                                                                                          | BETA-MOD-STAFF-001, BETA-SEC-006 |
+| BETA-MOD-STAFF-010 | P0        | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | BETA-MOD-STAFF-001               |
+| BETA-MOD-STAFF-011 | P0        | Запланировано | Добавить staff end-to-end regression                | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | BETA-SEC-006, BETA-OPS-003       |
 
 ### 5.9. Обязательный модуль: коммуникации
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-MOD-COMMS-001 | P0 | Запланировано | Провести полный route/action inventory коммуникаций | Overview, team chat, channels, messages, notifications, events и CRM contact tasks имеют entitlement, capability, tenant/store scope, audit и тест | BETA-TEN-002, BETA-IAM-001 |
-| BETA-MOD-COMMS-002 | P0 | В работе | Закрыть audience, membership и message scope | Для network announcements задана явная audience policy: при необходимости они могут читаться store staff того же tenant, но не дают NETWORK-полномочий; store/custom channel ограничен разрешёнными clubs/members; UUID, SSE, mentions, receipts, attachments и task-from-chat не раскрывают чужие объекты и не создают задачу для всей сети/чужого store | BETA-SEC-006, BETA-MOD-COMMS-001 |
-| BETA-MOD-COMMS-003 | P0 | Запланировано | Закрыть notifications и background delivery | Generate/read/acknowledge/resolve соблюдают scope и lifecycle; suspend останавливает внешнюю доставку; повтор не дублирует сообщение | BETA-TEN-004, BETA-OPS-008 |
-| BETA-MOD-COMMS-004 | P0 | Запланировано | Защитить CRM contact tasks и PII | Contact data masked by default; reveal/export — отдельные capabilities и audit; пользователь не получает гостя или задачу другого store | BETA-SEC-005, BETA-MOD-COMMS-001 |
-| BETA-MOD-COMMS-005 | P0 | Запланировано | Добавить communications end-to-end regression | Проверены chat send/read, channel boundaries, notifications, contact task, suspend и reconnect для network/club/staff roles | BETA-OPS-003, BETA-MOD-COMMS-002, BETA-MOD-COMMS-003 |
+| ID                 | Приоритет | Статус        | Задача                                              | Критерии приёмки                                                                                                                                                                                                                                                                                                                                          | Зависимости                                          |
+| ------------------ | --------- | ------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| BETA-MOD-COMMS-001 | P0        | Запланировано | Провести полный route/action inventory коммуникаций | Overview, team chat, channels, messages, notifications, events и CRM contact tasks имеют entitlement, capability, tenant/store scope, audit и тест                                                                                                                                                                                                        | BETA-TEN-002, BETA-IAM-001                           |
+| BETA-MOD-COMMS-002 | P0        | В работе      | Закрыть audience, membership и message scope        | Для network announcements задана явная audience policy: при необходимости они могут читаться store staff того же tenant, но не дают NETWORK-полномочий; store/custom channel ограничен разрешёнными clubs/members; UUID, SSE, mentions, receipts, attachments и task-from-chat не раскрывают чужие объекты и не создают задачу для всей сети/чужого store | BETA-SEC-006, BETA-MOD-COMMS-001                     |
+| BETA-MOD-COMMS-003 | P0        | Запланировано | Закрыть notifications и background delivery         | Generate/read/acknowledge/resolve соблюдают scope и lifecycle; suspend останавливает внешнюю доставку; повтор не дублирует сообщение                                                                                                                                                                                                                      | BETA-TEN-004, BETA-OPS-008                           |
+| BETA-MOD-COMMS-004 | P0        | Запланировано | Защитить CRM contact tasks и PII                    | Contact data masked by default; reveal/export — отдельные capabilities и audit; пользователь не получает гостя или задачу другого store                                                                                                                                                                                                                   | BETA-SEC-005, BETA-MOD-COMMS-001                     |
+| BETA-MOD-COMMS-005 | P0        | Запланировано | Добавить communications end-to-end regression       | Проверены chat send/read, channel boundaries, notifications, contact task, suspend и reconnect для network/club/staff roles                                                                                                                                                                                                                               | BETA-OPS-003, BETA-MOD-COMMS-002, BETA-MOD-COMMS-003 |
 
 ### 5.10. Cutover четырёх текущих клубов одной сети
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-CUT-001 | P0 | В работе | Зафиксировать topology manifest текущей сети | Записаны current tenant ID, четыре store ID, Langame domain/mapping, users, roles, sources, public links и контрольные суммы; подтверждено, что это одна сеть | BETA-SRC-002 |
-| BETA-CUT-002 | P0 | Запланировано | Провести backup и restore rehearsal перед cutover | Snapshot успешно восстановлен отдельно; подтверждены row counts и контрольные бизнес-суммы; известны время и процедура возврата | BETA-OPS-007, BETA-CUT-001 |
-| BETA-CUT-003 | P0 | Запланировано | Подготовить cutover runbook и окно изменения | Есть owner, freeze, stop jobs, SQL/API steps, verification, rollback, коммуникация и stop conditions; dry-run выполнен | BETA-CUT-002, BETA-OPS-012 |
-| BETA-CUT-004 | P0 | Запланировано | Перевести operational `demo` в реальный tenant in place | Сохранены tenantId и все FK; изменены name/slug/domain/stage/entitlements; четыре stores, users, продажи, inventory, staff и game data не потеряны | BETA-TEN-002, BETA-TEN-007, BETA-CUT-003 |
-| BETA-CUT-005 | P0 | В работе | Удалить зависимость operational данных от имени `demo` | Anonymous fallback не использует реальный tenant; seed не очищает его; jobs/config/routes не полагаются на slug `demo` | BETA-SEC-001, BETA-SEC-007, BETA-CUT-004 |
-| BETA-CUT-006 | P0 | Запланировано | Обновить guest/QR/Telegram links и sessions | Старые ссылки контролируемо перенаправлены либо перевыпущены; Telegram/guest login работает на новом slug; устаревшие сессии отозваны | BETA-TEN-007, BETA-CUT-004 |
-| BETA-CUT-007 | P0 | Запланировано | Выполнить staged sync и reconciliation четырёх клубов | Все четыре stores выбраны явно; catalog/inventory/sales/staff/game sources проверены; контрольные суммы и freshness приняты по каждому клубу | BETA-MOD-ASSORT-006, BETA-OPS-009 |
-| BETA-CUT-008 | P0 | Запланировано | Провести full-scope acceptance текущей сети | Для каждой обязательной области выполнены owner/network manager/club manager/employee/guest сценарии; scope подтверждён на четырёх stores | Все BETA-MOD-* P0 |
-| BETA-CUT-009 | P0 | Запланировано | Выдержать internal alpha | Семь последовательных дней без P0/P1 launch incident, потерянного sync, дубликата награды, cross-scope доступа и необработанного critical alert | BETA-CUT-008, BETA-OPS-011 |
+| ID           | Приоритет | Статус        | Задача                                                  | Критерии приёмки                                                                                                                                              | Зависимости                              |
+| ------------ | --------- | ------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| BETA-CUT-001 | P0        | В работе      | Зафиксировать topology manifest текущей сети            | Записаны current tenant ID, четыре store ID, Langame domain/mapping, users, roles, sources, public links и контрольные суммы; подтверждено, что это одна сеть | BETA-SRC-002                             |
+| BETA-CUT-002 | P0        | Запланировано | Провести backup и restore rehearsal перед cutover       | Snapshot успешно восстановлен отдельно; подтверждены row counts и контрольные бизнес-суммы; известны время и процедура возврата                               | BETA-OPS-007, BETA-CUT-001               |
+| BETA-CUT-003 | P0        | Запланировано | Подготовить cutover runbook и окно изменения            | Есть owner, freeze, stop jobs, SQL/API steps, verification, rollback, коммуникация и stop conditions; dry-run выполнен                                        | BETA-CUT-002, BETA-OPS-012               |
+| BETA-CUT-004 | P0        | Запланировано | Перевести operational `demo` в реальный tenant in place | Сохранены tenantId и все FK; изменены name/slug/domain/stage/entitlements; четыре stores, users, продажи, inventory, staff и game data не потеряны            | BETA-TEN-002, BETA-TEN-007, BETA-CUT-003 |
+| BETA-CUT-005 | P0        | В работе      | Удалить зависимость operational данных от имени `demo`  | Anonymous fallback не использует реальный tenant; seed не очищает его; jobs/config/routes не полагаются на slug `demo`                                        | BETA-SEC-001, BETA-SEC-007, BETA-CUT-004 |
+| BETA-CUT-006 | P0        | Запланировано | Обновить guest/QR/Telegram links и sessions             | Старые ссылки контролируемо перенаправлены либо перевыпущены; Telegram/guest login работает на новом slug; устаревшие сессии отозваны                         | BETA-TEN-007, BETA-CUT-004               |
+| BETA-CUT-007 | P0        | Запланировано | Выполнить staged sync и reconciliation четырёх клубов   | Все четыре stores выбраны явно; catalog/inventory/sales/staff/game sources проверены; контрольные суммы и freshness приняты по каждому клубу                  | BETA-MOD-ASSORT-006, BETA-OPS-009        |
+| BETA-CUT-008 | P0        | Запланировано | Провести full-scope acceptance текущей сети             | Для каждой обязательной области выполнены owner/network manager/club manager/employee/guest сценарии; scope подтверждён на четырёх stores                     | Все BETA-MOD-\* P0                       |
+| BETA-CUT-009 | P0        | Запланировано | Выдержать internal alpha                                | Семь последовательных дней без P0/P1 launch incident, потерянного sync, дубликата награды, cross-scope доступа и необработанного critical alert               | BETA-CUT-008, BETA-OPS-011               |
 
 ### 5.11. Onboarding, feedback и расширение теста
 
-| ID | Приоритет | Статус | Задача | Критерии приёмки | Зависимости |
-|---|---|---|---|---|---|
-| BETA-PILOT-001 | P0 | Запланировано | Реализовать persisted onboarding checklist | Owner invite, network/stores, Langame diagnostics, mapping, initial sync, reconciliation, users/roles, modules, support и acceptance сохраняются со статусами и audit | BETA-TEN-003 |
-| BETA-PILOT-002 | P0 | Запланировано | Реализовать in-product feedback | С каждой страницы отправляется category/severity/message с tenant/user/role/route/SHA/request ID/browser; screenshot только opt-in; бизнес-данные и PII не прикладываются автоматически | BETA-OPS-010 |
-| BETA-PILOT-003 | P0 | Запланировано | Добавить feedback inbox и workflow | Platform operator видит new/triaged/planned/fixed/closed, tenant, cohort, release и ответ; критичные обращения создают alert | BETA-PILOT-002, BETA-OPS-011 |
-| BETA-PILOT-004 | P0 | Запланировано | Добавить privacy-safe activation telemetry | Видны provisioned → invite accepted → diagnostics → first sync → validation → first module action → second user → D7 return; без raw PII | BETA-PILOT-001, BETA-OPS-010 |
-| BETA-PILOT-005 | P0 | Запланировано | Подготовить pilot package | С юристом согласованы pilot terms/data processing/retention/offboarding; готовы quickstart, role guide, module test script, known issues и support contacts | BETA-TEN-006 |
-| BETA-PILOT-006 | P0 | Запланировано | Подготовить support и incident process | Назначены primary/backup owner; severity и escalation; critical acknowledgment ≤2 рабочих часов; status updates, export/delete и incident templates готовы | BETA-OPS-011 |
-| BETA-PILOT-007 | P0 | Запланировано | Подключить friendly cohort | Две независимые сети, суммарно 3–5 клубов, provisioned раздельно; обязательные модули доступны; не более одного нового tenant каждые 3–4 дня | BETA-CUT-009, BETA-PILOT-001, BETA-PILOT-005 |
-| BETA-PILOT-008 | P0 | Запланировано | Провести 14-дневную внешнюю когорту | Нет security incident и открытых launch-blocking P0/P1; sync success ≥98%; freshness ≤24 ч; каждый tenant повторил целевой workflow две недели подряд | BETA-PILOT-007 |
-| BETA-PILOT-009 | P1 | Запланировано | Запустить открытый заявочный тест | Public application не создаёт tenant автоматически; оператор проверяет fit и capacity; provisioning выполняется штатным workflow; cohorts и stop conditions соблюдаются | BETA-PILOT-008 |
+| ID             | Приоритет | Статус        | Задача                                     | Критерии приёмки                                                                                                                                                                        | Зависимости                                  |
+| -------------- | --------- | ------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| BETA-PILOT-001 | P0        | Запланировано | Реализовать persisted onboarding checklist | Owner invite, network/stores, Langame diagnostics, mapping, initial sync, reconciliation, users/roles, modules, support и acceptance сохраняются со статусами и audit                   | BETA-TEN-003                                 |
+| BETA-PILOT-002 | P0        | Запланировано | Реализовать in-product feedback            | С каждой страницы отправляется category/severity/message с tenant/user/role/route/SHA/request ID/browser; screenshot только opt-in; бизнес-данные и PII не прикладываются автоматически | BETA-OPS-010                                 |
+| BETA-PILOT-003 | P0        | Запланировано | Добавить feedback inbox и workflow         | Platform operator видит new/triaged/planned/fixed/closed, tenant, cohort, release и ответ; критичные обращения создают alert                                                            | BETA-PILOT-002, BETA-OPS-011                 |
+| BETA-PILOT-004 | P0        | Запланировано | Добавить privacy-safe activation telemetry | Видны provisioned → invite accepted → diagnostics → first sync → validation → first module action → second user → D7 return; без raw PII                                                | BETA-PILOT-001, BETA-OPS-010                 |
+| BETA-PILOT-005 | P0        | Запланировано | Подготовить pilot package                  | С юристом согласованы pilot terms/data processing/retention/offboarding; готовы quickstart, role guide, module test script, known issues и support contacts                             | BETA-TEN-006                                 |
+| BETA-PILOT-006 | P0        | Запланировано | Подготовить support и incident process     | Назначены primary/backup owner; severity и escalation; critical acknowledgment ≤2 рабочих часов; status updates, export/delete и incident templates готовы                              | BETA-OPS-011                                 |
+| BETA-PILOT-007 | P0        | Запланировано | Подключить friendly cohort                 | Две независимые сети, суммарно 3–5 клубов, provisioned раздельно; обязательные модули доступны; не более одного нового tenant каждые 3–4 дня                                            | BETA-CUT-009, BETA-PILOT-001, BETA-PILOT-005 |
+| BETA-PILOT-008 | P0        | Запланировано | Провести 14-дневную внешнюю когорту        | Нет security incident и открытых launch-blocking P0/P1; sync success ≥98%; freshness ≤24 ч; каждый tenant повторил целевой workflow две недели подряд                                   | BETA-PILOT-007                               |
+| BETA-PILOT-009 | P1        | Запланировано | Запустить открытый заявочный тест          | Public application не создаёт tenant автоматически; оператор проверяет fit и capacity; provisioning выполняется штатным workflow; cohorts и stop conditions соблюдаются                 | BETA-PILOT-008                               |
 
 ### 5.12. Прогресс реализации — 26.07.2026
 
@@ -714,8 +714,9 @@ Rule/Template/Store/participant lock закрыты следующим checkpoin
 
 - scheduler и all-tenant HTTP остаются `NO-GO` без lifecycle/entitlement,
   durable lease/fencing и stale reclaim;
-- legacy inventory, same-tenant database invariants и политика физического
-  удаления Store ещё не закрыты;
+- guarded legacy inventory реализован следующим checkpoint в разделе 5.19;
+  production-like reconciliation, same-tenant database invariants и политика
+  физического удаления Store ещё не закрыты;
 - production-like A1/A2/B API/BFF/browser evidence ещё не закрыт.
 
 Топология и состав доступа неизменны: четыре текущих клуба — четыре `Store`
@@ -749,7 +750,7 @@ Production deployment и production migration не выполнялись.
 - interactive `run-due` принимает только `limit/dryRun`, использует server
   time и actor scope, сохраняет реального actor;
 - interactive `Run + Task + task audit/notification + Rule schedule + catalog
-  audit` имеют один commit; duplicate occurrence возвращает generic `SKIPPED`;
+audit` имеют один commit; duplicate occurrence возвращает generic `SKIPPED`;
 - raw legacy run errors и произвольный metadata не возвращаются actor;
 - template archive-only разрешён после деактивации Store при отсутствии active
   rules;
@@ -803,7 +804,8 @@ external beta              = NO-GO
 
 Следующий P1:
 
-- read-only legacy inventory и same-tenant DB invariants;
+- применить готовый read-only inventory к production-like snapshot, выполнить
+  reconciliation и добавить same-tenant/Store deletion DB invariants;
 - BFF/browser A1/A2/B negative journeys;
 - отдельный system execution context, tenant lifecycle/staff entitlement,
   durable lease/fencing/heartbeat/retry/stale reclaim до любого background
@@ -826,6 +828,84 @@ external beta              = NO-GO
 одного `Tenant`; каждая внешняя сеть получает отдельный tenant; первая когорта
 получает полный staff-модуль вместе с геймификацией, ассортиментом,
 коммуникациями и users/roles только в своём tenant/scope после Gate 2.
+
+Release decision остаётся `NO-GO`.
+
+### 5.19. Staff task integrity inventory candidate — 27.07.2026
+
+Создан отдельный implementation checkpoint
+`56d615437ecfcb90db252016d3e5b83f3f545578` и операционный
+`docs/security/access-scope/v1/staff-task-integrity-inventory-runbook.md`.
+Production/production-like inventory, data repair и production migration не
+выполнялись.
+
+Реализовано:
+
+- `db:inventory:staff-task-integrity` требует explicit
+  `development|staging|production`, exact run confirmation и дополнительную
+  production attestation;
+- соединение принудительно ограничено одним connection с
+  `default_transaction_read_only=on`;
+- все 43 aggregate проверки выполняются одним SQL statement внутри одной
+  `REPEATABLE READ` transaction; scanner повторно устанавливает READ ONLY и
+  проверяет фактические `transaction_read_only/isolation`;
+- bounded lock/statement/transaction timeout исключают бесконечный scan;
+- blocking coverage включает cross-tenant Template/Rule/Task/Run references,
+  current Rule/Template Store mismatch, source provenance, active
+  Store/Tenant/Template/schedule/timezone, active Rule и unfinished Task
+  assignee, stale `STARTED` и threshold `FAILED`;
+- review coverage отдельно считает tenant-global Template, исторические
+  Task↔mutable catalog Store mismatch и записи, которые текущий
+  `Store.onDelete=SetNull` превратит в global;
+- отчёт содержит только stable reason code и counts, без UUID, имён, email,
+  URL, credentials или свободного row text;
+- exit `1` означает contract/database failure, exit `2` — blocking findings,
+  review-only результат остаётся exit `0`, но требует owner/решения;
+- help/self-test/Node tests включены в application CI; реальный scanner
+  запускается после всех миграций в PostgreSQL migration job.
+
+Проверки:
+
+- syntax/help/self-test и contract suite — 9/9 pass;
+- Prisma validate и database script typecheck — pass;
+- чистая PostgreSQL schema: 156/156 migrations, 43 reason code,
+  `PASS`, blocking/review `0/0`;
+- намеренная cross-tenant Template→Store fixture:
+  `BLOCKED`, exit `2`, blocking/review `1/1`;
+- после безопасной локальной reconciliation fixture:
+  `REVIEW`, exit `0`, blocking `0`;
+- raw fixture identifiers не появились ни в одном report;
+- две точные временные test schema удалены, `public` не затрагивалась;
+- `git diff --check` и Prettier — pass;
+- независимый read-only review не нашёл P0/P1.
+
+Статус:
+
+```text
+inventory implementation     = IMPLEMENTED_CANDIDATE
+production-like inventory    = PENDING / NO-GO
+same-tenant DB constraints   = PENDING
+scheduler/all-tenant HTTP    = NO-GO / UNREGISTERED
+external beta                = NO-GO
+```
+
+Остатки:
+
+- добавить real PostgreSQL fixtures для всех критических групп predicate, а
+  не только clean schema и проверенную cross-tenant ветку;
+- принять семантику `REPEATED_FAILED_RUN`: все failures за окно либо последняя
+  непрерывная серия;
+- выполнить scanner на восстановленном production-like snapshot;
+- разработать отдельный idempotent reconciliation dry-run/apply tool; scanner
+  никогда не получает apply-режим;
+- после объяснённого zero blocking diff реализовать и отрепетировать
+  `EXPAND → VALIDATE → CONTRACT` для same-tenant references и archive-first
+  Store deletion policy.
+
+Топология и состав первой когорты не изменились: четыре текущих клуба —
+четыре `Store` одного `Tenant`; внешняя сеть получает отдельный Tenant; после
+Gate 2 доступны полные геймификация, ассортимент/товары, сотрудники,
+коммуникации и users/roles только в своём tenant/allowed stores.
 
 Release decision остаётся `NO-GO`.
 
@@ -886,14 +966,15 @@ Release decision остаётся `NO-GO`.
 4. Запустить read-only attachment inventory, затем реализовать отдельный
    idempotent apply/backfill/reconciliation tool с explicit apply,
    quarantine и повторным zero-diff dry-run.
-5. Использовать готовые template/catalog и actor-scoped recurring HTTP
-   candidates; сохранить scheduler/all-tenant route незарегистрированными до
-   lifecycle/entitlement, system identity и durable lease/fencing; следующим
-   срезом после уже обязательных в CI real PG Template/Store/participant races
-   добавить task/shift DB invariant + legacy inventory, global timezone policy
-   и полную production-like A1/A2/B API/BFF/browser/file evidence; затем продолжить
+5. Использовать готовые template/catalog, actor-scoped recurring HTTP и
+   guarded integrity inventory candidates; сохранить scheduler/all-tenant
+   route незарегистрированными до lifecycle/entitlement, system identity и
+   durable lease/fencing; выполнить inventory на production-like snapshot,
+   подготовить explicit reconciliation, затем добавить/валидировать
+   same-tenant/task-shift/Store-deletion DB invariants, global timezone policy
+   и полную production-like A1/A2/B API/BFF/browser/file evidence; продолжить
    parent adoption в порядке `CHECKLIST_RUN → KNOWLEDGE_ARTICLE/SHIFT_REGULATION →
-   TRAINING_COURSE/ONBOARDING_PLAN`, для каждого добавляя atomic bind, live
+TRAINING_COURSE/ONBOARDING_PLAN`, для каждого добавляя atomic bind, live
    parent ACL, revoke и A1/A2/B tests.
 6. Использовать реализованный process-wide `SHADOW` для mismatch evidence,
    добавить tenant/store canary orchestration и aggregate gate, затем включить

@@ -1,11 +1,11 @@
 # LeetPlus open beta: пакет запуска
 
-| Поле | Значение |
-|---|---|
-| Статус | Active implementation package |
-| Дата | 27.07.2026 |
-| Release decision | `NO-GO` до полного Gate 2 |
-| Владелец | LeetPlus product / engineering / operations |
+| Поле             | Значение                                    |
+| ---------------- | ------------------------------------------- |
+| Статус           | Active implementation package               |
+| Дата             | 27.07.2026                                  |
+| Release decision | `NO-GO` до полного Gate 2                   |
+| Владелец         | LeetPlus product / engineering / operations |
 
 Этот каталог — навигационная точка для перевода текущей сети из demo-режима в
 полноценную работу и последующего invite-only теста с внешними сетями. Он не
@@ -54,8 +54,11 @@
 10. [Checkpoint recurring actor HTTP](../security/access-scope/v1/staff-task-recurring-http-implementation-checkpoint.md) —
     scoped Rule CRUD/manual/interactive due candidate и явная изоляция
     scheduler/all-tenant execution.
-11. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
-   какие обезличенные доказательства сохранять для каждого SHA.
+11. [Runbook integrity inventory staff tasks](../security/access-scope/v1/staff-task-integrity-inventory-runbook.md) —
+    guarded read-only проверка legacy Template/Rule/Task/Run перед
+    same-tenant EXPAND/VALIDATE.
+12. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+    какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -77,6 +80,10 @@
   Store/participant locks, sparse PATCH, IANA/DST schedule и real PostgreSQL
   race evidence; background scheduler и all-tenant scheduled route не
   зарегистрированы и остаются `NO-GO`.
+- guarded staff task integrity inventory: 43 aggregate reason code, одна
+  read-only `REPEATABLE READ` snapshot, fail-closed exit `1/2` и обязательный
+  clean-schema CI run; production inventory и DB constraints ещё не
+  выполнялись.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный
@@ -117,6 +124,8 @@ credentials, encryption keys и необработанные выгрузки.
 - все обязательные surfaces имеют статус `VERIFIED`;
 - `LEGACY/SHADOW` не используются как внешний attachment authorization;
 - tenant/store IDOR, PII, exports, files, jobs и BFF regression зелёные;
+- staff task integrity inventory имеет zero blocking findings; все review-only
+  findings имеют owner и принятое решение;
 - exact SHA виден в API/web/edge;
 - backup restore, alert и rollback drills подтверждены;
 - gamification write-back включается отдельно по Store через

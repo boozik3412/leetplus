@@ -1,11 +1,11 @@
 # Cutover-чеклист текущей сети: один Tenant, четыре Store
 
-| Поле | Значение |
-|---|---|
-| Статус | Template; execution prohibited without explicit GO |
-| Топология | 1 operational Tenant / 4 Store |
-| Метод | In-place, без смены `tenantId` |
-| External access | Запрещён до успешного Gate 2 |
+| Поле            | Значение                                           |
+| --------------- | -------------------------------------------------- |
+| Статус          | Template; execution prohibited without explicit GO |
+| Топология       | 1 operational Tenant / 4 Store                     |
+| Метод           | In-place, без смены `tenantId`                     |
+| External access | Запрещён до успешного Gate 2                       |
 
 Реальные ID, email, домены интеграций, токены и database URLs в этот файл не
 вносятся. Для них используется защищённая операционная запись; здесь
@@ -31,6 +31,10 @@
 - [ ] У всех четырёх Store задан и проверен валидный IANA `timeZone`; UTC
       fallback отсутствует в принятом recurring schedule.
 - [ ] Cross-tenant `UserStoreAccess` count равен `0`.
+- [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
+      `blockingTotal=0`; каждый review reason code имеет owner/решение.
+- [ ] Template/Rule/Task/Run inventory evidence содержит только aggregate
+      counts и alias `Tenant A / Store A1..A4`, без production ID.
 - [ ] Public/QR/Telegram links проинвентаризированы.
 - [ ] План slug/domain rename и redirect/alias утверждён.
 
@@ -59,6 +63,10 @@
 - [ ] Backup непосредственно перед изменением успешен.
 - [ ] Restore rehearsal в отдельную БД успешен; RPO/RTO записаны.
 - [ ] Schema-only EXPAND rehearsal успешен с timeout/lock evidence.
+- [ ] Same-tenant StaffTask catalog constraints вводятся только после
+      zero-blocking inventory и отдельного reconciliation dry-run.
+- [ ] Физическое удаление Store блокируется при store-bound
+      Task/Template/Rule; штатный путь — deactivate/archive.
 - [ ] `_prisma_migrations` без pending/failed/unfinished rows.
 - [ ] Langame domains и четыре store mappings сверены.
 - [ ] Initial sync/backfill и freshness checks готовы.
@@ -73,6 +81,9 @@
 - [ ] Staff — control, tasks, regulations, KB, training, discipline, salary.
 - [ ] Staff recurring actor path — sparse PATCH, Store timezone, pause/revoke и
       Template/Store/participant race acceptance пройдены; background выключен.
+- [ ] Staff recurring legacy integrity — scanner exit `0`,
+      `blockingTotal=0`, review findings приняты; stale `STARTED` и
+      repeated-`FAILED` разобраны.
 - [ ] Communications — chat, mentions, receipts, notifications, contact tasks.
 - [ ] Users/roles — delegation, revoke и scope работают сразу.
 - [ ] Attachments `ENFORCED`; inventory/backfill/reconciliation zero-diff.

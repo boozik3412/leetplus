@@ -41,6 +41,8 @@ const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const POSTGRES_PERMISSION_DENIED = "42501";
 const ADMISSION_TIMEOUT_MS = 120_000;
 const MIGRATION_TIMEOUT_MS = 10 * 60 * 1000;
+const ADVISORY_LOCK_CLASS = 1_279_349_841;
+const ADVISORY_LOCK_OBJECT = 162;
 const HMAC_KEY = "synthetic-snapshot-admission-smoke-hmac-key-aaaaaaaaaaaaaaaa";
 const APPROVAL_REFERENCE = "synthetic-admission-smoke";
 const ADMISSION_SCRIPT_PATH = fileURLToPath(
@@ -102,7 +104,8 @@ Safety:
   force-drops the generated database, terminates generated reader sessions,
   drops the reader role, and removes the generated migration artifact. Run only
   on a disposable, single-purpose PostgreSQL cluster; forced process or host
-  termination can prevent in-process ACL restoration.
+  termination can prevent in-process ACL restoration. A cluster-wide advisory
+  lock rejects overlapping runs of this smoke.
 `.trim();
 
 function contractError(code) {
@@ -496,6 +499,36 @@ async function assertTestSuperuser(admin) {
     rows[0].rolsuper,
     true,
     "Synthetic legacy fixtures require a local/CI test superuser.",
+  );
+}
+
+async function acquireClusterSmokeLock(admin) {
+  const rows = await admin.$queryRawUnsafe(
+    `SELECT pg_try_advisory_lock(
+       ${ADVISORY_LOCK_CLASS},
+       ${ADVISORY_LOCK_OBJECT}
+     ) AS acquired`,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(
+    rows[0].acquired,
+    true,
+    "Another snapshot admission smoke owns the local cluster lock.",
+  );
+}
+
+async function releaseClusterSmokeLock(admin) {
+  const rows = await admin.$queryRawUnsafe(
+    `SELECT pg_advisory_unlock(
+       ${ADVISORY_LOCK_CLASS},
+       ${ADVISORY_LOCK_OBJECT}
+     ) AS released`,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(
+    rows[0].released,
+    true,
+    "The snapshot admission smoke did not own its cluster lock.",
   );
 }
 
@@ -1233,6 +1266,8 @@ function assertSourceGuards() {
   );
   assert.match(source, /\["show", `\$\{releaseSha\}:\$\{releasePath\}`\]/);
   assert.doesNotMatch(source, /await cp\(/);
+  assert.match(source, /pg_try_advisory_lock/);
+  assert.match(source, /pg_advisory_unlock/);
   assert.match(source, /DISABLE TRIGGER \$\{quoteIdentifier\(/);
   assert.equal(
     basename(ADMISSION_SCRIPT_PATH),
@@ -1325,7 +1360,7 @@ export async function runSelfTest() {
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    checks: 32,
+    checks: 34,
     localCiOnly: true,
     disposableDatabaseOnly: true,
     selectOnlyAdmissionRole: true,
@@ -1373,6 +1408,7 @@ export async function runSmoke(environment = process.env) {
   const quotedClone = quoteIdentifier(cloneDatabaseName);
   const quotedReader = quoteIdentifier(readerRoleName);
   const admin = prismaClient(adminDatabaseUrl);
+  let clusterLockHeld = false;
   let cloneCreated = false;
   let readerCreated = false;
   let tempRoot;
@@ -1441,10 +1477,20 @@ export async function runSmoke(environment = process.env) {
     } catch (error) {
       cleanupErrors.push(error);
     }
+    try {
+      if (clusterLockHeld) {
+        await releaseClusterSmokeLock(admin);
+        clusterLockHeld = false;
+      }
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
   }
 
   try {
     await assertTestSuperuser(admin);
+    await acquireClusterSmokeLock(admin);
+    clusterLockHeld = true;
     const migrationPlan = await readMigrationPlan();
     sourceFingerprintBefore = await aggregateFingerprint(sourceDatabaseUrl);
     tempRoot = await mkdtemp(path.join(tmpdir(), TEMP_ROOT_PREFIX));
@@ -1736,6 +1782,7 @@ export async function runSmoke(environment = process.env) {
     exactSelectRelations: READER_SELECT_RELATIONS.length,
     otherDatabasePublicConnectRevoked: revokedPublicConnectDatabases.length,
     otherDatabasePublicConnectRestored: true,
+    clusterAdvisoryLockVerified: true,
     selectOnlyRoleVerified: true,
     excessSelectDenied: true,
     dmlDeniedOutsideReadOnlyTransaction: true,

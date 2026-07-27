@@ -2829,12 +2829,64 @@ export class StaffChecklistsService {
       return null;
     }
 
+    const candidates = [-1, 0, 1]
+      .map((dayOffset) =>
+        this.parseTimeOfDayCandidate(
+          localDate,
+          dayOffset,
+          hours,
+          minutes,
+          timeZone,
+        ),
+      )
+      .filter((candidate): candidate is Date => Boolean(candidate));
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    return candidates.reduce((best, candidate) => {
+      const bestDistance = Math.abs(best.getTime() - base.getTime());
+      const candidateDistance = Math.abs(candidate.getTime() - base.getTime());
+
+      return candidateDistance < bestDistance ? candidate : best;
+    }, candidates[0]);
+  }
+
+  private parseTimeOfDayCandidate(
+    localDate: { year: string; month: string; day: string },
+    dayOffset: number,
+    hours: number,
+    minutes: number,
+    timeZone: string,
+  ): Date | null {
+    const shiftedDate = this.shiftLocalDate(localDate, dayOffset);
+
     return parseLangameDate(
-      `${localDate.year}-${localDate.month}-${localDate.day} ${String(
+      `${shiftedDate.year}-${shiftedDate.month}-${shiftedDate.day} ${String(
         hours,
       ).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
       timeZone,
     );
+  }
+
+  private shiftLocalDate(
+    localDate: { year: string; month: string; day: string },
+    dayOffset: number,
+  ) {
+    const shifted = new Date(
+      Date.UTC(
+        Number(localDate.year),
+        Number(localDate.month) - 1,
+        Number(localDate.day) + dayOffset,
+      ),
+    );
+
+    return {
+      year: String(shifted.getUTCFullYear()),
+      month: String(shifted.getUTCMonth() + 1).padStart(2, '0'),
+      day: String(shifted.getUTCDate()).padStart(2, '0'),
+    };
   }
 
   private localDateParts(

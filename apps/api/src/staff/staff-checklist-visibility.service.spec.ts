@@ -180,3 +180,55 @@ describe('Staff checklist catalog visibility', () => {
     );
   });
 });
+
+describe('Staff checklist time-of-day planning', () => {
+  function createService() {
+    return new StaffChecklistsService({} as never, {} as never);
+  }
+
+  function resolveTimeOfDayPlannedAt(
+    service: StaffChecklistsService,
+    base: Date,
+    timeOfDay: string,
+  ) {
+    const [hours, minutes] = timeOfDay.split(':').map(Number);
+
+    return (
+      service as unknown as {
+        resolveTimeOfDayPlannedAt: (
+          base: Date,
+          hours: number,
+          minutes: number,
+          timeZone: string,
+        ) => Date | null;
+      }
+    ).resolveTimeOfDayPlannedAt(base, hours, minutes, 'Asia/Yekaterinburg');
+  }
+
+  it('keeps overnight checklist items on the closest local shift date', () => {
+    const service = createService();
+    const shiftStartedAt = new Date('2026-07-19T17:00:00.000Z');
+
+    expect(
+      resolveTimeOfDayPlannedAt(
+        service,
+        shiftStartedAt,
+        '23:00',
+      )?.toISOString(),
+    ).toBe('2026-07-19T18:00:00.000Z');
+    expect(
+      resolveTimeOfDayPlannedAt(
+        service,
+        shiftStartedAt,
+        '00:00',
+      )?.toISOString(),
+    ).toBe('2026-07-19T19:00:00.000Z');
+    expect(
+      resolveTimeOfDayPlannedAt(
+        service,
+        shiftStartedAt,
+        '01:00',
+      )?.toISOString(),
+    ).toBe('2026-07-19T20:00:00.000Z');
+  });
+});

@@ -10,6 +10,7 @@
     "db:smoke": "node scripts/ci-smoke.mjs",
     "db:smoke:access-scope": "node scripts/access-scope-smoke.mjs",
     "db:smoke:attachment-acl": "node scripts/staff-attachment-acl-smoke.mjs",
+    "db:smoke:staff-task-catalog-audit": "node scripts/staff-task-catalog-audit-smoke.mjs",
     "db:inventory:attachment-acl": "node scripts/staff-attachment-backfill-dry-run.mjs",
     "check:attachment-inventory": "node --check scripts/staff-attachment-backfill-dry-run.mjs && node scripts/staff-attachment-backfill-dry-run.mjs --help && node scripts/staff-attachment-backfill-dry-run.mjs --self-test",
     "db:studio": "prisma studio",

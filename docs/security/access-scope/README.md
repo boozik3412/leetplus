@@ -56,6 +56,9 @@ invite-only открытому тесту. Она отвечает на вопр
 9. [План templates/recurring tasks](./v1/staff-task-catalog-adoption-plan.md) —
    route/action/job inventory, подтверждённые cross-store разрывы, безопасная
    materialization policy и следующий implementation slice.
+10. [Task catalog: implementation checkpoint](./v1/staff-task-catalog-implementation-checkpoint.md) —
+    scoped template CRUD/launch, shared materializer, catalog audit, проверки и
+    оставшиеся recurring/scheduler блокеры.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
@@ -74,7 +77,9 @@ candidate нельзя передавать в auto-deploy как единый p
 классификация, и только при нуле unresolved active subjects включается strict
 reader.
 
-Для attachment ACL schema candidate содержит 155 миграций, latest —
+Текущий общий schema candidate содержит 156 миграций, latest —
+`20260727120000_staff_task_catalog_audit_expand`; attachment ACL checkpoint
+завершается миграцией
 `20260727113000_staff_attachment_acl_invariant_hardening`. Native bind и
 parent-aware reader реализованы для chat и новых shift-report uploads.
 `STAFF_TASK` list/export/direct scope, transactional comment evidence bind и
@@ -89,6 +94,10 @@ comment/self-service status действия. Update/comment блокируют 
 `manage_staff_tasks`. Обычный create начинает task только в `OPEN`; assignment
 labels принадлежат серверу. Grouped/`ANY_OF` нельзя переназначить через
 single-assignee PATCH или лишить candidate observer membership.
+Template CRUD/launch также имеет bounded candidate: scoped rows/count/summary
+и options, fresh persisted scope, parent lock/recheck, ACTIVE/bound Store
+policy, shared task materializer и атомарный catalog audit. Recurring HTTP и
+scheduler остаются `NO-GO`.
 Для `CHECKLIST_RUN`, `KNOWLEDGE_ARTICLE`, `SHIFT_REGULATION`,
 `TRAINING_COURSE`, `ONBOARDING_PLAN` producer/reader adoption остаётся pending.
 Read-only inventory реализован, apply-backfill отсутствует. Поэтому

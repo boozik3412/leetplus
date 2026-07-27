@@ -273,6 +273,7 @@ model Tenant {
   staffTaskObservers                   StaffTaskObserver[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
+  staffTaskCatalogAuditEvents          StaffTaskCatalogAuditEvent[]
   staffKnowledgeSettings               StaffKnowledgeSettings?
   staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
@@ -374,6 +375,7 @@ model User {
   observedStaffTasks                   StaffTaskObserver[]                   @relation("StaffTaskObserverUser")
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
+  staffTaskCatalogAuditEvents          StaffTaskCatalogAuditEvent[]          @relation("StaffTaskCatalogAuditActor")
   updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]              @relation("StaffKnowledgeSettingsUpdatedBy")
   staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]         @relation("StaffKnowledgeSettingsEventActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
@@ -3454,6 +3456,29 @@ model StaffTaskAuditEvent {
   @@index([tenantId, createdAt], map: "staff_task_audit_tenant_created_idx")
   @@index([taskId, createdAt], map: "staff_task_audit_task_created_idx")
   @@index([actorUserId], map: "staff_task_audit_actor_idx")
+}
+
+model StaffTaskCatalogAuditEvent {
+  id               String   @id @default(uuid())
+  tenantId         String
+  actorUserId      String?
+  entityKind       String
+  entityId         String
+  action           String
+  effectiveStoreId String?
+  changedFields    String[]
+  beforeState      Json?
+  afterState       Json?
+  releaseSha       String?
+  reasonCode       String?
+  createdAt        DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actorUser User?  @relation("StaffTaskCatalogAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt], map: "staff_task_catalog_audit_tenant_created_idx")
+  @@index([entityKind, entityId, createdAt], map: "staff_task_catalog_audit_entity_created_idx")
+  @@index([actorUserId, createdAt], map: "staff_task_catalog_audit_actor_created_idx")
 }
 
 model StaffAttachment {

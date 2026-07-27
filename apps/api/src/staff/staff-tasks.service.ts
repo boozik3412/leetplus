@@ -152,6 +152,23 @@ export type StaffTaskCommentDto = {
   status?: StaffTaskStatus;
 };
 
+export type StaffTaskCatalogSource =
+  | {
+      kind: 'TEMPLATE';
+      templateId: string;
+      templateTitle: string;
+    }
+  | {
+      kind: 'RECURRING_RULE';
+      ruleId: string;
+      ruleTitle: string;
+      cadence: string;
+      templateId: string | null;
+      automatic: boolean;
+      scheduledFor?: string;
+      ruleRunId?: string;
+    };
+
 export type StaffTaskReport = {
   filters: {
     view: StaffTaskViewMode;
@@ -235,7 +252,7 @@ type StaffTaskMutationContext = StaffTaskStatusContext & {
 
 type StaffTaskReferenceClient = Pick<
   PrismaService,
-  'guestWorkingShift' | 'user'
+  'guestWorkingShift' | 'store' | 'user'
 >;
 
 export type StaffTaskResponse = {
@@ -710,6 +727,154 @@ export class StaffTasksService {
       createdCount: tasks.length,
       tasks: tasks.map((task) => this.toTaskResponse(task)),
     };
+  }
+
+  async createCatalogTaskInTransaction(
+    tx: Prisma.TransactionClient,
+    user: AuthenticatedUser,
+    dto: StaffTaskDto,
+    source: StaffTaskCatalogSource,
+  ): Promise<StaffTaskResponse> {
+    if (
+      dto.assignedToUserIds !== undefined ||
+      dto.assignmentMode !== undefined
+    ) {
+      throw new BadRequestException(
+        'Catalog task materialization supports a single assignment only',
+      );
+    }
+
+    const { tenantId } = this.tenantContextService.resolve(user);
+    const accessScope = this.accessScopeService.resolve(user);
+    const data = await this.normalizeTaskData(
+      tenantId,
+      dto,
+      { requireTitle: true },
+      tx,
+    );
+    const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
+    this.assertTaskCreationStatus(status);
+    const taskStoreId = typeof data.storeId === 'string' ? data.storeId : null;
+    const observerUserIds =
+      (await this.resolveObserverUserIds(
+        tenantId,
+        dto.observerUserIds,
+        accessScope,
+        taskStoreId,
+        tx,
+      )) ?? [];
+    const assignedToUserIds = await this.resolveAssignedUserIds(
+      tenantId,
+      undefined,
+      typeof data.assignedToUserId === 'string' ? data.assignedToUserId : null,
+      accessScope,
+      taskStoreId,
+      tx,
+    );
+
+    this.assertTaskCreateStoreAllowed(accessScope, taskStoreId);
+    await this.assertTaskShiftMatchesStore(
+      tenantId,
+      typeof data.shiftId === 'string' ? data.shiftId : null,
+      taskStoreId,
+      accessScope,
+      tx,
+    );
+    await this.assertTaskCreationPolicy(
+      tenantId,
+      user,
+      assignedToUserIds,
+      observerUserIds,
+      taskStoreId,
+      tx,
+    );
+
+    const assignedToUserId = assignedToUserIds[0] ?? null;
+    const labels = this.buildAssignmentLabels(data.labels, {
+      assignmentMode: 'SINGLE',
+      candidateUserIds: assignedToUserId ? [assignedToUserId] : [],
+      bulkTaskGroupId: null,
+      originalAssignedToUserIds: assignedToUserIds,
+    });
+    const sourceFields =
+      source.kind === 'TEMPLATE'
+        ? {
+            sourceTemplateId: source.templateId,
+            sourceRecurringRuleId: null,
+          }
+        : {
+            sourceTemplateId: source.templateId,
+            sourceRecurringRuleId: source.ruleId,
+          };
+    const sourceMetadata =
+      source.kind === 'TEMPLATE'
+        ? {
+            templateId: source.templateId,
+            templateTitle: source.templateTitle,
+          }
+        : {
+            ruleId: source.ruleId,
+            ruleTitle: source.ruleTitle,
+            cadence: source.cadence,
+            templateId: source.templateId,
+            automatic: source.automatic,
+            ...(source.scheduledFor
+              ? { scheduledFor: source.scheduledFor }
+              : {}),
+            ...(source.ruleRunId ? { ruleRunId: source.ruleRunId } : {}),
+          };
+    const auditAction =
+      source.kind === 'TEMPLATE'
+        ? 'CREATED_FROM_TEMPLATE'
+        : 'CREATED_FROM_RECURRING_RULE';
+    const auditMessage =
+      source.kind === 'TEMPLATE'
+        ? 'Task created from template'
+        : source.automatic
+          ? 'Task created automatically from recurring rule'
+          : 'Task created from recurring rule';
+    const created = await tx.staffTask.create({
+      data: {
+        ...(data as Prisma.StaffTaskUncheckedCreateInput),
+        ...sourceFields,
+        tenantId,
+        status,
+        assignedToUserId,
+        labels,
+        createdByUserId: user.id,
+        completedAt: null,
+      },
+      select: { id: true },
+    });
+
+    await tx.staffTaskAuditEvent.create({
+      data: {
+        tenantId,
+        taskId: created.id,
+        actorUserId: user.id,
+        action: auditAction,
+        message: auditMessage,
+        metadata: {
+          ...sourceMetadata,
+          status,
+          priority: data.priority ?? 'NORMAL',
+          type: data.type ?? 'ONE_TIME',
+          observerUserIds,
+          assignedToUserIds,
+          assignmentMode: 'SINGLE',
+        },
+      },
+    });
+    await this.syncTaskObservers(tx, tenantId, created.id, observerUserIds);
+
+    const task = await this.fetchTaskOrThrow(tx, tenantId, created.id);
+    await this.staffTeamChatService.createSystemNotification(
+      tenantId,
+      this.buildTaskCreatedNotification(task),
+      tx,
+    );
+
+    return this.toTaskResponse(task);
   }
 
   async updateTask(user: AuthenticatedUser, id: string, dto: StaffTaskDto) {
@@ -1380,10 +1545,58 @@ export class StaffTasksService {
   private buildTaskUserSelectorWhere(
     tenantId: string,
     accessScope: ResolvedAccessScope,
-    requiredStoreId: string | null = null,
+    requiredStoreId: string | null | undefined = undefined,
   ): Prisma.UserWhereInput {
     if (accessScope.mode === 'NETWORK') {
-      return { tenantId, isActive: true, isPlatformAdmin: false };
+      const where: Prisma.UserWhereInput = {
+        tenantId,
+        isActive: true,
+        isPlatformAdmin: false,
+      };
+
+      if (requiredStoreId === null) {
+        return {
+          ...where,
+          accessScope: 'NETWORK',
+          storeAccesses: { none: {} },
+        };
+      }
+
+      if (requiredStoreId) {
+        return {
+          ...where,
+          OR: [
+            {
+              accessScope: 'NETWORK',
+              storeAccesses: { none: {} },
+            },
+            {
+              accessScope: 'STORES',
+              storeAccesses: {
+                some: { storeId: requiredStoreId },
+                none: { store: { tenantId: { not: tenantId } } },
+              },
+            },
+          ],
+        };
+      }
+
+      return {
+        ...where,
+        OR: [
+          {
+            accessScope: 'NETWORK',
+            storeAccesses: { none: {} },
+          },
+          {
+            accessScope: 'STORES',
+            storeAccesses: {
+              some: { store: { tenantId } },
+              none: { store: { tenantId: { not: tenantId } } },
+            },
+          },
+        ],
+      };
     }
 
     const storeIds = [...accessScope.allowedStoreIds];
@@ -2214,7 +2427,8 @@ export class StaffTasksService {
       originalAssignedToUserIds: string[];
     },
   ) {
-    const labels = { ...(this.taskLabelObject(value) ?? {}) };
+    const labelObject = this.taskLabelObject(value);
+    const labels = { ...(labelObject ?? {}) };
     taskAssignmentLabelKeys.forEach((key) => delete labels[key]);
 
     if (
@@ -2222,7 +2436,13 @@ export class StaffTasksService {
       assignment.candidateUserIds.length <= 1 &&
       !assignment.bulkTaskGroupId
     ) {
-      return labels as Prisma.InputJsonValue;
+      return labelObject ? (labels as Prisma.InputJsonValue) : value;
+    }
+
+    if (!labelObject && value !== null && value !== undefined) {
+      throw new BadRequestException(
+        'Task labels must be an object for grouped assignment',
+      );
     }
 
     return {
@@ -2519,6 +2739,7 @@ export class StaffTasksService {
     tenantId: string,
     dto: StaffTaskDto,
     options: { requireTitle: boolean },
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ): Promise<Prisma.StaffTaskUncheckedUpdateInput> {
     const data: Prisma.StaffTaskUncheckedUpdateInput = {};
 
@@ -2550,11 +2771,19 @@ export class StaffTasksService {
     }
 
     if (dto.storeId !== undefined) {
-      data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
+      data.storeId = await this.resolveStoreId(
+        tenantId,
+        dto.storeId,
+        prismaClient,
+      );
     }
 
     if (dto.shiftId !== undefined) {
-      data.shiftId = await this.resolveShiftId(tenantId, dto.shiftId);
+      data.shiftId = await this.resolveShiftId(
+        tenantId,
+        dto.shiftId,
+        prismaClient,
+      );
     }
 
     if (dto.assignedToUserId !== undefined) {
@@ -3051,6 +3280,7 @@ export class StaffTasksService {
   private async resolveStoreId(
     tenantId: string,
     value: string | null | undefined,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ) {
     const id = this.normalizeOptionalString(value);
 
@@ -3058,7 +3288,7 @@ export class StaffTasksService {
       return null;
     }
 
-    const store = await this.prisma.store.findFirst({
+    const store = await prismaClient.store.findFirst({
       where: { id, tenantId },
       select: { id: true },
     });
@@ -3073,6 +3303,7 @@ export class StaffTasksService {
   private async resolveShiftId(
     tenantId: string,
     value: string | null | undefined,
+    prismaClient: StaffTaskReferenceClient = this.prisma,
   ) {
     const id = this.normalizeOptionalString(value);
 
@@ -3080,7 +3311,7 @@ export class StaffTasksService {
       return null;
     }
 
-    const shift = await this.prisma.guestWorkingShift.findFirst({
+    const shift = await prismaClient.guestWorkingShift.findFirst({
       where: { id, tenantId },
       select: { id: true },
     });

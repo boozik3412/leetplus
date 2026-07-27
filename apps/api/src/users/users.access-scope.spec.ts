@@ -343,7 +343,7 @@ describe('UsersService AccessScope boundary', () => {
           'Tenant must retain at least one active NETWORK OWNER',
         );
 
-        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
         expect(prisma.user.count).toHaveBeenCalledWith({
           where: {
             tenantId,
@@ -392,8 +392,16 @@ describe('UsersService AccessScope boundary', () => {
       const { prisma, service } = createService({});
       prisma.user.findFirst.mockResolvedValue(target);
       prisma.$queryRaw.mockImplementation((query: unknown) => {
-        events.push('lock');
-        lockQuery = query as typeof lockQuery;
+        const sql = query as typeof lockQuery;
+        const sqlText = sql?.strings?.join(' ') ?? '';
+
+        if (sqlText.includes('FOR UPDATE')) {
+          events.push('user-lock');
+          return Promise.resolve([{ id: target.id }]);
+        }
+
+        events.push('owner-lock');
+        lockQuery = sql;
         return Promise.resolve([{ pg_advisory_xact_lock: null }]);
       });
       prisma.user.count.mockImplementation(() => {
@@ -415,7 +423,7 @@ describe('UsersService AccessScope boundary', () => {
         scope: 'NETWORK',
       });
 
-      expect(events).toEqual(['lock', 'count', 'update']);
+      expect(events).toEqual(['user-lock', 'owner-lock', 'count', 'update']);
       expect(lockQuery?.strings?.join(' ')).toContain('pg_advisory_xact_lock');
       expect(lockQuery?.values).toContain(
         `users:last-active-network-owner:${tenantId}`,

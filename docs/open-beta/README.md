@@ -48,7 +48,10 @@
 8. [План templates/recurring tasks](../security/access-scope/v1/staff-task-catalog-adoption-plan.md) —
    подтверждённые same-tenant cross-store разрывы и следующий implementation
    slice.
-9. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+9. [Checkpoint task catalog](../security/access-scope/v1/staff-task-catalog-implementation-checkpoint.md) —
+   фактический template/materializer/audit candidate, проверки и остаточные
+   блокеры recurring/scheduler.
+10. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
    какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
@@ -65,6 +68,8 @@
 - scoped staff directory, notifications и team chat core;
 - attachment lifecycle/ACL EXPAND schema;
 - parent-aware chat и `STAFF_TASK` attachment adoption candidate.
+- scoped task templates, shared safe task materializer и catalog audit EXPAND
+  candidate.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный

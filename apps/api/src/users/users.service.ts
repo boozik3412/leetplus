@@ -834,6 +834,8 @@ export class UsersService {
 
     try {
       updated = await this.prisma.$transaction(async (tx) => {
+        await this.lockUserForUpdate(tx, tenantId, existing.id);
+
         if (removesActiveNetworkOwner) {
           await this.assertAnotherActiveNetworkOwnerExists(tx, {
             tenantId,
@@ -1201,6 +1203,26 @@ export class UsersService {
     if (otherOwnerCount === 0) {
       throw new ConflictException(
         'Tenant must retain at least one active NETWORK OWNER',
+      );
+    }
+  }
+
+  private async lockUserForUpdate(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    userId: string,
+  ): Promise<void> {
+    const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT subject."id"
+      FROM "User" AS subject
+      WHERE subject."id" = ${userId}
+        AND subject."tenantId" = ${tenantId}
+      FOR UPDATE
+    `);
+
+    if (lockedUsers.length !== 1) {
+      throw new ConflictException(
+        'User changed while the update was being prepared',
       );
     }
   }

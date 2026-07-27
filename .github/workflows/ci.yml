@@ -84,9 +84,9 @@ jobs:
           INTEGRATION_ENCRYPTION_KEY: ci-contract-integration-ffffffffffffffffffffffffffffffff
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
-          BUILD_TIME: '2026-07-26T00:00:00Z'
-          EXPECTED_DATABASE_MIGRATION: 20260727113000_staff_attachment_acl_invariant_hardening
-          EXPECTED_DATABASE_MIGRATION_COUNT: '155'
+          BUILD_TIME: "2026-07-26T00:00:00Z"
+          EXPECTED_DATABASE_MIGRATION: 20260727120000_staff_task_catalog_audit_expand
+          EXPECTED_DATABASE_MIGRATION_COUNT: "156"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -162,6 +162,11 @@ jobs:
         run: pnpm --filter database db:smoke:attachment-acl
         env:
           STAFF_ATTACHMENT_ACL_SMOKE_CONFIRM: run-staff-attachment-acl-fixtures
+
+      - name: Verify staff task catalog audit database invariants
+        run: pnpm --filter database db:smoke:staff-task-catalog-audit
+        env:
+          STAFF_TASK_CATALOG_AUDIT_SMOKE_CONFIRM: run-staff-task-catalog-audit-fixtures
 
       - name: Verify staff task transaction security with PostgreSQL
         run: pnpm --filter api test:integration:staff-task-security:pg

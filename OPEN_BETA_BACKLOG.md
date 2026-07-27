@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 27.07.2026
-- Версия: 1.12
+- Версия: 1.13
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
@@ -249,7 +249,7 @@
 |---|---|---|---|---|---|
 | BETA-MOD-STAFF-001 | P0 | Запланировано | Провести полный route/action inventory staff | Все staff pages/API/BFF, exports, attachments и schedulers сопоставлены с entitlement, capability, tenant/store/staff scope, audit и тестом | BETA-TEN-002, BETA-IAM-001 |
 | BETA-MOD-STAFF-002 | P0 | Запланировано | Закрыть directory и identity mapping | Сотрудник, LeetPlus user, store и Langame identity связаны без cross-tenant/store утечки; ручная замена и rollback аудируются | BETA-SEC-006, BETA-MOD-STAFF-001 |
-| BETA-MOD-STAFF-003 | P0 | В работе | Закрыть задачи, templates и recurring rules | Direct task candidate применяет persisted `AccessScope`, server-owned assignment metadata, parent lock/recheck и atomic evidence bind; full API/build и real PG A1→A2/rollback зелёные. До `Готово` остаются templates/recurring/background по `staff-task-catalog-adoption-plan.md`, task/shift DB invariant, revoke и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
+| BETA-MOD-STAFF-003 | P0 | В работе | Закрыть задачи, templates и recurring rules | Direct tasks и templates CRUD/launch имеют `IMPLEMENTED_CANDIDATE`: persisted scope, scoped aggregates/options, parent lock/recheck, shared materializer, observers и atomic task/catalog audit; clean 156 migrations, catalog smoke и PG task race/rollback зелёные. До `Готово` остаются actor-scoped recurring, общий rule/template lock, participant revoke, scheduler lease/entitlement, task/shift DB invariant и полная A1/A2/B API/BFF/browser suite | BETA-OPS-008, BETA-MOD-STAFF-001 |
 | BETA-MOD-STAFF-004 | P0 | Запланировано | Закрыть shift workspace и shift reports | Сотрудник видит свою смену и назначенные процессы; manager — разрешённые stores; drafts/send/history не выходят за scope | BETA-MOD-STAFF-002, BETA-IAM-002 |
 | BETA-MOD-STAFF-005 | P0 | Запланировано | Закрыть регламенты и чек-листы | Draft/publish/archive, targeting, acknowledgements, snapshots, execution, review и reports работают по role/store; опубликованная история неизменяема | BETA-MOD-STAFF-001 |
 | BETA-MOD-STAFF-006 | P0 | Запланировано | Закрыть знания, обучение и аттестации | Knowledge base, courses, onboarding, tests, assessments, profiles и readiness корректно target-ятся; результаты и read receipts защищены | BETA-MOD-STAFF-001, BETA-IAM-002 |
@@ -663,6 +663,69 @@ users/roles только в пределах собственного tenant и 
 Release decision остаётся `NO-GO` до завершения остальных parent kinds,
 inventory/backfill/reconciliation, activation/operations gates и полного Gate 2.
 
+### 5.17. Task templates и catalog audit candidate — 27.07.2026
+
+Создан фактический checkpoint:
+`docs/security/access-scope/v1/staff-task-catalog-implementation-checkpoint.md`.
+Production deployment не выполнялся.
+
+Реализовано:
+
+- единая catalog policy для template/rule/run/store/participant predicates;
+- template rows, scoped task counts, full summary, store/user options и creator
+  projection ограничены persisted `NETWORK | STORES`;
+- create/update перечитывают persisted actor scope в транзакции;
+- update/launch блокируют template, повторяют visibility и проверяют final
+  active Store/status;
+- `STORES` не создаёт global template, hidden UUID даёт `404`, forbidden filter
+  — `403`;
+- launch только из `ACTIVE`; store-bound template нельзя переопределить другим
+  Store или null;
+- template launch использует общий безопасный task materializer, включая
+  assignee, observers, role policy, server labels, task audit и notification;
+- массивы template tags не теряются при single assignment;
+- `UsersService` использует согласованный lock order
+  `User → UserStoreAccess`, поэтому concurrent scope revoke не образует прежний
+  deadlock с catalog mutation;
+- добавлена additive migration
+  `20260727120000_staff_task_catalog_audit_expand`;
+- create/update/activate/archive/launch пишут атомарный catalog audit без title,
+  email и participant lists;
+- UI запускает только active template, фиксирует bound Store и передаёт
+  подтверждающих observers.
+
+Проверки:
+
+- Prisma validate/generate — pass;
+- clean PostgreSQL schema: 156/156 migrations — pass;
+- catalog audit constraints/retention smoke — 5/5 pass;
+- real PostgreSQL task race/rollback — 3/3 pass;
+- focused API: 24 suites, 341/341 tests — pass;
+- full API: 77 suites, 1 565 pass, 2 todo (1 567 total) — pass;
+- API/web typecheck, API boundary lint и targeted web lint — pass;
+- API production build — pass;
+- web webpack production build: 203 pages — pass;
+- независимый review не нашёл прямого tenant/store escape в template
+  CRUD/launch.
+
+Статус ограничен `IMPLEMENTED_CANDIDATE`. P1 остаются:
+
+- recurring create/update/activation не использует общий template lock и имеет
+  phantom race с archive/rebind;
+- recurring HTTP, interactive due и scheduled paths ещё не actor-scoped;
+- scheduler остаётся `NO-GO` без explicit enable, lifecycle/entitlement,
+  durable lease/fencing и stale reclaim;
+- participant reference revoke требует lock/recheck либо reconciliation;
+- lifecycle архивирования template неактивного Store и production-like
+  A1/A2/B browser evidence ещё не закрыты.
+
+Топология и состав доступа неизменны: четыре текущих клуба — четыре `Store`
+одного `Tenant`; независимые сети получают отдельные tenant; первая когорта
+получает целиком геймификацию, ассортимент/товары, сотрудников, in-app
+коммуникации и users/roles только в пределах своего tenant/scope.
+
+Release decision остаётся `NO-GO`.
+
 ## 6. Release gates
 
 ### Gate 0 — каноническая основа
@@ -712,7 +775,7 @@ inventory/backfill/reconciliation, activation/operations gates и полного
    зафиксировать exact SHA и включить CI как required check; strict bundle не
    передавать в auto-deploy `main`.
 2. Отрепетировать отдельный schema-only EXPAND release на production-like
-   snapshot: все 155 migrations с session `PGOPTIONS`, ready/valid concurrent
+   snapshot: все 156 migrations с session `PGOPTIONS`, ready/valid concurrent
    indexes, N-1 compatibility, abort/retry и rollback evidence.
 3. На staging классифицировать persisted `NETWORK|STORES` для tenant одной сети
    с четырьмя клубами; strict AccessScope разрешить только при нуле unresolved
@@ -720,8 +783,9 @@ inventory/backfill/reconciliation, activation/operations gates и полного
 4. Запустить read-only attachment inventory, затем реализовать отдельный
    idempotent apply/backfill/reconciliation tool с explicit apply,
    quarantine и повторным zero-diff dry-run.
-5. Реализовать AccessScope и безопасную materialization для
-   task templates/recurring/scheduler по отдельному adoption plan; добавить
+5. Использовать готовый template/catalog candidate и реализовать actor-scoped
+   recurring HTTP с общим template lock и safe materializer; scheduler оставить
+   явно выключенным до lifecycle/entitlement и durable lease/fencing; добавить
    task/shift DB invariant + legacy inventory, revoke/delete и полную
    production-like A1/A2/B API/BFF/browser/file evidence; затем продолжить
    parent adoption в порядке `CHECKLIST_RUN → KNOWLEDGE_ARTICLE/SHIFT_REGULATION →

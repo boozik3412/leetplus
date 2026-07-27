@@ -2,25 +2,26 @@
 
 | Поле | Значение |
 |---|---|
-| Статус | `INVENTORY` / implementation pending / `NO-GO` |
-| Версия | 1.0.0 |
+| Статус | templates `IMPLEMENTED_CANDIDATE`; recurring/scheduler `NO-GO` |
+| Версия | 1.1.0 |
 | Дата | 27.07.2026 |
 | Backlog | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008` |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md) |
 
 Документ фиксирует route/action/job inventory для шаблонов и регулярных задач.
-Он не утверждает их готовность: текущие сервисы tenant-scoped, но не применяют
-persisted `NETWORK | STORES`, поэтому внутри сети из четырёх клубов остаётся
-same-tenant cross-store IDOR.
+Template CRUD/launch уже реализован отдельным bounded candidate, описанным в
+[implementation checkpoint](./staff-task-catalog-implementation-checkpoint.md).
+Recurring HTTP и scheduler всё ещё не применяют полный контракт, поэтому весь
+catalog slice и внешний тест остаются `NO-GO`.
 
 ## 1. Инвентаризация поверхности
 
 | Surface | Capability | Текущее состояние | Обязательное исправление |
 |---|---|---|---|
-| `GET /staff/task-templates` | `view_staff_tasks` | tenant-only list/options | rows, stores и users фильтруются persisted scope |
-| `POST /staff/task-templates` | `manage_staff_tasks` | references проверяются только по tenant | STORES требует non-null allowed Store; null/global write — NETWORK |
-| `PATCH /staff/task-templates/:id` | `manage_staff_tasks` | direct `id + tenantId` | hidden чужой Store UUID — `404`; final state валидируется после lock |
-| `POST /staff/task-templates/:id/tasks` | `manage_staff_tasks` | template можно запустить с override | parent/store/assignee проверяются по actor scope; task policy не обходится |
+| `GET /staff/task-templates` | `view_staff_tasks` | `IMPLEMENTED_CANDIDATE` | scoped rows/options/count/summary и creator projection |
+| `POST /staff/task-templates` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | fresh scope; STORES требует non-null active allowed Store |
+| `PATCH /staff/task-templates/:id` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | hidden UUID `404`; parent lock; final state; atomic catalog audit |
+| `POST /staff/task-templates/:id/tasks` | `manage_staff_tasks` | `IMPLEMENTED_CANDIDATE` | ACTIVE-only; bound Store; shared task materializer; observers/audit |
 | `GET /staff/task-rules` | `view_staff_tasks` | tenant-wide rules/runs/users/stores | rule, run и created-task projections используют один scope |
 | `POST /staff/task-rules` | `manage_staff_tasks` | tenant-only references | allowed Store, compatible template и authoritative assignee |
 | `PATCH /staff/task-rules/:id` | `manage_staff_tasks` | direct `id + tenantId` | scoped UUID, final-state validation и row lock |

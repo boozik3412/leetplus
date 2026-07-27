@@ -1,12 +1,17 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
+import type { ResolvedAccessScope } from '../tenancy/access-scope.service';
+import { StaffTaskCatalogAccessPolicyService } from './staff-task-catalog-access-policy.service';
+import { StaffTasksService } from './staff-tasks.service';
 
 const templateStatuses = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
 const taskTypes = [
@@ -49,6 +54,7 @@ export type StaffTaskTemplateLaunchDto = {
   description?: string | null;
   storeId?: string | null;
   assignedToUserId?: string | null;
+  observerUserIds?: unknown;
   dueAt?: string | null;
 };
 
@@ -96,54 +102,130 @@ export type StaffTaskTemplateLaunchResponse = {
   templateId: string;
 };
 
-const templateInclude = {
-  store: { select: { id: true, name: true, isActive: true } },
-  createdByUser: { select: { id: true, email: true, fullName: true } },
-  _count: { select: { tasks: true } },
-} satisfies Prisma.StaffTaskTemplateInclude;
+function buildVisibleTemplateTaskWhere(
+  accessScope: ResolvedAccessScope,
+): Prisma.StaffTaskWhereInput {
+  return accessScope.mode === 'NETWORK'
+    ? { tenantId: accessScope.tenantId }
+    : {
+        tenantId: accessScope.tenantId,
+        storeId: { in: [...accessScope.allowedStoreIds] },
+        OR: [
+          { shiftId: null },
+          {
+            shift: {
+              is: {
+                storeId: { in: [...accessScope.allowedStoreIds] },
+              },
+            },
+          },
+        ],
+      };
+}
+
+function buildTemplateInclude(accessScope: ResolvedAccessScope) {
+  const taskWhere = buildVisibleTemplateTaskWhere(accessScope);
+
+  return {
+    store: {
+      select: { id: true, tenantId: true, name: true, isActive: true },
+    },
+    createdByUser: {
+      select: { id: true, tenantId: true, email: true, fullName: true },
+    },
+    _count: { select: { tasks: { where: taskWhere } } },
+  } satisfies Prisma.StaffTaskTemplateInclude;
+}
 
 type StaffTaskTemplateRow = Prisma.StaffTaskTemplateGetPayload<{
-  include: typeof templateInclude;
+  include: ReturnType<typeof buildTemplateInclude>;
 }>;
+
+type StaffTaskTemplateReferenceClient = Pick<PrismaService, 'store'>;
 
 @Injectable()
 export class StaffTaskTemplatesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tenantContextService: TenantContextService,
+    private readonly catalogAccessPolicy: StaffTaskCatalogAccessPolicyService,
+    private readonly staffTasksService: StaffTasksService,
+    private readonly configService: ConfigService,
   ) {}
 
   async getTemplates(
     user: AuthenticatedUser,
     query: StaffTaskTemplatesQuery = {},
   ): Promise<StaffTaskTemplateReport> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const accessScope = this.catalogAccessPolicy.resolve(user);
     const filters = this.resolveFilters(query);
-    const where = this.buildWhere(tenantId, filters);
+    this.catalogAccessPolicy.assertExplicitStoreFilterAllowed(
+      accessScope,
+      filters.storeId,
+    );
+    if (filters.storeId) {
+      const visibleStore = await this.prisma.store.findFirst({
+        where: {
+          AND: [
+            this.catalogAccessPolicy.buildStoreSelectorWhere(accessScope),
+            { id: filters.storeId },
+          ],
+        },
+        select: { id: true },
+      });
 
-    const [rows, stores, users] = await Promise.all([
-      this.prisma.staffTaskTemplate.findMany({
-        where,
-        include: templateInclude,
-        orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
-        take: 200,
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      }),
-      this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
-        select: { id: true, email: true, fullName: true },
-        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
-      }),
-    ]);
-    const responseRows = rows.map((row) => this.toTemplateResponse(row));
+      if (!visibleStore) {
+        throw new ForbiddenException('Store is outside your access scope');
+      }
+    }
+    const where = this.catalogAccessPolicy.buildTemplateWhere(
+      accessScope,
+      this.buildFilterWhere(filters),
+    );
+
+    const [rows, stores, users, statusCounts, tasksCreated] = await Promise.all(
+      [
+        this.prisma.staffTaskTemplate.findMany({
+          where,
+          include: buildTemplateInclude(accessScope),
+          orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+          take: 200,
+        }),
+        this.prisma.store.findMany({
+          where: this.catalogAccessPolicy.buildStoreSelectorWhere(accessScope),
+          select: { id: true, name: true, isActive: true },
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+        }),
+        this.prisma.user.findMany({
+          where:
+            this.catalogAccessPolicy.buildParticipantUserWhere(accessScope),
+          select: { id: true, email: true, fullName: true },
+          orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+        }),
+        this.prisma.staffTaskTemplate.groupBy({
+          by: ['status'],
+          where,
+          _count: { _all: true },
+        }),
+        this.prisma.staffTask.count({
+          where: {
+            AND: [
+              buildVisibleTemplateTaskWhere(accessScope),
+              { sourceTemplate: { is: where } },
+            ],
+          },
+        }),
+      ],
+    );
+    const visibleCreatorIds = new Set(
+      users.map((visibleUser) => visibleUser.id),
+    );
+    const responseRows = rows.map((row) =>
+      this.toTemplateResponse(row, visibleCreatorIds),
+    );
 
     return {
       filters,
-      summary: this.buildSummary(responseRows),
+      summary: this.buildSummary(statusCounts, tasksCreated),
       rows: responseRows,
       stores,
       users,
@@ -151,20 +233,35 @@ export class StaffTaskTemplatesService {
   }
 
   async createTemplate(user: AuthenticatedUser, dto: StaffTaskTemplateDto) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
-    const data = await this.normalizeTemplateData(tenantId, dto, {
-      requireTitle: true,
-    });
-    const created = await this.prisma.staffTaskTemplate.create({
-      data: {
-        ...(data as Prisma.StaffTaskTemplateUncheckedCreateInput),
-        tenantId,
-        createdByUserId: user.id,
-      },
-      include: templateInclude,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const accessScope =
+        await this.catalogAccessPolicy.resolveFreshForMutation(tx, user);
+      const data = await this.normalizeTemplateData(
+        accessScope,
+        dto,
+        { requireTitle: true },
+        tx,
+      );
+      const storeId = typeof data.storeId === 'string' ? data.storeId : null;
+      this.catalogAccessPolicy.assertStoreMutationAllowed(accessScope, storeId);
+
+      const template = await tx.staffTaskTemplate.create({
+        data: {
+          ...(data as Prisma.StaffTaskTemplateUncheckedCreateInput),
+          tenantId: accessScope.tenantId,
+          createdByUserId: user.id,
+        },
+        include: buildTemplateInclude(accessScope),
+      });
+      await this.writeTemplateAudit(tx, user, template, {
+        action: 'CREATED',
+        changedFields: this.catalogChangedFields(dto),
+      });
+
+      return template;
     });
 
-    return this.toTemplateResponse(created);
+    return this.toTemplateResponse(created, new Set([user.id]));
   }
 
   async updateTemplate(
@@ -172,9 +269,9 @@ export class StaffTaskTemplatesService {
     id: string,
     dto: StaffTaskTemplateDto,
   ) {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const accessScope = this.catalogAccessPolicy.resolve(user);
     const current = await this.prisma.staffTaskTemplate.findFirst({
-      where: { id, tenantId },
+      where: this.catalogAccessPolicy.buildTemplateLookupWhere(accessScope, id),
       select: { id: true },
     });
 
@@ -182,16 +279,60 @@ export class StaffTaskTemplatesService {
       throw new NotFoundException('Staff task template not found');
     }
 
-    const data = await this.normalizeTemplateData(tenantId, dto, {
-      requireTitle: false,
-    });
-    const updated = await this.prisma.staffTaskTemplate.update({
-      where: { id: current.id },
-      data,
-      include: templateInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const freshAccessScope =
+        await this.catalogAccessPolicy.resolveFreshForMutation(tx, user);
+      const lockedCurrent = await this.lockVisibleTemplateForMutation(
+        tx,
+        freshAccessScope,
+        current.id,
+      );
+      const data = await this.normalizeTemplateData(
+        freshAccessScope,
+        dto,
+        { requireTitle: false },
+        tx,
+      );
+      const nextStoreId =
+        dto.storeId === undefined
+          ? lockedCurrent.storeId
+          : typeof data.storeId === 'string'
+            ? data.storeId
+            : null;
+      this.catalogAccessPolicy.assertStoreMutationAllowed(
+        freshAccessScope,
+        nextStoreId,
+      );
+      if (nextStoreId) {
+        await this.resolveStoreId(freshAccessScope, nextStoreId, tx);
+      }
+      const nextStatus =
+        typeof data.status === 'string' ? data.status : lockedCurrent.status;
+      await this.assertActiveRulesUnaffected(
+        tx,
+        lockedCurrent,
+        nextStoreId,
+        nextStatus,
+      );
+
+      const template = await tx.staffTaskTemplate.update({
+        where: { id: lockedCurrent.id },
+        data,
+        include: buildTemplateInclude(freshAccessScope),
+      });
+      await this.writeTemplateAudit(tx, user, template, {
+        action: this.resolveTemplateUpdateAuditAction(
+          lockedCurrent.status,
+          template.status,
+        ),
+        changedFields: this.catalogChangedFields(dto),
+        before: lockedCurrent,
+      });
+
+      return template;
     });
 
-    return this.toTemplateResponse(updated);
+    return this.toTemplateResponse(updated, new Set([user.id]));
   }
 
   async createTaskFromTemplate(
@@ -199,70 +340,92 @@ export class StaffTaskTemplatesService {
     id: string,
     dto: StaffTaskTemplateLaunchDto,
   ): Promise<StaffTaskTemplateLaunchResponse> {
-    const { tenantId } = await this.tenantContextService.resolve(user);
+    const accessScope = this.catalogAccessPolicy.resolve(user);
     const template = await this.prisma.staffTaskTemplate.findFirst({
-      where: { id, tenantId },
+      where: this.catalogAccessPolicy.buildTemplateLookupWhere(accessScope, id),
+      select: { id: true },
     });
 
     if (!template) {
       throw new NotFoundException('Staff task template not found');
     }
 
-    if (template.status === 'ARCHIVED') {
-      throw new BadRequestException('Archived template cannot create tasks');
-    }
-
-    const storeId =
-      dto.storeId === undefined
-        ? template.storeId
-        : await this.resolveStoreId(tenantId, dto.storeId);
-    const assignedToUserId =
-      dto.assignedToUserId === undefined
-        ? null
-        : await this.resolveUserId(tenantId, dto.assignedToUserId);
-    const dueAt =
-      dto.dueAt === undefined
-        ? this.resolveDueDateFromOffset(template.dueOffsetMinutes)
-        : this.normalizeDateTime(dto.dueAt);
-    const title =
-      this.normalizeOptionalString(dto.title) ?? template.title.trim();
-    const description =
-      dto.description === undefined
-        ? template.description
-        : this.normalizeOptionalString(dto.description);
-
     const created = await this.prisma.$transaction(async (tx) => {
-      const task = await tx.staffTask.create({
-        data: {
-          tenantId,
-          storeId,
-          assignedToUserId,
-          sourceTemplateId: template.id,
-          createdByUserId: user.id,
+      const freshAccessScope =
+        await this.catalogAccessPolicy.resolveFreshForMutation(tx, user);
+      const lockedTemplate = await this.lockVisibleTemplateForMutation(
+        tx,
+        freshAccessScope,
+        template.id,
+      );
+
+      if (lockedTemplate.status !== 'ACTIVE') {
+        throw new BadRequestException('Only active templates can create tasks');
+      }
+
+      const inheritedStoreId = lockedTemplate.storeId
+        ? await this.resolveStoreId(
+            freshAccessScope,
+            lockedTemplate.storeId,
+            tx,
+          )
+        : null;
+      const storeId =
+        dto.storeId === undefined
+          ? inheritedStoreId
+          : await this.resolveStoreId(freshAccessScope, dto.storeId, tx);
+      this.catalogAccessPolicy.assertStoreMutationAllowed(
+        freshAccessScope,
+        storeId,
+      );
+      if (inheritedStoreId && storeId !== inheritedStoreId) {
+        throw new BadRequestException(
+          'A store-bound template can only create tasks for its own store',
+        );
+      }
+      const dueAt =
+        dto.dueAt === undefined
+          ? this.resolveDueDateFromOffset(lockedTemplate.dueOffsetMinutes)
+          : this.normalizeDateTime(dto.dueAt);
+      const title =
+        this.normalizeOptionalString(dto.title) ?? lockedTemplate.title.trim();
+      const description =
+        dto.description === undefined
+          ? lockedTemplate.description
+          : this.normalizeOptionalString(dto.description);
+      const freshUser: AuthenticatedUser = {
+        ...user,
+        accessScope: freshAccessScope.mode,
+        allowedStoreIds: [...freshAccessScope.allowedStoreIds],
+      };
+
+      const task = await this.staffTasksService.createCatalogTaskInTransaction(
+        tx,
+        freshUser,
+        {
           title,
           description,
-          type: template.type,
-          priority: template.priority,
+          type: lockedTemplate.type as StaffTaskTemplateTaskType,
+          priority: lockedTemplate.priority as StaffTaskTemplatePriority,
           status: 'OPEN',
-          dueAt,
-          labels: template.labels ?? Prisma.DbNull,
-          checklist: template.checklist ?? Prisma.DbNull,
+          storeId,
+          assignedToUserId:
+            dto.assignedToUserId === undefined ? null : dto.assignedToUserId,
+          observerUserIds: dto.observerUserIds,
+          dueAt: dueAt?.toISOString() ?? null,
+          labels: lockedTemplate.labels,
+          checklist: lockedTemplate.checklist,
         },
-        select: { id: true, title: true, dueAt: true },
-      });
-
-      await tx.staffTaskAuditEvent.create({
-        data: {
-          tenantId,
-          taskId: task.id,
-          actorUserId: user.id,
-          action: 'CREATED_FROM_TEMPLATE',
-          message: 'Task created from template',
-          metadata: {
-            templateId: template.id,
-            templateTitle: template.title,
-          },
+        {
+          kind: 'TEMPLATE',
+          templateId: lockedTemplate.id,
+          templateTitle: lockedTemplate.title,
         },
+      );
+      await this.writeTemplateAudit(tx, user, lockedTemplate, {
+        action: 'TASK_LAUNCHED',
+        changedFields: [],
+        effectiveStoreId: storeId,
       });
 
       return task;
@@ -271,7 +434,7 @@ export class StaffTaskTemplatesService {
     return {
       id: created.id,
       title: created.title,
-      dueAt: created.dueAt?.toISOString() ?? null,
+      dueAt: created.dueAt,
       templateId: template.id,
     };
   }
@@ -291,16 +454,15 @@ export class StaffTaskTemplatesService {
         ['all', ...taskPriorities] as const,
         'all',
       ),
-      storeId: this.normalizeOptionalString(query.storeId),
+      storeId: this.normalizeOptionalIdentifier(query.storeId, 'storeId'),
       search: this.normalizeOptionalString(query.search),
     };
   }
 
-  private buildWhere(
-    tenantId: string,
+  private buildFilterWhere(
     filters: StaffTaskTemplateReport['filters'],
   ): Prisma.StaffTaskTemplateWhereInput {
-    const where: Prisma.StaffTaskTemplateWhereInput = { tenantId };
+    const where: Prisma.StaffTaskTemplateWhereInput = {};
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -328,30 +490,38 @@ export class StaffTaskTemplatesService {
     return where;
   }
 
-  private buildSummary(rows: StaffTaskTemplateResponse[]) {
-    return rows.reduce(
-      (summary, row) => {
-        summary.total += 1;
-        summary.tasksCreated += row.tasksCreatedCount;
+  private buildSummary(
+    statusCounts: Array<{ status: string; _count: { _all: number } }>,
+    tasksCreated: number,
+  ) {
+    const summary = {
+      total: 0,
+      draft: 0,
+      active: 0,
+      archived: 0,
+      tasksCreated,
+    };
 
-        if (row.status === 'DRAFT') {
-          summary.draft += 1;
-        } else if (row.status === 'ACTIVE') {
-          summary.active += 1;
-        } else if (row.status === 'ARCHIVED') {
-          summary.archived += 1;
-        }
+    for (const row of statusCounts) {
+      summary.total += row._count._all;
 
-        return summary;
-      },
-      { total: 0, draft: 0, active: 0, archived: 0, tasksCreated: 0 },
-    );
+      if (row.status === 'DRAFT') {
+        summary.draft += row._count._all;
+      } else if (row.status === 'ACTIVE') {
+        summary.active += row._count._all;
+      } else if (row.status === 'ARCHIVED') {
+        summary.archived += row._count._all;
+      }
+    }
+
+    return summary;
   }
 
   private async normalizeTemplateData(
-    tenantId: string,
+    accessScope: ResolvedAccessScope,
     dto: StaffTaskTemplateDto,
     options: { requireTitle: boolean },
+    prismaClient: StaffTaskTemplateReferenceClient = this.prisma,
   ): Promise<Prisma.StaffTaskTemplateUncheckedUpdateInput> {
     const data: Prisma.StaffTaskTemplateUncheckedUpdateInput = {};
 
@@ -379,7 +549,11 @@ export class StaffTaskTemplatesService {
     }
 
     if (dto.storeId !== undefined) {
-      data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
+      data.storeId = await this.resolveStoreId(
+        accessScope,
+        dto.storeId,
+        prismaClient,
+      );
     }
 
     if (dto.dueOffsetMinutes !== undefined) {
@@ -387,6 +561,7 @@ export class StaffTaskTemplatesService {
     }
 
     if (dto.labels !== undefined) {
+      this.catalogAccessPolicy.assertTaskLabelsWritable(dto.labels);
       data.labels = this.normalizeJson(dto.labels);
     }
 
@@ -399,6 +574,7 @@ export class StaffTaskTemplatesService {
 
   private toTemplateResponse(
     row: StaffTaskTemplateRow,
+    visibleCreatorIds: ReadonlySet<string> = new Set(),
   ): StaffTaskTemplateResponse {
     return {
       id: row.id,
@@ -413,8 +589,23 @@ export class StaffTaskTemplatesService {
       tasksCreatedCount: row._count.tasks,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      store: row.store,
-      createdByUser: row.createdByUser,
+      store:
+        row.store?.tenantId === row.tenantId
+          ? {
+              id: row.store.id,
+              name: row.store.name,
+              isActive: row.store.isActive,
+            }
+          : null,
+      createdByUser:
+        row.createdByUser?.tenantId === row.tenantId &&
+        visibleCreatorIds.has(row.createdByUser.id)
+          ? {
+              id: row.createdByUser.id,
+              email: row.createdByUser.email,
+              fullName: row.createdByUser.fullName,
+            }
+          : null,
     };
   }
 
@@ -451,6 +642,18 @@ export class StaffTaskTemplatesService {
 
     if (typeof value !== 'string') {
       return null;
+    }
+
+    return value.trim() || null;
+  }
+
+  private normalizeOptionalIdentifier(value: unknown, field: string) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${field} must be a string`);
     }
 
     return value.trim() || null;
@@ -505,8 +708,9 @@ export class StaffTaskTemplatesService {
   }
 
   private async resolveStoreId(
-    tenantId: string,
+    accessScope: ResolvedAccessScope,
     value: string | null | undefined,
+    prismaClient: StaffTaskTemplateReferenceClient = this.prisma,
   ) {
     const id = this.normalizeOptionalString(value);
 
@@ -514,8 +718,14 @@ export class StaffTaskTemplatesService {
       return null;
     }
 
-    const store = await this.prisma.store.findFirst({
-      where: { id, tenantId },
+    this.catalogAccessPolicy.assertStoreMutationAllowed(accessScope, id);
+    const store = await prismaClient.store.findFirst({
+      where: {
+        AND: [
+          this.catalogAccessPolicy.buildStoreSelectorWhere(accessScope),
+          { id, isActive: true },
+        ],
+      },
       select: { id: true },
     });
 
@@ -526,25 +736,151 @@ export class StaffTaskTemplatesService {
     return store.id;
   }
 
-  private async resolveUserId(
-    tenantId: string,
-    value: string | null | undefined,
+  private async lockVisibleTemplateForMutation(
+    tx: Prisma.TransactionClient,
+    accessScope: ResolvedAccessScope,
+    id: string,
   ) {
-    const id = this.normalizeOptionalString(value);
+    const where = this.catalogAccessPolicy.buildTemplateLookupWhere(
+      accessScope,
+      id,
+    );
+    const visibleBeforeLock = await tx.staffTaskTemplate.findFirst({ where });
 
-    if (!id) {
-      return null;
+    if (!visibleBeforeLock) {
+      throw new NotFoundException('Staff task template not found');
     }
 
-    const user = await this.prisma.user.findFirst({
-      where: { id, tenantId, isActive: true },
+    const lockedRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT template."id"
+      FROM "StaffTaskTemplate" AS template
+      WHERE template."id" = ${id}
+        AND template."tenantId" = ${accessScope.tenantId}
+      FOR UPDATE
+    `);
+
+    if (lockedRows.length !== 1) {
+      throw new NotFoundException('Staff task template not found');
+    }
+
+    const current = await tx.staffTaskTemplate.findFirst({ where });
+
+    if (!current) {
+      throw new NotFoundException('Staff task template not found');
+    }
+
+    return current;
+  }
+
+  private async assertActiveRulesUnaffected(
+    tx: Prisma.TransactionClient,
+    current: {
+      id: string;
+      tenantId: string;
+      storeId: string | null;
+      status: string;
+    },
+    nextStoreId: string | null,
+    nextStatus: string,
+  ) {
+    if (current.storeId === nextStoreId && current.status === nextStatus) {
+      return;
+    }
+
+    const activeRule = await tx.staffTaskRecurringRule.findFirst({
+      where: {
+        tenantId: current.tenantId,
+        templateId: current.id,
+        status: 'ACTIVE',
+      },
       select: { id: true },
     });
 
-    if (!user) {
-      throw new BadRequestException('Assigned user not found');
+    if (activeRule) {
+      throw new ConflictException(
+        'Pause active recurring rules before changing template store or status',
+      );
+    }
+  }
+
+  private catalogChangedFields(dto: StaffTaskTemplateDto) {
+    return [
+      'title',
+      'description',
+      'type',
+      'priority',
+      'status',
+      'storeId',
+      'dueOffsetMinutes',
+      'labels',
+      'checklist',
+    ].filter((field) => dto[field as keyof StaffTaskTemplateDto] !== undefined);
+  }
+
+  private resolveTemplateUpdateAuditAction(
+    previousStatus: string,
+    nextStatus: string,
+  ) {
+    if (previousStatus !== nextStatus && nextStatus === 'ACTIVE') {
+      return 'ACTIVATED';
     }
 
-    return user.id;
+    if (previousStatus !== nextStatus && nextStatus === 'ARCHIVED') {
+      return 'ARCHIVED';
+    }
+
+    return 'UPDATED';
+  }
+
+  private async writeTemplateAudit(
+    tx: Prisma.TransactionClient,
+    user: AuthenticatedUser,
+    template: {
+      id: string;
+      tenantId: string;
+      storeId: string | null;
+      status: string;
+    },
+    input: {
+      action:
+        | 'CREATED'
+        | 'UPDATED'
+        | 'ACTIVATED'
+        | 'ARCHIVED'
+        | 'TASK_LAUNCHED';
+      changedFields: string[];
+      before?: { storeId: string | null; status: string };
+      effectiveStoreId?: string | null;
+    },
+  ) {
+    const releaseSha = this.configService.get<string>('RELEASE_SHA')?.trim();
+
+    await tx.staffTaskCatalogAuditEvent.create({
+      data: {
+        tenantId: template.tenantId,
+        actorUserId: user.id,
+        entityKind: 'TEMPLATE',
+        entityId: template.id,
+        action: input.action,
+        effectiveStoreId:
+          input.effectiveStoreId === undefined
+            ? template.storeId
+            : input.effectiveStoreId,
+        changedFields: input.changedFields,
+        ...(input.before
+          ? {
+              beforeState: {
+                status: input.before.status,
+                storeId: input.before.storeId,
+              },
+            }
+          : {}),
+        afterState: {
+          status: template.status,
+          storeId: template.storeId,
+        },
+        releaseSha: releaseSha || null,
+      },
+    });
   }
 }

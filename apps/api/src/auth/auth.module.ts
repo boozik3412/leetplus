@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { MailModule } from '../mail/mail.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { TenancyModule } from '../tenancy/tenancy.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
@@ -20,6 +21,7 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
     ConfigModule,
     MailModule,
     PrismaModule,
+    TenancyModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

@@ -1,9 +1,15 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { TenantLifecycleStatus, UserRole } from '@prisma/client';
+import {
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+  TenantOnboardingStatus,
+  UserRole,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
+import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 class TestJwtAuthGuard extends JwtAuthGuard {
@@ -13,6 +19,16 @@ class TestJwtAuthGuard extends JwtAuthGuard {
 }
 
 describe('JwtAuthGuard access scope', () => {
+  const admittedTenant = {
+    id: 'tenant-a',
+    slug: 'tenant-a',
+    status: TenantLifecycleStatus.ACTIVE,
+    customerStage: TenantCustomerStage.INTERNAL,
+    onboardingStatus: TenantOnboardingStatus.ACTIVE,
+    trialStartsAt: null,
+    trialEndsAt: null,
+    entitlementProfileRevision: 0,
+  };
   const jwtService = {
     verifyAsync: jest.fn(),
   };
@@ -43,6 +59,7 @@ describe('JwtAuthGuard access scope', () => {
       jwtService as unknown as JwtService,
       prisma as unknown as PrismaService,
       new AccessScopeService(),
+      new TenantExecutionPolicyService(),
       new ConfigService({
         ACCESS_SCOPE_ENFORCEMENT_MODE: 'ENFORCED',
         RELEASE_SHA: 'a'.repeat(40),
@@ -70,10 +87,7 @@ describe('JwtAuthGuard access scope', () => {
           },
         },
       ],
-      tenant: {
-        slug: 'tenant-a',
-        status: TenantLifecycleStatus.ACTIVE,
-      },
+      tenant: admittedTenant,
     });
 
     await expect(guard.verify('token')).resolves.toMatchObject({
@@ -89,6 +103,7 @@ describe('JwtAuthGuard access scope', () => {
       jwtService as unknown as JwtService,
       prisma as unknown as PrismaService,
       new AccessScopeService(),
+      new TenantExecutionPolicyService(),
       new ConfigService({
         ACCESS_SCOPE_ENFORCEMENT_MODE: 'SHADOW',
         RELEASE_SHA: 'a'.repeat(40),
@@ -106,10 +121,7 @@ describe('JwtAuthGuard access scope', () => {
       tenantId: 'tenant-a',
       accessScope: null,
       storeAccesses: [],
-      tenant: {
-        slug: 'tenant-a',
-        status: TenantLifecycleStatus.ACTIVE,
-      },
+      tenant: admittedTenant,
     });
 
     await expect(guard.verify('token')).rejects.toBeInstanceOf(
@@ -160,9 +172,30 @@ describe('JwtAuthGuard access scope', () => {
       isPlatformAdmin: false,
       tenantId: 'tenant-a',
       ...persistedScope,
+      tenant: admittedTenant,
+    });
+
+    await expect(guard.verify('token')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects a valid JWT while its tenant is still provisioning', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-a',
+      email: 'current@example.test',
+      fullName: 'Current User',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      customRole: null,
+      isActive: true,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-a',
+      accessScope: 'NETWORK',
+      storeAccesses: [],
       tenant: {
-        slug: 'tenant-a',
-        status: TenantLifecycleStatus.ACTIVE,
+        ...admittedTenant,
+        onboardingStatus: TenantOnboardingStatus.PROVISIONING,
       },
     });
 

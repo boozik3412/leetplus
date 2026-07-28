@@ -10,15 +10,23 @@ import {
   buildReadOnlyDatabaseUrl,
   parseBoundedInteger,
 } from "./staff-task-integrity-inventory.mjs";
+import {
+  CURRENT_EXPECTED_LATEST_MIGRATION,
+  CURRENT_EXPECTED_MIGRATION_COUNT,
+  STAFF_TASK_FROZEN_PREFIX_COUNT,
+  STAFF_TASK_FROZEN_PREFIX_LATEST,
+} from "./staff-task-integrity-migration-state.mjs";
 
 export const SCRIPT_NAME = "staff-task-integrity-reconciliation-plan";
 export const REPORT_SCHEMA_VERSION = 1;
 export const RUN_CONFIRMATION = "run-staff-task-integrity-reconciliation-plan";
 export const PRODUCTION_ATTESTATION =
   "I_ATTEST_THIS_IS_A_READ_ONLY_PRODUCTION_STAFF_TASK_RECONCILIATION_PLAN";
-export const EXPECTED_MIGRATION_COUNT = 162;
-export const EXPECTED_LATEST_MIGRATION =
-  "20260727131000_staff_task_integrity_expand";
+export const EXPECTED_MIGRATION_COUNT = CURRENT_EXPECTED_MIGRATION_COUNT;
+export const EXPECTED_LATEST_MIGRATION = CURRENT_EXPECTED_LATEST_MIGRATION;
+export const PROTECTED_MIGRATION_PREFIX_COUNT = STAFF_TASK_FROZEN_PREFIX_COUNT;
+export const PROTECTED_MIGRATION_PREFIX_LATEST =
+  STAFF_TASK_FROZEN_PREFIX_LATEST;
 
 const TARGET_ENVIRONMENTS = new Set(["development", "staging", "production"]);
 const DEVELOPMENT_DATABASE_PATTERN =

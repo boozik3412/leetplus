@@ -1,36 +1,32 @@
-# Профиль доступа `SINGLE_DESIGN_PARTNER_V1`
+# Профиль optional isolation `SINGLE_DESIGN_PARTNER_V1`
 
 | Поле             | Значение                                                      |
 | ---------------- | ------------------------------------------------------------- |
 | Profile key      | `SINGLE_DESIGN_PARTNER_V1`                                    |
-| Версия           | 1.3                                                           |
+| Версия           | 1.4                                                           |
 | Дата             | 28.07.2026                                                    |
 | Статус           | `NO-GO`; bootstrap/rotate/suspend — implementation candidate  |
-| Формат           | Один named design partner, invite-only                        |
+| Формат           | Contingency/enterprise isolation, invite-only                 |
 | Среда            | Отдельные web, API, PostgreSQL, secrets и storage namespace   |
 | Partner topology | Новый `Tenant D`, один `Store D1`                             |
 | Current topology | Существующий `Tenant A`, четыре `Store A1..A4`, без изменений |
 | Активация        | Full initial in-app scope; high-risk effects gated separately |
 | Outbound/jobs    | `OFF` до отдельных surface/outbound `GO`                      |
-| Общий beta       | По-прежнему `NO-GO` до Gate 2                                 |
+| Общий beta       | По-прежнему `NO-GO` до Gate 1MT/Gate 2                        |
 
-Этот профиль предназначен для одного клуба, который вместе с LeetPlus
-проверяет работоспособность продукта до общей внешней когорты. Он не является
-исключением из security-инвариантов, не разрешает shared-production access и
-не заменяет профиль
-[`OPEN_BETA_FULL_OPERATIONS_V1`](./pilot-access-profile.md).
+Этот профиль сохранён для contingency или договорной enterprise isolation. Он
+не является основным способом первого внешнего теста, не является исключением
+из security-инвариантов и не заменяет
+[`SHARED_MULTI_TENANT_BETA_V1`](./shared-multi-tenant-beta-profile.md).
 
 Документ сам по себе не разрешает выдачу credentials. До выполнения
 [launch checklist](./single-design-partner-launch-checklist.md), Gate 1DP из
 [`OPEN_BETA_BACKLOG.md`](../../OPEN_BETA_BACKLOG.md) и сохранения отдельного
 `DESIGN_PARTNER GO` статус остаётся `NO-GO`.
 
-Самый ранний ориентир выдачи доступа — `2–4 рабочих дня` после фактической
-реализации и проверки изолированного runtime, provisioning и полного
-начального набора `DP-S0..DP-S4`. Отсчёт не начинается от даты этого
-документа. Failed check,
-security finding, отсутствие rollback/owner или изменение scope сдвигают
-ориентир.
+Календарное окно этой lane не назначено. Работы возобновляются только после
+отдельного product/security решения о том, почему целевой shared data plane
+не подходит. Gate 1DP не заменяет Gate 1MT/Gate 2.
 
 Текущая реализация умеет только безопасно подготовить tenant в состоянии
 `SUSPENDED`, проверить его topology и выполнить аварийную БД-блокировку. В CLI

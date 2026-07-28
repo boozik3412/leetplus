@@ -7,10 +7,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { TenantLifecycleStatus } from '@prisma/client';
 import { resolveAccessScopeEnforcementMode } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
+import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { AuthenticatedRequest, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 
@@ -22,6 +22,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
     private readonly accessScopeService: AccessScopeService,
+    private readonly tenantExecutionPolicy: TenantExecutionPolicyService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -46,8 +47,14 @@ export class JwtAuthGuard implements CanActivate {
         include: {
           tenant: {
             select: {
+              id: true,
               slug: true,
               status: true,
+              customerStage: true,
+              onboardingStatus: true,
+              trialStartsAt: true,
+              trialEndsAt: true,
+              entitlementProfileRevision: true,
             },
           },
           customRole: {
@@ -74,11 +81,8 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Invalid authorization token');
       }
 
-      if (
-        user.tenant.status !== TenantLifecycleStatus.ACTIVE &&
-        !user.isPlatformAdmin
-      ) {
-        throw new UnauthorizedException('Invalid authorization token');
+      if (!user.isPlatformAdmin) {
+        this.tenantExecutionPolicy.assertSessionAllowed(user.tenant);
       }
 
       const roleOverride = user.customRole
@@ -130,6 +134,12 @@ export class JwtAuthGuard implements CanActivate {
         tenantId: user.tenantId,
         tenantSlug: user.tenant.slug,
         tenantStatus: user.tenant.status,
+        tenantCustomerStage: user.tenant.customerStage,
+        tenantOnboardingStatus: user.tenant.onboardingStatus,
+        tenantTrialStartsAt: user.tenant.trialStartsAt,
+        tenantTrialEndsAt: user.tenant.trialEndsAt,
+        tenantEntitlementProfileRevision:
+          user.tenant.entitlementProfileRevision,
         accessScope: accessScope.mode,
         allowedStoreIds: accessScope.storeIds,
       };

@@ -2,15 +2,17 @@
 
 | Поле                  | Значение                                                                   |
 | --------------------- | -------------------------------------------------------------------------- |
-| Статус                | `IMPLEMENTED_CANDIDATE`; только read-only planning; не deployed            |
-| Версия                | 1.6.0                                                                      |
+| Статус                | `IMPLEMENTED_CANDIDATE`; current candidate SHA pending; не deployed        |
+| Версия                | 1.7.0                                                                      |
 | Дата                  | 28.07.2026                                                                 |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                       |
-| Candidate SHA         | `2c74c663780b3f183be708a01431c22efe57a723` — not deployed                  |
-| Proposal dry-run SHA  | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — SYNTHETIC only; not deployed  |
+| Current candidate SHA | Не назначен: current-state change находится в рабочем дереве               |
+| Historical planner    | `2c74c663780b3f183be708a01431c22efe57a723`; не current evidence            |
+| Historical dry-run    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; SYNTHETIC, не current evidence |
 | Report schema version | 1                                                                          |
 | Admission schema      | 2                                                                          |
-| Требуемая DB schema   | 162 migrations; latest `20260727131000_staff_task_integrity_expand`        |
+| Protected prefix      | 162; latest `20260727131000_staff_task_integrity_expand`                   |
+| Требуемая current DB  | `CURRENT_163`; latest `20260728120000_tenant_execution_control_plane_expand` |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) |
 | Предыдущий этап       | [Integrity inventory](./staff-task-integrity-inventory-runbook.md)         |
 | Связанный EXPAND      | [StaffTask integrity EXPAND](./staff-task-integrity-expand-runbook.md)     |
@@ -23,7 +25,10 @@ reconciliation и распределить классы работы, но не 
 Наличие слова `proposal` в отчёте не является разрешением на изменение данных.
 В candidate отсутствуют `--apply`, DML, row-level plan и любой путь мутации.
 Production-like planner разрешено запускать только после успешного Git-bound
-snapshot admission в состоянии `EXPAND_162`.
+snapshot admission в состоянии `CURRENT_163`. StaffTask authority при этом
+остаётся привязана к reviewed immutable prefix `EXPAND_162`; migration 163
+принимается только как exact allowlisted additive tail, не меняющий protected
+`StaffTask*` relations.
 
 ## 1. Зафиксированный контекст
 
@@ -163,7 +168,20 @@ tenant-global Task не может оставаться назначенной �
 Review-only counts требуют owner и решения, но не входят в actionable cap.
 Они входят в `observedOccurrences` и `reviewTotal`.
 
-## 5. Schema gate
+## 5. Protected prefix и current schema gate
+
+Два состояния намеренно не смешиваются:
+
+- `EXPAND_162` — frozen reviewed StaffTask prefix и его отдельный protected
+  authority/admission evidence;
+- `CURRENT_163` — фактическая БД текущего release: тот же exact prefix плюс
+  единственный allowlisted tail
+  `20260728120000_tenant_execution_control_plane_expand`.
+
+Наличие `EXPAND_162` evidence не разрешает planner на БД из 162 migrations
+после появления current tail. И наоборот, `CURRENT_163` не переписывает
+исторический StaffTask prefix evidence: новый current envelope/marker/admission
+добавляется поверх него.
 
 Planner сначала выполняет schema-first gate и запускает 43 inventory queries
 только после одновременного точного совпадения:
@@ -171,8 +189,8 @@ Planner сначала выполняет schema-first gate и запускае�
 ```text
 currentSchemaIsPublic                    = true
 databaseIdentityMatched                 = true
-migrationCount                           = 162
-latestMigration                          = 20260727131000_staff_task_integrity_expand
+migrationCount                           = 163
+latestMigration                          = 20260728120000_tenant_execution_control_plane_expand
 unfinishedMigrationCount                 = 0
 compositeContractMatchCount              = 14
 simpleContractMatchCount                 = 14
@@ -184,7 +202,8 @@ parentIndexContractMismatchCount         = 0
 
 Отклонение любого значения даёт `SCHEMA_MISMATCH` и exit `3`. Planner не
 выполняет inventory при mismatch и не используется как доказательство для
-pre-EXPAND, partially migrated, post-VALIDATE или post-CONTRACT schema; для
+pre-EXPAND, exact-prefix-only 162, partially migrated, unknown additive tail,
+post-VALIDATE или post-CONTRACT schema; для
 следующей schema-фазы contract должен быть явно обновлён и повторно reviewed.
 Exact match проверяет не только количество объектов, но и полный FK/index
 contract. Лишний protected FK, отсутствующий объект или неверное определение
@@ -259,10 +278,11 @@ row identifiers в git запрещены.
 ## 8. Безопасная последовательность
 
 1. Зафиксировать exact release/planner SHA и зелёные CI checks.
-2. Зафиксировать public-only pre-signed pinned-path `LOCAL PASS` на test
-   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child и до
-   production-like запуска получить remote CI evidence. Экспериментальный Node
-   22 module mock остаётся P2. Отдельным security change выполнить P0 reviewed
+2. Считать public-only `LOCAL PASS` на `2341b999...` historical evidence.
+   Создать exact current candidate SHA, повторить pinned-path/current-state
+   проверки и до production-like запуска получить remote CI evidence для
+   current SHA. Экспериментальный Node 22 module mock остаётся P2. Отдельным
+   security change выполнить P0 reviewed
    Ed25519 root enrollment и ввести P0 operational signer/approved
    acquisition/marker/evidence controls. Пока production roots пусты,
    остановить процесс в состоянии `NO-GO`.
@@ -279,29 +299,36 @@ row identifiers в git запрещены.
    marker его digest и только затем получить `ADMITTED` для `EXPAND_162`.
    Baseline envelope/marker не переиспользовать. Без обоих admission и
    protected marker-rotation attestation остановить процесс.
-7. Проверить `databaseIdentityMatched=true` и exact schema-first gate:
-   `162/latest/unfinished 0`, `14 composite exact`, `14 simple exact`,
+7. Применить только exact allowlisted additive tail migration
+   `20260728120000_tenant_execution_control_plane_expand`. Она не должна
+   изменять protected `StaffTask*` tables, FK, indexes или triggers.
+8. Для той же БД, release SHA и acquisition lineage получить третий
+   state-bound `CURRENT_163` authority envelope с новым nonce-bound binding,
+   заменить DB marker и пройти `admission(CURRENT_163)`. `EXPAND_162`
+   envelope/marker не переиспользовать.
+9. Проверить `databaseIdentityMatched=true` и current schema-first gate:
+   `163/latest/unfinished 0`, `14 composite exact`, `14 simple exact`,
    `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact`,
    `0 index mismatch`. Убедиться, что `inventoryExecuted === schema.ready`, а
    evidence содержит HMAC `databaseIdentityDigest` без raw identity.
-8. Запустить исходный read-only inventory и этот planner с одинаковыми
+10. Запустить исходный read-only inventory и этот planner с одинаковыми
    thresholds; сохранить aggregate evidence и exit code.
-9. Для каждого non-zero кода назначить owner. `proposal` проходит такой же
+11. Для каждого non-zero кода назначить owner. `proposal` проходит такой же
    review, как `operator`, и ничего не применяет автоматически.
-10. Не переносить `SYNTHETIC` proposal dry-run в production-like контур: его
+12. Не переносить `SYNTHETIC` proposal dry-run в production-like контур: его
     HMAC provenance остаётся harness-only и формирует предложения без apply
     authority.
-11. До получения production-like row evidence реализовать и утвердить
+13. До получения production-like row evidence реализовать и утвердить
     отдельный read-only row dry-run workflow с immutable binding, protected
     output и owner decisions.
-12. Выполнить production-like row dry-run в защищённом контуре и утвердить
+14. Выполнить production-like row dry-run в защищённом контуре и утвердить
     решение по каждой строке; raw identifiers не переносить в git.
-13. Отдельным reviewed change реализовать idempotent apply workflow с immutable
+15. Отдельным reviewed change реализовать idempotent apply workflow с immutable
     input evidence, row locks/recheck, audit и rollback; затем отдельным
     approval выполнить apply и повторный zero-diff dry-run.
-14. Повторить inventory и planner; blocking должен быть `0`, review findings
+16. Повторить inventory и planner; blocking должен быть `0`, review findings
     должны иметь owner и принятое решение.
-15. Только после этого отдельно репетировать `VALIDATE`; `CONTRACT` и deploy
+17. Только после этого отдельно репетировать `VALIDATE`; `CONTRACT` и deploy
     остаются следующими независимыми release phases.
 
 Production запуск требует отдельного operational approval, backup/restore
@@ -387,8 +414,9 @@ Release decision остаётся `NO-GO`.
 release_sha:
 target:
 executed_at:
-snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
-pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
+current_release_sha:
+historical_snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
+historical_pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
 admission_report_schema_version: 2
 planner_report_schema_version: 1
 proposal_report_schema_version: 1
@@ -404,12 +432,18 @@ expand_admission_decision:
 expand_admission_database_identity_digest:
 expand_admission_content_digest:
 expand_admission_execution_digest:
+current_authority_evidence_ref:
+current_marker_rotation_attestation_ref:
+current_admission_decision:
+current_admission_database_identity_digest:
+current_admission_content_digest:
+current_admission_execution_digest:
 database_revision:
 currentSchemaIsPublic: true
 databaseIdentityMatched: true
 databaseIdentityDigest:
-migrationCount: 162
-latestMigration: 20260727131000_staff_task_integrity_expand
+migrationCount: 163
+latestMigration: 20260728120000_tenant_execution_control_plane_expand
 unfinishedMigrationCount: 0
 compositeContractMatchCount: 14
 simpleContractMatchCount: 14
@@ -438,6 +472,12 @@ release_decision: NO-GO | RECONCILE | READY_FOR_VALIDATE_REHEARSAL
 
 ## 11. Changelog
 
+- `1.7.0`, 28.07.2026 — frozen StaffTask evidence оставлен на exact
+  `EXPAND_162`, а current planner gate переведён на `CURRENT_163`: 163
+  migrations, latest
+  `20260728120000_tenant_execution_control_plane_expand`. Зафиксированы
+  allowlisted additive tail, отдельный third state-bound envelope/marker/
+  admission и запрет считать historical SHA current candidate evidence.
 - `1.6.0`, 28.07.2026 — runtime candidate сохранён на
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, test evidence вынесен в
   `2341b99937e54cc50d1763a0a794d975816c72ce`: authority `9/9`, admission

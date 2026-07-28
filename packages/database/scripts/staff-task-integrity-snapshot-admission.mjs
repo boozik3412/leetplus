@@ -25,6 +25,11 @@ import {
   matchesVerifiedProductionLikeAuthority,
   verifyPinnedProductionLikeAuthority,
 } from "./staff-task-integrity-snapshot-authority.mjs";
+import {
+  STAFF_TASK_CURRENT_RELEASE_STATE,
+  STAFF_TASK_FROZEN_PREFIX_COUNT,
+  STAFF_TASK_FROZEN_PREFIX_LATEST,
+} from "./staff-task-integrity-migration-state.mjs";
 
 export const SCRIPT_NAME = "staff-task-integrity-snapshot-admission";
 export const REPORT_SCHEMA_VERSION = 2;
@@ -33,12 +38,17 @@ export const ISOLATION_ATTESTATION =
   "I_ATTEST_THIS_IS_AN_ISOLATED_ENCRYPTED_NO_EGRESS_NON_PRODUCTION_SNAPSHOT";
 export const BASELINE_STATE = "BASELINE_156";
 export const EXPAND_STATE = "EXPAND_162";
+export const CURRENT_STATE = STAFF_TASK_CURRENT_RELEASE_STATE;
 export const BASELINE_MIGRATION_COUNT = 156;
 export const BASELINE_LATEST_MIGRATION =
   "20260727120000_staff_task_catalog_audit_expand";
 
 const CLASSIFICATIONS = new Set(["SYNTHETIC", "PRODUCTION_LIKE"]);
-const EXPECTED_STATES = new Set([BASELINE_STATE, EXPAND_STATE]);
+const EXPECTED_STATES = new Set([
+  BASELINE_STATE,
+  EXPAND_STATE,
+  CURRENT_STATE,
+]);
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const SYNTHETIC_DATABASE_PATTERN = /^lp_snapshot_admission_ci_[0-9a-f]{16}$/u;
 const PRODUCTION_LIKE_DATABASE_PATTERN =
@@ -61,6 +71,7 @@ const RELEASE_RUNTIME_SOURCE_PATHS = Object.freeze([
   "packages/database/scripts/staff-task-integrity-snapshot-authority.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-authority-roots.mjs",
   "packages/database/scripts/staff-task-integrity-reconciliation-plan.mjs",
+  "packages/database/scripts/staff-task-integrity-migration-state.mjs",
   "packages/database/scripts/staff-task-integrity-reconciliation-proposal-dry-run.mjs",
   "packages/database/scripts/staff-task-integrity-inventory.mjs",
 ]);
@@ -222,7 +233,7 @@ ${SCRIPT_NAME}
 
 Guarded read-only admission gate for an isolated StaffTask production-like
 snapshot or a local/CI synthetic clone. The command validates PostgreSQL 16,
-database identity, public schema, one of the two exact migration states, the
+database identity, public schema, one of the three exact migration states, the
 matching schema catalog, and a dedicated least-privilege SELECT-only role.
 
 Usage:
@@ -236,7 +247,7 @@ Required environment:
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION
     SYNTHETIC | PRODUCTION_LIKE
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE
-    ${BASELINE_STATE} | ${EXPAND_STATE}
+    ${BASELINE_STATE} | ${EXPAND_STATE} | ${CURRENT_STATE}
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM
     ${RUN_CONFIRMATION}
@@ -1467,12 +1478,16 @@ export async function loadExpectedMigrationManifest(expectedState, releaseSha) {
   const expectedCount =
     expectedState === BASELINE_STATE
       ? BASELINE_MIGRATION_COUNT
-      : EXPECTED_MIGRATION_COUNT;
+      : expectedState === EXPAND_STATE
+        ? STAFF_TASK_FROZEN_PREFIX_COUNT
+        : EXPECTED_MIGRATION_COUNT;
   const selected = migrationDirectories.slice(0, expectedCount);
   const expectedLatest =
     expectedState === BASELINE_STATE
       ? BASELINE_LATEST_MIGRATION
-      : EXPECTED_LATEST_MIGRATION;
+      : expectedState === EXPAND_STATE
+        ? STAFF_TASK_FROZEN_PREFIX_LATEST
+        : EXPECTED_LATEST_MIGRATION;
   if (
     selected.length !== expectedCount ||
     selected.at(-1) !== expectedLatest ||
@@ -1588,18 +1603,26 @@ function migrationState(migrationRow) {
   ) {
     detectedState = BASELINE_STATE;
   } else if (
+    migrationCount === STAFF_TASK_FROZEN_PREFIX_COUNT &&
+    latestMigration === STAFF_TASK_FROZEN_PREFIX_LATEST &&
+    unfinishedMigrationCount === 0
+  ) {
+    detectedState = EXPAND_STATE;
+  } else if (
     migrationCount === EXPECTED_MIGRATION_COUNT &&
     latestMigration === EXPECTED_LATEST_MIGRATION &&
     unfinishedMigrationCount === 0
   ) {
-    detectedState = EXPAND_STATE;
+    detectedState = CURRENT_STATE;
   }
   return {
     detectedState,
     migrationCount,
     unfinishedMigrationCount,
     latestMigrationMatchesExpectedState:
-      detectedState === BASELINE_STATE || detectedState === EXPAND_STATE,
+      detectedState === BASELINE_STATE ||
+      detectedState === EXPAND_STATE ||
+      detectedState === CURRENT_STATE,
   };
 }
 
@@ -2188,7 +2211,7 @@ function selfTestEnvironment() {
       "postgresql://reader:secret@127.0.0.1:5432/lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa?schema=public",
     RELEASE_SHA: "a".repeat(40),
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION: "SYNTHETIC",
-    STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: EXPAND_STATE,
+    STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: CURRENT_STATE,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
       "lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa",
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM: RUN_CONFIRMATION,

@@ -1,19 +1,30 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { TenantLifecycleStatus, UserRole } from '@prisma/client';
+import {
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+  TenantOnboardingStatus,
+  UserAccessScope,
+  UserRole,
+} from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
+import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
 
 type PrismaMock = {
   user: {
     findUnique: jest.Mock;
+    create: jest.Mock;
+    findUniqueOrThrow: jest.Mock;
+    count: jest.Mock;
   };
   userRoleOverride: {
     findUnique: jest.Mock;
@@ -21,10 +32,20 @@ type PrismaMock = {
   tenant: {
     findUnique: jest.Mock;
     create: jest.Mock;
+    updateMany: jest.Mock;
   };
   userInvite: {
     findUnique: jest.Mock;
+    updateMany: jest.Mock;
   };
+  userStoreAccess: {
+    createMany: jest.Mock;
+  };
+  platformAdminAuditEvent: {
+    create: jest.Mock;
+  };
+  $queryRaw: jest.Mock;
+  $transaction: jest.Mock;
 };
 
 type PasswordMock = {
@@ -58,7 +79,54 @@ function createUserWithTenant() {
     tenant: {
       slug: 'club-a',
       status: TenantLifecycleStatus.ACTIVE,
+      customerStage: TenantCustomerStage.INTERNAL,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      trialStartsAt: null,
+      trialEndsAt: null,
+      entitlementProfileRevision: 0,
     },
+  };
+}
+
+function createInviteTenant(onboardingStatus = TenantOnboardingStatus.ACTIVE) {
+  return {
+    id: 'tenant-1',
+    name: 'Club A',
+    slug: 'club-a',
+    status: TenantLifecycleStatus.ACTIVE,
+    customerStage: TenantCustomerStage.PILOT,
+    onboardingStatus,
+    trialStartsAt: new Date(Date.now() - 60_000),
+    trialEndsAt: new Date(Date.now() + 3_600_000),
+    entitlementProfileRevision: 1,
+  };
+}
+
+function createMemberInvite(onboardingStatus = TenantOnboardingStatus.ACTIVE) {
+  return {
+    id: 'invite-member-1',
+    tenantId: 'tenant-1',
+    email: 'invitee@example.test',
+    fullName: 'Invitee',
+    role: UserRole.CLUB_ADMINISTRATOR,
+    customRoleId: null,
+    customRole: null,
+    accessScope: UserAccessScope.NETWORK,
+    storeIds: [],
+    expiresAt: new Date(Date.now() + 60_000),
+    acceptedAt: null,
+    updatedAt: new Date(),
+    tenant: createInviteTenant(onboardingStatus),
+  };
+}
+
+function createOwnerInvite() {
+  return {
+    ...createMemberInvite(TenantOnboardingStatus.OWNER_INVITED),
+    id: 'invite-owner-1',
+    email: 'owner@club-a.leetplus.ru',
+    fullName: 'Owner',
+    role: UserRole.OWNER,
   };
 }
 
@@ -73,6 +141,9 @@ describe('AuthService', () => {
     prisma = {
       user: {
         findUnique: jest.fn(),
+        create: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
+        count: jest.fn(),
       },
       userRoleOverride: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -80,11 +151,27 @@ describe('AuthService', () => {
       tenant: {
         findUnique: jest.fn(),
         create: jest.fn(),
+        updateMany: jest.fn(),
       },
       userInvite: {
         findUnique: jest.fn(),
+        updateMany: jest.fn(),
       },
+      userStoreAccess: {
+        createMany: jest.fn(),
+      },
+      platformAdminAuditEvent: {
+        create: jest.fn(),
+      },
+      $queryRaw: jest.fn(),
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(
+      async (operation: (tx: PrismaMock) => Promise<unknown>) =>
+        operation(prisma),
+    );
+    prisma.$queryRaw.mockResolvedValue([createInviteTenant()]);
+    prisma.user.count.mockResolvedValue(0);
     passwordService = {
       hash: jest.fn().mockResolvedValue('hash'),
       verify: jest.fn(),
@@ -104,76 +191,12 @@ describe('AuthService', () => {
       emailVerificationService as unknown as EmailVerificationService,
       { get: jest.fn() } as never,
       new AccessScopeService(),
+      new TenantExecutionPolicyService(),
     );
   });
 
-  it('registers owner, tenant and returns access token', async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
-    prisma.tenant.findUnique.mockResolvedValue(null);
-    prisma.tenant.create.mockResolvedValue({
-      id: 'tenant-1',
-      slug: 'club-a',
-      status: TenantLifecycleStatus.ACTIVE,
-      users: [createUserWithTenant()],
-    });
-
-    await expect(
-      service.register({
-        email: ' OWNER@CLUB-A.LEETPLUS.RU ',
-        password: 'strong-password',
-        confirmPassword: 'strong-password',
-        organizationName: 'Club A',
-        tenantSlug: ' Club-A ',
-        fullName: 'Owner',
-      }),
-    ).resolves.toMatchObject({
-      accessToken: 'signed-token',
-      user: {
-        id: 'user-1',
-        email: 'owner@club-a.leetplus.ru',
-        fullName: 'Owner',
-        role: UserRole.OWNER,
-        isActive: true,
-        isPlatformAdmin: false,
-        tenantId: 'tenant-1',
-        tenantSlug: 'club-a',
-      },
-    });
-    expect(jwtService.signAsync).toHaveBeenCalledWith(
-      expect.objectContaining({ sub: 'user-1' }),
-      { expiresIn: '24h' },
-    );
-
-    expect(prisma.tenant.create).toHaveBeenCalledWith({
-      data: {
-        name: 'Club A',
-        slug: 'club-a',
-        domain: 'club-a.leetplus.ru',
-        users: {
-          create: {
-            email: 'owner@club-a.leetplus.ru',
-            fullName: 'Owner',
-            passwordHash: 'hash',
-            role: UserRole.OWNER,
-            accessScope: 'NETWORK',
-          },
-        },
-      },
-      include: {
-        users: true,
-      },
-    });
-    expect(emailVerificationService.sendVerificationEmail).toHaveBeenCalledWith(
-      'user-1',
-      'owner@club-a.leetplus.ru',
-    );
-  });
-
-  it('rejects duplicate email during registration', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: 'existing-user' });
-    prisma.tenant.findUnique.mockResolvedValue(null);
-
-    await expect(
+  it('keeps service-level self-registration fail-closed', () => {
+    expect(() =>
       service.register({
         email: 'owner@example.com',
         password: 'strong-password',
@@ -181,33 +204,11 @@ describe('AuthService', () => {
         organizationName: 'Club A',
         tenantSlug: 'club-a',
       }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('rejects weak password during registration', async () => {
-    await expect(
-      service.register({
-        email: 'owner@example.com',
-        password: 'short',
-        confirmPassword: 'short',
-        organizationName: 'Club A',
-        tenantSlug: 'club-a',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('rejects password confirmation mismatch during registration', async () => {
-    await expect(
-      service.register({
-        email: 'owner@example.com',
-        password: 'strong-password',
-        confirmPassword: 'another-password',
-        organizationName: 'Club A',
-        tenantSlug: 'club-a',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).toThrow(ForbiddenException);
 
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(passwordService.hash).not.toHaveBeenCalled();
   });
 
   it('logs in with valid credentials', async () => {
@@ -230,6 +231,28 @@ describe('AuthService', () => {
       expect.objectContaining({ sub: 'user-1' }),
       { expiresIn: '24h' },
     );
+  });
+
+  it('does not issue a session after the tenant trial expires', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      ...createUserWithTenant(),
+      tenant: {
+        ...createUserWithTenant().tenant,
+        customerStage: TenantCustomerStage.PILOT,
+        trialStartsAt: new Date('2026-01-01T00:00:00.000Z'),
+        trialEndsAt: new Date('2026-01-31T00:00:00.000Z'),
+      },
+    });
+    passwordService.verify.mockResolvedValue(true);
+
+    await expect(
+      service.login({
+        email: 'owner@club-a.leetplus.ru',
+        password: 'strong-password',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
   });
 
   it('rejects invalid credentials', async () => {
@@ -285,25 +308,7 @@ describe('AuthService', () => {
   });
 
   it('resolves an invite only by the hash of its opaque bearer token', async () => {
-    prisma.userInvite.findUnique.mockResolvedValue({
-      id: 'invite-1',
-      tenantId: 'tenant-1',
-      email: 'invitee@example.test',
-      fullName: 'Invitee',
-      role: UserRole.CLUB_ADMINISTRATOR,
-      customRoleId: null,
-      customRole: null,
-      accessScope: 'NETWORK',
-      storeIds: [],
-      expiresAt: new Date(Date.now() + 60_000),
-      acceptedAt: null,
-      updatedAt: new Date(),
-      tenant: {
-        name: 'Club A',
-        slug: 'club-a',
-        status: TenantLifecycleStatus.ACTIVE,
-      },
-    });
+    prisma.userInvite.findUnique.mockResolvedValue(createMemberInvite());
 
     await expect(
       service.getInvite('opaque-bearer-token'),
@@ -322,6 +327,157 @@ describe('AuthService', () => {
     );
   });
 
+  it('transitions the first owner invite into ONBOARDING atomically', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());
+    prisma.$queryRaw.mockResolvedValue([
+      createInviteTenant(TenantOnboardingStatus.OWNER_INVITED),
+    ]);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'user-1' });
+    prisma.userInvite.updateMany.mockResolvedValue({ count: 1 });
+    prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
+    prisma.platformAdminAuditEvent.create.mockResolvedValue({ id: 'audit-1' });
+    prisma.user.findUniqueOrThrow.mockResolvedValue(createUserWithTenant());
+
+    await expect(
+      service.acceptInvite('opaque-owner-token', {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      }),
+    ).resolves.toMatchObject({
+      accessToken: 'signed-token',
+      user: {
+        id: 'user-1',
+        role: UserRole.OWNER,
+      },
+    });
+
+    expect(prisma.tenant.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'tenant-1',
+        status: TenantLifecycleStatus.ACTIVE,
+        onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+        entitlementProfileRevision: 1,
+      },
+      data: {
+        onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+      },
+    });
+    const auditCreate = prisma.platformAdminAuditEvent.create as jest.Mock<
+      Promise<unknown>,
+      [{ data: Record<string, unknown> }]
+    >;
+    const auditCall = auditCreate.mock.calls[0];
+    expect(auditCall?.[0].data).toMatchObject({
+      tenantId: 'tenant-1',
+      actorUserId: 'user-1',
+      action: 'TENANT_OWNER_INVITE_ACCEPTED',
+      before: {
+        onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+      },
+      after: {
+        onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+      },
+    });
+  });
+
+  it('rejects a bootstrap invite that is not the exact NETWORK OWNER shape', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue(
+      createMemberInvite(TenantOnboardingStatus.OWNER_INVITED),
+    );
+
+    await expect(service.getInvite('opaque-member-token')).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects an additional OWNER without an owner-transfer workflow', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue({
+      ...createOwnerInvite(),
+      tenant: createInviteTenant(TenantOnboardingStatus.ACTIVE),
+    });
+
+    await expect(service.getInvite('opaque-owner-token')).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('rolls back owner acceptance when the onboarding transition loses its CAS', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());
+    prisma.$queryRaw.mockResolvedValue([
+      createInviteTenant(TenantOnboardingStatus.OWNER_INVITED),
+    ]);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'user-1' });
+    prisma.userInvite.updateMany.mockResolvedValue({ count: 1 });
+    prisma.tenant.updateMany.mockResolvedValue({ count: 0 });
+
+    let rejection: unknown;
+    try {
+      await service.acceptInvite('opaque-owner-token', {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      });
+    } catch (error) {
+      rejection = error;
+    }
+    expect(rejection).toBeInstanceOf(ConflictException);
+
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+    expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+
+  it('rejects owner bootstrap when any owner record already exists', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());
+    prisma.$queryRaw.mockResolvedValue([
+      createInviteTenant(TenantOnboardingStatus.OWNER_INVITED),
+    ]);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.count.mockResolvedValue(1);
+
+    await expect(
+      service.acceptInvite('opaque-owner-token', {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.user.count).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        role: UserRole.OWNER,
+      },
+    });
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not expose an invite after the tenant trial expires', async () => {
+    const expiredTenant = {
+      ...createInviteTenant(),
+      trialStartsAt: new Date('2026-01-01T00:00:00.000Z'),
+      trialEndsAt: new Date('2026-01-31T00:00:00.000Z'),
+    };
+    prisma.userInvite.findUnique.mockResolvedValue({
+      ...createMemberInvite(),
+      tenant: expiredTenant,
+    });
+
+    await expect(service.getInvite('opaque-member-token')).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('does not expose invites while tenant onboarding is PROVISIONING', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue(
+      createMemberInvite(TenantOnboardingStatus.PROVISIONING),
+    );
+
+    await expect(service.getInvite('opaque-bearer-token')).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
   it('rejects a legacy invite that is not bound to email', async () => {
     prisma.userInvite.findUnique.mockResolvedValue({
       id: 'invite-1',
@@ -329,11 +485,7 @@ describe('AuthService', () => {
       email: null,
       expiresAt: new Date(Date.now() + 60_000),
       acceptedAt: null,
-      tenant: {
-        name: 'Club A',
-        slug: 'club-a',
-        status: TenantLifecycleStatus.ACTIVE,
-      },
+      tenant: createInviteTenant(),
     });
 
     await expect(service.getInvite('opaque-bearer-token')).rejects.toThrow(

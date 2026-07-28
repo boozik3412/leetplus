@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -8,11 +9,13 @@ import {
   IntegrationProvider,
   IntegrationSyncStatus,
   Prisma,
+  TenantCustomerStage,
   TenantLifecycleStatus,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 
 type TenantLifecycleAction = 'ACTIVATE' | 'SUSPEND' | 'ARCHIVE';
 
@@ -41,6 +44,7 @@ type SourceSupportActionDto = {
 
 export type PlatformAdminAuditEventQuery = {
   tenantId?: unknown;
+  requestId?: unknown;
   actor?: unknown;
   actorUserId?: unknown;
   targetType?: unknown;
@@ -51,6 +55,7 @@ export type PlatformAdminAuditEventQuery = {
 
 type ParsedAuditEventQuery = {
   tenantId?: string;
+  requestId?: string;
   actor?: string;
   actorUserId?: string;
   targetType?: string;
@@ -98,11 +103,47 @@ const lifecycleStatusByAction: Record<
   ARCHIVE: TenantLifecycleStatus.ARCHIVED,
 };
 
+const tenantLifecycleControlSelect = {
+  id: true,
+  name: true,
+  slug: true,
+  status: true,
+  customerStage: true,
+  onboardingStatus: true,
+  trialStartsAt: true,
+  trialEndsAt: true,
+  entitlementProfileRevision: true,
+  statusChangedAt: true,
+  statusReason: true,
+  updatedAt: true,
+  moduleEntitlements: {
+    select: {
+      module: true,
+      readEnabled: true,
+      writeEnabled: true,
+      outboundEnabled: true,
+      validFrom: true,
+      validUntil: true,
+      profileRevision: true,
+    },
+  },
+} satisfies Prisma.TenantSelect;
+
+const tenantLifecycleResultSelect = {
+  id: true,
+  name: true,
+  slug: true,
+  status: true,
+  statusChangedAt: true,
+  statusReason: true,
+} satisfies Prisma.TenantSelect;
+
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly langameSettingsService: LangameSettingsService,
+    private readonly tenantExecutionPolicy: TenantExecutionPolicyService,
   ) {}
 
   async getOverview() {
@@ -350,6 +391,7 @@ export class AdminService {
     const rows: CsvCell[][] = [
       [
         'Дата',
+        'Request ID',
         'Tenant',
         'Slug',
         'Actor',
@@ -364,6 +406,7 @@ export class AdminService {
       ],
       ...events.map((event) => [
         event.createdAt,
+        event.requestId,
         event.tenant?.name ?? '',
         event.tenant?.slug ?? '',
         event.actor?.fullName ?? '',
@@ -420,14 +463,7 @@ export class AdminService {
     const supportTicket = this.normalizeOptionalText(dto.supportTicket);
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        status: true,
-        statusChangedAt: true,
-        statusReason: true,
-      },
+      select: tenantLifecycleControlSelect,
     });
 
     if (!tenant) {
@@ -442,7 +478,6 @@ export class AdminService {
       throw new BadRequestException('Tenant is already in requested status');
     }
 
-    const before = this.serializeTenantStatus(tenant);
     const updated = await this.prisma.$transaction(async (tx) => {
       const designPartnerMarker = await tx.platformAdminAuditEvent.findFirst({
         where: {
@@ -458,21 +493,53 @@ export class AdminService {
         );
       }
 
-      const result = await tx.tenant.update({
+      const current = await tx.tenant.findUnique({
         where: { id: tenant.id },
+        select: tenantLifecycleControlSelect,
+      });
+      if (!current || current.slug !== tenant.slug) {
+        throw new ConflictException('Tenant lifecycle state has changed');
+      }
+
+      if (current.customerStage !== TenantCustomerStage.INTERNAL) {
+        throw new ForbiddenException(
+          'External tenant lifecycle requires the dedicated shared-beta workflow',
+        );
+      }
+
+      if (current.status === nextStatus) {
+        throw new BadRequestException('Tenant is already in requested status');
+      }
+
+      if (action === 'ACTIVATE') {
+        this.tenantExecutionPolicy.assertActivationAllowed(current);
+      }
+
+      const changedAt = new Date();
+      const claimed = await tx.tenant.updateMany({
+        where: {
+          id: current.id,
+          status: current.status,
+          customerStage: current.customerStage,
+          onboardingStatus: current.onboardingStatus,
+          trialStartsAt: current.trialStartsAt,
+          trialEndsAt: current.trialEndsAt,
+          entitlementProfileRevision: current.entitlementProfileRevision,
+          updatedAt: current.updatedAt,
+        },
         data: {
           status: nextStatus,
-          statusChangedAt: new Date(),
+          statusChangedAt: changedAt,
           statusReason: reason,
         },
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          status: true,
-          statusChangedAt: true,
-          statusReason: true,
-        },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException('Tenant lifecycle state has changed');
+      }
+
+      const result = await tx.tenant.findUniqueOrThrow({
+        where: { id: current.id },
+        select: tenantLifecycleResultSelect,
       });
 
       await tx.platformAdminAuditEvent.create({
@@ -483,7 +550,7 @@ export class AdminService {
           targetType: 'TENANT',
           targetId: tenant.id,
           reason,
-          before,
+          before: this.serializeTenantStatus(current),
           after: this.serializeTenantStatus(result),
           metadata: {
             supportTicket,
@@ -749,6 +816,7 @@ export class AdminService {
 
     return {
       tenantId: this.normalizeOptionalText(query.tenantId) ?? undefined,
+      requestId: this.normalizeOptionalText(query.requestId) ?? undefined,
       actor: this.normalizeOptionalText(query.actor) ?? undefined,
       actorUserId: this.normalizeOptionalText(query.actorUserId) ?? undefined,
       targetType: this.normalizeOptionalText(query.targetType) ?? undefined,
@@ -808,6 +876,7 @@ export class AdminService {
 
     return {
       ...(query.tenantId ? { tenantId: query.tenantId } : {}),
+      ...(query.requestId ? { requestId: query.requestId } : {}),
       ...(query.actorUserId ? { actorUserId: query.actorUserId } : {}),
       ...(query.targetType ? { targetType: query.targetType } : {}),
       ...(query.actor
@@ -865,6 +934,7 @@ export class AdminService {
     return {
       id: event.id,
       tenantId: event.tenantId,
+      requestId: event.requestId,
       action: event.action,
       targetType: event.targetType,
       targetId: event.targetId,

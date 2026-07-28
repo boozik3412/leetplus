@@ -1,11 +1,11 @@
-# Launch checklist: `SINGLE_DESIGN_PARTNER_V1`
+# Optional isolation launch checklist: `SINGLE_DESIGN_PARTNER_V1`
 
 | Поле        | Значение                                                      |
 | ----------- | ------------------------------------------------------------- |
-| Версия      | 1.3                                                           |
+| Версия      | 1.4                                                           |
 | Дата        | 28.07.2026                                                    |
 | Статус      | `NO-GO`; checklist не выполнен                                |
-| Область     | Один named partner, isolated environment, Tenant D/Store D1   |
+| Область     | Contingency/enterprise isolation, Tenant D/Store D1           |
 | Не меняется | Current production Tenant A с четырьмя Store A1..A4           |
 | Решение     | Отдельный `DESIGN_PARTNER GO` после всех обязательных пунктов |
 
@@ -14,9 +14,9 @@
 [`OPEN_BETA_BACKLOG.md`](../../OPEN_BETA_BACKLOG.md). Галочки в документе не
 заменяют protected evidence и approval.
 
-Самый ранний ориентир — `2–4 рабочих дня` после реализации и проверки всех
-обязательных пунктов до раздела H. Это не обещание выдачи через 2–4 дня от даты
-документа. Любой failed check сохраняет `NO-GO`.
+Эта lane не является основным путём первого внешнего теста и не имеет
+назначенного календарного окна. Любой failed check сохраняет `NO-GO`;
+Gate 1DP не заменяет Gate 1MT/Gate 2 shared beta.
 
 Текущая граница реализации:
 

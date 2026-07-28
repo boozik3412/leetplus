@@ -3,7 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { TenantCustomerStage, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import { UsersService } from './users.service';
@@ -30,6 +30,13 @@ const networkAdminActor = {
   role: UserRole.ADMIN,
   accessScope: 'NETWORK',
   allowedStoreIds: [],
+} satisfies AuthenticatedUser;
+
+const networkOwnerActor = {
+  ...networkAdminActor,
+  id: 'network-owner-actor',
+  email: 'network-owner@example.test',
+  role: UserRole.OWNER,
 } satisfies AuthenticatedUser;
 
 function userRow(
@@ -93,6 +100,7 @@ function createService(overrides: {
   users?: unknown[];
   invites?: unknown[];
   stores?: Array<{ id: string; name: string; isActive: boolean }>;
+  tenantCustomerStage?: TenantCustomerStage;
 }) {
   const stores =
     overrides.stores ??
@@ -102,6 +110,12 @@ function createService(overrides: {
       isActive: true,
     }));
   const prisma = {
+    tenant: {
+      findUnique: jest.fn().mockResolvedValue({
+        customerStage:
+          overrides.tenantCustomerStage ?? TenantCustomerStage.INTERNAL,
+      }),
+    },
     user: {
       findMany: jest.fn().mockResolvedValue(overrides.users ?? []),
       findUnique: jest.fn().mockResolvedValue(null),
@@ -213,6 +227,63 @@ describe('UsersService AccessScope boundary', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  it('requires external tenants to create users through email-bound invites', async () => {
+    const { prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.createUser(networkOwnerActor, {
+        email: 'new-user@example.test',
+        password: 'strong-password',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        scope: 'NETWORK',
+        storeIds: [],
+      }),
+    ).rejects.toThrow(
+      'External tenants must create users through email-bound invites',
+    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.store.findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps external invitations fail-closed until verified email delivery is available', async () => {
+    const { prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.createInvite(networkOwnerActor, {
+        email: 'new-user@example.test',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        scope: 'NETWORK',
+        storeIds: [],
+      }),
+    ).rejects.toThrow(
+      'External tenant invitations require the verified email-delivery workflow',
+    );
+    expect(prisma.userInvite.findFirst).not.toHaveBeenCalled();
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('keeps external email changes fail-closed until mailbox verification is available', async () => {
+    const target = userRow('employee-a1', 'STORES', ['a1']);
+    const { prisma, service } = createService({
+      tenantCustomerStage: TenantCustomerStage.PILOT,
+    });
+    prisma.user.findFirst.mockResolvedValue(target);
+
+    await expect(
+      service.updateUser(networkOwnerActor, target.id, {
+        email: 'unverified@example.test',
+      }),
+    ).rejects.toThrow(
+      'External tenant email changes require the verified email-change workflow',
+    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
   it('does not allow a store-scoped manager to issue a sibling store', async () => {
     const { service } = createService({
       stores: [{ id: 'a3', name: 'A3', isActive: true }],
@@ -227,6 +298,27 @@ describe('UsersService AccessScope boundary', () => {
       }),
     ).rejects.toThrow(ForbiddenException);
   });
+
+  it.each([
+    ['network ADMIN', networkAdminActor],
+    ['network OWNER', networkOwnerActor],
+  ])(
+    'requires a dedicated owner-transfer workflow when %s tries to add another OWNER',
+    async (_label, actor) => {
+      const { service } = createService({});
+
+      await expect(
+        service.createInvite(actor, {
+          email: 'second-owner@example.test',
+          role: UserRole.OWNER,
+          scope: 'NETWORK',
+          storeIds: [],
+        }),
+      ).rejects.toThrow(
+        'OWNER assignment requires the dedicated owner-transfer workflow',
+      );
+    },
+  );
 
   it('requires an explicit, internally consistent scope', async () => {
     const { service } = createService({});
@@ -338,7 +430,7 @@ describe('UsersService AccessScope boundary', () => {
         prisma.user.count.mockResolvedValue(0);
 
         await expect(
-          service.updateUser(networkAdminActor, target.id, dto),
+          service.updateUser(networkOwnerActor, target.id, dto),
         ).rejects.toThrow(
           'Tenant must retain at least one active NETWORK OWNER',
         );
@@ -374,7 +466,7 @@ describe('UsersService AccessScope boundary', () => {
       prisma.user.count.mockResolvedValue(0);
 
       await expect(
-        service.updateUser(networkAdminActor, target.id, {
+        service.updateUser(networkOwnerActor, target.id, {
           customRoleId: customRole.id,
         }),
       ).rejects.toThrow('Tenant must retain at least one active NETWORK OWNER');
@@ -414,7 +506,7 @@ describe('UsersService AccessScope boundary', () => {
       });
 
       await expect(
-        service.updateUser(networkAdminActor, target.id, {
+        service.updateUser(networkOwnerActor, target.id, {
           role: UserRole.ADMIN,
         }),
       ).resolves.toMatchObject({
@@ -442,7 +534,7 @@ describe('UsersService AccessScope boundary', () => {
         .mockResolvedValueOnce(changedTarget);
 
       await expect(
-        service.updateUser(networkAdminActor, target.id, {
+        service.updateUser(networkOwnerActor, target.id, {
           isActive: false,
         }),
       ).rejects.toThrow('User changed while the update was being prepared');

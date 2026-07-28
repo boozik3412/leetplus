@@ -3,34 +3,36 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.3                                                    |
+| Версия        | 1.6                                                    |
 | Дата          | 28.07.2026                                             |
-| Статус        | `NO-GO` до Gate 2; entitlement implementation pending  |
+| Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
 | Область       | Собственная сеть или явно разрешённые клубы            |
-| Назначение    | Первая общая внешняя когорта, не ранний DP-1           |
-| Runtime       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`             |
-| Test evidence | `2341b99937e54cc50d1763a0a794d975816c72ce`, local only |
+| Назначение    | Первый shared external tenant и последующая когорта    |
+| Candidate SHA | Не назначен: shared control-plane пока в рабочем дереве |
+| Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
 
-Этот профиль фиксирует обязательный продуктовый состав тестового доступа. Пока
-единый entitlement engine не реализован, документ является контрактом для
-route inventory, role matrix, provisioning и acceptance.
+Этот профиль фиксирует обязательный продуктовый состав тестового доступа.
+Persisted stage/trial, атомарный six-row entitlement profile и базовый
+deny-by-default policy уже реализованы. Shared provisioning/revoke foundation
+candidate атомарно создаёт suspended tenant/store/profile/OWNER invite, но
+ещё не имеет real PostgreSQL/concurrency evidence, email delivery,
+reissue/rotation и dedicated activation. Route/job/Telegram/integration
+adoption, role matrix и production evidence также не завершены.
+Initial shared-beta profile содержит пять product modules и supporting
+`INTEGRATIONS`; у всех шести `read/write=ON`, `outbound=OFF`. Generic profile
+mutation не включает outbound.
 
 Сам по себе профиль не разрешает выдачу доступа. До успешного cutover текущей
-сети, семи стабильных дней internal alpha, завершения Gate 2 и отдельного
-решения на внешний pilot активация остаётся `NO-GO`.
+сети, семи стабильных дней internal alpha, завершения Gate 1MT/Gate 2 и
+protected `SHARED BETA GO` активация остаётся `NO-GO`.
 
-Ранний совместный тест одного клуба регулируется отдельным профилем
-[`SINGLE_DESIGN_PARTNER_V1`](./single-design-partner-access-profile.md). Он
-допускается только после Gate 1DP в физически изолированном
-web/API/PostgreSQL/secrets контуре. Его `DP-S0..DP-S4` проверяются
-progressive/manual до отдельного `GO`, но открываются одновременно первыми
-credentials; поэтапно после старта включаются только новые surfaces и отдельно
-gated outbound effects. Точный состав задаёт DP-профиль, а не этот документ.
-
-Текущая сеть при этом остаётся одним существующим `Tenant A` с четырьмя
-`Store A1..A4`. Design partner получает новый `Tenant D` с единственным
-`Store D1` только в isolated environment; shared production запрещён.
+Основной первый тест регулируется
+[`SHARED_MULTI_TENANT_BETA_V1`](./shared-multi-tenant-beta-profile.md):
+текущая сеть остаётся одним существующим `Tenant A` с четырьмя
+`Store A1..A4`, а внешний клуб получает новый `Tenant B/Store B1` в общем
+web/API/workers/PostgreSQL/Telegram data plane. Отдельный runtime/DB остаётся
+только optional contingency/enterprise-isolation lane.
 
 Local public-only pinned-path evidence прошёл admission suite `19/19`, но
 remote CI ещё pending. Production authority roots остаются
@@ -80,6 +82,13 @@ Telegram/MAX/SMS-рассылки автоматически не включаю
 Users, invites, block/revoke, system/custom roles, capabilities, network/store
 scope и audit. `Platform Admin` не является tenant role и не выдаётся клиенту.
 
+### Интеграции — supporting entitlement
+
+Шестая обязательная строка профиля открывает tenant-owned settings,
+encrypted credentials, connection diagnostics, preview/select/map и
+read-only initial sync только своей сети. Unattended sync, reward/write-back
+и массовые сообщения остаются `outbound=OFF` до отдельных workflows.
+
 ## Поддерживающие разделы
 
 - tenant-scoped dashboard;
@@ -112,13 +121,15 @@ risk review, rollout и audit.
 - Actor не может выдать target роль, capability или scope шире собственного.
 - Login/session/invite и фоновые действия проверяют lifecycle, entitlement и
   актуальный persisted scope.
+- Generic lifecycle mutation запрещена для non-`INTERNAL` tenant; первый
+  внешний tenant активируется только dedicated workflow после всех gates.
 
 ## Acceptance профиля
 
 Профиль можно активировать для внешнего Tenant только когда:
 
-1. Текущая сеть прошла cutover и семь стабильных дней internal alpha; Gate 2
-   завершён и отдельно принят `GO` на внешний invite-only pilot.
+1. Текущая сеть прошла cutover и семь стабильных дней internal alpha;
+   Gate 1MT и Gate 2 завершены, protected `SHARED BETA GO` принят.
 2. Каждая включённая поверхность перечислена в module adoption matrix.
 3. Для неё известны capability, resource class, audit и data owner.
 4. Cross-tenant/store negative suite и browser journey зелёные.
@@ -127,7 +138,7 @@ risk review, rollout и audit.
 7. Support owner, trial/cohort dates и onboarding checklist назначены.
 8. Решение привязано к exact release SHA и имеет rollback.
 
-Успех или длительность работы isolated DP-1 не выполняют Gate 2, не заменяют
-семь дней internal alpha и не входят автоматически в Gate 3. После Gate 2
-promotion партнёра в эту когорту требует новой entitlement revision,
+Успех или длительность optional isolated DP-1 не выполняют Gate 1MT/Gate 2,
+не заменяют семь дней internal alpha и не входят автоматически в Gate 3.
+Promotion партнёра в shared когорту требует новой entitlement revision,
 отдельного `GO` и нового измерительного окна.

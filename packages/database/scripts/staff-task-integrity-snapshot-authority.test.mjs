@@ -3,6 +3,7 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 
 import * as authorityModule from "./staff-task-integrity-snapshot-authority.mjs";
+import { STAFF_TASK_CURRENT_RELEASE_STATE } from "./staff-task-integrity-migration-state.mjs";
 import {
   AUTHORITY_CLASSIFICATION,
   AUTHORITY_ISOLATION_PROFILE,
@@ -143,6 +144,39 @@ test("a pinned Ed25519 root verifies one exact canonical authority envelope", ()
   assert.equal(
     verified.databaseMarker,
     authorityDatabaseMarker(verified.envelopeDigest),
+  );
+});
+
+test("the exact current release state can be authority-bound independently", () => {
+  const { envelope, roots } = signedFixture({
+    envelopeOverrides: {
+      expectedState: STAFF_TASK_CURRENT_RELEASE_STATE,
+    },
+  });
+  const verified = verifyAuthorityEnvelopeAgainstRoots(
+    envelope,
+    expectedContract({
+      expectedState: STAFF_TASK_CURRENT_RELEASE_STATE,
+    }),
+    roots,
+    NOW,
+  );
+
+  assert.equal(verified.expectedState, STAFF_TASK_CURRENT_RELEASE_STATE);
+
+  const unsupportedState = "FUTURE_164";
+  const unsupported = signedFixture({
+    envelopeOverrides: { expectedState: unsupportedState },
+  });
+  assert.throws(
+    () =>
+      verifyAuthorityEnvelopeAgainstRoots(
+        unsupported.envelope,
+        expectedContract({ expectedState: unsupportedState }),
+        unsupported.roots,
+        NOW,
+      ),
+    { code: "PRODUCTION_LIKE_AUTHORITY_BINDING_INVALID" },
   );
 });
 

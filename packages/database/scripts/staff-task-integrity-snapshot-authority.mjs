@@ -2,6 +2,7 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 
 import { canonicalStringify } from "./staff-task-integrity-reconciliation-plan.mjs";
 import { PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS } from "./staff-task-integrity-snapshot-authority-roots.mjs";
+import { STAFF_TASK_CURRENT_RELEASE_STATE } from "./staff-task-integrity-migration-state.mjs";
 
 export const AUTHORITY_KIND = "LEETPLUS_STAFF_TASK_SNAPSHOT_AUTHORITY";
 export const AUTHORITY_PURPOSE = "STAFF_TASK_INTEGRITY_RECONCILIATION";
@@ -18,7 +19,11 @@ const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 const SHA_256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const KEY_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/u;
-const EXPECTED_STATES = new Set(["BASELINE_156", "EXPAND_162"]);
+const EXPECTED_STATES = new Set([
+  "BASELINE_156",
+  "EXPAND_162",
+  STAFF_TASK_CURRENT_RELEASE_STATE,
+]);
 const ENVELOPE_KEYS = Object.freeze(
   [
     "acquiredAt",

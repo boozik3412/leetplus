@@ -12,15 +12,21 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/platform-admin.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { TenantEntitlementProfileService } from '../tenancy/tenant-entitlement-profile.service';
 import {
   AdminService,
   type PlatformAdminAuditEventQuery,
 } from './admin.service';
+import { SharedTenantProvisioningService } from './shared-tenant-provisioning.service';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly tenantEntitlementProfileService: TenantEntitlementProfileService,
+    private readonly sharedTenantProvisioningService: SharedTenantProvisioningService,
+  ) {}
 
   @Get('overview')
   getOverview() {
@@ -57,6 +63,40 @@ export class AdminController {
     @Body() body: unknown,
   ) {
     return this.adminService.updateTenantLifecycle(user, tenantId, body ?? {});
+  }
+
+  @Post('shared-beta/tenants/provision')
+  provisionSharedBetaTenant(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: unknown,
+  ) {
+    return this.sharedTenantProvisioningService.provision(user, body ?? {});
+  }
+
+  @Post('tenants/:tenantId/initial-owner-invite/revoke')
+  revokeSharedBetaInitialOwnerInvite(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.sharedTenantProvisioningService.revokeInitialOwnerInvite(
+      user,
+      tenantId,
+      body ?? {},
+    );
+  }
+
+  @Post('tenants/:tenantId/entitlement-profile')
+  replaceTenantEntitlementProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+  ) {
+    return this.tenantEntitlementProfileService.replaceProfile(
+      user,
+      tenantId,
+      body ?? {},
+    );
   }
 
   @Post('tenants/:tenantId/support-note')

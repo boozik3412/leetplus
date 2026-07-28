@@ -267,6 +267,53 @@ export const accessCapabilityCatalog = [
 
 export type AccessCapability = (typeof accessCapabilityCatalog)[number]['key'];
 
+// Initial shared-beta OWNER scope: five product modules plus the supporting
+// integrations control plane. Marketing, broad guest CRM and direct guest PII
+// access stay outside the first cohort. Module/outbound admission is enforced
+// separately and may only reduce this capability ceiling.
+export const SHARED_BETA_INITIAL_OWNER_CAPABILITIES = [
+  'view_dashboard',
+  'view_reports',
+  'view_assortment_reports',
+  'export_reports',
+  'manage_assortment_reports',
+  'view_assortment_products',
+  'view_assortment_catalog',
+  'view_assortment_stores',
+  'view_guest_gamification',
+  'manage_guest_game_rules',
+  'approve_guest_game_rewards',
+  'operate_guest_game_ledger',
+  'view_communications',
+  'manage_communications',
+  'view_staff',
+  'view_staff_shift_workspace',
+  'view_staff_tasks',
+  'manage_staff_tasks',
+  'view_staff_standards',
+  'manage_staff_standards',
+  'view_staff_training',
+  'manage_staff_training',
+  'view_staff_knowledge',
+  'edit_staff_knowledge',
+  'review_staff_knowledge',
+  'publish_staff_knowledge',
+  'view_staff_control',
+  'manage_staff_control',
+  'view_staff_directory',
+  'manage_staff_directory',
+  'view_staff_salary',
+  'manage_staff_salary',
+  'manage_users',
+  'manage_integrations',
+  'run_sync',
+  'import_data',
+  'use_utilities',
+  'edit_products',
+  'edit_catalog',
+  'edit_stores',
+] as const satisfies readonly AccessCapability[];
+
 const validCapabilities = new Set<string>(
   accessCapabilityCatalog.map((capability) => capability.key),
 );

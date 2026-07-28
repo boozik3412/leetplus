@@ -3,10 +3,10 @@
 | Поле                  | Значение                                                                                                                    |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
-| Версия                | 1.6.0                                                                                                                       |
+| Версия                | 1.7.0                                                                                                                       |
 | Дата                  | 28.07.2026                                                                                                                  |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
-| Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                                                                   |
+| Current candidate SHA | Не назначен; historical `56d61543...` не является current evidence                                                         |
 | Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)                                            |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md)                                                  |
 | Следующий checkpoint  | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                      |
@@ -14,7 +14,9 @@
 Документ задаёт безопасный порядок проверки legacy-данных `StaffTask`,
 `StaffTaskTemplate`, `StaffTaskRecurringRule` и
 `StaffTaskRecurringRuleRun` после schema-only EXPAND и успешного
-`EXPAND_162` admission, но до reconciliation и `VALIDATE`.
+`CURRENT_163` admission, но до reconciliation и `VALIDATE`. Reviewed
+StaffTask evidence остаётся привязана к frozen `EXPAND_162` prefix; current
+state добавляет только allowlisted migration 163.
 Он не разрешает автоматическое исправление данных, production migration,
 включение scheduler или выдачу внешнего доступа.
 Production-like scanner можно запускать только после успешного admission
@@ -139,30 +141,35 @@ Review-находка не должна маскироваться как док
 3. Выполнить scanner на чистой CI schema; ожидается zero blocking findings.
 4. По
    [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md)
-   зафиксировать public-only pre-signed pinned-path `LOCAL PASS` на test
-   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child; до
-   production-like запуска получить remote CI evidence. Экспериментальный Node
-   22 module mock остаётся P2. Затем отдельным security change выполнить P0
+   учитывать public-only pre-signed pinned-path `LOCAL PASS` на historical test
+   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` только как прежний
+   boundary; для exact current candidate SHA до production-like запуска
+   получить clean remote CI evidence. Экспериментальный Node 22 module mock
+   остаётся P2. Затем отдельным security change выполнить P0
    reviewed Ed25519 root enrollment и ввести P0 operational signer/approved
    acquisition/evidence controls. Только после этого отдельно приобрести и
    восстановить свежий production-like snapshot в loopback clone, подписать
    отдельный `BASELINE_156` envelope, установить его DB marker и пройти
    admission. После exact migrations `157..162` выпустить новый state-bound
    `EXPAND_162` envelope с новым nonce-bound binding, заменить DB marker и
-   пройти второй admission. Baseline envelope/marker не переиспользовать.
+   пройти второй admission. Затем применить exact allowlisted migration
+   `20260728120000_tenant_execution_control_plane_expand`, выпустить отдельный
+   `CURRENT_163` envelope, ещё раз заменить marker и пройти третий admission.
+   Предыдущие envelope/marker не переиспользовать.
    Текущий пустой production trusted-root registry означает fail-closed
    `NO-GO`.
-5. Только после успешного `EXPAND_162` admission выполнить scanner на том же
+5. Только после успешного `CURRENT_163` admission выполнить scanner на том же
    неизменённом восстановленном snapshot.
 6. Сохранить только aggregate JSON, SHA, время, target label и exit code в
    защищённый release evidence.
 7. Назначить owner каждому non-zero reason code.
 8. Запустить отдельный
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md)
-   на exact schema-first gate:
-   `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
-0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
-0 index mismatch`; подтвердить hidden expected/actual database identity,
+   на exact current schema-first gate: `CURRENT_163`, `migrationCount=163`,
+   latest `20260728120000_tenant_execution_control_plane_expand`,
+   `unfinished=0`, `14 composite exact`, `14 simple exact`,
+   `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact`,
+   `0 index mismatch`; подтвердить hidden expected/actual database identity,
    domain-separated HMAC `databaseIdentityDigest`,
    `inventoryExecuted === schema.ready`, `8 proposal + 29 operator + 6 review`,
    actionable cap и HMAC evidence.
@@ -249,17 +256,19 @@ constraint-trigger design с concurrency tests.
 ## 7. Evidence template
 
 ```text
-release_sha:
+current_release_sha:
 target:
 executed_at:
-snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
-pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
+historical_snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
+historical_pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
 snapshot_admission_report_schema_version: 2
-snapshot_admission_state: EXPAND_162
+snapshot_admission_state: CURRENT_163
 baseline_authority_evidence_ref:
 baseline_marker_install_attestation_ref:
 expand_authority_evidence_ref:
 expand_marker_rotation_attestation_ref:
+current_authority_evidence_ref:
+current_marker_rotation_attestation_ref:
 snapshot_admission_decision:
 snapshot_admission_database_identity_digest:
 snapshot_admission_content_digest:
@@ -369,7 +378,8 @@ Inventory slice считается реализованным, когда:
 4. blocking/review result детерминирован и не раскрывает row identifiers;
 5. clean-schema smoke зелёный;
 6. production-like scanner запускается только после успешного Git-bound
-   `BASELINE_156 → 157..162 → EXPAND_162` admission;
+   `BASELINE_156 → 157..162 → EXPAND_162 → allowlisted 163 → CURRENT_163`
+   admission; protected StaffTask evidence остаётся bound к prefix 162;
 7. production-like reconciliation остаётся отдельным явным операционным шагом.
 
 Это повышает только readiness к production-like reconciliation/VALIDATE
@@ -378,6 +388,10 @@ rehearsal.
 
 ## 10. Changelog
 
+- `1.7.0`, 28.07.2026 — protected StaffTask prefix оставлен на
+  `EXPAND_162`, а current inventory/planner path переведён на exact
+  `CURRENT_163` с allowlisted migration 163 и третьим state-bound
+  envelope/marker/admission. Старый candidate SHA помечен historical.
 - `1.6.0`, 28.07.2026 — runtime admission candidate сохранён на
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; test evidence
   `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,

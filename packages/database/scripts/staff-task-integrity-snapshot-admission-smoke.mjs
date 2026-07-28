@@ -10,12 +10,20 @@ import { fileURLToPath } from "node:url";
 
 import { PrismaClient } from "@prisma/client";
 
+import {
+  STAFF_TASK_ALLOWED_ADDITIVE_TAIL,
+  STAFF_TASK_CURRENT_RELEASE_STATE,
+  STAFF_TASK_FROZEN_PREFIX_COUNT,
+  STAFF_TASK_FROZEN_PREFIX_LATEST,
+} from "./staff-task-integrity-migration-state.mjs";
+
 const SCRIPT_NAME = "staff-task-integrity-snapshot-admission-smoke";
 const REQUIRED_CONFIRMATION =
   "run-staff-task-integrity-snapshot-admission-smoke";
 const ADMISSION_ENV_PREFIX = "STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_";
 const BASELINE_STATE = "BASELINE_156";
 const EXPAND_STATE = "EXPAND_162";
+const CURRENT_STATE = STAFF_TASK_CURRENT_RELEASE_STATE;
 const BASELINE_MIGRATION_COUNT = 156;
 const BASELINE_LAST_MIGRATION =
   "20260727120000_staff_task_catalog_audit_expand";
@@ -169,6 +177,8 @@ It then injects synthetic cross-tenant legacy fixtures,
 including a positive matrix for all eight proposal codes and the two-reason
 last-task overlap, binds a signed short-lived provenance manifest to the
 disposable database, and exercises the read-only row-level proposal dry-run.
+Finally it applies the exact reviewed additive tail and admits CURRENT_163,
+while preserving the independently verified EXPAND_162 evidence boundary.
 The generated database and login are destroyed in a finally block.
 
 Usage:
@@ -351,8 +361,8 @@ async function readMigrationPlan() {
   );
   assert.equal(
     migrationNames.length,
-    BASELINE_MIGRATION_COUNT + EXPAND_MIGRATIONS.length,
-    "The snapshot admission smoke requires the frozen 162-migration manifest.",
+    STAFF_TASK_FROZEN_PREFIX_COUNT + STAFF_TASK_ALLOWED_ADDITIVE_TAIL.length,
+    "The snapshot admission smoke requires the frozen prefix and exact reviewed additive tail.",
   );
   assert.equal(
     migrationNames[BASELINE_MIGRATION_COUNT - 1],
@@ -360,16 +370,47 @@ async function readMigrationPlan() {
     "The frozen BASELINE_156 migration boundary changed.",
   );
   assert.deepEqual(
-    migrationNames.slice(BASELINE_MIGRATION_COUNT),
+    migrationNames.slice(
+      BASELINE_MIGRATION_COUNT,
+      STAFF_TASK_FROZEN_PREFIX_COUNT,
+    ),
     [...EXPAND_MIGRATIONS],
     "Migrations 157..162 must remain the exact contiguous EXPAND sequence.",
   );
+  assert.equal(
+    migrationNames[STAFF_TASK_FROZEN_PREFIX_COUNT - 1],
+    STAFF_TASK_FROZEN_PREFIX_LATEST,
+    "The reviewed StaffTask migration prefix changed.",
+  );
+  assert.deepEqual(
+    migrationNames.slice(STAFF_TASK_FROZEN_PREFIX_COUNT),
+    [...STAFF_TASK_ALLOWED_ADDITIVE_TAIL],
+    "The post-162 migration tail must be explicitly reviewed and allowlisted.",
+  );
+
+  for (const migrationName of STAFF_TASK_ALLOWED_ADDITIVE_TAIL) {
+    const sql = readFileSync(
+      path.join(sourcePrismaDir, "migrations", migrationName, "migration.sql"),
+      "utf8",
+    );
+    assert(
+      !/"StaffTask[A-Za-z]*"/.test(sql),
+      `Additive migration ${migrationName} touches a frozen StaffTask relation.`,
+    );
+  }
 
   return {
     sourcePrismaDir,
     baselineMigrations: migrationNames.slice(0, BASELINE_MIGRATION_COUNT),
-    expandMigrations: migrationNames.slice(BASELINE_MIGRATION_COUNT),
-    allMigrations: migrationNames,
+    expandMigrations: migrationNames.slice(
+      BASELINE_MIGRATION_COUNT,
+      STAFF_TASK_FROZEN_PREFIX_COUNT,
+    ),
+    allMigrations: migrationNames.slice(0, STAFF_TASK_FROZEN_PREFIX_COUNT),
+    currentMigrations: migrationNames,
+    additiveTailMigrations: migrationNames.slice(
+      STAFF_TASK_FROZEN_PREFIX_COUNT,
+    ),
   };
 }
 
@@ -420,7 +461,7 @@ async function copyMigrationArtifact(
   releaseSha,
 ) {
   assert(
-    stage === "baseline" || stage === "expand",
+    stage === "baseline" || stage === "expand" || stage === "current",
     "Unknown staged migration phase.",
   );
   assertSafeTempRoot(tempRoot);
@@ -429,7 +470,9 @@ async function copyMigrationArtifact(
   const selectedMigrations =
     stage === "baseline"
       ? migrationPlan.baselineMigrations
-      : migrationPlan.expandMigrations;
+      : stage === "expand"
+        ? migrationPlan.expandMigrations
+        : migrationPlan.additiveTailMigrations;
   const repositoryRoot = path.resolve(
     migrationPlan.sourcePrismaDir,
     "../../..",
@@ -2263,6 +2306,13 @@ export async function runSelfTest() {
     BASELINE_MIGRATION_COUNT,
   );
   assert.deepEqual(migrationPlan.expandMigrations, [...EXPAND_MIGRATIONS]);
+  assert.deepEqual(migrationPlan.additiveTailMigrations, [
+    ...STAFF_TASK_ALLOWED_ADDITIVE_TAIL,
+  ]);
+  assert.equal(
+    migrationPlan.currentMigrations.length,
+    STAFF_TASK_FROZEN_PREFIX_COUNT + STAFF_TASK_ALLOWED_ADDITIVE_TAIL.length,
+  );
   const dryRunModule =
     await import("./staff-task-integrity-reconciliation-proposal-dry-run.mjs");
   assert.deepEqual(Object.keys(EXPECTED_PROPOSAL_COUNTS).sort(), [
@@ -2291,7 +2341,7 @@ export async function runSelfTest() {
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    checks: 46,
+    checks: 48,
     localCiOnly: true,
     disposableDatabaseOnly: true,
     selectOnlyAdmissionRole: true,
@@ -2302,6 +2352,7 @@ export async function runSelfTest() {
     committedReleaseArtifactOnly: true,
     baselineMigrations: migrationPlan.baselineMigrations.length,
     expandMigrations: migrationPlan.expandMigrations.length,
+    additiveTailMigrations: migrationPlan.additiveTailMigrations.length,
     proposalCodes: Object.keys(EXPECTED_PROPOSAL_COUNTS).length,
     proposalCases: EXPECTED_PROPOSAL_CASES.length,
     lastTaskReasonCoalescingRequired: true,
@@ -2819,38 +2870,6 @@ export async function runSmoke(environment = process.env) {
       evidenceDigest(admissionSecond.report, "executionDigest"),
     );
 
-    const findings = spawnPlanner(
-      plannerEnvironment({
-        environment,
-        readerUrl,
-        cloneDatabaseName,
-        runConfirmation: plannerRunConfirmation,
-        maxCandidates: 10_000,
-      }),
-    );
-    assert.equal(findings.exitCode, 2);
-    assert.equal(findings.plannerExitCode, 2);
-    assertOutputSafe(findings.serialized, {
-      ...privacyContext,
-      fixtureIds,
-    });
-
-    const lowCap = spawnPlanner(
-      plannerEnvironment({
-        environment,
-        readerUrl,
-        cloneDatabaseName,
-        runConfirmation: plannerRunConfirmation,
-        maxCandidates: 1,
-      }),
-    );
-    assert.equal(lowCap.exitCode, 3);
-    assert.equal(lowCap.plannerExitCode, 3);
-    assertOutputSafe(lowCap.serialized, {
-      ...privacyContext,
-      fixtureIds,
-    });
-
     const syntheticProvenance = await installSyntheticProvenance({
       cloneDatabaseUrl,
       cloneDatabaseName,
@@ -3018,10 +3037,79 @@ export async function runSmoke(environment = process.env) {
       protectedValues: dryRunProtectedValues,
     });
 
+    await copyMigrationArtifact(
+      tempRoot,
+      migrationPlan,
+      "current",
+      environment.RELEASE_SHA,
+    );
+    runMigrateDeploy(migrationSchemaPath, cloneDatabaseUrl, environment);
+    await assertAppliedMigrations(
+      cloneDatabaseUrl,
+      migrationPlan.currentMigrations,
+    );
+    const currentForbiddenSelect = await assertExactReaderSelectScope(
+      cloneDatabaseUrl,
+      readerRoleName,
+    );
+    assert.equal(currentForbiddenSelect, expandForbiddenSelect);
+    await assertReaderCannotWrite(readerUrl, currentForbiddenSelect);
+
+    const currentAdmission = spawnAdmission(
+      admissionEnvironment({
+        ...baseAdmissionEnvironment,
+        expectedState: CURRENT_STATE,
+      }),
+    );
+    assert.equal(
+      currentAdmission.exitCode,
+      0,
+      `CURRENT_163 admission failed: ${JSON.stringify(
+        currentAdmission.report,
+      )}`,
+    );
+    assertAdmissionShape(currentAdmission.report, CURRENT_STATE);
+    assertOutputSafe(currentAdmission.serialized, {
+      ...privacyContext,
+      fixtureIds,
+    });
+
+    const findings = spawnPlanner(
+      plannerEnvironment({
+        environment,
+        readerUrl,
+        cloneDatabaseName,
+        runConfirmation: plannerRunConfirmation,
+        maxCandidates: 10_000,
+      }),
+    );
+    assert.equal(findings.exitCode, 2);
+    assert.equal(findings.plannerExitCode, 2);
+    assertOutputSafe(findings.serialized, {
+      ...privacyContext,
+      fixtureIds,
+    });
+
+    const lowCap = spawnPlanner(
+      plannerEnvironment({
+        environment,
+        readerUrl,
+        cloneDatabaseName,
+        runConfirmation: plannerRunConfirmation,
+        maxCandidates: 1,
+      }),
+    );
+    assert.equal(lowCap.exitCode, 3);
+    assert.equal(lowCap.plannerExitCode, 3);
+    assertOutputSafe(lowCap.serialized, {
+      ...privacyContext,
+      fixtureIds,
+    });
+
     const tamperedAdmission = spawnAdmission(
       admissionEnvironment({
         ...baseAdmissionEnvironment,
-        expectedState: EXPAND_STATE,
+        expectedState: CURRENT_STATE,
         overrides: {
           [`${ADMISSION_ENV_PREFIX}ISOLATION_ATTESTATION`]: `${isolationAttestation}-tampered`,
         },
@@ -3037,7 +3125,7 @@ export async function runSmoke(environment = process.env) {
     const tamperedMigration = spawnAdmission(
       admissionEnvironment({
         ...baseAdmissionEnvironment,
-        expectedState: EXPAND_STATE,
+        expectedState: CURRENT_STATE,
       }),
     );
     assert.equal(tamperedMigration.exitCode, 3);
@@ -3100,11 +3188,12 @@ export async function runSmoke(environment = process.env) {
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    scenarios: 23,
+    scenarios: 24,
     classification: SNAPSHOT_CLASSIFICATION,
-    admittedStates: [BASELINE_STATE, EXPAND_STATE],
+    admittedStates: [BASELINE_STATE, EXPAND_STATE, CURRENT_STATE],
     baselineMigrationsApplied: BASELINE_MIGRATION_COUNT,
     expandMigrationsApplied: EXPAND_MIGRATIONS.length,
+    additiveTailMigrationsApplied: STAFF_TASK_ALLOWED_ADDITIVE_TAIL.length,
     committedReleaseArtifactOnly: true,
     exactSelectRelations: READER_SELECT_RELATIONS.length,
     tableSelectRelations: READER_TABLE_SELECT_RELATIONS.length,

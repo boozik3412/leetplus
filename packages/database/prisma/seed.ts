@@ -2,6 +2,10 @@ import {
   Prisma,
   PrismaClient,
   StockMovementType,
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+  TenantModule,
+  TenantOnboardingStatus,
   UserAccessScope,
   UserRole,
 } from "@prisma/client";
@@ -22,6 +26,8 @@ assertDemoSeedEnvironment(process.env, databaseTarget);
 const client = new PrismaClient();
 const tenantSlug = resolveDemoSeedTenantSlug(process.env);
 const demoOwnerCredentials = createDemoSeedCredentials(process.env);
+const localDemoModules = Object.values(TenantModule);
+const localDemoProfileRevision = 1;
 
 const categories = [
   "Энергетики",
@@ -450,12 +456,44 @@ async function seed(prisma: Prisma.TransactionClient) {
     update: {
       name: "Local Demo Cyber Club",
       domain: `${tenantSlug}.localhost`,
+      status: TenantLifecycleStatus.ACTIVE,
+      customerStage: TenantCustomerStage.INTERNAL,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      cohortKey: null,
+      supportOwnerUserId: null,
+      trialStartsAt: null,
+      trialEndsAt: null,
+      entitlementProfileRevision: localDemoProfileRevision,
     },
     create: {
       name: "Local Demo Cyber Club",
       slug: tenantSlug,
       domain: `${tenantSlug}.localhost`,
+      status: TenantLifecycleStatus.ACTIVE,
+      customerStage: TenantCustomerStage.INTERNAL,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      entitlementProfileRevision: localDemoProfileRevision,
     },
+  });
+
+  await prisma.tenantModuleEntitlement.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+  const entitlementSeededAt = new Date();
+  await prisma.tenantModuleEntitlement.createMany({
+    data: localDemoModules.map((module) => ({
+      tenantId: tenant.id,
+      module,
+      readEnabled: true,
+      writeEnabled: true,
+      outboundEnabled: false,
+      profileRevision: localDemoProfileRevision,
+      reason: "Deterministic local development seed profile",
+      createdAt: entitlementSeededAt,
+      updatedAt: entitlementSeededAt,
+    })),
   });
 
   await prisma.stockMovement.deleteMany({
@@ -662,7 +700,13 @@ async function seed(prisma: Prisma.TransactionClient) {
   }
 
   const fastArticles = ["DRK-001", "DRK-004", "SNK-001", "COF-002", "FST-003"];
-  const steadyArticles = ["DRK-005", "SWT-001", "NOO-001", "SNK-004", "COF-001"];
+  const steadyArticles = [
+    "DRK-005",
+    "SWT-001",
+    "NOO-001",
+    "SNK-004",
+    "COF-001",
+  ];
 
   await prisma.salesFact.createMany({
     data: products.flatMap((product, productIndex) => {
@@ -708,8 +752,12 @@ async function seed(prisma: Prisma.TransactionClient) {
       }
 
       const riskyStock = fastArticles.includes(product.article);
-      const primaryQuantity = riskyStock ? (productIndex % 3) + 1 : 10 + productIndex;
-      const secondaryQuantity = riskyStock ? productIndex % 2 : 6 + (productIndex % 5);
+      const primaryQuantity = riskyStock
+        ? (productIndex % 3) + 1
+        : 10 + productIndex;
+      const secondaryQuantity = riskyStock
+        ? productIndex % 2
+        : 6 + (productIndex % 5);
 
       return [
         {
@@ -730,7 +778,13 @@ async function seed(prisma: Prisma.TransactionClient) {
     }),
   });
 
-  const movementArticles = ["FST-001", "FST-002", "DRK-001", "SNK-001", "COF-002"];
+  const movementArticles = [
+    "FST-001",
+    "FST-002",
+    "DRK-001",
+    "SNK-001",
+    "COF-002",
+  ];
 
   await prisma.stockMovement.createMany({
     data: movementArticles.flatMap((article, index) => {
@@ -750,7 +804,9 @@ async function seed(prisma: Prisma.TransactionClient) {
           movementDate: daysAgo(5 + index),
           type: StockMovementType.WRITEOFF,
           quantity: String(writeOffQuantity),
-          amount: String(writeOffQuantity * Number(createdProduct.purchasePrice)),
+          amount: String(
+            writeOffQuantity * Number(createdProduct.purchasePrice),
+          ),
           reason: index < 2 ? "Истёк срок годности" : "Повреждение упаковки",
         },
       ];

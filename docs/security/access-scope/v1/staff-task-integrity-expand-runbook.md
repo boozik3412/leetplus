@@ -3,17 +3,17 @@
 | Поле                    | Значение                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed                                                                           |
-| Версия                  | 1.5.0                                                                                                                                                        |
+| Версия                  | 1.6.0                                                                                                                                                        |
 | Дата                    | 28.07.2026                                                                                                                                                   |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                                                         |
 | Migration count         | 162                                                                                                                                                          |
 | Latest migration        | `20260727131000_staff_task_integrity_expand`                                                                                                                 |
 | DB-native guard         | 28 FK: 14 composite + 14 simple compatibility                                                                                                                |
 | Compatibility catalog   | 14 simple `NOT VALID`: 11 non-Store + 3 Store                                                                                                                |
-| Candidate SHA           | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed                                                                                                    |
-| Admission SHA           | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; production-like `NO-GO`                                                                              |
+| Historical EXPAND SHA   | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401`; frozen prefix evidence                                                                                           |
+| Historical admission    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence                                                                                              |
 | Входной gate            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `BASELINE_156`                                                                    |
-| После EXPAND            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `EXPAND_162` → [Integrity inventory](./staff-task-integrity-inventory-runbook.md) |
+| После EXPAND            | `EXPAND_162` admission → allowlisted migration 163 → `CURRENT_163` admission → [inventory](./staff-task-integrity-inventory-runbook.md)                      |
 | Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                                                       |
 | Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)                                                                                         |
 
@@ -26,9 +26,11 @@
 исправлять production-данные, включать scheduler или выдавать внешний доступ.
 Production-like inventory, reconciliation, `VALIDATE`, deployment и
 операционный rollback drill остаются отдельными обязательными шагами.
-До production-like inventory/planner обязательны два Git-bound admission:
-`BASELINE_156` до EXPAND и `EXPAND_162` после применения exact migrations
-`157..162`.
+До production-like inventory/planner обязательны три Git-bound admission:
+`BASELINE_156` до EXPAND, frozen-prefix `EXPAND_162` после exact migrations
+`157..162` и `CURRENT_163` после единственной allowlisted additive migration
+`20260728120000_tenant_execution_control_plane_expand`. Третий state не
+изменяет reviewed StaffTask prefix и не переиспользует его envelope/marker.
 
 ## 1. Зафиксированный контекст запуска
 
@@ -288,9 +290,10 @@ production-данных.
 
 1. зафиксировать exact release SHA, зелёные CI checks, migration count `162`,
    latest migration и отношение к канонической ветке;
-2. зафиксировать public-only pre-signed pinned-path `LOCAL PASS` на test
-   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child и до
-   production-like запуска получить такой же remote CI evidence.
+2. учитывать public-only pre-signed pinned-path `LOCAL PASS` на historical test
+   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` только как прежний
+   boundary и до production-like запуска получить clean remote CI evidence
+   для exact current candidate SHA.
    Экспериментальный Node 22 module mock остаётся P2. Отдельным security change
    выполнить P0 reviewed Ed25519 root enrollment и ввести P0 operational
    signer/approved acquisition/marker/evidence controls; при пустом production
@@ -307,36 +310,42 @@ production-данных.
 6. получить новый state-bound `EXPAND_162` authority envelope с новым
    nonce-bound binding, заменить DB marker его digest и только затем повторно
    пройти snapshot admission; baseline envelope/marker не переиспользовать;
-7. выполнить guarded read-only inventory и сохранить только aggregate
+7. применить только exact allowlisted additive migration
+   `20260728120000_tenant_execution_control_plane_expand`; подтвердить, что
+   protected `StaffTask*` relations не изменились;
+8. получить отдельный `CURRENT_163` authority envelope с новым nonce-bound
+   binding, повторно заменить DB marker и пройти третий admission;
+9. выполнить guarded read-only inventory и сохранить только aggregate
    evidence;
-8. на exact schema 162 выполнить
+10. на exact current schema `CURRENT_163` выполнить
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md):
-   latest migration, unfinished `0`, 14 composite exact, 14 simple exact,
+   migration count `163`, latest control-plane migration, unfinished `0`,
+   14 composite exact, 14 simple exact,
    `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes exact,
    `0` index mismatch, hidden expected/actual database identity,
    domain-separated HMAC `databaseIdentityDigest`,
    `inventoryExecuted === schema.ready`,
    classification `8 proposal + 29 operator + 6 review`, actionable cap и exit
    contract;
-9. назначить owner всем review/operator/proposal findings и получить
+11. назначить owner всем review/operator/proposal findings и получить
    `blockingTotal=0`; proposal, `contentDigest` и `executionDigest` не считать
    authorization;
-10. отдельно реализовать и утвердить production-like row dry-run, затем
+12. отдельно реализовать и утвердить production-like row dry-run, затем
     получить protected row evidence; synthetic proposal evidence не
     засчитывать;
-11. отдельным reviewed change реализовать idempotent explicit apply с
+13. отдельным reviewed change реализовать idempotent explicit apply с
     locks/recheck, audit и rollback; отдельным approval выполнить apply и
     повторный zero-diff dry-run;
-12. проверить backup restore, long transactions, свободное место, replication
+14. проверить backup restore, long transactions, свободное место, replication
     health и change window;
-13. отдельно повторить populated synthetic baseline
+15. отдельно повторить populated synthetic baseline
     `156 → exact six migrations 157..162` и N/N-1 application compatibility;
-14. измерить concurrent index duration и metadata lock duration;
-15. проверить abort/retry и application rollback без удаления принятых
+16. измерить concurrent index duration и metadata lock duration;
+17. проверить abort/retry и application rollback без удаления принятых
     constraints;
-16. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
+18. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
     знает нового archive-first delete order и не является rollback-шагом;
-17. получить явное решение `GO` для schema-only release.
+19. получить явное решение `GO` для schema-only release.
 
 Ни один шаг не выполняется автоматически из этого документа.
 
@@ -409,8 +418,9 @@ Staff-модуль до `VERIFIED` и не меняет общий release decis
 release_sha:
 target:
 executed_at:
-snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
-pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
+current_release_sha:
+historical_snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
+historical_pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
 snapshot_admission_report_schema_version: 2
 baseline_authority_evidence_ref:
 baseline_marker_install_attestation_ref:
@@ -424,6 +434,12 @@ expand_admission_decision:
 expand_admission_database_identity_digest:
 expand_admission_content_digest:
 expand_admission_execution_digest:
+current_authority_evidence_ref:
+current_marker_rotation_attestation_ref:
+current_admission_decision:
+current_admission_database_identity_digest:
+current_admission_content_digest:
+current_admission_execution_digest:
 database_revision_before:
 database_revision_after:
 migration_count:
@@ -471,6 +487,10 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 
 ## 11. Changelog
 
+- `1.6.0`, 28.07.2026 — EXPAND зафиксирован как immutable protected prefix
+  `EXPAND_162`; current downstream inventory/planner path требует отдельную
+  allowlisted migration 163, `CURRENT_163` envelope/marker/admission и новый
+  exact candidate SHA. Прежние SHA помечены historical.
 - `1.5.0`, 28.07.2026 — runtime admission candidate остаётся
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; test evidence
   `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,

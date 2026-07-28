@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'node:crypto';
-import { Prisma, UserAccessScope, UserRole } from '@prisma/client';
+import {
+  Prisma,
+  TenantCustomerStage,
+  UserAccessScope,
+  UserRole,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   accessCapabilityCatalog,
@@ -41,7 +46,6 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.TRAINEE,
   ],
   [UserRole.ADMIN]: [
-    UserRole.OWNER,
     UserRole.ADMIN,
     UserRole.MANAGER,
     UserRole.BUYER,
@@ -384,6 +388,10 @@ export class UsersService {
     dto: UserAccountDto,
   ): Promise<UserAccount> {
     const { tenantId } = this.tenantContextService.resolve(actor);
+    await this.assertGenericIdentityMutationAllowed(
+      tenantId,
+      'direct user creation',
+    );
     const email = this.normalizeEmail(dto.email);
     const customRoleId = this.normalizeOptionalId(dto.customRoleId);
     const role = customRoleId
@@ -395,6 +403,7 @@ export class UsersService {
 
     this.assertEmail(email);
     this.assertPassword(password);
+    this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
     const [existingUser, storeIds, customRole] = await Promise.all([
       this.prisma.user.findUnique({ where: { email } }),
@@ -444,6 +453,10 @@ export class UsersService {
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
     const { tenantId } = this.tenantContextService.resolve(actor);
+    await this.assertGenericIdentityMutationAllowed(
+      tenantId,
+      'invite delivery',
+    );
     const email = this.normalizeOptionalEmail(dto.email);
     const fullName = this.normalizeNullableText(dto.fullName);
     const customRoleId = this.normalizeOptionalId(dto.customRoleId);
@@ -458,6 +471,7 @@ export class UsersService {
         'Invite must be bound to a valid email address',
       );
     }
+    this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
     const [existingUser, storeIds, customRole, stores] = await Promise.all([
       email ? this.prisma.user.findUnique({ where: { email } }) : null,
@@ -510,6 +524,10 @@ export class UsersService {
     dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
     const { tenantId } = this.tenantContextService.resolve(actor);
+    await this.assertGenericIdentityMutationAllowed(
+      tenantId,
+      'invite delivery',
+    );
     const existing = await this.prisma.userInvite.findFirst({
       where: { id, tenantId },
       include: userInviteInclude,
@@ -576,6 +594,7 @@ export class UsersService {
         'Invite must be bound to a valid email address',
       );
     }
+    this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
     await this.assertCanAssignAccountRole(actor, role, customRole, tenantId);
     this.assertNewScope(scope, storeIds);
@@ -734,6 +753,7 @@ export class UsersService {
       if (existing.id === actor.id) {
         throw new BadRequestException('You cannot change your own role');
       }
+      this.assertOwnerAssignmentUsesTransferWorkflow(nextRole);
       await this.assertCanAssignAccountRole(
         actor,
         nextRole,
@@ -759,6 +779,10 @@ export class UsersService {
       this.assertEmail(email);
 
       if (email !== existing.email) {
+        await this.assertGenericIdentityMutationAllowed(
+          tenantId,
+          'email change',
+        );
         const emailOwner = await this.prisma.user.findUnique({
           where: { email },
           select: { id: true },
@@ -872,6 +896,32 @@ export class UsersService {
     }
 
     return this.toAccount(updated, await this.getRoleOverrideMap(tenantId));
+  }
+
+  private async assertGenericIdentityMutationAllowed(
+    tenantId: string,
+    operation: 'direct user creation' | 'email change' | 'invite delivery',
+  ): Promise<void> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { customerStage: true },
+    });
+    if (!tenant) {
+      throw new NotFoundException('Tenant was not found');
+    }
+    if (tenant.customerStage === TenantCustomerStage.INTERNAL) {
+      return;
+    }
+
+    const messageByOperation = {
+      'direct user creation':
+        'External tenants must create users through email-bound invites',
+      'invite delivery':
+        'External tenant invitations require the verified email-delivery workflow',
+      'email change':
+        'External tenant email changes require the verified email-change workflow',
+    } satisfies Record<typeof operation, string>;
+    throw new ForbiddenException(messageByOperation[operation]);
   }
 
   async createAccessRole(
@@ -1325,6 +1375,14 @@ export class UsersService {
     throw new ForbiddenException('You cannot assign this role');
   }
 
+  private assertOwnerAssignmentUsesTransferWorkflow(role: UserRole) {
+    if (role === UserRole.OWNER) {
+      throw new ForbiddenException(
+        'OWNER assignment requires the dedicated owner-transfer workflow',
+      );
+    }
+  }
+
   private getAssignableRoles(actor: AuthenticatedUser) {
     return assignableRolesByActor[actor.role] ?? [];
   }
@@ -1594,9 +1652,11 @@ export class UsersService {
   private toRoleOptions(
     roleOverridesByRole: Map<UserRole, UserRoleOverrideRow>,
   ): UserRoleOption[] {
-    return baseRoleOptions.map((option) =>
-      this.toRoleOption(option.role, roleOverridesByRole.get(option.role)),
-    );
+    return baseRoleOptions
+      .filter((option) => option.role !== UserRole.OWNER)
+      .map((option) =>
+        this.toRoleOption(option.role, roleOverridesByRole.get(option.role)),
+      );
   }
 
   private toRoleOption(

@@ -79,6 +79,9 @@ jobs:
       - name: Validate staff task integrity EXPAND smoke command
         run: pnpm --filter database check:staff-task-integrity-expand-smoke
 
+      - name: Validate tenant execution control-plane upgrade smoke
+        run: pnpm --filter database check:tenant-execution-control-plane-upgrade-smoke
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -115,8 +118,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260727131000_staff_task_integrity_expand
-          EXPECTED_DATABASE_MIGRATION_COUNT: "162"
+          EXPECTED_DATABASE_MIGRATION: 20260728120000_tenant_execution_control_plane_expand
+          EXPECTED_DATABASE_MIGRATION_COUNT: "163"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -179,6 +182,11 @@ jobs:
 
       - name: Apply all migrations to a clean database
         run: pnpm --filter database db:deploy
+
+      - name: Rehearse tenant execution control-plane 162 to 163 upgrade and lock timeout
+        run: pnpm --filter database db:smoke:tenant-execution-control-plane-upgrade
+        env:
+          TENANT_EXECUTION_CONTROL_PLANE_UPGRADE_SMOKE_CONFIRM: run-tenant-execution-control-plane-upgrade-smoke
 
       - name: Verify database connectivity and migration state
         run: pnpm --filter database db:smoke

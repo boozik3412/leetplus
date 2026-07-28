@@ -88,6 +88,8 @@ mock.module(rootsModuleUrl.href, {
 const authority = await import("./staff-task-integrity-snapshot-authority.mjs");
 const admission = await import("./staff-task-integrity-snapshot-admission.mjs");
 const planner = await import("./staff-task-integrity-reconciliation-plan.mjs");
+const migrationState =
+  await import("./staff-task-integrity-migration-state.mjs");
 
 const encodedEnvelope = authority.encodeAuthorityEnvelope(FIXTURE_ENVELOPE);
 const authorityExpectedContract = Object.freeze({
@@ -180,8 +182,8 @@ function reportRows(databaseMarker, generatedAt = NOW) {
       database_authority_marker: databaseMarker,
     },
     migrationRow: {
-      migration_count: String(planner.EXPECTED_MIGRATION_COUNT),
-      latest_migration: planner.EXPECTED_LATEST_MIGRATION,
+      migration_count: String(migrationState.STAFF_TASK_FROZEN_PREFIX_COUNT),
+      latest_migration: migrationState.STAFF_TASK_FROZEN_PREFIX_LATEST,
       unfinished_migration_count: "0",
     },
     catalogRow: {
@@ -197,8 +199,8 @@ function reportRows(databaseMarker, generatedAt = NOW) {
     privilegeRow: privilegeRow(),
     migrationManifest: {
       ready: true,
-      expectedCount: planner.EXPECTED_MIGRATION_COUNT,
-      actualCount: planner.EXPECTED_MIGRATION_COUNT,
+      expectedCount: migrationState.STAFF_TASK_FROZEN_PREFIX_COUNT,
+      actualCount: migrationState.STAFF_TASK_FROZEN_PREFIX_COUNT,
       manifestDigest: "d".repeat(64),
     },
   };

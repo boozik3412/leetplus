@@ -3,7 +3,7 @@
 | Поле           | Значение                                                                                                                                                  |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner, SYNTHETIC proposal dry-run и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.10.0                                                                                                                                                    |
+| Версия         | 1.11.0                                                                                                                                                    |
 | Дата           | 28.07.2026                                                                                                                                                |
 | Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                                                      |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                                                    |
@@ -25,6 +25,13 @@ Synthetic row-level proposal evidence описан в отдельном
 Scheduler и scheduled all-tenant HTTP не зарегистрированы и всё ещё не
 применяют system execution contract, поэтому весь catalog slice и внешний тест
 остаются `NO-GO`.
+
+State contract после control-plane EXPAND разделён: StaffTask evidence
+остаётся bound к frozen `EXPAND_162`, а current production-like
+inventory/planner допускается только после `CURRENT_163` admission — exact
+prefix плюс allowlisted migration
+`20260728120000_tenant_execution_control_plane_expand`. Historical SHA ниже не
+являются evidence текущего незакоммиченного candidate.
 
 ## 1. Инвентаризация поверхности
 
@@ -202,9 +209,10 @@ Schema-only EXPAND реализован отдельным bounded candidate
 [EXPAND runbook](./staff-task-integrity-expand-runbook.md). Наличие candidate
 не отменяет обязательный production-like inventory и reconciliation.
 
-Aggregate-only reconciliation planner реализован candidate
-`2c74c663780b3f183be708a01431c22efe57a723` и описан в отдельном
+Aggregate-only reconciliation planner описан в отдельном
 [runbook](./staff-task-integrity-reconciliation-plan-runbook.md):
+historical candidate `2c74c663...` не является current evidence; exact
+current candidate SHA ещё не назначен.
 
 - использует одно соединение и одну `READ ONLY REPEATABLE READ` transaction;
 - требует exact target/confirmation, production attestation, 40-hex
@@ -215,10 +223,11 @@ Aggregate-only reconciliation planner реализован candidate
   `8 proposal + 29 operator + 6 review`;
 - считает actionable cap только по proposal/operator, исключая review-only
   counts;
-- выполняет schema-first exact gate
-  `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
-0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
-0 index mismatch`;
+- сохраняет protected StaffTask prefix `EXPAND_162`, но выполняет current
+  schema-first exact gate `CURRENT_163`, `migrationCount=163`, latest
+  `20260728120000_tenant_execution_control_plane_expand`, `unfinished=0`,
+  `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
+  `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
 - использует exits `0/1/2/3`;
 - считает `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` blocking;
 - fail-closed требует `inventoryExecuted === schema.ready`;
@@ -233,10 +242,12 @@ production-like evidence или apply authorization. Production-like row dry-run
 idempotent apply, locks/recheck, audit, rollback и повторный zero-diff остаются
 отдельным следующим P0.
 
-Snapshot admission evidence boundary зафиксирован на
-`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`. Он допускает только loopback
-snapshot, точные runtime bytes и migration manifest из Git artifact и одно из
-состояний `BASELINE_156` либо `EXPAND_162`. Logical allowlist содержит девять
+Historical snapshot admission evidence boundary зафиксирован на
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; это не current candidate
+evidence. Current admission также поддерживает `CURRENT_163` после exact
+allowlisted migration 163, но требует нового exact SHA и повторного evidence.
+Admission допускает только loopback snapshot, точные runtime bytes и migration
+manifest из Git artifact. Logical allowlist содержит девять
 relations, но роль получает table-level `SELECT` только на восемь; для `User`
 разрешены ровно `id`, `tenantId`, `isPlatformAdmin`, `isActive`,
 `accessScope`. Admission report использует schema `2`, planner/proposal —
@@ -244,7 +255,7 @@ schema `1`. Caller HMAC не является production-like authority:
 положительный допуск требует Ed25519 manifest, nonce-bound DB/approval
 evidence и совпадающий DB marker. Trusted-root registry намеренно пуст, поэтому
 production-like admission, inventory и planner остаются fail-closed `NO-GO`.
-Отдельный test evidence
+Отдельный historical test evidence
 `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
 admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в
 изолированном child-процессе. Remote CI evidence ещё pending; используемый
@@ -275,18 +286,18 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
   candidate;
 - real PostgreSQL race/rollback integration — 2 suites/8 tests, включая
   recurring 5/5, реализована и обязательна в CI;
-- integrity inventory contract — 9/9; clean PostgreSQL со 162 миграциями
-  `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
-- aggregate reconciliation planner contract — pass; clean real PostgreSQL
-  schema прошла exact gate `162/latest/0 + 14/14/0/0 + 5/0` и вернула `PASS`;
-- snapshot admission contract — `19` admission unit, `9` authority unit и
+- historical integrity inventory contract — 9/9; frozen clean PostgreSQL
+  prefix 162 `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
+- historical aggregate reconciliation planner contract — pass на prefix 162;
+  current `CURRENT_163` production-like evidence ещё pending;
+- historical snapshot admission contract — `19` admission unit, `9` authority unit и
   `46` offline smoke checks; staged PostgreSQL 16.13 smoke прошёл `23`
   сценария `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact восемь
   table grants + пять `User` columns, admission schema `2`, все восемь
   proposal-кодов/восемь occurrences/семь cases, coalescing, parity
   `10 blocking + 2 review`, cap `9 reject / 10 findings` и негативные
   privilege/trigger/tamper/privacy проверки;
-- public-only pre-signed pinned-path test — `LOCAL PASS` на test evidence
+- historical public-only pre-signed pinned-path test — `LOCAL PASS` на evidence
   `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child; remote CI
   evidence pending, experimental Node 22 module mock — P2;
 - proposal dry-run contract — schema `1`, unit `14/14`; HMAC-authenticated

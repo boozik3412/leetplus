@@ -2,11 +2,12 @@
 
 | Поле                  | Значение                                                                        |
 | --------------------- | ------------------------------------------------------------------------------- |
-| Статус                | `IMPLEMENTED_CANDIDATE`; только `SYNTHETIC`; не deployed                        |
-| Версия                | 1.2.0                                                                           |
+| Статус                | Historical `IMPLEMENTED_CANDIDATE`; только `SYNTHETIC`; не deployed             |
+| Версия                | 1.3.0                                                                           |
 | Дата                  | 28.07.2026                                                                      |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                            |
-| Candidate SHA         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — not deployed                       |
+| Historical SHA        | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current candidate evidence       |
+| Current candidate SHA | Не назначен; новый SHA требует полного повторного evidence                       |
 | Report schema version | 1                                                                               |
 | Admission schema      | 2                                                                               |
 | Требуемая DB schema   | `EXPAND_162`; latest `20260727131000_staff_task_integrity_expand`               |
@@ -145,8 +146,9 @@ Dry-run наследует admission release authority:
 - worktree mutation не может подменить проверяемый release;
 - admission source, smoke, aggregate planner, proposal dry-run, inventory и
   migration directory входят в release source manifest;
-- candidate запускается только из clean checkout exact
-  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`.
+- historical evidence запускалось из clean checkout exact
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; новый запуск обязан использовать
+  новый exact reviewed current candidate SHA.
 
 Новый commit требует нового `RELEASE_SHA`, повторного contract test и
 PostgreSQL smoke. Старое evidence нельзя переносить на новый SHA.
@@ -277,7 +279,8 @@ Exit `0` не означает готовность к apply, `VALIDATE`, deploy
 
 ## 9. Полученное evidence
 
-Для runtime SHA `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`:
+Historical evidence для runtime SHA
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`:
 
 - proposal dry-run contract suite: `14/14` — `PASS`;
 - aggregate planner suite: `11/11` — `PASS`;
@@ -287,7 +290,8 @@ Exit `0` не означает готовность к apply, `VALIDATE`, deploy
 - database typecheck, Prisma validate и diff/format checks — `PASS`;
 - реальный PostgreSQL 16.13 disposable rehearsal: `23` scenarios — `PASS`.
 
-Test-evidence SHA `2341b99937e54cc50d1763a0a794d975816c72ce`
+Historical test-evidence SHA
+`2341b99937e54cc50d1763a0a794d975816c72ce`
 добавляет public-only pre-signed pinned-path test: admission suite `19/19`,
 `LOCAL PASS` в isolated child.
 
@@ -377,6 +381,9 @@ external beta                        = NO-GO
 
 ## Changelog
 
+- `1.3.0`, 28.07.2026 — прежние runtime/test SHA помечены historical.
+  `SYNTHETIC EXPAND_162` остаётся нормативным состоянием disposable harness,
+  но новый запуск требует exact current candidate SHA и повторного evidence.
 - `1.2.0`, 28.07.2026 — runtime candidate остаётся
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; test evidence
   `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,

@@ -8,6 +8,7 @@ import {
   BASELINE_LATEST_MIGRATION,
   BASELINE_MIGRATION_COUNT,
   BASELINE_STATE,
+  CURRENT_STATE,
   EXPAND_STATE,
   ISOLATION_ATTESTATION,
   PRIVILEGE_STATE_SQL,
@@ -28,6 +29,10 @@ import {
   PARENT_INDEXES,
   SIMPLE_CONSTRAINTS,
 } from "./staff-task-integrity-reconciliation-plan.mjs";
+import {
+  STAFF_TASK_FROZEN_PREFIX_COUNT,
+  STAFF_TASK_FROZEN_PREFIX_LATEST,
+} from "./staff-task-integrity-migration-state.mjs";
 import { computeNonceBoundDatabaseIdentityDigest } from "./staff-task-integrity-snapshot-authority.mjs";
 import { PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS } from "./staff-task-integrity-snapshot-authority-roots.mjs";
 
@@ -41,7 +46,7 @@ function environment(overrides = {}) {
     DATABASE_URL: `postgresql://reader:secret@127.0.0.1:5432/${SYNTHETIC_DATABASE}?schema=public`,
     RELEASE_SHA: "a".repeat(40),
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION: "SYNTHETIC",
-    STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: EXPAND_STATE,
+    STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: CURRENT_STATE,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
       SYNTHETIC_DATABASE,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM: RUN_CONFIRMATION,
@@ -170,6 +175,23 @@ function baselineRows() {
   };
 }
 
+function frozenExpandRows() {
+  return {
+    ...expandRows(),
+    migrationRow: {
+      migration_count: String(STAFF_TASK_FROZEN_PREFIX_COUNT),
+      latest_migration: STAFF_TASK_FROZEN_PREFIX_LATEST,
+      unfinished_migration_count: "0",
+    },
+    migrationManifest: {
+      ready: true,
+      expectedCount: STAFF_TASK_FROZEN_PREFIX_COUNT,
+      actualCount: STAFF_TASK_FROZEN_PREFIX_COUNT,
+      manifestDigest: "e".repeat(64),
+    },
+  };
+}
+
 test("CLI is read-only and rejects mutation-like arguments", () => {
   assert.deepEqual(parseArguments(["--pretty", "--self-test"]), {
     help: false,
@@ -186,7 +208,7 @@ test("CLI is read-only and rejects mutation-like arguments", () => {
 test("synthetic runtime contract is anchored to a local test database", () => {
   const config = parseRuntimeContract(environment(), NOW);
   assert.equal(config.classification, "SYNTHETIC");
-  assert.equal(config.expectedState, EXPAND_STATE);
+  assert.equal(config.expectedState, CURRENT_STATE);
   assert.equal(config.expectedDatabaseName, SYNTHETIC_DATABASE);
   assert.equal(config.localHost, true);
 
@@ -481,12 +503,25 @@ test("User evidence stays column-scoped and missing columns reject structurally"
   assert.match(PRIVILEGE_STATE_SQL, /privilege\.grantee = 0/u);
 });
 
-test("exact EXPAND_162 state is admitted without running inventory", () => {
+test("exact current release state is admitted without running inventory", () => {
   const config = parseRuntimeContract(environment(), NOW);
   const report = buildAdmissionReport({ config, ...expandRows() });
   assert.equal(report.summary.decision, "ADMITTED");
   assert.equal(report.summary.inventoryExecuted, false);
   assert.equal(report.summary.plannerExecuted, false);
+  assert.equal(report.database.migrations.detectedState, CURRENT_STATE);
+  assert.equal(exitCodeForAdmission(report, HMAC_KEY, NOW), 0);
+});
+
+test("exact EXPAND_162 prefix remains independently admissible", () => {
+  const config = parseRuntimeContract(
+    environment({
+      STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: EXPAND_STATE,
+    }),
+    NOW,
+  );
+  const report = buildAdmissionReport({ config, ...frozenExpandRows() });
+  assert.equal(report.summary.decision, "ADMITTED");
   assert.equal(report.database.migrations.detectedState, EXPAND_STATE);
   assert.equal(exitCodeForAdmission(report, HMAC_KEY, NOW), 0);
 });

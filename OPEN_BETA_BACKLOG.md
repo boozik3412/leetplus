@@ -1,12 +1,11 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 28.07.2026
-- Версия: 1.25
+- Версия: 1.29
 - Статус документа: активный launch backlog
-- Текущий release decision: `NO-GO` для всех внешних доступов; один named
-  `SINGLE_DESIGN_PARTNER` может получить отдельный `GO-LIMITED` только после
-  Gate 1DP в изолированном контуре, общий внешний pilot остаётся `NO-GO` до
-  Gate 2
+- Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
+  первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
+  только после Gate 1MT и Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
@@ -30,28 +29,35 @@
 - Operational tenant получает реальные `name`, `slug` и `domain`.
 - Отдельный публичный demo, если он нужен, создаётся заново как синтетический `public-demo` без реальных операционных, персональных и интеграционных данных.
 - Для каждой новой независимой сети создаётся отдельный tenant. Несвязанные сети не объединяются в одном tenant.
-- Ранний совместный тест с одним design partner не использует shared
-  production: для него создаются отдельные web, API, PostgreSQL, secrets и
-  отдельный `Tenant D` с единственным `Store D1`. Текущая сеть остаётся
-  существующим `Tenant A` с четырьмя `Store A1..A4` и не копируется в этот
-  контур.
-- Профиль `SINGLE_DESIGN_PARTNER_V1` проверяется progressive/manual slices до
-  `DESIGN_PARTNER GO`, но первые credentials одновременно открывают весь exact
-  in-app состав `DP-S0..DP-S4`. Progressive после старта применим только к
-  новым surfaces и отдельно gated outbound effects; schedulers и outbound
-  остаются `OFF` до собственных `GO`.
+- Целевая beta-топология общая: shared web, API, workers, PostgreSQL и
+  Telegram. Текущая сеть остаётся `Tenant A` с `Store A1..A4`; первый
+  независимый внешний клуб создаётся как новый `Tenant B` с `Store B1` в том
+  же data plane. Данные и полномочия пересекаются только через server-side
+  tenant/store policy, а не через отдельные runtime.
+- Владелец `Tenant B` получает email-bound owner invite, принимает его и затем
+  через verified email workflow сам приглашает пользователей, назначает
+  `NETWORK | STORES` scope и подключает интеграции только своей сети. Generic
+  direct-create и выдача raw invite URL владельцу не являются допустимым
+  production-путём.
+- Один общий Telegram-контур обслуживает несколько tenant; tenant/store
+  определяются из persisted identity и настроек. Отдельный бот на каждого B2B
+  пользователя не создаётся.
+- `SINGLE_DESIGN_PARTNER_V1` с отдельными web/API/PostgreSQL/secrets сохраняется
+  только как contingency или будущая enterprise-isolation option. Он не
+  является основным способом первого теста и не сокращает обязательные shared
+  multi-tenant gates.
 - Открытый тест сначала остаётся заявочным и invite-only. Публичная self-registration не является условием запуска.
 - Первый внешний тест не ограничивается только аналитикой. Тестовый tenant получает обязательный состав модулей, перечисленный ниже.
 
 ## 3. Обязательный состав первого внешнего теста
 
-Полный состав ниже является обязательным для общей первой внешней когорты
-после Gate 2. Для изолированного `SINGLE_DESIGN_PARTNER` все согласованные
-in-app slices сначала независимо достигают `VERIFIED + ENFORCED`, а затем
-открываются одновременно первыми credentials как `DP-S0..DP-S4`. До этого
-credentials не выдаются. Поэтапно после старта включаются только новые
-surfaces; unattended jobs и внешние effects остаются выключены до отдельных
-outbound gates.
+Полный состав ниже является обязательным для первого внешнего `Tenant B`
+после Gate 1MT и Gate 2. Все in-app surfaces должны иметь
+`VERIFIED + ENFORCED` tenant/store/capability policy до owner invite. Модуль
+`INTEGRATIONS` является supporting control-plane: владелец может подключить и
+проверить источник только своей сети, но sync, reward write-back, массовые
+сообщения и прочие внешние effects включаются отдельно через
+`OFF → SHADOW → CANARY → LIVE`.
 
 ### 3.1. Геймификация — целиком
 
@@ -199,10 +205,10 @@ outbound gates.
 
 | ID           | Приоритет | Статус        | Задача                                             | Критерии приёмки                                                                                                                                                                        | Зависимости                              |
 | ------------ | --------- | ------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| BETA-TEN-001 | P0        | Запланировано | Разделить operational lifecycle и customer stage   | Существуют lifecycle `ACTIVE/SUSPENDED/ARCHIVED` и отдельный stage `INTERNAL/PILOT/BETA/LIVE`; сохраняются cohort, trial dates, support owner и onboarding state                        | BETA-SRC-002                             |
-| BETA-TEN-002 | P0        | Запланировано | Добавить tenant/store entitlements                 | Профиль первого теста включает `gamification`, `assortment`, `staff`, `communications`, `users_roles`; read/write/outbound управляются отдельно; изменения имеют reason, expiry и audit | BETA-TEN-001                             |
-| BETA-TEN-003 | P0        | Запланировано | Реализовать idempotent Platform Admin provisioning | Одно действие создаёт tenant в `PROVISIONING`, обязательный beta entitlement profile, email-bound OWNER invite, support owner и checklist; повтор не создаёт дублей                     | BETA-TEN-001, BETA-TEN-002, BETA-SEC-009 |
-| BETA-TEN-004 | P0        | Запланировано | Ввести единый `TenantExecutionPolicy`              | Login, invites, HTTP writes, schedulers, sync, messages, rewards и exports проверяют lifecycle, trial, entitlement и store scope; suspend останавливает обработку немедленно            | BETA-TEN-002, BETA-SEC-003               |
+| BETA-TEN-001 | P0        | В работе      | Разделить operational lifecycle и customer stage   | Существуют lifecycle `ACTIVE/SUSPENDED/ARCHIVED` и отдельный stage `INTERNAL/PILOT/BETA/LIVE`; сохраняются cohort, trial dates, support owner и onboarding state                        | BETA-SRC-002                             |
+| BETA-TEN-002 | P0        | В работе      | Добавить tenant/store entitlements                 | Полный атомарный профиль первого теста содержит пять product rows `gamification`, `assortment`, `staff`, `communications`, `users_roles` и supporting row `integrations`; initial state для всех шести — `read/write=ON`, `outbound=OFF`; изменения имеют revision, reason, expiry и audit, а outbound включается только отдельным workflow | BETA-TEN-001                             |
+| BETA-TEN-003 | P0        | В работе      | Реализовать idempotent Platform Admin provisioning | Foundation candidate атомарно создаёт `PILOT/SUSPENDED/OWNER_INVITED` tenant, неактивный Store, OWNER override, полный six-row профиль и email-bound `NETWORK OWNER` invite; replay не создаёт дублей и не раскрывает one-time URL повторно; до приёмки нужны real PostgreSQL/concurrency evidence, email delivery и reissue/rotation workflow | BETA-TEN-001, BETA-TEN-002, BETA-SEC-009 |
+| BETA-TEN-004 | P0        | В работе      | Ввести единый `TenantExecutionPolicy`              | Login, invites, HTTP writes, schedulers, sync, messages, rewards и exports проверяют lifecycle, trial, entitlement и store scope; generic lifecycle mutation запрещена для любого non-`INTERNAL` tenant, а activation/suspend external tenant выполняются только dedicated workflow; suspend останавливает обработку немедленно | BETA-TEN-002, BETA-SEC-003               |
 | BETA-TEN-005 | P1        | Запланировано | Расширить Platform Admin cockpit                   | Видны stage, trial, entitlement, owner invite, onboarding, stores, source freshness, sync errors, last activity, support owner и incidents                                              | BETA-TEN-003, BETA-OPS-010               |
 | BETA-TEN-006 | P0        | Запланировано | Реализовать offboarding и retention workflow       | Suspend/archive отзывает invites/sessions, выключает integrations и jobs; data export/delete/retention выполняются по утверждённой процедуре и аудируются                               | BETA-TEN-004                             |
 | BETA-TEN-007 | P0        | Запланировано | Поддержать безопасную смену tenant slug            | Старые QR, Telegram и guest URLs имеют контролируемый alias/redirect либо перевыпускаются; alias не позволяет обратиться к чужому tenant                                                | BETA-SEC-003                             |
@@ -214,8 +220,8 @@ outbound gates.
 | BETA-IAM-001 | P0        | В работе      | Утвердить role/capability matrix обязательного beta scope | Для OWNER, ADMIN, network manager, club manager и сотрудников перечислены разрешённые действия во всех пяти обязательных контурах; deny-by-default                                                          | BETA-SEC-004               |
 | BETA-IAM-002 | P0        | В работе      | Реализовать явный network-level и club-level scope        | `NETWORK` и `STORES` — явные режимы; отсутствие `UserStoreAccess` не повышает пользователя до NETWORK; смена scope действует сразу на API, BFF, exports, files и активные сессии                            | BETA-SEC-003, BETA-IAM-001 |
 | BETA-IAM-003 | P0        | В работе      | Ограничить полномочия управляющего actor                  | Store manager не может создать NETWORK user, назначить чужой store, выдать роль/capability выше собственной или управлять пользователем вне пересечения scopes; защищены self-escalation и последний OWNER  | BETA-IAM-001, BETA-IAM-002 |
-| BETA-IAM-004 | P0        | В работе      | Завершить invite/resend/revoke workflow                   | Только email-bound opaque invites; update ротирует token; send/resend/revoke/accept аудируются; TTL настраивается; actor не может выдать invite шире своего scope; revoked/expired token не работает        | BETA-SEC-009, BETA-IAM-003 |
-| BETA-IAM-005 | P0        | Запланировано | Ограничить особо чувствительное повышение привилегий      | Только явно разрешённая роль может назначить OWNER или чувствительные capabilities; Platform Admin нельзя назначить tenant API                                                                              | BETA-IAM-001, BETA-IAM-003 |
+| BETA-IAM-004 | P0        | В работе      | Завершить invite/resend/revoke workflow                   | Для external tenant generic direct-create, invite issue/rotation и email change остаются fail-closed; verified workflow доставляет opaque token только на bound mailbox, не возвращает raw URL tenant actor, резервирует normalized email под lock, аудирует send/resend/revoke/accept и отклоняет revoked/expired token | BETA-SEC-009, BETA-IAM-003 |
+| BETA-IAM-005 | P0        | В работе      | Ограничить особо чувствительное повышение привилегий      | Generic users/invites API не назначает OWNER; добавление/смена OWNER выполняется только отдельным атомарным owner-transfer workflow; Platform Admin нельзя назначить tenant API                                | BETA-IAM-001, BETA-IAM-003 |
 | BETA-IAM-006 | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                       | BETA-IAM-001               |
 | BETA-IAM-007 | P0        | Запланировано | Добавить журнал доступа и управление сессиями             | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии                                                                                         | BETA-SEC-010               |
 | BETA-IAM-008 | P1        | Запланировано | Принять multi-network identity model                      | Решено, может ли один email состоять в нескольких независимых tenant; глобальная уникальность `User.email` либо сохранена как явное ограничение первого pilot, либо заменена membership-моделью с миграцией | BETA-TEN-003               |
@@ -279,6 +285,15 @@ outbound gates.
 | BETA-MOD-STAFF-009 | P0        | В работе      | Защитить attachments и evidence                     | Upload/download/delete проверяют parent resource, tenant/store/task access; тип/размер ограничены; URL не открывает чужой файл; lifecycle, quarantine и retention определены в `docs/security/access-scope/v1/attachment-acl-rollout.md`; фактический checkpoint — `attachment-acl-implementation-checkpoint.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | BETA-MOD-STAFF-001, BETA-SEC-006 |
 | BETA-MOD-STAFF-010 | P0        | Запланировано | Проверить AI-assistant как безопасную функцию staff | Только локальный deterministic режим; нет внешней отправки PII; вывод не изменяет задачи/регламенты/обучение без подтверждения                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | BETA-MOD-STAFF-001               |
 | BETA-MOD-STAFF-011 | P0        | Запланировано | Добавить staff end-to-end regression                | OWNER, network manager, club manager и employee проходят свои сценарии; запрещённые stores, зарплата, дисциплина, exports и attachments дают deny                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | BETA-SEC-006, BETA-OPS-003       |
+
+Current-state уточнение `BETA-MOD-STAFF-003`: перечисленные в строке
+`EXPAND_162` gate и старые SHA являются frozen/historical evidence. Protected
+StaffTask prefix остаётся 162, но current production-like
+admission/inventory/planner допускается только на `CURRENT_163` — exact prefix
+плюс allowlisted migration
+`20260728120000_tenant_execution_control_plane_expand`. Новый exact candidate
+SHA и production-like evidence ещё pending; статус остаётся `В работе /
+NO-GO`.
 
 ### 5.9. Обязательный модуль: коммуникации
 
@@ -1572,10 +1587,9 @@ external beta                       = NO-GO
 Ближайший security/data slice детализирует первую фазу канонической
 последовательности из раздела 7:
 
-1. для test-evidence commit
-   `2341b99937e54cc50d1763a0a794d975816c72ce` получить зелёный remote CI и
-   независимый review; runtime candidate остаётся
-   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`;
+1. считать `2341b999...`/`044ceca2...` historical evidence; назначить exact
+   current candidate SHA и получить для него зелёный remote CI и независимый
+   review;
 2. отдельно утвердить и enrol reviewed Ed25519 public root, создать
    защищённый signer и acquisition/evidence record вне caller-controlled env,
    database `COMMENT` и output report;
@@ -1585,11 +1599,13 @@ external beta                       = NO-GO
 4. отдельно выполнить production-like admission: подписанный state-bound
    `BASELINE_156` envelope → exact DB marker → admission → migrations
    `157..162` → новый `EXPAND_162` envelope с новым nonce-bound binding →
-   marker rotation → второй admission. Baseline envelope/marker не
-   переиспользовать; любой non-zero exit или
+   marker rotation → второй admission → exact allowlisted migration 163 →
+   новый `CURRENT_163` envelope/marker → третий admission. Protected StaffTask
+   prefix остаётся 162; предыдущие envelope/marker не переиспользовать; любой
+   non-zero exit или
    marker/freshness/blob/authority/ACL mismatch останавливает работу;
-5. только после обоих admission отдельно выполнить read-only inventory и
-   aggregate planner, назначить owner каждому non-zero code;
+5. только после всех трёх admission отдельно выполнить read-only inventory и
+   aggregate planner на current DB 163, назначить owner каждому non-zero code;
 6. отдельно спроектировать, утвердить и выполнить production-like row
    dry-run с protected row evidence; synthetic/HMAC report не засчитывать;
 7. отдельным изменением реализовать explicit idempotent apply с immutable
@@ -1643,8 +1659,8 @@ enrollment, не production-like admission и не разрешение на dep
 
 Канонический следующий порядок:
 
-1. получить зелёный remote CI и независимый review exact test-evidence commit
-   `2341b99937e54cc50d1763a0a794d975816c72ce`;
+1. считать `2341b999...` historical test evidence; назначить current candidate
+   SHA и получить для него зелёный remote CI и независимый review;
 2. отдельным security change enrol reviewed public root и развернуть
    protected signer/acquisition evidence boundary;
 3. получить свежий approved production-like snapshot;
@@ -1653,7 +1669,11 @@ enrollment, не production-like admission и не разрешение на dep
 5. применить только migrations `157..162`, выпустить новый signed
    `EXPAND_162` envelope с новым nonce-bound identity, выполнить marker
    rotation и второй admission; baseline envelope/marker reuse запрещён;
-6. затем отдельно проходить inventory/planner, row dry-run,
+6. применить exact allowlisted migration
+   `20260728120000_tenant_execution_control_plane_expand`, выпустить отдельный
+   `CURRENT_163` envelope, снова ротировать marker и пройти третий admission;
+   StaffTask protected prefix остаётся 162;
+7. затем отдельно проходить inventory/planner на current DB 163, row dry-run,
    apply/rollback/zero-diff и последующие Gate 2A/Gate 2 этапы из раздела 7.
 
 Топология и обязательный beta scope не меняются: четыре текущих клуба остаются
@@ -1664,11 +1684,12 @@ Store.
 
 Release decision остаётся `NO-GO`.
 
-### 5.26. `SINGLE_DESIGN_PARTNER`: ранний изолированный совместный тест — 28.07.2026
+### 5.26. `SINGLE_DESIGN_PARTNER`: contingency/enterprise isolation — 28.07.2026
 
-Это отдельная launch lane для одного заранее выбранного клуба, который вместе
-с командой LeetPlus проверяет продукт до общей внешней когорты. Она не
-ослабляет Gate 2 и не разрешает подключать второго внешнего tenant.
+Это сохранённая резервная lane для contractual enterprise isolation либо
+аварийного снижения blast radius. Она не является основным способом первого
+внешнего теста, не ослабляет Gate 1MT/Gate 2 и не разрешает обход
+shared-multitenant acceptance.
 
 Фиксированная topology:
 
@@ -1697,12 +1718,9 @@ database URL, encryption/signing/integration secrets и runtime processes не
 Текущий статус — `NO-GO`. Fail-closed bootstrap/rotate/suspend CLI, API startup
 validation isolated overlay и запрет generic lifecycle activation уже
 реализованы как candidate, но не создают инфраструктуру или разрешение на
-выдачу credentials. Самый ранний ориентир — `2–4 рабочих дня` после
-фактической реализации изоляции, persisted entitlements, reviewed activation,
-полного согласованного набора `DP-S0..DP-S4` и прохождения всех Gate 1DP
-checks. Это не
-календарное обещание: любой failed check, security finding или отсутствие
-owner/rollback продлевает срок.
+выдачу credentials. Календарное окно этой резервной lane не назначено: она
+возобновляется только отдельным product/security решением после оценки причин,
+из-за которых shared lane неприменима.
 
 | ID          | Приоритет | Статус        | Задача                                                     | Критерии приёмки                                                                                                                                                                                                                                                                                                                                                                                | Зависимости                                                 |
 | ----------- | --------- | ------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -1789,9 +1807,112 @@ Progressive activation contract:
 `outbound OFF → module writes OFF → jobs stop → sessions/invites revoke →
 Tenant D SUSPENDED`; evidence сохраняется, destructive rollback запрещён.
 
-Успех DP-1 не завершает Gate 2 или Gate 3 и не засчитывает обязательные семь
-дней internal alpha текущей сети. До фактического выполнения
+Успех DP-1 не завершает Gate 1MT, Gate 2 или Gate 3 и не засчитывает
+обязательные семь дней internal alpha текущей сети. До фактического выполнения
 `BETA-DP-001..010` и `BETA-DP-012` решение для DP-1 остаётся `NO-GO`.
+
+### 5.27. `SHARED_MULTI_TENANT_BETA`: основной путь первого внешнего клуба — 28.07.2026
+
+Целевая topology:
+
+```text
+SHARED DATA PLANE
+  shared web + API + workers + PostgreSQL + Telegram
+    Tenant A: Store A1, A2, A3, A4
+    Tenant B: Store B1
+```
+
+Первый внешний владелец получает email-bound invite максимальной tenant-роли,
+но не Platform Admin. После принятия invite он управляет пользователями,
+ролями, разрешёнными клубами и интеграциями только `Tenant B`. Любой доступ
+определяется пересечением:
+
+```text
+tenant lifecycle/stage/trial
+∩ module read/write/outbound entitlement
+∩ actor capability
+∩ NETWORK | STORES scope
+∩ resource ownership / outbound policy
+```
+
+Отсутствие любого элемента даёт deny-by-default. Полный профиль состоит из
+пяти product rows и шестой supporting row `INTEGRATIONS`. `INTEGRATIONS` не
+является шестым открытым продуктовым модулем: это supporting control-plane
+для настройки собственного источника. Для первого доступа у всех шести rows
+`read=ON`, `write=ON`, `outbound=OFF`; проверка credentials, preview/mapping
+и первичный read-only sync отделены от unattended sync и внешних write-back.
+
+| ID          | Приоритет | Статус        | Задача                                                        | Критерии приёмки                                                                                                                                                                                                                                                                              | Зависимости                                                   |
+| ----------- | --------- | ------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| BETA-MT-001 | P0        | В работе      | Зафиксировать shared topology и tenant creation contract       | Один manifest описывает shared web/API/workers/PostgreSQL/Telegram, `Tenant A/A1..A4` и новый `Tenant B/B1`; создание B не меняет A и не требует ручного SQL; public demo не содержит operational data                                                                                             | BETA-SRC-002, BETA-CUT-002                                   |
+| BETA-MT-002 | P0        | В работе      | Реализовать persisted stage/trial/module entitlements          | `INTERNAL/PILOT/BETA/LIVE`, onboarding state, trial dates и полный набор из шести rows `GAMIFICATION/ASSORTMENT/STAFF/COMMUNICATIONS/USERS_ROLES/INTEGRATIONS` хранятся с общей revision, reason, validity и audit; initial `read/write=ON`, `outbound=OFF`; missing/expired/incomplete/mixed-revision state запрещает действие | BETA-TEN-001, BETA-TEN-002                                   |
+| BETA-MT-003 | P0        | В работе      | Применить fail-closed `TenantExecutionPolicy` ко всем путям     | Login/invite, API/BFF, exports/files, jobs, sync, messages, rewards и Telegram пересекают lifecycle/stage/trial/entitlement со scope/capability; generic lifecycle mutation fail-closed запрещена для любого non-`INTERNAL` tenant, external activation/suspend принадлежат dedicated workflows; suspend/expiry прекращают новые HTTP и background actions без restart; неизвестный tenant/module/action запрещён | BETA-TEN-004, BETA-SEC-003..006                              |
+| BETA-MT-004 | P0        | В работе      | Реализовать idempotent shared provisioning и owner invite      | Foundation candidate: Platform Admin одной serializable-транзакцией создаёт ровно один `PILOT/SUSPENDED/OWNER_INVITED` `Tenant B` с revision 1, один неактивный `Store B1`, OWNER role override, exact six-row `read/write=ON + outbound=OFF` профиль, support owner и email-bound `NETWORK OWNER` invite; audit хранит request digest; идентичный replay не создаёт дублей и не раскрывает one-time URL повторно; Platform Admin revoke возвращает только pristine pre-owner tenant в `SUSPENDED/PROVISIONING`. До статуса «Готово» обязательны real PostgreSQL/concurrency evidence, email delivery, invite reissue/rotation и dedicated activation workflow | BETA-TEN-003, BETA-SEC-009, BETA-IAM-001..005                |
+| BETA-MT-005 | P0        | В работе      | Закрыть delegation и store authority во всех beta-модулях      | OWNER/ADMIN не могут назначить роль/scope/capability выше допустимого; generic API не назначает OWNER, а отдельный owner-transfer workflow сохраняет последнего active NETWORK OWNER; Store list/detail/write и все GAMIFICATION/ASSORTMENT/STAFF/COMMUNICATIONS/USERS_ROLES surfaces применяют тот же `NETWORK | STORES` authority | BETA-IAM-001..007, соответствующие BETA-MOD-*                |
+| BETA-MT-006 | P0        | Запланировано | Сделать безопасный self-service `INTEGRATIONS` control-plane   | Tenant owner сохраняет только свои зашифрованные credentials; endpoint allowlist, DNS/IP recheck, timeout/retry/circuit breaker и audit обязательны; preview показывает доступные внешние клубы, exact mapping создаёт только выбранный Store; ключ не импортирует остальные клубы domain/account       | BETA-MOD-ASSORT-006, BETA-SEC-008                            |
+| BETA-MT-007 | P0        | Запланировано | Доказать двухtenantную изоляцию на общем PostgreSQL/runtime     | Реальная PostgreSQL fixture содержит A/A1/A2 и B/B1; list/detail/aggregate/write/export/file/BFF/browser/job/SSE/Telegram negative matrix зелёная для пяти product modules и supporting `INTEGRATIONS`; stale token, hidden UUID, forbidden filter, scope change и owner delegation fail-closed; нет test-only policy bypass | BETA-MT-003..006, BETA-OPS-002, BETA-OPS-003                 |
+| BETA-MT-008 | P0        | Запланировано | Подготовить общий worker/Telegram execution plane              | Jobs получают явную tenant/store system identity, durable lease/fencing и idempotency; один shared Telegram bot маршрутизирует update в правильный tenant/store; update ID дедуплицируется durable; tenant suspend и per-store kill switch останавливают effects; hardcoded tenant/store отсутствуют    | BETA-MT-003, BETA-OPS-006, BETA-MOD-GAME-006                 |
+| BETA-MT-009 | P0        | Запланировано | Пройти полный module acceptance первого `Tenant B`              | Все пять product modules и supporting `INTEGRATIONS` доступны согласно полному six-row профилю; staff включает контроль, мотивацию, регламенты, checklist, обучение и knowledge base; salary только planning; in-app communications включены; integrations прошли preview/read-only sync; каждый outbound effect остаётся отдельно gated | BETA-MT-005..008, все BETA-MOD-* P0                          |
+| BETA-MT-010 | P0        | Запланировано | Принять shared beta access decision и выполнить day-0           | Gate 1MT и Gate 2 закрыты; exact SHA/CI/backup/restore/rollback/alerts приняты; protected `SHARED BETA GO` содержит Tenant/Store aliases, entitlement revision, trial, approver, support/rollback owner и stop conditions; owner invite создаётся после GO; day-0 login/scope/feedback/kill-switch smoke зелёный | BETA-MT-001..009, BETA-CUT-009, BETA-PILOT-005..006          |
+| BETA-MT-011 | P0        | Запланировано | Провести controlled first-club cycle и offboarding              | Один новый tenant активируется за change window; D1/D7 review привязаны к SHA; suspend, session/invite revoke, integration stop, export/retention и support подтверждены; второй внешний tenant не создаётся до принятия first-club review и capacity/incident decision                                | BETA-MT-010                                                  |
+
+Implementation checkpoint `Tenant execution control plane 1.4`:
+
+- новая сеть fail-closed создаётся как
+  `SUSPENDED + INTERNAL + PROVISIONING + profileRevision=0`;
+- persisted lifecycle/stage/onboarding/trial и атомарный six-row entitlement
+  profile реализованы; initial state для всех шести —
+  `read/write=ON, outbound=OFF`; generic mutation всегда отклоняет
+  `outbound=ON` и допускает только same-state update; смены
+  `customerStage` и onboarding state зарезервированы за dedicated workflows;
+  mutation защищена revision/`updatedAt` CAS,
+  request-ID idempotency и audit в одной транзакции;
+- login/JWT/invite admission учитывает свежий tenant state; первый OWNER
+  принимается только как `NETWORK` без stores/custom role и обязательно
+  переводит `OWNER_INVITED → ONBOARDING` под tenant row lock;
+- generic users/invites API больше не создаёт и не назначает OWNER; отдельный
+  owner-transfer workflow ещё не реализован;
+- для external tenant generic direct user creation, invite issue/rotation и
+  email change fail-closed до verified email delivery/change workflows. Это
+  исключает получение raw invite URL tenant actor и захват чужого глобального
+  email без доказательства владения mailbox;
+- database default с `User.role` удалён: любой create/invite/transfer path
+  обязан назначать роль явно;
+- candidate shared provisioning endpoint уже атомарно создаёт
+  `PILOT/SUSPENDED/OWNER_INVITED/revision 1` tenant, один неактивный Store,
+  OWNER role override, exact six-row `read/write=ON + outbound=OFF` profile,
+  email-bound `NETWORK OWNER` invite и audit с request digest; идентичный
+  replay не создаёт дублей и намеренно не раскрывает one-time URL повторно;
+  trial начинается в пределах 24 часов от provisioning, а invite сохраняет
+  минимум 24 часа на принятие от более позднего момента:
+  `max(provisioning time, trialStartsAt)`; идентичный replay остаётся
+  доступным после истечения create-only temporal admission window;
+- candidate Platform Admin revoke удаляет initial invite и возвращает только
+  pristine pre-owner tenant в `SUSPENDED/PROVISIONING`; tenant с user, другим
+  invite или integration state отклоняется;
+- generic lifecycle mutation теперь запрещена для каждого non-`INTERNAL`
+  tenant. Activation shared external tenant остаётся отдельным dedicated
+  workflow и в этом срезе не реализована;
+- StaffTask integrity contract сохранён как immutable migrations `1..162`;
+  control-plane migration `163` допускается только как проверенный additive
+  tail, не меняющий protected `StaffTask*` relations.
+
+Этот checkpoint закрывает foundation, но не Gate 1MT. Следующий обязательный
+P0-порядок: real PostgreSQL/concurrency evidence provisioning/revoke →
+защищённая email delivery и invite reissue/rotation → dedicated external
+activation/suspend workflow → route/job entitlement adoption и suspend cascade
+→ безопасный integration preview/select/map → real PostgreSQL two-tenant
+matrix и production-like migration/rollback rehearsal. До закрытия этих gates
+реальный внешний tenant не provisioned и owner invite тестеру не выдаётся.
+
+Исполнимый профиль и launch checklist:
+
+- [shared-multi-tenant-beta-profile.md](./docs/open-beta/shared-multi-tenant-beta-profile.md);
+- [shared-multi-tenant-launch-checklist.md](./docs/open-beta/shared-multi-tenant-launch-checklist.md).
+
+Срок выдачи не определяется датой документа. Текущий плановый ориентир первого
+friendly external club — окно `31.08–07.09.2026`, только если Gate 1MT и Gate 2
+завершены без stop condition; это не обещание даты.
 
 ## 6. Release gates
 
@@ -1808,7 +1929,7 @@ Tenant D SUSPENDED`; evidence сохраняется, destructive rollback за�
 - Двухtenantная и двухклубная suite зелёная.
 - Suspend останавливает HTTP и background execution.
 
-### Gate 1DP — один ранний design partner в изолированном контуре
+### Gate 1DP — optional contingency/enterprise isolation
 
 - Завершены и приняты `BETA-DP-001..009`.
 - Partner environment имеет отдельные web, API, PostgreSQL, secrets и storage
@@ -1825,9 +1946,34 @@ Tenant D SUSPENDED`; evidence сохраняется, destructive rollback за�
 - После выполнения технических preconditions отдельный
   `DESIGN_PARTNER GO` из `BETA-DP-010` сохранён до выдачи credentials.
 
-Gate 1DP разрешает только одного named partner в isolated environment. Он не
-разрешает shared-production access, второго партнёра, cutover текущей сети или
-общую внешнюю когорту и не закрывает Gate 1, Gate 2A, Gate 2 либо Gate 3.
+Gate 1DP не входит в основной launch critical path. Он разрешает только одного
+named partner в isolated environment после отдельного решения о необходимости
+изоляции. Он не разрешает shared-data-plane access, второго партнёра, cutover
+текущей сети или общую внешнюю когорту и не закрывает Gate 1, Gate 1MT,
+Gate 2A, Gate 2 либо Gate 3.
+
+### Gate 1MT — shared multi-tenant technical admission
+
+- Завершены и приняты `BETA-MT-001..009`.
+- Shared topology содержит текущий `Tenant A/A1..A4` и независимый
+  `Tenant B/B1`; публичный demo не использует их operational data.
+- Persisted lifecycle/stage/trial и module read/write/outbound entitlements
+  действуют fail-closed для API, BFF, files, jobs, sync, rewards и Telegram.
+- OWNER invite создаётся idempotent provisioning flow и даёт `NETWORK` только
+  внутри `Tenant B`; дальнейшая delegation не может расширить полномочия actor.
+- Full two-tenant/two-store PostgreSQL, API/BFF/browser/file/job/SSE/Telegram
+  matrix для всех обязательных модулей зелёная без test-only bypass.
+- `INTEGRATIONS` допускает только tenant-owned encrypted credentials,
+  безопасный preview и exact club mapping; unattended sync и write-back
+  остаются `OFF` до отдельных outbound gates.
+- Shared workers используют tenant/store system identity, durable
+  lease/fencing/idempotency; suspend и kill switches проверены.
+- Exact reviewed SHA, CI, version, backup/restore, rollback, alerts, support и
+  incident evidence приняты.
+
+Gate 1MT подтверждает техническую готовность общего data plane, но сам по себе
+не разрешает owner invite: до первого внешнего доступа также обязателен
+Gate 2 и protected `SHARED BETA GO` из `BETA-MT-010`.
 
 ### Gate 2A — разрешение на cutover текущей сети
 
@@ -1843,6 +1989,7 @@ Gate 1DP разрешает только одного named partner в isolated 
 
 ### Gate 2 — готовность текущей сети и внешнего invite-only pilot
 
+- Выполнен `Gate 1MT`.
 - Выполнен `Gate 2A`.
 - Текущий tenant переведён in place; четыре клуба сверены.
 - Выполнены backup restore, rollback и alert drills.
@@ -1856,10 +2003,11 @@ Gate 1DP разрешает только одного named partner в isolated 
 - Communications: проверены network/store channels, messages, mentions, read receipts, notifications, CRM contact tasks, SSE/reconnect и PII policy.
 - Users and roles: actor не может выдать scope или capability шире собственного; revoke действует немедленно; Platform Admin недоступен tenant users.
 
-После Gate 2 разрешается первый внешний invite-only pilot.
+После Gate 1MT и Gate 2 отдельный `SHARED BETA GO` разрешает owner invite
+первого внешнего `Tenant B/Store B1` в общем data plane.
 
-Ранний isolated `SINGLE_DESIGN_PARTNER`, если он отдельно прошёл Gate 1DP, не
-считается этой когортой и не заменяет ни одно условие Gate 2.
+Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно прошёл Gate 1DP,
+не считается этой когортой и не заменяет ни одно условие Gate 1MT/Gate 2.
 
 ### Gate 3 — готовность открытого заявочного теста
 
@@ -1872,24 +2020,23 @@ Gate 1DP разрешает только одного named partner в isolated 
 - Каждый production incident и feedback привязан к release SHA.
 - Suspend, restore, rollback, export и offboarding проверены.
 
-Результаты DP-1 могут использоваться как product feedback, но не входят в
-метрики Gate 3, пока после Gate 2 партнёр не переведён отдельным решением в
-общую когорту и для него не начато новое измерительное окно.
+Результаты optional isolated DP-1 могут использоваться как product feedback,
+но не входят в метрики Gate 3, пока после Gate 1MT/Gate 2 партнёр не переведён
+отдельным решением в shared когорту и для него не начато новое измерительное
+окно.
 
 ## 7. Рекомендуемая последовательность разработки
 
-Основная последовательность ниже остаётся production/cutover path. Параллельно
-можно реализовать `BETA-DP-001..010`; после отдельного Gate 1DP разрешён один
-изолированный DP-1 без ожидания Gate 2. Этот путь не использует shared
-production, не меняет Tenant A/A1..A4 и не переносит approvals или evidence в
-основную последовательность.
+Основная последовательность ниже — shared production/cutover path. Работы
+`BETA-MT-001..011` являются частью этого critical path. `BETA-DP-*` можно
+возобновить только по отдельному решению о contingency/enterprise isolation;
+эта lane не переносит approvals или evidence в shared последовательность.
 
-1. Для test-evidence commit
-   `2341b99937e54cc50d1763a0a794d975816c72ce` получить зелёные обязательные
-   remote CI checks и независимый review. Runtime candidate остаётся
-   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; bundle не передавать в
-   auto-deploy `main`.
-2. После принятия test evidence отдельным security change утвердить и enrol
+1. SHA `2341b999...` и `044ceca2...` являются historical evidence, а не
+   current candidate. Создать exact clean SHA текущего рабочего дерева,
+   получить зелёные обязательные remote CI checks и независимый review;
+   bundle не передавать в auto-deploy `main`.
+2. После принятия current test evidence отдельным security change утвердить и enrol
    pinned Ed25519 public root, создать защищённый signer и
    acquisition/evidence record вне
    caller-controlled env, database `COMMENT` и HMAC report. Private signing
@@ -1902,15 +2049,21 @@ production, не меняет Tenant A/A1..A4 и не переносит approva
    `BASELINE_156` envelope/marker и первый admission; затем применить только
    migrations `157..162`, получить новый `EXPAND_162` envelope с новым
    nonce-bound binding, заменить DB marker его digest и выполнить второй
-   admission. Baseline envelope/marker не переиспользовать; обе protected
-   authority bundle и marker-rotation attestation сохранить. Exact роль
+   admission. Затем применить только exact allowlisted migration
+   `20260728120000_tenant_execution_control_plane_expand`, выпустить третий
+   `CURRENT_163` envelope с новым binding, повторно заменить marker и пройти
+   третий admission. Protected StaffTask evidence остаётся bound к prefix 162;
+   baseline/expand marker не переиспользовать; все три authority bundle и обе
+   marker-rotation attestation сохранить. Exact роль
    получает table `SELECT` на восьми разрешённых relations и только
    `User(id, tenantId, isPlatformAdmin, isActive, accessScope)`; любой
    non-zero exit или authority/marker/freshness/blob/ACL mismatch
    останавливает работу.
-5. Только после обоих admission отдельно выполнить read-only inventory и
-   aggregate reconciliation planner schema `v1` с одинаковыми thresholds,
-   exact catalog gate и owner для каждого non-zero code. HMAC
+5. Только после всех трёх admission отдельно выполнить read-only inventory и
+   aggregate reconciliation planner schema `v1` на exact current
+   `CURRENT_163` (`migrationCount=163`, latest control-plane migration) с
+   одинаковыми thresholds, exact protected StaffTask catalog gate и owner для
+   каждого non-zero code. HMAC
    `databaseIdentityDigest`, `contentDigest` и `executionDigest` являются
    aggregate evidence, а не provenance, row-level/CAS authorization или
    authority.
@@ -1950,25 +2103,32 @@ production, не меняет Tenant A/A1..A4 и не переносит approva
     assortment/reports/imports и пройти store-level negative suites.
 16. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
     контуров.
-17. Реализовать customer stage, обязательный beta entitlement profile,
-    provisioning, suspend/offboarding и `TenantExecutionPolicy`.
-18. Завершить эксплуатационный контур: immutable artifact, versioned
+17. Реализовать `BETA-MT-001..006`: persisted customer stage/trial/module
+    entitlements, fail-closed `TenantExecutionPolicy`, idempotent shared
+    provisioning/owner invite, delegation limits и безопасный tenant-owned
+    integrations control-plane.
+18. Реализовать `BETA-MT-007..009`: полную shared PostgreSQL/API/BFF/browser/
+    file/job/SSE/Telegram isolation matrix, tenant-aware worker/Telegram
+    execution и full-scope module acceptance для `Tenant B/Store B1`.
+19. Завершить эксплуатационный контур: immutable artifact, versioned
     infrastructure, external probes/alerts, scheduler ownership,
     backup/restore и rollback drills.
-19. Провести legacy-key audit и безопасный secret/session/invite/referral
+20. Провести legacy-key audit и безопасный secret/session/invite/referral
     cutover.
-20. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
+21. Зафиксировать topology manifest и выполнить dry-run in-place cutover одной
     сети из четырёх клубов без смены `tenantId`.
-21. Закрыть все pre-cutover условия `Gate 2A` и сохранить отдельный explicit
+22. Закрыть все pre-cutover условия `Gate 2A` и сохранить отдельный explicit
     `CUTOVER GO` с approver, change window и stop conditions.
-22. Выполнить cutover, staged Langame sync, full-scope acceptance и
+23. Выполнить cutover, staged Langame sync, full-scope acceptance и
     post-cutover rollback verification.
-23. Провести семь стабильных дней internal alpha. После выполнения всех
-    условий Gate 2 отдельно принять `GO` на первый общий внешний invite-only
-    pilot. Ранее запущенный isolated DP-1 не является этим `GO`.
-24. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
+24. Провести семь стабильных дней internal alpha. После выполнения Gate 1MT и
+    всех условий Gate 2 сохранить protected `SHARED BETA GO`, затем создать
+    owner invite первого `Tenant B/Store B1`. Плановый ориентир окна
+    `31.08–07.09.2026` условный и автоматически сдвигается при failed gate.
+25. После принятого first-club review подключить ещё две friendly-сети не чаще
+    одного tenant каждые 3–4 дня и провести
     14-дневный pilot.
-25. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
+26. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
     лимиты.
 
 ## 8. Метрики запуска

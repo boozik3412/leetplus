@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.6.0                                              |
+| Версия          | 1.7.0                                              |
 | Дата            | 28.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -12,6 +12,11 @@
 Реальные ID, email, домены интеграций, токены и database URLs в этот файл не
 вносятся. Для них используется защищённая операционная запись; здесь
 сохраняются alias, checksum, counts и ссылка на неё.
+
+Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
+`Full candidate SHA` и не заменяют CI/review/evidence нового exact current
+candidate, который должен включать migration 163 и пройти `CURRENT_163`
+admission.
 
 ## A. Release identity и authority
 
@@ -78,13 +83,20 @@
       digests, expand authority bundle и marker-rotation attestation
       зафиксированы; baseline marker reuse запрещён, remote CI/synthetic
       evidence не засчитываются как этот `Gate 2A` checkpoint.
+- [ ] После `EXPAND_162` применена только exact allowlisted migration
+      `20260728120000_tenant_execution_control_plane_expand`; она не изменила
+      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_163`
+      envelope с новым nonce-bound binding, DB marker повторно заменён, третий
+      admission schema `v2` завершился exit `0`; reuse expand marker запрещён.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
       release SHA и thresholds; schema-first gate равен
-      `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
-0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
-0 index mismatch`, actionable cap не превышен.
+      `CURRENT_163`, `migrationCount=163`, latest
+      `20260728120000_tenant_execution_control_plane_expand`, `unfinished=0`,
+      `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
+      `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
+      actionable cap не превышен.
 - [ ] Ожидаемое имя БД связано с target и совпало с фактическим
       `current_database()` (`databaseIdentityMatched=true`); ни одно имя БД не
       попало в report/evidence.
@@ -337,6 +349,10 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.7.0`, 28.07.2026 — frozen StaffTask prefix/evidence оставлены на
+  `EXPAND_162`; current cutover checkpoint требует exact allowlisted tail 163,
+  отдельный `CURRENT_163` envelope/marker/admission и planner gate на 163
+  migrations. Прежние SHA считаются historical, не current candidate evidence.
 - `1.6.0`, 28.07.2026 — runtime candidate оставлен на
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, отдельно зафиксирован local
   test-evidence commit `2341b99937e54cc50d1763a0a794d975816c72ce`.

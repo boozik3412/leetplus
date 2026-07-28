@@ -46,7 +46,7 @@ const ADVISORY_LOCK_OBJECT = 162;
 const HMAC_KEY = "synthetic-snapshot-admission-smoke-hmac-key-aaaaaaaaaaaaaaaa";
 const PROPOSAL_DRY_RUN_HMAC_KEY = randomBytes(48).toString("base64url");
 const PROVENANCE_HMAC_KEY = randomBytes(48).toString("base64url");
-const APPROVAL_REFERENCE = "synthetic-admission-smoke";
+const APPROVAL_REFERENCE = "synthetic:admission-smoke";
 const ADMISSION_SCRIPT_PATH = fileURLToPath(
   new URL("./staff-task-integrity-snapshot-admission.mjs", import.meta.url),
 );
@@ -71,7 +71,91 @@ const READER_SELECT_RELATIONS = Object.freeze([
   "StaffTaskRecurringRuleRun",
   "StaffTask",
 ]);
+const READER_COLUMN_SELECTS = Object.freeze({
+  User: Object.freeze([
+    "id",
+    "tenantId",
+    "isPlatformAdmin",
+    "isActive",
+    "accessScope",
+  ]),
+});
+const READER_FORBIDDEN_USER_COLUMNS = Object.freeze([
+  "email",
+  "passwordHash",
+  "fullName",
+  "role",
+  "customRoleId",
+  "emailVerifiedAt",
+  "createdAt",
+  "updatedAt",
+]);
+const READER_TABLE_SELECT_RELATIONS = Object.freeze(
+  READER_SELECT_RELATIONS.filter(
+    (relationName) => !Object.hasOwn(READER_COLUMN_SELECTS, relationName),
+  ),
+);
 const SOURCE_FINGERPRINT_TABLES = READER_SELECT_RELATIONS;
+const EXPECTED_PROPOSAL_COUNTS = Object.freeze({
+  RULE_CREATOR_CROSS_TENANT: 1,
+  RULE_LAST_TASK_CROSS_TENANT: 1,
+  RULE_LAST_TASK_SOURCE_MISMATCH: 1,
+  RULE_TEMPLATE_CROSS_TENANT: 1,
+  TASK_CREATOR_CROSS_TENANT: 1,
+  TASK_RULE_CROSS_TENANT: 1,
+  TASK_TEMPLATE_CROSS_TENANT: 1,
+  TEMPLATE_CREATOR_CROSS_TENANT: 1,
+});
+const EXPECTED_PROPOSAL_OCCURRENCES = Object.values(
+  EXPECTED_PROPOSAL_COUNTS,
+).reduce((total, count) => total + count, 0);
+const EXPECTED_PROPOSAL_CASES = Object.freeze([
+  Object.freeze({
+    resourceType: "StaffTask",
+    column: "createdByUserId",
+    reasonCodes: Object.freeze(["TASK_CREATOR_CROSS_TENANT"]),
+  }),
+  Object.freeze({
+    resourceType: "StaffTask",
+    column: "sourceRecurringRuleId",
+    reasonCodes: Object.freeze(["TASK_RULE_CROSS_TENANT"]),
+  }),
+  Object.freeze({
+    resourceType: "StaffTask",
+    column: "sourceTemplateId",
+    reasonCodes: Object.freeze(["TASK_TEMPLATE_CROSS_TENANT"]),
+  }),
+  Object.freeze({
+    resourceType: "StaffTaskRecurringRule",
+    column: "createdByUserId",
+    reasonCodes: Object.freeze(["RULE_CREATOR_CROSS_TENANT"]),
+  }),
+  Object.freeze({
+    resourceType: "StaffTaskRecurringRule",
+    column: "lastCreatedTaskId",
+    reasonCodes: Object.freeze([
+      "RULE_LAST_TASK_CROSS_TENANT",
+      "RULE_LAST_TASK_SOURCE_MISMATCH",
+    ]),
+  }),
+  Object.freeze({
+    resourceType: "StaffTaskRecurringRule",
+    column: "templateId",
+    reasonCodes: Object.freeze(["RULE_TEMPLATE_CROSS_TENANT"]),
+  }),
+  Object.freeze({
+    resourceType: "StaffTaskTemplate",
+    column: "createdByUserId",
+    reasonCodes: Object.freeze(["TEMPLATE_CREATOR_CROSS_TENANT"]),
+  }),
+]);
+const EXPECTED_OPERATOR_OCCURRENCES = 2;
+const EXPECTED_REVIEW_OCCURRENCES = 2;
+const EXPECTED_POSITIVE_FINDING_COUNTS = Object.freeze({
+  ...EXPECTED_PROPOSAL_COUNTS,
+  TASK_STORE_CROSS_TENANT: EXPECTED_OPERATOR_OCCURRENCES,
+  TASK_STORE_SET_NULL_CANDIDATE: EXPECTED_REVIEW_OCCURRENCES,
+});
 
 const HELP = `
 ${SCRIPT_NAME}
@@ -80,10 +164,12 @@ Local/CI-only PostgreSQL smoke for the guarded StaffTask snapshot admission
 command. It creates a random disposable database from template0, deploys the
 exact committed migration baseline through Prisma, admits BASELINE_156,
 deploys exactly migrations 157..162, and admits EXPAND_162 through a dedicated
-least-privilege login. It then injects synthetic cross-tenant legacy fixtures,
-binds a signed short-lived provenance manifest to the disposable database, and
-exercises the read-only row-level proposal dry-run. The generated database and
-login are destroyed in a finally block.
+least-privilege login with eight table grants and five non-PII User columns.
+It then injects synthetic cross-tenant legacy fixtures,
+including a positive matrix for all eight proposal codes and the two-reason
+last-task overlap, binds a signed short-lived provenance manifest to the
+disposable database, and exercises the read-only row-level proposal dry-run.
+The generated database and login are destroyed in a finally block.
 
 Usage:
   node scripts/staff-task-integrity-snapshot-admission-smoke.mjs [options]
@@ -645,8 +731,11 @@ async function configureReaderRole(
   const cloneAdmin = prismaClient(cloneDatabaseUrl);
   const quotedRole = quoteIdentifier(readerRoleName);
   const quotedDatabase = quoteIdentifier(cloneDatabaseName);
-  const exactSelectRelations = READER_SELECT_RELATIONS.map(
+  const exactTableSelectRelations = READER_TABLE_SELECT_RELATIONS.map(
     (relationName) => `public.${quoteIdentifier(relationName)}`,
+  ).join(", ");
+  const exactUserSelectColumns = READER_COLUMN_SELECTS.User.map((columnName) =>
+    quoteIdentifier(columnName),
   ).join(", ");
   try {
     await cloneAdmin.$executeRawUnsafe(
@@ -686,13 +775,71 @@ async function configureReaderRole(
       `GRANT USAGE ON SCHEMA public TO ${quotedRole}`,
     );
     await cloneAdmin.$executeRawUnsafe(
-      `GRANT SELECT ON TABLE ${exactSelectRelations} TO ${quotedRole}`,
+      `GRANT SELECT ON TABLE ${exactTableSelectRelations} TO ${quotedRole}`,
+    );
+    await cloneAdmin.$executeRawUnsafe(
+      `GRANT SELECT (${exactUserSelectColumns})
+       ON TABLE public."User" TO ${quotedRole}`,
     );
     await cloneAdmin.$executeRawUnsafe(
       `GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system() TO ${quotedRole}`,
     );
   } finally {
     await cloneAdmin.$disconnect();
+  }
+}
+
+async function withReaderPrivilegeMutation(
+  { cloneDatabaseUrl, cloneDatabaseName, readerRoleName, privilegeStatement },
+  operation,
+) {
+  const cloneAdmin = prismaClient(cloneDatabaseUrl);
+  try {
+    await cloneAdmin.$executeRawUnsafe(privilegeStatement);
+  } finally {
+    await cloneAdmin.$disconnect();
+  }
+  try {
+    return await operation();
+  } finally {
+    await configureReaderRole(
+      cloneDatabaseUrl,
+      cloneDatabaseName,
+      readerRoleName,
+    );
+  }
+}
+
+async function withReaderCatalogMutation(
+  {
+    cloneDatabaseUrl,
+    cloneDatabaseName,
+    readerRoleName,
+    mutateStatement,
+    restoreStatement,
+  },
+  operation,
+) {
+  const mutateAdmin = prismaClient(cloneDatabaseUrl);
+  try {
+    await mutateAdmin.$executeRawUnsafe(mutateStatement);
+  } finally {
+    await mutateAdmin.$disconnect();
+  }
+  try {
+    return await operation();
+  } finally {
+    const restoreAdmin = prismaClient(cloneDatabaseUrl);
+    try {
+      await restoreAdmin.$executeRawUnsafe(restoreStatement);
+    } finally {
+      await restoreAdmin.$disconnect();
+    }
+    await configureReaderRole(
+      cloneDatabaseUrl,
+      cloneDatabaseName,
+      readerRoleName,
+    );
   }
 }
 
@@ -729,8 +876,78 @@ async function assertExactReaderSelectScope(cloneDatabaseUrl, readerRoleName) {
     );
     assert.deepEqual(
       selected.map((row) => String(row.relation_name)).sort(),
-      [...READER_SELECT_RELATIONS].sort(),
-      "The admission reader has missing or excessive public SELECT scope.",
+      [...READER_TABLE_SELECT_RELATIONS].sort(),
+      "The admission reader has missing or excessive table-level SELECT scope.",
+    );
+
+    const selectedUserColumns = await cloneAdmin.$queryRawUnsafe(
+      `SELECT attribute_row.attname::text AS column_name
+       FROM pg_class AS relation
+       JOIN pg_namespace AS namespace
+         ON namespace.oid = relation.relnamespace
+       JOIN pg_attribute AS attribute_row
+         ON attribute_row.attrelid = relation.oid
+        AND attribute_row.attnum > 0
+        AND NOT attribute_row.attisdropped
+       WHERE namespace.nspname = 'public'
+         AND relation.relname = 'User'
+         AND has_column_privilege(
+           $1,
+           relation.oid,
+           attribute_row.attname,
+           'SELECT'
+         )
+       ORDER BY attribute_row.attname`,
+      readerRoleName,
+    );
+    assert.deepEqual(
+      selectedUserColumns.map((row) => String(row.column_name)).sort(),
+      [...READER_COLUMN_SELECTS.User].sort(),
+      "The admission reader has missing or excessive User column SELECT scope.",
+    );
+
+    const grantOptionRows = await cloneAdmin.$queryRawUnsafe(
+      `SELECT
+         (
+           SELECT COUNT(*)
+           FROM pg_class AS relation
+           JOIN pg_namespace AS namespace
+             ON namespace.oid = relation.relnamespace
+           WHERE namespace.nspname = 'public'
+             AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+             AND has_table_privilege(
+               $1,
+               relation.oid,
+               'SELECT WITH GRANT OPTION'
+             )
+         )::text AS table_grant_option_count,
+         (
+           SELECT COUNT(*)
+           FROM pg_class AS relation
+           JOIN pg_namespace AS namespace
+             ON namespace.oid = relation.relnamespace
+           JOIN pg_attribute AS attribute_row
+             ON attribute_row.attrelid = relation.oid
+            AND attribute_row.attnum > 0
+            AND NOT attribute_row.attisdropped
+           WHERE namespace.nspname = 'public'
+             AND has_column_privilege(
+               $1,
+               relation.oid,
+               attribute_row.attname,
+               'SELECT WITH GRANT OPTION'
+             )
+         )::text AS column_grant_option_count`,
+      readerRoleName,
+    );
+    assert.equal(grantOptionRows.length, 1);
+    assert.deepEqual(
+      grantOptionRows[0],
+      {
+        table_grant_option_count: "0",
+        column_grant_option_count: "0",
+      },
+      "The admission reader unexpectedly owns SELECT grant options.",
     );
 
     const forbidden = await cloneAdmin.$queryRawUnsafe(
@@ -799,6 +1016,34 @@ async function assertReaderCannotWrite(readerUrl, forbiddenSelectRelation) {
            'public."Tenant"',
            'INSERT,UPDATE,DELETE,TRUNCATE'
          ) AS can_mutate,
+         has_table_privilege(
+           current_user,
+           'public."User"',
+           'SELECT'
+         ) AS can_select_user_table,
+         has_any_column_privilege(
+           current_user,
+           'public."User"',
+           'SELECT'
+         ) AS can_select_user_columns,
+         has_column_privilege(
+           current_user,
+           'public."User"',
+           'id',
+           'SELECT'
+         ) AS can_select_user_id,
+         has_column_privilege(
+           current_user,
+           'public."User"',
+           'email',
+           'SELECT'
+         ) AS can_select_user_email,
+         has_column_privilege(
+           current_user,
+           'public."User"',
+           'passwordHash',
+           'SELECT'
+         ) AS can_select_user_password_hash,
          has_database_privilege(
            current_user,
            current_database(),
@@ -830,12 +1075,37 @@ async function assertReaderCannotWrite(readerUrl, forbiddenSelectRelation) {
     assert.equal(state[0].transaction_read_only, "off");
     assert.equal(state[0].can_select, true);
     assert.equal(state[0].can_mutate, false);
+    assert.equal(state[0].can_select_user_table, false);
+    assert.equal(state[0].can_select_user_columns, true);
+    assert.equal(state[0].can_select_user_id, true);
+    assert.equal(state[0].can_select_user_email, false);
+    assert.equal(state[0].can_select_user_password_hash, false);
     assert.equal(state[0].can_connect, true);
     assert.equal(state[0].can_create_database, false);
     assert.equal(state[0].can_use_temporary, false);
     assert.equal(state[0].can_use_schema, true);
     assert.equal(state[0].can_create_schema_object, false);
 
+    const allowedUserColumns = await reader.$queryRawUnsafe(
+      `SELECT "id", "tenantId", "isPlatformAdmin", "isActive", "accessScope"
+       FROM public."User"
+       WHERE false`,
+    );
+    assert.deepEqual(allowedUserColumns, []);
+    for (const forbiddenUserColumn of READER_FORBIDDEN_USER_COLUMNS) {
+      await expectPermissionDenied(
+        `User ${forbiddenUserColumn} SELECT privilege guard`,
+        () =>
+          reader.$queryRawUnsafe(
+            `SELECT ${quoteIdentifier(
+              forbiddenUserColumn,
+            )} FROM public."User" WHERE false`,
+          ),
+      );
+    }
+    await expectPermissionDenied("User SELECT-star privilege guard", () =>
+      reader.$queryRawUnsafe(`SELECT * FROM public."User" WHERE false`),
+    );
     await expectPermissionDenied("excess SELECT privilege guard", () =>
       reader.$queryRawUnsafe(
         `SELECT 1 FROM public.${quoteIdentifier(
@@ -903,17 +1173,65 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
   const canaries = {
     userEmail: `snapshot-admission-user-${suffix}@example.invalid`,
     passwordHash: `synthetic-not-a-credential-${suffix}`,
-    templateTitle: `Synthetic cross-tenant creator template ${suffix}`,
+    tenantAName: `Synthetic admission tenant A ${suffix}`,
+    tenantBName: `Synthetic admission tenant B ${suffix}`,
+    storeBName: `Synthetic admission store B ${suffix}`,
+    templateCreatorTitle: `Synthetic template creator proposal ${suffix}`,
+    templateBTitle: `Synthetic tenant B template ${suffix}`,
+    ruleTemplateTitle: `Synthetic rule template proposal ${suffix}`,
+    ruleCreatorTitle: `Synthetic rule creator proposal ${suffix}`,
+    ruleLastTaskTitle: `Synthetic rule last-task overlap proposal ${suffix}`,
+    ruleBTitle: `Synthetic tenant B rule ${suffix}`,
   };
   const fixtureIds = {
     tenantA: randomUUID(),
     tenantB: randomUUID(),
     storeB: randomUUID(),
     userB: randomUUID(),
-    templateA: randomUUID(),
-    tasks: [randomUUID(), randomUUID()],
-    canaries: Object.freeze(Object.values(canaries)),
+    templates: {
+      creatorCrossTenant: randomUUID(),
+      tenantB: randomUUID(),
+    },
+    rules: {
+      templateCrossTenant: randomUUID(),
+      creatorCrossTenant: randomUUID(),
+      lastTaskOverlap: randomUUID(),
+      tenantB: randomUUID(),
+    },
+    tasks: {
+      storeCrossTenant: [randomUUID(), randomUUID()],
+      templateCrossTenant: randomUUID(),
+      ruleCrossTenant: randomUUID(),
+      creatorCrossTenant: randomUUID(),
+      lastTaskOverlap: randomUUID(),
+    },
   };
+  fixtureIds.protectedIds = Object.freeze([
+    fixtureIds.tenantA,
+    fixtureIds.tenantB,
+    fixtureIds.storeB,
+    fixtureIds.userB,
+    ...Object.values(fixtureIds.templates),
+    ...Object.values(fixtureIds.rules),
+    ...fixtureIds.tasks.storeCrossTenant,
+    fixtureIds.tasks.templateCrossTenant,
+    fixtureIds.tasks.ruleCrossTenant,
+    fixtureIds.tasks.creatorCrossTenant,
+    fixtureIds.tasks.lastTaskOverlap,
+  ]);
+  fixtureIds.canaries = Object.freeze([
+    ...Object.values(canaries),
+    `snapshot-admission-a-${suffix}`,
+    `snapshot-admission-b-${suffix}`,
+    ...fixtureIds.tasks.storeCrossTenant.map(
+      (_taskId, index) =>
+        `Synthetic cross-tenant store task ${index + 1} ${suffix}`,
+    ),
+    `Synthetic task template proposal ${suffix}`,
+    `Synthetic task rule proposal ${suffix}`,
+    `Synthetic task creator proposal ${suffix}`,
+    `Synthetic last-task overlap target ${suffix}`,
+  ]);
   const now = new Date();
   const cloneAdmin = prismaClient(cloneDatabaseUrl);
   try {
@@ -928,7 +1246,7 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
           )
           VALUES (
             ${fixtureIds.tenantA},
-            ${`Synthetic admission tenant A ${suffix}`},
+            ${canaries.tenantAName},
             ${`snapshot-admission-a-${suffix}`},
             'ACTIVE',
             ${now},
@@ -941,7 +1259,7 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
           )
           VALUES (
             ${fixtureIds.tenantB},
-            ${`Synthetic admission tenant B ${suffix}`},
+            ${canaries.tenantBName},
             ${`snapshot-admission-b-${suffix}`},
             'ACTIVE',
             ${now},
@@ -956,7 +1274,7 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
           VALUES (
             ${fixtureIds.storeB},
             ${fixtureIds.tenantB},
-            ${`Synthetic admission store B ${suffix}`},
+            ${canaries.storeBName},
             'UTC',
             true,
             ${now},
@@ -988,10 +1306,10 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
             "priority", "status", "createdAt", "updatedAt"
           )
           VALUES (
-            ${fixtureIds.templateA},
+            ${fixtureIds.templates.creatorCrossTenant},
             ${fixtureIds.tenantA},
             ${fixtureIds.userB},
-            ${canaries.templateTitle},
+            ${canaries.templateCreatorTitle},
             'SHIFT',
             'NORMAL',
             'DRAFT',
@@ -999,17 +1317,108 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
             ${now}
           )
         `;
-        for (let index = 0; index < fixtureIds.tasks.length; index += 1) {
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTaskTemplate" (
+            "id", "tenantId", "title", "type", "priority", "status",
+            "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.templates.tenantB},
+            ${fixtureIds.tenantB},
+            ${canaries.templateBTitle},
+            'SHIFT',
+            'NORMAL',
+            'DRAFT',
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTaskRecurringRule" (
+            "id", "tenantId", "templateId", "title", "cadence", "status",
+            "taskType", "priority", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.rules.templateCrossTenant},
+            ${fixtureIds.tenantA},
+            ${fixtureIds.templates.tenantB},
+            ${canaries.ruleTemplateTitle},
+            'DAILY',
+            'PAUSED',
+            'RECURRING',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTaskRecurringRule" (
+            "id", "tenantId", "createdByUserId", "title", "cadence",
+            "status", "taskType", "priority", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.rules.creatorCrossTenant},
+            ${fixtureIds.tenantA},
+            ${fixtureIds.userB},
+            ${canaries.ruleCreatorTitle},
+            'DAILY',
+            'PAUSED',
+            'RECURRING',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTaskRecurringRule" (
+            "id", "tenantId", "lastCreatedTaskId", "title", "cadence",
+            "status", "taskType", "priority", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.rules.lastTaskOverlap},
+            ${fixtureIds.tenantA},
+            ${fixtureIds.tasks.lastTaskOverlap},
+            ${canaries.ruleLastTaskTitle},
+            'DAILY',
+            'PAUSED',
+            'RECURRING',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTaskRecurringRule" (
+            "id", "tenantId", "title", "cadence", "status", "taskType",
+            "priority", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.rules.tenantB},
+            ${fixtureIds.tenantB},
+            ${canaries.ruleBTitle},
+            'DAILY',
+            'PAUSED',
+            'RECURRING',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
+        for (
+          let index = 0;
+          index < fixtureIds.tasks.storeCrossTenant.length;
+          index += 1
+        ) {
           await transaction.$executeRaw`
             INSERT INTO public."StaffTask" (
               "id", "tenantId", "storeId", "title", "type", "status",
               "priority", "createdAt", "updatedAt"
             )
             VALUES (
-              ${fixtureIds.tasks[index]},
+              ${fixtureIds.tasks.storeCrossTenant[index]},
               ${fixtureIds.tenantA},
               ${fixtureIds.storeB},
-              ${`Synthetic cross-tenant task ${index + 1} ${suffix}`},
+              ${`Synthetic cross-tenant store task ${index + 1} ${suffix}`},
               'ONE_TIME',
               'OPEN',
               'NORMAL',
@@ -1018,6 +1427,73 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
             )
           `;
         }
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTask" (
+            "id", "tenantId", "sourceTemplateId", "title", "type", "status",
+            "priority", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.tasks.templateCrossTenant},
+            ${fixtureIds.tenantA},
+            ${fixtureIds.templates.tenantB},
+            ${`Synthetic task template proposal ${suffix}`},
+            'ONE_TIME',
+            'OPEN',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTask" (
+            "id", "tenantId", "sourceRecurringRuleId", "title", "type",
+            "status", "priority", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.tasks.ruleCrossTenant},
+            ${fixtureIds.tenantA},
+            ${fixtureIds.rules.tenantB},
+            ${`Synthetic task rule proposal ${suffix}`},
+            'ONE_TIME',
+            'OPEN',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTask" (
+            "id", "tenantId", "createdByUserId", "title", "type", "status",
+            "priority", "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.tasks.creatorCrossTenant},
+            ${fixtureIds.tenantA},
+            ${fixtureIds.userB},
+            ${`Synthetic task creator proposal ${suffix}`},
+            'ONE_TIME',
+            'OPEN',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
+        await transaction.$executeRaw`
+          INSERT INTO public."StaffTask" (
+            "id", "tenantId", "title", "type", "status", "priority",
+            "createdAt", "updatedAt"
+          )
+          VALUES (
+            ${fixtureIds.tasks.lastTaskOverlap},
+            ${fixtureIds.tenantB},
+            ${`Synthetic last-task overlap target ${suffix}`},
+            'ONE_TIME',
+            'OPEN',
+            'NORMAL',
+            ${now},
+            ${now}
+          )
+        `;
         await transaction.$executeRawUnsafe(
           "SET LOCAL session_replication_role = origin",
         );
@@ -1031,26 +1507,11 @@ async function injectSyntheticLegacyFixtures(cloneDatabaseUrl) {
        JOIN public."Store" AS store ON store."id" = task."storeId"
        WHERE task."id" IN ($1, $2)
          AND task."tenantId" <> store."tenantId"`,
-      fixtureIds.tasks[0],
-      fixtureIds.tasks[1],
+      fixtureIds.tasks.storeCrossTenant[0],
+      fixtureIds.tasks.storeCrossTenant[1],
     );
     assert.equal(rows.length, 1);
     assert.equal(rows[0].count, "2");
-    const proposalRows = await cloneAdmin.$queryRawUnsafe(
-      `SELECT COUNT(*)::text AS count
-       FROM public."StaffTaskTemplate" AS template
-       JOIN public."User" AS creator
-         ON creator."id" = template."createdByUserId"
-       WHERE template."id" = $1
-         AND template."tenantId" <> creator."tenantId"`,
-      fixtureIds.templateA,
-    );
-    assert.equal(proposalRows.length, 1);
-    assert.equal(
-      proposalRows[0].count,
-      "1",
-      "The synthetic proposal fixture was not preserved.",
-    );
     return fixtureIds;
   } finally {
     await cloneAdmin.$disconnect();
@@ -1204,6 +1665,7 @@ function evidenceDigest(report, name) {
 }
 
 function assertAdmissionShape(report, expectedState) {
+  assert.equal(report?.reportSchemaVersion, 2);
   const classification = findFirstField(report, [
     "classification",
     "snapshotClassification",
@@ -1214,7 +1676,17 @@ function assertAdmissionShape(report, expectedState) {
     expectedState,
   );
   assert.equal(report?.database?.databaseNameMatched, true);
+  assert.equal(report?.database?.snapshotNotExpiredAtGeneration, true);
   assert.equal(report?.database?.databaseIdentityDigestMatched, true);
+  assert.equal(report?.database?.productionLikeAuthorityVerified, false);
+  assert.equal(
+    report?.database?.productionLikeAuthorityDatabaseMarkerMatched,
+    false,
+  );
+  assert.equal(
+    report?.safety?.independentProductionLikeAuthorityRequired,
+    true,
+  );
 }
 
 function assertOutputSafe(
@@ -1234,17 +1706,7 @@ function assertOutputSafe(
     readerRoleName,
     readerPassword,
     ...protectedValues,
-    ...(fixtureIds
-      ? [
-          fixtureIds.tenantA,
-          fixtureIds.tenantB,
-          fixtureIds.storeB,
-          fixtureIds.userB,
-          fixtureIds.templateA,
-          ...fixtureIds.tasks,
-          ...fixtureIds.canaries,
-        ]
-      : []),
+    ...(fixtureIds ? [...fixtureIds.protectedIds, ...fixtureIds.canaries] : []),
   ].filter((value) => typeof value === "string" && value.length > 0);
   for (const forbidden of forbiddenValues) {
     assert.equal(
@@ -1412,8 +1874,29 @@ function spawnProposalDryRun(childEnvironment) {
 
 function assertProposalDryRunFindings(report) {
   assert.equal(report?.summary?.capExceeded, false);
-  assert.equal(report?.summary?.proposalOccurrences, 1);
-  assert.equal(report?.summary?.uniqueProposalCases, 1);
+  assert.equal(
+    report?.summary?.proposalOccurrences,
+    EXPECTED_PROPOSAL_OCCURRENCES,
+  );
+  assert.equal(
+    report?.summary?.uniqueProposalCases,
+    EXPECTED_PROPOSAL_CASES.length,
+  );
+  assert.equal(
+    report?.summary?.operatorOccurrences,
+    EXPECTED_OPERATOR_OCCURRENCES,
+  );
+  assert.equal(report?.summary?.reviewOccurrences, EXPECTED_REVIEW_OCCURRENCES);
+  assert.equal(
+    report?.summary?.blockingTotal,
+    EXPECTED_PROPOSAL_OCCURRENCES + EXPECTED_OPERATOR_OCCURRENCES,
+  );
+  assert.equal(
+    report?.summary?.observedOccurrences,
+    EXPECTED_PROPOSAL_OCCURRENCES +
+      EXPECTED_OPERATOR_OCCURRENCES +
+      EXPECTED_REVIEW_OCCURRENCES,
+  );
   assert.equal(
     report?.provenanceBinding?.profile,
     "STAFF_TASK_INTEGRITY_DISPOSABLE_V1",
@@ -1438,22 +1921,116 @@ function assertProposalDryRunFindings(report) {
   assert.equal(report?.safety?.operatorCodesProposed, false);
   assert.equal(report?.safety?.reviewCodesProposed, false);
   assert.equal(Array.isArray(report?.cases), true);
-  assert.equal(report.cases.length, 1);
-  assert.match(String(report.cases[0]?.caseToken ?? ""), /^[0-9a-f]{64}$/);
-  assert.match(
-    String(report.cases[0]?.preconditionDigest ?? ""),
-    /^[0-9a-f]{64}$/,
+  assert.equal(report.cases.length, EXPECTED_PROPOSAL_CASES.length);
+
+  const positiveFindingCounts = Object.fromEntries(
+    report.findings
+      .filter((finding) => finding.count > 0)
+      .map((finding) => [finding.code, finding.count])
+      .sort(([left], [right]) => left.localeCompare(right)),
   );
-  assert.deepEqual(report.cases[0]?.target, {
-    resourceType: "StaffTaskTemplate",
-    column: "createdByUserId",
-  });
-  assert.deepEqual(report.cases[0]?.suggestion, {
-    kind: "REFERENCE_CLEAR_CANDIDATE",
-    reasonCodes: ["TEMPLATE_CREATOR_CROSS_TENANT"],
-    ownerApprovalRequired: true,
-    fullInvariantRecheckRequired: true,
-  });
+  const expectedPositiveFindingCounts = Object.fromEntries(
+    Object.entries(EXPECTED_POSITIVE_FINDING_COUNTS).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  );
+  assert.deepEqual(
+    positiveFindingCounts,
+    expectedPositiveFindingCounts,
+    "The real PostgreSQL aggregate fixture matrix changed.",
+  );
+
+  const caseDescriptors = report.cases
+    .map((proposalCase) => {
+      assert.deepEqual(Object.keys(proposalCase).sort(), [
+        "caseToken",
+        "preconditionDigest",
+        "suggestion",
+        "target",
+      ]);
+      assert.deepEqual(Object.keys(proposalCase.target).sort(), [
+        "column",
+        "resourceType",
+      ]);
+      assert.deepEqual(Object.keys(proposalCase.suggestion).sort(), [
+        "fullInvariantRecheckRequired",
+        "kind",
+        "ownerApprovalRequired",
+        "reasonCodes",
+      ]);
+      assert.match(String(proposalCase?.caseToken ?? ""), /^[0-9a-f]{64}$/);
+      assert.match(
+        String(proposalCase?.preconditionDigest ?? ""),
+        /^[0-9a-f]{64}$/,
+      );
+      assert.deepEqual(
+        {
+          kind: proposalCase?.suggestion?.kind,
+          ownerApprovalRequired:
+            proposalCase?.suggestion?.ownerApprovalRequired,
+          fullInvariantRecheckRequired:
+            proposalCase?.suggestion?.fullInvariantRecheckRequired,
+        },
+        {
+          kind: "REFERENCE_CLEAR_CANDIDATE",
+          ownerApprovalRequired: true,
+          fullInvariantRecheckRequired: true,
+        },
+      );
+      return {
+        resourceType: proposalCase?.target?.resourceType,
+        column: proposalCase?.target?.column,
+        reasonCodes: proposalCase?.suggestion?.reasonCodes,
+      };
+    })
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
+  const expectedCaseDescriptors = EXPECTED_PROPOSAL_CASES.map(
+    ({ resourceType, column, reasonCodes }) => ({
+      resourceType,
+      column,
+      reasonCodes: [...reasonCodes],
+    }),
+  ).sort((left, right) =>
+    JSON.stringify(left).localeCompare(JSON.stringify(right)),
+  );
+  assert.deepEqual(
+    caseDescriptors,
+    expectedCaseDescriptors,
+    "The real PostgreSQL proposal cases or coalesced reason sets changed.",
+  );
+
+  const aggregateProposalOccurrences = Object.keys(
+    EXPECTED_PROPOSAL_COUNTS,
+  ).reduce((total, code) => total + positiveFindingCounts[code], 0);
+  const rowReasonOccurrences = caseDescriptors.reduce(
+    (total, descriptor) => total + descriptor.reasonCodes.length,
+    0,
+  );
+  assert.equal(aggregateProposalOccurrences, EXPECTED_PROPOSAL_OCCURRENCES);
+  assert.equal(
+    rowReasonOccurrences,
+    aggregateProposalOccurrences,
+    "Coalesced row-level reason occurrences diverged from aggregate counts.",
+  );
+}
+
+function proposalCasesByDescriptor(report) {
+  const casesByDescriptor = new Map();
+  for (const proposalCase of report.cases) {
+    const descriptor = JSON.stringify({
+      target: proposalCase.target,
+      suggestion: proposalCase.suggestion,
+    });
+    assert.equal(
+      casesByDescriptor.has(descriptor),
+      false,
+      "The dry-run emitted duplicate stable proposal descriptors.",
+    );
+    casesByDescriptor.set(descriptor, proposalCase);
+  }
+  return casesByDescriptor;
 }
 
 function assertProposalDryRunRejection(result, expectedCode) {
@@ -1557,7 +2134,11 @@ function assertSourceGuards() {
   );
   assert.match(
     source,
-    /GRANT SELECT ON TABLE \$\{exactSelectRelations\} TO \$\{quotedRole\}/,
+    /GRANT SELECT ON TABLE \$\{exactTableSelectRelations\} TO \$\{quotedRole\}/,
+  );
+  assert.match(
+    source,
+    /GRANT SELECT \(\$\{exactUserSelectColumns\}\)\s+ON TABLE public\."User" TO \$\{quotedRole\}/,
   );
   assert.equal(
     source.includes(
@@ -1682,19 +2263,50 @@ export async function runSelfTest() {
     BASELINE_MIGRATION_COUNT,
   );
   assert.deepEqual(migrationPlan.expandMigrations, [...EXPAND_MIGRATIONS]);
+  const dryRunModule =
+    await import("./staff-task-integrity-reconciliation-proposal-dry-run.mjs");
+  assert.deepEqual(Object.keys(EXPECTED_PROPOSAL_COUNTS).sort(), [
+    ...dryRunModule.PROPOSAL_CODES,
+  ]);
+  assert.equal(EXPECTED_PROPOSAL_OCCURRENCES, 8);
+  assert.equal(EXPECTED_PROPOSAL_CASES.length, 7);
+  assert.deepEqual(
+    EXPECTED_PROPOSAL_CASES.find(
+      ({ resourceType, column }) =>
+        resourceType === "StaffTaskRecurringRule" &&
+        column === "lastCreatedTaskId",
+    )?.reasonCodes,
+    ["RULE_LAST_TASK_CROSS_TENANT", "RULE_LAST_TASK_SOURCE_MISMATCH"],
+  );
+  assert.equal(READER_TABLE_SELECT_RELATIONS.length, 8);
+  assert.deepEqual(READER_COLUMN_SELECTS.User, [
+    "id",
+    "tenantId",
+    "isPlatformAdmin",
+    "isActive",
+    "accessScope",
+  ]);
+  assert.equal(READER_FORBIDDEN_USER_COLUMNS.length, 8);
 
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    checks: 36,
+    checks: 46,
     localCiOnly: true,
     disposableDatabaseOnly: true,
     selectOnlyAdmissionRole: true,
     exactSelectRelations: READER_SELECT_RELATIONS.length,
+    tableSelectRelations: READER_TABLE_SELECT_RELATIONS.length,
+    userSelectColumns: READER_COLUMN_SELECTS.User.length,
+    forbiddenUserColumns: READER_FORBIDDEN_USER_COLUMNS.length,
     committedReleaseArtifactOnly: true,
     baselineMigrations: migrationPlan.baselineMigrations.length,
     expandMigrations: migrationPlan.expandMigrations.length,
-    sourceDatabaseWrites: false,
+    proposalCodes: Object.keys(EXPECTED_PROPOSAL_COUNTS).length,
+    proposalCases: EXPECTED_PROPOSAL_CASES.length,
+    lastTaskReasonCoalescingRequired: true,
+    sourceDataWrites: false,
+    clusterAclTemporarilyMutated: true,
   };
 }
 
@@ -1974,6 +2586,203 @@ export async function runSmoke(environment = process.env) {
     assertAdmissionShape(expandAdmission.report, EXPAND_STATE);
     assertOutputSafe(expandAdmission.serialized, privacyContext);
 
+    const tableWideUserAdmission = await withReaderPrivilegeMutation(
+      {
+        cloneDatabaseUrl,
+        cloneDatabaseName,
+        readerRoleName,
+        privilegeStatement: `GRANT SELECT ON TABLE public."User" TO ${quotedReader}`,
+      },
+      () =>
+        spawnAdmission(
+          admissionEnvironment({
+            ...baseAdmissionEnvironment,
+            expectedState: EXPAND_STATE,
+          }),
+        ),
+    );
+    assert.equal(tableWideUserAdmission.exitCode, 3);
+    assert.equal(tableWideUserAdmission.report?.summary?.decision, "REJECTED");
+    assert.equal(
+      tableWideUserAdmission.report?.database?.privileges?.actual
+        ?.columnScopedTableSelectCount,
+      1,
+    );
+    assertOutputSafe(tableWideUserAdmission.serialized, privacyContext);
+
+    const missingUserColumnAdmission = await withReaderPrivilegeMutation(
+      {
+        cloneDatabaseUrl,
+        cloneDatabaseName,
+        readerRoleName,
+        privilegeStatement:
+          `REVOKE SELECT ("accessScope") ON TABLE public."User" ` +
+          `FROM ${quotedReader}`,
+      },
+      () =>
+        spawnAdmission(
+          admissionEnvironment({
+            ...baseAdmissionEnvironment,
+            expectedState: EXPAND_STATE,
+          }),
+        ),
+    );
+    assert.equal(missingUserColumnAdmission.exitCode, 3);
+    assert.equal(
+      missingUserColumnAdmission.report?.summary?.decision,
+      "REJECTED",
+    );
+    assert.equal(
+      missingUserColumnAdmission.report?.database?.privileges?.actual
+        ?.requiredSelectMissingCount,
+      1,
+    );
+    assertOutputSafe(missingUserColumnAdmission.serialized, privacyContext);
+
+    const renamedUserColumnAdmission = await withReaderCatalogMutation(
+      {
+        cloneDatabaseUrl,
+        cloneDatabaseName,
+        readerRoleName,
+        mutateStatement:
+          `ALTER TABLE public."User" RENAME COLUMN "accessScope" ` +
+          `TO "accessScope_admission_missing"`,
+        restoreStatement:
+          `ALTER TABLE public."User" RENAME COLUMN ` +
+          `"accessScope_admission_missing" TO "accessScope"`,
+      },
+      () =>
+        spawnAdmission(
+          admissionEnvironment({
+            ...baseAdmissionEnvironment,
+            expectedState: EXPAND_STATE,
+          }),
+        ),
+    );
+    assert.equal(renamedUserColumnAdmission.exitCode, 3);
+    assert.equal(
+      renamedUserColumnAdmission.report?.summary?.decision,
+      "REJECTED",
+    );
+    assert.equal(
+      renamedUserColumnAdmission.report?.database?.privileges?.actual
+        ?.requiredSelectMissingCount,
+      1,
+    );
+    assertOutputSafe(renamedUserColumnAdmission.serialized, privacyContext);
+
+    const extraUserColumnAdmission = await withReaderPrivilegeMutation(
+      {
+        cloneDatabaseUrl,
+        cloneDatabaseName,
+        readerRoleName,
+        privilegeStatement:
+          `GRANT SELECT ("email") ON TABLE public."User" ` +
+          `TO ${quotedReader}`,
+      },
+      () =>
+        spawnAdmission(
+          admissionEnvironment({
+            ...baseAdmissionEnvironment,
+            expectedState: EXPAND_STATE,
+          }),
+        ),
+    );
+    assert.equal(extraUserColumnAdmission.exitCode, 3);
+    assert.equal(
+      extraUserColumnAdmission.report?.summary?.decision,
+      "REJECTED",
+    );
+    assert.equal(
+      extraUserColumnAdmission.report?.database?.privileges?.actual
+        ?.excessSelectColumnCount,
+      1,
+    );
+    assertOutputSafe(extraUserColumnAdmission.serialized, privacyContext);
+
+    const userGrantOptionAdmission = await withReaderPrivilegeMutation(
+      {
+        cloneDatabaseUrl,
+        cloneDatabaseName,
+        readerRoleName,
+        privilegeStatement:
+          `GRANT SELECT ("id") ON TABLE public."User" ` +
+          `TO ${quotedReader} WITH GRANT OPTION`,
+      },
+      () =>
+        spawnAdmission(
+          admissionEnvironment({
+            ...baseAdmissionEnvironment,
+            expectedState: EXPAND_STATE,
+          }),
+        ),
+    );
+    assert.equal(userGrantOptionAdmission.exitCode, 3);
+    assert.equal(
+      userGrantOptionAdmission.report?.summary?.decision,
+      "REJECTED",
+    );
+    assert.equal(
+      userGrantOptionAdmission.report?.database?.privileges?.actual
+        ?.selectGrantOptionColumnCount,
+      1,
+    );
+    assertOutputSafe(userGrantOptionAdmission.serialized, privacyContext);
+
+    const publicTableSelectAdmission = await withReaderPrivilegeMutation(
+      {
+        cloneDatabaseUrl,
+        cloneDatabaseName,
+        readerRoleName,
+        privilegeStatement: `GRANT SELECT ON TABLE public."Tenant" TO PUBLIC`,
+      },
+      () =>
+        spawnAdmission(
+          admissionEnvironment({
+            ...baseAdmissionEnvironment,
+            expectedState: EXPAND_STATE,
+          }),
+        ),
+    );
+    assert.equal(publicTableSelectAdmission.exitCode, 3);
+    assert.equal(
+      publicTableSelectAdmission.report?.database?.privileges?.actual
+        ?.publicSelectRelationCount,
+      1,
+    );
+    assertOutputSafe(publicTableSelectAdmission.serialized, privacyContext);
+
+    const publicColumnSelectAdmission = await withReaderPrivilegeMutation(
+      {
+        cloneDatabaseUrl,
+        cloneDatabaseName,
+        readerRoleName,
+        privilegeStatement:
+          `GRANT SELECT ("id") ON TABLE public."User" ` + `TO PUBLIC`,
+      },
+      () =>
+        spawnAdmission(
+          admissionEnvironment({
+            ...baseAdmissionEnvironment,
+            expectedState: EXPAND_STATE,
+          }),
+        ),
+    );
+    assert.equal(publicColumnSelectAdmission.exitCode, 3);
+    assert.equal(
+      publicColumnSelectAdmission.report?.database?.privileges?.actual
+        ?.publicSelectRelationCount,
+      1,
+    );
+    assertOutputSafe(publicColumnSelectAdmission.serialized, privacyContext);
+
+    const restoredForbiddenSelect = await assertExactReaderSelectScope(
+      cloneDatabaseUrl,
+      readerRoleName,
+    );
+    assert.equal(restoredForbiddenSelect, expandForbiddenSelect);
+    await assertReaderCannotWrite(readerUrl, restoredForbiddenSelect);
+
     const fixtureIds = await injectSyntheticLegacyFixtures(cloneDatabaseUrl);
     const admissionFirst = spawnAdmission(
       admissionEnvironment({
@@ -2070,8 +2879,6 @@ export async function runSmoke(environment = process.env) {
     const proposalFirst = spawnProposalDryRun(dryRunEnvironmentFor(10_000));
     assert.equal(proposalFirst.exitCode, 2);
     assertProposalDryRunFindings(proposalFirst.report);
-    assert.equal(proposalFirst.report.summary.operatorOccurrences, 2);
-    assert.equal(proposalFirst.report.summary.blockingTotal, 3);
     assertOutputSafe(proposalFirst.serialized, {
       ...privacyContext,
       fixtureIds,
@@ -2087,24 +2894,25 @@ export async function runSmoke(environment = process.env) {
       fixtureIds,
       protectedValues: dryRunProtectedValues,
     });
+    const firstCasesByDescriptor = proposalCasesByDescriptor(
+      proposalFirst.report,
+    );
+    const secondCasesByDescriptor = proposalCasesByDescriptor(
+      proposalSecond.report,
+    );
     assert.deepEqual(
-      proposalSecond.report.cases.map(({ target, suggestion }) => ({
-        target,
-        suggestion,
-      })),
-      proposalFirst.report.cases.map(({ target, suggestion }) => ({
-        target,
-        suggestion,
-      })),
+      [...secondCasesByDescriptor.keys()].sort(),
+      [...firstCasesByDescriptor.keys()].sort(),
     );
-    assert.notEqual(
-      proposalSecond.report.cases[0].caseToken,
-      proposalFirst.report.cases[0].caseToken,
-    );
-    assert.notEqual(
-      proposalSecond.report.cases[0].preconditionDigest,
-      proposalFirst.report.cases[0].preconditionDigest,
-    );
+    for (const [descriptor, firstCase] of firstCasesByDescriptor) {
+      const secondCase = secondCasesByDescriptor.get(descriptor);
+      assert(secondCase);
+      assert.notEqual(secondCase.caseToken, firstCase.caseToken);
+      assert.notEqual(
+        secondCase.preconditionDigest,
+        firstCase.preconditionDigest,
+      );
+    }
     assert.notEqual(
       evidenceDigest(proposalFirst.report, "contentDigest"),
       evidenceDigest(proposalSecond.report, "contentDigest"),
@@ -2117,12 +2925,59 @@ export async function runSmoke(environment = process.env) {
     const proposalCap = spawnProposalDryRun(dryRunEnvironmentFor(2));
     assert.equal(proposalCap.exitCode, 3);
     assert.equal(proposalCap.report?.summary?.capExceeded, true);
-    assert.equal(proposalCap.report?.summary?.blockingTotal, 3);
-    assert.equal(proposalCap.report?.summary?.proposalOccurrences, 1);
-    assert.equal(proposalCap.report?.summary?.operatorOccurrences, 2);
+    assert.equal(
+      proposalCap.report?.summary?.blockingTotal,
+      EXPECTED_PROPOSAL_OCCURRENCES + EXPECTED_OPERATOR_OCCURRENCES,
+    );
+    assert.equal(
+      proposalCap.report?.summary?.proposalOccurrences,
+      EXPECTED_PROPOSAL_OCCURRENCES,
+    );
+    assert.equal(
+      proposalCap.report?.summary?.operatorOccurrences,
+      EXPECTED_OPERATOR_OCCURRENCES,
+    );
+    assert.equal(
+      proposalCap.report?.summary?.reviewOccurrences,
+      EXPECTED_REVIEW_OCCURRENCES,
+    );
     assert.equal(proposalCap.report?.summary?.uniqueProposalCases, 0);
     assert.deepEqual(proposalCap.report?.cases, []);
     assertOutputSafe(proposalCap.serialized, {
+      ...privacyContext,
+      fixtureIds,
+      protectedValues: dryRunProtectedValues,
+    });
+
+    const proposalBlockingBoundaryCap = spawnProposalDryRun(
+      dryRunEnvironmentFor(9),
+    );
+    assert.equal(proposalBlockingBoundaryCap.exitCode, 3);
+    assert.equal(
+      proposalBlockingBoundaryCap.report?.summary?.capExceeded,
+      true,
+    );
+    assert.equal(
+      proposalBlockingBoundaryCap.report?.summary?.blockingTotal,
+      10,
+    );
+    assert.equal(
+      proposalBlockingBoundaryCap.report?.summary?.uniqueProposalCases,
+      0,
+    );
+    assert.deepEqual(proposalBlockingBoundaryCap.report?.cases, []);
+    assertOutputSafe(proposalBlockingBoundaryCap.serialized, {
+      ...privacyContext,
+      fixtureIds,
+      protectedValues: dryRunProtectedValues,
+    });
+
+    const proposalBlockingBoundaryAllowed = spawnProposalDryRun(
+      dryRunEnvironmentFor(10),
+    );
+    assert.equal(proposalBlockingBoundaryAllowed.exitCode, 2);
+    assertProposalDryRunFindings(proposalBlockingBoundaryAllowed.report);
+    assertOutputSafe(proposalBlockingBoundaryAllowed.serialized, {
       ...privacyContext,
       fixtureIds,
       protectedValues: dryRunProtectedValues,
@@ -2229,6 +3084,12 @@ export async function runSmoke(environment = process.env) {
   }
   await admin.$disconnect();
 
+  if (primaryError && cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [primaryError, ...cleanupErrors],
+      "Smoke execution and cleanup both failed.",
+    );
+  }
   if (primaryError) {
     throw primaryError;
   }
@@ -2239,13 +3100,24 @@ export async function runSmoke(environment = process.env) {
   return {
     script: SCRIPT_NAME,
     status: "PASS",
-    scenarios: 14,
+    scenarios: 23,
     classification: SNAPSHOT_CLASSIFICATION,
     admittedStates: [BASELINE_STATE, EXPAND_STATE],
     baselineMigrationsApplied: BASELINE_MIGRATION_COUNT,
     expandMigrationsApplied: EXPAND_MIGRATIONS.length,
     committedReleaseArtifactOnly: true,
     exactSelectRelations: READER_SELECT_RELATIONS.length,
+    tableSelectRelations: READER_TABLE_SELECT_RELATIONS.length,
+    userSelectColumns: READER_COLUMN_SELECTS.User.length,
+    userForbiddenColumnReadsDenied: READER_FORBIDDEN_USER_COLUMNS.length,
+    userSelectStarDenied: true,
+    userTableSelectAdmissionRejected: true,
+    missingUserColumnAdmissionRejected: true,
+    renamedUserColumnAdmissionRejected: true,
+    excessUserColumnAdmissionRejected: true,
+    userSelectGrantOptionAdmissionRejected: true,
+    publicTableSelectAdmissionRejected: true,
+    publicColumnSelectAdmissionRejected: true,
     otherDatabasePublicConnectRevoked: revokedPublicConnectDatabases.length,
     otherDatabasePublicConnectRestored: true,
     clusterAdvisoryLockVerified: true,
@@ -2261,6 +3133,12 @@ export async function runSmoke(environment = process.env) {
     proposalDryRunRlsExitVerified: 3,
     proposalDryRunAdvisoryLockExitVerified: 3,
     proposalDryRunExecutionUnlinkabilityVerified: true,
+    proposalDryRunPositiveCodesVerified: Object.keys(EXPECTED_PROPOSAL_COUNTS)
+      .length,
+    proposalDryRunOccurrencesVerified: EXPECTED_PROPOSAL_OCCURRENCES,
+    proposalDryRunUniqueCasesVerified: EXPECTED_PROPOSAL_CASES.length,
+    proposalDryRunLastTaskReasonCoalescingVerified: true,
+    proposalDryRunAggregateRowParityVerified: true,
     signedSyntheticProvenanceVerified: true,
     stableContentDigestVerified: true,
     timestampBoundExecutionDigestVerified: true,
@@ -2268,6 +3146,8 @@ export async function runSmoke(environment = process.env) {
     tamperedMigrationRejected: true,
     protectedOutputVerified: true,
     sourceAggregateFingerprintUnchanged: true,
+    sourceDataWrites: false,
+    clusterAclTemporarilyMutated: true,
     migrationArtifactRemoved: true,
     disposableDatabaseDropped: true,
     disposableRoleDropped: true,

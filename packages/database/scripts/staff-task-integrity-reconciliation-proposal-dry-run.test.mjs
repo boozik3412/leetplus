@@ -22,9 +22,12 @@ import {
   PROPOSAL_ACTIONS,
   PROPOSAL_CODES,
   PROPOSAL_ROWS_SQL,
-  RELATION_LOCK_SQL,
+  RELATION_LOCK_AFTER_USER_SQL,
+  RELATION_LOCK_BEFORE_USER_SQL,
+  RELATION_LOCK_ORDER,
   RLS_STATE_SQL,
   RUN_CONFIRMATION,
+  USER_RELATION_ACCESS_SHARE_SQL,
   buildDryRunReport,
   buildProposalCases,
   buildSyntheticProvenanceManifest,
@@ -43,7 +46,7 @@ const RELEASE_SHA = "a".repeat(40);
 const ADMISSION_HMAC_KEY = "unit-test-admission-hmac-key-aaaaaaaaaaaaaaaa";
 const DRY_RUN_HMAC_KEY = "unit-test-proposal-hmac-key-bbbbbbbbbbbbbbbbb";
 const PROVENANCE_HMAC_KEY = "unit-test-provenance-hmac-key-ccccccccccccccc";
-const DATABASE_NAME = "leetplus_ci_test";
+const DATABASE_NAME = "lp_snapshot_admission_ci_bbbbbbbbbbbbbbbb";
 const MUTATING_KEYWORD_PATTERN =
   /\b(?:INSERT|UPDATE|DELETE|MERGE|ALTER|CREATE|DROP|TRUNCATE|COPY|CALL|DO|GRANT|REVOKE|VACUUM|ANALYZE|REFRESH|REINDEX|CLUSTER|COMMENT|SECURITY\s+LABEL)\b/iu;
 
@@ -136,6 +139,11 @@ function privilegeRow(overrides = {}) {
     non_public_schema_usage_count: "0",
     writable_relation_count: "0",
     excess_select_relation_count: "0",
+    select_grant_option_relation_count: "0",
+    column_scoped_table_select_count: "0",
+    excess_select_column_count: "0",
+    select_grant_option_column_count: "0",
+    public_select_relation_count: "0",
     writable_sequence_count: "0",
     selectable_sequence_count: "0",
     executable_user_function_count: "0",
@@ -275,6 +283,7 @@ function reportFor({
       bindingDigest: "9".repeat(64),
     },
     databaseIdentityDigest: admission.databaseIdentityDigest,
+    verificationTime: NOW,
     ...gates,
   });
 }
@@ -338,10 +347,8 @@ test("runtime contract accepts only a distinct-key SYNTHETIC EXPAND_162 loopback
       {
         STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION:
           "PRODUCTION_LIKE",
-        STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST:
-          "c".repeat(64),
       },
-      "SYNTHETIC_EXPAND_ADMISSION_REQUIRED",
+      "PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED",
     ],
     [
       {
@@ -591,12 +598,39 @@ test("the catalog exposes exactly eight nullable-reference suggestions and exclu
 });
 
 test("row, RLS, and relation-lock SQL stay bounded and read-only", () => {
-  for (const sql of [PROPOSAL_ROWS_SQL, RLS_STATE_SQL, RELATION_LOCK_SQL]) {
+  assert.deepEqual(RELATION_LOCK_ORDER, [
+    "_prisma_migrations",
+    "StaffTask",
+    "StaffTaskRecurringRule",
+    "StaffTaskRecurringRuleRun",
+    "StaffTaskTemplate",
+    "Store",
+    "Tenant",
+    "User",
+    "UserStoreAccess",
+  ]);
+  const relationLockSql = [
+    RELATION_LOCK_BEFORE_USER_SQL,
+    USER_RELATION_ACCESS_SHARE_SQL,
+    RELATION_LOCK_AFTER_USER_SQL,
+  ].join("\n");
+  for (const sql of [
+    PROPOSAL_ROWS_SQL,
+    RLS_STATE_SQL,
+    RELATION_LOCK_BEFORE_USER_SQL,
+    USER_RELATION_ACCESS_SHARE_SQL,
+    RELATION_LOCK_AFTER_USER_SQL,
+  ]) {
     assert.equal(MUTATING_KEYWORD_PATTERN.test(sql), false);
     assert.doesNotMatch(sql, /SELECT\s+\*/iu);
     assert.doesNotMatch(sql, /;\s*\S/iu);
   }
-  assert.match(RELATION_LOCK_SQL, /IN ACCESS SHARE MODE$/u);
+  assert.match(RELATION_LOCK_BEFORE_USER_SQL, /IN ACCESS SHARE MODE$/u);
+  assert.match(RELATION_LOCK_AFTER_USER_SQL, /IN ACCESS SHARE MODE$/u);
+  assert.match(
+    USER_RELATION_ACCESS_SHARE_SQL,
+    /^SELECT "id"\s+FROM ONLY public\."User"\s+WHERE false$/u,
+  );
   assert.doesNotMatch(
     PROPOSAL_ROWS_SQL,
     /"(?:email|phone|passwordHash|firstName|lastName|username|telegramId|title|description)"/iu,
@@ -617,7 +651,7 @@ test("row, RLS, and relation-lock SQL stay bounded and read-only", () => {
     "StaffTask",
   ]) {
     assert.match(RLS_STATE_SQL, new RegExp(`'${relation}'`, "u"));
-    assert.match(RELATION_LOCK_SQL, new RegExp(`"${relation}"`, "u"));
+    assert.match(relationLockSql, new RegExp(`"${relation}"`, "u"));
   }
 });
 
@@ -855,13 +889,19 @@ test("tampering with content, execution, cases, safety, or key fails report veri
 
   const mutations = [
     (copy) => {
-      copy.contentDigest = `0${copy.contentDigest.slice(1)}`;
+      copy.contentDigest =
+        `${copy.contentDigest[0] === "0" ? "1" : "0"}` +
+        copy.contentDigest.slice(1);
     },
     (copy) => {
-      copy.executionDigest = `0${copy.executionDigest.slice(1)}`;
+      copy.executionDigest =
+        `${copy.executionDigest[0] === "0" ? "1" : "0"}` +
+        copy.executionDigest.slice(1);
     },
     (copy) => {
-      copy.cases[0].caseToken = `0${copy.cases[0].caseToken.slice(1)}`;
+      copy.cases[0].caseToken =
+        `${copy.cases[0].caseToken[0] === "0" ? "1" : "0"}` +
+        copy.cases[0].caseToken.slice(1);
     },
     (copy) => {
       copy.summary.blockingTotal = 0;

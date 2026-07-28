@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,9 +20,14 @@ import {
   canonicalStringify,
   computeDatabaseIdentityDigest,
 } from "./staff-task-integrity-reconciliation-plan.mjs";
+import {
+  computeNonceBoundDatabaseIdentityDigest,
+  matchesVerifiedProductionLikeAuthority,
+  verifyPinnedProductionLikeAuthority,
+} from "./staff-task-integrity-snapshot-authority.mjs";
 
 export const SCRIPT_NAME = "staff-task-integrity-snapshot-admission";
-export const REPORT_SCHEMA_VERSION = 1;
+export const REPORT_SCHEMA_VERSION = 2;
 export const RUN_CONFIRMATION = "run-staff-task-integrity-snapshot-admission";
 export const ISOLATION_ATTESTATION =
   "I_ATTEST_THIS_IS_AN_ISOLATED_ENCRYPTED_NO_EGRESS_NON_PRODUCTION_SNAPSHOT";
@@ -34,8 +40,7 @@ export const BASELINE_LATEST_MIGRATION =
 const CLASSIFICATIONS = new Set(["SYNTHETIC", "PRODUCTION_LIKE"]);
 const EXPECTED_STATES = new Set([BASELINE_STATE, EXPAND_STATE]);
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
-const SYNTHETIC_DATABASE_PATTERN =
-  /(?:^|[_-])(?:ci|test|testing|local)(?:$|[_-])/i;
+const SYNTHETIC_DATABASE_PATTERN = /^lp_snapshot_admission_ci_[0-9a-f]{16}$/u;
 const PRODUCTION_LIKE_DATABASE_PATTERN =
   /(?:^|[_-])(?:snapshot|rehearsal|preprod|staging|stage|test)(?:$|[_-])/i;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
@@ -50,12 +55,17 @@ const MAX_HMAC_KEY_BYTES = 4_096;
 const MAX_SYNTHETIC_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAX_PRODUCTION_LIKE_LIFETIME_MS = 72 * 60 * 60 * 1_000;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
-const RELEASE_SOURCE_PATHS = Object.freeze([
+const RELEASE_RUNTIME_SOURCE_PATHS = Object.freeze([
   "packages/database/scripts/staff-task-integrity-snapshot-admission.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-admission-smoke.mjs",
+  "packages/database/scripts/staff-task-integrity-snapshot-authority.mjs",
+  "packages/database/scripts/staff-task-integrity-snapshot-authority-roots.mjs",
   "packages/database/scripts/staff-task-integrity-reconciliation-plan.mjs",
   "packages/database/scripts/staff-task-integrity-reconciliation-proposal-dry-run.mjs",
   "packages/database/scripts/staff-task-integrity-inventory.mjs",
+]);
+const RELEASE_SOURCE_PATHS = Object.freeze([
+  ...RELEASE_RUNTIME_SOURCE_PATHS,
   "packages/database/prisma/migrations",
 ]);
 
@@ -70,6 +80,23 @@ const REQUIRED_SELECT_RELATIONS = Object.freeze([
   "StaffTaskRecurringRuleRun",
   "StaffTask",
 ]);
+
+export const REQUIRED_COLUMN_SELECTS = Object.freeze({
+  User: Object.freeze([
+    "id",
+    "tenantId",
+    "isPlatformAdmin",
+    "isActive",
+    "accessScope",
+  ]),
+});
+
+const REQUIRED_TABLE_SELECT_RELATIONS = Object.freeze(
+  REQUIRED_SELECT_RELATIONS.filter(
+    (relation) => !Object.hasOwn(REQUIRED_COLUMN_SELECTS, relation),
+  ),
+);
+const PRODUCTION_LIKE_REPORT_EVIDENCE = new WeakMap();
 
 function baselineForeignKey(
   childTable,
@@ -216,7 +243,8 @@ Required environment:
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION
     ${ISOLATION_ATTESTATION}
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_HMAC_KEY
-    At least 32 UTF-8 bytes.
+    At least 32 UTF-8 bytes. Used only to pseudonymize and integrity-bind the
+    generated report; it never authorizes a production-like snapshot.
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_SNAPSHOT_DIGEST
     SHA-256 of the encrypted snapshot artifact (64 lowercase hex).
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE
@@ -231,9 +259,10 @@ Required environment:
     SYNTHETIC=7 days; PRODUCTION_LIKE=72 hours.
 
 Required only for PRODUCTION_LIKE:
-  STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST
-    Pre-approved HMAC-SHA-256 of database name, cluster system identifier,
-    and database OID, obtained out of band from the isolated restore.
+  STAFF_TASK_INTEGRITY_SNAPSHOT_AUTHORITY_MANIFEST
+    Canonical base64url Ed25519 envelope signed by a public root pinned in the
+    exact release. This release intentionally has no enrolled production-like
+    root, so every production-like admission currently fails closed.
 
 Optional bounded timeouts:
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_LOCK_TIMEOUT_MS
@@ -254,6 +283,8 @@ Safety:
     RELEASE_SHA Git checkout.
   - Raw database identity, role names, URLs, credentials, and row identifiers
     are never serialized.
+  - Caller-supplied HMAC identity digests and public-key environment variables
+    are never accepted as production-like authority.
   - Admission evidence is not row-level evidence, CAS, approval, or permission
     to reconcile, VALIDATE, deploy, or open external beta access.
 `.trim();
@@ -479,6 +510,22 @@ function requiredSelectValues() {
   ).join(",\n    ");
 }
 
+function requiredTableSelectValues() {
+  return REQUIRED_TABLE_SELECT_RELATIONS.map(
+    (relation) => `(${sqlLiteral(relation)})`,
+  ).join(",\n    ");
+}
+
+function requiredColumnSelectValues() {
+  return Object.entries(REQUIRED_COLUMN_SELECTS)
+    .flatMap(([relation, columns]) =>
+      columns.map(
+        (column) => `(${sqlLiteral(relation)}, ${sqlLiteral(column)})`,
+      ),
+    )
+    .join(",\n    ");
+}
+
 export const PRIVILEGE_STATE_SQL = `
 WITH
   current_role_row AS (
@@ -500,6 +547,14 @@ WITH
     VALUES
     ${requiredSelectValues()}
   ),
+  required_table_select(relation_name) AS (
+    VALUES
+    ${requiredTableSelectValues()}
+  ),
+  required_column_select(relation_name, column_name) AS (
+    VALUES
+    ${requiredColumnSelectValues()}
+  ),
   required_relation_state AS (
     SELECT
       required.relation_name,
@@ -512,6 +567,21 @@ WITH
      AND relation_row.relname = required.relation_name
      AND relation_row.relkind IN ('r', 'p')
   ),
+  required_column_state AS (
+    SELECT
+      required.relation_name,
+      required.column_name,
+      relation.relation_oid,
+      attribute_row.attnum AS attribute_number
+    FROM required_column_select AS required
+    LEFT JOIN required_relation_state AS relation
+      ON relation.relation_name = required.relation_name
+    LEFT JOIN pg_attribute AS attribute_row
+      ON attribute_row.attrelid = relation.relation_oid
+     AND attribute_row.attname = required.column_name
+     AND attribute_row.attnum > 0
+     AND NOT attribute_row.attisdropped
+  ),
   user_namespace AS (
     SELECT namespace_row.oid, namespace_row.nspname, namespace_row.nspowner
     FROM pg_namespace AS namespace_row
@@ -522,6 +592,7 @@ WITH
     SELECT
       relation_row.oid,
       relation_row.relowner,
+      relation_row.relacl,
       namespace_row.nspname AS schema_name,
       relation_row.relname AS relation_name
     FROM pg_class AS relation_row
@@ -654,6 +725,84 @@ SELECT
   ) AS excess_select_relation_count,
   (
     SELECT COUNT(*)::text
+    FROM user_table_like AS relation
+    WHERE has_table_privilege(
+      current_user,
+      relation.oid,
+      'SELECT WITH GRANT OPTION'
+    )
+  ) AS select_grant_option_relation_count,
+  (
+    SELECT COUNT(*)::text
+    FROM user_table_like AS relation
+    WHERE relation.schema_name = 'public'
+      AND relation.relation_name IN (
+        SELECT DISTINCT required.relation_name
+        FROM required_column_select AS required
+      )
+      AND has_table_privilege(current_user, relation.oid, 'SELECT')
+  ) AS column_scoped_table_select_count,
+  (
+    SELECT COUNT(*)::text
+    FROM user_table_like AS relation
+    JOIN pg_attribute AS attribute_row
+      ON attribute_row.attrelid = relation.oid
+     AND attribute_row.attnum > 0
+     AND NOT attribute_row.attisdropped
+    WHERE relation.schema_name = 'public'
+      AND relation.relation_name IN (
+        SELECT DISTINCT required.relation_name
+        FROM required_column_select AS required
+      )
+      AND has_column_privilege(
+        current_user,
+        relation.oid,
+        attribute_row.attname,
+        'SELECT'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM required_column_select AS required
+        WHERE required.relation_name = relation.relation_name
+          AND required.column_name = attribute_row.attname
+      )
+  ) AS excess_select_column_count,
+  (
+    SELECT COUNT(*)::text
+    FROM user_table_like AS relation
+    JOIN pg_attribute AS attribute_row
+      ON attribute_row.attrelid = relation.oid
+     AND attribute_row.attnum > 0
+     AND NOT attribute_row.attisdropped
+    WHERE has_column_privilege(
+      current_user,
+      relation.oid,
+      attribute_row.attname,
+      'SELECT WITH GRANT OPTION'
+    )
+  ) AS select_grant_option_column_count,
+  (
+    SELECT COUNT(*)::text
+    FROM user_table_like AS relation
+    WHERE EXISTS (
+      SELECT 1
+      FROM aclexplode(relation.relacl) AS privilege
+      WHERE privilege.grantee = 0
+        AND privilege.privilege_type = 'SELECT'
+    )
+       OR EXISTS (
+         SELECT 1
+         FROM pg_attribute AS attribute_row
+         CROSS JOIN LATERAL aclexplode(attribute_row.attacl) AS privilege
+         WHERE attribute_row.attrelid = relation.oid
+           AND attribute_row.attnum > 0
+           AND NOT attribute_row.attisdropped
+           AND privilege.grantee = 0
+           AND privilege.privilege_type = 'SELECT'
+       )
+  ) AS public_select_relation_count,
+  (
+    SELECT COUNT(*)::text
     FROM user_sequence AS relation
     WHERE has_sequence_privilege(current_user, relation.oid, 'USAGE')
        OR has_sequence_privilege(current_user, relation.oid, 'UPDATE')
@@ -694,15 +843,33 @@ SELECT
        )
   ) AS large_object_privilege_count,
   (
-    SELECT COUNT(*)::text
-    FROM required_relation_state AS required
-    WHERE required.relation_oid IS NULL
-       OR NOT has_table_privilege(
-         current_user,
-         required.relation_oid,
-         'SELECT'
-       )
-  ) AS required_select_missing_count
+    (
+      SELECT COUNT(*)
+      FROM required_table_select AS required
+      LEFT JOIN required_relation_state AS relation
+        ON relation.relation_name = required.relation_name
+      WHERE relation.relation_oid IS NULL
+         OR NOT has_table_privilege(
+           current_user,
+           relation.relation_oid,
+           'SELECT'
+         )
+    ) + (
+      SELECT COUNT(*)
+      FROM required_column_state AS required
+      WHERE required.relation_oid IS NULL
+         OR required.attribute_number IS NULL
+         OR NOT COALESCE(
+           has_column_privilege(
+             current_user,
+             required.relation_oid,
+             required.attribute_number,
+             'SELECT'
+           ),
+           false
+         )
+    )
+  )::text AS required_select_missing_count
 FROM current_role_row AS role_row
 CROSS JOIN current_database_row AS database_row
 CROSS JOIN public_schema_row AS schema_row
@@ -716,6 +883,14 @@ FROM public."_prisma_migrations"
 WHERE "finished_at" IS NOT NULL
   AND "rolled_back_at" IS NULL
 ORDER BY "migration_name"
+`.trim();
+
+export const DATABASE_AUTHORITY_MARKER_SQL = `
+SELECT
+  shobj_description(database_row.oid, 'pg_database')::text
+    AS authority_marker
+FROM pg_catalog.pg_database AS database_row
+WHERE database_row.datname = pg_catalog.current_database()
 `.trim();
 
 export function parseArguments(argv) {
@@ -877,7 +1052,7 @@ export function parseRuntimeContract(environment, now = new Date()) {
     if (!SYNTHETIC_DATABASE_PATTERN.test(databaseName)) {
       contractError(
         "SYNTHETIC_TARGET_INVALID",
-        "Synthetic admission requires a local CI/test database.",
+        "Synthetic admission requires an exact harness-generated disposable database name.",
       );
     }
   } else {
@@ -919,17 +1094,23 @@ export function parseRuntimeContract(environment, now = new Date()) {
       "A bounded opaque approval or synthetic-provenance reference is required.",
     );
   }
+  if (
+    classification === "SYNTHETIC" &&
+    !approvalReference.startsWith("synthetic:")
+  ) {
+    contractError(
+      "SYNTHETIC_PROVENANCE_REFERENCE_REQUIRED",
+      "Synthetic admission requires an explicit harness provenance reference.",
+    );
+  }
   const expectedIdentityDigest = String(
     environment.STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST ??
       "",
   ).trim();
-  if (
-    classification === "PRODUCTION_LIKE" &&
-    !HMAC_PATTERN.test(expectedIdentityDigest)
-  ) {
+  if (classification === "PRODUCTION_LIKE" && expectedIdentityDigest) {
     contractError(
-      "EXPECTED_IDENTITY_DIGEST_REQUIRED",
-      "Production-like admission requires the pre-approved database identity digest.",
+      "LEGACY_PRODUCTION_LIKE_AUTHORITY_PROHIBITED",
+      "A caller-supplied HMAC identity digest cannot authorize a production-like snapshot.",
     );
   }
   if (
@@ -990,6 +1171,23 @@ export function parseRuntimeContract(environment, now = new Date()) {
     );
   }
 
+  const authority =
+    classification === "PRODUCTION_LIKE"
+      ? verifyPinnedProductionLikeAuthority(
+          environment.STAFF_TASK_INTEGRITY_SNAPSHOT_AUTHORITY_MANIFEST,
+          {
+            releaseSha,
+            expectedState,
+            snapshotArtifactDigest,
+            approvalReference,
+            acquiredAt: acquiredAt.toISOString(),
+            restoredAt: restoredAt.toISOString(),
+            expiresAt: expiresAt.toISOString(),
+          },
+          currentTime,
+        )
+      : null;
+
   const lockTimeoutMs = parseBoundedInteger(
     environment.STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_LOCK_TIMEOUT_MS,
     {
@@ -1039,6 +1237,7 @@ export function parseRuntimeContract(environment, now = new Date()) {
     snapshotArtifactDigest,
     approvalReference,
     expectedIdentityDigest: expectedIdentityDigest || null,
+    authority,
     acquiredAt: acquiredAt.toISOString(),
     restoredAt: restoredAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
@@ -1145,6 +1344,23 @@ function parseGitBatchObjects(batchOutput, expectedPaths) {
   return objects;
 }
 
+function normalizedReleaseSourceContent(content) {
+  if (!Buffer.isBuffer(content)) {
+    contractError(
+      "RELEASE_SOURCE_MISMATCH",
+      "The release source content is invalid.",
+    );
+  }
+  const decoded = content.toString("utf8");
+  if (!Buffer.from(decoded, "utf8").equals(content) || decoded.includes("\0")) {
+    contractError(
+      "RELEASE_SOURCE_MISMATCH",
+      "The release source must be valid UTF-8 text.",
+    );
+  }
+  return decoded.replace(/\r\n/gu, "\n");
+}
+
 export async function loadExpectedMigrationManifest(expectedState, releaseSha) {
   if (!EXPECTED_STATES.has(expectedState)) {
     contractError(
@@ -1178,6 +1394,32 @@ export async function loadExpectedMigrationManifest(expectedState, releaseSha) {
       "RELEASE_SOURCE_MISMATCH",
       "The running source is not anchored to RELEASE_SHA.",
     );
+  }
+  const runtimeObjectSpecs = RELEASE_RUNTIME_SOURCE_PATHS.map(
+    (sourcePath) => `${releaseSha}:${sourcePath}`,
+  ).join("\n");
+  const runtimeBatchOutput = runGit(["cat-file", "--batch"], {
+    cwd: repositoryRoot,
+    encoding: null,
+    input: `${runtimeObjectSpecs}\n`,
+  });
+  const runtimeObjects = parseGitBatchObjects(
+    runtimeBatchOutput,
+    RELEASE_RUNTIME_SOURCE_PATHS,
+  );
+  for (const runtimeObject of runtimeObjects) {
+    const worktreeContent = readFileSync(
+      path.resolve(repositoryRoot, runtimeObject.path),
+    );
+    if (
+      normalizedReleaseSourceContent(worktreeContent) !==
+      normalizedReleaseSourceContent(runtimeObject.content)
+    ) {
+      contractError(
+        "RELEASE_SOURCE_MISMATCH",
+        "The running source content differs from the exact release blob.",
+      );
+    }
   }
   const sourceStatus = String(
     runGit(
@@ -1550,6 +1792,26 @@ export function privilegeState(row) {
       row?.excess_select_relation_count,
       "DATABASE_PRIVILEGE_COUNT_INVALID",
     ),
+    selectGrantOptionRelationCount: safeCount(
+      row?.select_grant_option_relation_count,
+      "DATABASE_PRIVILEGE_COUNT_INVALID",
+    ),
+    columnScopedTableSelectCount: safeCount(
+      row?.column_scoped_table_select_count,
+      "DATABASE_PRIVILEGE_COUNT_INVALID",
+    ),
+    excessSelectColumnCount: safeCount(
+      row?.excess_select_column_count,
+      "DATABASE_PRIVILEGE_COUNT_INVALID",
+    ),
+    selectGrantOptionColumnCount: safeCount(
+      row?.select_grant_option_column_count,
+      "DATABASE_PRIVILEGE_COUNT_INVALID",
+    ),
+    publicSelectRelationCount: safeCount(
+      row?.public_select_relation_count,
+      "DATABASE_PRIVILEGE_COUNT_INVALID",
+    ),
     writableSequenceCount: safeCount(
       row?.writable_sequence_count,
       "DATABASE_PRIVILEGE_COUNT_INVALID",
@@ -1602,6 +1864,11 @@ export function privilegeState(row) {
     actual.nonPublicSchemaUsageCount === 0 &&
     actual.writableRelationCount === 0 &&
     actual.excessSelectRelationCount === 0 &&
+    actual.selectGrantOptionRelationCount === 0 &&
+    actual.columnScopedTableSelectCount === 0 &&
+    actual.excessSelectColumnCount === 0 &&
+    actual.selectGrantOptionColumnCount === 0 &&
+    actual.publicSelectRelationCount === 0 &&
     actual.writableSequenceCount === 0 &&
     actual.selectableSequenceCount === 0 &&
     actual.executableUserFunctionCount === 0 &&
@@ -1627,6 +1894,8 @@ export function buildAdmissionReport({
   privilegeRow,
 }) {
   const generatedAt = normalizeGeneratedAt(snapshotRow?.generated_at);
+  const snapshotNotExpiredAtGeneration =
+    Date.parse(generatedAt) < Date.parse(config.expiresAt);
   const currentSchemaIsPublic =
     String(snapshotRow?.current_schema ?? "") === "public";
   const databaseNameMatched =
@@ -1637,9 +1906,29 @@ export function buildAdmissionReport({
   );
   const databaseIdentityDigestRequired =
     config.classification === "PRODUCTION_LIKE";
+  const productionLikeAuthorityVerified =
+    databaseIdentityDigestRequired &&
+    matchesVerifiedProductionLikeAuthority(config.authority, {
+      releaseSha: config.releaseSha,
+      expectedState: config.expectedState,
+      snapshotArtifactDigest: config.snapshotArtifactDigest,
+      approvalReference: config.approvalReference,
+      acquiredAt: config.acquiredAt,
+      restoredAt: config.restoredAt,
+      expiresAt: config.expiresAt,
+    });
+  const productionLikeAuthorityDatabaseMarkerMatched =
+    databaseIdentityDigestRequired &&
+    productionLikeAuthorityVerified &&
+    String(snapshotRow?.database_authority_marker ?? "") ===
+      config.authority.databaseMarker;
   const databaseIdentityDigestMatched =
     !databaseIdentityDigestRequired ||
-    databaseIdentityDigest === config.expectedIdentityDigest;
+    (productionLikeAuthorityVerified &&
+      computeNonceBoundDatabaseIdentityDigest(
+        snapshotRow,
+        config.authority.creationNonce,
+      ) === config.authority.databaseIdentityDigest);
   const serverVersionNumber = safeCount(
     snapshotRow?.server_version_num,
     "DATABASE_SERVER_VERSION_INVALID",
@@ -1665,6 +1954,18 @@ export function buildAdmissionReport({
   const rejectionCodes = [];
   if (!currentSchemaIsPublic) rejectionCodes.push("PUBLIC_SCHEMA_REQUIRED");
   if (!databaseNameMatched) rejectionCodes.push("DATABASE_IDENTITY_MISMATCH");
+  if (!snapshotNotExpiredAtGeneration) {
+    rejectionCodes.push("SNAPSHOT_EXPIRED_DURING_ADMISSION");
+  }
+  if (databaseIdentityDigestRequired && !productionLikeAuthorityVerified) {
+    rejectionCodes.push("PRODUCTION_LIKE_AUTHORITY_REQUIRED");
+  }
+  if (
+    databaseIdentityDigestRequired &&
+    !productionLikeAuthorityDatabaseMarkerMatched
+  ) {
+    rejectionCodes.push("PRODUCTION_LIKE_AUTHORITY_MARKER_MISMATCH");
+  }
   if (!databaseIdentityDigestMatched) {
     rejectionCodes.push("DATABASE_IDENTITY_DIGEST_MISMATCH");
   }
@@ -1706,6 +2007,7 @@ export function buildAdmissionReport({
       leastPrivilegeRoleRequired: true,
       exactSelectAllowlistRequired: true,
       releaseArtifactBound: true,
+      independentProductionLikeAuthorityRequired: true,
       enforcementTriggersRequired: true,
       outputContainsDatabaseName: false,
       outputContainsRoleName: false,
@@ -1720,8 +2022,11 @@ export function buildAdmissionReport({
     database: {
       currentSchemaIsPublic,
       databaseNameMatched,
+      snapshotNotExpiredAtGeneration,
       databaseIdentityDigestRequired,
       databaseIdentityDigestMatched,
+      productionLikeAuthorityVerified,
+      productionLikeAuthorityDatabaseMarkerMatched,
       postgresqlMajor,
       postgresqlMajorSupported,
       migrations,
@@ -1737,31 +2042,49 @@ export function buildAdmissionReport({
     },
   };
   const contentDigest = computeHmac(
-    "staff-task-snapshot-admission-content-v1",
+    "staff-task-snapshot-admission-content-v2",
     stableReport,
     config.hmacKey,
   );
-  return {
+  const report = {
     ...stableReport,
     generatedAt,
     contentDigest,
     executionDigest: computeHmac(
-      "staff-task-snapshot-admission-execution-v1",
+      "staff-task-snapshot-admission-execution-v2",
       { contentDigest, generatedAt },
       config.hmacKey,
     ),
   };
+  if (databaseIdentityDigestRequired && productionLikeAuthorityVerified) {
+    PRODUCTION_LIKE_REPORT_EVIDENCE.set(report, contentDigest);
+  }
+  return report;
 }
 
-export function exitCodeForAdmission(report, hmacKey) {
+export function exitCodeForAdmission(
+  report,
+  hmacKey,
+  currentTime = new Date(),
+) {
   const hmacKeyBytes = Buffer.byteLength(String(hmacKey ?? ""), "utf8");
+  const evaluatedAt =
+    currentTime instanceof Date
+      ? new Date(currentTime.valueOf())
+      : new Date(String(currentTime));
+  const reportExpiresAt = Date.parse(String(report?.expiresAt ?? ""));
   if (
     report?.script !== SCRIPT_NAME ||
+    report?.reportSchemaVersion !== REPORT_SCHEMA_VERSION ||
+    Number.isNaN(reportExpiresAt) ||
+    new Date(reportExpiresAt).toISOString() !== report?.expiresAt ||
     hmacKeyBytes < 32 ||
     hmacKeyBytes > MAX_HMAC_KEY_BYTES ||
     !HMAC_PATTERN.test(String(report?.databaseIdentityDigest ?? "")) ||
     !HMAC_PATTERN.test(String(report?.contentDigest ?? "")) ||
     !HMAC_PATTERN.test(String(report?.executionDigest ?? "")) ||
+    Number.isNaN(evaluatedAt.valueOf()) ||
+    evaluatedAt.valueOf() >= reportExpiresAt ||
     report?.summary?.inventoryExecuted !== false ||
     report?.summary?.plannerExecuted !== false
   ) {
@@ -1770,12 +2093,12 @@ export function exitCodeForAdmission(report, hmacKey) {
   const { generatedAt, contentDigest, executionDigest, ...stableReport } =
     report;
   const expectedContentDigest = computeHmac(
-    "staff-task-snapshot-admission-content-v1",
+    "staff-task-snapshot-admission-content-v2",
     stableReport,
     hmacKey,
   );
   const expectedExecutionDigest = computeHmac(
-    "staff-task-snapshot-admission-execution-v1",
+    "staff-task-snapshot-admission-execution-v2",
     { contentDigest: expectedContentDigest, generatedAt },
     hmacKey,
   );
@@ -1787,10 +2110,24 @@ export function exitCodeForAdmission(report, hmacKey) {
   }
 
   const rejectionCodes = report?.summary?.rejectionCodes;
+  const productionLikeAuthorityGateReady =
+    report.classification === "PRODUCTION_LIKE"
+      ? report?.database?.databaseIdentityDigestRequired === true &&
+        report?.database?.productionLikeAuthorityVerified === true &&
+        report?.database?.productionLikeAuthorityDatabaseMarkerMatched ===
+          true &&
+        PRODUCTION_LIKE_REPORT_EVIDENCE.get(report) === report.contentDigest
+      : report.classification === "SYNTHETIC" &&
+        report?.database?.databaseIdentityDigestRequired === false &&
+        report?.database?.productionLikeAuthorityVerified === false &&
+        report?.database?.productionLikeAuthorityDatabaseMarkerMatched ===
+          false;
   const gatesReady =
     report?.database?.currentSchemaIsPublic === true &&
     report?.database?.databaseNameMatched === true &&
+    report?.database?.snapshotNotExpiredAtGeneration === true &&
     report?.database?.databaseIdentityDigestMatched === true &&
+    productionLikeAuthorityGateReady &&
     report?.database?.postgresqlMajorSupported === true &&
     report?.database?.migrations?.detectedState === report.expectedState &&
     report?.database?.migrationManifest?.ready === true &&
@@ -1800,6 +2137,7 @@ export function exitCodeForAdmission(report, hmacKey) {
     report?.safety?.applySupported === false &&
     report?.safety?.remoteTargetAllowed === false &&
     report?.safety?.releaseArtifactBound === true &&
+    report?.safety?.independentProductionLikeAuthorityRequired === true &&
     report?.safety?.exactSelectAllowlistRequired === true &&
     report?.safety?.enforcementTriggersRequired === true;
   if (
@@ -1828,6 +2166,7 @@ function assertReadOnlySource() {
     SNAPSHOT_STATE_SQL,
     MIGRATION_STATE_SQL,
     APPLIED_MIGRATION_MANIFEST_SQL,
+    DATABASE_AUTHORITY_MARKER_SQL,
     CATALOG_STATE_SQL,
     BASELINE_CATALOG_STATE_SQL,
     PRIVILEGE_STATE_SQL,
@@ -1846,12 +2185,12 @@ function selfTestEnvironment() {
   return {
     NODE_ENV: "test",
     DATABASE_URL:
-      "postgresql://reader:secret@127.0.0.1:5432/leetplus_snapshot_test?schema=public",
+      "postgresql://reader:secret@127.0.0.1:5432/lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa?schema=public",
     RELEASE_SHA: "a".repeat(40),
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION: "SYNTHETIC",
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: EXPAND_STATE,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
-      "leetplus_snapshot_test",
+      "lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa",
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM: RUN_CONFIRMATION,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION:
       ISOLATION_ATTESTATION,
@@ -1874,7 +2213,7 @@ function selfTestRows() {
     snapshotRow: {
       generated_at: new Date("2026-07-27T00:00:00.000Z"),
       current_schema: "public",
-      current_database: "leetplus_snapshot_test",
+      current_database: "lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa",
       cluster_system_identifier: "1234567890123456789",
       database_oid: "16384",
       server_version_num: "160009",
@@ -1919,6 +2258,11 @@ function selfTestRows() {
       non_public_schema_usage_count: "0",
       writable_relation_count: "0",
       excess_select_relation_count: "0",
+      select_grant_option_relation_count: "0",
+      column_scoped_table_select_count: "0",
+      excess_select_column_count: "0",
+      select_grant_option_column_count: "0",
+      public_select_relation_count: "0",
       writable_sequence_count: "0",
       selectable_sequence_count: "0",
       executable_user_function_count: "0",
@@ -1956,7 +2300,7 @@ export function runSelfTest() {
   const rows = selfTestRows();
   const admitted = buildAdmissionReport({ config, ...rows });
   assert.equal(admitted.summary.decision, "ADMITTED");
-  assert.equal(exitCodeForAdmission(admitted, config.hmacKey), 0);
+  assert.equal(exitCodeForAdmission(admitted, config.hmacKey, now), 0);
   assert.match(admitted.databaseIdentityDigest, HMAC_PATTERN);
   assert.match(admitted.contentDigest, HMAC_PATTERN);
   assert.match(admitted.executionDigest, HMAC_PATTERN);
@@ -1985,10 +2329,10 @@ export function runSelfTest() {
     },
   });
   assert.equal(unsafePrivilege.summary.decision, "REJECTED");
-  assert.equal(exitCodeForAdmission(unsafePrivilege, config.hmacKey), 3);
+  assert.equal(exitCodeForAdmission(unsafePrivilege, config.hmacKey, now), 3);
 
   const serialized = JSON.stringify(admitted);
-  assert.doesNotMatch(serialized, /leetplus_snapshot_test/u);
+  assert.doesNotMatch(serialized, /lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa/u);
   assert.doesNotMatch(serialized, /1234567890123456789/u);
   assert.doesNotMatch(serialized, /reader|secret/u);
 
@@ -2028,16 +2372,21 @@ export async function inspectDatabase(environment, config) {
         const snapshotRows =
           await transaction.$queryRawUnsafe(SNAPSHOT_STATE_SQL);
         const snapshotRow = snapshotRows[0];
+        const authorityMarkerRows = await transaction.$queryRawUnsafe(
+          DATABASE_AUTHORITY_MARKER_SQL,
+        );
         const versionRows = await transaction.$queryRawUnsafe(
           `SELECT current_setting('server_version_num')::text AS server_version_num`,
         );
-        if (!snapshotRow || !versionRows[0]) {
+        if (!snapshotRow || !versionRows[0] || !authorityMarkerRows[0]) {
           contractError(
             "DATABASE_SNAPSHOT_STATE_MISSING",
             "The database did not return snapshot identity state.",
           );
         }
         snapshotRow.server_version_num = versionRows[0].server_version_num;
+        snapshotRow.database_authority_marker =
+          authorityMarkerRows[0].authority_marker;
 
         const migrationRows =
           await transaction.$queryRawUnsafe(MIGRATION_STATE_SQL);
@@ -2140,7 +2489,7 @@ export async function main(
 
   try {
     const report = await inspectDatabase(environment, config);
-    const exitCode = exitCodeForAdmission(report, config.hmacKey);
+    const exitCode = exitCodeForAdmission(report, config.hmacKey, new Date());
     if (exitCode === 1) {
       contractError(
         "ADMISSION_REPORT_INTEGRITY_FAILED",

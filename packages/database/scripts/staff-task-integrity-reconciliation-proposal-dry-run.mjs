@@ -304,17 +304,45 @@ FROM pg_catalog.pg_database AS database_row
 WHERE database_row.datname = pg_catalog.current_database()
 `.trim();
 
-export const RELATION_LOCK_SQL = `
+export const RELATION_LOCK_ORDER = Object.freeze([
+  "_prisma_migrations",
+  "StaffTask",
+  "StaffTaskRecurringRule",
+  "StaffTaskRecurringRuleRun",
+  "StaffTaskTemplate",
+  "Store",
+  "Tenant",
+  "User",
+  "UserStoreAccess",
+]);
+
+function qualifiedLockRelation(relation) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(relation)) {
+    throw new Error("Unsafe frozen relation-lock identifier.");
+  }
+  return `public."${relation}"`;
+}
+
+const USER_LOCK_INDEX = RELATION_LOCK_ORDER.indexOf("User");
+
+export const RELATION_LOCK_BEFORE_USER_SQL = `
 LOCK TABLE
-  public."_prisma_migrations",
-  public."StaffTask",
-  public."StaffTaskRecurringRule",
-  public."StaffTaskRecurringRuleRun",
-  public."StaffTaskTemplate",
-  public."Store",
-  public."Tenant",
-  public."User",
-  public."UserStoreAccess"
+  ${RELATION_LOCK_ORDER.slice(0, USER_LOCK_INDEX)
+    .map(qualifiedLockRelation)
+    .join(",\n  ")}
+IN ACCESS SHARE MODE
+`.trim();
+
+export const USER_RELATION_ACCESS_SHARE_SQL = `
+SELECT "id"
+FROM ONLY public."User"
+WHERE false
+`.trim();
+
+export const RELATION_LOCK_AFTER_USER_SQL = `
+LOCK TABLE ${RELATION_LOCK_ORDER.slice(USER_LOCK_INDEX + 1)
+  .map(qualifiedLockRelation)
+  .join(",\n  ")}
 IN ACCESS SHARE MODE
 `.trim();
 
@@ -355,7 +383,7 @@ The full snapshot admission environment is also required. It must declare:
   EXPECTED_STATE=EXPAND_162
   loopback PostgreSQL 16
   exact clean RELEASE_SHA
-  exact least-privilege nine-table SELECT role
+  exact least-privilege role with eight table grants and five User columns
   exact harness-created database comment carrying the signed creation nonce
 
 Exit codes:
@@ -1097,7 +1125,11 @@ export function buildProposalCases({
     .sort((left, right) => left.caseToken.localeCompare(right.caseToken));
 }
 
-function validateAdmissionBinding(admissionReport, config) {
+function validateAdmissionBinding(
+  admissionReport,
+  config,
+  verificationTime = new Date(),
+) {
   if (
     admissionReport?.summary?.decision !== "ADMITTED" ||
     admissionReport?.classification !== CLASSIFICATION ||
@@ -1106,7 +1138,11 @@ function validateAdmissionBinding(admissionReport, config) {
     !HMAC_PATTERN.test(String(admissionReport?.databaseIdentityDigest ?? "")) ||
     !HMAC_PATTERN.test(String(admissionReport?.contentDigest ?? "")) ||
     !HMAC_PATTERN.test(String(admissionReport?.executionDigest ?? "")) ||
-    exitCodeForAdmission(admissionReport, config.admission.hmacKey) !== 0
+    exitCodeForAdmission(
+      admissionReport,
+      config.admission.hmacKey,
+      verificationTime,
+    ) !== 0
   ) {
     contractError(
       "ADMISSION_BINDING_INVALID",
@@ -1223,8 +1259,9 @@ export function buildDryRunReport({
   advisoryLockAcquired = true,
   provenanceBinding,
   databaseIdentityDigest,
+  verificationTime = new Date(),
 }) {
-  validateAdmissionBinding(admissionReport, config);
+  validateAdmissionBinding(admissionReport, config, verificationTime);
   validatePlannerBinding(plan, config);
   const planCounts = validatedPlanCounts(plan, config);
   if (
@@ -1412,7 +1449,7 @@ export function exitCodeForDryRun(report, hmacKey) {
 function selfTestAdmissionReport(config, databaseIdentityDigest) {
   const stable = {
     script: "staff-task-integrity-snapshot-admission",
-    reportSchemaVersion: 1,
+    reportSchemaVersion: 2,
     classification: CLASSIFICATION,
     expectedState: EXPAND_STATE,
     releaseSha: config.admission.releaseSha,
@@ -1434,6 +1471,7 @@ function selfTestAdmissionReport(config, databaseIdentityDigest) {
       leastPrivilegeRoleRequired: true,
       exactSelectAllowlistRequired: true,
       releaseArtifactBound: true,
+      independentProductionLikeAuthorityRequired: true,
       enforcementTriggersRequired: true,
       outputContainsDatabaseName: false,
       outputContainsRoleName: false,
@@ -1448,8 +1486,11 @@ function selfTestAdmissionReport(config, databaseIdentityDigest) {
     database: {
       currentSchemaIsPublic: true,
       databaseNameMatched: true,
+      snapshotNotExpiredAtGeneration: true,
       databaseIdentityDigestRequired: false,
       databaseIdentityDigestMatched: true,
+      productionLikeAuthorityVerified: false,
+      productionLikeAuthorityDatabaseMarkerMatched: false,
       postgresqlMajor: 16,
       postgresqlMajorSupported: true,
       migrations: {
@@ -1495,7 +1536,7 @@ function selfTestAdmissionReport(config, databaseIdentityDigest) {
   };
   const generatedAt = "2026-07-27T00:00:00.000Z";
   const contentDigest = computeHmac(
-    "staff-task-snapshot-admission-content-v1",
+    "staff-task-snapshot-admission-content-v2",
     stable,
     config.admission.hmacKey,
   );
@@ -1504,7 +1545,7 @@ function selfTestAdmissionReport(config, databaseIdentityDigest) {
     generatedAt,
     contentDigest,
     executionDigest: computeHmac(
-      "staff-task-snapshot-admission-execution-v1",
+      "staff-task-snapshot-admission-execution-v2",
       { contentDigest, generatedAt },
       config.admission.hmacKey,
     ),
@@ -1517,7 +1558,7 @@ function selfTestConfig() {
   const provenanceHmacKey = "self-test-provenance-hmac-key-cccccccccccccc";
   const databaseIdentityDigest = computeDatabaseIdentityDigest(
     {
-      current_database: "leetplus_ci",
+      current_database: "lp_snapshot_admission_ci_cccccccccccccccc",
       cluster_system_identifier: "1234567890123456789",
       database_oid: "16384",
     },
@@ -1537,11 +1578,12 @@ function selfTestConfig() {
     {
       NODE_ENV: "test",
       DATABASE_URL:
-        "postgresql://reader:secret@127.0.0.1:5432/leetplus_ci?schema=public",
+        "postgresql://reader:secret@127.0.0.1:5432/lp_snapshot_admission_ci_cccccccccccccccc?schema=public",
       RELEASE_SHA: releaseSha,
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION: CLASSIFICATION,
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: EXPAND_STATE,
-      STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE: "leetplus_ci",
+      STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
+        "lp_snapshot_admission_ci_cccccccccccccccc",
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM:
         "run-staff-task-integrity-snapshot-admission",
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION:
@@ -1550,7 +1592,7 @@ function selfTestConfig() {
         "self-test-admission-hmac-key-aaaaaaaaaaaaaaaa",
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_SNAPSHOT_DIGEST: "b".repeat(64),
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE:
-        "synthetic-dry-run-self-test",
+        "synthetic:dry-run-self-test",
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ACQUIRED_AT:
         "2026-07-27T00:00:00.000Z",
       STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_RESTORED_AT:
@@ -1656,8 +1698,19 @@ export function runSelfTest() {
     MUTATING_KEYWORD_PATTERN.test(SYNTHETIC_PROVENANCE_STATE_SQL),
     false,
   );
-  assert.equal(MUTATING_KEYWORD_PATTERN.test(RELATION_LOCK_SQL), false);
-  assert.match(RELATION_LOCK_SQL, /IN ACCESS SHARE MODE$/u);
+  for (const sql of [
+    RELATION_LOCK_BEFORE_USER_SQL,
+    USER_RELATION_ACCESS_SHARE_SQL,
+    RELATION_LOCK_AFTER_USER_SQL,
+  ]) {
+    assert.equal(MUTATING_KEYWORD_PATTERN.test(sql), false);
+  }
+  assert.match(RELATION_LOCK_BEFORE_USER_SQL, /IN ACCESS SHARE MODE$/u);
+  assert.match(
+    USER_RELATION_ACCESS_SHARE_SQL,
+    /^SELECT "id"\s+FROM ONLY public\."User"\s+WHERE false$/u,
+  );
+  assert.match(RELATION_LOCK_AFTER_USER_SQL, /IN ACCESS SHARE MODE$/u);
   assert.doesNotMatch(PROPOSAL_ROWS_SQL, /SELECT\s+\*/iu);
   assert.throws(() => parseArguments(["--apply"]), {
     code: "CLI_ARGUMENT_UNSUPPORTED",
@@ -1714,6 +1767,7 @@ export function runSelfTest() {
       bindingDigest: "f".repeat(64),
     },
     databaseIdentityDigest: admissionReport.databaseIdentityDigest,
+    verificationTime: new Date("2026-07-27T00:00:00.000Z"),
   });
   assert.equal(exitCodeForDryRun(report, config.hmacKey), 2);
   const serialized = JSON.stringify(report);
@@ -1747,8 +1801,15 @@ export async function scanDatabase(
     environment,
     config.admission,
   );
-  validateAdmissionBinding(admissionReport, config);
-  if (exitCodeForAdmission(admissionReport, config.admission.hmacKey) !== 0) {
+  const admissionVerificationTime = new Date();
+  validateAdmissionBinding(admissionReport, config, admissionVerificationTime);
+  if (
+    exitCodeForAdmission(
+      admissionReport,
+      config.admission.hmacKey,
+      admissionVerificationTime,
+    ) !== 0
+  ) {
     contractError(
       "ADMISSION_BINDING_INVALID",
       "The prerequisite admission report was not admitted.",
@@ -1803,7 +1864,9 @@ export async function scanDatabase(
             3,
           );
         }
-        await transaction.$executeRawUnsafe(RELATION_LOCK_SQL);
+        await transaction.$executeRawUnsafe(RELATION_LOCK_BEFORE_USER_SQL);
+        await transaction.$queryRawUnsafe(USER_RELATION_ACCESS_SHARE_SQL);
+        await transaction.$executeRawUnsafe(RELATION_LOCK_AFTER_USER_SQL);
 
         const snapshotRows =
           await transaction.$queryRawUnsafe(SNAPSHOT_STATE_SQL);
@@ -1947,6 +2010,7 @@ export async function scanDatabase(
           advisoryLockAcquired,
           provenanceBinding: finalProvenanceBinding,
           databaseIdentityDigest,
+          verificationTime: new Date(finalProvenanceRows[0].verified_at),
         });
       },
       {

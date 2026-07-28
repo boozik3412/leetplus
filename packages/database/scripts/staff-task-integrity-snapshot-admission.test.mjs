@@ -7,6 +7,8 @@ import {
   BASELINE_STATE,
   EXPAND_STATE,
   ISOLATION_ATTESTATION,
+  PRIVILEGE_STATE_SQL,
+  REQUIRED_COLUMN_SELECTS,
   RUN_CONFIRMATION,
   buildAdmissionReport,
   buildMigrationManifestState,
@@ -23,20 +25,21 @@ import {
   PARENT_INDEXES,
   SIMPLE_CONSTRAINTS,
 } from "./staff-task-integrity-reconciliation-plan.mjs";
+import { computeNonceBoundDatabaseIdentityDigest } from "./staff-task-integrity-snapshot-authority.mjs";
 
 const NOW = new Date("2026-07-27T00:00:00.000Z");
 const HMAC_KEY = "unit-test-snapshot-admission-hmac-key-aaaaaaaa";
+const SYNTHETIC_DATABASE = "lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa";
 
 function environment(overrides = {}) {
   return {
     NODE_ENV: "test",
-    DATABASE_URL:
-      "postgresql://reader:secret@127.0.0.1:5432/leetplus_snapshot_test?schema=public",
+    DATABASE_URL: `postgresql://reader:secret@127.0.0.1:5432/${SYNTHETIC_DATABASE}?schema=public`,
     RELEASE_SHA: "a".repeat(40),
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION: "SYNTHETIC",
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE: EXPAND_STATE,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
-      "leetplus_snapshot_test",
+      SYNTHETIC_DATABASE,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM: RUN_CONFIRMATION,
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION:
       ISOLATION_ATTESTATION,
@@ -82,6 +85,11 @@ function privilegeRow(overrides = {}) {
     non_public_schema_usage_count: "0",
     writable_relation_count: "0",
     excess_select_relation_count: "0",
+    select_grant_option_relation_count: "0",
+    column_scoped_table_select_count: "0",
+    excess_select_column_count: "0",
+    select_grant_option_column_count: "0",
+    public_select_relation_count: "0",
     writable_sequence_count: "0",
     selectable_sequence_count: "0",
     executable_user_function_count: "0",
@@ -97,7 +105,7 @@ function expandRows(overrides = {}) {
     snapshotRow: {
       generated_at: new Date("2026-07-27T00:00:00.000Z"),
       current_schema: "public",
-      current_database: "leetplus_snapshot_test",
+      current_database: SYNTHETIC_DATABASE,
       cluster_system_identifier: "1234567890123456789",
       database_oid: "16384",
       server_version_num: "160009",
@@ -131,7 +139,7 @@ function baselineRows() {
     snapshotRow: {
       generated_at: new Date("2026-07-27T00:00:00.000Z"),
       current_schema: "public",
-      current_database: "leetplus_snapshot_test",
+      current_database: SYNTHETIC_DATABASE,
       cluster_system_identifier: "1234567890123456789",
       database_oid: "16384",
       server_version_num: "160009",
@@ -175,15 +183,14 @@ test("synthetic runtime contract is anchored to a local test database", () => {
   const config = parseRuntimeContract(environment(), NOW);
   assert.equal(config.classification, "SYNTHETIC");
   assert.equal(config.expectedState, EXPAND_STATE);
-  assert.equal(config.expectedDatabaseName, "leetplus_snapshot_test");
+  assert.equal(config.expectedDatabaseName, SYNTHETIC_DATABASE);
   assert.equal(config.localHost, true);
 
   assert.throws(
     () =>
       parseRuntimeContract(
         environment({
-          DATABASE_URL:
-            "postgresql://reader:secret@db.internal:5432/leetplus_snapshot_test",
+          DATABASE_URL: `postgresql://reader:secret@db.internal:5432/${SYNTHETIC_DATABASE}`,
         }),
         NOW,
       ),
@@ -218,7 +225,7 @@ test("production process and missing attestations fail closed", () => {
   );
 });
 
-test("remote targets stay NO-GO and production-like identity is pre-bound", () => {
+test("remote targets stay NO-GO and production-like authority fails closed", () => {
   const remoteEnvironment = environment({
     DATABASE_URL:
       "postgresql://reader:secret@db.internal:5432/leetplus_snapshot_rehearsal",
@@ -240,18 +247,22 @@ test("remote targets stay NO-GO and production-like identity is pre-bound", () =
       "leetplus_snapshot_rehearsal",
   });
   assert.throws(() => parseRuntimeContract(localProductionLike, NOW), {
-    code: "EXPECTED_IDENTITY_DIGEST_REQUIRED",
+    code: "PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED",
   });
-  const config = parseRuntimeContract(
+  assert.throws(
+    () =>
+      parseRuntimeContract(
+        {
+          ...localProductionLike,
+          STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST:
+            "c".repeat(64),
+        },
+        NOW,
+      ),
     {
-      ...localProductionLike,
-      STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST:
-        "c".repeat(64),
+      code: "LEGACY_PRODUCTION_LIKE_AUTHORITY_PROHIBITED",
     },
-    NOW,
   );
-  assert.equal(config.classification, "PRODUCTION_LIKE");
-  assert.equal(config.localHost, true);
 });
 
 test("database marker, public schema, HMAC, expiry, and timeout order are exact", () => {
@@ -270,8 +281,7 @@ test("database marker, public schema, HMAC, expiry, and timeout order are exact"
     () =>
       parseRuntimeContract(
         environment({
-          DATABASE_URL:
-            "postgresql://reader:secret@127.0.0.1:5432/leetplus_snapshot_test?schema=private",
+          DATABASE_URL: `postgresql://reader:secret@127.0.0.1:5432/${SYNTHETIC_DATABASE}?schema=private`,
         }),
         NOW,
       ),
@@ -328,8 +338,6 @@ test("database marker, public schema, HMAC, expiry, and timeout order are exact"
             "PRODUCTION_LIKE",
           STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
             "leetplus_snapshot_rehearsal",
-          STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST:
-            "c".repeat(64),
           STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPIRES_AT:
             "2026-07-31T00:00:00.000Z",
         }),
@@ -378,6 +386,22 @@ test("read-only URL fixes one connection, public schema, and bounded settings", 
   );
 });
 
+test("User evidence stays column-scoped and missing columns reject structurally", () => {
+  assert.deepEqual(REQUIRED_COLUMN_SELECTS.User, [
+    "id",
+    "tenantId",
+    "isPlatformAdmin",
+    "isActive",
+    "accessScope",
+  ]);
+  assert.match(
+    PRIVILEGE_STATE_SQL,
+    /has_column_privilege\(\s*current_user,\s*required\.relation_oid,\s*required\.attribute_number,\s*'SELECT'\s*\)/u,
+  );
+  assert.match(PRIVILEGE_STATE_SQL, /public_select_relation_count/u);
+  assert.match(PRIVILEGE_STATE_SQL, /privilege\.grantee = 0/u);
+});
+
 test("exact EXPAND_162 state is admitted without running inventory", () => {
   const config = parseRuntimeContract(environment(), NOW);
   const report = buildAdmissionReport({ config, ...expandRows() });
@@ -385,54 +409,69 @@ test("exact EXPAND_162 state is admitted without running inventory", () => {
   assert.equal(report.summary.inventoryExecuted, false);
   assert.equal(report.summary.plannerExecuted, false);
   assert.equal(report.database.migrations.detectedState, EXPAND_STATE);
-  assert.equal(exitCodeForAdmission(report, HMAC_KEY), 0);
+  assert.equal(exitCodeForAdmission(report, HMAC_KEY, NOW), 0);
 });
 
-test("production-like admission requires the pre-approved identity digest", () => {
-  const syntheticConfig = parseRuntimeContract(environment(), NOW);
-  const identityDigest = buildAdmissionReport({
-    config: syntheticConfig,
+test("snapshot expiry is rechecked at database generation and before emit", () => {
+  const config = parseRuntimeContract(environment(), NOW);
+  const expiredDuringQuery = buildAdmissionReport({
+    config,
     ...expandRows(),
-  }).databaseIdentityDigest;
-  const productionConfig = parseRuntimeContract(
-    environment({
-      DATABASE_URL:
-        "postgresql://reader:secret@127.0.0.1:5432/leetplus_snapshot_rehearsal?schema=public",
-      STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION: "PRODUCTION_LIKE",
-      STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
-        "leetplus_snapshot_rehearsal",
-      STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST:
-        identityDigest,
-    }),
-    NOW,
+    snapshotRow: {
+      ...expandRows().snapshotRow,
+      generated_at: new Date(config.expiresAt),
+    },
+  });
+  assert.equal(expiredDuringQuery.summary.decision, "REJECTED");
+  assert.ok(
+    expiredDuringQuery.summary.rejectionCodes.includes(
+      "SNAPSHOT_EXPIRED_DURING_ADMISSION",
+    ),
   );
+  assert.equal(exitCodeForAdmission(expiredDuringQuery, HMAC_KEY, NOW), 3);
+
+  const admitted = buildAdmissionReport({ config, ...expandRows() });
+  assert.equal(
+    exitCodeForAdmission(admitted, HMAC_KEY, new Date(config.expiresAt)),
+    1,
+  );
+});
+
+test("a truthy forged production-like authority cannot bypass verification", () => {
+  const syntheticConfig = parseRuntimeContract(environment(), NOW);
   const rows = expandRows();
   rows.snapshotRow.current_database = "leetplus_snapshot_rehearsal";
-  const actualIdentityDigest = buildAdmissionReport({
-    config: { ...productionConfig, expectedIdentityDigest: null },
-    ...rows,
-  }).databaseIdentityDigest;
-  const admitted = buildAdmissionReport({
-    config: {
-      ...productionConfig,
-      expectedIdentityDigest: actualIdentityDigest,
-    },
-    ...rows,
-  });
-  assert.equal(admitted.database.databaseIdentityDigestRequired, true);
-  assert.equal(admitted.database.databaseIdentityDigestMatched, true);
-  assert.equal(admitted.summary.decision, "ADMITTED");
-
+  const creationNonce = "d".repeat(64);
   const rejected = buildAdmissionReport({
     config: {
-      ...productionConfig,
-      expectedIdentityDigest: "f".repeat(64),
+      ...syntheticConfig,
+      classification: "PRODUCTION_LIKE",
+      expectedDatabaseName: "leetplus_snapshot_rehearsal",
+      authority: {
+        creationNonce,
+        databaseIdentityDigest: computeNonceBoundDatabaseIdentityDigest(
+          rows.snapshotRow,
+          creationNonce,
+        ),
+      },
     },
     ...rows,
   });
+  assert.equal(rejected.database.databaseIdentityDigestRequired, true);
+  assert.equal(rejected.database.databaseIdentityDigestMatched, false);
+  assert.equal(rejected.database.productionLikeAuthorityVerified, false);
+  assert.equal(
+    rejected.database.productionLikeAuthorityDatabaseMarkerMatched,
+    false,
+  );
   assert.ok(
     rejected.summary.rejectionCodes.includes(
       "DATABASE_IDENTITY_DIGEST_MISMATCH",
+    ),
+  );
+  assert.ok(
+    rejected.summary.rejectionCodes.includes(
+      "PRODUCTION_LIKE_AUTHORITY_REQUIRED",
     ),
   );
 });
@@ -463,7 +502,7 @@ test("unfinished or intermediate migration state is rejected", () => {
   });
   assert.equal(report.summary.decision, "REJECTED");
   assert.deepEqual(report.summary.rejectionCodes, ["MIGRATION_STATE_MISMATCH"]);
-  assert.equal(exitCodeForAdmission(report, HMAC_KEY), 3);
+  assert.equal(exitCodeForAdmission(report, HMAC_KEY, NOW), 3);
 });
 
 test("full ordered migration names and checksums must match release artifacts", () => {
@@ -538,6 +577,11 @@ test("every privilege escalation class rejects admission", () => {
     { non_public_schema_usage_count: "1" },
     { writable_relation_count: "1" },
     { excess_select_relation_count: "1" },
+    { select_grant_option_relation_count: "1" },
+    { column_scoped_table_select_count: "1" },
+    { excess_select_column_count: "1" },
+    { select_grant_option_column_count: "1" },
+    { public_select_relation_count: "1" },
     { writable_sequence_count: "1" },
     { selectable_sequence_count: "1" },
     { executable_user_function_count: "1" },
@@ -593,7 +637,7 @@ test("digests are stable, timestamp-bound, database-bound, and privacy-safe", ()
 
   const serialized = JSON.stringify(first);
   for (const secret of [
-    "leetplus_snapshot_test",
+    SYNTHETIC_DATABASE,
     "1234567890123456789",
     "16384",
     "reader",
@@ -606,7 +650,7 @@ test("digests are stable, timestamp-bound, database-bound, and privacy-safe", ()
 });
 
 test("forged or incomplete reports never produce a success exit", () => {
-  assert.equal(exitCodeForAdmission({}, HMAC_KEY), 1);
+  assert.equal(exitCodeForAdmission({}, HMAC_KEY, NOW), 1);
   const config = parseRuntimeContract(environment(), NOW);
   const report = buildAdmissionReport({ config, ...expandRows() });
   assert.equal(
@@ -616,6 +660,7 @@ test("forged or incomplete reports never produce a success exit", () => {
         summary: { ...report.summary, inventoryExecuted: true },
       },
       HMAC_KEY,
+      NOW,
     ),
     1,
   );
@@ -629,6 +674,7 @@ test("forged or incomplete reports never produce a success exit", () => {
         },
       },
       HMAC_KEY,
+      NOW,
     ),
     1,
   );

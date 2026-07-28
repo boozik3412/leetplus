@@ -61,6 +61,9 @@ jobs:
       - name: Validate staff task integrity reconciliation planner
         run: pnpm --filter database check:staff-task-integrity-reconciliation-plan
 
+      - name: Validate staff task snapshot authority boundary
+        run: pnpm --filter database check:staff-task-integrity-snapshot-authority
+
       - name: Validate staff task snapshot admission
         run: pnpm --filter database check:staff-task-integrity-snapshot-admission
 

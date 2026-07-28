@@ -1,20 +1,19 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { TenantModule, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import {
-  hasCapability,
-  resolveUserCapabilities,
-} from '../auth/capabilities';
+import { hasCapability, resolveUserCapabilities } from '../auth/capabilities';
 import { TransactionalMailService } from '../mail/transactional-mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   TenantExecutionAdmissionDecision,
   TenantExecutionAdmissionService,
+  type TenantExecutionPermitAcquisition,
 } from '../tenancy/tenant-execution-admission.service';
 import type {
   ReportDigestType,
@@ -26,10 +25,15 @@ import { ReportsService, type OperationalReport } from './reports.service';
 
 const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
-const REPORT_DIGEST_OUTBOUND_REQUIREMENTS = [
+export const REPORT_DIGEST_OUTBOUND_REQUIREMENTS = [
   { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
   { module: TenantModule.COMMUNICATIONS, action: 'OUTBOUND' },
 ] as const;
+
+type SendScheduledDigestsOptions = {
+  tenantId?: string;
+  permitAcquisition?: TenantExecutionPermitAcquisition;
+};
 
 type ScheduledDigestSkippedResult = {
   status: 'SKIPPED';
@@ -77,16 +81,14 @@ export class ReportsDigestService {
       dto.recipientEmail,
       user.email,
     );
-    await this.tenantExecutionAdmissionService.assertAllowed(
+    const permit = await this.tenantExecutionAdmissionService.issuePermit(
       user.tenantId,
       REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
     );
     const digest = await this.buildDigest(user, type);
 
-    await this.tenantExecutionAdmissionService.assertAllowed(
-      user.tenantId,
-      REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
-    );
+    await this.tenantExecutionAdmissionService.assertPermitCurrent(permit);
+    await this.assertFreshManualExportAuthority(user, permit.executionRevision);
     await this.sendDigestEmail(recipientEmail, digest);
 
     return {
@@ -101,8 +103,9 @@ export class ReportsDigestService {
 
   async sendScheduledDigests(
     dto: SendScheduledReportDigestDto,
-    options: { tenantId?: string } = {},
+    options: SendScheduledDigestsOptions = {},
   ) {
+    this.assertSuppliedAcquisitionScope(options);
     const type = this.resolveDigestType(dto.type);
     const recipients = await this.prisma.user.findMany({
       where: {
@@ -157,6 +160,16 @@ export class ReportsDigestService {
         override,
       ]),
     );
+    const acquisitionsByTenant = new Map<
+      string,
+      TenantExecutionPermitAcquisition
+    >();
+    if (options.permitAcquisition) {
+      acquisitionsByTenant.set(
+        options.permitAcquisition.decision.tenantId,
+        options.permitAcquisition,
+      );
+    }
 
     if (dto.dryRun) {
       const skippedResults: ScheduledDigestSkippedResult[] = [];
@@ -172,12 +185,14 @@ export class ReportsDigestService {
           continue;
         }
 
-        const admission = await this.tenantExecutionAdmissionService.evaluate(
+        const acquisition = await this.resolveScheduledPermitAcquisition(
           recipient.tenantId,
-          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+          acquisitionsByTenant,
         );
-        if (!admission.allowed) {
-          skippedResults.push(this.toSkippedResult(recipient, admission));
+        if (!acquisition.permit) {
+          skippedResults.push(
+            this.toSkippedResult(recipient, acquisition.decision),
+          );
           continue;
         }
 
@@ -213,36 +228,22 @@ export class ReportsDigestService {
         continue;
       }
 
-      const initialAdmission =
-        await this.tenantExecutionAdmissionService.evaluate(
-          user.tenantId,
-          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
-        );
-      if (!initialAdmission.allowed) {
+      const acquisition = await this.resolveScheduledPermitAcquisition(
+        user.tenantId,
+        acquisitionsByTenant,
+      );
+      if (!acquisition.permit) {
         skippedResults.push(
-          this.toSkippedResult(recipient, initialAdmission),
+          this.toSkippedResult(recipient, acquisition.decision),
         );
         continue;
       }
 
       const digest = await this.buildDigest(user, type);
-      const effectAdmission =
-        await this.tenantExecutionAdmissionService.evaluate(
-          user.tenantId,
-          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
-        );
-      if (!effectAdmission.allowed) {
-        skippedResults.push(
-          this.toSkippedResult(recipient, effectAdmission),
-        );
-        continue;
-      }
 
       const freshRecipient = await this.loadFreshScheduledRecipient(recipient);
       if (!freshRecipient) {
-        skippedResults.push(
-          this.toAuthorityRevokedSkippedResult(recipient),
-        );
+        skippedResults.push(this.toAuthorityRevokedSkippedResult(recipient));
         continue;
       }
       const freshRoleOverrides =
@@ -252,8 +253,17 @@ export class ReportsDigestService {
         freshRoleOverrides,
       );
       if (!hasCapability(freshUser, 'export_reports')) {
+        skippedResults.push(this.toCapabilitySkippedResult(freshRecipient));
+        continue;
+      }
+
+      const effectAdmission =
+        await this.tenantExecutionAdmissionService.evaluatePermit(
+          acquisition.permit,
+        );
+      if (!effectAdmission.allowed) {
         skippedResults.push(
-          this.toCapabilitySkippedResult(freshRecipient),
+          this.toSkippedResult(freshRecipient, effectAdmission),
         );
         continue;
       }
@@ -278,6 +288,151 @@ export class ReportsDigestService {
     };
   }
 
+  private assertSuppliedAcquisitionScope(options: SendScheduledDigestsOptions) {
+    const acquisition = options.permitAcquisition;
+    if (!acquisition) {
+      return;
+    }
+
+    const tenantId = acquisition.decision.tenantId;
+    if (
+      (options.tenantId && options.tenantId !== tenantId) ||
+      (acquisition.permit && acquisition.permit.tenantId !== tenantId)
+    ) {
+      throw new BadRequestException(
+        'Scheduled digest permit acquisition tenant mismatch',
+      );
+    }
+  }
+
+  private async resolveScheduledPermitAcquisition(
+    tenantId: string,
+    acquisitionsByTenant: Map<string, TenantExecutionPermitAcquisition>,
+  ) {
+    const cached = acquisitionsByTenant.get(tenantId);
+    if (cached) {
+      return cached;
+    }
+
+    const acquisition =
+      await this.tenantExecutionAdmissionService.acquirePermit(
+        tenantId,
+        REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+      );
+    acquisitionsByTenant.set(tenantId, acquisition);
+
+    return acquisition;
+  }
+
+  private async assertFreshManualExportAuthority(
+    user: Pick<
+      AuthenticatedUser,
+      'id' | 'tenantId' | 'accessScope' | 'allowedStoreIds'
+    >,
+    expectedExecutionRevision: number,
+  ) {
+    const freshUser = await this.prisma.user.findFirst({
+      where: {
+        id: user.id,
+        tenantId: user.tenantId,
+        isActive: true,
+      },
+      select: {
+        role: true,
+        accessScope: true,
+        tenant: {
+          select: {
+            executionRevision: true,
+          },
+        },
+        customRole: {
+          select: {
+            permissions: true,
+          },
+        },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: {
+              select: {
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (
+      !freshUser ||
+      freshUser.tenant.executionRevision !== expectedExecutionRevision ||
+      !this.isSameManualAccessScope(user, freshUser)
+    ) {
+      throw new ForbiddenException({
+        reasonCode: 'REPORT_EXPORT_AUTHORITY_REVOKED',
+        message: 'Report export authority is no longer current',
+      });
+    }
+
+    const roleOverride = freshUser.customRole
+      ? null
+      : await this.prisma.userRoleOverride.findUnique({
+          where: {
+            tenantId_role: {
+              tenantId: user.tenantId,
+              role: freshUser.role,
+            },
+          },
+          select: {
+            permissions: true,
+          },
+        });
+    const permissions = resolveUserCapabilities({
+      role: freshUser.role,
+      customRole: freshUser.customRole,
+      roleOverride,
+    });
+
+    if (!hasCapability({ permissions }, 'export_reports')) {
+      throw new ForbiddenException({
+        reasonCode: 'CAPABILITY_EXPORT_REPORTS_REQUIRED',
+        message: 'Report export capability is no longer current',
+      });
+    }
+  }
+
+  private isSameManualAccessScope(
+    expected: Pick<
+      AuthenticatedUser,
+      'tenantId' | 'accessScope' | 'allowedStoreIds'
+    >,
+    actual: {
+      accessScope: string | null;
+      storeAccesses: Array<{
+        storeId: string;
+        store: { tenantId: string };
+      }>;
+    },
+  ) {
+    if (actual.accessScope !== expected.accessScope) {
+      return false;
+    }
+
+    const actualStoreIds = actual.storeAccesses
+      .filter((access) => access.store.tenantId === expected.tenantId)
+      .map((access) => access.storeId)
+      .sort();
+    const expectedStoreIds = [...expected.allowedStoreIds].sort();
+
+    return (
+      actualStoreIds.length === actual.storeAccesses.length &&
+      actualStoreIds.length === expectedStoreIds.length &&
+      actualStoreIds.every(
+        (storeId, index) => storeId === expectedStoreIds[index],
+      )
+    );
+  }
+
   private toSkippedResult(
     recipient: {
       tenantId: string;
@@ -297,10 +452,7 @@ export class ReportsDigestService {
   }
 
   private toCapabilitySkippedResult(
-    recipient: Pick<
-      ScheduledDigestRecipient,
-      'tenantId' | 'email' | 'tenant'
-    >,
+    recipient: Pick<ScheduledDigestRecipient, 'tenantId' | 'email' | 'tenant'>,
   ): ScheduledDigestSkippedResult {
     return {
       status: 'SKIPPED',
@@ -313,10 +465,7 @@ export class ReportsDigestService {
   }
 
   private toAuthorityRevokedSkippedResult(
-    recipient: Pick<
-      ScheduledDigestRecipient,
-      'tenantId' | 'email' | 'tenant'
-    >,
+    recipient: Pick<ScheduledDigestRecipient, 'tenantId' | 'email' | 'tenant'>,
   ): ScheduledDigestSkippedResult {
     return {
       status: 'SKIPPED',
@@ -358,9 +507,7 @@ export class ReportsDigestService {
 
   private async loadScheduledRecipientRoleOverrides(
     recipient: ScheduledDigestRecipient,
-  ): Promise<
-    ReadonlyMap<string, { permissions: string[] }>
-  > {
+  ): Promise<ReadonlyMap<string, { permissions: string[] }>> {
     if (recipient.customRole) {
       return new Map();
     }
@@ -619,10 +766,7 @@ export class ReportsDigestService {
 
   private userToAuthenticatedUser(
     user: ScheduledDigestRecipient,
-    roleOverridesByTenantRole: ReadonlyMap<
-      string,
-      { permissions: string[] }
-    >,
+    roleOverridesByTenantRole: ReadonlyMap<string, { permissions: string[] }>,
   ): AuthenticatedUser {
     const roleOverride = user.customRole
       ? null

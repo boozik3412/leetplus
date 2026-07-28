@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 28.07.2026
-- Версия: 1.32
+- Версия: 1.35
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -212,7 +212,7 @@
 | BETA-TEN-005 | P1        | Запланировано | Расширить Platform Admin cockpit                   | Видны stage, trial, entitlement, owner invite, onboarding, stores, source freshness, sync errors, last activity, support owner и incidents                                              | BETA-TEN-003, BETA-OPS-010               |
 | BETA-TEN-006 | P0        | Запланировано | Реализовать offboarding и retention workflow       | Suspend/archive отзывает invites/sessions, выключает integrations и jobs; data export/delete/retention выполняются по утверждённой процедуре и аудируются                               | BETA-TEN-004                             |
 | BETA-TEN-007 | P0        | Запланировано | Поддержать безопасную смену tenant slug            | Старые QR, Telegram и guest URLs имеют контролируемый alias/redirect либо перевыпускаются; alias не позволяет обратиться к чужому tenant                                                | BETA-SEC-003                             |
-| BETA-TEN-008 | P0        | Запланировано | Реализовать persisted GO, activation/suspend и execution fencing | Signed gate attestations и tenant admission decision привязаны к exact SHA/environment/schema/profile; activation запускает trial и атомарно создаёт invite/outbox; `executionRevision` fencing не позволяет job/provider effect после suspend commit; emergency suspend не зависит от stale GO | BETA-TEN-003, BETA-TEN-004, BETA-IAM-004A, BETA-OPS-004 |
+| BETA-TEN-008 | P0        | В работе      | Реализовать persisted GO, activation/suspend и execution fencing | Signed gate attestations и tenant admission decision привязаны к exact SHA/environment/schema/profile; activation запускает trial и атомарно создаёт invite/outbox; `executionRevision` fencing не позволяет job/provider effect после suspend commit; emergency suspend не зависит от stale GO | BETA-TEN-003, BETA-TEN-004, BETA-IAM-004A, BETA-OPS-004 |
 
 ### 5.4. Пользователи и роли
 
@@ -292,9 +292,10 @@
 Current-state уточнение `BETA-MOD-STAFF-003`: перечисленные в строке
 `EXPAND_162` gate и старые SHA являются frozen/historical evidence. Protected
 StaffTask prefix остаётся 162, но current production-like
-admission/inventory/planner допускается только на `CURRENT_163` — exact prefix
-плюс allowlisted migration
-`20260728120000_tenant_execution_control_plane_expand`. Новый exact candidate
+admission/inventory/planner допускается только на `CURRENT_164` — exact prefix
+плюс allowlisted migrations
+`20260728120000_tenant_execution_control_plane_expand` и
+`20260728150000_tenant_execution_revision_fence`. Новый exact candidate
 SHA и production-like evidence ещё pending; статус остаётся `В работе /
 NO-GO`.
 
@@ -1602,13 +1603,14 @@ external beta                       = NO-GO
 4. отдельно выполнить production-like admission: подписанный state-bound
    `BASELINE_156` envelope → exact DB marker → admission → migrations
    `157..162` → новый `EXPAND_162` envelope с новым nonce-bound binding →
-   marker rotation → второй admission → exact allowlisted migration 163 →
-   новый `CURRENT_163` envelope/marker → третий admission. Protected StaffTask
+   marker rotation → второй admission → exact allowlisted migrations
+   `163..164` → новый `CURRENT_164` envelope/marker → третий admission.
+   Protected StaffTask
    prefix остаётся 162; предыдущие envelope/marker не переиспользовать; любой
    non-zero exit или
    marker/freshness/blob/authority/ACL mismatch останавливает работу;
 5. только после всех трёх admission отдельно выполнить read-only inventory и
-   aggregate planner на current DB 163, назначить owner каждому non-zero code;
+   aggregate planner на current DB 164, назначить owner каждому non-zero code;
 6. отдельно спроектировать, утвердить и выполнить production-like row
    dry-run с protected row evidence; synthetic/HMAC report не засчитывать;
 7. отдельным изменением реализовать explicit idempotent apply с immutable
@@ -1673,10 +1675,11 @@ enrollment, не production-like admission и не разрешение на dep
    `EXPAND_162` envelope с новым nonce-bound identity, выполнить marker
    rotation и второй admission; baseline envelope/marker reuse запрещён;
 6. применить exact allowlisted migration
-   `20260728120000_tenant_execution_control_plane_expand`, выпустить отдельный
-   `CURRENT_163` envelope, снова ротировать marker и пройти третий admission;
+   `20260728120000_tenant_execution_control_plane_expand`, затем
+   `20260728150000_tenant_execution_revision_fence`, выпустить отдельный
+   `CURRENT_164` envelope, снова ротировать marker и пройти третий admission;
    StaffTask protected prefix остаётся 162;
-7. затем отдельно проходить inventory/planner на current DB 163, row dry-run,
+7. затем отдельно проходить inventory/planner на current DB 164, row dry-run,
    apply/rollback/zero-diff и последующие Gate 2A/Gate 2 этапы из раздела 7.
 
 Топология и обязательный beta scope не меняются: четыре текущих клуба остаются
@@ -1854,12 +1857,12 @@ tenant lifecycle/stage/trial
 | BETA-MT-005 | P0        | В работе      | Закрыть delegation и store authority во всех beta-модулях      | OWNER/ADMIN не могут назначить роль/scope/capability выше допустимого; generic API не назначает OWNER, а отдельный owner-transfer workflow сохраняет последнего active NETWORK OWNER; Store list/detail/write и все GAMIFICATION/ASSORTMENT/STAFF/COMMUNICATIONS/USERS_ROLES surfaces применяют тот же `NETWORK | STORES` authority | BETA-IAM-001..007, соответствующие BETA-MOD-*                |
 | BETA-MT-006 | P0        | Запланировано | Сделать безопасный self-service `INTEGRATIONS` control-plane   | Tenant owner сохраняет только свои зашифрованные credentials; endpoint allowlist, DNS/IP recheck, timeout/retry/circuit breaker и audit обязательны; preview показывает доступные внешние клубы, exact mapping создаёт только выбранный Store; ключ не импортирует остальные клубы domain/account       | BETA-MOD-ASSORT-006, BETA-SEC-008                            |
 | BETA-MT-007 | P0        | Запланировано | Доказать двухtenantную изоляцию на общем PostgreSQL/runtime     | Реальная PostgreSQL fixture содержит A/A1/A2 и B/B1; list/detail/aggregate/write/export/file/BFF/browser/job/SSE/Telegram negative matrix зелёная для пяти product modules и supporting `INTEGRATIONS`; stale token, hidden UUID, forbidden filter, scope change и owner delegation fail-closed; нет test-only policy bypass | BETA-MT-003..006, BETA-OPS-002, BETA-OPS-003                 |
-| BETA-MT-008 | P0        | Запланировано | Подготовить общий worker/Telegram execution plane              | Jobs получают явную tenant/store system identity, durable lease/fencing и idempotency; один shared Telegram bot маршрутизирует update в правильный tenant/store; update ID дедуплицируется durable; tenant suspend и per-store kill switch останавливают effects; hardcoded tenant/store отсутствуют    | BETA-MT-003, BETA-OPS-006, BETA-MOD-GAME-006                 |
+| BETA-MT-008 | P0        | В работе      | Подготовить общий worker/Telegram execution plane              | Jobs получают явную tenant/store system identity, durable lease/fencing и idempotency; один shared Telegram bot маршрутизирует update в правильный tenant/store; update ID дедуплицируется durable; tenant suspend и per-store kill switch останавливают effects; hardcoded tenant/store отсутствуют    | BETA-MT-003, BETA-OPS-006, BETA-MOD-GAME-006                 |
 | BETA-MT-009 | P0        | Запланировано | Пройти полный module acceptance первого `Tenant B`              | Все пять product modules и supporting `INTEGRATIONS` доступны согласно полному six-row профилю; staff включает контроль, мотивацию, регламенты, checklist, обучение и knowledge base; salary только planning; in-app communications включены; integrations прошли preview/read-only sync; каждый outbound effect остаётся отдельно gated | BETA-MT-005..008, все BETA-MOD-* P0                          |
 | BETA-MT-010 | P0        | Запланировано | Принять shared beta access decision и выполнить day-0           | Gate 1MT и Gate 2 закрыты; exact SHA/CI/backup/restore/rollback/alerts приняты; protected `SHARED BETA GO` содержит Tenant/Store aliases, entitlement revision, trial, approver, support/rollback owner и stop conditions; owner invite создаётся после GO; day-0 login/scope/feedback/kill-switch smoke зелёный | BETA-MT-001..009, BETA-CUT-009, BETA-PILOT-005..006          |
 | BETA-MT-011 | P0        | Запланировано | Провести controlled first-club cycle и offboarding              | Один новый tenant активируется за change window; D1/D7 review привязаны к SHA; suspend, session/invite revoke, integration stop, export/retention и support подтверждены; второй внешний tenant не создаётся до принятия first-club review и capacity/incident decision                                | BETA-MT-010                                                  |
 
-Implementation checkpoint `Tenant execution control plane 1.6`:
+Implementation checkpoint `Tenant execution control plane 1.7`:
 
 - новая сеть fail-closed создаётся как
   `SUSPENDED + INTERNAL + PROVISIONING + profileRevision=0`;
@@ -1905,12 +1908,57 @@ Implementation checkpoint `Tenant execution control plane 1.6`:
   read-only diagnostics и manual pull/ingest не смешиваются с provider write
   или unattended execution;
 - lower-layer `TenantExecutionAdmissionService` каждый раз перечитывает
-  lifecycle/trial/profile/entitlements из PostgreSQL, поддерживает
-  cross-module requirements и возвращает stable denial для scheduler
+  lifecycle/trial/profile/entitlements и `executionRevision` из PostgreSQL,
+  поддерживает cross-module requirements, выдаёт revision-bound permit и
+  возвращает stable denial для scheduler
   `SKIPPED`; report email/digest, scheduled Langame sync/daily sync,
   bonus-ledger provider, scheduled delivery, Telegram/MAX dispatch и bot pull
-  уже защищены. Оставшиеся schedulers, public guest/Telegram identity,
-  durable claim/lease и execution fencing ещё pending;
+  уже защищены baseline admission;
+- additive migration `164` вводит trigger-owned монотонный
+  `Tenant.executionRevision`: existing tenants backfill-ятся в `1`, новый
+  неактивный shell начинается в `0`, а lifecycle/onboarding/trial/profile
+  mutation даёт ровно один bump. Прямое изменение revision запрещено; shared
+  API lifecycle/profile/OWNER/revoke paths используют revision в CAS и
+  перепроверяют фактический `+1`. Legacy operator scripts требуют отдельного
+  rollout review. Перед DDL migration берёт `ACCESS EXCLUSIVE` locks и
+  fail-closed отклоняет apply при любом `RUNNING` report digest либо
+  `PROCESSING/DISPATCHING` bonus-ledger effect; operational drain теперь
+  является не только runbook-требованием, но и database precondition;
+- ручные report email/digest получают permit до построения файла и
+  непосредственно перед SMTP повторно проверяют permit, tenant revision,
+  active actor, effective `export_reports` и неизменный
+  `NETWORK | STORES` scope. Scheduled digest сохраняет
+  captured revision в `ReportDigestScheduleRun`; bonus ledger сохраняет её в
+  claim, повторно проверяет permit перед Langame и завершает transition только
+  по exact `status + claimGeneration + attempts + executionRevision`;
+  pre-dispatch CAS дополнительно привязан к `lockedAt`.
+  Ветка staff-test cancellation использует тот же CAS и не позволяет stale
+  worker отменить запись, уже захваченную новым worker. Отдельный монотонный
+  `claimGeneration`, не сбрасываемый вместе с retry-attempts, закрывает ABA
+  после operator `NOT_APPLIED → retry`;
+- bonus-ledger Langame write имеет обязательный timeout не более 30 секунд,
+  свежо читает active source/credential, normalized phone target и
+  reward/staff eligibility у effect boundary. Непосредственно перед provider
+  выполняется exact ownership check текущей claim generation вместе с
+  текущим `Tenant.executionRevision`. Неоднозначный timeout идёт в
+  `RECONCILIATION_REQUIRED` без
+  автоматического write retry; `NOT_APPLIED` доступен только после quarantine
+  `LANGAME_BONUS_RECONCILIATION_QUARANTINE_MINUTES` (default `30`). Provider
+  idempotency/status API ещё не доказан, поэтому outbound остаётся `OFF`;
+- token-only `POST /reports/digests/scheduled` допускает только явно
+  включённый `dryRun=true`; live HTTP SMTP fail-closed до маршрутизации через
+  persisted `ReportDigestScheduleRun` coordinator и unique run guard;
+- remaining `BETA-MT-008`: durable lease/reclaim для delivery, Langame sync и
+  остальных schedulers, per-source recheck, shared Telegram claim и
+  двухфазный suspend/drain. Поэтому полный immediate-suspend contract ещё
+  pending, а outbound первого tenant остаётся `OFF`;
+- populated PostgreSQL `163 → 164` upgrade с существующими tenant/run/ledger
+  rows и lock-timeout atomic rollback ещё не отрепетирован; clean-schema CI и
+  post-migration claim-generation smoke не заменяют этот release evidence;
+- runtime database role пока не запечатана от прямого изменения
+  `TenantModuleEntitlement`: штатный profile API повышает parent revision, но
+  обходной DML должен быть запрещён privilege/trigger boundary до external
+  `GO`;
 - scheduled report digest вычисляет effective capabilities с custom role и
   tenant overrides; отсутствие `export_reports` блокирует export и SMTP, а
   active/network scope, role и overrides повторно читаются непосредственно
@@ -1930,14 +1978,22 @@ Implementation checkpoint `Tenant execution control plane 1.6`:
   canonical email claim + encrypted mail outbox + persisted GO согласно
   [initial OWNER contract](./docs/open-beta/initial-owner-identity-and-activation.md);
 - StaffTask integrity contract сохранён как immutable migrations `1..162`;
-  control-plane migration `163` допускается только как проверенный additive
-  tail, не меняющий protected `StaffTask*` relations.
-- checkpoint проходит `16/618` tenant-execution, `32/518` focused и полный
-  API regression `95 suites / 1808 passed / 2 todo`; typecheck, production
-  build, targeted lint, Prisma validate и diff-check зелёные.
+  control-plane migrations `163..164` допускаются только как проверенный
+  additive tail, не меняющий protected `StaffTask*` relations. Current
+  release state — `CURRENT_164`.
+- checkpoint проходит `16 suites / 646 tests` tenant-execution,
+  `32 suites / 523 tests` focused security и полный API regression
+  `95 suites / 1843 passed / 2 todo` (`1845 total`). Design-partner subset
+  проходит `7 suites / 68 tests`. API production build, production env
+  contract, API/database/web
+  typecheck, API boundary/tenant-execution lint, web lint без ошибок, seed
+  safety `9/9`, Prisma validate/generate, migration-164 offline contract
+  `6/6` и diff-check зелёные; real
+  PostgreSQL smoke подключён в CI и локально не имитируется без
+  PostgreSQL/Docker.
 
 Этот checkpoint закрывает foundation, но не Gate 1MT. Следующий обязательный
-P0-порядок: закончить route/job/guest/Telegram policy и effect fencing →
+P0-порядок: закончить durable lease/job/guest/Telegram effect fencing →
 реализовать identity claim/outbox и shell-only provisioning → persisted
 release gates + dedicated activation/suspend/reissue/revoke → real
 PostgreSQL concurrency → безопасный integration preview/select/map →
@@ -2092,8 +2148,9 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    migrations `157..162`, получить новый `EXPAND_162` envelope с новым
    nonce-bound binding, заменить DB marker его digest и выполнить второй
    admission. Затем применить только exact allowlisted migration
-   `20260728120000_tenant_execution_control_plane_expand`, выпустить третий
-   `CURRENT_163` envelope с новым binding, повторно заменить marker и пройти
+   `20260728120000_tenant_execution_control_plane_expand`, затем exact
+   `20260728150000_tenant_execution_revision_fence`, выпустить третий
+   `CURRENT_164` envelope с новым binding, повторно заменить marker и пройти
    третий admission. Protected StaffTask evidence остаётся bound к prefix 162;
    baseline/expand marker не переиспользовать; все три authority bundle и обе
    marker-rotation attestation сохранить. Exact роль
@@ -2103,7 +2160,8 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    останавливает работу.
 5. Только после всех трёх admission отдельно выполнить read-only inventory и
    aggregate reconciliation planner schema `v1` на exact current
-   `CURRENT_163` (`migrationCount=163`, latest control-plane migration) с
+   `CURRENT_164` (`migrationCount=164`, latest
+   `20260728150000_tenant_execution_revision_fence`) с
    одинаковыми thresholds, exact protected StaffTask catalog gate и owner для
    каждого non-zero code. HMAC
    `databaseIdentityDigest`, `contentDigest` и `executionDigest` являются

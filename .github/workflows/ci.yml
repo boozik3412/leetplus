@@ -82,6 +82,9 @@ jobs:
       - name: Validate tenant execution control-plane upgrade smoke
         run: pnpm --filter database check:tenant-execution-control-plane-upgrade-smoke
 
+      - name: Validate tenant execution revision fence contract
+        run: pnpm --filter database check:tenant-execution-revision-fence
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -124,8 +127,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260728120000_tenant_execution_control_plane_expand
-          EXPECTED_DATABASE_MIGRATION_COUNT: "163"
+          EXPECTED_DATABASE_MIGRATION: 20260728150000_tenant_execution_revision_fence
+          EXPECTED_DATABASE_MIGRATION_COUNT: "164"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 

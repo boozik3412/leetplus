@@ -2,11 +2,11 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.7                                                             |
+| Версия           | 1.10                                                            |
 | Дата             | 28.07.2026                                                      |
-| Статус           | Foundation + HTTP/lower-layer adoption; evidence pending          |
+| Статус           | Foundation + revision fencing slice; evidence pending            |
 | Release decision | `NO-GO` для внешнего owner invite                               |
-| Migration        | `20260728120000_tenant_execution_control_plane_expand`           |
+| Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть        |
 
 Этот документ фиксирует фактически реализованный срез
@@ -284,15 +284,54 @@ shared external tenant и не является разрешением на до
   scheduled Langame sync и daily composite sync, bonus-ledger provider
   dispatch, scheduled delivery pipeline, Telegram/MAX provider dispatch и
   bot-delivery pull. Denied tenant получает `SKIPPED`/`BLOCKED`, не останавливая
-  остальные tenants. Непосредственно перед SMTP, bonus-ledger и Telegram/MAX
-  provider effect выполняется fresh admission; Langame пока имеет только
-  tenant preflight перед длинным sync. Это ещё не заменяет
-  `executionRevision`, per-source recheck и durable claim/lease.
+  остальные tenants. `TenantExecutionAdmissionService` теперь выдаёт
+  revision-bound permit и fail-closed отклоняет uninitialized revision `0`.
+- Migration `164` добавляет trigger-owned `Tenant.executionRevision`,
+  backfill existing tenants в `1`, baseline `0` для нового shell, ровно один
+  bump на lifecycle/onboarding/trial/profile mutation и запрет direct revision
+  write. Shared API lifecycle/profile/OWNER/revoke paths включают expected
+  revision в CAS и проверяют фактический `+1`; legacy operator scripts не
+  считаются этим доказательством и должны проходить отдельный rollout review.
+  Migration до изменения схемы берёт `ACCESS EXCLUSIVE` locks и отклоняется
+  с SQLSTATE `55000`, если существует `RUNNING` report digest или
+  `PROCESSING/DISPATCHING` bonus-ledger entry. Drain является обязательной
+  database precondition, а не только операторской договорённостью.
+- Непосредственно перед SMTP выполняются `assertPermitCurrent` и повторное
+  чтение active actor, effective `export_reports`, tenant revision и exact
+  `NETWORK | STORES` scope; любое изменение authority после построения файла
+  запрещает отправку. Scheduled run сохраняет captured revision.
+  Bonus-ledger claim сохраняет revision в строке,
+  непосредственно перед Langame вызывает `evaluatePermit`, а каждый
+  worker-transition требует exact
+  `status + claimGeneration + attempts + executionRevision`; pre-dispatch CAS
+  дополнительно привязан к `lockedAt`.
+  `claimGeneration` монотонно увеличивается при каждом claim и не сбрасывается
+  operator retry, поэтому старый provider response не может подтвердить новую
+  claim generation после `NOT_APPLIED`.
+- Langame bonus write использует обязательный bounded timeout не более 30 секунд,
+  заново читает active source и credential непосредственно у provider boundary и
+  повторно проверяет reward/staff eligibility и normalized phone target после
+  перехода в `DISPATCHING`. После этих проверок выполняется exact ownership
+  lookup по generation/attempt/lock и текущему `Tenant.executionRevision`;
+  stale worker не вызывает provider.
+  Неоднозначный timeout не ретраится автоматически: запись переводится в
+  `RECONCILIATION_REQUIRED`, а ручной `NOT_APPLIED` запрещён до истечения
+  fail-closed quarantine (по умолчанию 30 минут). Это ещё не доказывает
+  at-most-once: до подтверждения provider idempotency/status API outbound
+  остаётся `OFF`.
+- Token-only scheduled digest HTTP допускает только явно включённый
+  `dryRun=true`. Live HTTP SMTP fail-closed до общей маршрутизации через
+  persisted `ReportDigestScheduleRun` coordinator и unique run guard.
+- Telegram/MAX delivery и длинный Langame sync пока имеют только fresh
+  admission/preflight без общего durable claim/lease. Микро-гонка уже начатого
+  provider request описывается как bounded drain/reconciliation; строгий
+  двухфазный suspend остаётся обязательным до outbound `GO`.
 - Scheduled report digest вычисляет фактические capabilities системной или
   custom role с tenant overrides; без `export_reports` recipient получает
   `CAPABILITY_EXPORT_REPORTS_REQUIRED`, а export и SMTP не запускаются.
-  Непосредственно перед SMTP повторно читаются active/network scope, role,
-  custom role и tenant override; отозванный recipient получает
+  Непосредственно перед SMTP повторно читаются active state, tenant revision,
+  exact network/store scope, role, custom role и tenant override; отозванный
+  или изменённый recipient получает
   `RECIPIENT_AUTHORITY_REVOKED`.
 - Cross-module Langame admission требует одновременно `INTEGRATIONS` и
   `ASSORTMENT`; guest foundation и business snapshot дополнительно требуют
@@ -355,15 +394,21 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
 Этот checkpoint не закрывает Gate 1MT. До первого внешнего владельца нужны:
 
 1. exhaustive route manifest/decorators и policy для BFF/files/guest/Telegram;
-2. adoption lower-layer admission в оставшихся schedulers/provider effects;
-3. `executionRevision`, worker lease/fencing и immediate suspend contract;
-4. canonical email claim, encrypted outbox и fail-closed mail config;
-5. shell-only provisioning вместо текущего raw-URL candidate;
-6. persisted release gates и dedicated activation/suspend/reissue/revoke;
-7. real PostgreSQL provision/activate/accept/suspend concurrency tests;
-8. двухtenantная/двухклубная PostgreSQL/browser isolation matrix;
-9. безопасный integration preview/select/map и tenant-aware Telegram;
-10. PostgreSQL 16 migration/rollback, backup/restore и operational rollout.
+2. durable worker lease/claim для delivery, Langame sync и оставшихся
+   schedulers; strict suspend/drain поверх уже реализованного revision fence;
+3. canonical email claim, encrypted outbox и fail-closed mail config;
+4. shell-only provisioning вместо текущего raw-URL candidate;
+5. persisted release gates и dedicated activation/suspend/reissue/revoke;
+6. real PostgreSQL provision/activate/accept/suspend concurrency tests;
+7. двухtenantная/двухклубная PostgreSQL/browser isolation matrix;
+8. безопасный integration preview/select/map и tenant-aware Telegram;
+9. PostgreSQL 16 populated `163 → 164` upgrade/lock-timeout rollback,
+   backup/restore и operational rollout с
+   обязательным pre-migration drain старого API/workers и zero in-flight
+   evidence до apply revision fence.
+10. DB-role/trigger sealing для прямого `TenantModuleEntitlement` DML:
+    profile API уже повышает parent execution revision, но обходной runtime
+    write должен быть запрещён до external `GO`.
 
 До выполнения этого списка endpoint не вызывается с тестовым email, реальный
 external tenant/invite не создаётся и release decision остаётся `NO-GO`.
@@ -387,14 +432,18 @@ PostgreSQL migration smoke выполняется CI на чистой PostgreSQ
 
 Последняя локальная проверка checkpoint:
 
-- tenant-execution suite: `16 suites / 618 tests`;
-- focused security suite: `32 suites / 518 tests`;
-- полный API regression: `95 suites / 1808 passed / 2 todo`;
+- tenant-execution suite: `16 suites / 646 tests`;
+- focused security suite: `32 suites / 523 tests`;
+- design-partner subset: `7 suites / 68 tests`;
+- полный API regression: `95 suites / 1843 passed / 2 todo`
+  (`1845 total`);
 - API typecheck, production build, boundary/tenant-execution lint,
-  Prisma validate и `git diff --check`: `PASS`.
+  production environment contract, Prisma validate/generate, database
+  typecheck, seed safety `9/9`, migration-164 offline contract `6/6` и
+  `git diff --check`: `PASS`.
 
-StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migration
-`163` принимается только как явно allowlisted additive tail, не затрагивающий
-protected `StaffTask*` relations. Frozen StaffTask evidence остаётся в state
-`EXPAND_162`; фактическая текущая БД и downstream inventory/planner должны
-проходить отдельный admission как `CURRENT_163`.
+StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migrations
+`163..164` принимаются только как явно allowlisted additive tail, не
+затрагивающий protected `StaffTask*` relations. Frozen StaffTask evidence
+остаётся в state `EXPAND_162`; фактическая текущая БД и downstream
+inventory/planner должны проходить отдельный admission как `CURRENT_164`.

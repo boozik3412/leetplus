@@ -473,6 +473,7 @@ async function seed(prisma: Prisma.TransactionClient) {
       customerStage: TenantCustomerStage.INTERNAL,
       onboardingStatus: TenantOnboardingStatus.ACTIVE,
       entitlementProfileRevision: localDemoProfileRevision,
+      executionRevision: 1,
     },
   });
 

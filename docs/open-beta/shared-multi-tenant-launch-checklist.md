@@ -52,8 +52,17 @@ API keys, encryption/signing secrets и raw business data запрещено с�
       provisioning оставляет tenant в `PROVISIONING` без invite/token/trial.
 - [ ] Generic lifecycle mutation отклоняет любой non-`INTERNAL` tenant;
       dedicated external activation/suspend/offboarding приняты отдельно.
-- [ ] `executionRevision` увеличивается при lifecycle/onboarding/trial/profile
-      mutation; старый job permit не может commit/ack/send после suspend.
+- [x] Trigger-owned `executionRevision` увеличивается при
+      lifecycle/onboarding/trial/profile mutation; прямой revision write
+      запрещён, shared API mutation paths используют CAS.
+- [x] Report SMTP и bonus-ledger Langame write сохраняют captured revision и
+      повторно проверяют permit перед effect; SMTP authority и ledger claim
+      ownership перечитываются у effect boundary, stale transition fenced.
+- [ ] Runtime DB role либо DB invariant запрещает прямое изменение
+      `TenantModuleEntitlement` в обход profile-revision workflow.
+- [ ] Delivery, общий Langame sync и остальные jobs имеют durable
+      claim/lease; старый permit не может commit/ack/send после suspend, а
+      начатый provider request проходит documented drain/reconciliation.
 - [ ] Persisted `SHARED BETA GO` привязан к exact release SHA, environment,
       schema head, policy manifest, profile digest и execution revision.
 - [ ] Unknown/missing/expired state прекращает действие fail-closed.
@@ -207,6 +216,9 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 - [ ] URL policy проверяет scheme/host/port, DNS/IP и rebinding.
 - [ ] Loopback, link-local, metadata и запрещённые private targets отклоняются.
 - [ ] Общий timeout, bounded retry, circuit breaker и rate limit включены.
+- [x] Bonus-ledger balance write имеет обязательный timeout до 30 секунд,
+      неоднозначный результат уходит в reconciliation без write retry и
+      защищён quarantine перед `NOT_APPLIED`.
 - [ ] Preview перечисляет видимые source clubs без создания Store.
 - [ ] OWNER явно выбирает свой source club и связывает только `Store B1`.
 - [ ] Domain/API key не импортирует автоматически остальные видимые клубы.

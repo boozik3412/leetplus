@@ -81,6 +81,7 @@ type ProvisioningReceipt = {
     customerStage: typeof TenantCustomerStage.PILOT;
     onboardingStatus: typeof TenantOnboardingStatus.OWNER_INVITED;
     profileRevision: number;
+    executionRevision: number;
   };
   store: {
     id: string;
@@ -118,6 +119,8 @@ type RevokeReceipt = {
   revokedInviteId: string;
   lifecycleStatus: typeof TenantLifecycleStatus.SUSPENDED;
   onboardingStatus: typeof TenantOnboardingStatus.PROVISIONING;
+  executionRevisionBefore: number;
+  executionRevisionAfter: number;
 };
 
 @Injectable()
@@ -274,6 +277,7 @@ export class SharedTenantProvisioningService {
               customerStage: true,
               onboardingStatus: true,
               entitlementProfileRevision: true,
+              executionRevision: true,
             },
           });
           const store = await tx.store.create({
@@ -343,6 +347,7 @@ export class SharedTenantProvisioningService {
               customerStage: TenantCustomerStage.PILOT,
               onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
               profileRevision: tenant.entitlementProfileRevision,
+              executionRevision: tenant.executionRevision,
             },
             store: {
               id: store.id,
@@ -387,6 +392,7 @@ export class SharedTenantProvisioningService {
                 outboundDefault: 'OFF',
                 activationRequired: true,
                 confirmationRule: 'PROVISION tenant_slug',
+                executionRevision: tenant.executionRevision,
               },
             },
           });
@@ -502,6 +508,7 @@ export class SharedTenantProvisioningService {
               customerStage: TenantCustomerStage;
               onboardingStatus: TenantOnboardingStatus;
               entitlementProfileRevision: number;
+              executionRevision: number;
               updatedAt: Date;
             }>
           >(Prisma.sql`
@@ -512,6 +519,7 @@ export class SharedTenantProvisioningService {
               "customerStage",
               "onboardingStatus",
               "entitlementProfileRevision",
+              "executionRevision",
               "updatedAt"
             FROM "Tenant"
             WHERE "id" = ${tenant.id}
@@ -642,6 +650,7 @@ export class SharedTenantProvisioningService {
               status: current.status,
               onboardingStatus: current.onboardingStatus,
               entitlementProfileRevision: current.entitlementProfileRevision,
+              executionRevision: current.executionRevision,
               updatedAt: current.updatedAt,
             },
             data: {
@@ -657,12 +666,33 @@ export class SharedTenantProvisioningService {
             );
           }
 
+          const revokedTenant = await tx.tenant.findUniqueOrThrow({
+            where: { id: current.id },
+            select: {
+              status: true,
+              onboardingStatus: true,
+              executionRevision: true,
+            },
+          });
+          if (
+            revokedTenant.status !== TenantLifecycleStatus.SUSPENDED ||
+            revokedTenant.onboardingStatus !==
+              TenantOnboardingStatus.PROVISIONING ||
+            revokedTenant.executionRevision !== current.executionRevision + 1
+          ) {
+            throw new ConflictException(
+              'Tenant execution revision changed while revoking the initial invite',
+            );
+          }
+
           const revokeReceipt: RevokeReceipt = {
             tenantId: tenant.id,
             tenantSlug: tenant.slug,
             revokedInviteId: invite.id,
             lifecycleStatus: TenantLifecycleStatus.SUSPENDED,
             onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+            executionRevisionBefore: current.executionRevision,
+            executionRevisionAfter: revokedTenant.executionRevision,
           };
           await tx.platformAdminAuditEvent.create({
             data: {
@@ -678,13 +708,19 @@ export class SharedTenantProvisioningService {
                 expiresAt: invite.expiresAt.toISOString(),
                 lifecycleStatus: current.status,
                 onboardingStatus: current.onboardingStatus,
+                executionRevision: current.executionRevision,
               },
-              after: revokeReceipt,
+              after: {
+                ...revokeReceipt,
+                executionRevision: revokedTenant.executionRevision,
+              },
               metadata: {
                 requestDigest,
                 supportTicket,
                 provisioningProfileVersion: SHARED_BETA_PROFILE_VERSION,
                 confirmationRule: 'REVOKE tenant_slug',
+                executionRevisionBefore: current.executionRevision,
+                executionRevisionAfter: revokedTenant.executionRevision,
               },
             },
           });
@@ -806,12 +842,20 @@ export class SharedTenantProvisioningService {
       throw new ConflictException('Stored revoke receipt is invalid');
     }
     const receipt = event.after;
+    const executionRevisionBefore = receipt.executionRevisionBefore;
+    const executionRevisionAfter = receipt.executionRevisionAfter;
     if (
       typeof receipt.tenantId !== 'string' ||
       typeof receipt.tenantSlug !== 'string' ||
       typeof receipt.revokedInviteId !== 'string' ||
       receipt.lifecycleStatus !== TenantLifecycleStatus.SUSPENDED ||
-      receipt.onboardingStatus !== TenantOnboardingStatus.PROVISIONING
+      receipt.onboardingStatus !== TenantOnboardingStatus.PROVISIONING ||
+      typeof executionRevisionBefore !== 'number' ||
+      !Number.isSafeInteger(executionRevisionBefore) ||
+      executionRevisionBefore < 0 ||
+      typeof executionRevisionAfter !== 'number' ||
+      !Number.isSafeInteger(executionRevisionAfter) ||
+      executionRevisionAfter !== executionRevisionBefore + 1
     ) {
       throw new ConflictException('Stored revoke receipt is invalid');
     }
@@ -821,6 +865,8 @@ export class SharedTenantProvisioningService {
       revokedInviteId: receipt.revokedInviteId,
       lifecycleStatus: TenantLifecycleStatus.SUSPENDED,
       onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+      executionRevisionBefore,
+      executionRevisionAfter,
     };
   }
 
@@ -868,6 +914,8 @@ export class SharedTenantProvisioningService {
       tenant.customerStage !== TenantCustomerStage.PILOT ||
       tenant.onboardingStatus !== TenantOnboardingStatus.OWNER_INVITED ||
       tenant.profileRevision !== 1 ||
+      !Number.isSafeInteger(tenant.executionRevision) ||
+      (tenant.executionRevision as number) < 0 ||
       typeof store.id !== 'string' ||
       typeof store.name !== 'string' ||
       store.isActive !== false ||

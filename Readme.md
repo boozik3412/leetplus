@@ -101,6 +101,8 @@ Payload: `phone`, `type`, `sum`, `comment`, где `type` может быть `b
 
 Боевой dispatcher включается env-флагом `LANGAME_BONUS_ACCRUAL_ENABLED=true`; путь по умолчанию: `LANGAME_BONUS_ACCRUAL_PATH=/master_api/guests/balance/phone`.
 
+Каждый Langame balance write принудительно ограничен таймаутом не более 30 секунд; отключить его значением `0` или увеличить выше этого предела нельзя. Перед вызовом provider bonus ledger заново проверяет ownership текущей claim-generation вместе с `Tenant.executionRevision`, tenant permit, normalized phone target, deliverability reward/staff-профиля и активные tenant source/credential. Неоднозначный timeout не запускает автоматический write retry: запись переходит в `RECONCILIATION_REQUIRED`, а решение `NOT_APPLIED` разрешается только после fail-closed quarantine `LANGAME_BONUS_RECONCILIATION_QUARANTINE_MINUTES` (по умолчанию `30`). Это не является доказательством at-most-once без подтверждённой idempotency/status-семантики Langame, поэтому для нового tenant outbound остаётся выключенным до отдельного canary gate.
+
 Для автономной работы без админского запуска добавлен API-side scheduler `GuestBonusLedgerSchedulerService`: в production он стартует при наличии `SYNC_SERVICE_TOKEN`, если `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED` не выключен явно. Scheduler вызывает существующий `POST /guests/gamification/scheduled/bonus-ledger/dispatch`-контур внутри backend, пропускает пересекающиеся тики и логирует только агрегаты tenant/queued/confirmed/failed/blocked без raw phone, токенов и Langame payload. Настройки: `GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_ID`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG`, `GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES`. Реальная запись в Langame все равно требует `LANGAME_BONUS_ACCRUAL_ENABLED=true`; если write-флаг не включен, ledger остается в safe dry-run/disabled режиме.
 
 Для внешнего Telegram/MAX bot-consumer добавлены сервисные endpoints под тем же `SYNC_SERVICE_TOKEN`: `POST /guests/gamification/scheduled/deliveries/bot/pull` принимает `tenantId` или `tenantSlug`, `channels` и `limit`, возвращает только готовые `READY_FOR_BOT` доставки из `GuestGameDelivery` с безопасным текстом сообщения, масками и подтвержденным bot identity для отправки; `POST /guests/gamification/scheduled/deliveries/bot/ack` принимает `deliveryId`, `status=SENT|FAILED|BLOCKED`, короткие provider-поля и переводит delivery в итоговый статус с записью `GuestGameDeliveryEvent`. Повторный terminal ack с тем же статусом идемпотентно возвращает текущую delivery без нового события, а смена terminal-статуса требует явного retry из Guest Game Hub. Эти endpoints не делают live-запросы в Langame, не пишут в Langame, не отдают raw phone и не сохраняют raw Telegram update.
@@ -386,7 +388,12 @@ Deployment-порядок для fallback-входа закреплен в `docs
 - Ежедневный email-дайджест по сети: деньги, маржа, OOS, списания, SKU без продаж и ключевые действия.
 - Еженедельный коммерческий отчет: сравнение с предыдущей неделей и XLSX-отчет во вложении.
 - В `/reports` добавлен блок отправки ежедневного дайджеста и недельного отчета на email.
-- Для будущего расписания есть защищенный endpoint `POST /reports/digests/scheduled` с `x-sync-service-token`.
+- Для диагностики будущего расписания endpoint
+  `POST /reports/digests/scheduled` требует `x-sync-service-token`, явный
+  `REPORT_DIGEST_SCHEDULED_HTTP_ENABLED=true` и допускает только
+  `dryRun=true`. Live HTTP-отправка fail-closed до маршрутизации через
+  persisted `ReportDigestScheduleRun` coordinator; штатный internal scheduler
+  использует этот coordinator.
 - В API добавлен встроенный scheduler ежедневной/еженедельной доставки с журналом запусков и защитой от повторной отправки по tenant/type/date.
 - `/reports` не загружает полный sales-detail в первый экран: тяжелая таблица открывается отдельно, чтобы хаб отчетов и блок дайджестов не зависели от многомегабайтного preview.
 - Позже добавить Telegram/MAX-уведомления для критических событий после подготовки канала и юридических правил.

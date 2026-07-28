@@ -11,6 +11,8 @@ import {
 export const TENANT_EXECUTION_ADMISSION_DENIAL_REASONS = [
   'TENANT_NOT_FOUND',
   'TENANT_EXECUTION_REQUIREMENTS_EMPTY',
+  'TENANT_EXECUTION_REVISION_INVALID',
+  'TENANT_EXECUTION_REVISION_CHANGED',
 ] as const;
 
 export type TenantExecutionAdmissionDenialReason =
@@ -32,8 +34,20 @@ export type TenantExecutionAdmissionDecision = {
   reasonCode: 'ALLOWED' | TenantExecutionAdmissionDenialReason;
   failedRequirement: TenantExecutionRequirement | null;
   entitlementProfileRevision: number | null;
+  executionRevision: number | null;
   customerStage: TenantCustomerStage | null;
   internalEntitlementBypass: boolean;
+};
+
+export type TenantExecutionPermit = {
+  tenantId: string;
+  executionRevision: number;
+  requirements: readonly TenantExecutionRequirement[];
+};
+
+export type TenantExecutionPermitAcquisition = {
+  decision: TenantExecutionAdmissionDecision;
+  permit: TenantExecutionPermit | null;
 };
 
 const tenantExecutionSubjectSelect = {
@@ -44,6 +58,7 @@ const tenantExecutionSubjectSelect = {
   trialStartsAt: true,
   trialEndsAt: true,
   entitlementProfileRevision: true,
+  executionRevision: true,
   moduleEntitlements: {
     select: {
       module: true,
@@ -81,6 +96,7 @@ export class TenantExecutionAdmissionService {
         reasonCode: 'TENANT_NOT_FOUND',
         failedRequirement: null,
         entitlementProfileRevision: null,
+        executionRevision: null,
         customerStage: null,
         internalEntitlementBypass: false,
       };
@@ -94,6 +110,23 @@ export class TenantExecutionAdmissionService {
         reasonCode: 'TENANT_EXECUTION_REQUIREMENTS_EMPTY',
         failedRequirement: null,
         entitlementProfileRevision: subject.entitlementProfileRevision,
+        executionRevision: subject.executionRevision,
+        customerStage: subject.customerStage,
+        internalEntitlementBypass: false,
+      };
+    }
+
+    if (
+      !Number.isSafeInteger(subject.executionRevision) ||
+      subject.executionRevision < 1
+    ) {
+      return {
+        allowed: false,
+        tenantId: subject.id,
+        reasonCode: 'TENANT_EXECUTION_REVISION_INVALID',
+        failedRequirement: null,
+        entitlementProfileRevision: subject.entitlementProfileRevision,
+        executionRevision: null,
         customerStage: subject.customerStage,
         internalEntitlementBypass: false,
       };
@@ -126,9 +159,84 @@ export class TenantExecutionAdmissionService {
       reasonCode: 'ALLOWED',
       failedRequirement: null,
       entitlementProfileRevision: subject.entitlementProfileRevision,
+      executionRevision: subject.executionRevision,
       customerStage: subject.customerStage,
       internalEntitlementBypass: false,
     };
+  }
+
+  async acquirePermit(
+    tenantId: string,
+    requirementInput: TenantExecutionRequirementInput,
+    now = new Date(),
+  ): Promise<TenantExecutionPermitAcquisition> {
+    const requirements = this.normalizeRequirements(requirementInput);
+    const decision = await this.evaluate(tenantId, requirements, now);
+    const permit =
+      decision.allowed && decision.executionRevision !== null
+        ? {
+            tenantId: decision.tenantId,
+            executionRevision: decision.executionRevision,
+            requirements: requirements.map((requirement) => ({
+              ...requirement,
+            })),
+          }
+        : null;
+
+    return { decision, permit };
+  }
+
+  async issuePermit(
+    tenantId: string,
+    requirementInput: TenantExecutionRequirementInput,
+    now = new Date(),
+  ): Promise<TenantExecutionPermit> {
+    const acquisition = await this.acquirePermit(
+      tenantId,
+      requirementInput,
+      now,
+    );
+    if (!acquisition.permit) {
+      this.throwDenied(acquisition.decision);
+    }
+
+    return acquisition.permit;
+  }
+
+  async evaluatePermit(
+    permit: TenantExecutionPermit,
+    now = new Date(),
+  ): Promise<TenantExecutionAdmissionDecision> {
+    const decision = await this.evaluate(
+      permit.tenantId,
+      permit.requirements,
+      now,
+    );
+    if (
+      decision.allowed &&
+      decision.executionRevision !== permit.executionRevision
+    ) {
+      return {
+        ...decision,
+        allowed: false,
+        reasonCode: 'TENANT_EXECUTION_REVISION_CHANGED',
+        failedRequirement: null,
+      };
+    }
+
+    return decision;
+  }
+
+  async assertPermitCurrent(
+    permit: TenantExecutionPermit,
+    now = new Date(),
+  ): Promise<TenantExecutionAdmissionDecision> {
+    const decision = await this.evaluatePermit(permit, now);
+    if (!decision.allowed) {
+      this.throwDenied(decision);
+    }
+
+    return decision;
   }
 
   async assertAllowed(
@@ -138,12 +246,7 @@ export class TenantExecutionAdmissionService {
   ): Promise<TenantExecutionAdmissionDecision> {
     const decision = await this.evaluate(tenantId, requirementInput, now);
     if (!decision.allowed) {
-      throw new ForbiddenException({
-        message: `Tenant execution is not admitted: ${decision.reasonCode}`,
-        reasonCode: decision.reasonCode,
-        tenantId: decision.tenantId,
-        failedRequirement: decision.failedRequirement,
-      });
+      this.throwDenied(decision);
     }
 
     return decision;
@@ -180,8 +283,19 @@ export class TenantExecutionAdmissionService {
       reasonCode: decision.reasonCode,
       failedRequirement: decision.allowed ? null : requirement,
       entitlementProfileRevision: decision.entitlementProfileRevision,
+      executionRevision: subject.executionRevision,
       customerStage: subject.customerStage,
       internalEntitlementBypass,
     };
+  }
+
+  private throwDenied(decision: TenantExecutionAdmissionDecision): never {
+    throw new ForbiddenException({
+      message: `Tenant execution is not admitted: ${decision.reasonCode}`,
+      reasonCode: decision.reasonCode,
+      tenantId: decision.tenantId,
+      failedRequirement: decision.failedRequirement,
+      executionRevision: decision.executionRevision,
+    });
   }
 }

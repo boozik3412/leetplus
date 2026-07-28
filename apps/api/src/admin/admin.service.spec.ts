@@ -59,6 +59,7 @@ const suspendedTenant = {
   trialStartsAt: new Date('2026-07-28T00:00:00.000Z'),
   trialEndsAt: new Date('2026-08-28T00:00:00.000Z'),
   entitlementProfileRevision: 1,
+  executionRevision: 7,
   statusChangedAt: new Date('2026-07-28T08:00:00.000Z'),
   statusReason: 'Awaiting Gate 1DP',
   updatedAt: new Date('2026-07-28T08:00:00.000Z'),
@@ -138,6 +139,7 @@ describe('AdminService design-partner lifecycle guard', () => {
     prisma.tenant.findUniqueOrThrow.mockResolvedValue({
       ...suspendedTenant,
       status: TenantLifecycleStatus.ACTIVE,
+      executionRevision: suspendedTenant.executionRevision + 1,
       statusChangedAt: new Date('2026-07-28T09:00:00.000Z'),
       statusReason: 'Ordinary tenant activation',
     });
@@ -182,6 +184,7 @@ describe('AdminService design-partner lifecycle guard', () => {
         trialStartsAt: suspendedTenant.trialStartsAt,
         trialEndsAt: suspendedTenant.trialEndsAt,
         entitlementProfileRevision: suspendedTenant.entitlementProfileRevision,
+        executionRevision: suspendedTenant.executionRevision,
         updatedAt: suspendedTenant.updatedAt,
       },
       data: {
@@ -191,6 +194,24 @@ describe('AdminService design-partner lifecycle guard', () => {
     });
     expect(updateManyCall?.data.statusChangedAt).toBeInstanceOf(Date);
     expect(prisma.platformAdminAuditEvent.create).toHaveBeenCalledTimes(1);
+    const auditCreateMock = prisma.platformAdminAuditEvent.create as jest.Mock<
+      Promise<unknown>,
+      [
+        {
+          data: {
+            before: { executionRevision: number };
+            after: { executionRevision: number };
+          };
+        },
+      ]
+    >;
+    const auditCreateCall = auditCreateMock.mock.calls[0]?.[0];
+    expect(auditCreateCall?.data.before.executionRevision).toBe(
+      suspendedTenant.executionRevision,
+    );
+    expect(auditCreateCall?.data.after.executionRevision).toBe(
+      suspendedTenant.executionRevision + 1,
+    );
     expect(tenantExecutionPolicy.assertActivationAllowed).toHaveBeenCalledWith(
       internalTenant,
     );
@@ -230,6 +251,32 @@ describe('AdminService design-partner lifecycle guard', () => {
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(prisma.tenant.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a lifecycle result when the database fence does not advance', async () => {
+    const internalTenant = {
+      ...suspendedTenant,
+      customerStage: TenantCustomerStage.INTERNAL,
+    };
+    prisma.tenant.findUnique.mockResolvedValue(internalTenant);
+    prisma.platformAdminAuditEvent.findFirst.mockResolvedValue(null);
+    prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({
+      ...internalTenant,
+      status: TenantLifecycleStatus.ACTIVE,
+    });
+
+    await expect(
+      service.updateTenantLifecycle(actor, suspendedTenant.id, {
+        action: 'ACTIVATE',
+        confirmation: suspendedTenant.slug,
+        reason: 'Ordinary tenant activation',
+      }),
+    ).rejects.toThrow(
+      'Tenant execution revision changed during lifecycle update',
+    );
+
     expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
   });
 

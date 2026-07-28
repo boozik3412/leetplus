@@ -3,7 +3,7 @@
 | Поле                     | Значение                                                                   |
 | ------------------------ | -------------------------------------------------------------------------- |
 | Статус                   | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE `NO-GO` |
-| Версия                   | 0.6.0                                                                      |
+| Версия                   | 0.7.0                                                                      |
 | Дата                     | 28.07.2026                                                                 |
 | Backlog                  | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`       |
 | Current candidate SHA    | Не назначен: current-state change находится в рабочем дереве                |
@@ -41,7 +41,7 @@ Remote target, production process, reconciliation apply, `VALIDATE`,
 Candidate:
 
 - принимает только `SYNTHETIC` или `PRODUCTION_LIKE`;
-- принимает только `BASELINE_156`, `EXPAND_162` или `CURRENT_163`;
+- принимает только `BASELINE_156`, `EXPAND_162` или `CURRENT_164`;
 - разрешает PostgreSQL только на `127.0.0.1`, `localhost` или `::1`;
 - отвергает `NODE_ENV=production`;
 - использует exact committed `RELEASE_SHA`, а не содержимое mutable worktree;
@@ -255,11 +255,11 @@ State 157–161, post-`VALIDATE`, post-`CONTRACT`, иной PostgreSQL major, д
 schema, лишний protected FK или altered/disabled FK trigger получают
 `REJECTED`/exit `3`.
 
-### 5.3. `CURRENT_163`
+### 5.3. `CURRENT_164`
 
 ```text
-migrationCount                         = 163
-latestMigration                        = 20260728120000_tenant_execution_control_plane_expand
+migrationCount                         = 164
+latestMigration                        = 20260728150000_tenant_execution_revision_fence
 unfinishedMigrationCount               = 0
 compositeContractMatchCount             = 14
 simpleContractMatchCount                = 14
@@ -270,11 +270,12 @@ parentIndexContractMismatchCount         = 0
 enforcement triggers per expected FK    = 4 enabled
 ```
 
-`CURRENT_163` содержит exact frozen StaffTask prefix `EXPAND_162` плюс ровно
-одну allowlisted additive tail migration
-`20260728120000_tenant_execution_control_plane_expand`. Tail не может менять
+`CURRENT_164` содержит exact frozen StaffTask prefix `EXPAND_162` плюс ровно
+две allowlisted additive tail migrations:
+`20260728120000_tenant_execution_control_plane_expand` и
+`20260728150000_tenant_execution_revision_fence`. Tail не может менять
 protected `StaffTask*` relations, FK, indexes или triggers. Иная 163-я
-migration, дополнительная migration либо изменённый prefix получают
+migration, иная 164-я migration, дополнительная migration либо изменённый prefix получают
 `REJECTED`/exit `3`.
 
 ## 6. Acquisition, restore и operational approval
@@ -462,7 +463,7 @@ node packages/database/scripts/staff-task-integrity-snapshot-admission.mjs --pre
 DATABASE_URL=<loopback PostgreSQL URL with schema=public>
 RELEASE_SHA=<exact 40-character lowercase Git SHA>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION=SYNTHETIC|PRODUCTION_LIKE
-STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE=BASELINE_156|EXPAND_162|CURRENT_163
+STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE=BASELINE_156|EXPAND_162|CURRENT_164
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE=<exact restored DB name>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM=run-staff-task-integrity-snapshot-admission
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION=I_ATTEST_THIS_IS_AN_ISOLATED_ENCRYPTED_NO_EGRESS_NON_PRODUCTION_SNAPSHOT
@@ -802,10 +803,10 @@ fingerprint/key id, acquisition/restore approvals и доказательств�
 exact DB marker. Они коррелируются с report/release SHA, но не копируются в
 обычный JSON/stdout.
 
-`BASELINE_156`, `EXPAND_162` и `CURRENT_163` используют три разных state-bound
+`BASELINE_156`, `EXPAND_162` и `CURRENT_164` используют три разных state-bound
 authority envelope. После migrations `157..162` signer выпускает
 `EXPAND_162` envelope с новым nonce-bound binding; после exact allowlisted
-migration 163 — третий `CURRENT_163` envelope с ещё одним новым binding.
+migrations 163 и 164 — третий `CURRENT_164` envelope с ещё одним новым binding.
 DB `COMMENT` marker заменяется digest соответствующего envelope до каждого
 следующего admission. Protected evidence хранит все три authority bundle,
 первоначальную установку marker и обе ротации. Raw marker или manifest в
@@ -839,9 +840,10 @@ acquisition approval
   → replace DB comment marker with exact EXPAND_162 envelope digest
   → admission(EXPAND_162)
   → exact allowlisted migration 20260728120000_tenant_execution_control_plane_expand
-  → trusted signer creates distinct CURRENT_163 envelope with a new nonce-bound binding
-  → replace DB comment marker with exact CURRENT_163 envelope digest
-  → admission(CURRENT_163)
+  → exact allowlisted migration 20260728150000_tenant_execution_revision_fence
+  → trusted signer creates distinct CURRENT_164 envelope with a new nonce-bound binding
+  → replace DB comment marker with exact CURRENT_164 envelope digest
+  → admission(CURRENT_164)
   → read-only integrity inventory
   → aggregate reconciliation planner
   → owner decision for every non-zero code
@@ -922,7 +924,7 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
    Ed25519 public root с exact fingerprint, profile/purpose и validity window;
    private key не должен попадать в admission runtime, environment или repo;
 5. P0: одобрить acquisition/restore workflow, три state-bound nonce-signed
-   envelope (`BASELINE_156`, `EXPAND_162`, `CURRENT_163`), первоначальную
+   envelope (`BASELINE_156`, `EXPAND_162`, `CURRENT_164`), первоначальную
    установку и две обязательные ротации exact DB comment marker, а также
    protected evidence storage;
 6. получить clean remote CI evidence для exact enrolled-root SHA;
@@ -942,6 +944,10 @@ apply/rollback, zero-diff и повторные проверки.
 
 ## 18. Changelog
 
+- `0.7.0`, 28.07.2026 — current admission синхронизирован с
+  `CURRENT_164`: exact additive tail теперь состоит из reviewed migrations
+  163 и 164, а третий state-bound envelope/marker/admission выпускается только
+  после обеих migrations.
 - `0.6.0`, 28.07.2026 — admission contract синхронизирован с frozen
   StaffTask prefix `EXPAND_162` и current DB state `CURRENT_163`; добавлены
   exact allowlisted migration 163, третий state-bound envelope/marker

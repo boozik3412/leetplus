@@ -1,12 +1,15 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { TenantModule } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { hasCapability, resolveUserCapabilities } from '../auth/capabilities';
 import { TransactionalMailService } from '../mail/transactional-mail.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import type { SendReportEmailDto } from './reports.dto';
 import { ReportsExportService } from './reports-export.service';
@@ -25,11 +28,12 @@ export class ReportsEmailService {
     private readonly reportsExportService: ReportsExportService,
     private readonly transactionalMailService: TransactionalMailService,
     private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async sendReport(user: AuthenticatedUser, dto: SendReportEmailDto) {
     const recipientEmail = this.resolveRecipientEmail(dto.recipientEmail, user);
-    await this.tenantExecutionAdmissionService.assertAllowed(
+    const permit = await this.tenantExecutionAdmissionService.issuePermit(
       user.tenantId,
       REPORT_EMAIL_OUTBOUND_REQUIREMENTS,
     );
@@ -38,10 +42,8 @@ export class ReportsEmailService {
       format: dto.format ?? 'xlsx',
     });
 
-    await this.tenantExecutionAdmissionService.assertAllowed(
-      user.tenantId,
-      REPORT_EMAIL_OUTBOUND_REQUIREMENTS,
-    );
+    await this.tenantExecutionAdmissionService.assertPermitCurrent(permit);
+    await this.assertFreshExportAuthority(user, permit.executionRevision);
 
     try {
       await this.transactionalMailService.sendReportExport(recipientEmail, {
@@ -69,6 +71,115 @@ export class ReportsEmailService {
       recipientEmail,
       fileName: exportFile.fileName,
     };
+  }
+
+  private async assertFreshExportAuthority(
+    user: Pick<
+      AuthenticatedUser,
+      'id' | 'tenantId' | 'accessScope' | 'allowedStoreIds'
+    >,
+    expectedExecutionRevision: number,
+  ) {
+    const freshUser = await this.prisma.user.findFirst({
+      where: {
+        id: user.id,
+        tenantId: user.tenantId,
+        isActive: true,
+      },
+      select: {
+        role: true,
+        accessScope: true,
+        tenant: {
+          select: {
+            executionRevision: true,
+          },
+        },
+        customRole: {
+          select: {
+            permissions: true,
+          },
+        },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: {
+              select: {
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (
+      !freshUser ||
+      freshUser.tenant.executionRevision !== expectedExecutionRevision ||
+      !this.isSameAccessScope(user, freshUser)
+    ) {
+      throw new ForbiddenException({
+        reasonCode: 'REPORT_EXPORT_AUTHORITY_REVOKED',
+        message: 'Report export authority is no longer current',
+      });
+    }
+
+    const roleOverride = freshUser.customRole
+      ? null
+      : await this.prisma.userRoleOverride.findUnique({
+          where: {
+            tenantId_role: {
+              tenantId: user.tenantId,
+              role: freshUser.role,
+            },
+          },
+          select: {
+            permissions: true,
+          },
+        });
+    const permissions = resolveUserCapabilities({
+      role: freshUser.role,
+      customRole: freshUser.customRole,
+      roleOverride,
+    });
+
+    if (!hasCapability({ permissions }, 'export_reports')) {
+      throw new ForbiddenException({
+        reasonCode: 'CAPABILITY_EXPORT_REPORTS_REQUIRED',
+        message: 'Report export capability is no longer current',
+      });
+    }
+  }
+
+  private isSameAccessScope(
+    expected: Pick<
+      AuthenticatedUser,
+      'tenantId' | 'accessScope' | 'allowedStoreIds'
+    >,
+    actual: {
+      accessScope: string | null;
+      storeAccesses: Array<{
+        storeId: string;
+        store: { tenantId: string };
+      }>;
+    },
+  ) {
+    if (actual.accessScope !== expected.accessScope) {
+      return false;
+    }
+
+    const actualStoreIds = actual.storeAccesses
+      .filter((access) => access.store.tenantId === expected.tenantId)
+      .map((access) => access.storeId)
+      .sort();
+    const expectedStoreIds = [...expected.allowedStoreIds].sort();
+
+    return (
+      actualStoreIds.length === actual.storeAccesses.length &&
+      actualStoreIds.length === expectedStoreIds.length &&
+      actualStoreIds.every(
+        (storeId, index) => storeId === expectedStoreIds[index],
+      )
+    );
   }
 
   private resolveRecipientEmail(

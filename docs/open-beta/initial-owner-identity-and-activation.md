@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.0                                                             |
+| Версия           | 1.1                                                             |
 | Дата             | 28.07.2026                                                      |
-| Статус           | Target contract; implementation pending                         |
+| Статус           | Target contract; execution-fence foundation implemented         |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -148,10 +148,15 @@ SMTP вызывается после commit. Для at-least-once delivery ис�
 
 ### 3.3. Execution fence
 
-В `Tenant` нужны:
+В `Tenant` реализован первый обязательный primitive:
 
 ```text
 executionRevision
+```
+
+Остальные activation/suspend receipt-поля ещё pending:
+
+```text
 lastAdmissionDecisionId
 lastActivatedProfileRevision
 lastActivatedAt
@@ -162,6 +167,14 @@ suspendedAt
 profile changes. Любой claimed job несёт прочитанную revision и
 перепроверяет её вместе с persisted policy непосредственно перед внешним
 effect.
+
+Migration `20260728150000_tenant_execution_revision_fence` backfill-ит
+существующие tenants в revision `1`, оставляет новый shell в `0`, выполняет
+ровно один trigger bump на policy mutation и запрещает direct revision write.
+Report schedule и bonus-ledger claim уже сохраняют captured revision; SMTP и
+Langame bonus write повторно проверяют permit перед provider call. Общий
+durable lease для delivery/Langame sync и strict two-phase suspend/drain ещё
+не реализованы, поэтому initial outbound остаётся `OFF`.
 
 ## 4. Release gates и admission decision
 
@@ -385,17 +398,16 @@ Two-tenant:
 
 ## 8. Последовательность реализации
 
-1. Довести fail-closed module/action enforcement для HTTP, workers, guest и
-   Telegram surfaces.
-2. Добавить `executionRevision` и effect-boundary fencing.
-3. Добавить canonical email claim и preflight case-insensitive conflicts.
-4. Добавить encrypted identity mail outbox и fail-closed mail config.
-5. Перевести provisioning в shell-only flow.
-6. Реализовать release-gate attestations и tenant admission decision.
-7. Реализовать activation/suspend/reissue/revoke.
-8. Перевести invite transport на fragment + POST body.
-9. Выполнить real PostgreSQL concurrency и two-tenant tests.
-10. Провести production-like rehearsal, backup/restore и только затем
+1. Довести durable lease/effect fencing для оставшихся workers, guest и
+   Telegram surfaces поверх реализованного `executionRevision`.
+2. Добавить canonical email claim и preflight case-insensitive conflicts.
+3. Добавить encrypted identity mail outbox и fail-closed mail config.
+4. Перевести provisioning в shell-only flow.
+5. Реализовать release-gate attestations и tenant admission decision.
+6. Реализовать activation/suspend/reissue/revoke.
+7. Перевести invite transport на fragment + POST body.
+8. Выполнить real PostgreSQL concurrency и two-tenant tests.
+9. Провести production-like rehearsal, backup/restore и только затем
     отдельное решение о production deployment и первом owner invite.
 
 External employee invites, self-service email change и owner transfer

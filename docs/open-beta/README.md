@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.10                                         |
+| Версия           | 1.12                                         |
 | Дата             | 28.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -96,7 +96,7 @@ enterprise-isolation option и не сокращает shared gates.
 18. [Runbook admission StaffTask snapshot](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md) —
     обязательный fail-closed checkpoint перед production-like inventory и
     planner: PostgreSQL 16, frozen `BASELINE_156 | EXPAND_162`, current
-    `CURRENT_163`, release manifest, catalog и отдельная SELECT-only роль.
+    `CURRENT_164`, release manifest, catalog и отдельная SELECT-only роль.
 19. [Runbook SYNTHETIC reconciliation proposal dry-run](../security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
     read-only row-evidence rehearsal только для подписанной disposable
     harness-БД: восемь proposal-кодов, HMAC-токены, coalescing и явный запрет
@@ -143,8 +143,16 @@ enterprise-isolation option и не сокращает shared gates.
   reusable lower-layer admission перечитывает persisted state на каждый
   effect и поддерживает cross-module requirements. Уже защищены report
   email/digest, scheduled Langame sync, bonus-ledger provider и игровой
-  Telegram/MAX delivery/pull. Остальные schedulers, public guest/Telegram
-  identity routes, files и execution fencing ещё pending;
+  Telegram/MAX delivery/pull;
+- execution-revision fence candidate: migration `164` добавляет trigger-owned
+  monotonic revision, CAS для lifecycle/profile/OWNER/revoke и durable
+  revision capture в report schedule и bonus-ledger claim. Migration
+  fail-closed требует zero `RUNNING/PROCESSING/DISPATCHING` effects до DDL.
+  SMTP повторно проверяет actor/capability/scope/revision, а Langame bonus
+  effect — target/source/eligibility/claim ownership непосредственно перед
+  provider.
+  Durable lease/reclaim для delivery/общего Langame sync, public
+  guest/Telegram identity routes, files и strict suspend/drain ещё pending;
 - scheduled report digest применяет effective role/custom-role overrides и
   требует `export_reports`; Langame/guest foundation/business snapshot
   проверяют полный cross-module entitlement и AND-capability contract;
@@ -180,9 +188,9 @@ enterprise-isolation option и не сокращает shared gates.
   обязательны одна read-only `REPEATABLE READ` transaction, exact target /
   confirmation / production attestation / 40-hex SHA / HMAC и expected
   database binding. Frozen StaffTask evidence остаётся на exact
-  `EXPAND_162`, а current schema-first gate требует `CURRENT_163`,
-  `migrationCount=163`, latest
-  `20260728120000_tenant_execution_control_plane_expand`,
+  `EXPAND_162`, а current schema-first gate требует `CURRENT_164`,
+  `migrationCount=164`, latest
+  `20260728150000_tenant_execution_revision_fence`,
   `unfinished=0`, `14 composite exact`, `14 simple exact`,
   `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact` и
   `0 index mismatch`; expected/actual database names не выводятся, а
@@ -198,7 +206,7 @@ enterprise-isolation option и не сокращает shared gates.
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` не является current evidence;
   новый exact candidate SHA ещё не назначен. `IMPLEMENTED_CANDIDATE`, not
   deployed. Admission принимает только изолированную loopback PostgreSQL 16
-  копию в точном `BASELINE_156`, `EXPAND_162` или `CURRENT_163`,
+  копию в точном `BASELINE_156`, `EXPAND_162` или `CURRENT_164`,
   сверяет ordered migration names/checksums, exact Git blob content, catalog,
   database marker и freshness. Отдельная `LOGIN NOINHERIT` роль получает
   table-level `SELECT` ровно на восьми разрешённых relations и column-level
@@ -244,10 +252,11 @@ enterprise-isolation option и не сокращает shared gates.
 3. отдельно production-like admission: новый state-bound `BASELINE_156`
    envelope/marker → admission → migrations `157..162` → новый
    `EXPAND_162` envelope/marker → admission → exact allowlisted migration
-   `20260728120000_tenant_execution_control_plane_expand` → новый
-   `CURRENT_163` envelope/marker → третий admission. Protected StaffTask
+   `20260728120000_tenant_execution_control_plane_expand` → exact
+   `20260728150000_tenant_execution_revision_fence` → новый
+   `CURRENT_164` envelope/marker → третий admission. Protected StaffTask
    evidence остаётся bound к prefix 162; planner работает только на current
-   DB 163;
+   DB 164;
 4. отдельно production-like inventory и aggregate planner;
 5. отдельно production-like row dry-run;
 6. отдельно explicit apply, rollback и доказательство zero-diff;
@@ -336,7 +345,8 @@ Gate 2 и
 - тот же production-like snapshot до inventory прошёл
   [обязательный admission checkpoint](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
   в `BASELINE_156`, после migrations `157..162` — в frozen-prefix
-  `EXPAND_162`, а после exact allowlisted migration 163 — в `CURRENT_163`;
+  `EXPAND_162`, а после exact allowlisted migrations `163..164` — в
+  `CURRENT_164`;
   для каждого из трёх states использован отдельный signed envelope, перед
   вторым и третьим admission DB marker заменён digest нового envelope, а
   state-specific protected evidence и обе marker-rotation attestation
@@ -356,8 +366,8 @@ Gate 2 и
   findings имеют owner и принятое решение;
 - aggregate reconciliation planner запущен на том же production-like
   snapshot и прошёл exact schema-first gate:
-  `CURRENT_163`, `migrationCount=163`, latest
-  `20260728120000_tenant_execution_control_plane_expand`, `unfinished=0`,
+  `CURRENT_164`, `migrationCount=164`, latest
+  `20260728150000_tenant_execution_revision_fence`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
   `databaseIdentityMatched=true`, `databaseIdentityDigest` зафиксирован,

@@ -6,6 +6,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   TenantExecutionAdmissionDecision,
   TenantExecutionAdmissionService,
+  type TenantExecutionPermit,
+  type TenantExecutionPermitAcquisition,
 } from '../tenancy/tenant-execution-admission.service';
 import { ReportsDigestService } from './reports-digest.service';
 import { ReportsExportService } from './reports-export.service';
@@ -18,6 +20,7 @@ type PrismaMock = {
   };
   userRoleOverride: {
     findMany: jest.Mock;
+    findUnique: jest.Mock;
   };
 };
 
@@ -34,8 +37,10 @@ type MailServiceMock = {
 };
 
 type TenantExecutionAdmissionServiceMock = {
-  evaluate: jest.Mock;
-  assertAllowed: jest.Mock;
+  acquirePermit: jest.Mock;
+  issuePermit: jest.Mock;
+  evaluatePermit: jest.Mock;
+  assertPermitCurrent: jest.Mock;
 };
 
 const outboundRequirements = [
@@ -89,8 +94,26 @@ function allowedDecision(tenantId: string): TenantExecutionAdmissionDecision {
     reasonCode: 'ALLOWED',
     failedRequirement: null,
     entitlementProfileRevision: 0,
+    executionRevision: 1,
     customerStage: TenantCustomerStage.INTERNAL,
     internalEntitlementBypass: true,
+  };
+}
+
+function permitFor(tenantId: string): TenantExecutionPermit {
+  return {
+    tenantId,
+    executionRevision: 1,
+    requirements: outboundRequirements,
+  };
+}
+
+function acquisitionFor(
+  decision: TenantExecutionAdmissionDecision,
+): TenantExecutionPermitAcquisition {
+  return {
+    decision,
+    permit: decision.allowed ? permitFor(decision.tenantId) : null,
   };
 }
 
@@ -104,6 +127,7 @@ function deniedDecision(tenantId: string): TenantExecutionAdmissionDecision {
       action: 'OUTBOUND',
     },
     entitlementProfileRevision: 1,
+    executionRevision: 1,
     customerStage: TenantCustomerStage.BETA,
     internalEntitlementBypass: false,
   };
@@ -125,6 +149,7 @@ describe('ReportsDigestService tenant execution admission', () => {
       },
       userRoleOverride: {
         findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
       },
     };
     reportsService = {
@@ -139,8 +164,14 @@ describe('ReportsDigestService tenant execution admission', () => {
       sendReportDigest: jest.fn(),
     };
     admissionService = {
-      evaluate: jest.fn(),
-      assertAllowed: jest
+      acquirePermit: jest.fn((tenantId: string) =>
+        Promise.resolve(acquisitionFor(allowedDecision(tenantId))),
+      ),
+      issuePermit: jest.fn().mockResolvedValue(permitFor(manualUser.tenantId)),
+      evaluatePermit: jest.fn((permit: TenantExecutionPermit) =>
+        Promise.resolve(allowedDecision(permit.tenantId)),
+      ),
+      assertPermitCurrent: jest
         .fn()
         .mockResolvedValue(allowedDecision(manualUser.tenantId)),
     };
@@ -154,7 +185,7 @@ describe('ReportsDigestService tenant execution admission', () => {
   });
 
   it('does not invoke mail for a manually requested denied digest', async () => {
-    admissionService.assertAllowed.mockRejectedValueOnce(
+    admissionService.issuePermit.mockRejectedValueOnce(
       new ForbiddenException({
         reasonCode: 'ENTITLEMENT_OUTBOUND_DISABLED',
       }),
@@ -164,7 +195,7 @@ describe('ReportsDigestService tenant execution admission', () => {
       ForbiddenException,
     );
 
-    expect(admissionService.assertAllowed).toHaveBeenCalledWith(
+    expect(admissionService.issuePermit).toHaveBeenCalledWith(
       manualUser.tenantId,
       outboundRequirements,
     );
@@ -173,19 +204,106 @@ describe('ReportsDigestService tenant execution admission', () => {
   });
 
   it('rechecks manual digest admission immediately before mail', async () => {
-    admissionService.assertAllowed
-      .mockResolvedValueOnce(allowedDecision(manualUser.tenantId))
-      .mockRejectedValueOnce(
-        new ForbiddenException({
-          reasonCode: 'TENANT_INACTIVE',
-        }),
-      );
+    admissionService.assertPermitCurrent.mockRejectedValueOnce(
+      new ForbiddenException({
+        reasonCode: 'TENANT_EXECUTION_REVISION_CHANGED',
+      }),
+    );
 
     await expect(service.sendDigest(manualUser, {})).rejects.toThrow(
       ForbiddenException,
     );
 
     expect(reportsService.getOperationalReport).toHaveBeenCalled();
+    expect(admissionService.assertPermitCurrent).toHaveBeenCalledWith(
+      permitFor(manualUser.tenantId),
+    );
+    expect(mailService.sendReportDigest).not.toHaveBeenCalled();
+  });
+
+  it('does not send a manual digest when the actor is deactivated during the build', async () => {
+    prisma.user.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.sendDigest(manualUser, {})).rejects.toThrow(
+      'Report export authority is no longer current',
+    );
+
+    expect(reportsService.getOperationalReport).toHaveBeenCalled();
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: manualUser.id,
+        tenantId: manualUser.tenantId,
+        isActive: true,
+      },
+      select: {
+        role: true,
+        accessScope: true,
+        tenant: {
+          select: {
+            executionRevision: true,
+          },
+        },
+        customRole: {
+          select: {
+            permissions: true,
+          },
+        },
+        storeAccesses: {
+          select: {
+            storeId: true,
+            store: {
+              select: {
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(mailService.sendReportDigest).not.toHaveBeenCalled();
+  });
+
+  it('does not send a manual digest when a fresh custom role removes export_reports', async () => {
+    prisma.user.findFirst.mockResolvedValueOnce({
+      role: UserRole.OWNER,
+      accessScope: 'NETWORK',
+      tenant: {
+        executionRevision: permitFor(manualUser.tenantId).executionRevision,
+      },
+      customRole: {
+        permissions: ['view_assortment_reports'],
+      },
+      storeAccesses: [],
+    });
+
+    await expect(service.sendDigest(manualUser, {})).rejects.toThrow(
+      'Report export capability is no longer current',
+    );
+
+    expect(prisma.userRoleOverride.findUnique).not.toHaveBeenCalled();
+    expect(mailService.sendReportDigest).not.toHaveBeenCalled();
+  });
+
+  it('does not send a manual digest when the actor scope changes during the build', async () => {
+    prisma.user.findFirst.mockResolvedValueOnce({
+      role: UserRole.OWNER,
+      accessScope: 'STORES',
+      tenant: {
+        executionRevision: permitFor(manualUser.tenantId).executionRevision,
+      },
+      customRole: null,
+      storeAccesses: [
+        {
+          storeId: 'store-a',
+          store: { tenantId: manualUser.tenantId },
+        },
+      ],
+    });
+
+    await expect(service.sendDigest(manualUser, {})).rejects.toThrow(
+      'Report export authority is no longer current',
+    );
+
     expect(mailService.sendReportDigest).not.toHaveBeenCalled();
   });
 
@@ -221,13 +339,14 @@ describe('ReportsDigestService tenant execution admission', () => {
           recipients.find((recipient) => recipient.id === where.id) ?? null,
         ),
     );
-    admissionService.evaluate.mockImplementation((tenantId: string) =>
-      Promise.resolve(
+    admissionService.acquirePermit.mockImplementation((tenantId: string) => {
+      const decision =
         tenantId === 'tenant-denied'
           ? deniedDecision(tenantId)
-          : allowedDecision(tenantId),
-      ),
-    );
+          : allowedDecision(tenantId);
+
+      return Promise.resolve(acquisitionFor(decision));
+    });
 
     await expect(service.sendScheduledDigests({})).resolves.toMatchObject({
       ok: true,
@@ -250,20 +369,18 @@ describe('ReportsDigestService tenant execution admission', () => {
         },
       ],
     });
-    expect(admissionService.evaluate).toHaveBeenNthCalledWith(
+    expect(admissionService.acquirePermit).toHaveBeenNthCalledWith(
       1,
       'tenant-denied',
       outboundRequirements,
     );
-    expect(admissionService.evaluate).toHaveBeenNthCalledWith(
+    expect(admissionService.acquirePermit).toHaveBeenNthCalledWith(
       2,
       'tenant-allowed',
       outboundRequirements,
     );
-    expect(admissionService.evaluate).toHaveBeenNthCalledWith(
-      3,
-      'tenant-allowed',
-      outboundRequirements,
+    expect(admissionService.evaluatePermit).toHaveBeenCalledWith(
+      permitFor('tenant-allowed'),
     );
     expect(mailService.sendReportDigest).toHaveBeenCalledTimes(1);
     expect(mailService.sendReportDigest).toHaveBeenCalledWith(
@@ -301,7 +418,7 @@ describe('ReportsDigestService tenant execution admission', () => {
         },
       ],
     });
-    expect(admissionService.evaluate).not.toHaveBeenCalled();
+    expect(admissionService.acquirePermit).not.toHaveBeenCalled();
     expect(reportsService.getOperationalReport).not.toHaveBeenCalled();
     expect(mailService.sendReportDigest).not.toHaveBeenCalled();
   });
@@ -341,7 +458,7 @@ describe('ReportsDigestService tenant execution admission', () => {
         },
       ],
     });
-    expect(admissionService.evaluate).not.toHaveBeenCalled();
+    expect(admissionService.acquirePermit).not.toHaveBeenCalled();
     expect(mailService.sendReportDigest).not.toHaveBeenCalled();
   });
 
@@ -360,8 +477,8 @@ describe('ReportsDigestService tenant execution admission', () => {
       },
     ]);
     prisma.user.findFirst.mockResolvedValue(null);
-    admissionService.evaluate.mockResolvedValue(
-      allowedDecision('tenant-disabled'),
+    admissionService.acquirePermit.mockResolvedValue(
+      acquisitionFor(allowedDecision('tenant-disabled')),
     );
 
     await expect(service.sendScheduledDigests({})).resolves.toMatchObject({
@@ -376,6 +493,7 @@ describe('ReportsDigestService tenant execution admission', () => {
     });
     expect(reportsService.getOperationalReport).toHaveBeenCalledTimes(1);
     expect(prisma.user.findFirst).toHaveBeenCalledTimes(1);
+    expect(admissionService.evaluatePermit).not.toHaveBeenCalled();
     expect(mailService.sendReportDigest).not.toHaveBeenCalled();
   });
 
@@ -401,8 +519,8 @@ describe('ReportsDigestService tenant execution admission', () => {
         permissions: ['view_dashboard'],
       },
     });
-    admissionService.evaluate.mockResolvedValue(
-      allowedDecision('tenant-role-revoked'),
+    admissionService.acquirePermit.mockResolvedValue(
+      acquisitionFor(allowedDecision('tenant-role-revoked')),
     );
 
     await expect(service.sendScheduledDigests({})).resolves.toMatchObject({
@@ -415,6 +533,59 @@ describe('ReportsDigestService tenant execution admission', () => {
         },
       ],
     });
+    expect(admissionService.evaluatePermit).not.toHaveBeenCalled();
+    expect(mailService.sendReportDigest).not.toHaveBeenCalled();
+  });
+
+  it('uses the supplied acquisition without reacquiring and skips when its revision changed', async () => {
+    const recipient = {
+      id: 'user-revision-changed',
+      email: 'owner@revision-changed.example',
+      fullName: 'Owner revision changed',
+      role: UserRole.OWNER,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-revision-changed',
+      customRoleId: null,
+      customRole: null,
+      tenant: { slug: 'revision-changed' },
+    };
+    const permitAcquisition = acquisitionFor(
+      allowedDecision(recipient.tenantId),
+    );
+    const revisionChangedDecision: TenantExecutionAdmissionDecision = {
+      ...allowedDecision(recipient.tenantId),
+      allowed: false,
+      reasonCode: 'TENANT_EXECUTION_REVISION_CHANGED',
+      executionRevision: 2,
+    };
+    prisma.user.findMany.mockResolvedValue([recipient]);
+    prisma.user.findFirst.mockResolvedValue(recipient);
+    admissionService.evaluatePermit.mockResolvedValue(revisionChangedDecision);
+
+    await expect(
+      service.sendScheduledDigests(
+        {},
+        {
+          tenantId: recipient.tenantId,
+          permitAcquisition,
+        },
+      ),
+    ).resolves.toMatchObject({
+      sent: 0,
+      skipped: 1,
+      skippedResults: [
+        {
+          tenantId: recipient.tenantId,
+          reasonCode: 'TENANT_EXECUTION_REVISION_CHANGED',
+        },
+      ],
+    });
+
+    expect(admissionService.acquirePermit).not.toHaveBeenCalled();
+    expect(admissionService.evaluatePermit).toHaveBeenCalledWith(
+      permitAcquisition.permit,
+    );
+    expect(reportsService.getOperationalReport).toHaveBeenCalledTimes(1);
     expect(mailService.sendReportDigest).not.toHaveBeenCalled();
   });
 });

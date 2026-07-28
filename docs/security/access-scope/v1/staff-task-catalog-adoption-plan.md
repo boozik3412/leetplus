@@ -28,9 +28,10 @@ Scheduler и scheduled all-tenant HTTP не зарегистрированы и 
 
 State contract после control-plane EXPAND разделён: StaffTask evidence
 остаётся bound к frozen `EXPAND_162`, а current production-like
-inventory/planner допускается только после `CURRENT_163` admission — exact
-prefix плюс allowlisted migration
-`20260728120000_tenant_execution_control_plane_expand`. Historical SHA ниже не
+inventory/planner допускается только после `CURRENT_164` admission — exact
+prefix плюс allowlisted migrations
+`20260728120000_tenant_execution_control_plane_expand` и
+`20260728150000_tenant_execution_revision_fence`. Historical SHA ниже не
 являются evidence текущего незакоммиченного candidate.
 
 ## 1. Инвентаризация поверхности
@@ -224,8 +225,8 @@ current candidate SHA ещё не назначен.
 - считает actionable cap только по proposal/operator, исключая review-only
   counts;
 - сохраняет protected StaffTask prefix `EXPAND_162`, но выполняет current
-  schema-first exact gate `CURRENT_163`, `migrationCount=163`, latest
-  `20260728120000_tenant_execution_control_plane_expand`, `unfinished=0`,
+  schema-first exact gate `CURRENT_164`, `migrationCount=164`, latest
+  `20260728150000_tenant_execution_revision_fence`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
 - использует exits `0/1/2/3`;
@@ -244,8 +245,9 @@ idempotent apply, locks/recheck, audit, rollback и повторный zero-diff
 
 Historical snapshot admission evidence boundary зафиксирован на
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; это не current candidate
-evidence. Current admission также поддерживает `CURRENT_163` после exact
-allowlisted migration 163, но требует нового exact SHA и повторного evidence.
+evidence. Current admission также поддерживает `CURRENT_164` после exact
+allowlisted migrations `163..164`, но требует нового exact SHA и повторного
+evidence.
 Admission допускает только loopback snapshot, точные runtime bytes и migration
 manifest из Git artifact. Logical allowlist содержит девять
 relations, но роль получает table-level `SELECT` только на восемь; для `User`
@@ -289,7 +291,7 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 - historical integrity inventory contract — 9/9; frozen clean PostgreSQL
   prefix 162 `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
 - historical aggregate reconciliation planner contract — pass на prefix 162;
-  current `CURRENT_163` production-like evidence ещё pending;
+  current `CURRENT_164` production-like evidence ещё pending;
 - historical snapshot admission contract — `19` admission unit, `9` authority unit и
   `46` offline smoke checks; staged PostgreSQL 16.13 smoke прошёл `23`
   сценария `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact восемь

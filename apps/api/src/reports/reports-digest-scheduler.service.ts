@@ -6,8 +6,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { ReportDigestType } from './reports.dto';
-import { ReportsDigestService } from './reports-digest.service';
+import {
+  REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+  ReportsDigestService,
+} from './reports-digest.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 
 type DigestSchedule = {
   type: ReportDigestType;
@@ -30,6 +34,7 @@ export class ReportsDigestSchedulerService
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly reportsDigestService: ReportsDigestService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
   ) {}
 
   onModuleInit() {
@@ -114,9 +119,20 @@ export class ReportsDigestSchedulerService
     }
 
     try {
+      const permitAcquisition =
+        await this.tenantExecutionAdmissionService.acquirePermit(
+          tenant.id,
+          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+        );
+      await this.prisma.reportDigestScheduleRun.update({
+        where: { id: run.id },
+        data: {
+          executionRevision: permitAcquisition.decision.executionRevision,
+        },
+      });
       const result = await this.reportsDigestService.sendScheduledDigests(
         { type },
-        { tenantId: tenant.id },
+        { tenantId: tenant.id, permitAcquisition },
       );
       const sentCount = result.dryRun ? 0 : result.sent;
       const skippedCount = result.skipped;

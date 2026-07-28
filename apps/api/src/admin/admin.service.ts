@@ -113,6 +113,7 @@ const tenantLifecycleControlSelect = {
   trialStartsAt: true,
   trialEndsAt: true,
   entitlementProfileRevision: true,
+  executionRevision: true,
   statusChangedAt: true,
   statusReason: true,
   updatedAt: true,
@@ -134,6 +135,7 @@ const tenantLifecycleResultSelect = {
   name: true,
   slug: true,
   status: true,
+  executionRevision: true,
   statusChangedAt: true,
   statusReason: true,
 } satisfies Prisma.TenantSelect;
@@ -525,6 +527,7 @@ export class AdminService {
           trialStartsAt: current.trialStartsAt,
           trialEndsAt: current.trialEndsAt,
           entitlementProfileRevision: current.entitlementProfileRevision,
+          executionRevision: current.executionRevision,
           updatedAt: current.updatedAt,
         },
         data: {
@@ -541,6 +544,11 @@ export class AdminService {
         where: { id: current.id },
         select: tenantLifecycleResultSelect,
       });
+      if (result.executionRevision !== current.executionRevision + 1) {
+        throw new ConflictException(
+          'Tenant execution revision changed during lifecycle update',
+        );
+      }
 
       await tx.platformAdminAuditEvent.create({
         data: {
@@ -583,6 +591,7 @@ export class AdminService {
         name: true,
         slug: true,
         status: true,
+        executionRevision: true,
         statusChangedAt: true,
         statusReason: true,
       },
@@ -996,6 +1005,7 @@ export class AdminService {
     name: string;
     slug: string;
     status: TenantLifecycleStatus;
+    executionRevision: number;
     statusChangedAt: Date | null;
     statusReason: string | null;
   }) {
@@ -1004,6 +1014,7 @@ export class AdminService {
       name: tenant.name,
       slug: tenant.slug,
       status: tenant.status,
+      executionRevision: tenant.executionRevision,
       statusChangedAt: tenant.statusChangedAt?.toISOString() ?? null,
       statusReason: tenant.statusReason,
     };

@@ -44,6 +44,7 @@ function externalSubject(
     trialStartsAt: new Date('2026-08-01T00:00:00.000Z'),
     trialEndsAt: new Date('2026-09-01T00:00:00.000Z'),
     entitlementProfileRevision: 1,
+    executionRevision: 3,
     moduleEntitlements: COMPLETE_TENANT_MODULE_PROFILE.map((module) =>
       entitlement(module),
     ),
@@ -80,6 +81,7 @@ describe('TenantExecutionAdmissionService', () => {
       reasonCode: 'ALLOWED',
       failedRequirement: null,
       entitlementProfileRevision: 1,
+      executionRevision: 3,
       customerStage: TenantCustomerStage.PILOT,
       internalEntitlementBypass: false,
     });
@@ -183,6 +185,7 @@ describe('TenantExecutionAdmissionService', () => {
       allowed: true,
       reasonCode: 'ALLOWED',
       entitlementProfileRevision: 0,
+      executionRevision: 3,
       customerStage: TenantCustomerStage.INTERNAL,
       internalEntitlementBypass: true,
     });
@@ -272,6 +275,7 @@ describe('TenantExecutionAdmissionService', () => {
       reasonCode: 'TENANT_NOT_FOUND',
       failedRequirement: null,
       entitlementProfileRevision: null,
+      executionRevision: null,
       customerStage: null,
       internalEntitlementBypass: false,
     });
@@ -318,6 +322,129 @@ describe('TenantExecutionAdmissionService', () => {
       reasonCode: 'TENANT_EXECUTION_REQUIREMENTS_EMPTY',
     });
     expect(findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    -1,
+    0,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+    Number.NaN,
+  ])(
+    'fails closed when execution revision %s is invalid',
+    async (executionRevision) => {
+      findUnique.mockResolvedValue(
+        externalSubject({ executionRevision }),
+      );
+
+      await expect(
+        service.evaluate(
+          'tenant-external',
+          { module: TenantModule.ASSORTMENT, action: 'READ' },
+          now,
+        ),
+      ).resolves.toMatchObject({
+        allowed: false,
+        reasonCode: 'TENANT_EXECUTION_REVISION_INVALID',
+        executionRevision: null,
+      });
+      await expect(
+        service.acquirePermit(
+          'tenant-external',
+          { module: TenantModule.ASSORTMENT, action: 'READ' },
+          now,
+        ),
+      ).resolves.toMatchObject({
+        decision: {
+          allowed: false,
+          reasonCode: 'TENANT_EXECUTION_REVISION_INVALID',
+          executionRevision: null,
+        },
+        permit: null,
+      });
+    },
+  );
+
+  it('acquires a revision-bound permit and revalidates it while current', async () => {
+    findUnique.mockResolvedValue(externalSubject());
+    const requirements = [
+      { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+      { module: TenantModule.STAFF, action: 'READ' },
+    ] as const;
+
+    const acquisition = await service.acquirePermit(
+      'tenant-external',
+      requirements,
+      now,
+    );
+
+    expect(acquisition.decision).toMatchObject({
+      allowed: true,
+      reasonCode: 'ALLOWED',
+      executionRevision: 3,
+    });
+    expect(acquisition.permit).toEqual({
+      tenantId: 'tenant-external',
+      executionRevision: 3,
+      requirements,
+    });
+    if (!acquisition.permit) {
+      throw new Error('Expected an admitted execution permit');
+    }
+
+    await expect(
+      service.evaluatePermit(acquisition.permit, now),
+    ).resolves.toMatchObject({
+      allowed: true,
+      reasonCode: 'ALLOWED',
+      executionRevision: 3,
+    });
+    await expect(
+      service.assertPermitCurrent(acquisition.permit, now),
+    ).resolves.toMatchObject({
+      allowed: true,
+      reasonCode: 'ALLOWED',
+      executionRevision: 3,
+    });
+    expect(findUnique).toHaveBeenCalledTimes(3);
+  });
+
+  it('denies evaluate and assert when a permit execution revision changed', async () => {
+    findUnique
+      .mockResolvedValueOnce(externalSubject({ executionRevision: 3 }))
+      .mockResolvedValue(
+        externalSubject({ executionRevision: 4 }),
+      );
+    const acquisition = await service.acquirePermit(
+      'tenant-external',
+      { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+      now,
+    );
+    if (!acquisition.permit) {
+      throw new Error('Expected an admitted execution permit');
+    }
+
+    await expect(
+      service.evaluatePermit(acquisition.permit, now),
+    ).resolves.toMatchObject({
+      allowed: false,
+      reasonCode: 'TENANT_EXECUTION_REVISION_CHANGED',
+      executionRevision: 4,
+      failedRequirement: null,
+    });
+
+    try {
+      await service.assertPermitCurrent(acquisition.permit, now);
+      throw new Error('Expected a changed execution permit to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).getResponse()).toMatchObject({
+        reasonCode: 'TENANT_EXECUTION_REVISION_CHANGED',
+        tenantId: 'tenant-external',
+        executionRevision: 4,
+      });
+    }
+    expect(findUnique).toHaveBeenCalledTimes(3);
   });
 
   it('assertAllowed exposes the stable denial to lower-layer callers', async () => {

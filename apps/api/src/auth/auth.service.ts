@@ -71,6 +71,7 @@ type UserWithTenant = {
     trialStartsAt: Date | null;
     trialEndsAt: Date | null;
     entitlementProfileRevision: number;
+    executionRevision: number;
     moduleEntitlements: PersistedTenantModuleEntitlement[];
   };
   customRole?: {
@@ -208,7 +209,8 @@ export class AuthService {
           "onboardingStatus",
           "trialStartsAt",
           "trialEndsAt",
-          "entitlementProfileRevision"
+          "entitlementProfileRevision",
+          "executionRevision"
         FROM "Tenant"
         WHERE "id" = ${invite.tenantId}
         FOR UPDATE
@@ -292,6 +294,7 @@ export class AuthService {
             status: TenantLifecycleStatus.ACTIVE,
             onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
             entitlementProfileRevision: lockedTenant.entitlementProfileRevision,
+            executionRevision: lockedTenant.executionRevision,
           },
           data: {
             onboardingStatus: TenantOnboardingStatus.ONBOARDING,
@@ -301,6 +304,24 @@ export class AuthService {
         if (transitioned.count !== 1) {
           throw new ConflictException(
             'Tenant onboarding changed while accepting invite',
+          );
+        }
+
+        const transitionedTenant = await tx.tenant.findUniqueOrThrow({
+          where: { id: invite.tenantId },
+          select: {
+            onboardingStatus: true,
+            executionRevision: true,
+          },
+        });
+        if (
+          transitionedTenant.onboardingStatus !==
+            TenantOnboardingStatus.ONBOARDING ||
+          transitionedTenant.executionRevision !==
+            lockedTenant.executionRevision + 1
+        ) {
+          throw new ConflictException(
+            'Tenant execution revision changed while accepting invite',
           );
         }
 
@@ -314,13 +335,17 @@ export class AuthService {
             reason: 'Initial owner accepted the email-bound invite',
             before: {
               onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+              executionRevision: lockedTenant.executionRevision,
             },
             after: {
               onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+              executionRevision: transitionedTenant.executionRevision,
             },
             metadata: {
               inviteId: invite.id,
               ownerUserId: user.id,
+              executionRevisionBefore: lockedTenant.executionRevision,
+              executionRevisionAfter: transitionedTenant.executionRevision,
             },
           },
         });
@@ -338,6 +363,7 @@ export class AuthService {
               trialStartsAt: true,
               trialEndsAt: true,
               entitlementProfileRevision: true,
+              executionRevision: true,
               moduleEntitlements: {
                 select: tenantModuleEntitlementExecutionSelect,
               },
@@ -384,6 +410,7 @@ export class AuthService {
             trialStartsAt: true,
             trialEndsAt: true,
             entitlementProfileRevision: true,
+            executionRevision: true,
             moduleEntitlements: {
               select: tenantModuleEntitlementExecutionSelect,
             },
@@ -442,6 +469,7 @@ export class AuthService {
             trialStartsAt: true,
             trialEndsAt: true,
             entitlementProfileRevision: true,
+            executionRevision: true,
             moduleEntitlements: {
               select: tenantModuleEntitlementExecutionSelect,
             },
@@ -511,6 +539,7 @@ export class AuthService {
             trialStartsAt: true,
             trialEndsAt: true,
             entitlementProfileRevision: true,
+            executionRevision: true,
             moduleEntitlements: {
               select: tenantModuleEntitlementExecutionSelect,
             },
@@ -736,6 +765,7 @@ export class AuthService {
       trialStartsAt: user.tenant.trialStartsAt,
       trialEndsAt: user.tenant.trialEndsAt,
       entitlementProfileRevision: user.tenant.entitlementProfileRevision,
+      executionRevision: user.tenant.executionRevision,
       moduleEntitlements: user.tenant.moduleEntitlements,
     });
   }

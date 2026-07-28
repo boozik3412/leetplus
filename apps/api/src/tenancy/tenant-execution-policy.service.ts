@@ -59,6 +59,7 @@ export type PersistedTenantExecutionSubject = {
   trialStartsAt: Date | null;
   trialEndsAt: Date | null;
   entitlementProfileRevision: number;
+  executionRevision: number;
   moduleEntitlements?: readonly PersistedTenantModuleEntitlement[];
 };
 

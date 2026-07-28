@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   TenantExecutionAdmissionService,
   type TenantExecutionAdmissionDecision,
+  type TenantExecutionPermit,
   type TenantExecutionRequirement,
 } from '../tenancy/tenant-execution-admission.service';
 
@@ -99,7 +100,7 @@ export type GuestGameBonusLedgerReconciliationOutcome =
   | 'NOT_APPLIED';
 
 export type GuestGameBonusLedgerReconciliationResolveDto = {
-  outcome?: GuestGameBonusLedgerReconciliationOutcome | string | null;
+  outcome?: string | null;
   note?: string | null;
   confirmation?: boolean | string | null;
 };
@@ -211,6 +212,7 @@ type BonusLedgerConfig = {
   retryMinutes: number;
   staleLockMinutes: number;
   staffTestRewardAccrualEnabled: boolean;
+  executionRevision: number | null;
 };
 
 type ClaimedBonusLedgerEntry = {
@@ -229,7 +231,9 @@ type ClaimedBonusLedgerEntry = {
   status: string;
   amount: Prisma.Decimal;
   attempts: number;
+  claimGeneration: number;
   lockedAt: Date | null;
+  executionRevision: number | null;
   reason: string | null;
   metadata: Prisma.JsonValue | null;
   createdAt: Date;
@@ -241,6 +245,7 @@ type StaleDispatchingBonusLedgerEntry = {
   rewardId: string | null;
   status: string;
   attempts: number;
+  claimGeneration: number;
   lockedAt: Date | null;
   updatedAt: Date;
   errorCode: string | null;
@@ -656,21 +661,46 @@ export class GuestBonusLedgerService {
       };
     }
 
+    const permitAcquisition = await this.tenantExecutionAdmission.acquirePermit(
+      user.tenantId,
+      bonusLedgerOutboundRequirements,
+    );
+    if (!permitAcquisition.permit) {
+      const status = await this.getStatus(user, dto);
+
+      return {
+        mode: 'READY',
+        dryRun: false,
+        canary: config.canary,
+        ready: true,
+        queued,
+        checked: 0,
+        confirmed: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: status.pending + status.failed,
+        items: [],
+        status,
+        note: tenantExecutionAdmissionNote(permitAcquisition.decision),
+      };
+    }
+
+    const dispatchConfig: BonusLedgerConfig = {
+      ...config,
+      executionRevision: permitAcquisition.permit.executionRevision,
+    };
     const actorUserId = ledgerActorUserId(user);
     await this.promoteStaleDispatchingEntries(
       user.tenantId,
       actorUserId,
-      config,
+      dispatchConfig,
     );
-    const access = await this.langameSettingsService.resolveTenantAccess(
-      user.tenantId,
-    );
-    const entries = await this.claimReadyEntries(user.tenantId, config);
+    const entries = await this.claimReadyEntries(user.tenantId, dispatchConfig);
     const items: GuestGameBonusLedgerDispatchItem[] = [];
 
     for (const entry of entries) {
       items.push(
-        await this.processClaimedEntry(actorUserId, entry, config, access),
+        await this.processClaimedEntry(actorUserId, entry, dispatchConfig),
       );
     }
 
@@ -775,6 +805,9 @@ export class GuestBonusLedgerService {
         throw new BadRequestException(
           'Ручное разрешение доступно только для ledger-записи в статусе RECONCILIATION_REQUIRED.',
         );
+      }
+      if (outcome === 'NOT_APPLIED') {
+        this.assertReconciliationQuarantineElapsed(entry, resolvedAt);
       }
 
       const audit: BonusLedgerReconciliationAudit = {
@@ -897,22 +930,21 @@ export class GuestBonusLedgerService {
         );
       }
       if (row.rewardId) {
-        const acceptedWalletDelivery =
-          await tx.guestGameReward.findFirst({
-            where: {
-              id: row.rewardId,
-              tenantId: user.tenantId,
-              claimRequired: true,
-              deliveryRequestedAt: { not: null },
-              walletItems: {
-                some: {
-                  kind: 'REWARD',
-                  status: { in: ['PROCESSING', 'FAILED'] },
-                },
+        const acceptedWalletDelivery = await tx.guestGameReward.findFirst({
+          where: {
+            id: row.rewardId,
+            tenantId: user.tenantId,
+            claimRequired: true,
+            deliveryRequestedAt: { not: null },
+            walletItems: {
+              some: {
+                kind: 'REWARD',
+                status: { in: ['PROCESSING', 'FAILED'] },
               },
             },
-            select: { id: true },
-          });
+          },
+          select: { id: true },
+        });
         if (acceptedWalletDelivery) {
           throw new BadRequestException(
             'Награда уже принята гостем и ожидает сверки выдачи. Отмена запрещена.',
@@ -926,9 +958,7 @@ export class GuestBonusLedgerService {
           id,
           tenantId: user.tenantId,
           status: row.status,
-          ...(row.status === 'PROCESSING'
-            ? { lockedAt: row.lockedAt }
-            : {}),
+          ...(row.status === 'PROCESSING' ? { lockedAt: row.lockedAt } : {}),
         },
         data: {
           status: 'CANCELED',
@@ -1247,6 +1277,7 @@ export class GuestBonusLedgerService {
             ledger."rewardId",
             ledger."status",
             ledger."attempts",
+            ledger."claimGeneration",
             ledger."lockedAt",
             ledger."updatedAt",
             ledger."errorCode",
@@ -1304,6 +1335,7 @@ export class GuestBonusLedgerService {
           previousErrorCode: candidate.errorCode,
           previousErrorMessage: candidate.errorMessage,
           attempts: candidate.attempts,
+          claimGeneration: candidate.claimGeneration,
           staleThresholdMinutes: config.staleLockMinutes,
           reason: 'DISPATCH_CRASH_OR_HTTP_OUTCOME_UNKNOWN',
         };
@@ -1313,6 +1345,7 @@ export class GuestBonusLedgerService {
             tenantId,
             status: 'DISPATCHING',
             attempts: candidate.attempts,
+            claimGeneration: candidate.claimGeneration,
             lockedAt: candidate.lockedAt,
             updatedAt: candidate.updatedAt,
           },
@@ -1342,6 +1375,15 @@ export class GuestBonusLedgerService {
     tenantId: string,
     config: BonusLedgerConfig,
   ): Promise<ClaimedBonusLedgerEntry[]> {
+    if (
+      !Number.isSafeInteger(config.executionRevision) ||
+      (config.executionRevision ?? 0) < 1
+    ) {
+      throw new BadRequestException(
+        'Bonus ledger claim requires a current tenant execution revision',
+      );
+    }
+
     const storeFilter = config.storeId
       ? Prisma.sql`AND candidate."storeId" = ${config.storeId}`
       : Prisma.empty;
@@ -1356,6 +1398,8 @@ export class GuestBonusLedgerService {
         "lockedAt" = NOW(),
         "processedAt" = NOW(),
         "attempts" = "attempts" + 1,
+        "claimGeneration" = "claimGeneration" + 1,
+        "executionRevision" = ${config.executionRevision},
         "updatedAt" = NOW()
       WHERE ledger."id" IN (
         SELECT candidate."id"
@@ -1453,7 +1497,9 @@ export class GuestBonusLedgerService {
         "status",
         "amount",
         "attempts",
+        "claimGeneration",
         "lockedAt",
+        "executionRevision",
         "reason",
         "metadata",
         "createdAt"
@@ -1464,26 +1510,37 @@ export class GuestBonusLedgerService {
     actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
     config: BonusLedgerConfig,
-    access: TenantAccess,
   ): Promise<GuestGameBonusLedgerDispatchItem> {
     let sourcedEntry = entry;
     let dispatchStarted = false;
+    let dispatchLockedAt: Date | null = null;
 
     try {
-      const source = await this.resolveEntrySource(entry, access);
-      sourcedEntry = this.withResolvedEntrySource(entry, source.domain);
+      const executionPermit = this.executionPermitForEntry(sourcedEntry);
       const phone = await this.resolveEntryPhone(sourcedEntry);
-      const staffTestReason = await this.resolveEntryStaffTestReason(
+      let staffTestReason = await this.resolveEntryStaffTestReason(
         sourcedEntry,
         phone.value,
       );
 
       if (staffTestReason && config.staffTestRewardAccrualEnabled === false) {
-        await this.cancelStaffTestEntry(
+        const canceled = await this.cancelStaffTestEntry(
           actorUserId,
           sourcedEntry,
           staffTestReason,
         );
+
+        if (!canceled) {
+          return {
+            ledgerEntryId: sourcedEntry.id,
+            rewardId: sourcedEntry.rewardId,
+            status: 'BLOCKED',
+            amount: decimalToNumber(sourcedEntry.amount),
+            externalDomain: sourcedEntry.externalDomain,
+            externalGuestId: sourcedEntry.externalGuestId,
+            note: 'Ledger-запись уже была повторно захвачена или изменилась; поздняя отмена тестовой награды не применена.',
+          };
+        }
 
         return {
           ledgerEntryId: sourcedEntry.id,
@@ -1526,10 +1583,12 @@ export class GuestBonusLedgerService {
         };
       }
 
+      dispatchLockedAt = new Date();
       dispatchStarted = await this.markEntryDispatching(
         actorUserId,
         sourcedEntry,
         auditPayload,
+        dispatchLockedAt,
       );
       if (!dispatchStarted) {
         return {
@@ -1543,15 +1602,108 @@ export class GuestBonusLedgerService {
         };
       }
 
-      const outboundAdmission = await this.tenantExecutionAdmission.evaluate(
-        sourcedEntry.tenantId,
-        bonusLedgerOutboundRequirements,
+      const dispatchingDelivery = await this.revalidateClaimedEntryForDelivery(
+        actorUserId,
+        sourcedEntry,
+        'DISPATCHING',
+        dispatchLockedAt,
       );
+      if (!dispatchingDelivery.ready) {
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: dispatchingDelivery.status ?? 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note:
+            dispatchingDelivery.note ??
+            'Награда больше не готова к внешнему начислению.',
+        };
+      }
+
+      let dispatchingPhone: Awaited<
+        ReturnType<GuestBonusLedgerService['resolveEntryPhone']>
+      >;
+      try {
+        dispatchingPhone = await this.resolveEntryPhone(sourcedEntry);
+      } catch (error) {
+        await this.returnDispatchingEntryAfterTargetChange(
+          actorUserId,
+          sourcedEntry,
+          dispatchLockedAt,
+          errorMessage(error),
+        );
+
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: 'Телефон получателя изменился или больше недоступен после начала dispatch; Langame не вызывался.',
+        };
+      }
+      if (dispatchingPhone.value !== phone.value) {
+        await this.returnDispatchingEntryAfterTargetChange(
+          actorUserId,
+          sourcedEntry,
+          dispatchLockedAt,
+          'Normalized Langame phone target changed after DISPATCHING.',
+        );
+
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: 'Телефон получателя изменился после начала dispatch; Langame не вызывался.',
+        };
+      }
+
+      staffTestReason = await this.resolveEntryStaffTestReason(
+        sourcedEntry,
+        dispatchingPhone.value,
+      );
+      if (staffTestReason && config.staffTestRewardAccrualEnabled === false) {
+        const canceled = await this.cancelStaffTestEntry(
+          actorUserId,
+          sourcedEntry,
+          staffTestReason,
+          'DISPATCHING',
+          dispatchLockedAt,
+        );
+
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: canceled ? 'CANCELED' : 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: canceled
+            ? staffTestLedgerNote()
+            : 'Ledger-запись уже была повторно захвачена или изменилась; поздняя отмена тестовой награды не применена.',
+        };
+      }
+
+      const access = await this.langameSettingsService.resolveTenantAccess(
+        sourcedEntry.tenantId,
+      );
+      const source = await this.resolveEntrySource(sourcedEntry, access);
+      sourcedEntry = this.withResolvedEntrySource(sourcedEntry, source.domain);
+
+      const outboundAdmission =
+        await this.tenantExecutionAdmission.evaluatePermit(executionPermit);
       if (!outboundAdmission.allowed) {
         await this.returnDispatchingEntryAfterAdmissionDenial(
           actorUserId,
           sourcedEntry,
           outboundAdmission,
+          dispatchLockedAt,
         );
 
         return {
@@ -1562,6 +1714,22 @@ export class GuestBonusLedgerService {
           externalDomain: sourcedEntry.externalDomain,
           externalGuestId: sourcedEntry.externalGuestId,
           note: tenantExecutionAdmissionNote(outboundAdmission),
+        };
+      }
+
+      const ownsDispatch = await this.ownsCurrentDispatch(
+        sourcedEntry,
+        dispatchLockedAt,
+      );
+      if (!ownsDispatch) {
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: 'Ledger-запись уже была повторно захвачена или изменилась; устаревший worker не вызвал Langame.',
         };
       }
 
@@ -1627,12 +1795,17 @@ export class GuestBonusLedgerService {
     actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
     admission: TenantExecutionAdmissionDecision,
+    dispatchLockedAt: Date,
   ): Promise<void> {
     await this.prisma.guestBonusLedgerEntry.updateMany({
       where: {
         id: entry.id,
         tenantId: entry.tenantId,
         status: 'DISPATCHING',
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        lockedAt: dispatchLockedAt,
+        executionRevision: entry.executionRevision,
       },
       data: {
         status: 'PENDING',
@@ -1648,9 +1821,41 @@ export class GuestBonusLedgerService {
     });
   }
 
+  private async returnDispatchingEntryAfterTargetChange(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    dispatchLockedAt: Date,
+    detail: string,
+  ): Promise<void> {
+    await this.prisma.guestBonusLedgerEntry.updateMany({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: 'DISPATCHING',
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        lockedAt: dispatchLockedAt,
+        executionRevision: entry.executionRevision,
+      },
+      data: {
+        status: 'PENDING',
+        processedByUserId: actorUserId,
+        attempts: { decrement: 1 },
+        lockedAt: null,
+        processedAt: null,
+        failedAt: null,
+        nextAttemptAt: null,
+        errorCode: 'LANGAME_TARGET_CHANGED',
+        errorMessage: truncate(detail, 1000),
+      },
+    });
+  }
+
   private async revalidateClaimedEntryForDelivery(
     actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
+    expectedStatus: 'PROCESSING' | 'DISPATCHING' = 'PROCESSING',
+    expectedLockedAt: Date | null = entry.lockedAt,
   ): Promise<BonusLedgerDeliveryRevalidation> {
     if (entry.source !== 'GAMIFICATION_REWARD' || !entry.rewardId) {
       return {
@@ -1756,7 +1961,11 @@ export class GuestBonusLedgerService {
         where: {
           id: entry.id,
           tenantId: entry.tenantId,
-          status: 'PROCESSING',
+          status: expectedStatus,
+          attempts: entry.attempts,
+          claimGeneration: entry.claimGeneration,
+          lockedAt: expectedLockedAt,
+          executionRevision: entry.executionRevision,
         },
         data: {
           status,
@@ -1784,9 +1993,8 @@ export class GuestBonusLedgerService {
     actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
     request: Record<string, unknown>,
+    dispatchLockedAt: Date = new Date(),
   ) {
-    const now = new Date();
-
     return this.prisma.$transaction(async (tx) => {
       if (entry.rewardId) {
         await tx.$queryRaw(Prisma.sql`
@@ -1818,7 +2026,7 @@ export class GuestBonusLedgerService {
             ? !acceptedRewardClaimBeforeDeadline(reward)
             : Boolean(
                 reward.expiresAt &&
-                  reward.expiresAt.getTime() <= now.getTime(),
+                reward.expiresAt.getTime() <= dispatchLockedAt.getTime(),
               ))
         ) {
           return false;
@@ -1853,11 +2061,15 @@ export class GuestBonusLedgerService {
           id: entry.id,
           tenantId: entry.tenantId,
           status: 'PROCESSING',
+          attempts: entry.attempts,
+          claimGeneration: entry.claimGeneration,
+          lockedAt: entry.lockedAt,
+          executionRevision: entry.executionRevision,
         },
         data: {
           status: 'DISPATCHING',
           processedByUserId: actorUserId,
-          lockedAt: now,
+          lockedAt: dispatchLockedAt,
           nextAttemptAt: null,
           errorCode: null,
           errorMessage: null,
@@ -1867,6 +2079,35 @@ export class GuestBonusLedgerService {
 
       return dispatching.count === 1;
     });
+  }
+
+  private async ownsCurrentDispatch(
+    entry: ClaimedBonusLedgerEntry,
+    dispatchLockedAt: Date,
+  ) {
+    if (
+      !Number.isSafeInteger(entry.executionRevision) ||
+      (entry.executionRevision ?? 0) < 1
+    ) {
+      return false;
+    }
+    const executionRevision = entry.executionRevision as number;
+    const count = await this.prisma.guestBonusLedgerEntry.count({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: 'DISPATCHING',
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        lockedAt: dispatchLockedAt,
+        executionRevision,
+        tenant: {
+          executionRevision,
+        },
+      },
+    });
+
+    return count === 1;
   }
 
   private async confirmEntry(
@@ -1918,43 +2159,43 @@ export class GuestBonusLedgerService {
     const langameBalanceType = langameBalanceTypeForEntry(entry);
 
     if (entry.rewardId) {
-        await tx.$queryRaw(Prisma.sql`
+      await tx.$queryRaw(Prisma.sql`
           SELECT "id"
           FROM "GuestGameReward"
           WHERE "id" = ${entry.rewardId}
             AND "tenantId" = ${entry.tenantId}
           FOR UPDATE
         `);
-        const deliveryReward = await tx.guestGameReward.findFirst({
-          where: {
-            id: entry.rewardId,
-            tenantId: entry.tenantId,
-          },
-          select: {
-            id: true,
-            status: true,
-            claimRequired: true,
-            deliveryRequestedAt: true,
-            claimExpiresAt: true,
-            expiresAt: true,
-          },
-        });
-        if (
-          !deliveryReward ||
-          deliveryReward.status !== 'APPROVED' ||
-          (deliveryReward.claimRequired
-            ? !acceptedRewardClaimBeforeDeadline(deliveryReward)
-            : Boolean(
-                deliveryReward.expiresAt &&
-                  deliveryReward.expiresAt.getTime() <= now.getTime(),
-              ))
-        ) {
-          throw new BadRequestException(
-            'Награда больше не находится в состоянии, допускающем подтверждение внешней выдачи.',
-          );
-        }
-        if (deliveryReward.claimRequired) {
-          await tx.$queryRaw(Prisma.sql`
+      const deliveryReward = await tx.guestGameReward.findFirst({
+        where: {
+          id: entry.rewardId,
+          tenantId: entry.tenantId,
+        },
+        select: {
+          id: true,
+          status: true,
+          claimRequired: true,
+          deliveryRequestedAt: true,
+          claimExpiresAt: true,
+          expiresAt: true,
+        },
+      });
+      if (
+        !deliveryReward ||
+        deliveryReward.status !== 'APPROVED' ||
+        (deliveryReward.claimRequired
+          ? !acceptedRewardClaimBeforeDeadline(deliveryReward)
+          : Boolean(
+              deliveryReward.expiresAt &&
+              deliveryReward.expiresAt.getTime() <= now.getTime(),
+            ))
+      ) {
+        throw new BadRequestException(
+          'Награда больше не находится в состоянии, допускающем подтверждение внешней выдачи.',
+        );
+      }
+      if (deliveryReward.claimRequired) {
+        await tx.$queryRaw(Prisma.sql`
             SELECT "id"
             FROM "GuestGameRewardWalletItem"
             WHERE "tenantId" = ${entry.tenantId}
@@ -1962,175 +2203,177 @@ export class GuestBonusLedgerService {
               AND "kind" = 'REWARD'
             FOR UPDATE
           `);
-          const wallet = await tx.guestGameRewardWalletItem.findFirst({
-            where: {
-              tenantId: entry.tenantId,
-              rewardId: entry.rewardId,
-              kind: 'REWARD',
-              status: 'PROCESSING',
-            },
-            select: { id: true },
-          });
-          if (!wallet) {
-            throw new BadRequestException(
-              'Кошелек наград больше не ожидает подтверждения этой выдачи.',
-            );
-          }
+        const wallet = await tx.guestGameRewardWalletItem.findFirst({
+          where: {
+            tenantId: entry.tenantId,
+            rewardId: entry.rewardId,
+            kind: 'REWARD',
+            status: 'PROCESSING',
+          },
+          select: { id: true },
+        });
+        if (!wallet) {
+          throw new BadRequestException(
+            'Кошелек наград больше не ожидает подтверждения этой выдачи.',
+          );
         }
+      }
     }
 
     const tracksBonusBalance = langameBalanceType === 'bonus_balance';
-      const current = tracksBonusBalance
-        ? await this.findCurrentBalance(tx, entry)
-        : null;
-      const balanceBefore = tracksBonusBalance
-        ? (current?.bonusBalance ?? new Prisma.Decimal(0))
-        : null;
-      const balanceAfter = balanceBefore ? balanceBefore.plus(amount) : null;
+    const current = tracksBonusBalance
+      ? await this.findCurrentBalance(tx, entry)
+      : null;
+    const balanceBefore = tracksBonusBalance
+      ? (current?.bonusBalance ?? new Prisma.Decimal(0))
+      : null;
+    const balanceAfter = balanceBefore ? balanceBefore.plus(amount) : null;
 
-      if (current && balanceAfter) {
-        await tx.guestBonusBalanceCurrent.update({
-          where: { id: current.id },
-          data: {
-            bonusBalance: balanceAfter,
-            snapshotDate: now,
-            source: 'LANGAME_LEDGER',
-            lastSyncedAt: now,
-            sourcePayloadHash: entry.idempotencyKey,
-            externalProvider: entry.externalProvider,
-            externalDomain: entry.externalDomain,
-            externalGuestId: entry.externalGuestId ?? current.externalGuestId,
-          },
-        });
-      } else if (tracksBonusBalance && entry.externalGuestId && balanceAfter) {
-        await tx.guestBonusBalanceCurrent.create({
-          data: {
-            tenantId: entry.tenantId,
-            guestId: entry.guestId,
-            externalProvider: entry.externalProvider,
-            externalDomain: entry.externalDomain,
-            externalGuestId: entry.externalGuestId,
-            bonusBalance: balanceAfter,
-            snapshotDate: now,
-            source: 'LANGAME_LEDGER',
-            lastSyncedAt: now,
-            sourcePayloadHash: entry.idempotencyKey,
-          },
-        });
-      }
-
-      const confirmedLedger = await tx.guestBonusLedgerEntry.updateMany({
-        where: {
-          id: entry.id,
-          tenantId: entry.tenantId,
-          status: expectedStatus,
-        },
+    if (current && balanceAfter) {
+      await tx.guestBonusBalanceCurrent.update({
+        where: { id: current.id },
         data: {
-          status: 'CONFIRMED',
-          processedByUserId: actorUserId,
+          bonusBalance: balanceAfter,
+          snapshotDate: now,
+          source: 'LANGAME_LEDGER',
+          lastSyncedAt: now,
+          sourcePayloadHash: entry.idempotencyKey,
           externalProvider: entry.externalProvider,
           externalDomain: entry.externalDomain,
-          lockedAt: null,
-          nextAttemptAt: null,
-          processedAt: now,
-          confirmedAt: now,
-          failedAt: null,
-          errorCode: null,
-          errorMessage: null,
-          balanceBefore,
-          balanceAfter,
-          langameRequest: jsonValue(request),
-          langameResponse: jsonValue(response),
-          ...(metadata ? { metadata } : {}),
+          externalGuestId: entry.externalGuestId ?? current.externalGuestId,
         },
       });
-      if (confirmedLedger.count !== 1) {
-        throw new BadRequestException(
-          'Ledger-запись потеряла право подтвердить внешнюю выдачу.',
-        );
-      }
+    } else if (tracksBonusBalance && entry.externalGuestId && balanceAfter) {
+      await tx.guestBonusBalanceCurrent.create({
+        data: {
+          tenantId: entry.tenantId,
+          guestId: entry.guestId,
+          externalProvider: entry.externalProvider,
+          externalDomain: entry.externalDomain,
+          externalGuestId: entry.externalGuestId,
+          bonusBalance: balanceAfter,
+          snapshotDate: now,
+          source: 'LANGAME_LEDGER',
+          lastSyncedAt: now,
+          sourcePayloadHash: entry.idempotencyKey,
+        },
+      });
+    }
 
-      if (entry.rewardId) {
-        const reward = await tx.guestGameReward.findFirst({
-          where: {
-            id: entry.rewardId,
-            tenantId: entry.tenantId,
-          },
-          select: {
-            id: true,
-            status: true,
-            tenantId: true,
-            profileId: true,
-            guestId: true,
-            lootBoxId: true,
-            missionId: true,
-            seasonId: true,
-            rewardLabel: true,
-            rewardCode: true,
-            approvedByUserId: true,
-            claimRequired: true,
+    const confirmedLedger = await tx.guestBonusLedgerEntry.updateMany({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: expectedStatus,
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        executionRevision: entry.executionRevision,
+      },
+      data: {
+        status: 'CONFIRMED',
+        processedByUserId: actorUserId,
+        externalProvider: entry.externalProvider,
+        externalDomain: entry.externalDomain,
+        lockedAt: null,
+        nextAttemptAt: null,
+        processedAt: now,
+        confirmedAt: now,
+        failedAt: null,
+        errorCode: null,
+        errorMessage: null,
+        balanceBefore,
+        balanceAfter,
+        langameRequest: jsonValue(request),
+        langameResponse: jsonValue(response),
+        ...(metadata ? { metadata } : {}),
+      },
+    });
+    if (confirmedLedger.count !== 1) {
+      throw new BadRequestException(
+        'Ledger-запись потеряла право подтвердить внешнюю выдачу.',
+      );
+    }
+
+    if (entry.rewardId) {
+      const reward = await tx.guestGameReward.findFirst({
+        where: {
+          id: entry.rewardId,
+          tenantId: entry.tenantId,
+        },
+        select: {
+          id: true,
+          status: true,
+          tenantId: true,
+          profileId: true,
+          guestId: true,
+          lootBoxId: true,
+          missionId: true,
+          seasonId: true,
+          rewardLabel: true,
+          rewardCode: true,
+          approvedByUserId: true,
+          claimRequired: true,
+        },
+      });
+
+      if (reward?.status === 'APPROVED') {
+        await tx.guestGameReward.update({
+          where: { id: reward.id },
+          data: {
+            status: 'PAID',
+            paidAt: now,
+            approvedByUserId: reward.approvedByUserId ?? actorUserId,
           },
         });
-
-        if (reward?.status === 'APPROVED') {
-          await tx.guestGameReward.update({
-            where: { id: reward.id },
-            data: {
-              status: 'PAID',
-              paidAt: now,
-              approvedByUserId: reward.approvedByUserId ?? actorUserId,
-            },
-          });
-          const claimedWallet =
-            await tx.guestGameRewardWalletItem.updateMany({
-            where: {
-              tenantId: reward.tenantId,
-              rewardId: reward.id,
-              kind: 'REWARD',
-              status: 'PROCESSING',
-            },
-            data: {
-              status: 'CLAIMED',
-              claimedAt: now,
-            },
-          });
-          if (reward.claimRequired && claimedWallet.count !== 1) {
-            throw new BadRequestException(
-              'Кошелек наград не подтвердил единственную принятую выдачу.',
-            );
-          }
-          await tx.guestGameEvent.create({
-            data: {
-              tenantId: reward.tenantId,
-              profileId: reward.profileId,
-              guestId: reward.guestId,
-              lootBoxId: reward.lootBoxId,
-              missionId: reward.missionId,
-              seasonId: reward.seasonId,
-              createdByUserId: actorUserId,
-              eventType: 'REWARD_PAID',
-              source: 'SYSTEM',
-              externalProvider: entry.externalProvider,
-              externalDomain: entry.externalDomain,
-              externalId: `bonus-ledger:${entry.id}`,
-              xpDelta: 0,
-              occurredAt: now,
-              payload: {
-                ledgerEntryId: entry.id,
-                idempotencyKey: entry.idempotencyKey,
-                amount: decimalToNumber(amount),
-                balanceType: langameBalanceType,
-                balanceBefore: decimalToNullableNumber(balanceBefore),
-                balanceAfter: decimalToNullableNumber(balanceAfter),
-                ...(reconciliationAudit
-                  ? { reconciliationResolution: reconciliationAudit }
-                  : {}),
-              },
-              note: `${reward.rewardLabel} · ${reward.rewardCode ?? entry.idempotencyKey}`,
-            },
-          });
+        const claimedWallet = await tx.guestGameRewardWalletItem.updateMany({
+          where: {
+            tenantId: reward.tenantId,
+            rewardId: reward.id,
+            kind: 'REWARD',
+            status: 'PROCESSING',
+          },
+          data: {
+            status: 'CLAIMED',
+            claimedAt: now,
+          },
+        });
+        if (reward.claimRequired && claimedWallet.count !== 1) {
+          throw new BadRequestException(
+            'Кошелек наград не подтвердил единственную принятую выдачу.',
+          );
         }
+        await tx.guestGameEvent.create({
+          data: {
+            tenantId: reward.tenantId,
+            profileId: reward.profileId,
+            guestId: reward.guestId,
+            lootBoxId: reward.lootBoxId,
+            missionId: reward.missionId,
+            seasonId: reward.seasonId,
+            createdByUserId: actorUserId,
+            eventType: 'REWARD_PAID',
+            source: 'SYSTEM',
+            externalProvider: entry.externalProvider,
+            externalDomain: entry.externalDomain,
+            externalId: `bonus-ledger:${entry.id}`,
+            xpDelta: 0,
+            occurredAt: now,
+            payload: {
+              ledgerEntryId: entry.id,
+              idempotencyKey: entry.idempotencyKey,
+              amount: decimalToNumber(amount),
+              balanceType: langameBalanceType,
+              balanceBefore: decimalToNullableNumber(balanceBefore),
+              balanceAfter: decimalToNullableNumber(balanceAfter),
+              ...(reconciliationAudit
+                ? { reconciliationResolution: reconciliationAudit }
+                : {}),
+            },
+            note: `${reward.rewardLabel} · ${reward.rewardCode ?? entry.idempotencyKey}`,
+          },
+        });
       }
+    }
   }
 
   private async markReconciliationNotAppliedInTransaction(
@@ -2211,6 +2454,9 @@ export class GuestBonusLedgerService {
         id: entry.id,
         tenantId: user.tenantId,
         status: 'RECONCILIATION_REQUIRED',
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        executionRevision: entry.executionRevision,
       },
       data: {
         status: 'FAILED',
@@ -2253,6 +2499,34 @@ export class GuestBonusLedgerService {
     }
   }
 
+  private assertReconciliationQuarantineElapsed(
+    entry: {
+      failedAt: Date | null;
+      updatedAt: Date;
+      createdAt: Date;
+    },
+    now: Date,
+  ) {
+    const quarantineMinutes = positiveInt(
+      this.configService.get<string>(
+        'LANGAME_BONUS_RECONCILIATION_QUARANTINE_MINUTES',
+      ),
+      30,
+      7 * 24 * 60,
+    );
+    const quarantineStartedAt =
+      entry.failedAt ?? entry.updatedAt ?? entry.createdAt;
+    const retryAllowedAt = new Date(
+      quarantineStartedAt.getTime() + quarantineMinutes * 60 * 1000,
+    );
+
+    if (now.getTime() < retryAllowedAt.getTime()) {
+      throw new BadRequestException(
+        `NOT_APPLIED retry remains quarantined until ${retryAllowedAt.toISOString()}`,
+      );
+    }
+  }
+
   private async failEntry(
     actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
@@ -2272,7 +2546,9 @@ export class GuestBonusLedgerService {
           tenantId: entry.tenantId,
           status: 'PROCESSING',
           attempts: entry.attempts,
+          claimGeneration: entry.claimGeneration,
           lockedAt: entry.lockedAt,
+          executionRevision: entry.executionRevision,
         },
         data: {
           status: 'FAILED',
@@ -2322,6 +2598,9 @@ export class GuestBonusLedgerService {
           id: entry.id,
           tenantId: entry.tenantId,
           status: 'DISPATCHING',
+          attempts: entry.attempts,
+          claimGeneration: entry.claimGeneration,
+          executionRevision: entry.executionRevision,
         },
         data: {
           status: 'RECONCILIATION_REQUIRED',
@@ -2567,6 +2846,8 @@ export class GuestBonusLedgerService {
     actorUserId: string | null,
     entry: ClaimedBonusLedgerEntry,
     reason: string,
+    expectedStatus: 'PROCESSING' | 'DISPATCHING' = 'PROCESSING',
+    expectedLockedAt: Date | null = entry.lockedAt,
   ) {
     const now = new Date();
     const metadata = {
@@ -2575,9 +2856,17 @@ export class GuestBonusLedgerService {
       staffTestReason: reason,
     };
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.guestBonusLedgerEntry.update({
-        where: { id: entry.id },
+    return this.prisma.$transaction(async (tx) => {
+      const canceled = await tx.guestBonusLedgerEntry.updateMany({
+        where: {
+          id: entry.id,
+          tenantId: entry.tenantId,
+          status: expectedStatus,
+          attempts: entry.attempts,
+          claimGeneration: entry.claimGeneration,
+          lockedAt: expectedLockedAt,
+          executionRevision: entry.executionRevision,
+        },
         data: {
           status: 'CANCELED',
           processedByUserId: actorUserId,
@@ -2592,6 +2881,9 @@ export class GuestBonusLedgerService {
           metadata: metadata,
         },
       });
+      if (canceled.count !== 1) {
+        return false;
+      }
 
       if (entry.rewardId) {
         await tx.guestGameReward.updateMany({
@@ -2619,6 +2911,8 @@ export class GuestBonusLedgerService {
           },
         });
       }
+
+      return true;
     });
   }
 
@@ -2812,6 +3106,26 @@ export class GuestBonusLedgerService {
         24 * 60,
       ),
       staffTestRewardAccrualEnabled: this.isStaffTestRewardAccrualEnabled(),
+      executionRevision: null,
+    };
+  }
+
+  private executionPermitForEntry(
+    entry: ClaimedBonusLedgerEntry,
+  ): TenantExecutionPermit {
+    if (
+      !Number.isSafeInteger(entry.executionRevision) ||
+      (entry.executionRevision ?? 0) < 1
+    ) {
+      throw new BadRequestException(
+        'Ledger claim does not carry a valid tenant execution revision.',
+      );
+    }
+
+    return {
+      tenantId: entry.tenantId,
+      executionRevision: entry.executionRevision as number,
+      requirements: bonusLedgerOutboundRequirements,
     };
   }
 

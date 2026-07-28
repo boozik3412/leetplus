@@ -1,5 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
+import { TenantCustomerStage, TenantModule } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { ReportsDigestSchedulerService } from './reports-digest-scheduler.service';
 import { ReportsDigestService } from './reports-digest.service';
 
@@ -45,10 +47,30 @@ describe('ReportsDigestSchedulerService admission result handling', () => {
         ],
       }),
     };
+    const permitAcquisition = {
+      decision: {
+        allowed: false,
+        tenantId: 'tenant-denied',
+        reasonCode: 'ENTITLEMENT_OUTBOUND_DISABLED',
+        failedRequirement: {
+          module: TenantModule.ASSORTMENT,
+          action: 'OUTBOUND',
+        },
+        entitlementProfileRevision: 4,
+        executionRevision: 7,
+        customerStage: TenantCustomerStage.BETA,
+        internalEntitlementBypass: false,
+      },
+      permit: null,
+    };
+    const tenantExecutionAdmissionService = {
+      acquirePermit: jest.fn().mockResolvedValue(permitAcquisition),
+    };
     const service = new ReportsDigestSchedulerService(
       configService as unknown as ConfigService,
       prisma as unknown as PrismaService,
       reportsDigestService as unknown as ReportsDigestService,
+      tenantExecutionAdmissionService as unknown as TenantExecutionAdmissionService,
     );
 
     await (
@@ -59,6 +81,26 @@ describe('ReportsDigestSchedulerService admission result handling', () => {
       dateKey: '2026-07-28',
     });
 
+    expect(tenantExecutionAdmissionService.acquirePermit).toHaveBeenCalledWith(
+      'tenant-denied',
+      [
+        { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+        { module: TenantModule.COMMUNICATIONS, action: 'OUTBOUND' },
+      ],
+    );
+    expect(prisma.reportDigestScheduleRun.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'run-1' },
+      data: {
+        executionRevision: 7,
+      },
+    });
+    expect(reportsDigestService.sendScheduledDigests).toHaveBeenCalledWith(
+      { type: 'DAILY' },
+      {
+        tenantId: 'tenant-denied',
+        permitAcquisition,
+      },
+    );
     expect(prisma.reportDigestScheduleRun.update).toHaveBeenCalledWith({
       where: { id: 'run-1' },
       data: {
@@ -68,5 +110,10 @@ describe('ReportsDigestSchedulerService admission result handling', () => {
         errorMessage: 'ENTITLEMENT_OUTBOUND_DISABLED',
       },
     });
+    expect(
+      prisma.reportDigestScheduleRun.update.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      reportsDigestService.sendScheduledDigests.mock.invocationCallOrder[0],
+    );
   });
 });

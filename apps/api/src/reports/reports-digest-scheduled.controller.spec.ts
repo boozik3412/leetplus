@@ -25,6 +25,7 @@ describe('ReportsDigestScheduledController', () => {
   it('rejects isolated scheduled HTTP before any digest is sent', () => {
     const { controller, reportsDigestService } = createSubject({
       DESIGN_PARTNER_ISOLATED_MODE: 'true',
+      REPORT_DIGEST_SCHEDULED_HTTP_ENABLED: 'true',
       SYNC_SERVICE_TOKEN: 'sync-token',
     });
 
@@ -34,19 +35,43 @@ describe('ReportsDigestScheduledController', () => {
     expect(reportsDigestService.sendScheduledDigests).not.toHaveBeenCalled();
   });
 
-  it('keeps token validation and delegation unchanged outside isolated mode', async () => {
+  it('requires the explicit scheduled HTTP enable flag', () => {
     const { controller, reportsDigestService } = createSubject({
       SYNC_SERVICE_TOKEN: 'sync-token',
     });
 
-    expect(() => controller.sendScheduledDigests('invalid-token', {})).toThrow(
-      UnauthorizedException,
-    );
+    expect(() =>
+      controller.sendScheduledDigests('sync-token', { dryRun: true }),
+    ).toThrow(ServiceUnavailableException);
+    expect(reportsDigestService.sendScheduledDigests).not.toHaveBeenCalled();
+  });
+
+  it('keeps token validation for the explicitly enabled dry-run path', async () => {
+    const { controller, reportsDigestService } = createSubject({
+      REPORT_DIGEST_SCHEDULED_HTTP_ENABLED: 'true',
+      SYNC_SERVICE_TOKEN: 'sync-token',
+    });
+
+    expect(() =>
+      controller.sendScheduledDigests('invalid-token', { dryRun: true }),
+    ).toThrow(UnauthorizedException);
     await expect(
       controller.sendScheduledDigests('sync-token', { dryRun: true }),
     ).resolves.toEqual({});
     expect(reportsDigestService.sendScheduledDigests).toHaveBeenCalledWith({
       dryRun: true,
     });
+  });
+
+  it('rejects live HTTP sends until they use the persisted run coordinator', () => {
+    const { controller, reportsDigestService } = createSubject({
+      REPORT_DIGEST_SCHEDULED_HTTP_ENABLED: 'true',
+      SYNC_SERVICE_TOKEN: 'sync-token',
+    });
+
+    expect(() =>
+      controller.sendScheduledDigests('sync-token', { type: 'DAILY' }),
+    ).toThrow(ServiceUnavailableException);
+    expect(reportsDigestService.sendScheduledDigests).not.toHaveBeenCalled();
   });
 });

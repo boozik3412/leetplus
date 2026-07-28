@@ -206,6 +206,8 @@ model Tenant {
   trialEndsAt                DateTime?              @db.Timestamptz(3)
   /// Monotonic CAS/version for the complete module entitlement profile.
   entitlementProfileRevision Int                    @default(0)
+  /// Monotonic fence for lifecycle/onboarding/trial/profile execution permits.
+  executionRevision          Int                    @default(0)
   statusChangedAt            DateTime?
   statusReason               String?
   createdAt                  DateTime               @default(now())
@@ -494,7 +496,7 @@ model PlatformAdminAuditEvent {
   actorUserId String?
   /// Tenant-scoped idempotency is represented below; the migration also adds
   /// a partial unique (action, requestId) index for global tenantId=NULL events.
-  requestId String?
+  requestId   String?
   action      String
   targetType  String
   targetId    String?
@@ -935,22 +937,24 @@ model RecommendationState {
 }
 
 model ReportDigestScheduleRun {
-  id               String    @id @default(uuid())
-  tenantId         String
-  type             String
-  scheduledForDate String
-  status           String    @default("RUNNING")
-  startedAt        DateTime  @default(now())
-  completedAt      DateTime?
-  sentCount        Int       @default(0)
-  errorMessage     String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                String    @id @default(uuid())
+  tenantId          String
+  type              String
+  scheduledForDate  String
+  status            String    @default("RUNNING")
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+  sentCount         Int       @default(0)
+  executionRevision Int?
+  errorMessage      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, type, scheduledForDate], map: "report_digest_schedule_tenant_type_date_uidx")
   @@index([tenantId, status, startedAt], map: "report_digest_schedule_status_started_idx")
+  @@index([tenantId, executionRevision, status], map: "report_digest_schedule_execution_revision_idx")
 }
 
 model SalesFact {
@@ -2563,8 +2567,11 @@ model GuestBonusLedgerEntry {
   langameRequest    Json?
   langameResponse   Json?
   attempts          Int                  @default(0)
+  /// Monotonic worker-claim token; unlike attempts it is never reset.
+  claimGeneration   Int                  @default(0)
   nextAttemptAt     DateTime?
   lockedAt          DateTime?
+  executionRevision Int?
   processedAt       DateTime?
   confirmedAt       DateTime?
   failedAt          DateTime?
@@ -2593,6 +2600,7 @@ model GuestBonusLedgerEntry {
   @@index([storeId], map: "guest_bonus_ledger_store_idx")
   @@index([createdByUserId], map: "guest_bonus_ledger_created_by_idx")
   @@index([processedByUserId], map: "guest_bonus_ledger_processed_by_idx")
+  @@index([tenantId, executionRevision, status], map: "guest_bonus_ledger_execution_revision_idx")
 }
 
 model GuestSession {

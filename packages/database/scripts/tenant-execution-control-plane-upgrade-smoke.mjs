@@ -235,9 +235,9 @@ async function readMigrationPlan() {
     "The current latest migration does not match the release contract.",
   );
   assert.equal(
-    CURRENT_EXPECTED_LATEST_MIGRATION,
+    STAFF_TASK_ALLOWED_ADDITIVE_TAIL[0],
     TARGET_MIGRATION,
-    "The upgrade smoke target changed.",
+    "Migration 163 must remain the first reviewed additive-tail migration.",
   );
 
   return {

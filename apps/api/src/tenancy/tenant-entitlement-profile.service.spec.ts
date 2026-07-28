@@ -20,6 +20,7 @@ import {
 type PrismaMock = {
   tenant: {
     findUnique: jest.Mock;
+    findUniqueOrThrow: jest.Mock;
     updateMany: jest.Mock;
   };
   user: {
@@ -40,6 +41,7 @@ function createPrismaMock(): PrismaMock {
   const prisma: PrismaMock = {
     tenant: {
       findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       updateMany: jest.fn(),
     },
     user: {
@@ -86,6 +88,7 @@ const tenant = {
   trialStartsAt: new Date('2026-08-31T00:00:00.000Z'),
   trialEndsAt: new Date('2026-09-30T00:00:00.000Z'),
   entitlementProfileRevision: 0,
+  executionRevision: 4,
   updatedAt: new Date('2026-07-28T09:00:00.000Z'),
   moduleEntitlements: [],
 };
@@ -135,6 +138,10 @@ describe('TenantEntitlementProfileService', () => {
       isPlatformAdmin: true,
     });
     prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({
+      entitlementProfileRevision: 1,
+      executionRevision: tenant.executionRevision + 1,
+    });
     prisma.platformAdminAuditEvent.findUnique.mockResolvedValue(null);
     prisma.tenantModuleEntitlement.deleteMany.mockResolvedValue({ count: 0 });
     prisma.tenantModuleEntitlement.createMany.mockResolvedValue({
@@ -153,6 +160,7 @@ describe('TenantEntitlementProfileService', () => {
       ok: true,
       tenantId: tenant.id,
       profileRevision: 1,
+      executionRevision: 5,
     });
     expect(result.modules).toHaveLength(6);
     expect(
@@ -177,6 +185,7 @@ describe('TenantEntitlementProfileService', () => {
       where: {
         id: tenant.id,
         entitlementProfileRevision: 0,
+        executionRevision: tenant.executionRevision,
         updatedAt: tenant.updatedAt,
       },
       data: {
@@ -220,14 +229,20 @@ describe('TenantEntitlementProfileService', () => {
       tenantId: tenant.id,
       actorUserId: platformAdmin.id,
       action: 'TENANT_ENTITLEMENT_PROFILE_CHANGED',
-      before: { profileRevision: 0 },
+      before: {
+        profileRevision: 0,
+        executionRevision: tenant.executionRevision,
+      },
       after: {
         profileRevision: 1,
+        executionRevision: tenant.executionRevision + 1,
       },
       metadata: {
         requestId: 'request-shared-beta-001',
         expectedProfileRevision: 0,
         nextProfileRevision: 1,
+        expectedExecutionRevision: tenant.executionRevision,
+        nextExecutionRevision: tenant.executionRevision + 1,
         moduleCount: 6,
       },
     });
@@ -384,6 +399,57 @@ describe('TenantEntitlementProfileService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('allows a PILOT shell to keep its trial window unset while suspended in provisioning', async () => {
+    prisma.tenant.findUnique.mockResolvedValue({
+      ...tenant,
+      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+      trialStartsAt: null,
+      trialEndsAt: null,
+    });
+
+    await expect(
+      service.replaceProfile(
+        platformAdmin,
+        tenant.id,
+        request({
+          onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+          trialStartsAt: null,
+          trialEndsAt: null,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      executionRevision: tenant.executionRevision + 1,
+      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+      trialStartsAt: null,
+      trialEndsAt: null,
+    });
+  });
+
+  it('requires a finite trial for an ACTIVE PILOT tenant after onboarding', async () => {
+    prisma.tenant.findUnique.mockResolvedValue({
+      ...tenant,
+      status: TenantLifecycleStatus.ACTIVE,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+    });
+
+    await expect(
+      service.replaceProfile(
+        platformAdmin,
+        tenant.id,
+        request({
+          onboardingStatus: TenantOnboardingStatus.ACTIVE,
+          trialStartsAt: null,
+          trialEndsAt: null,
+        }),
+      ),
+    ).rejects.toThrow(
+      'PILOT and BETA stages require a finite trial window outside the SUSPENDED/PROVISIONING shell',
+    );
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('rejects a stale revision before opening the transaction', async () => {
     prisma.tenant.findUnique.mockResolvedValue({
       ...tenant,
@@ -411,10 +477,27 @@ describe('TenantEntitlementProfileService', () => {
         where: {
           id: tenant.id,
           entitlementProfileRevision: 0,
+          executionRevision: tenant.executionRevision,
           updatedAt: tenant.updatedAt,
         },
       }),
     );
+  });
+
+  it('rolls back when the database fence does not advance with the profile revision', async () => {
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({
+      entitlementProfileRevision: 1,
+      executionRevision: tenant.executionRevision,
+    });
+
+    await expect(
+      service.replaceProfile(platformAdmin, tenant.id, request()),
+    ).rejects.toThrow(
+      'Tenant execution revision changed during entitlement profile replacement',
+    );
+
+    expect(prisma.tenantModuleEntitlement.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
   });
 
   it('does not rely only on the controller guard for platform authority', async () => {

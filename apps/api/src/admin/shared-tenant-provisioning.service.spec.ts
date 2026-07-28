@@ -16,6 +16,7 @@ import { SharedTenantProvisioningService } from './shared-tenant-provisioning.se
 type SharedProvisioningPrismaMock = {
   tenant: {
     findUnique: jest.Mock;
+    findUniqueOrThrow: jest.Mock;
     findFirst: jest.Mock;
     create: jest.Mock;
     updateMany: jest.Mock;
@@ -61,6 +62,7 @@ function createPrismaMock(): SharedProvisioningPrismaMock {
   const prisma: SharedProvisioningPrismaMock = {
     tenant: {
       findUnique: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
       updateMany: jest.fn(),
@@ -193,6 +195,7 @@ describe('SharedTenantProvisioningService', () => {
       customerStage: TenantCustomerStage.PILOT,
       onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
       entitlementProfileRevision: 1,
+      executionRevision: 0,
     });
     prisma.store.create.mockResolvedValue({
       id: 'store-b1',
@@ -218,6 +221,7 @@ describe('SharedTenantProvisioningService', () => {
         customerStage: TenantCustomerStage.PILOT,
         onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
         profileRevision: 1,
+        executionRevision: 0,
       },
       store: {
         id: 'store-b1',
@@ -276,6 +280,9 @@ describe('SharedTenantProvisioningService', () => {
       tenantId: 'tenant-b',
       requestId: 'provision-request-1',
       action: 'SHARED_BETA_TENANT_PROVISIONED',
+      metadata: {
+        executionRevision: 0,
+      },
     });
   });
 
@@ -305,6 +312,7 @@ describe('SharedTenantProvisioningService', () => {
       id: 'tenant-b',
       slug: 'friendly-club',
       entitlementProfileRevision: 1,
+      executionRevision: 0,
     });
     seedPrisma.store.create.mockResolvedValue({
       id: 'store-b1',
@@ -436,6 +444,7 @@ describe('SharedTenantProvisioningService', () => {
         customerStage: TenantCustomerStage.PILOT,
         onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
         profileRevision: 1,
+        executionRevision: 0,
       },
       store: {
         id: 'store-b1',
@@ -468,6 +477,7 @@ describe('SharedTenantProvisioningService', () => {
         customerStage: TenantCustomerStage.PILOT,
         onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
         entitlementProfileRevision: 1,
+        executionRevision: 4,
         updatedAt: new Date(),
       },
     ]);
@@ -500,6 +510,11 @@ describe('SharedTenantProvisioningService', () => {
       },
     ]);
     prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({
+      status: TenantLifecycleStatus.SUSPENDED,
+      onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+      executionRevision: 5,
+    });
 
     await expect(
       service.revokeInitialOwnerInvite(platformAdmin, 'tenant-b', {
@@ -515,18 +530,46 @@ describe('SharedTenantProvisioningService', () => {
       revokedInviteId: 'invite-owner-b',
       lifecycleStatus: TenantLifecycleStatus.SUSPENDED,
       onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+      executionRevisionBefore: 4,
+      executionRevisionAfter: 5,
     });
     expect(prisma.userInvite.delete).toHaveBeenCalledWith({
       where: { id: 'invite-owner-b' },
     });
-    expect(firstCallData(prisma.tenant.updateMany)).toMatchObject({
+    const tenantUpdateCalls = prisma.tenant.updateMany.mock
+      .calls as unknown[][];
+    const tenantUpdate = tenantUpdateCalls[0]?.[0];
+    if (
+      !record(tenantUpdate) ||
+      !record(tenantUpdate.where) ||
+      !record(tenantUpdate.data)
+    ) {
+      throw new Error('Expected tenant updateMany CAS payload');
+    }
+    expect(tenantUpdate.where.executionRevision).toBe(4);
+    expect(tenantUpdate.data).toMatchObject({
       status: TenantLifecycleStatus.SUSPENDED,
       onboardingStatus: TenantOnboardingStatus.PROVISIONING,
     });
-    expect(firstCallData(prisma.platformAdminAuditEvent.create)).toMatchObject({
+    const revokeAudit = firstCallData(
+      prisma.platformAdminAuditEvent.create,
+    );
+    expect(revokeAudit).toMatchObject({
       requestId: 'revoke-request-1',
       action: 'SHARED_BETA_INITIAL_OWNER_INVITE_REVOKED',
       targetId: 'invite-owner-b',
+      before: {
+        executionRevision: 4,
+      },
+      after: {
+        executionRevisionBefore: 4,
+        executionRevisionAfter: 5,
+        executionRevision: 5,
+      },
+      metadata: {
+        executionRevisionBefore: 4,
+        executionRevisionAfter: 5,
+      },
     });
   });
 });

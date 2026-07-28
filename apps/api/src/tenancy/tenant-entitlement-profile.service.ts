@@ -8,6 +8,7 @@ import {
 import {
   Prisma,
   TenantCustomerStage,
+  TenantLifecycleStatus,
   TenantModule,
   TenantOnboardingStatus,
 } from '@prisma/client';
@@ -87,6 +88,7 @@ type SerializedTenantEntitlementProfile = {
   trialStartsAt: string | null;
   trialEndsAt: string | null;
   profileRevision: number;
+  executionRevision: number;
   modules: SerializedModuleEntitlement[];
 };
 
@@ -94,6 +96,7 @@ type ReplaceTenantEntitlementProfileResult = {
   ok: true;
   tenantId: string;
   profileRevision: number;
+  executionRevision: number;
   customerStage: TenantCustomerStage;
   onboardingStatus: TenantOnboardingStatus;
   cohortKey: string | null;
@@ -128,6 +131,7 @@ export class TenantEntitlementProfileService {
         trialStartsAt: true,
         trialEndsAt: true,
         entitlementProfileRevision: true,
+        executionRevision: true,
         updatedAt: true,
         moduleEntitlements: {
           select: {
@@ -169,6 +173,13 @@ export class TenantEntitlementProfileService {
       tenant.onboardingStatus,
       parsed.onboardingStatus,
     );
+    this.assertTrialWindowAllowed(
+      tenant.status,
+      parsed.customerStage,
+      parsed.onboardingStatus,
+      parsed.trialStartsAt,
+      parsed.trialEndsAt,
+    );
 
     if (tenant.entitlementProfileRevision !== parsed.expectedProfileRevision) {
       throw new ConflictException('Tenant entitlement profile has changed');
@@ -178,6 +189,14 @@ export class TenantEntitlementProfileService {
     if (!Number.isSafeInteger(nextProfileRevision)) {
       throw new ConflictException('Tenant entitlement revision is exhausted');
     }
+    if (
+      !Number.isSafeInteger(tenant.executionRevision) ||
+      tenant.executionRevision < 0 ||
+      tenant.executionRevision >= 2_147_483_647
+    ) {
+      throw new ConflictException('Tenant execution revision is exhausted');
+    }
+    const nextExecutionRevision = tenant.executionRevision + 1;
 
     const changedAt = new Date();
     const before = this.serializeProfile(
@@ -193,6 +212,7 @@ export class TenantEntitlementProfileService {
       supportOwnerUserId: parsed.supportOwnerUserId,
       trialStartsAt: parsed.trialStartsAt,
       trialEndsAt: parsed.trialEndsAt,
+      executionRevision: nextExecutionRevision,
     };
     const after = this.serializeProfile(
       afterTenant,
@@ -228,6 +248,7 @@ export class TenantEntitlementProfileService {
           where: {
             id: tenant.id,
             entitlementProfileRevision: parsed.expectedProfileRevision,
+            executionRevision: tenant.executionRevision,
             updatedAt: tenant.updatedAt,
           },
           data: {
@@ -243,6 +264,21 @@ export class TenantEntitlementProfileService {
 
         if (claimed.count !== 1) {
           throw new ConflictException('Tenant entitlement profile has changed');
+        }
+        const advancedTenant = await tx.tenant.findUniqueOrThrow({
+          where: { id: tenant.id },
+          select: {
+            entitlementProfileRevision: true,
+            executionRevision: true,
+          },
+        });
+        if (
+          advancedTenant.entitlementProfileRevision !== nextProfileRevision ||
+          advancedTenant.executionRevision !== nextExecutionRevision
+        ) {
+          throw new ConflictException(
+            'Tenant execution revision changed during entitlement profile replacement',
+          );
         }
 
         await tx.tenantModuleEntitlement.deleteMany({
@@ -276,6 +312,8 @@ export class TenantEntitlementProfileService {
               supportTicket: parsed.supportTicket,
               expectedProfileRevision: parsed.expectedProfileRevision,
               nextProfileRevision,
+              expectedExecutionRevision: tenant.executionRevision,
+              nextExecutionRevision,
               moduleCount: parsed.modules.length,
               confirmationRule: 'tenant_slug',
             },
@@ -364,6 +402,7 @@ export class TenantEntitlementProfileService {
       ok: true,
       tenantId: profile.tenantId,
       profileRevision: profile.profileRevision,
+      executionRevision: profile.executionRevision,
       customerStage: profile.customerStage,
       onboardingStatus: profile.onboardingStatus,
       cohortKey: profile.cohortKey,
@@ -390,6 +429,7 @@ export class TenantEntitlementProfileService {
       (candidate) => candidate === value.onboardingStatus,
     );
     const profileRevision = value.profileRevision;
+    const executionRevision = value.executionRevision;
     const modules = value.modules.map((module) =>
       this.deserializeModule(module),
     );
@@ -405,6 +445,9 @@ export class TenantEntitlementProfileService {
       !Number.isSafeInteger(profileRevision) ||
       typeof profileRevision !== 'number' ||
       profileRevision < 1 ||
+      !Number.isSafeInteger(executionRevision) ||
+      typeof executionRevision !== 'number' ||
+      executionRevision < 0 ||
       !this.nullableString(value.cohortKey) ||
       !this.nullableString(value.supportOwnerUserId) ||
       !this.nullableTimestamp(value.trialStartsAt) ||
@@ -433,6 +476,7 @@ export class TenantEntitlementProfileService {
       trialStartsAt: value.trialStartsAt,
       trialEndsAt: value.trialEndsAt,
       profileRevision,
+      executionRevision,
       modules,
     };
   }
@@ -542,16 +586,6 @@ export class TenantEntitlementProfileService {
 
     if (trialStartsAt && trialEndsAt && trialStartsAt >= trialEndsAt) {
       throw new BadRequestException('trialStartsAt must be before trialEndsAt');
-    }
-
-    if (
-      (customerStage === TenantCustomerStage.PILOT ||
-        customerStage === TenantCustomerStage.BETA) &&
-      (!trialStartsAt || !trialEndsAt)
-    ) {
-      throw new BadRequestException(
-        'PILOT and BETA stages require a finite trial window',
-      );
     }
 
     if (!Array.isArray(dto.modules)) {
@@ -679,6 +713,7 @@ export class TenantEntitlementProfileService {
       supportOwnerUserId: string | null;
       trialStartsAt: Date | null;
       trialEndsAt: Date | null;
+      executionRevision: number;
     },
     profileRevision: number,
     modules: readonly {
@@ -704,6 +739,7 @@ export class TenantEntitlementProfileService {
       trialStartsAt: tenant.trialStartsAt?.toISOString() ?? null,
       trialEndsAt: tenant.trialEndsAt?.toISOString() ?? null,
       profileRevision,
+      executionRevision: tenant.executionRevision,
       modules: [...modules]
         .sort(
           (left, right) =>
@@ -752,6 +788,36 @@ export class TenantEntitlementProfileService {
 
     throw new ConflictException(
       'Customer-stage transition requires its dedicated workflow',
+    );
+  }
+
+  private assertTrialWindowAllowed(
+    lifecycleStatus: TenantLifecycleStatus,
+    customerStage: TenantCustomerStage,
+    onboardingStatus: TenantOnboardingStatus,
+    trialStartsAt: Date | null,
+    trialEndsAt: Date | null,
+  ): void {
+    if (
+      customerStage !== TenantCustomerStage.PILOT &&
+      customerStage !== TenantCustomerStage.BETA
+    ) {
+      return;
+    }
+
+    if (trialStartsAt && trialEndsAt) {
+      return;
+    }
+
+    if (
+      lifecycleStatus === TenantLifecycleStatus.SUSPENDED &&
+      onboardingStatus === TenantOnboardingStatus.PROVISIONING
+    ) {
+      return;
+    }
+
+    throw new BadRequestException(
+      'PILOT and BETA stages require a finite trial window outside the SUSPENDED/PROVISIONING shell',
     );
   }
 

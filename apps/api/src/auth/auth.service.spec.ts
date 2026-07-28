@@ -33,6 +33,7 @@ type PrismaMock = {
   };
   tenant: {
     findUnique: jest.Mock;
+    findUniqueOrThrow: jest.Mock;
     create: jest.Mock;
     updateMany: jest.Mock;
   };
@@ -101,6 +102,7 @@ function createUserWithTenant() {
       trialStartsAt: null,
       trialEndsAt: null,
       entitlementProfileRevision: 0,
+      executionRevision: 1,
       moduleEntitlements: [],
     },
   };
@@ -117,6 +119,7 @@ function createInviteTenant(onboardingStatus = TenantOnboardingStatus.ACTIVE) {
     trialStartsAt: new Date(Date.now() - 60_000),
     trialEndsAt: new Date(Date.now() + 3_600_000),
     entitlementProfileRevision: 1,
+    executionRevision: 1,
     moduleEntitlements: completeEntitlements(),
   };
 }
@@ -169,6 +172,7 @@ describe('AuthService', () => {
       },
       tenant: {
         findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
         create: jest.fn(),
         updateMany: jest.fn(),
       },
@@ -194,6 +198,10 @@ describe('AuthService', () => {
     );
     prisma.$queryRaw.mockResolvedValue([createInviteTenant()]);
     prisma.user.count.mockResolvedValue(0);
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({
+      onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+      executionRevision: 2,
+    });
     passwordService = {
       hash: jest.fn().mockResolvedValue('hash'),
       verify: jest.fn(),
@@ -434,6 +442,7 @@ describe('AuthService', () => {
         status: TenantLifecycleStatus.ACTIVE,
         onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
         entitlementProfileRevision: 1,
+        executionRevision: 1,
       },
       data: {
         onboardingStatus: TenantOnboardingStatus.ONBOARDING,
@@ -450,9 +459,15 @@ describe('AuthService', () => {
       action: 'TENANT_OWNER_INVITE_ACCEPTED',
       before: {
         onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
+        executionRevision: 1,
       },
       after: {
         onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+        executionRevision: 2,
+      },
+      metadata: {
+        executionRevisionBefore: 1,
+        executionRevisionAfter: 2,
       },
     });
   });
@@ -498,6 +513,31 @@ describe('AuthService', () => {
       rejection = error;
     }
     expect(rejection).toBeInstanceOf(ConflictException);
+
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+    expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+
+  it('rolls back owner acceptance when the trigger does not advance the execution revision', async () => {
+    prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());
+    prisma.$queryRaw.mockResolvedValue([
+      createInviteTenant(TenantOnboardingStatus.OWNER_INVITED),
+    ]);
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'user-1' });
+    prisma.userInvite.updateMany.mockResolvedValue({ count: 1 });
+    prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({
+      onboardingStatus: TenantOnboardingStatus.ONBOARDING,
+      executionRevision: 1,
+    });
+
+    await expect(
+      service.acceptInvite('opaque-owner-token', {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
 
     expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
     expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();

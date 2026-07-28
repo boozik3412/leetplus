@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.7.0                                              |
+| Версия          | 1.10.0                                             |
 | Дата            | 28.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -15,7 +15,8 @@
 
 Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
 `Full candidate SHA` и не заменяют CI/review/evidence нового exact current
-candidate, который должен включать migration 163 и пройти `CURRENT_163`
+candidate, который должен включать additive migrations `163..164` и пройти
+`CURRENT_164`
 admission.
 
 ## A. Release identity и authority
@@ -83,17 +84,18 @@ admission.
       digests, expand authority bundle и marker-rotation attestation
       зафиксированы; baseline marker reuse запрещён, remote CI/synthetic
       evidence не засчитываются как этот `Gate 2A` checkpoint.
-- [ ] После `EXPAND_162` применена только exact allowlisted migration
-      `20260728120000_tenant_execution_control_plane_expand`; она не изменила
-      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_163`
+- [ ] После `EXPAND_162` применены только exact allowlisted migrations
+      `20260728120000_tenant_execution_control_plane_expand` и
+      `20260728150000_tenant_execution_revision_fence`; они не изменили
+      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_164`
       envelope с новым nonce-bound binding, DB marker повторно заменён, третий
       admission schema `v2` завершился exit `0`; reuse expand marker запрещён.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
       release SHA и thresholds; schema-first gate равен
-      `CURRENT_163`, `migrationCount=163`, latest
-      `20260728120000_tenant_execution_control_plane_expand`, `unfinished=0`,
+      `CURRENT_164`, `migrationCount=164`, latest
+      `20260728150000_tenant_execution_revision_fence`, `unfinished=0`,
       `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
       `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
       actionable cap не превышен.
@@ -162,6 +164,10 @@ admission.
       marker, freshness, exact runtime blob content, isolation, no-egress и
       cleanup evidence подтверждены.
 - [ ] Schema-only EXPAND rehearsal успешен с timeout/lock evidence.
+- [ ] Populated PostgreSQL 16 rehearsal применил migration `164` поверх
+      existing migration `163` tenant/report-run/bonus-ledger rows, подтвердил
+      backfill/data preservation/defaults и атомарный rollback при
+      `lock_timeout`.
 - [ ] EXPAND rehearsal начинается с populated legacy baseline 156 и применяет
       ровно шесть migration `157..162`; пять concurrent indexes строятся на
       заполненных parent-таблицах.
@@ -295,6 +301,16 @@ admission.
       rollback и zero-diff имеют отдельные evidence records и отдельные
       approvals; ни один предыдущий `GO` не переносится на следующий шаг.
 - [ ] Dry-run не изменил production state.
+- [ ] Перед apply migration `164` старый API/worker release переведён в
+      controlled drain: scheduled HTTP, internal schedulers и bonus dispatch
+      выключены; живые `PROCESSING/DISPATCHING` завершены либо помещены в
+      reconciliation quarantine. После подтверждённого zero in-flight
+      выполнены migrate + restart exact candidate, поэтому ни один worker
+      старой версии не может выполнить effect после schema upgrade.
+- [ ] Database preflight migration `164` самостоятельно подтвердил отсутствие
+      `RUNNING` report digest и `PROCESSING/DISPATCHING` bonus-ledger rows;
+      negative rehearsal получила SQLSTATE `55000` и доказала отсутствие
+      partial DDL/data changes.
 - [ ] Для EXPAND, `VALIDATE`, `CONTRACT`, deployment и `SHADOW → ENFORCED`
       сохранены отдельные phase approvals; ни один из них не разрешает cutover.
 - [ ] Schema EXPAND применена и проверена.
@@ -349,6 +365,17 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.10.0`, 28.07.2026 — migration `164` получила fail-closed database
+  precondition для zero in-flight report/bonus effects; manual SMTP повторно
+  проверяет tenant revision, active actor, capability и exact scope, а
+  Langame boundary — свежий target/source/eligibility и ownership generation.
+- `1.9.0`, 28.07.2026 — перед migration `164` добавлен обязательный drain
+  старого API/workers и zero in-flight evidence, чтобы worker старой версии
+  не выполнил SMTP/Langame effect после schema upgrade.
+- `1.8.0`, 28.07.2026 — current release tail расширен exact migration `164`
+  с trigger-owned tenant execution revision; frozen StaffTask evidence
+  остаётся `EXPAND_162`, current envelope/marker/admission теперь
+  `CURRENT_164`, `migrationCount=164`.
 - `1.7.0`, 28.07.2026 — frozen StaffTask prefix/evidence оставлены на
   `EXPAND_162`; current cutover checkpoint требует exact allowlisted tail 163,
   отдельный `CURRENT_163` envelope/marker/admission и planner gate на 163

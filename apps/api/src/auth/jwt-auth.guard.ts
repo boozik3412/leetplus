@@ -91,6 +91,7 @@ export class JwtAuthGuard implements CanActivate {
               trialStartsAt: true,
               trialEndsAt: true,
               entitlementProfileRevision: true,
+              executionRevision: true,
               moduleEntitlements: {
                 select: {
                   module: true,

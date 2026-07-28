@@ -1,0 +1,18 @@
+{
+  "partnerAlias": "DP1",
+  "tenantName": "Название сети партнера",
+  "tenantSlug": "partner-club",
+  "storeName": "Название клуба",
+  "storeAddress": "Адрес клуба",
+  "storeCity": "Екатеринбург",
+  "storeTimeZone": "Asia/Yekaterinburg",
+  "dataMode": "MANUAL_ONLY",
+  "langameDomain": null,
+  "langameClubId": null,
+  "ownerEmail": "owner@example.com",
+  "ownerFullName": "Имя владельца",
+  "supportOwnerAlias": "LEETPLUS_PRIMARY",
+  "reason": "Закрытый совместный тест LeetPlus в изолированном контуре",
+  "supportTicket": "DP-1",
+  "accessExpiresAt": "2026-08-31T20:59:59.000Z"
+}

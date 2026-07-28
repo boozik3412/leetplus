@@ -1,5 +1,8 @@
 import { ConfigService } from '@nestjs/config';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
+  DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
   PRODUCTION_SECRET_KEYS,
   resolveAccessScopeEnforcementMode,
   resolveSecuritySecret,
@@ -23,6 +26,31 @@ function validProductionEnvironment() {
     ACCESS_SCOPE_ENFORCEMENT_MODE: 'SHADOW',
     STAFF_ATTACHMENT_ACL_MODE: 'SHADOW',
   };
+}
+
+function documentedDesignPartnerOverlay(): Record<string, string> {
+  const source = readFileSync(
+    resolve(
+      __dirname,
+      '../../../../docs/open-beta/design-partner-runtime.env.example',
+    ),
+    'utf8',
+  );
+
+  const entries: Array<[string, string]> = source
+    .split(/\r?\n/)
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line): [string, string] => {
+      const separator = line.indexOf('=');
+      return [line.slice(0, separator), line.slice(separator + 1)];
+    })
+    .filter(
+      ([key]) =>
+        key !== 'DESIGN_PARTNER_TENANT_SLUG' &&
+        key !== 'DESIGN_PARTNER_TENANT_DOMAIN',
+    );
+
+  return Object.fromEntries(entries);
 }
 
 describe('validateEnvironment', () => {
@@ -136,6 +164,83 @@ describe('validateEnvironment', () => {
     expect(() => validateEnvironment(invalid)).toThrow(
       /STAFF_ATTACHMENT_ACL_MODE must be LEGACY, SHADOW, or ENFORCED/,
     );
+  });
+
+  it('requires the complete fail-closed overlay in isolated design-partner mode', () => {
+    const missingOverlay = {
+      ...validProductionEnvironment(),
+      DESIGN_PARTNER_ISOLATED_MODE: 'true',
+    };
+    const validOverlay = {
+      ...validProductionEnvironment(),
+      ...DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
+      DESIGN_PARTNER_TENANT_SLUG: 'partner-club',
+      DESIGN_PARTNER_TENANT_DOMAIN: 'partner-club.leetplus.ru',
+    };
+
+    expect(() => validateEnvironment(missingOverlay)).toThrow(
+      /LANGAME_SCHEDULED_HTTP_ENABLED must equal false/,
+    );
+    expect(validateEnvironment(validOverlay).DESIGN_PARTNER_ISOLATED_MODE).toBe(
+      'true',
+    );
+  });
+
+  it('keeps the documented isolated overlay identical to startup policy', () => {
+    expect(documentedDesignPartnerOverlay()).toEqual(
+      DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
+    );
+  });
+
+  it('rejects the provisioning manifest HMAC key in isolated runtime', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validProductionEnvironment(),
+        ...DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
+        DESIGN_PARTNER_TENANT_SLUG: 'partner-club',
+        DESIGN_PARTNER_TENANT_DOMAIN: 'partner-club.leetplus.ru',
+        DESIGN_PARTNER_MANIFEST_HMAC_KEY: `provisioning_${'h'.repeat(40)}`,
+      }),
+    ).toThrow(
+      /DESIGN_PARTNER_MANIFEST_HMAC_KEY must be absent from design-partner runtime/,
+    );
+  });
+
+  it('binds isolated runtime to one exact tenant slug and domain', () => {
+    const valid = {
+      ...validProductionEnvironment(),
+      ...DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
+      DESIGN_PARTNER_TENANT_SLUG: 'partner-club',
+      DESIGN_PARTNER_TENANT_DOMAIN: 'partner-club.leetplus.ru',
+    };
+
+    expect(() =>
+      validateEnvironment({
+        ...valid,
+        DESIGN_PARTNER_TENANT_DOMAIN: 'another-club.leetplus.ru',
+      }),
+    ).toThrow(/must equal <tenant-slug>\.leetplus\.ru/);
+    expect(validateEnvironment(valid).DESIGN_PARTNER_TENANT_SLUG).toBe(
+      'partner-club',
+    );
+  });
+
+  it('cannot bypass production validation by using isolated mode in development', () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'development',
+        ...DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
+      }),
+    ).toThrow(/JWT_SECRET is required/);
+  });
+
+  it('rejects an ambiguous design-partner mode value', () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'development',
+        DESIGN_PARTNER_ISOLATED_MODE: 'TRUE',
+      }),
+    ).toThrow(/must be exactly true or false/);
   });
 });
 

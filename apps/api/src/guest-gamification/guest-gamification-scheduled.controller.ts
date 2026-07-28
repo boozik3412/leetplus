@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertScheduledHttpAllowed } from '../config/design-partner-runtime-policy';
 import {
   GuestBonusLedgerService,
   type GuestGameScheduledBonusLedgerDispatchDto,
@@ -82,6 +83,8 @@ export class GuestGamificationScheduledController {
   }
 
   private assertToken(token: string | undefined) {
+    assertScheduledHttpAllowed(this.configService);
+
     const expectedToken = this.configService
       .get<string>('SYNC_SERVICE_TOKEN')
       ?.trim();

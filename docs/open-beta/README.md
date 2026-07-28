@@ -1,17 +1,23 @@
 # LeetPlus open beta: пакет запуска
 
-| Поле             | Значение                                    |
-| ---------------- | ------------------------------------------- |
-| Статус           | Active implementation package               |
-| Версия           | 1.2                                         |
-| Дата             | 28.07.2026                                  |
-| Release decision | `NO-GO` до полного Gate 2                   |
-| Владелец         | LeetPlus product / engineering / operations |
+| Поле             | Значение                                     |
+| ---------------- | -------------------------------------------- |
+| Статус           | Active implementation package                |
+| Версия           | 1.4                                          |
+| Дата             | 28.07.2026                                   |
+| Release decision | `NO-GO`; isolated DP-1 только после Gate 1DP |
+| Владелец         | LeetPlus product / engineering / operations  |
 
 Этот каталог — навигационная точка для перевода текущей сети из demo-режима в
 полноценную работу и последующего invite-only теста с внешними сетями. Он не
 разрешает deployment, миграцию production-данных или выдачу доступа сам по
 себе.
+
+Общий внешний pilot остаётся `NO-GO` до Gate 2. Единственная предусмотренная
+ранняя lane — один named `SINGLE_DESIGN_PARTNER` после отдельного Gate 1DP,
+только в физически изолированном контуре и с полным согласованным начальным
+in-app scope; high-risk и outbound effects включаются отдельно. Сейчас этот
+lane также `NO-GO`.
 
 ## Зафиксированные решения
 
@@ -21,6 +27,11 @@
   `Tenant` и не разделяются на четыре tenant;
 - operational tenant перестаёт быть anonymous demo до переименования;
 - независимая внешняя сеть всегда получает отдельный `Tenant`;
+- ранний design partner получает новый `Tenant D` и единственный `Store D1`
+  только в отдельном web/API/PostgreSQL/secrets контуре; current production
+  `Tenant A` с четырьмя `Store A1..A4` не меняется и не копируется;
+- все partner schedulers и outbound effects по умолчанию `OFF`; доступные
+  surfaces включаются только вручную после отдельных evidence и `GO`;
 - первая внешняя когорта подключается только вручную и по приглашениям;
 - состав доступа задаёт
   [профиль первой когорты](./pilot-access-profile.md);
@@ -35,46 +46,58 @@
    зависимости, Gate 0–3, метрики и последовательность разработки.
 2. [Профиль доступа первой когорты](./pilot-access-profile.md) — что именно
    получает тестовый клуб и какие функции остаются закрыты.
-3. [Cutover-чеклист текущей сети](./current-network-cutover-checklist.md) —
+3. [Профиль одного design partner](./single-design-partner-access-profile.md) —
+   topology, progressive slices, ограничения и kill switches отдельного
+   изолированного DP-1.
+4. [Launch checklist одного design partner](./single-design-partner-launch-checklist.md) —
+   исполнимые Gate 1DP checks, GO record, day-0, incident, rollback и
+   offboarding.
+   [PostgreSQL runtime-role contract](./design-partner-database-role-contract.md) —
+   bounded real-PostgreSQL evidence для разделения migration/provisioning и
+   restricted runtime identity.
+5. [Intake первого тестового клуба](./single-design-partner-intake.md) —
+   какие несекретные данные нужны для Tenant D/Store D1 и что передаётся
+   только защищённым каналом.
+6. [Cutover-чеклист текущей сети](./current-network-cutover-checklist.md) —
    безопасный перевод одного tenant с четырьмя Store.
-4. [AccessScope package](../security/access-scope/README.md) — нормативная
+7. [AccessScope package](../security/access-scope/README.md) — нормативная
    server-side модель tenant/store authority, rollout и rollback.
-5. [Матрица внедрения](../security/access-scope/v1/module-adoption-matrix.md) —
+8. [Матрица внедрения](../security/access-scope/v1/module-adoption-matrix.md) —
    фактический статус поверхностей.
-6. [Стратегия тестирования](../security/access-scope/v1/test-strategy.md) —
+9. [Стратегия тестирования](../security/access-scope/v1/test-strategy.md) —
    обязательные positive/negative topology-сценарии.
-7. [Attachment ACL rollout](../security/access-scope/v1/attachment-acl-rollout.md)
-   и
-   [implementation checkpoint](../security/access-scope/v1/attachment-acl-implementation-checkpoint.md).
-8. [План templates/recurring tasks](../security/access-scope/v1/staff-task-catalog-adoption-plan.md) —
-   подтверждённые same-tenant cross-store разрывы и следующий implementation
-   slice.
-9. [Checkpoint task catalog](../security/access-scope/v1/staff-task-catalog-implementation-checkpoint.md) —
-   фактический template/materializer/audit candidate, проверки и остаточные
-   блокеры recurring/scheduler.
-10. [Checkpoint recurring actor HTTP](../security/access-scope/v1/staff-task-recurring-http-implementation-checkpoint.md) —
+10. [Attachment ACL rollout](../security/access-scope/v1/attachment-acl-rollout.md)
+    и
+    [implementation checkpoint](../security/access-scope/v1/attachment-acl-implementation-checkpoint.md).
+11. [План templates/recurring tasks](../security/access-scope/v1/staff-task-catalog-adoption-plan.md) —
+    подтверждённые same-tenant cross-store разрывы и следующий implementation
+    slice.
+12. [Checkpoint task catalog](../security/access-scope/v1/staff-task-catalog-implementation-checkpoint.md) —
+    фактический template/materializer/audit candidate, проверки и остаточные
+    блокеры recurring/scheduler.
+13. [Checkpoint recurring actor HTTP](../security/access-scope/v1/staff-task-recurring-http-implementation-checkpoint.md) —
     scoped Rule CRUD/manual/interactive due candidate и явная изоляция
     scheduler/all-tenant execution.
-11. [Runbook integrity inventory staff tasks](../security/access-scope/v1/staff-task-integrity-inventory-runbook.md) —
+14. [Runbook integrity inventory staff tasks](../security/access-scope/v1/staff-task-integrity-inventory-runbook.md) —
     guarded read-only проверка legacy Template/Rule/Task/Run перед
     same-tenant EXPAND/VALIDATE.
-12. [Runbook StaffTask integrity EXPAND](../security/access-scope/v1/staff-task-integrity-expand-runbook.md) —
+15. [Runbook StaffTask integrity EXPAND](../security/access-scope/v1/staff-task-integrity-expand-runbook.md) —
     пять concurrent parent indexes, 14 composite + 14 simple compatibility
     `NOT VALID` FK, archive-first/global-existence Store protection, immutable
     parent IDs и порядок дальнейших `VALIDATE/CONTRACT`.
-13. [Runbook aggregate reconciliation plan](../security/access-scope/v1/staff-task-integrity-reconciliation-plan-runbook.md) —
+16. [Runbook aggregate reconciliation plan](../security/access-scope/v1/staff-task-integrity-reconciliation-plan-runbook.md) —
     read-only классификация `8 proposal + 29 operator + 6 review`, exact
     schema-first gate, actionable cap, `contentDigest`/`executionDigest` и
     exits `0/1/2/3`.
-14. [Runbook admission StaffTask snapshot](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md) —
+17. [Runbook admission StaffTask snapshot](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md) —
     обязательный fail-closed checkpoint перед production-like inventory и
     planner: PostgreSQL 16, exact `BASELINE_156 | EXPAND_162`, release
     manifest, catalog и отдельная SELECT-only роль.
-15. [Runbook SYNTHETIC reconciliation proposal dry-run](../security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
+18. [Runbook SYNTHETIC reconciliation proposal dry-run](../security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
     read-only row-evidence rehearsal только для подписанной disposable
     harness-БД: восемь proposal-кодов, HMAC-токены, coalescing и явный запрет
     standalone/production-like/apply.
-16. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
+19. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
     какие обезличенные доказательства сохранять для каждого SHA.
 
 При противоречии исторического документа этому пакету действует
@@ -185,12 +208,22 @@
    explicit `CUTOVER GO` — in-place cutover четырёх `Store` текущей сети
    внутри одного существующего `Tenant`;
 9. семь стабильных дней internal alpha завершают Gate 2; только затем возможен
-   отдельный `GO` на первый внешний invite-only pilot.
+   отдельный `GO` на первый общий внешний invite-only pilot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный
 gamification/assortment adoption, tenant entitlements/lifecycle, browser E2E,
 operations, backup/restore и production canary.
+
+Отдельно реализуется isolated DP-1 lane из backlog section 5.26: новые
+web/API/PostgreSQL/secrets, Tenant D/Store D1 и полный согласованный начальный
+набор in-app модулей. Fail-closed bootstrap/rotate/suspend CLI, API startup
+overlay validation, HMAC-bound initial/rotated invite receipts и
+запрет generic activation уже находятся в статусе `IMPLEMENTED_CANDIDATE`.
+Изолированный runtime, persisted surface entitlements, reviewed activation и
+Gate 1DP ещё не готовы, поэтому lane остаётся `NO-GO`. Ориентир
+`2–4 рабочих дня` зависит от прохождения полного Gate 1DP; он не меняет
+production/cutover sequence выше.
 
 ## Рабочий цикл каждой реализации
 
@@ -218,9 +251,36 @@ operations, backup/restore и production canary.
 В git запрещены production ID, email, телефоны, database URLs, токены,
 credentials, encryption keys и необработанные выгрузки.
 
-## Условия первого внешнего приглашения
+## Условия внешнего доступа
 
-Доступ можно выдать только после Gate 2, когда:
+### Один isolated design partner
+
+До Gate 2 можно выдать ограниченный доступ только одному named DP-1 и только
+когда:
+
+- создан отдельный контур с собственными web, API, PostgreSQL, secrets и
+  storage namespace;
+- partner runtime технически не имеет production credentials/data path;
+- текущая сеть остаётся Tenant A с четырьмя Store A1..A4, а partner создан как
+  новый Tenant D с единственным Store D1;
+- завершены `BETA-DP-001..009`, Gate 1DP и отдельный
+  [`DESIGN_PARTNER GO`](./single-design-partner-launch-checklist.md);
+- exact SHA, CI, ephemeral PostgreSQL/IDOR/browser tests, health/version,
+  backup/restore и rollback evidence приняты;
+- credentials одновременно открывают `VERIFIED + ENFORCED` slices
+  `DP-S0..DP-S4`: IAM/support, ассортимент целиком, сотрудников целиком,
+  in-app коммуникации и геймификацию;
+- не входящие в scope surfaces, все unattended schedulers и внешние outbound
+  effects остаются `OFF`;
+- support, feedback, incident, stop/offboarding owners и expiry назначены.
+
+Сейчас эти условия не выполнены, поэтому DP-1 остаётся `NO-GO`. Самый ранний
+ориентир — `2–4 рабочих дня` после реализации и проверки, а не после
+публикации этого документа.
+
+### Первая общая внешняя когорта
+
+Общий invite-only доступ можно выдать только после Gate 2, когда:
 
 - текущая сеть успешно переведена и прошла семь дней internal alpha;
 - все обязательные surfaces имеют статус `VERIFIED`;
@@ -278,3 +338,7 @@ credentials, encryption keys и необработанные выгрузки.
 - backup restore, alert и rollback drills подтверждены;
 - gamification write-back включается отдельно по Store через
   `OFF → SHADOW → CANARY → LIVE`.
+
+DP-1 feedback или время работы до Gate 2 не заменяют internal alpha и не
+входят автоматически в Gate 3. Promotion партнёра в общую когорту требует
+новой entitlement revision, отдельного решения и нового измерительного окна.

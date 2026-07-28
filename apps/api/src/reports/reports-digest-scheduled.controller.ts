@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertScheduledHttpAllowed } from '../config/design-partner-runtime-policy';
 import { ReportsDigestService } from './reports-digest.service';
 import type { SendScheduledReportDigestDto } from './reports.dto';
 
@@ -27,6 +28,8 @@ export class ReportsDigestScheduledController {
   }
 
   private assertToken(token: string | undefined) {
+    assertScheduledHttpAllowed(this.configService);
+
     const expectedToken = this.configService
       .get<string>('SYNC_SERVICE_TOKEN')
       ?.trim();

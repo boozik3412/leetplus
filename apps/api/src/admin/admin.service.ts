@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -86,6 +87,7 @@ export type PlatformAdminAuditExportFile = {
 };
 
 const STALE_SYNC_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+const DESIGN_PARTNER_PROVISION_ACTION = 'SINGLE_DESIGN_PARTNER_PROVISIONED';
 
 const lifecycleStatusByAction: Record<
   TenantLifecycleAction,
@@ -442,6 +444,20 @@ export class AdminService {
 
     const before = this.serializeTenantStatus(tenant);
     const updated = await this.prisma.$transaction(async (tx) => {
+      const designPartnerMarker = await tx.platformAdminAuditEvent.findFirst({
+        where: {
+          tenantId: tenant.id,
+          action: DESIGN_PARTNER_PROVISION_ACTION,
+        },
+        select: { id: true },
+      });
+
+      if (designPartnerMarker) {
+        throw new ForbiddenException(
+          'Design-partner lifecycle requires its dedicated provision/suspend/Gate 1DP flow',
+        );
+      }
+
       const result = await tx.tenant.update({
         where: { id: tenant.id },
         data: {

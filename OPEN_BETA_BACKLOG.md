@@ -1,9 +1,12 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 28.07.2026
-- Версия: 1.22
+- Версия: 1.25
 - Статус документа: активный launch backlog
-- Текущий release decision: `NO-GO` для внешних доступов до прохождения Gate 2
+- Текущий release decision: `NO-GO` для всех внешних доступов; один named
+  `SINGLE_DESIGN_PARTNER` может получить отдельный `GO-LIMITED` только после
+  Gate 1DP в изолированном контуре, общий внешний pilot остаётся `NO-GO` до
+  Gate 2
 - Связанный общий backlog: [BACKLOG.md](./BACKLOG.md)
 - Пакет документации запуска:
   [docs/open-beta](./docs/open-beta/README.md)
@@ -27,10 +30,28 @@
 - Operational tenant получает реальные `name`, `slug` и `domain`.
 - Отдельный публичный demo, если он нужен, создаётся заново как синтетический `public-demo` без реальных операционных, персональных и интеграционных данных.
 - Для каждой новой независимой сети создаётся отдельный tenant. Несвязанные сети не объединяются в одном tenant.
+- Ранний совместный тест с одним design partner не использует shared
+  production: для него создаются отдельные web, API, PostgreSQL, secrets и
+  отдельный `Tenant D` с единственным `Store D1`. Текущая сеть остаётся
+  существующим `Tenant A` с четырьмя `Store A1..A4` и не копируется в этот
+  контур.
+- Профиль `SINGLE_DESIGN_PARTNER_V1` проверяется progressive/manual slices до
+  `DESIGN_PARTNER GO`, но первые credentials одновременно открывают весь exact
+  in-app состав `DP-S0..DP-S4`. Progressive после старта применим только к
+  новым surfaces и отдельно gated outbound effects; schedulers и outbound
+  остаются `OFF` до собственных `GO`.
 - Открытый тест сначала остаётся заявочным и invite-only. Публичная self-registration не является условием запуска.
 - Первый внешний тест не ограничивается только аналитикой. Тестовый tenant получает обязательный состав модулей, перечисленный ниже.
 
 ## 3. Обязательный состав первого внешнего теста
+
+Полный состав ниже является обязательным для общей первой внешней когорты
+после Gate 2. Для изолированного `SINGLE_DESIGN_PARTNER` все согласованные
+in-app slices сначала независимо достигают `VERIFIED + ENFORCED`, а затем
+открываются одновременно первыми credentials как `DP-S0..DP-S4`. До этого
+credentials не выдаются. Поэтапно после старта включаются только новые
+surfaces; unattended jobs и внешние effects остаются выключены до отдельных
+outbound gates.
 
 ### 3.1. Геймификация — целиком
 
@@ -1643,6 +1664,135 @@ Store.
 
 Release decision остаётся `NO-GO`.
 
+### 5.26. `SINGLE_DESIGN_PARTNER`: ранний изолированный совместный тест — 28.07.2026
+
+Это отдельная launch lane для одного заранее выбранного клуба, который вместе
+с командой LeetPlus проверяет продукт до общей внешней когорты. Она не
+ослабляет Gate 2 и не разрешает подключать второго внешнего tenant.
+
+Фиксированная topology:
+
+```text
+CURRENT_NETWORK
+  Tenant A
+    Store A1
+    Store A2
+    Store A3
+    Store A4
+
+SINGLE_DESIGN_PARTNER
+  isolated web + API + PostgreSQL + secrets
+  Tenant D
+    Store D1
+```
+
+`Tenant A` и четыре его `Store` остаются в текущем production-контуре без
+переноса, копирования или общей БД с partner environment. `Tenant D` и
+`Store D1` создаются только в отдельном контуре; отдельные credentials,
+database URL, encryption/signing/integration secrets и runtime processes не
+переиспользуются из shared production. Upload/storage разрешается только в
+отдельном namespace с отдельными credentials; иначе attachments остаются
+`OFF`.
+
+Текущий статус — `NO-GO`. Fail-closed bootstrap/rotate/suspend CLI, API startup
+validation isolated overlay и запрет generic lifecycle activation уже
+реализованы как candidate, но не создают инфраструктуру или разрешение на
+выдачу credentials. Самый ранний ориентир — `2–4 рабочих дня` после
+фактической реализации изоляции, persisted entitlements, reviewed activation,
+полного согласованного набора `DP-S0..DP-S4` и прохождения всех Gate 1DP
+checks. Это не
+календарное обещание: любой failed check, security finding или отсутствие
+owner/rollback продлевает срок.
+
+| ID          | Приоритет | Статус        | Задача                                                     | Критерии приёмки                                                                                                                                                                                                                                                                                                                                                                                | Зависимости                                                 |
+| ----------- | --------- | ------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| BETA-DP-001 | P0        | Запланировано | Зафиксировать topology и design-partner agreement          | В protected record указаны один named partner, срок, owner, data terms и aliases `Tenant D`/`Store D1`; отдельно подтверждено, что текущая сеть — неизменный `Tenant A`/`A1..A4`, а production ID/PII/secrets не попадают в git                                                                                                                                                                 | —                                                           |
+| BETA-DP-002 | P0        | Запланировано | Развернуть полностью изолированный runtime                 | Отдельные web, API, PostgreSQL, secrets, DNS/runtime identity и storage namespace; partner runtime не имеет route, credentials или network access к production PostgreSQL текущей сети; `/version` показывает exact reviewed SHA                                                                                                                                                                | BETA-SRC-002, BETA-OPS-001, BETA-DP-001                     |
+| BETA-DP-003 | P0        | В работе      | Сделать isolated startup и egress fail-closed              | Нет fallback/production secrets; anonymous B2B даёт `401`; schedulers, queues, Langame/reward writes, Telegram/SMS/MAX и любой outbound default-off; egress allowlist пуст либо содержит только отдельно одобренный endpoint; restart не меняет эти значения                                                                                                                                    | BETA-SEC-001, BETA-SEC-008, BETA-DP-002                     |
+| BETA-DP-004 | P0        | Запланировано | Реализовать профиль `SINGLE_DESIGN_PARTNER_V1`             | Persisted lifecycle/cohort и read/write/outbound entitlements имеют revision, reason, expiry и audit; неактивная surface скрыта в UI и отклоняется API/BFF/job; `TenantExecutionPolicy` может немедленно suspend весь `Tenant D`                                                                                                                                                                | BETA-TEN-001, BETA-TEN-002, BETA-TEN-004, BETA-DP-003       |
+| BETA-DP-005 | P0        | В работе      | Provision `Tenant D` и единственный `Store D1`             | Idempotent workflow создаёт ровно один tenant/store, email-bound OWNER invite, support owner и checklist; OWNER имеет `NETWORK` только внутри D, club actor — `STORES[D1]`; Platform Admin клиенту недоступен; manual SQL и добавление D1 в Tenant A запрещены; real-PG bridge доказывает, что exact output production provisioning без ручной подмены принимается API startup admission        | BETA-TEN-003, BETA-SEC-009, BETA-IAM-001..005, BETA-DP-004  |
+| BETA-DP-006 | P0        | Запланировано | Доказать tenant/store/capability isolation                 | На ephemeral двухtenantной fixture зелёные list/detail/aggregate/write/export/file/BFF/job/SSE negative cases; stale token, forbidden filter, hidden UUID, scope change и invite delegation fail-closed; тесты не используют production data Tenant A                                                                                                                                           | BETA-SEC-003..006, BETA-OPS-002, BETA-OPS-003, BETA-DP-005  |
+| BETA-DP-007 | P0        | Запланировано | Подготовить полный начальный набор модулей                 | До credentials IAM/support/feedback и все согласованные in-app slices `DP-S1..DP-S4` — геймификация, ассортимент целиком, сотрудники целиком, коммуникации и users/roles — имеют exact inventory, capability, audit, tests, accepted evidence SHA и runtime `VERIFIED + ENFORCED`; unattended jobs и внешние reward/Langame/Telegram/SMS/MAX effects остаются `OFF` до отдельных outbound gates | BETA-DP-006, соответствующие BETA-MOD-\*                    |
+| BETA-DP-008 | P0        | Запланировано | Проверить backup, kill switches и rollback                 | Выполнены isolated backup/restore, outbound `OFF`, module writes `OFF`, scheduler stop, invite/session revoke, tenant suspend и N-1 либо fix-forward drill; destructive down migration запрещена; измерены owner и recovery time                                                                                                                                                                | BETA-OPS-005, BETA-OPS-007, BETA-OPS-012, BETA-DP-007       |
+| BETA-DP-009 | P0        | Запланировано | Запустить feedback и incident process                      | Назначены partner/primary/backup owners; обращения привязаны к alias tenant/store, severity, route, request ID и SHA без auto-PII; есть ежедневный active-window triage, weekly review, SEV0/SEV1 templates, critical alert и stop/offboarding communication                                                                                                                                    | BETA-PILOT-002, BETA-PILOT-003, BETA-PILOT-006, BETA-DP-008 |
+| BETA-DP-012 | P0        | Запланировано | Запечатать control-plane DB writes                         | Фактическая runtime role не может менять Tenant lifecycle, provisioning/rotation/suspend receipts и bootstrap OWNER override; receipt audit append-only, signed invite token hash неизменяем, expiry только сокращается, acceptance выполняется CAS; `_prisma_migrations` доступна только на `SELECT`; valid-hex tamper, restart и readiness проверены под exact runtime login                  | BETA-DP-003, BETA-DP-005                                    |
+| BETA-DP-010 | P0        | Запланировано | Принять отдельный `DESIGN_PARTNER GO` и выдать credentials | Все технические preconditions Gate 1DP из `BETA-DP-001..009` и `BETA-DP-012` выполнены без незакрытых stop condition; protected record содержит exact environment/release SHA, entitlement revision, enabled surfaces, expiry, approver и rollback owner; day-0 login/scope/health/feedback/kill-switch smoke зелёный; срок доступа начинается только после этого record                        | BETA-DP-001..009, BETA-DP-012                               |
+| BETA-DP-011 | P1        | Запланировано | Провести цикл, offboarding либо controlled promotion       | Feedback и incidents привязаны к SHA; нет security/data-integrity incident; export/retention/revoke/suspend проверены; добавление второго partner запрещено; promotion в общую когорту возможен только после Gate 2 с новой entitlement revision и новым измерительным окном                                                                                                                    | BETA-DP-010                                                 |
+
+Implementation checkpoint:
+
+- `BETA-DP-003`: API при `DESIGN_PARTNER_ISOLATED_MODE=true` требует точный
+  fail-closed runtime overlay и допускает только empty pre-provisioning DB либо
+  один exact `SUSPENDED` tenant/inactive Store с marker и структурно exact
+  initial/rotation receipt topology; token-only scheduled HTTP routes
+  отклоняются до service execution. Provisioning HMAC key в runtime запрещён,
+  поэтому криптографический receipt status выполняется оператором перед
+  restart, а runtime проверяет ID/digest/hash shapes и невозможность продлить
+  signed expiry. Это candidate-код, deployment/restart и egress evidence ещё
+  отсутствуют.
+- `BETA-DP-005`: CLI поддерживает только
+  `status|provision|rotate-invite|suspend`, требует
+  явного confirmation и пустой tenant database, создаёт Tenant `SUSPENDED`,
+  единственный inactive Store, hash-only email-bound invite и least-privilege
+  bootstrap OWNER override без product writes/export/PII/integrations,
+  broad staff/comms/game; текущий обязательный OWNER knowledge minimum включён
+  явно и остаётся admission item. Generic Platform Admin `ACTIVATE` для
+  provisioning marker заблокирован. Canonical manifest связан независимым
+  HMAC digest; initial и rotated invite дополнительно имеют domain-separated
+  HMAC receipts, которые связывают Tenant/Store, invite ID, token hash,
+  исходный expiry и, для rotation, operation ID. Revoke может только сокращать
+  expiry; подмена token hash или продление expiry блокируют
+  HMAC-authenticated operator `status`/`rotate` admission. Runtime startup без
+  provisioning key проверяет только receipt topology, 64-hex shapes и верхнюю
+  границу signed expiry; он намеренно не считается криптографическим verifier.
+  Accepted OWNER обязан ссылаться на exact accepted invite, concurrent rotation
+  сериализуется и идемпотентна, а лишние IAM/integration записи блокируют exact
+  topology check. Provisioning HMAC key технически запрещён в API/standalone
+  runtime.
+- `accessExpiresAt` пока закреплён только manifest/audit metadata и не является
+  runtime policy; persisted expiry/entitlements остаются `BETA-DP-004`.
+- PostgreSQL lifecycle smoke добавлен в CI и проверяет concurrent same-request
+  rotation, receipt tamper/TTL-extension rejection и suspend, но remote run
+  exact candidate SHA, isolated runtime и activation evidence ещё не приняты.
+- Provisioning lifecycle и API admission пока выполняются двумя отдельными
+  PostgreSQL fixtures; обязательный bridge `real provision output → same DB
+startup admission` без ручного fake receipt ещё не реализован и сохраняет
+  `BETA-DP-005` в статусе `В работе`.
+- Restricted runtime-role smoke доказывает базовые attributes, отсутствие
+  ownership/DDL/grant option, application DML и read-only migration readiness.
+  Он пока намеренно выдаёт broad application-table DML и не запечатывает
+  control-plane строки/колонки; это отдельный обязательный `BETA-DP-012`, без
+  которого credentials остаются `NO-GO`.
+- Точные operator commands и граница DB-only emergency stop приведены в
+  [`single-design-partner-launch-checklist.md`](docs/open-beta/single-design-partner-launch-checklist.md).
+
+Progressive activation contract:
+
+1. credentials открывают одновременно IAM/support/feedback и все согласованные
+   in-app slices `DP-S1..DP-S4`: геймификацию, ассортимент целиком,
+   сотрудников целиком и коммуникации; users/roles ограничены Tenant D/D1;
+2. surface со статусом ниже `VERIFIED + ENFORCED` не может входить в первый
+   доступ; новые возможности после старта включаются отдельными revisions;
+3. staff recurring scheduler и любой all-tenant route не запускаются;
+4. reward/Langame/Telegram и иные outbound effects остаются `OFF` до
+   отдельного store-level `OUTBOUND GO`, canary и reconciliation;
+5. salary остаётся planning-only, а discipline/motivation не выполняют
+   внешних санкций;
+6. marketing/mass messaging, full CRM analytics, billing, public
+   self-registration и Platform Administration не входят в lane.
+
+Немедленные stop conditions: cross-tenant/store/PII reveal, неизвестный scope,
+доступ к выключенной surface, обход entitlement, потеря/дублирование reward,
+необъяснимое повреждение import/sync, недоставленный critical alert,
+недоступный suspend/revoke/rollback, неожиданная scheduler/outbound activity
+или любая техническая связь с production Tenant A. Реакция:
+`outbound OFF → module writes OFF → jobs stop → sessions/invites revoke →
+Tenant D SUSPENDED`; evidence сохраняется, destructive rollback запрещён.
+
+Успех DP-1 не завершает Gate 2 или Gate 3 и не засчитывает обязательные семь
+дней internal alpha текущей сети. До фактического выполнения
+`BETA-DP-001..010` и `BETA-DP-012` решение для DP-1 остаётся `NO-GO`.
+
 ## 6. Release gates
 
 ### Gate 0 — каноническая основа
@@ -1657,6 +1807,27 @@ Release decision остаётся `NO-GO`.
 - Anonymous B2B API отвечает `401`.
 - Двухtenantная и двухклубная suite зелёная.
 - Suspend останавливает HTTP и background execution.
+
+### Gate 1DP — один ранний design partner в изолированном контуре
+
+- Завершены и приняты `BETA-DP-001..009`.
+- Partner environment имеет отдельные web, API, PostgreSQL, secrets и storage
+  namespace и технически не может обратиться к production data Tenant A.
+- Exact SHA, CI, ephemeral PostgreSQL/IDOR/browser smoke, health/version,
+  backup/restore и rollback evidence зелёные.
+- `Tenant D` содержит ровно один `Store D1`; owner/invite/scope/capability
+  работают fail-closed, Platform Admin клиенту не выдаётся.
+- Все согласованные начальные slices `DP-S0..DP-S4` имеют
+  `VERIFIED + ENFORCED`; не входящие в scope surfaces остаются `OFF`.
+- Все schedulers, all-tenant jobs и outbound effects остаются `OFF`; их
+  включение требует отдельных surface/outbound `GO`.
+- Support, feedback, incident, stop/offboarding owners и expiry назначены.
+- После выполнения технических preconditions отдельный
+  `DESIGN_PARTNER GO` из `BETA-DP-010` сохранён до выдачи credentials.
+
+Gate 1DP разрешает только одного named partner в isolated environment. Он не
+разрешает shared-production access, второго партнёра, cutover текущей сети или
+общую внешнюю когорту и не закрывает Gate 1, Gate 2A, Gate 2 либо Gate 3.
 
 ### Gate 2A — разрешение на cutover текущей сети
 
@@ -1687,6 +1858,9 @@ Release decision остаётся `NO-GO`.
 
 После Gate 2 разрешается первый внешний invite-only pilot.
 
+Ранний isolated `SINGLE_DESIGN_PARTNER`, если он отдельно прошёл Gate 1DP, не
+считается этой когортой и не заменяет ни одно условие Gate 2.
+
 ### Gate 3 — готовность открытого заявочного теста
 
 - Две friendly-сети прошли 14 дней.
@@ -1698,7 +1872,17 @@ Release decision остаётся `NO-GO`.
 - Каждый production incident и feedback привязан к release SHA.
 - Suspend, restore, rollback, export и offboarding проверены.
 
+Результаты DP-1 могут использоваться как product feedback, но не входят в
+метрики Gate 3, пока после Gate 2 партнёр не переведён отдельным решением в
+общую когорту и для него не начато новое измерительное окно.
+
 ## 7. Рекомендуемая последовательность разработки
+
+Основная последовательность ниже остаётся production/cutover path. Параллельно
+можно реализовать `BETA-DP-001..010`; после отдельного Gate 1DP разрешён один
+изолированный DP-1 без ожидания Gate 2. Этот путь не использует shared
+production, не меняет Tenant A/A1..A4 и не переносит approvals или evidence в
+основную последовательность.
 
 1. Для test-evidence commit
    `2341b99937e54cc50d1763a0a794d975816c72ce` получить зелёные обязательные
@@ -1780,7 +1964,8 @@ Release decision остаётся `NO-GO`.
 22. Выполнить cutover, staged Langame sync, full-scope acceptance и
     post-cutover rollback verification.
 23. Провести семь стабильных дней internal alpha. После выполнения всех
-    условий Gate 2 отдельно принять `GO` на первый внешний invite-only pilot.
+    условий Gate 2 отдельно принять `GO` на первый общий внешний invite-only
+    pilot. Ранее запущенный isolated DP-1 не является этим `GO`.
 24. Подключить две friendly-сети по одному tenant каждые 3–4 дня и провести
     14-дневный pilot.
 25. После Gate 3 открыть приём заявок, сохранив ручное одобрение и когортные
@@ -1798,6 +1983,10 @@ Release decision остаётся `NO-GO`.
 - Support: critical acknowledgment ≤2 рабочих часов.
 - Activation: owner принял invite, завершил sync и выполнил первое действие в каждом обязательном модуле.
 - Retention: каждый pilot tenant повторил минимум один целевой workflow две недели подряд.
+- DP isolation: partner web/API/PostgreSQL/secrets не имеют production
+  credentials или data path; неожиданных scheduler/outbound executions — 0.
+- DP control: 100% активных surfaces имеют отдельные evidence SHA,
+  entitlement revision, owner и проверенный kill switch.
 
 ## 9. Осознанно отложено
 

@@ -90,6 +90,21 @@ describe('StaffTaskRecurringRulesScheduledController', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it('cannot run in isolated design-partner mode even if explicitly enabled', () => {
+    const { controller, recurringRulesService } = createSubject({
+      DESIGN_PARTNER_ISOLATED_MODE: 'true',
+      STAFF_TASK_RULES_SCHEDULED_HTTP_ENABLED: 'true',
+      SYNC_SERVICE_TOKEN: 'sync-token',
+    });
+
+    expect(() => controller.runDueRules('sync-token', {})).toThrow(
+      ServiceUnavailableException,
+    );
+    expect(
+      recurringRulesService.runDueRulesForAllTenants,
+    ).not.toHaveBeenCalled();
+  });
+
   it('checks the sync token only after the HTTP endpoint is enabled', () => {
     const { controller, recurringRulesService } = createSubject({
       STAFF_TASK_RULES_SCHEDULED_HTTP_ENABLED: 'true',

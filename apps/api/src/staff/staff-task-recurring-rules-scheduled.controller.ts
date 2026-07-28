@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertScheduledHttpAllowed } from '../config/design-partner-runtime-policy';
 import {
   StaffTaskRecurringRulesService,
   type StaffTaskRecurringRuleRunDueDto,
@@ -32,6 +33,8 @@ export class StaffTaskRecurringRulesScheduledController {
   }
 
   private assertEnabled() {
+    assertScheduledHttpAllowed(this.configService);
+
     if (
       this.configService.get<string>(
         'STAFF_TASK_RULES_SCHEDULED_HTTP_ENABLED',

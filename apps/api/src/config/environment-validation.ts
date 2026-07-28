@@ -43,6 +43,57 @@ export const STAFF_ATTACHMENT_ACL_MODES = [
 export type StaffAttachmentAclMode =
   (typeof STAFF_ATTACHMENT_ACL_MODES)[number];
 
+export const DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS = {
+  DESIGN_PARTNER_ISOLATED_MODE: 'true',
+  ACCESS_SCOPE_ENFORCEMENT_MODE: 'ENFORCED',
+  STAFF_ATTACHMENT_ACL_MODE: 'ENFORCED',
+  GUEST_GAME_PIPELINE_SCHEDULER_ENABLED: 'false',
+  GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false',
+  GUEST_GAME_RETENTION_SCHEDULER_ENABLED: 'false',
+  LANGAME_DAILY_SYNC_SCHEDULER_ENABLED: 'false',
+  GUEST_ACTIVITY_LEDGER_SCHEDULER_ENABLED: 'false',
+  REPORT_DIGEST_SCHEDULER_ENABLED: 'false',
+  STAFF_TASK_RULES_SCHEDULER_ENABLED: 'false',
+  STAFF_TASK_RULES_SCHEDULED_HTTP_ENABLED: 'false',
+  LANGAME_SCHEDULED_HTTP_ENABLED: 'false',
+  GUEST_GAME_SCHEDULED_HTTP_ENABLED: 'false',
+  REPORT_DIGEST_SCHEDULED_HTTP_ENABLED: 'false',
+  GUEST_GAME_LEDGER_FALLBACK_MODE: 'OFF',
+  GUEST_GAME_LOOT_BOX_RECOVERY_MODE: 'OFF',
+  GUEST_GAME_PIPELINE_BACKFILL_MODE: 'OFF',
+  GUEST_GAME_SUPPLEMENTAL_PIPELINE_MODE: 'OFF',
+  GUEST_GAME_LEDGER_FALLBACK_KILL_SWITCH: 'true',
+  GUEST_GAME_LOOT_BOX_RECOVERY_KILL_SWITCH: 'true',
+  GUEST_GAME_PIPELINE_BACKFILL_KILL_SWITCH: 'true',
+  GUEST_GAME_SUPPLEMENTAL_PIPELINE_KILL_SWITCH: 'true',
+  GUEST_GAME_REWARD_MATERIALIZER_KILL_SWITCH: 'true',
+  GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN: 'true',
+  GUEST_GAME_BOT_CONSUMER_DRY_RUN: 'true',
+  GUEST_GAME_TG_EDGE_DRY_RUN: 'true',
+  GUEST_GAME_BOT_CONSUMER_ENABLED: 'false',
+  GUEST_GAME_TG_EDGE_ADAPTER_ENABLED: 'false',
+  GUEST_GAME_TG_EDGE_POLLER_ENABLED: 'false',
+  GUEST_GAME_TG_EDGE_POLLING_DELETE_WEBHOOK_ON_START: 'false',
+  LANGAME_BONUS_ACCRUAL_ENABLED: 'false',
+  GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED: 'false',
+  GUEST_GAME_DELIVERY_REAL_SEND_ENABLED: 'false',
+  GUEST_GAME_TELEGRAM_DELIVERY_ENABLED: 'false',
+  GUEST_GAME_MAX_DELIVERY_ENABLED: 'false',
+  GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED: 'false',
+  GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED: 'false',
+  GUEST_PORTAL_USER_CALL_ENABLED: 'false',
+  GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED: 'false',
+  GUEST_PORTAL_DEV_OTP_ENABLED: 'false',
+  GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'false',
+  GUEST_PORTAL_OTP_SMS_ENABLED: 'false',
+  GUEST_PORTAL_OTP_SMS_RU_TEST_MODE: 'true',
+  GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED: 'false',
+  GUEST_PORTAL_OTP_TELEGRAM_ENABLED: 'false',
+  GUEST_PORTAL_OTP_MAX_ENABLED: 'false',
+  GUEST_GAME_RETENTION_LIVE_ENABLED: 'false',
+  GUEST_GAME_MONITORING_ENABLED: 'false',
+} as const;
+
 const PLACEHOLDER_SECRET_PATTERNS = [
   /^change[\s_-]*me(?:[\s_-].*)?$/i,
   /^replace[\s_-]*me(?:[\s_-].*)?$/i,
@@ -114,7 +165,16 @@ function isPlaceholderSecret(value: string) {
  * Values are not included in errors so startup logs cannot disclose them.
  */
 export function validateEnvironment(config: EnvironmentValues) {
-  if (!productionEnvironment(config)) {
+  const isProduction = productionEnvironment(config);
+  const isolatedMode = stringValue(config.DESIGN_PARTNER_ISOLATED_MODE);
+
+  if (isolatedMode && isolatedMode !== 'true' && isolatedMode !== 'false') {
+    throw new Error(
+      'DESIGN_PARTNER_ISOLATED_MODE must be exactly true or false',
+    );
+  }
+
+  if (!isProduction && isolatedMode !== 'true') {
     return config;
   }
 
@@ -217,6 +277,34 @@ export function validateEnvironment(config: EnvironmentValues) {
     errors.push('EXPECTED_DATABASE_MIGRATION_COUNT must be a positive integer');
   }
 
+  if (isolatedMode === 'true') {
+    for (const [key, expected] of Object.entries(
+      DESIGN_PARTNER_REQUIRED_RUNTIME_SETTINGS,
+    )) {
+      const actual = stringValue(config[key]);
+      if (actual !== expected) {
+        errors.push(`${key} must equal ${expected} in design-partner mode`);
+      }
+    }
+    if (stringValue(config.DESIGN_PARTNER_MANIFEST_HMAC_KEY)) {
+      errors.push(
+        'DESIGN_PARTNER_MANIFEST_HMAC_KEY must be absent from design-partner runtime',
+      );
+    }
+    const tenantSlug = stringValue(config.DESIGN_PARTNER_TENANT_SLUG);
+    const tenantDomain = stringValue(config.DESIGN_PARTNER_TENANT_DOMAIN);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tenantSlug)) {
+      errors.push(
+        'DESIGN_PARTNER_TENANT_SLUG must be an exact lowercase slug in design-partner mode',
+      );
+    }
+    if (tenantDomain !== `${tenantSlug}.leetplus.ru`) {
+      errors.push(
+        'DESIGN_PARTNER_TENANT_DOMAIN must equal <tenant-slug>.leetplus.ru in design-partner mode',
+      );
+    }
+  }
+
   if (errors.length > 0) {
     throw new Error(
       `Invalid production environment:\n${errors
@@ -234,6 +322,7 @@ export function validateEnvironment(config: EnvironmentValues) {
     EXPECTED_DATABASE_MIGRATION_COUNT: expectedMigrationCount,
     ACCESS_SCOPE_ENFORCEMENT_MODE: accessScopeEnforcementMode,
     STAFF_ATTACHMENT_ACL_MODE: staffAttachmentAclMode,
+    DESIGN_PARTNER_ISOLATED_MODE: isolatedMode || undefined,
   };
 }
 

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'fs/promises';
 import { dirname } from 'path';
 
+import { assertStandaloneProcessAllowed } from '../config/design-partner-runtime-policy';
 import {
   handleTelegramEdgeWebhook,
   loadTelegramEdgeConfig,
@@ -70,6 +71,16 @@ const defaultPollingStatePath = '/app/data/telegram-poller-state.json';
 const defaultPollingTimeoutSeconds = 50;
 
 async function main() {
+  assertStandaloneProcessAllowed(
+    process.env,
+    'GUEST_GAME_TG_EDGE_POLLER_ENABLED',
+    {
+      GUEST_GAME_TG_EDGE_DRY_RUN: 'true',
+      GUEST_GAME_TG_EDGE_POLLING_DELETE_WEBHOOK_ON_START: 'false',
+    },
+    'GUEST_GAME_TG_EDGE_LEETPLUS_API_URL',
+  );
+
   const edgeConfig = loadTelegramEdgeConfig(process.env);
   const pollingConfig = loadTelegramPollingConfig(process.env);
   const telegramFetchImpl = createTelegramBotApiFetch(process.env);

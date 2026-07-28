@@ -3,11 +3,12 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.1                                                    |
+| Версия        | 1.3                                                    |
 | Дата          | 28.07.2026                                             |
 | Статус        | `NO-GO` до Gate 2; entitlement implementation pending  |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
 | Область       | Собственная сеть или явно разрешённые клубы            |
+| Назначение    | Первая общая внешняя когорта, не ранний DP-1           |
 | Runtime       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`             |
 | Test evidence | `2341b99937e54cc50d1763a0a794d975816c72ce`, local only |
 
@@ -18,6 +19,18 @@ route inventory, role matrix, provisioning и acceptance.
 Сам по себе профиль не разрешает выдачу доступа. До успешного cutover текущей
 сети, семи стабильных дней internal alpha, завершения Gate 2 и отдельного
 решения на внешний pilot активация остаётся `NO-GO`.
+
+Ранний совместный тест одного клуба регулируется отдельным профилем
+[`SINGLE_DESIGN_PARTNER_V1`](./single-design-partner-access-profile.md). Он
+допускается только после Gate 1DP в физически изолированном
+web/API/PostgreSQL/secrets контуре. Его `DP-S0..DP-S4` проверяются
+progressive/manual до отдельного `GO`, но открываются одновременно первыми
+credentials; поэтапно после старта включаются только новые surfaces и отдельно
+gated outbound effects. Точный состав задаёт DP-профиль, а не этот документ.
+
+Текущая сеть при этом остаётся одним существующим `Tenant A` с четырьмя
+`Store A1..A4`. Design partner получает новый `Tenant D` с единственным
+`Store D1` только в isolated environment; shared production запрещён.
 
 Local public-only pinned-path evidence прошёл admission suite `19/19`, но
 remote CI ещё pending. Production authority roots остаются
@@ -113,3 +126,8 @@ risk review, rollout и audit.
 6. Outbound side effects имеют tenant/store kill switch и canary.
 7. Support owner, trial/cohort dates и onboarding checklist назначены.
 8. Решение привязано к exact release SHA и имеет rollback.
+
+Успех или длительность работы isolated DP-1 не выполняют Gate 2, не заменяют
+семь дней internal alpha и не входят автоматически в Gate 3. После Gate 2
+promotion партнёра в эту когорту требует новой entitlement revision,
+отдельного `GO` и нового измерительного окна.

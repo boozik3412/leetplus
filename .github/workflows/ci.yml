@@ -70,6 +70,12 @@ jobs:
       - name: Validate synthetic staff task reconciliation proposal dry-run
         run: pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
 
+      - name: Validate isolated design-partner provisioning command
+        run: pnpm --filter database check:design-partner-provisioning
+
+      - name: Validate isolated design-partner PostgreSQL runtime-role smoke
+        run: pnpm --filter database check:design-partner-runtime-role
+
       - name: Validate staff task integrity EXPAND smoke command
         run: pnpm --filter database check:staff-task-integrity-expand-smoke
 
@@ -78,6 +84,12 @@ jobs:
 
       - name: Lint API security, health, and configuration boundary
         run: pnpm --filter api lint:ci:boundary
+
+      - name: Lint isolated design-partner runtime boundary
+        run: pnpm --filter api lint:ci:design-partner
+
+      - name: Test isolated design-partner runtime boundary
+        run: pnpm --filter api test:ci:design-partner
 
       - name: Run focused API security tests
         run: pnpm --filter api test:ci:focused
@@ -170,6 +182,21 @@ jobs:
 
       - name: Verify database connectivity and migration state
         run: pnpm --filter database db:smoke
+
+      - name: Verify isolated design-partner provisioning lifecycle
+        run: pnpm --filter database db:smoke:design-partner-provisioning
+        env:
+          DESIGN_PARTNER_PROVISIONING_SMOKE_CONFIRM: run-design-partner-provisioning-smoke
+
+      - name: Verify isolated design-partner API database admission
+        run: pnpm --filter api test:integration:design-partner-runtime-admission:pg
+        env:
+          DESIGN_PARTNER_RUNTIME_ADMISSION_PG_CONFIRM: run-design-partner-runtime-admission-postgres-fixture
+
+      - name: Verify isolated design-partner PostgreSQL runtime-role baseline
+        run: pnpm --filter database db:smoke:design-partner-runtime-role
+        env:
+          DESIGN_PARTNER_RUNTIME_ROLE_SMOKE_CONFIRM: run-design-partner-runtime-role-smoke
 
       - name: Verify AccessScope database invariants
         run: pnpm --filter database db:smoke:access-scope

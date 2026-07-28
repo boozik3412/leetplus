@@ -1,5 +1,9 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import {
+  IntegrationProvider,
+  Prisma,
+  TenantCustomerStage,
+} from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
@@ -19,6 +23,10 @@ import type {
   LangameTransaction,
 } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 
 const DEFAULT_PAGE_LIMIT = 200;
 const MAX_SYNC_PAGES_PER_SOURCE = 20;
@@ -361,6 +369,9 @@ export class GuestActivityLedgerService {
     const retryBefore = new Date(now.getTime() - 5 * 60 * 1_000);
     const states = await this.prisma.guestActivitySyncState.findMany({
       where: {
+        tenant: {
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
         status: { in: ['PARTIAL', 'FAILED'] },
         profileId: { not: null },
         OR: [
@@ -377,6 +388,11 @@ export class GuestActivityLedgerService {
         status: true,
         errorMessage: true,
         diagnostics: true,
+        tenant: {
+          select: {
+            customerStage: true,
+          },
+        },
       },
       orderBy: { updatedAt: 'asc' },
       take: Math.max(limit * 3, limit),
@@ -386,6 +402,16 @@ export class GuestActivityLedgerService {
 
     for (const state of states) {
       if (queued >= limit) break;
+      const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(
+          state.tenant.customerStage,
+        ),
+        jobKind: 'GUEST_ACTIVITY_LEDGER_SYNC',
+      });
+      if (!executionDecision.allowed) {
+        skipped += 1;
+        continue;
+      }
       if (syncStateHasStaleExternalGuest(state)) {
         await this.prisma.guestActivitySyncState.update({
           where: { id: state.id },
@@ -415,6 +441,9 @@ export class GuestActivityLedgerService {
     const now = new Date();
     const staleAt = new Date(now.getTime() - SYNC_JOB_LOCK_STALE_MS);
     const availableWhere = {
+      tenant: {
+        customerStage: TenantCustomerStage.INTERNAL,
+      },
       OR: [
         {
           status: { in: ['PENDING', 'RETRY'] },
@@ -425,10 +454,26 @@ export class GuestActivityLedgerService {
     };
     const candidate = await this.prisma.guestActivitySyncJob.findFirst({
       where: availableWhere,
+      include: {
+        tenant: {
+          select: {
+            customerStage: true,
+          },
+        },
+      },
       orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
     });
 
     if (!candidate) {
+      return null;
+    }
+    const executionDecision = evaluateTenantBackgroundExecutionPolicy({
+      stage: tenantBackgroundStageForCustomerStage(
+        candidate.tenant.customerStage,
+      ),
+      jobKind: 'GUEST_ACTIVITY_LEDGER_SYNC',
+    });
+    if (!executionDecision.allowed) {
       return null;
     }
 

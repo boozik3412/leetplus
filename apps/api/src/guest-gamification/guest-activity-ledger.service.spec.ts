@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
-import { IntegrationProvider } from '@prisma/client';
+import { IntegrationProvider, TenantCustomerStage } from '@prisma/client';
 import type { GuestIdentityResolverService } from '../integrations/guest-identity-resolver.service';
 import type { LangameClient } from '../integrations/langame.client';
 import type { LangameSettingsService } from '../integrations/langame-settings.service';
@@ -417,15 +417,21 @@ describe('GuestActivityLedgerService', () => {
               null,
           );
         }),
-        findFirst: jest
-          .fn()
-          .mockImplementation(() =>
-            Promise.resolve(
-              Array.from(syncJobs.values()).find((row) =>
-                ['PENDING', 'RETRY'].includes(row.status),
-              ) ?? null,
-            ),
-          ),
+        findFirst: jest.fn().mockImplementation(() => {
+          const row = Array.from(syncJobs.values()).find((candidate) =>
+            ['PENDING', 'RETRY'].includes(candidate.status),
+          );
+          return Promise.resolve(
+            row
+              ? {
+                  ...row,
+                  tenant: {
+                    customerStage: TenantCustomerStage.INTERNAL,
+                  },
+                }
+              : null,
+          );
+        }),
         findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockImplementation(({ data }) => {
           const row = {
@@ -1743,6 +1749,22 @@ describe('GuestActivityLedgerService', () => {
     const job = Array.from(syncJobs.values())[0];
 
     expect(result).toMatchObject({ processed: 1, success: 1 });
+    expect(
+      (prisma.guestActivitySyncJob.findFirst as jest.Mock).mock.calls[0]?.[0],
+    ).toMatchObject({
+      where: {
+        tenant: {
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
+      },
+      include: {
+        tenant: {
+          select: {
+            customerStage: true,
+          },
+        },
+      },
+    });
     expect(job).toEqual(
       expect.objectContaining({
         status: 'SUCCESS',
@@ -1751,6 +1773,32 @@ describe('GuestActivityLedgerService', () => {
         lockedBy: null,
       }),
     );
+  });
+
+  it('does not claim queued sync work for an external tenant', async () => {
+    await service.enqueueProfileSync({
+      tenantId,
+      profileId,
+      guestId,
+      storeId,
+      reason: 'EXTERNAL_CONTAINMENT',
+    });
+    const job = Array.from(syncJobs.values())[0];
+    (prisma.guestActivitySyncJob.findFirst as jest.Mock).mockResolvedValueOnce({
+      ...job,
+      tenant: {
+        customerStage: TenantCustomerStage.PILOT,
+      },
+    });
+    const syncProfile = jest.spyOn(service, 'syncProfile');
+
+    const result = await service.processQueuedSyncJobs(1, 'test-worker');
+
+    expect(result).toMatchObject({ processed: 0 });
+    expect(
+      (prisma.guestActivitySyncJob.updateMany as jest.Mock).mock.calls,
+    ).toHaveLength(0);
+    expect(syncProfile).not.toHaveBeenCalled();
   });
 
   it('marks a queued stale external guest sync as skipped', async () => {
@@ -1784,6 +1832,9 @@ describe('GuestActivityLedgerService', () => {
         status: 'PARTIAL',
         errorMessage: 'upstream timeout',
         diagnostics: null,
+        tenant: {
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
       },
       {
         id: 'sync-stale',
@@ -1794,12 +1845,31 @@ describe('GuestActivityLedgerService', () => {
         status: 'FAILED',
         errorMessage: 'Guest not found',
         diagnostics: null,
+        tenant: {
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
       },
     ]);
 
     const result = await service.enqueueDueRecoverySyncs(10);
 
     expect(result).toEqual({ scanned: 2, queued: 1, skipped: 1 });
+    expect(
+      (prisma.guestActivitySyncState.findMany as jest.Mock).mock.calls[0]?.[0],
+    ).toMatchObject({
+      where: {
+        tenant: {
+          customerStage: TenantCustomerStage.INTERNAL,
+        },
+      },
+      select: {
+        tenant: {
+          select: {
+            customerStage: true,
+          },
+        },
+      },
+    });
     expect(Array.from(syncJobs.values())).toEqual([
       expect.objectContaining({
         profileId,
@@ -1811,6 +1881,31 @@ describe('GuestActivityLedgerService', () => {
       where: { id: 'sync-stale' },
       data: { status: 'STALE_BINDING' },
     });
+  });
+
+  it('does not enqueue or mutate recovery state for an external tenant', async () => {
+    (prisma.guestActivitySyncState.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'sync-external',
+        tenantId,
+        profileId,
+        guestId,
+        storeId,
+        status: 'FAILED',
+        errorMessage: 'upstream timeout',
+        diagnostics: null,
+        tenant: {
+          customerStage: TenantCustomerStage.LIVE,
+        },
+      },
+    ]);
+    const enqueueProfileSync = jest.spyOn(service, 'enqueueProfileSync');
+
+    const result = await service.enqueueDueRecoverySyncs(10);
+
+    expect(result).toEqual({ scanned: 1, queued: 0, skipped: 1 });
+    expect(enqueueProfileSync).not.toHaveBeenCalled();
+    expect(syncStateUpdate).not.toHaveBeenCalled();
   });
 
   it('requests a rerun without releasing an already running sync job', async () => {

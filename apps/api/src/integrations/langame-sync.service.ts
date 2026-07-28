@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import {
   IntegrationSyncMode,
   IntegrationProvider,
@@ -13,9 +17,15 @@ import { join } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
+import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 import type {
   LangameGood,
   LangameClubProductConfiguration,
@@ -128,12 +138,30 @@ export class LangameSyncService {
         continue;
       }
 
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: 'LANGAME_SCHEDULED_SYNC',
+      });
+      if (!backgroundExecution.allowed) {
+        skips.push({
+          status: 'SKIPPED',
+          tenantId: tenant.id,
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          failedRequirement: null,
+        });
+        continue;
+      }
+
       results.push(
-        await this.syncTenantById(tenant.id, {
-          ...query,
-          mode,
-          trigger: 'AUTO',
-        }),
+        await this.syncTenantById(
+          tenant.id,
+          {
+            ...query,
+            mode,
+            trigger: 'AUTO',
+          },
+          'LANGAME_SCHEDULED_SYNC',
+        ),
       );
     }
 
@@ -150,16 +178,31 @@ export class LangameSyncService {
   async syncTenantById(
     tenantId: string,
     query: LangameSyncQuery,
+    backgroundJobKind:
+      | 'LANGAME_SCHEDULED_SYNC'
+      | 'LANGAME_DAILY_SYNC' = 'LANGAME_SCHEDULED_SYNC',
   ): Promise<LangameSyncResult> {
     const executionAction =
       query.trigger === 'AUTO' ? ('OUTBOUND' as const) : ('WRITE' as const);
-    await this.tenantExecutionAdmissionService.assertAllowed(
+    const admission = await this.tenantExecutionAdmissionService.assertAllowed(
       tenantId,
       LANGAME_SYNC_MODULES.map((module) => ({
         module,
         action: executionAction,
       })),
     );
+    if (executionAction === 'OUTBOUND') {
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: backgroundJobKind,
+      });
+      if (!backgroundExecution.allowed) {
+        throw new ServiceUnavailableException({
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          message: tenantBackgroundExecutionNote(backgroundExecution),
+        });
+      }
+    }
 
     const requestedPeriod = this.resolvePeriod(query);
     const { apiKey, sources } =

@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.11                                                                        |
+| Версия           | 1.12                                                                        |
 | Дата             | 28.07.2026                                                                  |
 | Статус           | Foundation + revision fencing slice; evidence pending                       |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
@@ -326,6 +326,16 @@ shared external tenant и не является разрешением на до
   admission/preflight без общего durable claim/lease. Микро-гонка уже начатого
   provider request описывается как bounded drain/reconciliation; строгий
   двухфазный suspend остаётся обязательным до outbound `GO`.
+- Временный background execution registry перечисляет 17 проверенных job kinds.
+  Для `PILOT/BETA/LIVE` только `REPORT_DIGEST_SMTP` и
+  `GUEST_BONUS_LEDGER_LANGAME` имеют `REVISION_FENCED`; остальные 15
+  fail-closed получают `EXTERNAL_DENY`. Оба разрешённых пути сверяют registry
+  на scheduler/claim boundary и повторно непосредственно перед SMTP/Langame.
+  `INTERNAL` сохраняет legacy-совместимость. Этот слой является containment, а
+  не durable suspend/drain fence: stage/revision flip после claim и уже
+  переданный bot payload требуют migration `165` и общей claim generation.
+  Полная матрица и ограничения:
+  [background-execution-containment.md](./background-execution-containment.md).
 - Scheduled report digest вычисляет фактические capabilities системной или
   custom role с tenant overrides; без `export_reports` recipient получает
   `CAPABILITY_EXPORT_REPORTS_REQUIRED`, а export и SMTP не запускаются.
@@ -395,7 +405,8 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
 
 1. exhaustive route manifest/decorators и policy для BFF/files/guest/Telegram;
 2. durable worker lease/claim для delivery, Langame sync и оставшихся
-   schedulers; strict suspend/drain поверх уже реализованного revision fence;
+   schedulers; strict suspend/drain поверх уже реализованного revision fence и
+   временного 17-job fail-closed containment;
 3. canonical email claim, encrypted outbox и fail-closed mail config;
 4. shell-only provisioning вместо текущего raw-URL candidate;
 5. persisted release gates и dedicated activation/suspend/reissue/revoke;
@@ -447,11 +458,12 @@ PASS текущего candidate пока pending.
 
 Последняя локальная проверка checkpoint:
 
-- tenant-execution suite: `16 suites / 646 tests`;
+- tenant-execution suite: `16 suites / 663 tests`;
+- background-execution containment suite: `15 suites / 665 tests`;
 - focused security suite: `32 suites / 523 tests`;
 - design-partner subset: `7 suites / 68 tests`;
-- полный API regression: `95 suites / 1843 passed / 2 todo`
-  (`1845 total`);
+- полный API regression: `96 suites / 1873 passed / 2 todo`
+  (`1875 total`);
 - API typecheck, production build, boundary/tenant-execution lint,
   production environment contract, Prisma validate/generate, database
   typecheck, seed safety `9/9`, migration-164 offline contract `6/6` и

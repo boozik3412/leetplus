@@ -116,4 +116,73 @@ describe('ReportsDigestSchedulerService admission result handling', () => {
       reportsDigestService.sendScheduledDigests.mock.invocationCallOrder[0],
     );
   });
+
+  it('persists a background policy denial before invoking digest generation', async () => {
+    const configService = {
+      get: jest.fn(),
+    };
+    const prisma = {
+      reportDigestScheduleRun: {
+        create: jest.fn().mockResolvedValue({ id: 'run-2' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const reportsDigestService = {
+      sendScheduledDigests: jest.fn(),
+    };
+    const permitAcquisition = {
+      decision: {
+        allowed: true,
+        tenantId: 'tenant-malformed-stage',
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        entitlementProfileRevision: 4,
+        executionRevision: 8,
+        customerStage: null,
+        internalEntitlementBypass: false,
+      },
+      permit: {
+        tenantId: 'tenant-malformed-stage',
+        executionRevision: 8,
+        requirements: [
+          { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+          { module: TenantModule.COMMUNICATIONS, action: 'OUTBOUND' },
+        ],
+      },
+    };
+    const tenantExecutionAdmissionService = {
+      acquirePermit: jest.fn().mockResolvedValue(permitAcquisition),
+    };
+    const service = new ReportsDigestSchedulerService(
+      configService as unknown as ConfigService,
+      prisma as unknown as PrismaService,
+      reportsDigestService as unknown as ReportsDigestService,
+      tenantExecutionAdmissionService as unknown as TenantExecutionAdmissionService,
+    );
+
+    await (
+      service as unknown as RunnableReportsDigestScheduler
+    ).runTenantDigest({
+      tenant: { id: 'tenant-malformed-stage', slug: 'malformed-stage' },
+      type: 'DAILY',
+      dateKey: '2026-07-28',
+    });
+
+    expect(prisma.reportDigestScheduleRun.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'run-2' },
+      data: {
+        executionRevision: 8,
+      },
+    });
+    expect(prisma.reportDigestScheduleRun.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'run-2' },
+      data: {
+        status: 'SKIPPED',
+        sentCount: 0,
+        completedAt: expect.any(Date) as Date,
+        errorMessage: 'BACKGROUND_EXECUTION_STAGE_REQUIRED',
+      },
+    });
+    expect(reportsDigestService.sendScheduledDigests).not.toHaveBeenCalled();
+  });
 });

@@ -1,10 +1,15 @@
 import {
   IntegrationProvider,
+  TenantCustomerStage,
   TenantModule,
   UserRole,
 } from '@prisma/client';
 import { createHmac } from 'node:crypto';
-import { GuestDataFoundationService } from './guest-data-foundation.service';
+import {
+  GuestDataFoundationService,
+  type GuestDataFoundationSyncResult,
+} from './guest-data-foundation.service';
+import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 
 const user = {
   id: 'user-1',
@@ -222,6 +227,9 @@ describe('GuestDataFoundationService', () => {
       findMany: jest.fn(),
       updateMany: jest.fn(),
     },
+    tenant: {
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
   const tenantContextService = {
@@ -294,6 +302,7 @@ describe('GuestDataFoundationService', () => {
       tenantId: 'tenant-1',
       reasonCode: 'ALLOWED',
       failedRequirement: null,
+      customerStage: TenantCustomerStage.INTERNAL,
     });
 
     prisma.guestDataProfileRun.create.mockResolvedValue({ id: 'run-1' });
@@ -304,6 +313,7 @@ describe('GuestDataFoundationService', () => {
     prisma.store.findMany.mockResolvedValue([
       { id: 'store-1', externalClubId: '10', timeZone: null },
     ]);
+    prisma.tenant.findMany.mockResolvedValue([]);
     prisma.store.updateMany.mockResolvedValue({ count: 1 });
     prisma.guest.upsert.mockResolvedValue({ id: 'guest-1' });
     prisma.guest.findFirst.mockResolvedValue(null);
@@ -673,6 +683,130 @@ describe('GuestDataFoundationService', () => {
       ],
     );
     expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
+  });
+
+  it('fences an admitted external scheduled child before stale-run, credential or provider access', async () => {
+    tenantExecutionAdmissionService.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.syncTenantById(
+        'tenant-pilot',
+        {
+          dateFrom: '2026-05-01',
+          dateTo: '2026-05-01',
+        },
+        'OUTBOUND',
+      ),
+    ).rejects.toMatchObject({
+      status: 503,
+      response: {
+        reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+        message: expect.stringContaining(
+          'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+        ) as string,
+      },
+    });
+
+    expect(prisma.guestDataProfileRun.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guestDataProfileRun.create).not.toHaveBeenCalled();
+    expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
+    for (const method of Object.values(langameClient)) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
+  it('skips external configured tenants without aborting the following internal sync', async () => {
+    prisma.tenant.findMany.mockResolvedValueOnce([
+      {
+        id: 'tenant-pilot',
+        customerStage: TenantCustomerStage.PILOT,
+      },
+      {
+        id: 'tenant-internal',
+        customerStage: TenantCustomerStage.INTERNAL,
+      },
+    ]);
+    const internalResult: GuestDataFoundationSyncResult = {
+      tenantId: 'tenant-internal',
+      sources: 1,
+      failedSources: 0,
+      sourceResults: [],
+    };
+    const syncTenantById = jest
+      .spyOn(service, 'syncTenantById')
+      .mockResolvedValueOnce(internalResult);
+
+    await expect(
+      service.syncConfiguredTenants({
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
+      }),
+    ).resolves.toEqual({
+      tenants: 2,
+      results: [internalResult],
+      skipped: 1,
+      skips: [
+        expect.objectContaining({
+          status: 'SKIPPED',
+          tenantId: 'tenant-pilot',
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          note: expect.stringContaining(
+            'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+          ) as string,
+        }),
+      ],
+    });
+
+    expect(syncTenantById).toHaveBeenCalledTimes(1);
+    expect(syncTenantById).toHaveBeenCalledWith(
+      'tenant-internal',
+      {
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
+      },
+      'OUTBOUND',
+    );
+    expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { id: true, customerStage: true },
+      }),
+    );
+  });
+
+  it('keeps an authenticated manual foundation sync available for an external tenant', async () => {
+    tenantExecutionAdmissionService.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    langameSettingsService.resolveTenantAccess.mockResolvedValueOnce({
+      apiKey: 'api-key',
+      sources: [],
+    });
+
+    await expect(
+      service.syncTenantById('tenant-pilot', {
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
+      }),
+    ).resolves.toMatchObject({
+      tenantId: 'tenant-pilot',
+      sources: 0,
+      failedSources: 0,
+    });
+
+    expect(prisma.guestDataProfileRun.updateMany).toHaveBeenCalled();
+    expect(langameSettingsService.resolveTenantAccess).toHaveBeenCalledWith(
+      'tenant-pilot',
+    );
   });
 
   it('reconciles a complete guest snapshot through the identity resolver', async () => {

@@ -1,4 +1,4 @@
-import { TenantLifecycleStatus } from '@prisma/client';
+import { TenantCustomerStage, TenantLifecycleStatus } from '@prisma/client';
 import type { GuestGameEffectMaterializeResult } from './guest-gamification.service';
 import { GuestGameRewardMaterializerSchedulerService } from './guest-game-reward-materializer-scheduler.service';
 
@@ -25,6 +25,7 @@ function tenant(
     id: 'tenant-1',
     slug: 'demo',
     status: TenantLifecycleStatus.ACTIVE,
+    customerStage: TenantCustomerStage.INTERNAL,
     users: [
       {
         id: 'user-1',
@@ -216,6 +217,36 @@ describe('GuestGameRewardMaterializerSchedulerService', () => {
     expect(scheduler.getRuntimeStatus().lastFinishedAt).toEqual(
       expect.any(String),
     );
+  });
+
+  it('skips an external tenant before materializer claims', async () => {
+    const { scheduler, gamification } = createScheduler(
+      {
+        GUEST_GAME_REWARD_MATERIALIZER_ENABLED: 'true',
+        GUEST_GAME_REWARD_MATERIALIZER_TENANT_SLUG: 'pilot',
+      },
+      [
+        tenant({
+          id: 'tenant-pilot',
+          slug: 'pilot',
+          customerStage: TenantCustomerStage.PILOT,
+        }),
+      ],
+    );
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      tenants: [{ tenantId: 'tenant-pilot', status: 'SKIPPED' }],
+    });
+    expect(result?.tenants[0]?.reason).toContain(
+      'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+    );
+    expect(gamification.materializeRewardIntents).not.toHaveBeenCalled();
+    expect(gamification.materializeRewardEffects).not.toHaveBeenCalled();
   });
 
   it('requires an explicit opt-in before processing all tenants', async () => {

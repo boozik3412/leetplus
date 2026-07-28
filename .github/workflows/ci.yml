@@ -106,6 +106,9 @@ jobs:
       - name: Run tenant execution admission tests
         run: pnpm --filter api test:ci:tenant-execution
 
+      - name: Run background execution containment tests
+        run: pnpm --filter api test:ci:background-execution
+
       - name: Run full API test suite
         run: pnpm --filter api test:ci
 

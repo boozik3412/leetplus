@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, TenantCustomerStage } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 
 const DEFAULT_RAW_RETENTION_DAYS = 365;
 const DEFAULT_DERIVED_RETENTION_DAYS = 3 * 365;
@@ -29,21 +34,53 @@ export class GuestGameDataRetentionService {
 
   async runAll(options: { now?: Date; liveRequested?: boolean } = {}) {
     const now = options.now ?? new Date();
-    await this.recoverStaleRewardWalletOpeningBatches(now);
-    await this.expireOrphanRewardClaimBatches(now);
+    const tenants = await this.prisma.tenant.findMany({
+      select: { id: true, customerStage: true },
+    });
+    const executionByTenant = new Map(
+      tenants.map((tenant) => [
+        tenant.id,
+        evaluateTenantBackgroundExecutionPolicy({
+          stage: tenantBackgroundStageForCustomerStage(tenant.customerStage),
+          jobKind: 'GUEST_GAME_DATA_RETENTION',
+        }),
+      ]),
+    );
+    const executableTenantIds = tenants
+      .filter((tenant) => executionByTenant.get(tenant.id)?.allowed === true)
+      .map((tenant) => tenant.id);
+
+    await this.recoverStaleRewardWalletOpeningBatches(now, executableTenantIds);
+    await this.expireOrphanRewardClaimBatches(now, executableTenantIds);
     const walletCleanup = {
-      deleted: await this.deleteExpiredRewardWalletItemBatches(now),
+      deleted: await this.deleteExpiredRewardWalletItemBatches(
+        now,
+        executableTenantIds,
+      ),
     };
-    const [tenants, policies] = await Promise.all([
-      this.prisma.tenant.findMany({ select: { id: true } }),
-      this.prisma.guestGameDataRetentionPolicy.findMany(),
-    ]);
+    const policies =
+      executableTenantIds.length > 0
+        ? await this.prisma.guestGameDataRetentionPolicy.findMany({
+            where: { tenantId: { in: executableTenantIds } },
+          })
+        : [];
     const policyByTenant = new Map(
       policies.map((policy) => [policy.tenantId, policy]),
     );
     const results: Array<Record<string, unknown> & { status: string }> = [];
 
     for (const tenant of tenants) {
+      const executionDecision = executionByTenant.get(tenant.id);
+      if (!executionDecision?.allowed) {
+        results.push({
+          tenantId: tenant.id,
+          status: 'SKIPPED',
+          reason: executionDecision
+            ? tenantBackgroundExecutionNote(executionDecision)
+            : 'Background execution policy decision is unavailable.',
+        });
+        continue;
+      }
       results.push(
         await this.runTenant({
           tenantId: tenant.id,
@@ -320,12 +357,22 @@ export class GuestGameDataRetentionService {
     );
   }
 
-  private async deleteExpiredRewardWalletItemBatches(cutoff: Date) {
+  private async deleteExpiredRewardWalletItemBatches(
+    cutoff: Date,
+    tenantIds: readonly string[],
+  ) {
+    if (tenantIds.length === 0) {
+      return 0;
+    }
     let deleted = 0;
     let cursor: { expiresAt: Date; id: string } | null = null;
     for (let batch = 0; batch < this.maxBatches(); batch += 1) {
       const rows = await this.prisma.guestGameRewardWalletItem.findMany({
         where: {
+          tenantId: { in: [...tenantIds] },
+          tenant: {
+            customerStage: TenantCustomerStage.INTERNAL,
+          },
           status: { in: ['PENDING', 'CLAIMED'] },
           AND: [
             { expiresAt: { lte: cutoff } },
@@ -621,11 +668,21 @@ export class GuestGameDataRetentionService {
     return deleted;
   }
 
-  private async expireOrphanRewardClaimBatches(cutoff: Date) {
+  private async expireOrphanRewardClaimBatches(
+    cutoff: Date,
+    tenantIds: readonly string[],
+  ) {
+    if (tenantIds.length === 0) {
+      return 0;
+    }
     let expired = 0;
     for (let batch = 0; batch < this.maxBatches(); batch += 1) {
       const rows = await this.prisma.guestGameReward.findMany({
         where: {
+          tenantId: { in: [...tenantIds] },
+          tenant: {
+            customerStage: TenantCustomerStage.INTERNAL,
+          },
           status: 'APPROVED',
           claimRequired: true,
           deliveryRequestedAt: null,
@@ -725,7 +782,13 @@ export class GuestGameDataRetentionService {
     return expired;
   }
 
-  private async recoverStaleRewardWalletOpeningBatches(now: Date) {
+  private async recoverStaleRewardWalletOpeningBatches(
+    now: Date,
+    tenantIds: readonly string[],
+  ) {
+    if (tenantIds.length === 0) {
+      return 0;
+    }
     const staleBefore = new Date(
       now.getTime() - REWARD_WALLET_OPENING_STALE_MS,
     );
@@ -733,6 +796,10 @@ export class GuestGameDataRetentionService {
     for (let batch = 0; batch < this.maxBatches(); batch += 1) {
       const rows = await this.prisma.guestGameRewardWalletItem.findMany({
         where: {
+          tenantId: { in: [...tenantIds] },
+          tenant: {
+            customerStage: TenantCustomerStage.INTERNAL,
+          },
           kind: 'LOOT_BOX_ENTITLEMENT',
           status: 'OPENING',
           updatedAt: { lte: staleBefore },

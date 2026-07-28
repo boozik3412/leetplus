@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.13                                         |
+| Версия           | 1.14                                         |
 | Дата             | 28.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -107,7 +107,10 @@ enterprise-isolation option и не сокращает shared gates.
     persisted stage/trial/profile, Platform Admin CAS, runtime admission,
     shared provisioning/revoke candidate, owner onboarding и точный остаток
     до dedicated external activation.
-22. [Initial OWNER identity and activation](./initial-owner-identity-and-activation.md) —
+22. [Background execution containment](./background-execution-containment.md) —
+    authoritative registry из 17 job kinds, временный `INTERNAL` compatibility
+    lane, fail-closed external deny и точные ограничения до durable fencing.
+23. [Initial OWNER identity and activation](./initial-owner-identity-and-activation.md) —
     shell-only provisioning, canonical email claim, encrypted mail outbox,
     persisted release gates, activation/suspend state machine и обязательная
     concurrency/effect-fencing matrix.
@@ -153,6 +156,17 @@ enterprise-isolation option и не сокращает shared gates.
   provider.
   Durable lease/reclaim для delivery/общего Langame sync, public
   guest/Telegram identity routes, files и strict suspend/drain ещё pending;
+- background containment candidate: authoritative registry фиксирует 17 job
+  kinds; `INTERNAL` временно сохраняет legacy execution, а
+  `PILOT/BETA/LIVE` допускает только revision-fenced report SMTP и bonus-ledger
+  Langame effect. Остальные 15 scheduled/AUTO paths fail-closed пропускаются
+  до credentials/provider/защищённой business mutation; детерминированная
+  audit-запись `SKIPPED`/`BLOCKED` разрешена. Оба разрешённых effect path сами
+  проверяют registry. Это не durable suspend/drain fence; подробности и
+  ограничения зафиксированы в checkpoint. Локальный gate:
+  `15 suites / 665 tests`; полный API regression:
+  `96 suites / 1873 passed / 2 todo`; подробности:
+  [checkpoint](./background-execution-containment.md);
 - populated migration rehearsal candidate: обязательный CI создаёт две
   disposable PostgreSQL 16 test-БД, поднимает exact schema `1..163` с
   tenant/report-run/bonus-ledger fixtures и проверяет upgrade `164`,

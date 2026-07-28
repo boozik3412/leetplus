@@ -427,8 +427,9 @@ function createService(
       reasonCode: 'ALLOWED',
       failedRequirement: null,
       entitlementProfileRevision: 1,
-      customerStage: 'PILOT',
-      internalEntitlementBypass: false,
+      executionRevision: 1,
+      customerStage: 'INTERNAL',
+      internalEntitlementBypass: true,
     }),
   };
 
@@ -18382,6 +18383,86 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('blocks a real provider send for an external tenant until delivery is revision-fenced', async () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
+        'https://max-provider.example/send';
+      process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+      const { service, prisma, tenantExecutionAdmission } = createService();
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('background policy must block provider'));
+      const maxRow = deliveryRow({
+        channel: 'MAX',
+        channelIdentityMasked: 'max:***',
+        profile: {
+          id: 'profile-1',
+          displayName: 'Guest One',
+          contactMasked: '+7 *** **-11',
+          telegramIdentity: null,
+          maxIdentity: 'max:user-123',
+          xp: 120,
+          level: 2,
+        },
+      });
+
+      prisma.guestGameDelivery.findMany.mockResolvedValue([maxRow]);
+      tenantExecutionAdmission.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: user.tenantId,
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        entitlementProfileRevision: 5,
+        executionRevision: 5,
+        customerStage: 'PILOT',
+        internalEntitlementBypass: false,
+      });
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+      jest.spyOn(service, 'getDeliveries').mockResolvedValue([]);
+
+      const result = await service.dispatchDeliveries(user, {
+        dryRun: false,
+        channels: ['MAX'],
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+        user,
+        'delivery-1',
+        'reward-1',
+        expect.objectContaining({
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: 'READY',
+          toStatus: 'READY',
+          channel: 'MAX',
+          note: expect.stringContaining(
+            'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+          ),
+        }),
+      );
+      expect(result).toMatchObject({
+        dryRun: false,
+        checked: 1,
+        sent: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: 1,
+        items: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            rewardId: 'reward-1',
+            status: 'BLOCKED',
+            note: expect.stringContaining(
+              'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+            ),
+          }),
+        ],
+      });
+    });
+
     it('sends MAX delivery through generic provider when env and canary are explicitly enabled', async () => {
       process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
@@ -18719,8 +18800,9 @@ describe('GuestGamificationService', () => {
                 reasonCode: 'ALLOWED',
                 failedRequirement: null,
                 entitlementProfileRevision: 3,
-                customerStage: 'PILOT',
-                internalEntitlementBypass: false,
+                executionRevision: 3,
+                customerStage: 'INTERNAL',
+                internalEntitlementBypass: true,
               },
         ),
       );
@@ -18774,6 +18856,89 @@ describe('GuestGamificationService', () => {
             tenantId: 'tenant-admitted',
             tenantSlug: 'admitted',
             status: 'PROCESSED',
+          }),
+        ],
+      });
+    });
+
+    it('skips an admitted external tenant before scheduled delivery dispatch', async () => {
+      const { service, prisma, tenantExecutionAdmission } = createService();
+      const dispatch = jest.spyOn(service, 'dispatchDeliveries');
+      prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+      tenantExecutionAdmission.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: user.tenantId,
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        entitlementProfileRevision: 6,
+        executionRevision: 6,
+        customerStage: 'BETA',
+        internalEntitlementBypass: false,
+      });
+
+      const result = await service.runDeliveryDispatchScheduled({
+        dryRun: true,
+      });
+
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        checkedTenants: 1,
+        processedTenants: 0,
+        skippedTenants: 1,
+        tenants: [
+          expect.objectContaining({
+            tenantId: user.tenantId,
+            status: 'SKIPPED',
+            reason: expect.stringContaining(
+              'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+            ),
+            result: null,
+          }),
+        ],
+      });
+    });
+
+    it('skips an admitted external tenant before scheduled snapshot processing', async () => {
+      const { service, prisma, tenantExecutionAdmission } = createService();
+      const runPipeline = jest.spyOn(service, 'runSnapshotPipeline');
+      prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+      tenantExecutionAdmission.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: user.tenantId,
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        entitlementProfileRevision: 7,
+        executionRevision: 7,
+        customerStage: 'PILOT',
+        internalEntitlementBypass: false,
+      });
+
+      const result = await service.runSnapshotPipelineScheduled({
+        dryRunOnly: false,
+      });
+
+      expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledWith(
+        user.tenantId,
+        [
+          {
+            module: TenantModule.GAMIFICATION,
+            action: 'WRITE',
+          },
+        ],
+      );
+      expect(runPipeline).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        checkedTenants: 1,
+        processedTenants: 0,
+        skippedTenants: 1,
+        tenants: [
+          expect.objectContaining({
+            tenantId: user.tenantId,
+            status: 'SKIPPED',
+            reason: expect.stringContaining(
+              'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+            ),
+            result: null,
           }),
         ],
       });
@@ -18847,6 +19012,37 @@ describe('GuestGamificationService', () => {
         items: [],
         note:
           'Tenant execution admission denied: TENANT_INACTIVE (GAMIFICATION:OUTBOUND).',
+      });
+    });
+
+    it('returns an empty deterministic bot pull for an admitted external tenant', async () => {
+      const { service, prisma, tenantExecutionAdmission } = createService();
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      tenantExecutionAdmission.evaluate.mockResolvedValue({
+        allowed: true,
+        tenantId: user.tenantId,
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        entitlementProfileRevision: 8,
+        executionRevision: 8,
+        customerStage: 'LIVE',
+        internalEntitlementBypass: false,
+      });
+
+      const result = await service.pullBotDeliveries({
+        tenantSlug: user.tenantSlug,
+        channels: 'telegram',
+      });
+
+      expect(prisma.guestGameDelivery.findMany).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note: expect.stringContaining(
+          'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+        ),
       });
     });
 
@@ -19237,6 +19433,53 @@ describe('GuestGamificationService supplemental pipeline', () => {
     updatedAt: new Date('2026-07-15T10:00:00.000Z'),
     rawRecordId: 'raw-1',
   };
+
+  it('skips an admitted external tenant before supplemental mutations', async () => {
+    const { service, prisma, tenantExecutionAdmission } = createService();
+    prisma.tenant.findMany.mockResolvedValue([scheduledTenantRow()]);
+    tenantExecutionAdmission.evaluate.mockResolvedValue({
+      allowed: true,
+      tenantId: user.tenantId,
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      entitlementProfileRevision: 9,
+      executionRevision: 9,
+      customerStage: 'BETA',
+      internalEntitlementBypass: false,
+    });
+
+    const result = await service.runSupplementalPipelineScheduled({
+      mode: 'LIVE',
+      factTypes: ['BALANCE_TOPUP'],
+      limit: 1,
+    });
+
+    expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledWith(
+      user.tenantId,
+      [
+        {
+          module: TenantModule.GAMIFICATION,
+          action: 'WRITE',
+        },
+      ],
+    );
+    expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      tenants: [
+        expect.objectContaining({
+          tenantId: user.tenantId,
+          status: 'SKIPPED',
+          reason: expect.stringContaining(
+            'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+          ),
+        }),
+      ],
+    });
+  });
 
   it('evaluates a selected-club domain top-up and fails closed for another domain', async () => {
     const { service, prisma } = createService();

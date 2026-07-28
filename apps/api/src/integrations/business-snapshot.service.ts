@@ -1,13 +1,15 @@
-import { Injectable } from '@nestjs/common';
-import {
-  Prisma,
-  TenantModule,
-  type BusinessSnapshotRun,
-} from '@prisma/client';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma, TenantModule, type BusinessSnapshotRun } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import type { TenantExecutionAction } from '../tenancy/tenant-execution-policy.service';
+import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 
 export type BusinessSnapshotType =
   | 'REVENUE'
@@ -172,7 +174,23 @@ export class BusinessSnapshotService {
     query: BusinessSnapshotRunQuery,
     executionAction: TenantExecutionAction = 'WRITE',
   ): Promise<BusinessSnapshotRunResult> {
-    await this.assertExecutionAllowed(tenantId, executionAction);
+    const admission = await this.assertExecutionAllowed(
+      tenantId,
+      executionAction,
+    );
+    if (executionAction === 'OUTBOUND') {
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: 'LANGAME_BUSINESS_SNAPSHOT',
+      });
+      if (!backgroundExecution.allowed) {
+        throw new ServiceUnavailableException({
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          message: tenantBackgroundExecutionNote(backgroundExecution),
+        });
+      }
+    }
+
     const startedAt = new Date();
     const period = this.resolvePeriod(query);
     const types = this.resolveTypes(query.type);

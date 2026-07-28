@@ -12,6 +12,10 @@ import {
 } from './reports-digest.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
 
 type DigestSchedule = {
   type: ReportDigestType;
@@ -130,6 +134,29 @@ export class ReportsDigestSchedulerService
           executionRevision: permitAcquisition.decision.executionRevision,
         },
       });
+      if (permitAcquisition.decision.allowed) {
+        const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+          stage: tenantBackgroundStageForCustomerStage(
+            permitAcquisition.decision.customerStage,
+          ),
+          jobKind: 'REPORT_DIGEST_SMTP',
+        });
+        if (!backgroundExecution.allowed) {
+          await this.prisma.reportDigestScheduleRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'SKIPPED',
+              sentCount: 0,
+              completedAt: new Date(),
+              errorMessage: backgroundExecution.reasonCode,
+            },
+          });
+          this.logger.warn(
+            `Skipped ${type} report digest for ${tenant.slug}: ${backgroundExecution.reasonCode}`,
+          );
+          return;
+        }
+      }
       const result = await this.reportsDigestService.sendScheduledDigests(
         { type },
         { tenantId: tenant.id, permitAcquisition },

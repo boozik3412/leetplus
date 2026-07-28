@@ -18,6 +18,12 @@ import {
   type TenantExecutionPermit,
   type TenantExecutionRequirement,
 } from '../tenancy/tenant-execution-admission.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundExecutionPolicyDecision,
+} from '../tenancy/tenant-background-execution-policy';
 
 const langameBalancePhonePath = '/guests/balance/phone';
 const langameBalancePhoneMasterPath = `/master_api${langameBalancePhonePath}`;
@@ -607,10 +613,6 @@ export class GuestBonusLedgerService {
     const config = this.resolveConfig(dto);
     const shouldQueue =
       !config.canary && booleanValue(dto.queueApprovedRewards, true);
-    const queued =
-      shouldQueue && !config.dryRun
-        ? await this.queueApprovedRewards(user, dto)
-        : null;
 
     if (config.dryRun) {
       const preview = await this.previewPendingEntries(user.tenantId, config);
@@ -621,7 +623,7 @@ export class GuestBonusLedgerService {
         dryRun: true,
         canary: config.canary,
         ready: config.ready,
-        queued,
+        queued: null,
         checked: preview.length,
         confirmed: 0,
         failed: 0,
@@ -641,6 +643,60 @@ export class GuestBonusLedgerService {
       };
     }
 
+    const permitAcquisition = await this.tenantExecutionAdmission.acquirePermit(
+      user.tenantId,
+      bonusLedgerOutboundRequirements,
+    );
+    if (!permitAcquisition.permit) {
+      const status = await this.getStatus(user, dto);
+
+      return {
+        mode: config.mode,
+        dryRun: false,
+        canary: config.canary,
+        ready: config.ready,
+        queued: null,
+        checked: 0,
+        confirmed: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: status.pending + status.failed,
+        items: [],
+        status,
+        note: tenantExecutionAdmissionNote(permitAcquisition.decision),
+      };
+    }
+
+    const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+      stage: tenantBackgroundStageForCustomerStage(
+        permitAcquisition.decision.customerStage,
+      ),
+      jobKind: 'GUEST_BONUS_LEDGER_LANGAME',
+    });
+    if (!backgroundExecution.allowed) {
+      const status = await this.getStatus(user, dto);
+
+      return {
+        mode: config.mode,
+        dryRun: false,
+        canary: config.canary,
+        ready: config.ready,
+        queued: null,
+        checked: 0,
+        confirmed: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: status.pending + status.failed,
+        items: [],
+        status,
+        note: tenantBackgroundExecutionNote(backgroundExecution),
+      };
+    }
+
+    const queued = shouldQueue
+      ? await this.queueApprovedRewards(user, dto)
+      : null;
+
     if (!config.ready) {
       const status = await this.getStatus(user, dto);
 
@@ -658,30 +714,6 @@ export class GuestBonusLedgerService {
         items: [],
         status,
         note: 'Langame write API для бонусов не включен: ledger не был claim-нут, статусы не изменены.',
-      };
-    }
-
-    const permitAcquisition = await this.tenantExecutionAdmission.acquirePermit(
-      user.tenantId,
-      bonusLedgerOutboundRequirements,
-    );
-    if (!permitAcquisition.permit) {
-      const status = await this.getStatus(user, dto);
-
-      return {
-        mode: 'READY',
-        dryRun: false,
-        canary: config.canary,
-        ready: true,
-        queued,
-        checked: 0,
-        confirmed: 0,
-        failed: 0,
-        skipped: 0,
-        blocked: status.pending + status.failed,
-        items: [],
-        status,
-        note: tenantExecutionAdmissionNote(permitAcquisition.decision),
       };
     }
 
@@ -1717,6 +1749,31 @@ export class GuestBonusLedgerService {
         };
       }
 
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(
+          outboundAdmission.customerStage,
+        ),
+        jobKind: 'GUEST_BONUS_LEDGER_LANGAME',
+      });
+      if (!backgroundExecution.allowed) {
+        await this.returnDispatchingEntryAfterBackgroundExecutionDenial(
+          actorUserId,
+          sourcedEntry,
+          backgroundExecution,
+          dispatchLockedAt,
+        );
+
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: tenantBackgroundExecutionNote(backgroundExecution),
+        };
+      }
+
       const ownsDispatch = await this.ownsCurrentDispatch(
         sourcedEntry,
         dispatchLockedAt,
@@ -1817,6 +1874,36 @@ export class GuestBonusLedgerService {
         nextAttemptAt: null,
         errorCode: 'TENANT_EXECUTION_NOT_ADMITTED',
         errorMessage: truncate(tenantExecutionAdmissionNote(admission), 1000),
+      },
+    });
+  }
+
+  private async returnDispatchingEntryAfterBackgroundExecutionDenial(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    decision: TenantBackgroundExecutionPolicyDecision,
+    dispatchLockedAt: Date,
+  ): Promise<void> {
+    await this.prisma.guestBonusLedgerEntry.updateMany({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: 'DISPATCHING',
+        attempts: entry.attempts,
+        claimGeneration: entry.claimGeneration,
+        lockedAt: dispatchLockedAt,
+        executionRevision: entry.executionRevision,
+      },
+      data: {
+        status: 'PENDING',
+        processedByUserId: actorUserId,
+        attempts: { decrement: 1 },
+        lockedAt: null,
+        processedAt: null,
+        failedAt: null,
+        nextAttemptAt: null,
+        errorCode: 'BACKGROUND_EXECUTION_NOT_ADMITTED',
+        errorMessage: truncate(tenantBackgroundExecutionNote(decision), 1000),
       },
     });
   }

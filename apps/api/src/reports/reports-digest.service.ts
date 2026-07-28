@@ -15,6 +15,12 @@ import {
   TenantExecutionAdmissionService,
   type TenantExecutionPermitAcquisition,
 } from '../tenancy/tenant-execution-admission.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundExecutionPolicyDecision,
+  type TenantBackgroundExecutionPolicyReasonCode,
+} from '../tenancy/tenant-background-execution-policy';
 import type {
   ReportDigestType,
   SendReportDigestEmailDto,
@@ -42,6 +48,7 @@ type ScheduledDigestSkippedResult = {
   recipientEmail: string;
   reasonCode:
     | TenantExecutionAdmissionDecision['reasonCode']
+    | TenantBackgroundExecutionPolicyReasonCode
     | 'CAPABILITY_EXPORT_REPORTS_REQUIRED'
     | 'RECIPIENT_AUTHORITY_REVOKED';
   failedRequirement: TenantExecutionAdmissionDecision['failedRequirement'];
@@ -268,6 +275,22 @@ export class ReportsDigestService {
         continue;
       }
 
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(
+          effectAdmission.customerStage,
+        ),
+        jobKind: 'REPORT_DIGEST_SMTP',
+      });
+      if (!backgroundExecution.allowed) {
+        skippedResults.push(
+          this.toBackgroundExecutionSkippedResult(
+            freshRecipient,
+            backgroundExecution,
+          ),
+        );
+        continue;
+      }
+
       await this.sendDigestEmail(freshRecipient.email, digest);
       results.push({
         tenantSlug: freshUser.tenantSlug,
@@ -460,6 +483,20 @@ export class ReportsDigestService {
       tenantSlug: recipient.tenant.slug,
       recipientEmail: recipient.email,
       reasonCode: 'CAPABILITY_EXPORT_REPORTS_REQUIRED',
+      failedRequirement: null,
+    };
+  }
+
+  private toBackgroundExecutionSkippedResult(
+    recipient: Pick<ScheduledDigestRecipient, 'tenantId' | 'email' | 'tenant'>,
+    decision: TenantBackgroundExecutionPolicyDecision,
+  ): ScheduledDigestSkippedResult {
+    return {
+      status: 'SKIPPED',
+      tenantId: recipient.tenantId,
+      tenantSlug: recipient.tenant.slug,
+      recipientEmail: recipient.email,
+      reasonCode: decision.reasonCode,
       failedRequirement: null,
     };
   }

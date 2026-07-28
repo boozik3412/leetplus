@@ -1,5 +1,11 @@
 import type { TenantExecutionAdmissionDecision } from '../tenancy/tenant-execution-admission.service';
 
+export const BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE =
+  'BACKGROUND_EXECUTION_FENCE_PENDING' as const;
+
+export type BackgroundExecutionFencePendingReasonCode =
+  typeof BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE;
+
 export type LangameClub = {
   id: number;
   name: string;
@@ -602,7 +608,9 @@ export type LangameScheduledSyncResult = {
   skips: {
     status: 'SKIPPED';
     tenantId: string;
-    reasonCode: TenantExecutionAdmissionDecision['reasonCode'];
+    reasonCode:
+      | TenantExecutionAdmissionDecision['reasonCode']
+      | BackgroundExecutionFencePendingReasonCode;
     failedRequirement: TenantExecutionAdmissionDecision['failedRequirement'];
   }[];
 };

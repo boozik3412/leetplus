@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.5                                                        |
+| Версия     | 1.6                                                        |
 | Дата       | 28.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -232,6 +232,11 @@ actors: A-network, A-store1, A-store2, B-owner, B-store1
 
 ## G. Shared workers и Telegram
 
+- [x] Временный authoritative registry перечисляет все 17 проверенных job
+      kinds: для external stage разрешены только два revision-fenced effect
+      path, остальные 15 fail-closed запрещены. Это containment evidence, а не
+      закрытие durable worker/suspend пунктов ниже:
+      [checkpoint](./background-execution-containment.md).
 - [ ] Каждый job получает explicit tenant/store system identity.
 - [ ] All-tenant iteration не использует общий user/service token.
 - [ ] Durable lease/fencing не допускает двойного scheduler ownership.

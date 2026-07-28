@@ -588,4 +588,43 @@ describe('ReportsDigestService tenant execution admission', () => {
     expect(reportsService.getOperationalReport).toHaveBeenCalledTimes(1);
     expect(mailService.sendReportDigest).not.toHaveBeenCalled();
   });
+
+  it('fails closed at the SMTP effect boundary when background stage is missing', async () => {
+    const recipient = {
+      id: 'user-background-stage-missing',
+      email: 'owner@background-stage-missing.example',
+      fullName: 'Owner with malformed stage',
+      role: UserRole.OWNER,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-background-stage-missing',
+      customRoleId: null,
+      customRole: null,
+      tenant: { slug: 'background-stage-missing' },
+    };
+    const malformedDecision: TenantExecutionAdmissionDecision = {
+      ...allowedDecision(recipient.tenantId),
+      customerStage: null,
+    };
+    prisma.user.findMany.mockResolvedValue([recipient]);
+    prisma.user.findFirst.mockResolvedValue(recipient);
+    admissionService.acquirePermit.mockResolvedValue(
+      acquisitionFor(malformedDecision),
+    );
+    admissionService.evaluatePermit.mockResolvedValue(malformedDecision);
+
+    await expect(service.sendScheduledDigests({})).resolves.toMatchObject({
+      sent: 0,
+      skipped: 1,
+      skippedResults: [
+        {
+          tenantId: recipient.tenantId,
+          reasonCode: 'BACKGROUND_EXECUTION_STAGE_REQUIRED',
+        },
+      ],
+    });
+
+    expect(reportsService.getOperationalReport).toHaveBeenCalledTimes(1);
+    expect(admissionService.evaluatePermit).toHaveBeenCalledTimes(1);
+    expect(mailService.sendReportDigest).not.toHaveBeenCalled();
+  });
 });

@@ -1,11 +1,12 @@
 import type { ConfigService } from '@nestjs/config';
-import { TenantModule } from '@prisma/client';
+import { TenantCustomerStage, TenantModule } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import type { BusinessSnapshotService } from './business-snapshot.service';
 import type { GuestDataFoundationService } from './guest-data-foundation.service';
 import { LangameDailySyncService } from './langame-daily-sync.service';
 import type { LangameSyncService } from './langame-sync.service';
+import { BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE } from './langame.types';
 
 type RunnableDailySyncService = {
   runTenantDailySync(input: {
@@ -25,6 +26,10 @@ describe('LangameDailySyncService tenant execution admission', () => {
     const prisma = {
       tenant: {
         findMany: jest.fn(),
+      },
+      dailyDataCoverage: {
+        findUnique: jest.fn(),
+        upsert: jest.fn(),
       },
     };
     const langameSyncService = {
@@ -81,6 +86,7 @@ describe('LangameDailySyncService tenant execution admission', () => {
               tenantId,
               reasonCode: 'ALLOWED',
               failedRequirement: null,
+              customerStage: TenantCustomerStage.INTERNAL,
             },
       ),
     );
@@ -186,6 +192,61 @@ describe('LangameDailySyncService tenant execution admission', () => {
         },
       ],
     });
+    expect(subject.langameSyncService.syncTenantById).not.toHaveBeenCalled();
+    expect(
+      subject.guestDataFoundationService.syncTenantById,
+    ).not.toHaveBeenCalled();
+    expect(
+      subject.businessSnapshotService.runSnapshotsForTenant,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('skips an admitted external tenant before any daily scope or coverage mutation', async () => {
+    const subject = createSubject();
+    subject.prisma.tenant.findMany.mockResolvedValue([
+      { id: 'tenant-pilot', slug: 'pilot' },
+    ]);
+    subject.admissionService.evaluate.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    const runTenantDailySync = jest.spyOn(
+      subject.service as unknown as RunnableDailySyncService,
+      'runTenantDailySync',
+    );
+
+    const result = await subject.service.runDailySync({ date: '2026-07-27' });
+
+    expect(result).toMatchObject({
+      tenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      results: [
+        {
+          tenantId: 'tenant-pilot',
+          status: 'SKIPPED',
+          skipped: true,
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          failedRequirement: null,
+        },
+      ],
+    });
+    expect(result.results[0]?.scopes).toHaveLength(4);
+    for (const scope of result.results[0]?.scopes ?? []) {
+      expect(scope).toMatchObject({
+        status: 'SKIPPED',
+        skipped: true,
+        errorMessage: expect.stringContaining(
+          'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+        ) as string,
+      });
+    }
+
+    expect(runTenantDailySync).not.toHaveBeenCalled();
+    expect(subject.prisma.dailyDataCoverage.upsert).not.toHaveBeenCalled();
     expect(subject.langameSyncService.syncTenantById).not.toHaveBeenCalled();
     expect(
       subject.guestDataFoundationService.syncTenantById,

@@ -42,6 +42,12 @@ import {
   type TenantExecutionAdmissionDecision,
   type TenantExecutionRequirement,
 } from '../tenancy/tenant-execution-admission.service';
+import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+  type TenantBackgroundJobKind,
+} from '../tenancy/tenant-background-execution-policy';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   GuestBonusLedgerSchedulerService,
@@ -159,6 +165,12 @@ const deliveryOutboundRequirements = [
   {
     module: TenantModule.COMMUNICATIONS,
     action: 'OUTBOUND',
+  },
+] as const satisfies readonly TenantExecutionRequirement[];
+const gamificationWriteRequirements = [
+  {
+    module: TenantModule.GAMIFICATION,
+    action: 'WRITE',
   },
 ] as const satisfies readonly TenantExecutionRequirement[];
 const deliveryStatuses = [
@@ -7134,6 +7146,25 @@ export class GuestGamificationService {
         continue;
       }
 
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        tenant.id,
+        gamificationWriteRequirements,
+      );
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAMIFICATION_SNAPSHOT_PIPELINE',
+      );
+      if (backgroundDenialNote) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason: backgroundDenialNote,
+          result: null,
+        });
+        continue;
+      }
+
       const actor = this.pickScheduledPipelineActor(tenant.users);
 
       if (!actor) {
@@ -7236,6 +7267,26 @@ export class GuestGamificationService {
             mode === 'OFF'
               ? 'Supplemental pipeline is disabled.'
               : 'Tenant is not active.',
+          ),
+        );
+        continue;
+      }
+
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        tenant.id,
+        gamificationWriteRequirements,
+      );
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAMIFICATION_SUPPLEMENTAL_PIPELINE',
+      );
+      if (backgroundDenialNote) {
+        results.push(
+          supplementalTenantResult(
+            tenant.id,
+            tenant.slug,
+            'SKIPPED',
+            backgroundDenialNote,
           ),
         );
         continue;
@@ -7773,12 +7824,16 @@ export class GuestGamificationService {
         tenant.id,
         deliveryOutboundRequirements,
       );
-      if (!admission.allowed) {
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAME_DELIVERY_DISPATCH',
+      );
+      if (backgroundDenialNote) {
         tenantResults.push({
           tenantId: tenant.id,
           tenantSlug: tenant.slug,
           status: 'SKIPPED',
-          reason: deliveryExecutionAdmissionNote(admission),
+          reason: backgroundDenialNote,
           result: null,
         });
         continue;
@@ -7850,13 +7905,17 @@ export class GuestGamificationService {
       user.tenantId,
       deliveryOutboundRequirements,
     );
-    if (!admission.allowed) {
+    const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+      admission,
+      'GUEST_GAME_DELIVERY_BOT_PULL',
+    );
+    if (backgroundDenialNote) {
       return {
         checked: 0,
         ready: 0,
         skipped: 0,
         items: [],
-        note: deliveryExecutionAdmissionNote(admission),
+        note: backgroundDenialNote,
       };
     }
 
@@ -11094,8 +11153,12 @@ export class GuestGamificationService {
         user.tenantId,
         deliveryOutboundRequirements,
       );
-      if (!admission.allowed) {
-        const note = deliveryExecutionAdmissionNote(admission);
+      const backgroundDenialNote = tenantBackgroundExecutionDenialNote(
+        admission,
+        'GUEST_GAME_DELIVERY_DISPATCH',
+      );
+      if (backgroundDenialNote) {
+        const note = backgroundDenialNote;
         blocked += 1;
         items.push({
           deliveryId: row.id,
@@ -25206,6 +25269,22 @@ function deliveryExecutionAdmissionNote(
     : '';
 
   return `Tenant execution admission denied: ${decision.reasonCode}${failedRequirement}.`;
+}
+
+function tenantBackgroundExecutionDenialNote(
+  admission: TenantExecutionAdmissionDecision,
+  jobKind: TenantBackgroundJobKind,
+): string | null {
+  if (!admission.allowed) {
+    return deliveryExecutionAdmissionNote(admission);
+  }
+
+  const decision = evaluateTenantBackgroundExecutionPolicy({
+    stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+    jobKind,
+  });
+
+  return decision.allowed ? null : tenantBackgroundExecutionNote(decision);
 }
 
 function deliveryProviderMessage(row: DeliveryRow) {

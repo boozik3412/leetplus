@@ -19,6 +19,11 @@ import {
   TenantExecutionAdmissionService,
 } from '../tenancy/tenant-execution-admission.service';
 import {
+  evaluateTenantBackgroundExecutionPolicy,
+  tenantBackgroundExecutionNote,
+  tenantBackgroundStageForCustomerStage,
+} from '../tenancy/tenant-background-execution-policy';
+import {
   BusinessSnapshotService,
   type BusinessSnapshotRunResult,
 } from './business-snapshot.service';
@@ -27,7 +32,11 @@ import {
   type GuestDataFoundationSyncResult,
 } from './guest-data-foundation.service';
 import { LangameSyncService } from './langame-sync.service';
-import type { LangameSyncResult } from './langame.types';
+import {
+  BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+  type BackgroundExecutionFencePendingReasonCode,
+  type LangameSyncResult,
+} from './langame.types';
 
 const DEFAULT_DAILY_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_DAILY_SYNC_LOCAL_TIME = '04:30';
@@ -57,7 +66,10 @@ type DailySyncTenantResult = {
   date: string;
   status: 'PROCESSED' | 'SKIPPED';
   skipped: boolean;
-  reasonCode: TenantExecutionAdmissionDecision['reasonCode'] | null;
+  reasonCode:
+    | TenantExecutionAdmissionDecision['reasonCode']
+    | BackgroundExecutionFencePendingReasonCode
+    | null;
   failedRequirement:
     | TenantExecutionAdmissionDecision['failedRequirement']
     | null;
@@ -134,6 +146,22 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
             slug: tenant.slug,
             dateInput,
             admission,
+          }),
+        );
+        continue;
+      }
+
+      const backgroundExecution = evaluateTenantBackgroundExecutionPolicy({
+        stage: tenantBackgroundStageForCustomerStage(admission.customerStage),
+        jobKind: 'LANGAME_DAILY_SYNC',
+      });
+      if (!backgroundExecution.allowed) {
+        results.push(
+          this.backgroundExecutionSkippedTenant({
+            tenantId: tenant.id,
+            slug: tenant.slug,
+            dateInput,
+            errorMessage: tenantBackgroundExecutionNote(backgroundExecution),
           }),
         );
         continue;
@@ -261,6 +289,36 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private backgroundExecutionSkippedTenant(input: {
+    tenantId: string;
+    slug: string;
+    dateInput: string;
+    errorMessage: string;
+  }): DailySyncTenantResult {
+    const scopes = [
+      DailyDataCoverageScope.BUSINESS_FACTS,
+      DailyDataCoverageScope.GUEST_FOUNDATION,
+      DailyDataCoverageScope.STAFF_SHIFTS,
+      DailyDataCoverageScope.BUSINESS_SNAPSHOTS,
+    ].map((scope) => ({
+      scope,
+      status: DailyDataCoverageStatus.SKIPPED,
+      skipped: true,
+      errorMessage: input.errorMessage,
+    }));
+
+    return {
+      tenantId: input.tenantId,
+      slug: input.slug,
+      date: input.dateInput,
+      status: 'SKIPPED',
+      skipped: true,
+      reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+      failedRequirement: null,
+      scopes,
+    };
+  }
+
   private async runBusinessFactsScope(input: {
     tenantId: string;
     businessDate: Date;
@@ -282,6 +340,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           mode: 'QUICK',
           trigger: 'AUTO',
         },
+        'LANGAME_DAILY_SYNC',
       );
 
       if (result.failedSources > 0) {

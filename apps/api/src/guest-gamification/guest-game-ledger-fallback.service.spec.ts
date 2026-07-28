@@ -1,4 +1,8 @@
-import { IntegrationProvider, TenantLifecycleStatus } from '@prisma/client';
+import {
+  IntegrationProvider,
+  TenantCustomerStage,
+  TenantLifecycleStatus,
+} from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import * as exactOwnerReconciler from './guest-game-exact-owner-reconciler';
 import { GuestGameLedgerFallbackService } from './guest-game-ledger-fallback.service';
@@ -17,6 +21,7 @@ function tenant() {
     id: 'tenant-1',
     slug: 'tenant-one',
     status: TenantLifecycleStatus.ACTIVE,
+    customerStage: TenantCustomerStage.INTERNAL,
     users: [
       {
         id: 'user-1',
@@ -469,6 +474,35 @@ describe('GuestGameLedgerFallbackService', () => {
       createdRewards: 0,
     });
     expect(prisma.tenant.findMany).not.toHaveBeenCalled();
+    expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
+    expect(gamification.processEvent).not.toHaveBeenCalled();
+  });
+
+  it('skips an external tenant before reading or claiming ledger work', async () => {
+    const { service, prisma, gamification } = createService();
+    prisma.tenant.findMany.mockResolvedValueOnce([
+      {
+        ...tenant(),
+        customerStage: TenantCustomerStage.PILOT,
+      },
+    ]);
+
+    const result = await service.runScheduled({
+      mode: 'SHADOW',
+      tenantId: 'tenant-1',
+    });
+
+    expect(result).toMatchObject({
+      checkedTenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      tenants: [{ tenantId: 'tenant-1', status: 'SKIPPED' }],
+    });
+    expect(result.tenants[0]?.reason).toContain(
+      'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+    );
+    expect(prisma.guestGameMission.findMany).not.toHaveBeenCalled();
+    expect(prisma.guestActivityFact.findMany).not.toHaveBeenCalled();
     expect(gamification.recordRuleDecisions).not.toHaveBeenCalled();
     expect(gamification.processEvent).not.toHaveBeenCalled();
   });

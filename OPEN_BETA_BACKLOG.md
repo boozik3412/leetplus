@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 28.07.2026
-- Версия: 1.36
+- Версия: 1.37
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -2015,6 +2015,50 @@ two-tenant matrix и production-like migration/rollback rehearsal. До закр
 Срок выдачи не определяется датой документа. Текущий плановый ориентир первого
 friendly external club — окно `31.08–07.09.2026`, только если Gate 1MT и Gate 2
 завершены без stop condition; это не обещание даты.
+
+### 5.28. Background execution containment candidate — 28.07.2026
+
+До полной реализации `BETA-MT-008` добавлен временный fail-closed registry для
+17 unattended job kinds. Persisted stages `PILOT/BETA/LIVE` отображаются в
+`EXTERNAL`; отсутствующий/неизвестный stage или job kind отклоняется.
+Текущая сеть `Tenant A/A1..A4` сохраняет legacy-совместимость только в явно
+заданной стадии `INTERNAL`.
+
+Для внешнего tenant сейчас разрешены только два уже доказанных
+revision-fenced effect path:
+
+- `REPORT_DIGEST_SMTP`;
+- `GUEST_BONUS_LEDGER_LANGAME`.
+
+Оба пути теперь сами вызывают registry при scheduler/dispatch admission и на
+fresh effect boundary; bonus-ledger делает это до auto-queue, stale promotion
+и claim. Изменение registry-классификации не игнорируется. Все
+остальные 15 job kinds имеют `EXTERNAL_DENY`. Containment подключён к
+scheduled/AUTO Langame, daily/business/guest-foundation, gamification
+snapshot/supplemental, delivery/bot pull, activity ledger, retention,
+fallback, loot-box recovery, quality monitoring и reward materializer.
+Staff recurring job зарезервирован в registry, но scheduler/all-tenant route
+по-прежнему не смонтированы.
+
+Отдельный CI gate `test:ci:background-execution` фиксирует hard-coded полный
+набор registry keys, unknown-value deny, совместимость `INTERNAL`, deny
+`PILOT/BETA/LIVE`, отсутствие provider/credential/защищённой business mutation
+после denial, допустимую audit-запись `SKIPPED`/`BLOCKED` и повторную проверку
+двух разрешённых effect paths. Последний локальный результат:
+`15 suites / 665 tests`; полный API regression:
+`96 suites / 1873 passed / 2 todo`; tenant-execution lint, production typecheck
+и API build — `PASS`.
+
+Ограничения остаются launch-blocking: это не durable lease/generation fence.
+Stage/revision flip посреди уже начатого `INTERNAL` job, bot provider после
+pull, длинные retention/materializer операции и direct/manual DB entrypoints
+не имеют общего suspend/drain primitive. Activity external jobs могут
+оставаться unclaimed. Migration `165` не создана до remote PostgreSQL 16 PASS
+для populated `163 → 164`. Поэтому `BETA-MT-008` остаётся `В работе`, external
+outbound — `OFF`, owner invite — `NO-GO`.
+
+Полный контракт, матрица job kinds, проверки и следующий порядок:
+[background-execution-containment.md](./docs/open-beta/background-execution-containment.md).
 
 ## 6. Release gates
 

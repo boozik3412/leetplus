@@ -1,4 +1,9 @@
-import { Prisma, TenantModule, UserRole } from '@prisma/client';
+import {
+  Prisma,
+  TenantCustomerStage,
+  TenantModule,
+  UserRole,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -6,7 +11,10 @@ import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-adm
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
-import type { LangameSyncResult } from './langame.types';
+import {
+  BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+  type LangameSyncResult,
+} from './langame.types';
 
 type PrismaMock = {
   tenant: {
@@ -352,12 +360,14 @@ describe('LangameSyncService', () => {
         tenantId: 'tenant-1',
         reasonCode: 'ALLOWED',
         failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
       }),
       assertAllowed: jest.fn().mockResolvedValue({
         allowed: true,
         tenantId: 'tenant-1',
         reasonCode: 'ALLOWED',
         failedRequirement: null,
+        customerStage: TenantCustomerStage.INTERNAL,
       }),
     };
     prisma.product.upsert.mockResolvedValue({
@@ -595,6 +605,7 @@ describe('LangameSyncService', () => {
               tenantId,
               reasonCode: 'ALLOWED',
               failedRequirement: null,
+              customerStage: TenantCustomerStage.INTERNAL,
             },
       ),
     );
@@ -623,10 +634,14 @@ describe('LangameSyncService', () => {
       ],
     });
     expect(syncTenantById).toHaveBeenCalledTimes(1);
-    expect(syncTenantById).toHaveBeenCalledWith('tenant-allowed', {
-      mode: 'QUICK',
-      trigger: 'AUTO',
-    });
+    expect(syncTenantById).toHaveBeenCalledWith(
+      'tenant-allowed',
+      {
+        mode: 'QUICK',
+        trigger: 'AUTO',
+      },
+      'LANGAME_SCHEDULED_SYNC',
+    );
     expect(admission.evaluate).toHaveBeenCalledWith('tenant-denied', [
       { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
       { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
@@ -679,6 +694,42 @@ describe('LangameSyncService', () => {
     }
   });
 
+  it('skips an admitted external tenant before the scheduled child resolves credentials', async () => {
+    prisma.tenant.findMany.mockResolvedValue([{ id: 'tenant-pilot' }]);
+    admission.evaluate.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    const syncTenantById = jest.spyOn(service, 'syncTenantById');
+
+    await expect(
+      service.syncConfiguredTenants({ mode: 'QUICK' }),
+    ).resolves.toMatchObject({
+      tenants: 1,
+      processedTenants: 0,
+      skippedTenants: 1,
+      results: [],
+      skips: [
+        {
+          status: 'SKIPPED',
+          tenantId: 'tenant-pilot',
+          reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+          failedRequirement: null,
+        },
+      ],
+    });
+
+    expect(syncTenantById).not.toHaveBeenCalled();
+    expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
+    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+    for (const method of Object.values(client)) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
   it('rechecks both outbound modules in the scheduled child before credentials and provider calls', async () => {
     admission.assertAllowed.mockRejectedValueOnce(
       new Error('ENTITLEMENT_OUTBOUND_DISABLED'),
@@ -700,5 +751,63 @@ describe('LangameSyncService', () => {
     for (const method of Object.values(client)) {
       expect(method).not.toHaveBeenCalled();
     }
+  });
+
+  it('fences an admitted external AUTO child before credentials, jobs or provider calls', async () => {
+    admission.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+
+    await expect(
+      service.syncTenantById('tenant-pilot', {
+        mode: 'FULL',
+        trigger: 'AUTO',
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      response: {
+        reasonCode: BACKGROUND_EXECUTION_FENCE_PENDING_REASON_CODE,
+        message: expect.stringContaining(
+          'BACKGROUND_EXTERNAL_EXECUTION_DENIED',
+        ) as string,
+      },
+    });
+
+    expect(settings.resolveTenantAccess).not.toHaveBeenCalled();
+    expect(prisma.integrationSyncJob.create).not.toHaveBeenCalled();
+    for (const method of Object.values(client)) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps an authenticated manual sync available for an external tenant', async () => {
+    admission.assertAllowed.mockResolvedValueOnce({
+      allowed: true,
+      tenantId: 'tenant-pilot',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      customerStage: TenantCustomerStage.PILOT,
+    });
+    settings.resolveTenantAccess.mockResolvedValueOnce({
+      apiKey: 'test-key',
+      sources: [],
+    });
+
+    await expect(
+      service.syncTenantById('tenant-pilot', {
+        mode: 'QUICK',
+        trigger: 'MANUAL',
+      }),
+    ).resolves.toMatchObject({
+      tenantId: 'tenant-pilot',
+      sources: 0,
+      failedSources: 0,
+    });
+
+    expect(settings.resolveTenantAccess).toHaveBeenCalledWith('tenant-pilot');
   });
 });

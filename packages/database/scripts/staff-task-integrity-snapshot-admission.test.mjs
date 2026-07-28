@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   BASELINE_LATEST_MIGRATION,
@@ -26,6 +29,7 @@ import {
   SIMPLE_CONSTRAINTS,
 } from "./staff-task-integrity-reconciliation-plan.mjs";
 import { computeNonceBoundDatabaseIdentityDigest } from "./staff-task-integrity-snapshot-authority.mjs";
+import { PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS } from "./staff-task-integrity-snapshot-authority-roots.mjs";
 
 const NOW = new Date("2026-07-27T00:00:00.000Z");
 const HMAC_KEY = "unit-test-snapshot-admission-hmac-key-aaaaaaaa";
@@ -263,6 +267,81 @@ test("remote targets stay NO-GO and production-like authority fails closed", () 
       code: "LEGACY_PRODUCTION_LIKE_AUTHORITY_PROHIBITED",
     },
   );
+});
+
+test("a public-only fixture exercises the isolated positive pinned path", () => {
+  assert.deepEqual(PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS, {});
+  const fixturePath = fileURLToPath(
+    new URL(
+      "./staff-task-integrity-snapshot-pinned-path.fixture.mjs",
+      import.meta.url,
+    ),
+  );
+  const fixtureSource = readFileSync(fixturePath, "utf8");
+  assert.doesNotMatch(
+    fixtureSource,
+    /BEGIN (?:ENCRYPTED )?PRIVATE KEY|createPrivateKey|generateKeyPair|privateKey|\bsign\s*\(|signingSeed/iu,
+  );
+
+  const fixtureEnvironment = {
+    ...process.env,
+    NODE_ENV: "test",
+    NODE_OPTIONS: "",
+    LEETPLUS_PINNED_PATH_FIXTURE_CONFIRM: "run-public-only-pinned-path-fixture",
+  };
+  const preloadResult = spawnSync(
+    process.execPath,
+    [
+      "--no-warnings",
+      "--experimental-test-module-mocks",
+      "--import",
+      pathToFileURL(fixturePath).href,
+      "--input-type=module",
+      "--eval",
+      "process.stdout.write('unexpected-preload-entry-executed')",
+    ],
+    {
+      encoding: "utf8",
+      env: fixtureEnvironment,
+      timeout: 30_000,
+      windowsHide: true,
+    },
+  );
+  assert.notEqual(preloadResult.status, 0);
+  assert.match(preloadResult.stderr, /must be the direct process entrypoint/u);
+  assert.doesNotMatch(
+    preloadResult.stdout,
+    /unexpected-preload-entry-executed|public-only-pinned-path/u,
+  );
+  assert.deepEqual(PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS, {});
+
+  const result = spawnSync(
+    process.execPath,
+    ["--no-warnings", "--experimental-test-module-mocks", fixturePath],
+    {
+      encoding: "utf8",
+      env: fixtureEnvironment,
+      timeout: 30_000,
+      windowsHide: true,
+    },
+  );
+  assert.equal(
+    result.status,
+    0,
+    [result.stdout, result.stderr, result.error?.message]
+      .filter(Boolean)
+      .join("\n"),
+  );
+  assert.deepEqual(JSON.parse(result.stdout), {
+    fixture: "public-only-pinned-path",
+    productionRootRegistryOnDiskEmpty: true,
+    fixtureRootScope: "isolated-child-module-mock",
+    privateSigningMaterialPresent: false,
+    positiveAdmission: true,
+    markerMismatchRejected: true,
+    expiryRejected: true,
+    detachedReportRejected: true,
+  });
 });
 
 test("database marker, public schema, HMAC, expiry, and timeout order are exact", () => {

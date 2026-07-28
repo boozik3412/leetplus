@@ -3,7 +3,8 @@
 | Поле             | Значение                                    |
 | ---------------- | ------------------------------------------- |
 | Статус           | Active implementation package               |
-| Дата             | 27.07.2026                                  |
+| Версия           | 1.2                                         |
+| Дата             | 28.07.2026                                  |
 | Release decision | `NO-GO` до полного Gate 2                   |
 | Владелец         | LeetPlus product / engineering / operations |
 
@@ -125,31 +126,66 @@
   `contentDigest` и timestamp-bound `executionDigest` не являются
   row-stable/CAS authorization. Contract tests, clean real PostgreSQL planner
   и adversarial disposable-clone smoke для неверного FK/index contract прошли.
-- StaffTask snapshot admission
-  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
+- StaffTask snapshot admission schema `v2`
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` —
   `IMPLEMENTED_CANDIDATE`, not deployed. Он принимает только изолированную
   loopback PostgreSQL 16 копию в точном `BASELINE_156` или `EXPAND_162`,
-  сверяет ordered migration names/checksums, exact catalog и отдельную
-  `LOGIN NOINHERIT` роль с SELECT только к девяти таблицам, без write, DDL,
-  TEMP, membership и ownership. Локально подтверждены 16 unit, 36 offline
-  smoke и интегрированный real PostgreSQL 16.14 smoke из 14 сценариев: exact
-  Git blob baseline 156 → ровно шесть migrations → expand 162, а также
-  trigger/privilege/tamper/privacy/cleanup guards. Выполнен только
-  `SYNTHETIC` rehearsal; remote CI и production-like admission не
-  выполнялись.
+  сверяет ordered migration names/checksums, exact Git blob content, catalog,
+  database marker и freshness. Отдельная `LOGIN NOINHERIT` роль получает
+  table-level `SELECT` ровно на восьми разрешённых relations и column-level
+  `SELECT` только на
+  `User(id, tenantId, isPlatformAdmin, isActive, accessScope)`, без
+  table-wide `User SELECT`, write, DDL, TEMP, membership или ownership.
+  Independent verify-only Ed25519 boundary реализована, но pinned public
+  roots намеренно пусты: production-like authority fail-closed и остаётся
+  `NO-GO`. HMAC не заменяет authority; production-like report доверяется
+  только как same-process/non-transferable evidence.
+- Public-only pinned-path test evidence
+  `2341b99937e54cc50d1763a0a794d975816c72ce` —
+  `LOCAL PASS`, remote CI pending. Runtime candidate остаётся
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`. Pre-signed fixture не содержит
+  private key, generation или signing API; production root registry остаётся
+  пустым. Изолированный Node.js 22 child проверяет реальный pinned wrapper,
+  marker/nonce-bound identity, expiry и отказ detached report; admission suite
+  прошла `19/19`. Experimental module mock является `P2` test-infrastructure
+  risk и не превращает fixture в production authority.
 - StaffTask reconciliation proposal dry-run
-  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` —
   `IMPLEMENTED_CANDIDATE`, not deployed. Он работает только внутри
-  `SYNTHETIC EXPAND_162` disposable harness с подписанной provenance, в одной
-  read-only `REPEATABLE READ` transaction и без apply-path. Ровно восемь
-  proposal-кодов могут сформировать pseudonymous
-  `REFERENCE_CLEAR_CANDIDATE`; 29 operator и 6 review кодов остаются только
-  aggregate. Пройдены self-test `20`, unit `14/14` и один positive
-  PostgreSQL predicate в smoke. PostgreSQL fixtures для остальных семи
-  proposal predicates и coalescing остаются P1 до расширения rehearsal.
+  `SYNTHETIC EXPAND_162` disposable harness, в одной read-only
+  `REPEATABLE READ` transaction и без apply-path. Реальный PostgreSQL 16.13
+  smoke прошёл `23` scenarios: все `8` proposal codes дали `8` occurrences и
+  `7` cases, включая coalescing двух last-task причин в один case; пройдены
+  exact parity/cap/privacy/unlinkability и все negative ACL gates. Source data
+  не изменились, временная cluster ACL mutation восстановлена. Planner и
+  proposal report остаются schema `v1`. Exact synthetic database name и
+  `synthetic:` reference — доверенная декларация harness/operator, а не
+  provenance proof, production-like authority или Gate 2 evidence.
 - production-like inventory/planner/proposal dry-run, standalone dry-run,
   reconciliation apply,
   `VALIDATE`, `CONTRACT` и deployment не выполнялись.
+
+Ближайшая последовательность намеренно разделена на независимые решения:
+
+1. зелёные mandatory remote CI checks и independent review для exact
+   test-evidence commit `2341b99937e54cc50d1763a0a794d975816c72ce`;
+2. reviewed Ed25519 root enrollment, protected signer и approved snapshot
+   acquisition; runtime candidate остаётся
+   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`;
+3. отдельно production-like admission: новый state-bound `BASELINE_156`
+   envelope/marker → admission → migrations `157..162` → новый
+   `EXPAND_162` envelope с новым nonce-bound binding → marker rotation →
+   второй admission;
+4. отдельно production-like inventory и aggregate planner;
+5. отдельно production-like row dry-run;
+6. отдельно explicit apply, rollback и доказательство zero-diff;
+7. только после zero blocking — отдельные решения по `VALIDATE`, N-1 window,
+   `CONTRACT` и deployment;
+8. после выполнения всех platform/module prerequisites и отдельного `Gate 2A`
+   explicit `CUTOVER GO` — in-place cutover четырёх `Store` текущей сети
+   внутри одного существующего `Tenant`;
+9. семь стабильных дней internal alpha завершают Gate 2; только затем возможен
+   отдельный `GO` на первый внешний invite-only pilot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный
@@ -193,9 +229,20 @@ credentials, encryption keys и необработанные выгрузки.
 - тот же production-like snapshot до inventory прошёл
   [обязательный admission checkpoint](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
   в `BASELINE_156`, затем после ровно шести migrations — в `EXPAND_162`;
-  подтверждены PostgreSQL 16, exact release manifest/catalog, девять
-  SELECT-only relations, HMAC/artifact/approval/TTL evidence, isolation и
+  для каждого state использован отдельный signed envelope, перед вторым
+  admission DB marker заменён digest нового envelope, а state-specific
+  protected evidence и marker-rotation attestation сохранены;
+  подтверждены PostgreSQL 16, admission schema `v2`, exact release
+  manifest/blob/catalog, database marker/freshness, table-level `SELECT` на
+  восьми разрешённых relations и column-level `SELECT` только на
+  `User(id, tenantId, isPlatformAdmin, isActive, accessScope)`, isolation и
   no-egress;
+- reviewed Ed25519 public root enrolment, protected signer и acquisition
+  evidence завершены до production-like admission; текущий empty-root
+  fail-closed state не засчитывается как Gate 2;
+- HMAC digest/report не используется как authority или provenance;
+  production-like report не передаётся как самостоятельное доказательство,
+  потому что его authority evidence same-process и non-transferable;
 - staff task integrity inventory имеет zero blocking findings; все review-only
   findings имеют owner и принятое решение;
 - aggregate reconciliation planner запущен на том же production-like
@@ -208,7 +255,9 @@ credentials, encryption keys и необработанные выгрузки.
   `proposal` не считается authorization, `contentDigest`/`executionDigest` не
   используются как row-level/CAS token;
 - текущий proposal dry-run candidate не засчитывается как production-like
-  reconciliation: он допускает только подписанную `SYNTHETIC` harness-БД;
+  reconciliation: он допускает только exact-name/ref `SYNTHETIC` harness-БД,
+  а эта классификация является доверенной декларацией operator/harness, не
+  provenance proof;
   отдельные protected production-like row evidence, owner approval,
   locks/recheck, audit и rollback по-прежнему обязательны;
 - adversarial catalog smoke на disposable local/CI clone при сохранении всех

@@ -3,8 +3,8 @@
 | Поле                  | Значение                                                                                                                    |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
-| Версия                | 1.4.0                                                                                                                       |
-| Дата                  | 27.07.2026                                                                                                                  |
+| Версия                | 1.6.0                                                                                                                       |
+| Дата                  | 28.07.2026                                                                                                                  |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
 | Candidate SHA         | `56d615437ecfcb90db252016d3e5b83f3f545578` — not deployed                                                                   |
 | Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)                                            |
@@ -139,9 +139,19 @@ Review-находка не должна маскироваться как док
 3. Выполнить scanner на чистой CI schema; ожидается zero blocking findings.
 4. По
    [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md)
-   отдельно приобрести и восстановить свежий production-like snapshot в
-   loopback clone, пройти `BASELINE_156`, применить только exact migrations
-   `157..162`, затем пройти `EXPAND_162`.
+   зафиксировать public-only pre-signed pinned-path `LOCAL PASS` на test
+   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child; до
+   production-like запуска получить remote CI evidence. Экспериментальный Node
+   22 module mock остаётся P2. Затем отдельным security change выполнить P0
+   reviewed Ed25519 root enrollment и ввести P0 operational signer/approved
+   acquisition/evidence controls. Только после этого отдельно приобрести и
+   восстановить свежий production-like snapshot в loopback clone, подписать
+   отдельный `BASELINE_156` envelope, установить его DB marker и пройти
+   admission. После exact migrations `157..162` выпустить новый state-bound
+   `EXPAND_162` envelope с новым nonce-bound binding, заменить DB marker и
+   пройти второй admission. Baseline envelope/marker не переиспользовать.
+   Текущий пустой production trusted-root registry означает fail-closed
+   `NO-GO`.
 5. Только после успешного `EXPAND_162` admission выполнить scanner на том же
    неизменённом восстановленном snapshot.
 6. Сохранить только aggregate JSON, SHA, время, target label и exit code в
@@ -160,9 +170,12 @@ Review-находка не должна маскироваться как док
    дополнительного конфликтующего FK с другим именем и index с неверным
    порядком колонок; оба обязаны дать `SCHEMA_MISMATCH`/exit `3` до inventory,
    не меняя source database.
-10. Не использовать planner proposal, `contentDigest` или `executionDigest` как
-    authorization. Подготовить отдельный idempotent row-level reconciliation
-    tool с dry-run, обязательным explicit apply, locks/recheck, audit и rollback.
+10. Не использовать planner proposal, synthetic proposal dry-run,
+    `contentDigest` или `executionDigest` как authorization. Реализованный
+    synthetic row-level proposal применяется только в disposable harness.
+    Production-like row dry-run и отдельный idempotent reconciliation apply
+    требуют protected evidence, explicit approval, locks/recheck, audit,
+    rollback и последующего zero-diff.
 11. Повторять scanner/planner после reconciliation до объяснённого zero
     critical diff.
 12. Только затем репетировать отдельный `VALIDATE`; `CONTRACT` выполняется
@@ -239,8 +252,14 @@ constraint-trigger design с concurrency tests.
 release_sha:
 target:
 executed_at:
-snapshot_admission_sha: 7d67333b22f171c6e79f723190647cdd2454b128
+snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
+pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
+snapshot_admission_report_schema_version: 2
 snapshot_admission_state: EXPAND_162
+baseline_authority_evidence_ref:
+baseline_marker_install_attestation_ref:
+expand_authority_evidence_ref:
+expand_marker_rotation_attestation_ref:
 snapshot_admission_decision:
 snapshot_admission_database_identity_digest:
 snapshot_admission_content_digest:
@@ -324,10 +343,21 @@ EXPAND rehearsal теперь использует populated legacy baseline 156
   только последнюю непрерывную серию; production owner должен принять
   семантику или изменить её до использования как release gate.
 
-Синтетический snapshot admission candidate
-`7d67333b22f171c6e79f723190647cdd2454b128` прошёл `16` unit, `34` offline и
-`9` PostgreSQL 16 smoke-сценариев. Production-like acquisition, restore,
-admission и inventory не выполнялись.
+Синтетический snapshot admission evidence boundary
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` прошёл `18` admission unit,
+`9` authority unit, `46` offline checks и `23` PostgreSQL 16.13
+smoke-сценария. Logical allowlist из девяти relations реализован как восемь
+table grants и пять разрешённых колонок `User`; все восемь proposal-кодов дали
+восемь occurrences и семь cases, включая coalescing двух last-task причин в
+один case. Подтверждены parity `10 blocking + 2 review` и cap boundary
+`9 reject / 10 findings`. Admission report использует schema `2`,
+planner/proposal — schema `1`. Trusted-root registry пуст; production-like
+acquisition, root enrollment, restore, admission и inventory не выполнялись.
+Public-only pre-signed pinned-path test имеет отдельный evidence SHA
+`2341b99937e54cc50d1763a0a794d975816c72ce`, повышает admission suite до
+`19/19` и имеет `LOCAL PASS` в isolated child.
+Remote CI evidence pending; experimental Node 22 module mock — P2. Production
+root enrollment, operational signer и approved acquisition остаются P0.
 
 ## 9. Exit criteria
 
@@ -348,6 +378,20 @@ rehearsal.
 
 ## 10. Changelog
 
+- `1.6.0`, 28.07.2026 — runtime admission candidate сохранён на
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; test evidence
+  `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
+  admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в isolated
+  child. Remote CI pending, experimental Node 22 module mock — P2. Production
+  roots пусты; root enrollment/signer/acquisition остаются P0, production-like
+  inventory — `NO-GO`. Два state-bound envelopes и DB marker rotation между
+  `BASELINE_156` и `EXPAND_162` сохранены обязательными.
+- `1.5.0`, 28.07.2026 — связан admission schema v2/evidence boundary
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`: exact Git blobs,
+  column-scoped `User`, Ed25519 verifier/DB marker/freshness и exhaustive
+  synthetic proposal matrix прошли 23 PostgreSQL 16.13 сценария. Реестр
+  trusted roots пуст; production-like acquisition/admission/inventory и apply
+  остаются `NO-GO`.
 - `1.4.0`, 27.07.2026 — snapshot admission сделан обязательным
   production-like prerequisite для inventory/planner; зафиксирован synthetic
   candidate `7d67333b22f171c6e79f723190647cdd2454b128` с `16` unit, `34` offline и

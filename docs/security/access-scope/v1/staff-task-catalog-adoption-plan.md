@@ -1,12 +1,12 @@
 # Staff task templates и recurring rules: AccessScope adoption plan
 
-| Поле           | Значение                                                                                                                      |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.8.0                                                                                                                         |
-| Дата           | 27.07.2026                                                                                                                    |
-| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                          |
-| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                        |
+| Поле           | Значение                                                                                                                                                  |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner, SYNTHETIC proposal dry-run и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
+| Версия         | 1.10.0                                                                                                                                                    |
+| Дата           | 28.07.2026                                                                                                                                                |
+| Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                                                      |
+| Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                                                    |
 
 Документ фиксирует route/action/job inventory для шаблонов и регулярных задач.
 Template CRUD/launch уже реализован отдельным bounded candidate, описанным в
@@ -19,6 +19,9 @@ Aggregate-only классификация будущей reconciliation опис
 [reconciliation plan runbook](./staff-task-integrity-reconciliation-plan-runbook.md).
 Допуск точного Git-bound snapshot перед inventory/planner обязателен по
 [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md).
+Synthetic row-level proposal evidence описан в отдельном
+[proposal dry-run runbook](./staff-task-integrity-reconciliation-proposal-dry-run-runbook.md);
+он не является production-like evidence или apply authorization.
 Scheduler и scheduled all-tenant HTTP не зарегистрированы и всё ещё не
 применяют system execution contract, поэтому весь catalog slice и внешний тест
 остаются `NO-GO`.
@@ -224,19 +227,34 @@ Aggregate-only reconciliation planner реализован candidate
   `contentDigest` и timestamp-bound `executionDigest` не являются row-stable
   checksum или CAS/apply token.
 
-Planner только оценивает объём и классы работы. Row-level evidence,
-idempotent dry-run/apply, locks/recheck, audit, rollback и повторный zero-diff
-остаются отдельным следующим P0.
+Planner только оценивает объём и классы работы. SYNTHETIC row-level proposal
+dry-run schema `1` уже реализован для disposable harness, но не является
+production-like evidence или apply authorization. Production-like row dry-run,
+idempotent apply, locks/recheck, audit, rollback и повторный zero-diff остаются
+отдельным следующим P0.
 
-Snapshot admission реализован candidate
-`7d67333b22f171c6e79f723190647cdd2454b128`. Он допускает только loopback
-disposable clone, точный Git artifact и одно из состояний `BASELINE_156` либо
-`EXPAND_162`; для production-like требует отдельные acquisition/restore
-attestations, TTL, HMAC identity binding и роль с exact `SELECT` только на
-девять разрешённых relations. Синтетическая PostgreSQL 16 репетиция прошла
-`16` unit, `34` offline и `9` database-сценариев. Production-like snapshot этим
-candidate не приобретался и не восстанавливался, поэтому его admission,
-inventory и planner остаются `NO-GO`.
+Snapshot admission evidence boundary зафиксирован на
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`. Он допускает только loopback
+snapshot, точные runtime bytes и migration manifest из Git artifact и одно из
+состояний `BASELINE_156` либо `EXPAND_162`. Logical allowlist содержит девять
+relations, но роль получает table-level `SELECT` только на восемь; для `User`
+разрешены ровно `id`, `tenantId`, `isPlatformAdmin`, `isActive`,
+`accessScope`. Admission report использует schema `2`, planner/proposal —
+schema `1`. Caller HMAC не является production-like authority:
+положительный допуск требует Ed25519 manifest, nonce-bound DB/approval
+evidence и совпадающий DB marker. Trusted-root registry намеренно пуст, поэтому
+production-like admission, inventory и planner остаются fail-closed `NO-GO`.
+Отдельный test evidence
+`2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
+admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в
+изолированном child-процессе. Remote CI evidence ещё pending; используемый
+экспериментальный Node 22 module mock классифицирован как P2. Это тест verifier
+path, а не enrollment production root: reviewed root enrollment, operational
+signer и approved snapshot acquisition остаются P0.
+Синтетическая PostgreSQL 16.13 репетиция прошла 23 database-сценария: восемь
+proposal-кодов дали восемь occurrences и семь cases, включая coalescing двух
+last-task причин; подтверждены parity `10 blocking + 2 review` и cap boundary
+`9 reject / 10 findings`.
 
 ## 5. Обязательная test topology
 
@@ -261,10 +279,19 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
   `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
 - aggregate reconciliation planner contract — pass; clean real PostgreSQL
   schema прошла exact gate `162/latest/0 + 14/14/0/0 + 5/0` и вернула `PASS`;
-- snapshot admission contract — `16` unit и `34` offline checks; staged
-  PostgreSQL 16 smoke прошёл `9` сценариев
-  `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact девять
-  SELECT-relations и негативные privilege/trigger/tamper проверки;
+- snapshot admission contract — `19` admission unit, `9` authority unit и
+  `46` offline smoke checks; staged PostgreSQL 16.13 smoke прошёл `23`
+  сценария `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact восемь
+  table grants + пять `User` columns, admission schema `2`, все восемь
+  proposal-кодов/восемь occurrences/семь cases, coalescing, parity
+  `10 blocking + 2 review`, cap `9 reject / 10 findings` и негативные
+  privilege/trigger/tamper/privacy проверки;
+- public-only pre-signed pinned-path test — `LOCAL PASS` на test evidence
+  `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child; remote CI
+  evidence pending, experimental Node 22 module mock — P2;
+- proposal dry-run contract — schema `1`, unit `14/14`; HMAC-authenticated
+  synthetic provenance, privacy, execution unlinkability и no-apply boundary
+  подтверждены;
 - identity/inventory contract подтверждает HMAC `databaseIdentityDigest`,
   различие evidence между БД/кластерами и отклонение противоречивого
   `inventoryExecuted`;
@@ -293,9 +320,12 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 3. Interactive audit сохраняет реального actor.
 4. Suspended/non-entitled tenant не обрабатывается.
 5. Parent lock/recheck и rollback доказаны real PostgreSQL тестом.
-6. Свежий production-like snapshot прошёл Git-bound admission сначала как
-   `BASELINE_156`, затем после exact migrations `157..162` как `EXPAND_162`;
-   remote target и mutable worktree artifact не использовались.
+6. Свежий production-like snapshot прошёл Git-bound admission сначала с
+   отдельным `BASELINE_156` authority envelope/DB marker, затем после exact
+   migrations `157..162` — с новым `EXPAND_162` envelope, новым nonce-bound
+   binding и заменённым DB marker; обе state-specific protected evidence
+   bundle и marker-rotation attestation сохранены. Remote target, baseline
+   marker reuse и mutable worktree artifact не использовались.
 7. Production-like legacy inventory и reconciliation имеют объяснённый zero
    critical mismatch.
 8. Focused/full CI и production builds зелёные.
@@ -313,6 +343,19 @@ ownership и общий Gate 2.
 
 ## 7. Changelog
 
+- `1.10.0`, 28.07.2026 — runtime candidate сохранён на
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, а тестовый контур зафиксирован
+  отдельным SHA `2341b99937e54cc50d1763a0a794d975816c72ce`: authority `9/9`,
+  admission `19/19`, public-only pre-signed pinned-path `LOCAL PASS` в isolated
+  child. Remote CI evidence pending; experimental Node 22 module mock — P2.
+  Production roots пусты; root enrollment, signer и acquisition остаются P0,
+  production-like прогон и внешний beta — `NO-GO`.
+- `1.9.0`, 28.07.2026 — admission обновлён до schema v2 и evidence boundary
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`: exact runtime Git blobs,
+  column-scoped `User`, Ed25519 manifest/DB marker/freshness и exhaustive
+  synthetic proposal matrix подтверждены 23 PostgreSQL 16.13 сценариями.
+  Trusted roots, operational signer/acquisition и production-like прогон ещё
+  отсутствуют; apply и внешний beta остаются `NO-GO`.
 - `1.8.0`, 27.07.2026 — добавлен обязательный Git-bound snapshot admission
   перед production-like inventory/planner: candidate
   `7d67333b22f171c6e79f723190647cdd2454b128`, состояния `BASELINE_156` и

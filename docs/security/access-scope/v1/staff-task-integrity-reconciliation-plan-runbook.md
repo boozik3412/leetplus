@@ -3,12 +3,13 @@
 | Поле                  | Значение                                                                   |
 | --------------------- | -------------------------------------------------------------------------- |
 | Статус                | `IMPLEMENTED_CANDIDATE`; только read-only planning; не deployed            |
-| Версия                | 1.4.0                                                                      |
-| Дата                  | 27.07.2026                                                                 |
+| Версия                | 1.6.0                                                                      |
+| Дата                  | 28.07.2026                                                                 |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                       |
 | Candidate SHA         | `2c74c663780b3f183be708a01431c22efe57a723` — not deployed                  |
-| Proposal dry-run SHA  | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — SYNTHETIC only; not deployed  |
+| Proposal dry-run SHA  | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — SYNTHETIC only; not deployed  |
 | Report schema version | 1                                                                          |
+| Admission schema      | 2                                                                          |
 | Требуемая DB schema   | 162 migrations; latest `20260727131000_staff_task_integrity_expand`        |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) |
 | Предыдущий этап       | [Integrity inventory](./staff-task-integrity-inventory-runbook.md)         |
@@ -258,36 +259,49 @@ row identifiers в git запрещены.
 ## 8. Безопасная последовательность
 
 1. Зафиксировать exact release/planner SHA и зелёные CI checks.
-2. Отдельно приобрести и восстановить свежий production-like snapshot в
+2. Зафиксировать public-only pre-signed pinned-path `LOCAL PASS` на test
+   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child и до
+   production-like запуска получить remote CI evidence. Экспериментальный Node
+   22 module mock остаётся P2. Отдельным security change выполнить P0 reviewed
+   Ed25519 root enrollment и ввести P0 operational signer/approved
+   acquisition/marker/evidence controls. Пока production roots пусты,
+   остановить процесс в состоянии `NO-GO`.
+3. Отдельно приобрести и восстановить свежий production-like snapshot в
    изолированную loopback БД на exact `BASELINE_156`.
-3. По
+4. По
    [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md)
-   получить `ADMITTED` для `BASELINE_156`; сохранить protected evidence.
-4. Применить только exact migrations `157..162` из того же committed release
+   получить отдельный signed authority envelope/DB marker и `ADMITTED` для
+   `BASELINE_156`; сохранить state-specific protected evidence.
+5. Применить только exact migrations `157..162` из того же committed release
    artifact.
-5. На той же БД, release SHA и database identity получить `ADMITTED` для
-   `EXPAND_162`. Без обоих admission остановить процесс.
-6. Проверить `databaseIdentityMatched=true` и exact schema-first gate:
+6. Для той же БД, release SHA и approved acquisition lineage получить новый
+   `EXPAND_162` authority envelope с новым nonce-bound binding, заменить DB
+   marker его digest и только затем получить `ADMITTED` для `EXPAND_162`.
+   Baseline envelope/marker не переиспользовать. Без обоих admission и
+   protected marker-rotation attestation остановить процесс.
+7. Проверить `databaseIdentityMatched=true` и exact schema-first gate:
    `162/latest/unfinished 0`, `14 composite exact`, `14 simple exact`,
    `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact`,
    `0 index mismatch`. Убедиться, что `inventoryExecuted === schema.ready`, а
    evidence содержит HMAC `databaseIdentityDigest` без raw identity.
-7. Запустить исходный read-only inventory и этот planner с одинаковыми
+8. Запустить исходный read-only inventory и этот planner с одинаковыми
    thresholds; сохранить aggregate evidence и exit code.
-8. Для каждого non-zero кода назначить owner. `proposal` проходит такой же
+9. Для каждого non-zero кода назначить owner. `proposal` проходит такой же
    review, как `operator`, и ничего не применяет автоматически.
-9. В защищённом контуре получить row-level evidence и утвердить решение по
-   каждой строке; raw identifiers не переносить в git.
-10. Не переносить `SYNTHETIC` proposal dry-run в production-like контур: он
-    принимает только подписанную disposable harness provenance и формирует
-    предложения без apply authority.
-11. Для production-like reconciliation реализовать отдельный approved
-    idempotent workflow: protected row evidence, explicit apply, immutable
-    input evidence, row locks/recheck, audit и rollback; затем выполнить
-    отдельный approved apply и повторный zero-diff dry-run.
-12. Повторить inventory и planner; blocking должен быть `0`, review findings
+10. Не переносить `SYNTHETIC` proposal dry-run в production-like контур: его
+    HMAC provenance остаётся harness-only и формирует предложения без apply
+    authority.
+11. До получения production-like row evidence реализовать и утвердить
+    отдельный read-only row dry-run workflow с immutable binding, protected
+    output и owner decisions.
+12. Выполнить production-like row dry-run в защищённом контуре и утвердить
+    решение по каждой строке; raw identifiers не переносить в git.
+13. Отдельным reviewed change реализовать idempotent apply workflow с immutable
+    input evidence, row locks/recheck, audit и rollback; затем отдельным
+    approval выполнить apply и повторный zero-diff dry-run.
+14. Повторить inventory и planner; blocking должен быть `0`, review findings
     должны иметь owner и принятое решение.
-13. Только после этого отдельно репетировать `VALIDATE`; `CONTRACT` и deploy
+15. Только после этого отдельно репетировать `VALIDATE`; `CONTRACT` и deploy
     остаются следующими независимыми release phases.
 
 Production запуск требует отдельного operational approval, backup/restore
@@ -332,21 +346,35 @@ violations и проходят все прежние проверки 14 composi
 compatibility FK, invalid writes, delete policies, immutable parent IDs/tenant
 ownership и Prisma drift.
 
-Snapshot admission candidate
-`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` прошёл `16` unit, `36` offline и
-`14` staged PostgreSQL 16.14 smoke-сценариев с точным переходом
-`BASELINE_156 → 157..162 → EXPAND_162`. Проверялись exact Git blobs, девять
-SELECT-relations, DML/DDL/trigger denial, tamper rejection и cleanup.
+Snapshot admission/proposal candidate
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` использует admission report schema
+`2`; planner и proposal report schemas остаются `1`. Exact logical boundary
+состоит из девяти relations: table-level `SELECT` к восьми таблицам и только
+пять колонок `User` (`id`, `tenantId`, `isPlatformAdmin`, `isActive`,
+`accessScope`). Замороженный порядок получает восемь table locks через
+`LOCK TABLE`, а lock `User` — no-row запросом
+`SELECT "id" FROM ONLY ... WHERE false`.
 
-SYNTHETIC proposal dry-run candidate
-`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` прошёл self-test `20`, unit
-`14/14` и integrated disposable PostgreSQL 16.14 smoke. Он допускает только
-подписанную harness-БД в `SYNTHETIC EXPAND_162`, повторно проверяет
-admission/release/schema/catalog/RLS/privileges в read-only snapshot и
-формирует pseudonymous `REFERENCE_CLEAR_CANDIDATE` только для точных восьми
-proposal-кодов. Все 29 operator + 6 review кодов остаются aggregate-only.
-PostgreSQL smoke содержит один positive proposal predicate; fixtures для
-остальных семи и coalescing остаются P1.
+Integrated disposable PostgreSQL 16.13 smoke прошёл `23` scenarios. Fixture
+matrix покрывает все восемь proposal codes: восемь proposal occurrences
+образуют семь уникальных cases, потому что две last-task причины coalesce.
+Подтверждены aggregate/row parity (`10 blocking occurrences =
+8 proposal + 2 operator`, `2 review`), cap boundary (`9` отклоняет, `10`
+допускает findings), privacy, unlinkability, privilege/RLS/tamper/advisory-lock
+guards и cleanup.
+
+Independent verify-only Ed25519 authority verifier и database marker binding
+реализованы, но pinned roots намеренно пусты. Synthetic HMAC provenance
+остаётся только disposable harness evidence и не заменяет Gate 2 authority.
+До reviewed root enrollment, независимого signer и approved snapshot
+acquisition production-like admission/dry-run fail-closed запрещены.
+
+Отдельный test evidence
+`2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
+admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в isolated
+child. Remote CI evidence pending; experimental Node 22 module mock — P2.
+Production root enrollment, operational signer и approved acquisition остаются
+P0.
 
 Production-like inventory/planner/proposal dry-run, standalone dry-run,
 reconciliation apply,
@@ -359,16 +387,23 @@ Release decision остаётся `NO-GO`.
 release_sha:
 target:
 executed_at:
-snapshot_admission_sha: dee25393ae7bff171bdd74a49f2d01cdef9ce4ee
+snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
+pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
+admission_report_schema_version: 2
+planner_report_schema_version: 1
+proposal_report_schema_version: 1
+baseline_authority_evidence_ref:
+baseline_marker_install_attestation_ref:
 baseline_admission_decision:
 baseline_admission_database_identity_digest:
 baseline_admission_content_digest:
 baseline_admission_execution_digest:
+expand_authority_evidence_ref:
+expand_marker_rotation_attestation_ref:
 expand_admission_decision:
 expand_admission_database_identity_digest:
 expand_admission_content_digest:
 expand_admission_execution_digest:
-report_schema_version:
 database_revision:
 currentSchemaIsPublic: true
 databaseIdentityMatched: true
@@ -403,12 +438,30 @@ release_decision: NO-GO | RECONCILE | READY_FOR_VALIDATE_REHEARSAL
 
 ## 11. Changelog
 
+- `1.6.0`, 28.07.2026 — runtime candidate сохранён на
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, test evidence вынесен в
+  `2341b99937e54cc50d1763a0a794d975816c72ce`: authority `9/9`, admission
+  `19/19`, public-only pre-signed pinned-path `LOCAL PASS` в isolated child.
+  Remote CI pending, experimental Node 22 module mock — P2. Production roots
+  пусты; root enrollment/signer/acquisition остаются P0, production-like
+  reconciliation — `NO-GO`. Отдельные state-bound envelopes и marker rotation
+  между `BASELINE_156` и `EXPAND_162` сохранены.
+- `1.5.0`, 28.07.2026 — synthetic candidate
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` прошёл PostgreSQL 16.13 smoke
+  `23` scenarios: все `8` proposal codes/occurrences, `7` unique cases,
+  last-task coalescing, exact aggregate/row parity (`10 blocking`, `2 review`),
+  cap boundary `9/10`, privacy и unlinkability. Admission schema повышена до
+  `2`, planner/proposal schemas сохранены на `1`; authority boundary использует
+  exact eight-table + five-column `User` ACL, frozen relation lock order и
+  verify-only Ed25519/marker foundation. Pinned roots пусты; root
+  enrollment/signer/acquisition, production-like dry-run,
+  apply/rollback/zero-diff,
+  `VALIDATE`/`CONTRACT`/deploy/external beta остаются `NO-GO`.
 - `1.4.0`, 27.07.2026 — добавлен строго SYNTHETIC proposal dry-run candidate
   `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`: signed disposable harness
   provenance, exact 8 proposal codes, aggregate-only 29 operator + 6 review,
   read-only/HMAC/coalescing contract и no-apply boundary. Пройдены self-test
-  20, unit 14/14 и integrated PostgreSQL 16.14 smoke 14 scenarios; один
-  positive PG predicate покрыт, оставшиеся 7 + coalescing — P1.
+  20, unit 14/14 и первоначальный integrated PostgreSQL 16.14 smoke.
   Production-like/standalone/apply/`VALIDATE`/`CONTRACT`/deploy/external beta
   остаются `NO-GO`.
 - `1.3.0`, 27.07.2026 — Git-bound snapshot admission `EXPAND_162` сделан

@@ -3,11 +3,12 @@
 | Поле                  | Значение                                                                        |
 | --------------------- | ------------------------------------------------------------------------------- |
 | Статус                | `IMPLEMENTED_CANDIDATE`; только `SYNTHETIC`; не deployed                        |
-| Версия                | 1.0.0                                                                           |
-| Дата                  | 27.07.2026                                                                      |
+| Версия                | 1.2.0                                                                           |
+| Дата                  | 28.07.2026                                                                      |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                            |
-| Candidate SHA         | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — not deployed                       |
+| Candidate SHA         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — not deployed                       |
 | Report schema version | 1                                                                               |
+| Admission schema      | 2                                                                               |
 | Требуемая DB schema   | `EXPAND_162`; latest `20260727131000_staff_task_integrity_expand`               |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md)      |
 | Агрегированный вход   | [Reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md) |
@@ -67,9 +68,10 @@ pnpm --filter database db:smoke:staff-task-integrity-snapshot-admission
 
 Последняя команда создаёт и уничтожает тестовые database/role/fixture и не
 предназначена для общей локальной или production БД. Реальный dry-run должен
-запускаться только самим smoke/CI harness, который создаёт подписанный
-provenance manifest и database marker. Копировать внутренние значения manifest,
-nonce или ключи в ручную команду запрещено.
+запускаться только самим smoke/CI harness, который создаёт
+HMAC-аутентифицированный synthetic provenance manifest и database marker.
+Копировать внутренние значения manifest, nonce или ключи в ручную команду
+запрещено.
 
 ## 3. Runtime и provenance contract
 
@@ -85,7 +87,7 @@ STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_HMAC_KEY=
 STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_PROVENANCE_HMAC_KEY=
   <harness-owned 32..4096 UTF-8 bytes>
 STAFF_TASK_INTEGRITY_RECONCILIATION_DRY_RUN_PROVENANCE_MANIFEST=
-  <canonical base64url signed manifest>
+  <canonical base64url HMAC-authenticated synthetic manifest>
 ```
 
 Опциональный cap:
@@ -121,11 +123,18 @@ Fail-closed требования:
 - rendered report больше 8 MiB отклоняется целиком; partial evidence не
   выводится.
 
-Provenance подтверждает владение harness-ключом, но не является независимой
-аттестацией происхождения данных, если caller сам контролирует environment и
-database `COMMENT`. Поэтому текущий contract достаточен только для
-изолированного CI/disposable harness. Для production-like границы потребуется
-отдельный out-of-band ключ либо асимметричная подпись с pinned verifier.
+Synthetic HMAC provenance подтверждает владение harness-ключом, но не является
+независимой аттестацией происхождения данных, если caller сам контролирует
+environment и database `COMMENT`. Поэтому текущий HMAC contract достаточен
+только для изолированного CI/disposable harness и не является Gate 2
+production-like authority.
+
+Отдельная verify-only Ed25519 authority boundary уже реализована: она связывает
+release/artifact, snapshot state, approval, TTL и database marker с
+асимметрично подписанным manifest, а admission report использует schema `2`.
+Pinned root set намеренно пуст. Пока reviewed public root не зарегистрирован,
+нет независимого signer и approved acquisition workflow, любой
+`PRODUCTION_LIKE` запуск fail-closed отклоняется и остаётся `NO-GO`.
 
 ## 4. Release authority
 
@@ -137,7 +146,7 @@ Dry-run наследует admission release authority:
 - admission source, smoke, aggregate planner, proposal dry-run, inventory и
   migration directory входят в release source manifest;
 - candidate запускается только из clean checkout exact
-  `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`.
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`.
 
 Новый commit требует нового `RELEASE_SHA`, повторного contract test и
 PostgreSQL smoke. Старое evidence нельзя переносить на новый SHA.
@@ -150,20 +159,29 @@ PostgreSQL smoke. Старое evidence нельзя переносить на �
 3. Открыть вторую `READ ONLY REPEATABLE READ` transaction.
 4. Получить фиксированный cluster advisory lock. Конкурирующий dry-run
    отклоняется.
-5. В начале transaction взять `ACCESS SHARE` lock на все девять разрешённых
-   relations:
+5. В начале transaction получить `ACCESS SHARE` на фиксированную логическую
+   границу из девяти relations в замороженном порядке. Для восьми relations
+   выполняется `LOCK TABLE`, а для `User` lock приобретается без чтения строк
+   через `SELECT "id" FROM ONLY public."User" WHERE false`:
 
 ```text
 public._prisma_migrations
-public."Tenant"
-public."Store"
-public."User"
-public."UserStoreAccess"
-public."StaffTaskTemplate"
+public."StaffTask"
 public."StaffTaskRecurringRule"
 public."StaffTaskRecurringRuleRun"
-public."StaffTask"
+public."StaffTaskTemplate"
+public."Store"
+public."Tenant"
+public."User" — no-row SELECT lock
+public."UserStoreAccess"
 ```
+
+Admission-role имеет table-level `SELECT` только к остальным восьми relations.
+Для `User` разрешены ровно пять колонок:
+`id`, `tenantId`, `isPlatformAdmin`, `isActive`, `accessScope`. Любой
+table-level `User SELECT`, дополнительная column privilege, `GRANT OPTION` или
+доступ через `PUBLIC` отклоняет admission. Это сохраняет логическую
+девятиреляционную границу, не раскрывая остальные поля `User`.
 
 6. Повторно проверить PostgreSQL 16, transaction mode, database identity,
    exact migration names/checksums, schema/catalog/trigger state, RLS и
@@ -259,50 +277,62 @@ Exit `0` не означает готовность к apply, `VALIDATE`, deploy
 
 ## 9. Полученное evidence
 
-Для exact SHA `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`:
+Для runtime SHA `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`:
 
-- dry-run self-test: `20` checks — `PASS`;
-- dry-run contract unit suite: `14/14` — `PASS`;
-- snapshot admission unit suite: `16/16` — `PASS`;
-- admission offline smoke/source guards: `36` checks — `PASS`;
+- proposal dry-run contract suite: `14/14` — `PASS`;
 - aggregate planner suite: `11/11` — `PASS`;
 - inventory suite: `9/9` — `PASS`;
+- authority suite: `9/9` — `PASS`;
+- admission suite: `18/18` — `PASS`;
 - database typecheck, Prisma validate и diff/format checks — `PASS`;
-- реальный PostgreSQL 16.14 disposable rehearsal: `14` scenarios — `PASS`.
+- реальный PostgreSQL 16.13 disposable rehearsal: `23` scenarios — `PASS`.
+
+Test-evidence SHA `2341b99937e54cc50d1763a0a794d975816c72ce`
+добавляет public-only pre-signed pinned-path test: admission suite `19/19`,
+`LOCAL PASS` в isolated child.
+
+Remote CI evidence для pinned path ещё pending. Тест использует
+экспериментальный Node 22 module mock в изолированном child-процессе; это P2 и
+не является production root enrollment.
 
 PostgreSQL smoke подтвердил:
 
-- baseline 156 и expand 162 admission из exact commit artifacts;
-- exact nine-table SELECT-only role и запрет excess SELECT/DML/DDL/internal FK
-  trigger disable;
+- baseline 156 и expand 162 admission schema `2` из exact commit artifacts;
+- exact logical nine-relation boundary: table-level `SELECT` к восьми
+  relations, только пять разрешённых `User` columns, замороженный lock order,
+  запрет excess SELECT/DML/DDL/`GRANT OPTION`/`PUBLIC`/internal FK trigger
+  disable;
 - planner exits `2/3`;
-- dry-run findings exit `2`, cap/RLS/concurrent advisory lock exits `3`;
-- signed synthetic provenance и отклонение tampered admission/migration;
-- unlinkable case tokens между executions;
+- восемь proposal codes дают восемь proposal occurrences и семь уникальных
+  cases; две причины для одного `lastCreatedTaskId` coalesce в один case;
+- aggregate/row parity: `10` blocking occurrences (`8 proposal + 2 operator`)
+  и `2 review`;
+- cap `9` отклоняет запуск, cap `10` допускает findings; dry-run findings exit
+  `2`, cap/RLS/concurrent advisory lock exits `3`;
+- HMAC-аутентифицированный synthetic provenance и отклонение tampered
+  admission/migration;
+- unlinkable case tokens между executions и отсутствие raw identifiers/PII в
+  case/report;
 - stable content и timestamp-bound execution digests;
 - protected output, неизменность source aggregate fingerprint и полный cleanup
   disposable database/role/artifact.
 
 ## 10. Известные ограничения и обязательные следующие шаги
 
-Текущий PostgreSQL smoke создаёт положительную row fixture только для
-`TEMPLATE_CREATOR_CROSS_TENANT`. Остальные семь predicates и overlap/coalescing
-проверены unit-контрактом и zero-row SQL path, но ещё не имеют отдельных
-положительных PostgreSQL fixtures. До заявления о полном восьмикодовом
-PostgreSQL evidence необходимо:
-
-1. добавить положительную fixture для каждого из восьми reason codes;
-2. добавить overlap, где один `lastCreatedTaskId` одновременно получает
-   `RULE_LAST_TASK_CROSS_TENANT` и `RULE_LAST_TASK_SOURCE_MISMATCH`;
-3. доказать aggregate/row parity и coalescing на реальном PostgreSQL;
-4. повторить privacy, cap, tamper, RLS, advisory-lock и cleanup scenarios.
+Synthetic PostgreSQL fixture matrix для всех восьми proposal codes, overlap,
+coalescing, aggregate/row parity, cap boundary, privacy и unlinkability
+проверена. Это закрывает только disposable harness evidence и не повышает
+release decision до production-like.
 
 Отдельные production-like блокеры:
 
-- вынести provenance signing из caller-controlled environment в
-  out-of-band/asymmetric trust boundary;
-- заменить table-wide `User` SELECT на column-scoped privilege либо
-  специально спроектированные views;
+- выполнить P0 reviewed Ed25519 public-root enrollment отдельным release
+  change;
+- реализовать P0 independent operational signer и approved snapshot
+  acquisition/marker
+  workflow вне caller-controlled environment;
+- выполнить production-like admission schema `2` и сохранить защищённое
+  подписанное authority evidence;
 - спроектировать отдельный idempotent write-инструмент с owner approval,
   immutable input evidence, row lock/recheck, audit, rollback и zero-diff;
 - выполнить approved production-like admission, inventory и aggregate planner;
@@ -334,17 +364,37 @@ decision.
 
 ```text
 SYNTHETIC proposal dry-run candidate = IMPLEMENTED_CANDIDATE
-SYNTHETIC PostgreSQL rehearsal       = PASS / 14 scenarios
-all 8 positive PostgreSQL fixtures   = PENDING
+SYNTHETIC PostgreSQL rehearsal       = PASS / 23 scenarios
+all 8 proposal codes + coalescing    = PASS / SYNTHETIC only
+Ed25519 authority verifier/marker    = IMPLEMENTED / roots empty
+pinned-path verifier test            = LOCAL PASS / remote CI pending
 standalone/operator-run dry-run      = NO-GO
 PRODUCTION_LIKE dry-run              = PENDING / NO-GO
-explicit apply / zero-diff           = PENDING / NO-GO
+apply / rollback / zero-diff         = PENDING / NO-GO
 VALIDATE / CONTRACT / deploy         = PENDING / NO-GO
 external beta                        = NO-GO
 ```
 
 ## Changelog
 
+- `1.2.0`, 28.07.2026 — runtime candidate остаётся
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; test evidence
+  `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
+  admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в isolated
+  child. Remote CI evidence pending; experimental Node 22 module mock — P2.
+  Production roots пусты; root enrollment, operational signer и approved
+  acquisition остаются P0, production-like dry-run — fail-closed `NO-GO`.
+- `1.1.0`, 28.07.2026 — exact candidate
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` прошёл реальный PostgreSQL
+  16.13 smoke `23` scenarios: все восемь proposal-кодов, восемь occurrences,
+  семь уникальных cases, двухпричинный last-task coalescing, aggregate/row
+  parity (`10 blocking`, `2 review`), cap boundary `9/10`, privacy и
+  unlinkability. Authority boundary переведена на admission schema `2`;
+  реализованы exact eight-table + five-column `User` ACL, frozen lock order и
+  verify-only Ed25519/marker foundation. Pinned roots пусты, поэтому
+  root enrollment, signer/acquisition, production-like admission/dry-run,
+  apply/rollback/zero-diff,
+  `VALIDATE`/`CONTRACT`/deploy и внешний beta остаются `NO-GO`.
 - `1.0.0`, 27.07.2026 — зафиксирован synthetic-only proposal dry-run для
   восьми StaffTask integrity codes: повторный admission, ранние relation locks,
   signed disposable provenance, aggregate/row parity, bounded

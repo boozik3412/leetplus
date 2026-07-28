@@ -3,8 +3,8 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.4.0                                              |
-| Дата            | 27.07.2026                                         |
+| Версия          | 1.6.0                                              |
+| Дата            | 28.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
 | External access | Запрещён до успешного Gate 2                       |
@@ -27,11 +27,29 @@
       `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only, no apply,
       не production deployment.
 - [ ] Snapshot admission source checkpoint:
-      `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
+      `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema `v2`,
       `IMPLEMENTED_CANDIDATE`, не production deployment.
+- [x] Local test-evidence checkpoint
+      `2341b99937e54cc50d1763a0a794d975816c72ce`: public-only pre-signed
+      fixture без private key/generation/signing API проверила реальный pinned
+      wrapper, marker/nonce-bound identity match и private same-process report
+      evidence; marker/expiry и detached-report cases fail-closed, admission
+      suite `19/19`.
+- [ ] Remote CI checks и independent review exact test-evidence commit
+      `2341b99937e54cc50d1763a0a794d975816c72ce` зелёные.
+- [ ] Experimental Node.js 22 module-mock `P2` risk принят либо заменён
+      стабильным test seam; mock остаётся изолированным spawned child и не
+      изменяет production root registry.
 - [ ] SYNTHETIC reconciliation proposal dry-run source checkpoint:
-      `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — read-only harness-only,
-      no apply, не production deployment.
+      `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema `v1`, read-only
+      harness-only, no apply, не production deployment.
+- [x] В runtime candidate production authority root registry остаётся exact
+      `EMPTY / FAIL-CLOSED`; `PRODUCTION_LIKE` остаётся `NO-GO`.
+- [ ] Reviewed Ed25519 public authority root enrolment выполнен отдельным
+      change; current empty-root fail-closed state снят только для exact
+      approved release.
+- [ ] Protected signer и snapshot acquisition/evidence owner отделены от
+      caller-controlled env, database `COMMENT`, HMAC report и target process.
 - [ ] API/web/edge показывают тот же SHA/build time.
 - [ ] Required CI checks зелёные.
 - [ ] Release decision owner и change window назначены.
@@ -48,14 +66,18 @@
 - [ ] Cross-tenant `UserStoreAccess` count равен `0`.
 - [ ] Восстановленная production-like копия прошла
       [snapshot admission](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
-      в состоянии `BASELINE_156`: exit `0`, exact release SHA, matched HMAC
-      database identity, report digests и protected evidence reference
-      зафиксированы.
+      schema `v2` в состоянии `BASELINE_156`: exit `0`, exact release SHA,
+      verified Ed25519 authority, matched database marker/freshness/blob
+      binding, report digests, отдельные baseline authority bundle и marker
+      install attestation зафиксированы.
 - [ ] После применения ровно шести exact migrations `157..162` та же
-      production-like копия прошла admission в состоянии `EXPAND_162`: exit
-      `0`, тот же release SHA, matched HMAC database identity, новые report
-      digests и protected evidence reference зафиксированы; remote
-      CI/synthetic evidence не засчитываются как этот Gate 2 checkpoint.
+      production-like копия получила новый state-bound `EXPAND_162` authority
+      envelope с новым nonce-bound binding; DB marker заменён его digest до
+      admission schema `v2`. Exit `0`, тот же release SHA, verified Ed25519
+      authority, matched database marker/freshness/blob binding, новые report
+      digests, expand authority bundle и marker-rotation attestation
+      зафиксированы; baseline marker reuse запрещён, remote CI/synthetic
+      evidence не засчитываются как этот `Gate 2A` checkpoint.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
@@ -69,14 +91,20 @@
 - [ ] Evidence содержит domain-separated HMAC `databaseIdentityDigest`,
       привязанный к database name, PostgreSQL `system_identifier` и database
       OID без вывода raw identity.
+- [ ] HMAC `databaseIdentityDigest` и report integrity не используются как
+      authority или provenance; production-like report считается
+      same-process/non-transferable evidence и связан с отдельным защищённым
+      подписанным manifest.
 - [ ] Planner evidence содержит `8 proposal + 29 operator + 6 review`;
       `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` классифицирован как `BLOCKING`.
 - [ ] Planner proposal не используется как authorization, а `contentDigest` и
       `executionDigest` — как row-level checksum или CAS token.
 - [ ] SYNTHETIC proposal dry-run evidence не засчитывается как production-like
-      reconciliation: standalone target запрещён; для production-like
-      необходимы отдельные protected row evidence, approval, locks/recheck,
-      audit и rollback.
+      reconciliation: exact database name и `synthetic:` reference являются
+      доверенной декларацией harness/operator, а не provenance proof или Gate
+      2 evidence; standalone target запрещён; для production-like необходимы
+      отдельные protected row evidence, approval, locks/recheck, audit и
+      rollback.
 - [ ] Template/Rule/Task/Run inventory evidence содержит только aggregate
       counts и alias `Tenant A / Store A1..A4`, без production ID.
 - [ ] Public/QR/Telegram links проинвентаризированы.
@@ -106,13 +134,21 @@
 
 - [ ] Backup непосредственно перед изменением успешен.
 - [ ] Restore rehearsal в отдельную БД успешен; RPO/RTO записаны.
-- [ ] Admission использовал отдельную `LOGIN NOINHERIT` роль с exact SELECT
-      только к девяти разрешённым таблицам; отсутствуют write/DDL/TEMP,
-      membership, ownership и лишние privileges.
+- [ ] Admission использовал отдельную `LOGIN NOINHERIT` роль с table-level
+      `SELECT` ровно на восьми разрешённых relations и column-level `SELECT`
+      только на
+      `User(id, tenantId, isPlatformAdmin, isActive, accessScope)`; это девять
+      логических relations без table-wide `User SELECT`; отсутствуют
+      write/DDL/TEMP, membership, ownership и лишние privileges.
+- [ ] Negative ACL gates отклонили отсутствующий grant, лишние User columns,
+      table-wide `User SELECT`, table/column grant option, `PUBLIC SELECT`,
+      запрещённые DML/DDL/TEMP/membership/ownership и физически
+      переименованный authority column.
 - [ ] Exact Git blob manifest подтвердил ordered names/checksums 156
       migrations до EXPAND и 162 после него; FK enforcement triggers,
-      artifact digest, opaque approval, HMAC evidence, TTL, isolation,
-      no-egress и cleanup evidence подтверждены.
+      artifact digest, opaque approval, verified Ed25519 authority, database
+      marker, freshness, exact runtime blob content, isolation, no-egress и
+      cleanup evidence подтверждены.
 - [ ] Schema-only EXPAND rehearsal успешен с timeout/lock evidence.
 - [ ] EXPAND rehearsal начинается с populated legacy baseline 156 и применяет
       ровно шесть migration `157..162`; пять concurrent indexes строятся на
@@ -148,13 +184,17 @@
       authorization, locks/recheck, audit и rollback; `contentDigest`/
       `executionDigest` не использовались вместо них.
 - [ ] Synthetic rehearsal proposal dry-run привязан к exact
-      `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`, подписанной
-      `SYNTHETIC EXPAND_162` disposable harness provenance и read-only
-      transaction; output содержит cases только для 8 proposal-кодов, а
-      29 operator + 6 review остаются aggregate-only.
-- [ ] До production-like шага synthetic PostgreSQL fixtures покрывают все 8
-      proposal predicates и coalescing; текущий candidate подтверждает один
-      positive PG predicate, оставшиеся 7 + coalescing являются P1.
+      `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, exact-name/ref
+      `SYNTHETIC EXPAND_162` disposable harness contract и read-only
+      transaction; output содержит cases только для 8 proposal-кодов, а 29
+      operator + 6 review остаются aggregate-only. Synthetic classification
+      является доверенной декларацией harness/operator, не provenance proof.
+- [ ] Synthetic PostgreSQL 16.13 fixture matrix прошла `23` scenarios и
+      покрыла все `8` proposal codes, `8` occurrences, `7` cases и coalescing
+      двух last-task причин в один case; exact aggregate/reason parity,
+      cap/privacy/unlinkability и отсутствие raw identity/canary подтверждены.
+- [ ] Source data после synthetic smoke не изменились; временная cluster ACL
+      mutation восстановлена, disposable database/role удалены.
 - [ ] `contentDigest` стабилен для одинакового aggregate content, а
       `executionDigest` меняется вместе с snapshot `generatedAt`; смена БД или
       PostgreSQL cluster меняет `databaseIdentityDigest` и оба evidence digest.
@@ -205,7 +245,8 @@
 - [ ] `OPEN_BETA_FULL_OPERATIONS_V1` подготовлен.
 - [ ] Gamification — admin, guest, Telegram, ledger и store canary.
 - [ ] Assortment — catalog, facts, imports, reports и exports, 4/4 stores.
-- [ ] Staff — control, tasks, regulations, KB, training, discipline, salary.
+- [ ] Staff — control, ratings, motivation, tasks, regulations, KB, training,
+      discipline и salary planning.
 - [ ] Staff recurring actor path — sparse PATCH, Store timezone, pause/revoke и
       Template/Store/participant race acceptance пройдены; background выключен.
 - [ ] Staff recurring legacy integrity — scanner exit `0`,
@@ -213,9 +254,10 @@
       repeated-`FAILED` разобраны.
 - [ ] Staff reconciliation planner — exit `0`, schema ready, cap соблюдён;
       proposal/operator decisions завершены отдельным approved workflow.
-- [ ] Staff SYNTHETIC proposal dry-run — self-test `20`, unit `14/14` и
-      disposable PostgreSQL 16.14 smoke `14 scenarios` подтверждены; это не
-      production-like evidence и не apply authorization.
+- [ ] Staff SYNTHETIC proposal dry-run — disposable PostgreSQL 16.13 smoke
+      `23 scenarios`, все `8` proposal codes/`8` occurrences/`7` cases и
+      двухпричинный last-task coalescing подтверждены; это не provenance
+      proof, production-like evidence или apply authorization.
 - [ ] Communications — chat, mentions, receipts, notifications, contact tasks.
 - [ ] Users/roles — delegation, revoke и scope работают сразу.
 - [ ] Attachments `ENFORCED`; inventory/backfill/reconciliation zero-diff.
@@ -234,9 +276,15 @@
 
 ## H. Dry-run и cutover
 
+- [ ] Reviewed Ed25519 root enrollment, protected signer/acquisition и оба
+      production-like admission checkpoints выполнены отдельным решением до
+      inventory/planner.
+- [ ] Production-like inventory/planner, row dry-run, explicit apply,
+      rollback и zero-diff имеют отдельные evidence records и отдельные
+      approvals; ни один предыдущий `GO` не переносится на следующий шаг.
 - [ ] Dry-run не изменил production state.
-- [ ] Контрольные counts/checksums до cutover сохранены.
-- [ ] Application writes/jobs остановлены либо совместимы с фазой.
+- [ ] Для EXPAND, `VALIDATE`, `CONTRACT`, deployment и `SHADOW → ENFORCED`
+      сохранены отдельные phase approvals; ни один из них не разрешает cutover.
 - [ ] Schema EXPAND применена и проверена.
 - [ ] StaffTask catalog revision равна
       `20260727131000_staff_task_integrity_expand`; все 28 FK прошли
@@ -248,10 +296,17 @@
 - [ ] Accounts/invites классифицированы.
 - [ ] Strict application candidate активирован по плану.
 - [ ] Модули переведены `SHADOW → ENFORCED` только при zero mismatch.
+- [ ] Контрольные counts/checksums до cutover сохранены.
+- [ ] Все pre-cutover условия `Gate 2A` выполнены и отдельный explicit
+      `CUTOVER GO` с approver/change window сохранён до первой
+      cutover-specific mutation.
+- [ ] Application writes/jobs остановлены либо совместимы с фазой.
 - [ ] Operational tenant переименован без смены `tenantId`.
 - [ ] Public links/QR/Telegram проверены после rename.
 - [ ] Контрольные counts/totals после cutover совпадают.
 - [ ] Post-deploy browser/API/file/job smoke зелёный.
+- [ ] Cutover evidence принято; начато отдельное семидневное internal-alpha
+      окно для завершения Gate 2.
 
 ## I. Internal alpha и решение о внешнем pilot
 
@@ -261,7 +316,8 @@
 - [ ] Revenue/operations divergence ≤1% либо исключение утверждено.
 - [ ] Нет lost sync, duplicate reward или unresolved critical alert.
 - [ ] Feedback и incidents привязаны к release SHA.
-- [ ] Итоговое решение `GO/NO-GO`, дата и approver сохранены в release evidence.
+- [ ] Все условия Gate 2 завершены; итоговое решение `GO/NO-GO` на первый
+      внешний invite-only pilot, дата и approver сохранены в release evidence.
 
 ## Stop conditions
 
@@ -273,10 +329,38 @@ Cutover немедленно останавливается при cross-scope �
 mismatch, catalog mismatch/cap exceeded, попытке считать proposal,
 `contentDigest` или `executionDigest` разрешением на apply либо недоставленном
 critical alert, а также попытке запустить SYNTHETIC proposal dry-run на
-standalone/production-like target или без подписанной harness provenance.
+standalone/production-like target, выдать operator-declared `SYNTHETIC`
+classification за provenance/Gate 2 evidence, принять HMAC как authority,
+передать production-like report как самостоятельное transferable evidence
+либо продолжить production-like шаг при пустом/unverified Ed25519 root,
+marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.6.0`, 28.07.2026 — runtime candidate оставлен на
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, отдельно зафиксирован local
+  test-evidence commit `2341b99937e54cc50d1763a0a794d975816c72ce`.
+  Public-only pre-signed pinned-path fixture без private signing material
+  прошла реальный branded wrapper, marker/nonce-bound identity, expiry и
+  detached-report gates; admission suite `19/19` — `LOCAL PASS`. Production
+  roots остаются `EMPTY / FAIL-CLOSED`, `PRODUCTION_LIKE` и внешний beta —
+  `NO-GO`, remote CI pending. Experimental Node.js 22 module mock принят как
+  отдельный `P2` test-infrastructure risk. Следующий порядок:
+  remote CI/review → root/signer/acquisition → отдельный `BASELINE_156`
+  envelope/marker/admission → новый `EXPAND_162` envelope с новым nonce,
+  marker rotation и второй admission.
+- `1.5.0`, 28.07.2026 — зафиксирован verified code SHA
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`: admission schema `v2`,
+  exact least-privilege доступ к восьми разрешённым relations плюс пяти
+  columns `User`, independent Ed25519 verifier, database marker, freshness и
+  exact runtime blob binding. PostgreSQL 16.13 smoke прошёл `23` scenarios:
+  все `8` proposal codes/`8` occurrences/`7` cases, двухпричинный last-task
+  coalescing, negative ACL gates, unchanged source data и restored temporary
+  cluster ACL. Pinned roots намеренно пусты, HMAC не authority,
+  synthetic name/ref — operator/harness declaration, а production-like report
+  same-process/non-transferable; production-like admission, inventory/planner,
+  row dry-run, apply/rollback/zero-diff и cutover четырёх `Store` одного
+  `Tenant` остаются отдельными `NO-GO` этапами.
 - `1.4.0`, 27.07.2026 — добавлен exact SYNTHETIC proposal dry-run checkpoint
   `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`: read-only signed-harness
   boundary, 8 proposal-кодов, aggregate-only 29 operator + 6 review, self-test

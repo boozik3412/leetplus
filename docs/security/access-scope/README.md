@@ -3,8 +3,8 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.14.0                                                                                              |
-| Дата                           | 27.07.2026                                                                                          |
+| Версия контракта               | 1.16.0                                                                                              |
+| Дата                           | 28.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
 | Исходный baseline              | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2`                                                          |
@@ -16,8 +16,9 @@
 | Staff task integrity inventory | `56d615437ecfcb90db252016d3e5b83f3f545578` — not run on production                                  |
 | Staff task integrity EXPAND    | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — 162 migrations / 28 guarded FK; not deployed           |
 | Staff reconciliation planner   | `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only; no apply; not deployed                 |
-| Staff snapshot admission       | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — synthetic verified; production-like not executed       |
-| Staff proposal dry-run         | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — SYNTHETIC harness only; no apply; not deployed         |
+| Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
+| Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — local pinned-path PASS; remote CI pending              |
+| Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
 invite-only открытому тесту. Она отвечает на вопросы:
@@ -81,15 +82,19 @@ invite-only открытому тесту. Она отвечает на вопр
     reconciliation.
 15. [Staff task snapshot admission](./v1/staff-task-integrity-snapshot-admission-runbook.md) —
     обязательный fail-closed вход для production-like snapshot: PostgreSQL 16,
-    exact release/migration/catalog state и отдельная роль с SELECT только к
-    девяти таблицам.
+    exact release/runtime/migration/catalog state, отдельная роль с table
+    `SELECT` на восьми relations и пятью разрешёнными колонками `User`, а также
+    независимый Ed25519 authority contract.
 16. [Staff task SYNTHETIC proposal dry-run](./v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
-    подписанная disposable harness-fixture, повторный admission, read-only
+    disposable harness-fixture, повторный admission, read-only
     row evidence только для восьми proposal codes и явный запрет
     standalone/production-like/apply.
 
 Release evidence хранится в `evidence/<release-sha>/`. Evidence не содержит
 секретов, токенов, email, телефонов или необработанных production ID.
+Будущий production-like signed authority manifest и acquisition/restore
+evidence хранятся отдельно в access-controlled protected storage; обычный
+release evidence содержит только opaque reference.
 
 ## Текущая стадия
 
@@ -241,37 +246,77 @@ smoke для дополнительного конфликтующего FK/не
 
 Следующим обязательным checkpoint реализован
 [StaffTask snapshot admission](./v1/staff-task-integrity-snapshot-admission-runbook.md)
-`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` —
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` —
 `IMPLEMENTED_CANDIDATE`, not deployed. Он допускает только изолированную
 loopback PostgreSQL 16 копию в точном `BASELINE_156` либо `EXPAND_162`,
-сверяет ordered migration names/checksums из exact Git blob, FK/index/trigger
-catalog и отдельную `LOGIN NOINHERIT` роль с exact SELECT к девяти таблицам,
-без write, DDL, TEMP, membership и ownership. Локально прошли 16 unit,
-36 offline smoke и 14 real PostgreSQL 16.14 scenarios, включая
+сверяет ordered migration names/checksums и фактический runtime content с
+exact Git blobs, FK/index/trigger catalog и отдельную `LOGIN NOINHERIT` роль.
+Её logical allowlist из девяти relations реализован как table `SELECT` на
+восьми relations и ровно пять колонок `User`:
+`id, tenantId, isPlatformAdmin, isActive, accessScope`. Table-wide/extra/
+missing/renamed/grant-option/`PUBLIC` grants и `SELECT * FROM User`
+отклоняются; write, DDL, TEMP, membership и ownership отсутствуют.
+
+Report schema v2 отделяет caller HMAC от production-like authority. HMAC
+служит только для integrity/pseudonymization. Для `PRODUCTION_LIKE` требуется
+canonical base64url Ed25519 manifest, exact-release pinned public root,
+nonce-bound DB/approval digests, exact DB comment marker и mandatory freshness.
+Legacy `EXPECTED_IDENTITY_DIGEST` как production-like authority запрещён.
+Runtime bytes admission/smoke/authority/planner/proposal/inventory сверяются с
+Git blobs exact release. Положительный production-like report дополнительно
+привязан к private same-process evidence и не является standalone
+transferable audit proof; аудит опирается на protected signed manifest.
+
+Authority envelope подписывает `expectedState`, поэтому `BASELINE_156` и
+`EXPAND_162` требуют двух отдельных envelope. После migrations `157..162`
+signer выпускает новый `EXPAND_162` envelope с новым nonce-bound binding, DB
+marker заменяется его digest до второго admission, а protected evidence хранит
+обе state-specific bundle и marker-rotation attestation. Baseline marker reuse
+запрещён.
+
+Runtime admission candidate остаётся
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; отдельное test evidence commit —
+`2341b99937e54cc50d1763a0a794d975816c72ce`. Admission tests 19/19, authority
+tests 9/9, offline/integrated smoke self-test 46 и real PostgreSQL 16.13 smoke
+23 scenarios прошли, включая
 `baseline 156 → ровно шесть migrations → expand 162`,
-privilege/tamper/privacy/cleanup guards.
+privilege/tamper/privacy/cleanup guards. Pinned production-like roots в этом
+release намеренно пусты, поэтому production-like запуск fail-closed остаётся
+`NO-GO`.
 
 Следующим bounded candidate реализован
 [StaffTask SYNTHETIC proposal dry-run](./v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
-`dee25393ae7bff171bdd74a49f2d01cdef9ce4ee` — not deployed. Он допускает
-только подписанную harness-created `SYNTHETIC EXPAND_162` disposable fixture,
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — not deployed. Он допускает
+только harness-created `SYNTHETIC EXPAND_162` disposable fixture,
 повторно проверяет admission/release/migrations/catalog/RLS/privileges внутри
 read-only `REPEATABLE READ` snapshot, заранее получает `ACCESS SHARE` locks и
 формирует unlinkable HMAC-псевдонимизированные
 `REFERENCE_CLEAR_CANDIDATE` только для точных восьми proposal codes.
 Все 29 operator + 6 review codes остаются aggregate-only; apply path
-отсутствует. Пройдены self-test 20, unit 14/14 и integrated PostgreSQL 16.14
-smoke 14 scenarios.
+отсутствует. Real PostgreSQL 16.13 smoke покрывает все восемь proposal codes,
+семь case rows и coalescing двух last-task причин с aggregate/reason parity,
+unlinkability и запретом raw identifiers.
 
-PostgreSQL smoke пока имеет positive fixture для одного proposal predicate.
-Оставшиеся семь и coalescing двух last-task причин — P1. Provenance вне
-доверенного harness не является независимой аттестацией, а table-wide `User`
-SELECT требует сужения перед production-like использованием.
+Exact synthetic DB
+`lp_snapshot_admission_ci_<16 lowercase hex>` и approval reference
+`synthetic:` являются доверенной декларацией harness/оператора, а не
+автоматическим proof происхождения данных или Gate 2. Signer/key custody,
+production-like acquisition и public-root enrollment остаются P0.
 
-Выполнен только `SYNTHETIC` rehearsal. Standalone dry-run, remote CI,
-production-like acquisition/restore/admission, inventory/planner/row dry-run,
+Public-only pre-signed fixture без private signing material на test evidence
+commit `2341b99937e54cc50d1763a0a794d975816c72ce` локально прошла end-to-end
+positive pinned path: pinned wrapper, marker/nonce-bound identity, private
+same-process report evidence, marker/expiry, detached-report и preload negative
+cases. Fixture исполняется только в изолированном child process с direct-entry
+realpath guard; production root registry на диске остаётся пустым. Remote CI
+для этого commit ещё pending. Экспериментальный Node 22
+`--experimental-test-module-mocks` остаётся P2 test-infra risk и не является
+частью production authority.
+
+Выполнены `SYNTHETIC` rehearsal и локальный public-only test-only pinned-path.
+Production-like acquisition/restore/admission, inventory/planner/row dry-run,
 reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
-не выполнялись.
+не выполнялись; remote CI evidence также ещё не получен.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -289,6 +334,32 @@ reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
 
 ## Changelog
 
+- `1.16.0`, 28.07.2026 — runtime admission candidate сохранён на
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, test evidence отделено commit
+  `2341b99937e54cc50d1763a0a794d975816c72ce`. Public-only pre-signed fixture
+  без private signing material локально прошла isolated-child positive pinned
+  path и negative marker/expiry/detached-report/preload cases; admission tests
+  теперь 19/19, authority 9/9. Production root registry остаётся пустым,
+  `PRODUCTION_LIKE` — `NO-GO`; signer/acquisition/root enrollment остаются P0,
+  remote CI pending. Experimental Node 22 module mocks отмечены как P2
+  test-infra risk. Требование двух state-bound envelope и marker rotation
+  сохранено.
+- `1.15.0`, 28.07.2026 — admission/report schema v2 и SYNTHETIC proposal
+  rehearsal привязаны к
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`. Role contract сужен до table
+  `SELECT` на восьми relations и exact
+  `User(id, tenantId, isPlatformAdmin, isActive, accessScope)`; отклоняются
+  table-wide/extra/missing/renamed/grant-option/`PUBLIC` grants и `SELECT *`.
+  Добавлен verify-only production-like boundary: canonical base64url Ed25519
+  manifest, exact-release pinned roots, nonce-bound DB/approval digests, DB
+  comment marker, mandatory freshness, exact runtime/Git-blob binding и
+  private same-process positive-report evidence. Legacy production-like HMAC
+  identity запрещён; HMAC остаётся только integrity/pseudonymization.
+  Пройдены admission 18/18, authority 9/9, smoke self-test 46 и real
+  PostgreSQL 16.13 smoke 23 scenarios со всеми восьмью proposal codes и
+  coalescing. Synthetic markers — trusted harness/operator declaration, не
+  Gate 2 proof. Pinned roots пока пусты; signer/acquisition/root enrollment —
+  P0, production-like/apply/deploy/external beta остаются `NO-GO`.
 - `1.14.0`, 27.07.2026 — добавлен строго SYNTHETIC StaffTask proposal dry-run
   candidate `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`: signed disposable
   harness provenance, повторный admission, ранние relation locks, exact

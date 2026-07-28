@@ -1,15 +1,30 @@
 # Профиль доступа первой внешней когорты
 
-| Поле | Значение |
-|---|---|
-| Profile key | `OPEN_BETA_FULL_OPERATIONS_V1` |
-| Статус | Product contract; entitlement implementation pending |
-| Выдача | Invite-only, отдельный Tenant на независимую сеть |
-| Область | Собственная сеть или явно разрешённые клубы |
+| Поле          | Значение                                               |
+| ------------- | ------------------------------------------------------ |
+| Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
+| Версия        | 1.1                                                    |
+| Дата          | 28.07.2026                                             |
+| Статус        | `NO-GO` до Gate 2; entitlement implementation pending  |
+| Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
+| Область       | Собственная сеть или явно разрешённые клубы            |
+| Runtime       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`             |
+| Test evidence | `2341b99937e54cc50d1763a0a794d975816c72ce`, local only |
 
 Этот профиль фиксирует обязательный продуктовый состав тестового доступа. Пока
 единый entitlement engine не реализован, документ является контрактом для
 route inventory, role matrix, provisioning и acceptance.
+
+Сам по себе профиль не разрешает выдачу доступа. До успешного cutover текущей
+сети, семи стабильных дней internal alpha, завершения Gate 2 и отдельного
+решения на внешний pilot активация остаётся `NO-GO`.
+
+Local public-only pinned-path evidence прошёл admission suite `19/19`, но
+remote CI ещё pending. Production authority roots остаются
+`EMPTY / FAIL-CLOSED`, поэтому fixture не является production-like authority
+или Gate 2 evidence. Experimental Node.js 22 module mock учитывается как `P2`
+test-infrastructure risk и не меняет entitlement или продуктовый состав этого
+профиля.
 
 ## Включено
 
@@ -89,10 +104,12 @@ risk review, rollout и audit.
 
 Профиль можно активировать для внешнего Tenant только когда:
 
-1. Каждая включённая поверхность перечислена в module adoption matrix.
-2. Для неё известны capability, resource class, audit и data owner.
-3. Cross-tenant/store negative suite и browser journey зелёные.
-4. Exports, attachments, PII и background jobs проверены отдельно.
-5. Outbound side effects имеют tenant/store kill switch и canary.
-6. Support owner, trial/cohort dates и onboarding checklist назначены.
-7. Решение привязано к exact release SHA и имеет rollback.
+1. Текущая сеть прошла cutover и семь стабильных дней internal alpha; Gate 2
+   завершён и отдельно принят `GO` на внешний invite-only pilot.
+2. Каждая включённая поверхность перечислена в module adoption matrix.
+3. Для неё известны capability, resource class, audit и data owner.
+4. Cross-tenant/store negative suite и browser journey зелёные.
+5. Exports, attachments, PII и background jobs проверены отдельно.
+6. Outbound side effects имеют tenant/store kill switch и canary.
+7. Support owner, trial/cohort dates и onboarding checklist назначены.
+8. Решение привязано к exact release SHA и имеет rollback.

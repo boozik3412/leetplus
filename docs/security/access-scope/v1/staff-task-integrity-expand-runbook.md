@@ -3,14 +3,15 @@
 | Поле                    | Значение                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed                                                                           |
-| Версия                  | 1.3.0                                                                                                                                                        |
-| Дата                    | 27.07.2026                                                                                                                                                   |
+| Версия                  | 1.5.0                                                                                                                                                        |
+| Дата                    | 28.07.2026                                                                                                                                                   |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                                                         |
 | Migration count         | 162                                                                                                                                                          |
 | Latest migration        | `20260727131000_staff_task_integrity_expand`                                                                                                                 |
 | DB-native guard         | 28 FK: 14 composite + 14 simple compatibility                                                                                                                |
 | Compatibility catalog   | 14 simple `NOT VALID`: 11 non-Store + 3 Store                                                                                                                |
 | Candidate SHA           | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — not deployed                                                                                                    |
+| Admission SHA           | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; production-like `NO-GO`                                                                              |
 | Входной gate            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `BASELINE_156`                                                                    |
 | После EXPAND            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `EXPAND_162` → [Integrity inventory](./staff-task-integrity-inventory-runbook.md) |
 | Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                                                       |
@@ -287,18 +288,28 @@ production-данных.
 
 1. зафиксировать exact release SHA, зелёные CI checks, migration count `162`,
    latest migration и отношение к канонической ветке;
-2. отдельно приобрести и восстановить свежий production-like snapshot в
+2. зафиксировать public-only pre-signed pinned-path `LOCAL PASS` на test
+   evidence `2341b99937e54cc50d1763a0a794d975816c72ce` в isolated child и до
+   production-like запуска получить такой же remote CI evidence.
+   Экспериментальный Node 22 module mock остаётся P2. Отдельным security change
+   выполнить P0 reviewed Ed25519 root enrollment и ввести P0 operational
+   signer/approved acquisition/marker/evidence controls; при пустом production
+   root registry остановиться с `NO-GO`;
+3. отдельно приобрести и восстановить свежий production-like snapshot в
    изолированную loopback БД;
-3. по
+4. по
    [snapshot admission runbook](./staff-task-integrity-snapshot-admission-runbook.md)
-   подтвердить `BASELINE_156`, exact committed Git artifact, TTL/attestations,
-   database identity и least-privilege роль;
-4. применить в изолированной копии только exact six migrations `157..162` по
+   получить отдельный подписанный `BASELINE_156` authority envelope, установить
+   его exact DB marker и подтвердить admission, exact committed Git artifact,
+   TTL/attestations, database identity и least-privilege роль;
+5. применить в изолированной копии только exact six migrations `157..162` по
    утверждённому rehearsal;
-5. повторно пройти snapshot admission в состоянии `EXPAND_162`;
-6. выполнить guarded read-only inventory и сохранить только aggregate
+6. получить новый state-bound `EXPAND_162` authority envelope с новым
+   nonce-bound binding, заменить DB marker его digest и только затем повторно
+   пройти snapshot admission; baseline envelope/marker не переиспользовать;
+7. выполнить guarded read-only inventory и сохранить только aggregate
    evidence;
-7. на exact schema 162 выполнить
+8. на exact schema 162 выполнить
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md):
    latest migration, unfinished `0`, 14 composite exact, 14 simple exact,
    `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes exact,
@@ -307,21 +318,25 @@ production-данных.
    `inventoryExecuted === schema.ready`,
    classification `8 proposal + 29 operator + 6 review`, actionable cap и exit
    contract;
-8. назначить owner всем review/operator/proposal findings и получить
+9. назначить owner всем review/operator/proposal findings и получить
    `blockingTotal=0`; proposal, `contentDigest` и `executionDigest` не считать
    authorization;
-9. выполнить отдельный idempotent row-level reconciliation dry-run, explicit
-   apply и повторный zero-diff dry-run;
-10. проверить backup restore, long transactions, свободное место, replication
+10. отдельно реализовать и утвердить production-like row dry-run, затем
+    получить protected row evidence; synthetic proposal evidence не
+    засчитывать;
+11. отдельным reviewed change реализовать idempotent explicit apply с
+    locks/recheck, audit и rollback; отдельным approval выполнить apply и
+    повторный zero-diff dry-run;
+12. проверить backup restore, long transactions, свободное место, replication
     health и change window;
-11. отдельно повторить populated synthetic baseline
+13. отдельно повторить populated synthetic baseline
     `156 → exact six migrations 157..162` и N/N-1 application compatibility;
-12. измерить concurrent index duration и metadata lock duration;
-13. проверить abort/retry и application rollback без удаления принятых
+14. измерить concurrent index duration и metadata lock duration;
+15. проверить abort/retry и application rollback без удаления принятых
     constraints;
-14. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
+16. доказать, что N-1 rollback не запускает старый seed: предыдущий seed не
     знает нового archive-first delete order и не является rollback-шагом;
-15. получить явное решение `GO` для schema-only release.
+17. получить явное решение `GO` для schema-only release.
 
 Ни один шаг не выполняется автоматически из этого документа.
 
@@ -394,11 +409,17 @@ Staff-модуль до `VERIFIED` и не меняет общий release decis
 release_sha:
 target:
 executed_at:
-snapshot_admission_sha: 7d67333b22f171c6e79f723190647cdd2454b128
+snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
+pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
+snapshot_admission_report_schema_version: 2
+baseline_authority_evidence_ref:
+baseline_marker_install_attestation_ref:
 baseline_admission_decision:
 baseline_admission_database_identity_digest:
 baseline_admission_content_digest:
 baseline_admission_execution_digest:
+expand_authority_evidence_ref:
+expand_marker_rotation_attestation_ref:
 expand_admission_decision:
 expand_admission_database_identity_digest:
 expand_admission_content_digest:
@@ -450,6 +471,21 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 
 ## 11. Changelog
 
+- `1.5.0`, 28.07.2026 — runtime admission candidate остаётся
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; test evidence
+  `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
+  admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в isolated
+  child. Remote CI evidence pending; experimental Node 22 module mock — P2.
+  Production roots пусты, поэтому root enrollment, signer и acquisition
+  остаются P0, а production-like flow — `NO-GO`. Порядок сохраняет отдельные
+  state-bound `BASELINE_156` и `EXPAND_162` envelopes и обязательную замену DB
+  marker между состояниями.
+- `1.4.0`, 28.07.2026 — admission prerequisite обновлён до schema v2 boundary
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`: public-only pinned-path
+  requirement,
+  reviewed root/signer/acquisition controls, exact column-scoped `User` ACL и
+  раздельные production-like row dry-run/apply/rollback/zero-diff. Trusted
+  roots пусты; production-like execution остаётся `NO-GO`.
 - `1.3.0`, 27.07.2026 — перед production-like inventory/planner добавлены
   обязательные Git-bound admissions `BASELINE_156` и `EXPAND_162`; synthetic
   candidate `7d67333b22f171c6e79f723190647cdd2454b128` прошёл `16` unit, `34`

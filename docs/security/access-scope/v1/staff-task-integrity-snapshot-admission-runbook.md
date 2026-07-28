@@ -1,15 +1,16 @@
 # Staff task integrity: snapshot admission runbook
 
-| Поле                  | Значение                                                                        |
-| --------------------- | ------------------------------------------------------------------------------- |
-| Статус                | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE NOT EXECUTED |
-| Версия                | 0.3.0                                                                           |
-| Дата                  | 27.07.2026                                                                      |
-| Backlog               | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`            |
-| Candidate code SHA    | `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`                                      |
-| Report schema version | 1                                                                               |
-| PostgreSQL            | Только major version `16`                                                       |
-| Разрешённая schema    | Только `public`                                                                 |
+| Поле                     | Значение                                                                   |
+| ------------------------ | -------------------------------------------------------------------------- |
+| Статус                   | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE `NO-GO` |
+| Версия                   | 0.5.0                                                                      |
+| Дата                     | 28.07.2026                                                                 |
+| Backlog                  | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`       |
+| Runtime candidate SHA    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`                                 |
+| Test evidence commit SHA | `2341b99937e54cc50d1763a0a794d975816c72ce`                                 |
+| Report schema version    | 2                                                                          |
+| PostgreSQL               | Только major version `16`                                                  |
+| Разрешённая schema       | Только `public`                                                            |
 
 Этот документ описывает реализованный fail-closed admission candidate для
 изолированного StaffTask snapshot. Candidate только проверяет runtime, exact
@@ -43,11 +44,15 @@ Candidate:
 - разрешает PostgreSQL только на `127.0.0.1`, `localhost` или `::1`;
 - отвергает `NODE_ENV=production`;
 - использует exact committed `RELEASE_SHA`, а не содержимое mutable worktree;
-- сверяет exact migration names и SHA-256 checksums;
+- сверяет exact migration names, SHA-256 checksums и runtime source с Git
+  blobs exact release;
 - использует ровно одно DB-соединение и одну
   `READ ONLY REPEATABLE READ` transaction;
-- проверяет exact SELECT-only role contract;
-- создаёт aggregate privacy-safe report и HMAC evidence;
+- проверяет exact column-scoped SELECT-only role contract;
+- для `PRODUCTION_LIKE` требует независимый Ed25519 authority manifest,
+  подписанный root из exact release, и nonce-bound DB/approval binding;
+- создаёт aggregate privacy-safe report; HMAC используется только для
+  integrity и pseudonymization;
 - не имеет restore, migrate, export, row-level, apply, `VALIDATE`, destroy или
   auto-fix path.
 
@@ -55,17 +60,36 @@ Candidate:
 
 ```text
 implementation candidate               = IMPLEMENTED_CANDIDATE
-unit contract                           = PASS (16/16)
-offline source/safety contract          = PASS (36 checks)
-SYNTHETIC real PostgreSQL verification = PASS (14 scenarios; PostgreSQL 16.14)
+admission contract tests                 = LOCAL PASS (19/19)
+authority contract tests                 = PASS (9/9)
+public-only positive pinned path          = LOCAL PASS (isolated test-only child)
+test evidence commit                      = 2341b99937e54cc50d1763a0a794d975816c72ce
+offline/integrated smoke self-test       = PASS (46 checks)
+SYNTHETIC real PostgreSQL verification = PASS (23 scenarios; PostgreSQL 16.13)
 PRODUCTION_LIKE acquisition/restore/run = NOT EXECUTED
+production-like authority roots         = EMPTY; FAIL-CLOSED
+remote CI evidence                       = PENDING
+Node 22 experimental module mocks        = P2 TEST-INFRA RISK
 remote admission                        = NO-GO
 production apply/VALIDATE/deploy        = NO-GO
 external beta                           = NO-GO
 ```
 
-Независимый security rereview exact candidate не обнаружил оставшихся P0/P1.
-Оставшиеся ограничения сохраняются как P2/operational `NO-GO`:
+Этот verification slice закрывает synthetic fixture matrix и техническую
+column-scoped/authority verification boundary. Public-only pre-signed fixture
+локально подтверждает положительный путь
+`pinned wrapper → marker/identity matching → private same-process report
+evidence`, отрицательные marker/expiry/detached-report сценарии и запрет
+preload. Fixture исполняется отдельным test-only child process с direct-entry
+realpath guard, не содержит private signing material и не изменяет пустой
+production root registry. Это test evidence, а не production-like operational
+trust или root enrollment. Signer/key custody, acquisition pipeline и
+enrollment production-like public root остаются P0 перед первым таким
+rehearsal; remote CI для test evidence commit ещё не получен. Использование
+экспериментального Node 22 `--experimental-test-module-mocks` остаётся P2
+риском тестовой инфраструктуры.
+
+Дополнительные operational ограничения сохраняют `NO-GO`:
 
 - восстановление `PUBLIC CONNECT` выполняется smoke-процессом и при аварийной
   остановке не гарантируется, поэтому smoke допустим только в одноразовом
@@ -87,7 +111,7 @@ external beta                           = NO-GO
 
 Правила:
 
-- класс не выводится из имени БД, hostname, количества строк или похожести
+- класс не доказывается именем БД, hostname, количеством строк или похожестью
   данных;
 - `SYNTHETIC` нельзя переименовать или задним числом объявить
   `PRODUCTION_LIKE`;
@@ -99,12 +123,16 @@ external beta                           = NO-GO
 - production-like classification не разрешает production или remote
   connection.
 
-Имена локальных БД дополнительно имеют fail-closed marker:
+Для `SYNTHETIC` действуют exact harness markers:
 
-- `SYNTHETIC`: `ci|test|testing|local`;
-- `PRODUCTION_LIKE`: `snapshot|rehearsal|preprod|staging|stage|test`.
+- database name: `lp_snapshot_admission_ci_<16 lowercase hex>`;
+- approval reference начинается с `synthetic:`.
 
-Marker не заменяет classification или approval.
+Это доверенная декларация harness/оператора, а не автоматическое доказательство
+происхождения данных, absence of PII или соответствия Gate 2. Для
+`PRODUCTION_LIKE` имя содержит отдельный
+`snapshot|rehearsal|preprod|staging|stage|test` marker, но оно также не
+заменяет classification, signed authority или approval.
 
 ## 4. Exact release authority
 
@@ -112,20 +140,61 @@ Marker не заменяет classification или approval.
 
 1. находит repository root из фактического runtime path;
 2. требует `HEAD === RELEASE_SHA`;
-3. требует clean status для admission script, inventory/planner sources и
+3. читает через `git cat-file` exact release blobs admission, smoke, authority,
+   authority roots, inventory/planner/proposal runtime;
+4. требует, чтобы фактический runtime content этих файлов совпадал с Git blobs
+   exact release после нормализации UTF-8/LF;
+5. требует clean status для всех этих runtime sources и
    `packages/database/prisma/migrations`;
-4. читает migration paths и `migration.sql` blobs через Git из exact
+6. читает migration paths и `migration.sql` blobs через Git из exact
    `RELEASE_SHA`;
-5. требует, чтобы release manifest содержал ровно 162 canonical migration
+7. требует, чтобы release manifest содержал ровно 162 canonical migration
    directories;
-6. для выбранного state строит expected manifest из первых 156 либо всех 162
+8. для выбранного state строит expected manifest из первых 156 либо всех 162
    migration blobs и сравнивает exact names/checksums с
    `public._prisma_migrations`.
 
 Незакоммиченный, untracked или изменённый authority source не используется.
-Mutable worktree не является источником migration truth. Отсутствующий Git
-object, другой HEAD, dirty authority path или неверный manifest дают contract
-error/exit `1`.
+`assume-unchanged`/`skip-worktree` не позволяют подменить проверяемые runtime
+bytes: content всё равно сравнивается с exact Git blob. Mutable worktree не
+является источником migration truth. Отсутствующий Git object, другой HEAD,
+dirty authority path, runtime/blob mismatch или неверный manifest дают
+contract error/exit `1`.
+
+### 4.1. Независимый production-like authority
+
+Для `PRODUCTION_LIKE` caller-supplied HMAC не является authority. Admission
+принимает только canonical JSON envelope, целиком закодированный canonical
+base64url и подписанный Ed25519-ключом, public root которого закреплён в exact
+release. Envelope строго связывает:
+
+- purpose, classification, profile и isolation profile;
+- `signingKeyId`, exact `releaseSha` и expected schema state;
+- digest encrypted snapshot artifact;
+- одноразовый `creationNonce`;
+- nonce-bound digests database identity и approval reference;
+- acquisition, restore, issue и expiry timestamps.
+
+Nonce-bound database identity вычисляется над
+`current_database() + system_identifier + database OID + creationNonce`.
+Approval digest отдельно связывает opaque approval reference с тем же nonce.
+В comment exact restored database должен находиться marker
+`LEETPLUS_STAFF_TASK_SNAPSHOT_AUTHORITY_V2:<authority-envelope-digest>`;
+admission читает и сверяет его внутри той же snapshot transaction.
+
+Pinned root также ограничен exact algorithm/classification/profile/purpose,
+fingerprint и интервалом действия. Freshness проверяется при разборе
+конфигурации, по DB `generatedAt` при создании report и повторно по текущему
+времени перед exit. Просроченный manifest/report не может получить exit `0`.
+
+Реализованный модуль является только verifier: в нём нет signing/private-key
+API, получения snapshot или authority manifest acquisition. Текущий
+`staff-task-integrity-snapshot-authority-roots.mjs` содержит намеренно пустой
+registry. Поэтому любой `PRODUCTION_LIKE` запуск exact SHA
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` завершается fail-closed
+`PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED`. До отдельного signer/key-custody
+design, acquisition pipeline и security-reviewed root enrollment статус
+production-like остаётся P0/`NO-GO`.
 
 ## 5. Exact schema states
 
@@ -279,17 +348,31 @@ Admission выполняется отдельной `LOGIN NOINHERIT` ролью
 schema, relation или function owner, не состоит в других ролях и не совпадает с
 restore owner, migration role, application role либо operator.
 
-Единственный application SELECT allowlist:
+Логический application allowlist содержит девять relations. Восемь из них
+требуют table-level `SELECT`:
 
 1. `public._prisma_migrations`;
 2. `public.Tenant`;
 3. `public.Store`;
-4. `public.User`;
-5. `public.UserStoreAccess`;
-6. `public.StaffTaskTemplate`;
-7. `public.StaffTaskRecurringRule`;
-8. `public.StaffTaskRecurringRuleRun`;
-9. `public.StaffTask`.
+4. `public.UserStoreAccess`;
+5. `public.StaffTaskTemplate`;
+6. `public.StaffTaskRecurringRule`;
+7. `public.StaffTaskRecurringRuleRun`;
+8. `public.StaffTask`.
+
+Для девятой relation, `public.User`, table-level `SELECT` запрещён. Разрешены
+ровно пять column grants:
+
+```text
+id
+tenantId
+isPlatformAdmin
+isActive
+accessScope
+```
+
+Следовательно, `SELECT * FROM public."User"` и чтение любой другой `User`
+колонки должны завершаться отказом PostgreSQL.
 
 Role contract:
 
@@ -309,6 +392,11 @@ USAGE public                         = true
 CREATE public                        = false
 required SELECT missing count        = 0
 excess application SELECT count      = 0
+SELECT grant-option relation count   = 0
+column-scoped table SELECT count     = 0
+excess User SELECT column count      = 0
+SELECT grant-option column count     = 0
+PUBLIC SELECT relation count         = 0
 other database CONNECT count         = 0
 non-public schema USAGE count        = 0
 writable relation count              = 0
@@ -319,10 +407,14 @@ large-object privilege count         = 0
 ```
 
 Системный catalog read, необходимый для inspection, не расширяет allowlist на
-другие user/application relations. Любой другой SELECT, sequence privilege,
-user-function execution, foreign-server usage, large-object privilege,
-other-database CONNECT, non-public schema usage, membership, ownership или
-write authority отклоняет role с `LEAST_PRIVILEGE_ROLE_REQUIRED`.
+другие user/application relations. Role отклоняется с
+`LEAST_PRIVILEGE_ROLE_REQUIRED` при table-wide `User` SELECT, missing/extra или
+renamed required column, table/column grant option, любом table/column SELECT
+через `PUBLIC`, любом другом SELECT, sequence privilege, user-function
+execution, foreign-server usage, large-object privilege, other-database
+CONNECT, non-public schema usage, membership, ownership или write authority.
+Physical rename `accessScope` не маскируется ordinal fallback и также
+fail-closed отклоняется.
 
 `default_transaction_read_only=on` добавляется к connection options, но не
 заменяет фактическую privilege inspection.
@@ -362,11 +454,18 @@ STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPIRES_AT=<canonical ISO-8601>
 Только для `PRODUCTION_LIKE`:
 
 ```text
-STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST=<64 lowercase hex>
+STAFF_TASK_INTEGRITY_SNAPSHOT_AUTHORITY_MANIFEST=<canonical base64url envelope>
 ```
 
-Это pre-approved HMAC database identity, полученный out-of-band на exact
-isolated restore. Для synthetic он не является Gate 2 authority.
+Envelope должен иметь canonical JSON/base64url форму, Ed25519 signature и
+`signingKeyId`, существующий в pinned root registry exact release. Private key
+или public-key override через environment не поддерживаются.
+
+Legacy
+`STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST` запрещён
+для `PRODUCTION_LIKE`: даже корректный caller-supplied HMAC вызывает
+`LEGACY_PRODUCTION_LIKE_AUTHORITY_PROHIBITED`. Для synthetic optional identity
+digest остаётся только harness-check и никогда не является Gate 2 authority.
 
 Опциональные bounded timeouts:
 
@@ -384,9 +483,10 @@ argument, включая `--apply`, `--restore`, `--migrate`, `--validate`,
 `--destroy`, raw output path или remote override, отклоняется.
 
 `--help` и `--self-test` не подключаются к DB. `NODE_ENV=production`, remote
-hostname, неверный DB marker, schema не `public`, URL/expected DB mismatch,
-неверные timestamps или отсутствие exact attestation отклоняются до normal
-report.
+hostname, неверный DB-name marker, schema не `public`, URL/expected DB
+mismatch, неверные timestamps, отсутствие exact attestation или невалидный
+authority manifest отклоняются до normal report. При текущем пустом root
+registry любой production-like manifest отклоняется до DB connection.
 
 ## 10. Read-only execution contract
 
@@ -412,13 +512,14 @@ Catalog/privilege queries могут быть выполнены до форми
 bounded timeouts и финальным fail-closed gate. Нельзя интерпретировать порядок
 queries как отдельную гарантию admission.
 
-## 11. Database identity и HMAC evidence
+## 11. Database identity, authority и HMAC evidence
 
 Expected database сначала сравнивается с DB name в `DATABASE_URL`, затем
 `databaseNameMatched` сравнивает его с фактическим `current_database()` внутри
 snapshot transaction. Database names в report не выводятся.
 
-`databaseIdentityDigest` — domain-separated HMAC-SHA256 только над:
+Сериализуемый `databaseIdentityDigest` — domain-separated HMAC-SHA256 только
+над:
 
 - фактическим `current_database()`;
 - PostgreSQL `system_identifier`;
@@ -428,26 +529,44 @@ Classification и expected state не входят в `databaseIdentityDigest`. 
 входят в stable admission report и поэтому защищены отдельным
 `contentDigest`.
 
-Для `PRODUCTION_LIKE` фактический `databaseIdentityDigest` обязан точно
-совпасть с
-`STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_IDENTITY_DIGEST`. Raw DB
-identity и expected digest не сериализуются отдельно.
+Для `PRODUCTION_LIKE` этот HMAC не участвует в authority decision. Вместо него
+admission независимо вычисляет nonce-bound SHA-256 database identity из
+фактических DB identity fields и `creationNonce` signed envelope, сравнивает
+его с подписанным `databaseIdentityDigest` manifest и отдельно сверяет DB
+comment marker с digest того же envelope. Authority digest, raw DB identity и
+raw marker не сериализуются.
 
 Дополнительные evidence:
 
 - `approvalReferenceDigest` — HMAC opaque approval/provenance alias;
-- `contentDigest` — domain-separated HMAC stable report, включая
+- `contentDigest` — domain-separated HMAC v2 stable report, включая
   classification, expected state, release SHA, timestamps, snapshot digest,
   database identity, safety/limits и все aggregate gates;
-- `executionDigest` — отдельный HMAC над `{contentDigest, generatedAt}`.
+- `executionDigest` — отдельный HMAC v2 над
+  `{contentDigest, generatedAt}`.
 
 Перед выдачей exit code candidate заново вычисляет и сравнивает
-`contentDigest` и `executionDigest`. Любая post-build подмена report или
-несогласованность decision/gates даёт exit `1`.
+`contentDigest`/`executionDigest`, проверяет непросроченный `expiresAt` по
+текущему времени и согласованность decision/gates. Любая post-build подмена
+report, expiry между generation и exit либо несогласованность даёт exit `1`.
 
-Ни один digest не является row-level checksum, CAS token, approval signature
-или разрешением на reconcile/migrate/validate/deploy. HMAC key и raw database
-identity не выводятся.
+HMAC key контролируется caller и используется только для privacy-safe
+pseudonymization и integrity внутри текущего процесса. HMAC не доказывает
+классификацию, approval или происхождение snapshot и не может заменить
+Ed25519 authority.
+
+Положительный production-like report дополнительно получает приватное
+same-process evidence, которое не сериализуется и должно совпасть с
+`contentDigest` перед exit `0`. Поэтому повторно загруженный JSON, даже с
+валидным HMAC, не является самостоятельно переносимым audit proof и не может
+повторно пройти production-like gate. Для аудита report сопоставляется с
+protected signed authority manifest, release SHA, фактическим CLI exit и
+операционной acquisition/restore evidence.
+
+Ни один digest или report не является row-level checksum, CAS token, owner
+decision, approval signature либо разрешением на
+reconcile/migrate/validate/deploy. HMAC key, raw database identity и signed
+manifest не выводятся в обычный report.
 
 ## 12. Decision и exit codes
 
@@ -466,7 +585,13 @@ inventory/planner findings.
 - detected migration state равен expected state;
 - exact migration manifest, catalog и privilege gates `ready=true`;
 - no-write/no-apply/no-remote safety flags;
-- release artifact binding, exact SELECT allowlist и FK trigger enforcement;
+- release artifact/runtime binding, exact table/column SELECT allowlist и FK
+  trigger enforcement;
+- для `PRODUCTION_LIKE`: pinned-root Ed25519 authority, nonce-bound
+  DB/approval binding, exact DB comment marker, freshness и private
+  same-process report evidence;
+- для `SYNTHETIC`: authority flags остаются `false`, exact harness DB/reference
+  markers не трактуются как Gate 2;
 - пустой `summary.rejectionCodes`;
 - internally verified content/execution HMAC.
 
@@ -480,7 +605,7 @@ Privacy-safe JSON имеет следующую форму:
 ```json
 {
   "script": "staff-task-integrity-snapshot-admission",
-  "reportSchemaVersion": 1,
+  "reportSchemaVersion": 2,
   "classification": "SYNTHETIC",
   "expectedState": "BASELINE_156",
   "releaseSha": "<40 lowercase hex>",
@@ -502,6 +627,7 @@ Privacy-safe JSON имеет следующую форму:
     "leastPrivilegeRoleRequired": true,
     "exactSelectAllowlistRequired": true,
     "releaseArtifactBound": true,
+    "independentProductionLikeAuthorityRequired": true,
     "enforcementTriggersRequired": true,
     "outputContainsDatabaseName": false,
     "outputContainsRoleName": false,
@@ -516,8 +642,11 @@ Privacy-safe JSON имеет следующую форму:
   "database": {
     "currentSchemaIsPublic": true,
     "databaseNameMatched": true,
+    "snapshotNotExpiredAtGeneration": true,
     "databaseIdentityDigestRequired": false,
     "databaseIdentityDigestMatched": true,
+    "productionLikeAuthorityVerified": false,
+    "productionLikeAuthorityDatabaseMarkerMatched": false,
     "postgresqlMajor": 16,
     "postgresqlMajorSupported": true,
     "migrations": {
@@ -578,6 +707,11 @@ Privacy-safe JSON имеет следующую форму:
         "nonPublicSchemaUsageCount": 0,
         "writableRelationCount": 0,
         "excessSelectRelationCount": 0,
+        "selectGrantOptionRelationCount": 0,
+        "columnScopedTableSelectCount": 0,
+        "excessSelectColumnCount": 0,
+        "selectGrantOptionColumnCount": 0,
+        "publicSelectRelationCount": 0,
         "writableSequenceCount": 0,
         "selectableSequenceCount": 0,
         "executableUserFunctionCount": 0,
@@ -613,11 +747,14 @@ Privacy-safe JSON имеет следующую форму:
 }
 ```
 
-Для `PRODUCTION_LIKE`
-`database.databaseIdentityDigestRequired=true`. Candidate SHA, raw approval
-reference, DB/role names, `system_identifier`, database OID, row IDs, PII,
-credentials, HMAC key, isolation verification и destruction result не входят
-в report.
+Для `PRODUCTION_LIKE` поля
+`database.databaseIdentityDigestRequired`,
+`database.productionLikeAuthorityVerified` и
+`database.productionLikeAuthorityDatabaseMarkerMatched` обязаны быть `true`.
+Для `SYNTHETIC` последние два поля обязаны оставаться `false`. Candidate SHA,
+raw approval reference, signed authority manifest, DB comment marker, DB/role
+names, `system_identifier`, database OID, row IDs, PII, credentials, HMAC key,
+isolation verification и destruction result не входят в report.
 
 CLI exit code сохраняется рядом с report в protected evidence, но не является
 JSON field.
@@ -635,6 +772,20 @@ JSON field.
 - acquisition/restore/expiry/generated timestamps;
 - decision, rejection codes и фактический CLI exit;
 - opaque protected evidence location.
+
+Только в защищённом access-controlled evidence bundle для будущего
+`PRODUCTION_LIKE` сохраняются signed authority manifest, signing key
+fingerprint/key id, acquisition/restore approvals и доказательство установки
+exact DB marker. Они коррелируются с report/release SHA, но не копируются в
+обычный JSON/stdout.
+
+`BASELINE_156` и `EXPAND_162` используют два разных state-bound authority
+envelope. После применения migrations `157..162` signer обязан выпустить новый
+envelope с `expectedState=EXPAND_162`, новым nonce-bound binding и той же
+одобренной acquisition lineage; DB `COMMENT` marker заменяется digest нового
+envelope до второго admission. Protected evidence хранит обе authority bundle,
+attestation первоначальной установки marker и attestation его ротации. Raw
+marker или manifest в git/stdout не попадают.
 
 Запрещено сохранять в git/stdout/CI artifacts:
 
@@ -655,9 +806,13 @@ Snapshot isolation, encryption, no-egress и destruction подтверждаю�
 acquisition approval
   → encrypted snapshot acquisition
   → isolated PostgreSQL 16 loopback restore
+  → trusted signer creates BASELINE_156 envelope for exact restore/approval/artifact/release
+  → install exact BASELINE_156 signed-envelope DB comment marker
   → admission(BASELINE_156)
   → populated baseline 156 evidence
   → exact migrations 157..162
+  → trusted signer creates distinct EXPAND_162 envelope with a new nonce-bound binding
+  → replace DB comment marker with exact EXPAND_162 envelope digest
   → admission(EXPAND_162)
   → read-only integrity inventory
   → aggregate reconciliation planner
@@ -673,8 +828,11 @@ rehearsal и никогда не удовлетворяет Gate 2.
 
 Реализованный
 [proposal dry-run](./staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
-покрывает только `SYNTHETIC EXPAND_162` disposable harness с подписанной
-provenance. Он не является будущим production-like шагом из схемы выше:
+покрывает только `SYNTHETIC EXPAND_162` disposable harness с явной
+harness provenance. Exact DB-name/`synthetic:` markers являются доверенной
+декларацией тестового контура, а не доказательством production-like
+происхождения. Этот dry-run не является будущим production-like шагом из схемы
+выше:
 standalone target отклоняется, предложения не авторизуют apply, а 29 operator
 и 6 review кодов остаются aggregate-only.
 
@@ -682,6 +840,7 @@ standalone target отклоняется, предложения не автор
 approval/evidence. Нельзя:
 
 - пропускать `BASELINE_156` admission;
+- использовать caller HMAC/legacy identity digest вместо signed authority;
 - применять `157..162` до baseline evidence;
 - запускать inventory/planner на partially migrated state;
 - считать HMAC/proposal owner decision или apply authorization;
@@ -702,8 +861,11 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
 - Git HEAD/source/manifest mismatch;
 - PostgreSQL/schema/state/catalog/FK-trigger mismatch;
 - database identity mismatch;
-- admission role membership, ownership, лишнем SELECT/EXECUTE/USAGE/CONNECT
-  либо любом write privilege;
+- production-like signer/root не enrolled, signature/binding/root validity,
+  DB comment marker или private report evidence не подтверждены;
+- admission role membership, ownership, table-wide/extra/missing/renamed
+  `User` SELECT, grant option, `PUBLIC` SELECT, лишнем
+  SELECT/EXECUTE/USAGE/CONNECT либо любом write privilege;
 - invalid timeline или expired snapshot;
 - report HMAC mismatch;
 - появлении raw identity, row ID, PII или secret в report/log;
@@ -718,22 +880,65 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
 
 До повышения operational статуса остаются:
 
-1. получить clean remote CI evidence для exact SHA;
-2. отдельно одобрить acquisition/restore production-like snapshot;
-3. получить out-of-band expected database identity digest;
-4. выполнить первый `PRODUCTION_LIKE` admission только на loopback disposable
-   cluster;
-5. уничтожить snapshot по TTL и сохранить destruction evidence.
-6. расширить synthetic PostgreSQL rehearsal proposal dry-run: кроме уже
-   проверенного одного positive predicate покрыть оставшиеся семь proposal
-   predicates и coalescing; это P1 test evidence, а не разрешение
-   production-like запуска.
+1. P0: утвердить threat model, signer implementation, separation of duties,
+   key custody/rotation/revocation и защищённый acquisition-to-signature
+   transport;
+2. получить clean remote CI evidence для test evidence commit
+   `2341b99937e54cc50d1763a0a794d975816c72ce`; локальный public-only pinned-path
+   `PASS` не заменяет этот gate;
+3. P2: зафиксировать поддерживаемую Node 22 версию для test-only
+   `--experimental-test-module-mocks` и отслеживать/заменить experimental API,
+   если он изменится;
+4. P0: отдельным reviewed release enroll хотя бы один production-like
+   Ed25519 public root с exact fingerprint, profile/purpose и validity window;
+   private key не должен попадать в admission runtime, environment или repo;
+5. P0: одобрить acquisition/restore workflow, два state-bound nonce-signed
+   envelope (`BASELINE_156` и `EXPAND_162`), первоначальную установку и
+   обязательную ротацию exact DB comment marker, а также protected evidence
+   storage;
+6. получить clean remote CI evidence для exact enrolled-root SHA;
+7. выполнить первый `PRODUCTION_LIKE` admission только на loopback disposable
+   PostgreSQL 16 cluster и сопоставить same-process report с protected signed
+   manifest/acquisition evidence;
+8. уничтожить snapshot по TTL и сохранить destruction evidence.
 
-Ни один из этих пунктов сам по себе не разрешает apply, `VALIDATE`, deploy или
-внешний beta-доступ.
+Synthetic coverage для всех восьми proposal codes и coalescing двух last-task
+причин подтверждён real PostgreSQL smoke, но это только engineering evidence.
+Он не закрывает ни один production-like gate.
+
+Ни один из перечисленных пунктов сам по себе не разрешает apply, `VALIDATE`,
+deploy или внешний beta-доступ. После production-like admission всё ещё
+обязательны отдельные inventory/planner, protected row-level dry-run, approved
+apply/rollback, zero-diff и повторные проверки.
 
 ## 18. Changelog
 
+- `0.5.0`, 28.07.2026 — runtime admission candidate сохранён на
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, а отдельное test evidence
+  привязано к `2341b99937e54cc50d1763a0a794d975816c72ce`. Public-only
+  pre-signed fixture без private signing material локально прошла полный
+  positive pinned path в изолированном test-only child: pinned wrapper,
+  marker/nonce-bound identity, private same-process report evidence, negative
+  marker/expiry, detached-report и preload cases. Admission tests — 19/19,
+  authority — 9/9. Production root registry остаётся пустым,
+  `PRODUCTION_LIKE` — fail-closed `NO-GO`; signer/acquisition/root enrollment —
+  P0, remote CI pending. Experimental Node 22 module mocks зафиксированы как P2
+  test-infra risk. Два state-bound envelope и обязательная marker rotation
+  остаются неизменной operational границей.
+- `0.4.0`, 28.07.2026 — candidate привязан к
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, report schema повышена до v2.
+  Exact role contract сужен до table `SELECT` на восьми relations и пяти
+  колонок `User`; table-wide/extra/missing/renamed/grant-option/`PUBLIC`
+  grants и `SELECT *` отклоняются. Добавлен verify-only production-like
+  authority: canonical base64url Ed25519 manifest, exact-release pinned roots,
+  nonce-bound DB/approval digests, DB comment marker, mandatory freshness,
+  runtime-content/Git-blob binding и private same-process report evidence.
+  Legacy production-like HMAC identity запрещён; HMAC оставлен только для
+  integrity/pseudonymization. Admission tests 18/18, authority tests 9/9,
+  smoke self-test 46 и disposable PostgreSQL 16.13 smoke 23 scenarios прошли,
+  включая все восемь proposal fixtures и coalescing. Root registry остаётся
+  пустым; signer/acquisition/root enrollment — P0, поэтому production-like и
+  внешний beta остаются `NO-GO`.
 - `0.3.0`, 27.07.2026 — release authority обновлена до exact candidate
   `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`; admission сохраняет 16/16 unit,
   offline contract расширен до 36 checks, integrated disposable PostgreSQL

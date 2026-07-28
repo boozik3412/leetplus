@@ -11,11 +11,24 @@ LeetPlus - SaaS-платформа для операционного управ�
 одного существующего `Tenant`.
 
 Текущий StaffTask hardening checkpoint —
-[SYNTHETIC reconciliation proposal dry-run](./docs/security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
-на SHA `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`. Он прошёл disposable
-PostgreSQL 16.14 smoke, работает только внутри подписанного CI/harness
-snapshot, не содержит apply-пути и не разрешает production-like запуск,
-deployment или внешний beta.
+[snapshot evidence boundary и SYNTHETIC reconciliation proposal dry-run](./docs/security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
+на runtime candidate SHA `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`.
+Он прошёл 23 сценария disposable PostgreSQL 16.13: все восемь proposal-кодов
+дают восемь occurrences и семь cases; две last-task причины coalesce в один
+case, а admission role имеет table-level `SELECT` к восьми relations и только
+пять разрешённых колонок `User`.
+Отдельный test-evidence commit
+`2341b99937e54cc50d1763a0a794d975816c72ce` локально добавляет public-only
+pre-signed pinned-path fixture и подтверждает admission suite `19/19`. Fixture
+не содержит private key, key generation или signing API; production root
+registry не изменяется. Remote CI и независимый review этого commit ещё
+pending.
+Production-like verifier, DB marker и exact Git-blob binding реализованы
+fail-closed, но trusted-root registry намеренно пуст: production-like запуск,
+apply, deployment и внешний beta всё ещё не разрешены.
+Изолированный experimental Node.js 22 module mock используется только для
+test child process и остаётся `P2` test-infrastructure risk, а не production
+authority.
 
 ## Текущий статус
 
@@ -706,12 +719,16 @@ pnpm --filter api test:ci:focused
 pnpm --filter api test:ci
 pnpm --filter api typecheck
 pnpm --filter web typecheck
+pnpm --filter database check:staff-task-integrity-snapshot-admission
 pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
 ```
 
 Полный StaffTask admission/proposal PostgreSQL rehearsal запускается только на
 выделенном одноразовом local/CI PostgreSQL 16, поскольку smoke создаёт и
-удаляет временные database, role и fixtures:
+удаляет временные database, role и fixtures. На время запуска он также
+сериализованно отзывает `PUBLIC CONNECT` у других БД этого одноразового
+кластера и восстанавливает исходный ACL в `finally`; запускать его на общем
+или production-кластере нельзя:
 
 ```powershell
 $env:DATABASE_URL = "<disposable local/CI PostgreSQL 16 URL>"

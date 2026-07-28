@@ -1,4 +1,8 @@
-import { IntegrationProvider, UserRole } from '@prisma/client';
+import {
+  IntegrationProvider,
+  TenantModule,
+  UserRole,
+} from '@prisma/client';
 import { createHmac } from 'node:crypto';
 import { GuestDataFoundationService } from './guest-data-foundation.service';
 
@@ -248,6 +252,9 @@ describe('GuestDataFoundationService', () => {
   const guestIdentityResolver = {
     reconcileDomainSnapshot: jest.fn(),
   };
+  const tenantExecutionAdmissionService = {
+    assertAllowed: jest.fn(),
+  };
 
   let service: GuestDataFoundationService;
 
@@ -281,6 +288,12 @@ describe('GuestDataFoundationService', () => {
       alreadyLinked: 0,
       conflicts: 0,
       ambiguous: 0,
+    });
+    tenantExecutionAdmissionService.assertAllowed.mockResolvedValue({
+      allowed: true,
+      tenantId: 'tenant-1',
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
     });
 
     prisma.guestDataProfileRun.create.mockResolvedValue({ id: 'run-1' });
@@ -421,11 +434,12 @@ describe('GuestDataFoundationService', () => {
 
     service = new GuestDataFoundationService(
       prisma as never,
-      tenantContextService as never,
+      tenantContextService,
       langameClient as never,
       langameSettingsService as never,
       configService as never,
       guestIdentityResolver as never,
+      tenantExecutionAdmissionService as never,
     );
   });
 
@@ -434,6 +448,16 @@ describe('GuestDataFoundationService', () => {
       dateFrom: '2026-05-01',
       dateTo: '2026-05-01',
     });
+
+    expect(tenantExecutionAdmissionService.assertAllowed).toHaveBeenCalledWith(
+      'tenant-1',
+      [
+        { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+        { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+        { module: TenantModule.GAMIFICATION, action: 'WRITE' },
+        { module: TenantModule.STAFF, action: 'WRITE' },
+      ],
+    );
 
     expect(result.failedSources).toBe(0);
     expect(prisma.guest.upsert).toHaveBeenCalledTimes(1);
@@ -601,6 +625,54 @@ describe('GuestDataFoundationService', () => {
     expect(shiftUpsert.update.externalClubId).toBe('10');
     expect(shiftUpsert.update.durationMinutes).toBe(630);
     expect(shiftUpsert.update.message).toBeNull();
+  });
+
+  it('rejects foundation sync before run mutation, credentials or provider calls when a dependent module is denied', async () => {
+    tenantExecutionAdmissionService.assertAllowed.mockRejectedValueOnce(
+      new Error('ENTITLEMENT_WRITE_DISABLED'),
+    );
+
+    await expect(
+      service.syncTenant(user, {
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
+      }),
+    ).rejects.toThrow('ENTITLEMENT_WRITE_DISABLED');
+
+    expect(prisma.guestDataProfileRun.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guestDataProfileRun.create).not.toHaveBeenCalled();
+    expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
+    for (const method of Object.values(langameClient)) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
+  it('requires outbound access to every affected module for a scheduled child sync', async () => {
+    tenantExecutionAdmissionService.assertAllowed.mockRejectedValueOnce(
+      new Error('ENTITLEMENT_OUTBOUND_DISABLED'),
+    );
+
+    await expect(
+      service.syncTenantById(
+        'tenant-1',
+        {
+          dateFrom: '2026-05-01',
+          dateTo: '2026-05-01',
+        },
+        'OUTBOUND',
+      ),
+    ).rejects.toThrow('ENTITLEMENT_OUTBOUND_DISABLED');
+
+    expect(tenantExecutionAdmissionService.assertAllowed).toHaveBeenCalledWith(
+      'tenant-1',
+      [
+        { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
+        { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+        { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
+        { module: TenantModule.STAFF, action: 'OUTBOUND' },
+      ],
+    );
+    expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
   });
 
   it('reconciles a complete guest snapshot through the identity resolver', async () => {

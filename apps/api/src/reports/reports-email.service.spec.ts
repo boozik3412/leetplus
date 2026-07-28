@@ -1,8 +1,11 @@
+import { ForbiddenException } from '@nestjs/common';
+import { TenantCustomerStage, TenantModule } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   TransactionalMailService,
   type ReportEmailContext,
 } from '../mail/transactional-mail.service';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
 import { ReportsEmailService } from './reports-email.service';
 import { ReportsExportService } from './reports-export.service';
 
@@ -12,6 +15,10 @@ type ReportsExportServiceMock = {
 
 type MailServiceMock = {
   sendReportExport: jest.Mock;
+};
+
+type TenantExecutionAdmissionServiceMock = {
+  assertAllowed: jest.Mock;
 };
 
 type SendReportExportCall = [string, ReportEmailContext];
@@ -27,6 +34,7 @@ const user = {
 describe('ReportsEmailService', () => {
   let reportsExportService: ReportsExportServiceMock;
   let mailService: MailServiceMock;
+  let tenantExecutionAdmissionService: TenantExecutionAdmissionServiceMock;
   let service: ReportsEmailService;
 
   beforeEach(() => {
@@ -44,13 +52,25 @@ describe('ReportsEmailService', () => {
     mailService = {
       sendReportExport: jest.fn(),
     };
+    tenantExecutionAdmissionService = {
+      assertAllowed: jest.fn().mockResolvedValue({
+        allowed: true,
+        tenantId: user.tenantId,
+        reasonCode: 'ALLOWED',
+        failedRequirement: null,
+        entitlementProfileRevision: 0,
+        customerStage: TenantCustomerStage.INTERNAL,
+        internalEntitlementBypass: true,
+      }),
+    };
     service = new ReportsEmailService(
       reportsExportService as unknown as ReportsExportService,
       mailService as unknown as TransactionalMailService,
+      tenantExecutionAdmissionService as unknown as TenantExecutionAdmissionService,
     );
   });
 
-  it('sends xlsx report to current user by default', async () => {
+  it('keeps an admitted INTERNAL tenant compatible and sends the report', async () => {
     await expect(
       service.sendReport(user, {
         from: '2026-04-01',
@@ -66,6 +86,16 @@ describe('ReportsEmailService', () => {
       to: '2026-04-30',
       format: 'xlsx',
     });
+    expect(tenantExecutionAdmissionService.assertAllowed).toHaveBeenCalledWith(
+      user.tenantId,
+      [
+        { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+        { module: TenantModule.COMMUNICATIONS, action: 'OUTBOUND' },
+      ],
+    );
+    expect(
+      tenantExecutionAdmissionService.assertAllowed,
+    ).toHaveBeenCalledTimes(2);
     const [recipientEmail, emailContext] = mailService.sendReportExport.mock
       .calls[0] as SendReportExportCall;
     expect(recipientEmail).toBe('owner@club-a.leetplus.ru');
@@ -93,5 +123,47 @@ describe('ReportsEmailService', () => {
       service.sendReport(user, { recipientEmail: 'not-email' }),
     ).rejects.toThrow('recipientEmail must be a valid email');
     expect(reportsExportService.exportReports).not.toHaveBeenCalled();
+  });
+
+  it('does not build or send a report when initial outbound admission is denied', async () => {
+    tenantExecutionAdmissionService.assertAllowed.mockRejectedValueOnce(
+      new ForbiddenException({
+        reasonCode: 'ENTITLEMENT_OUTBOUND_DISABLED',
+      }),
+    );
+
+    await expect(
+      service.sendReport(user, {
+        from: '2026-04-01',
+        to: '2026-04-30',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(reportsExportService.exportReports).not.toHaveBeenCalled();
+    expect(mailService.sendReportExport).not.toHaveBeenCalled();
+  });
+
+  it('rechecks admission after export and before the mail effect', async () => {
+    tenantExecutionAdmissionService.assertAllowed
+      .mockResolvedValueOnce({
+        allowed: true,
+        tenantId: user.tenantId,
+        reasonCode: 'ALLOWED',
+      })
+      .mockRejectedValueOnce(
+        new ForbiddenException({
+          reasonCode: 'TENANT_INACTIVE',
+        }),
+      );
+
+    await expect(
+      service.sendReport(user, {
+        from: '2026-04-01',
+        to: '2026-04-30',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(reportsExportService.exportReports).toHaveBeenCalledTimes(1);
+    expect(mailService.sendReportExport).not.toHaveBeenCalled();
   });
 });

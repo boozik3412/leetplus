@@ -4,6 +4,7 @@ import {
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
+  TenantModule,
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -11,6 +12,11 @@ import { LangameClient } from '../integrations/langame.client';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  TenantExecutionAdmissionService,
+  type TenantExecutionAdmissionDecision,
+  type TenantExecutionRequirement,
+} from '../tenancy/tenant-execution-admission.service';
 
 const langameBalancePhonePath = '/guests/balance/phone';
 const langameBalancePhoneMasterPath = `/master_api${langameBalancePhonePath}`;
@@ -42,6 +48,16 @@ const staffTestProfileReasons = {
 } as const;
 const staffTestRewardAccrualEnabledEnv =
   'GUEST_GAME_STAFF_TEST_REWARD_ACCRUAL_ENABLED';
+const bonusLedgerOutboundRequirements = [
+  {
+    module: TenantModule.GAMIFICATION,
+    action: 'OUTBOUND',
+  },
+  {
+    module: TenantModule.INTEGRATIONS,
+    action: 'OUTBOUND',
+  },
+] as const satisfies readonly TenantExecutionRequirement[];
 
 type BonusLedgerMode = 'DISABLED' | 'DRY_RUN' | 'READY';
 type BonusLedgerItemStatus =
@@ -306,6 +322,7 @@ export class GuestBonusLedgerService {
     private readonly langameClient: LangameClient,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly secretEncryptionService: SecretEncryptionService,
+    private readonly tenantExecutionAdmission: TenantExecutionAdmissionService,
   ) {}
 
   async getStatus(
@@ -1073,6 +1090,21 @@ export class GuestBonusLedgerService {
         continue;
       }
 
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        tenant.id,
+        bonusLedgerOutboundRequirements,
+      );
+      if (!admission.allowed) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason: tenantExecutionAdmissionNote(admission),
+          result: null,
+        });
+        continue;
+      }
+
       const actor = this.pickScheduledActor(tenant.users);
 
       if (!actor) {
@@ -1510,6 +1542,29 @@ export class GuestBonusLedgerService {
           note: 'Ledger-запись не перешла в стадию отправки. Внешнее начисление не выполнялось.',
         };
       }
+
+      const outboundAdmission = await this.tenantExecutionAdmission.evaluate(
+        sourcedEntry.tenantId,
+        bonusLedgerOutboundRequirements,
+      );
+      if (!outboundAdmission.allowed) {
+        await this.returnDispatchingEntryAfterAdmissionDenial(
+          actorUserId,
+          sourcedEntry,
+          outboundAdmission,
+        );
+
+        return {
+          ledgerEntryId: sourcedEntry.id,
+          rewardId: sourcedEntry.rewardId,
+          status: 'BLOCKED',
+          amount: decimalToNumber(sourcedEntry.amount),
+          externalDomain: sourcedEntry.externalDomain,
+          externalGuestId: sourcedEntry.externalGuestId,
+          note: tenantExecutionAdmissionNote(outboundAdmission),
+        };
+      }
+
       const response = await this.langameClient.adjustGuestBalanceByPhone(
         source.baseUrl,
         access.apiKey,
@@ -1566,6 +1621,31 @@ export class GuestBonusLedgerService {
           : 'Ledger-запись уже изменилась; поздняя ошибка не перезаписала состояние.',
       };
     }
+  }
+
+  private async returnDispatchingEntryAfterAdmissionDenial(
+    actorUserId: string | null,
+    entry: ClaimedBonusLedgerEntry,
+    admission: TenantExecutionAdmissionDecision,
+  ): Promise<void> {
+    await this.prisma.guestBonusLedgerEntry.updateMany({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: 'DISPATCHING',
+      },
+      data: {
+        status: 'PENDING',
+        processedByUserId: actorUserId,
+        attempts: { decrement: 1 },
+        lockedAt: null,
+        processedAt: null,
+        failedAt: null,
+        nextAttemptAt: null,
+        errorCode: 'TENANT_EXECUTION_NOT_ADMITTED',
+        errorMessage: truncate(tenantExecutionAdmissionNote(admission), 1000),
+      },
+    });
   }
 
   private async revalidateClaimedEntryForDelivery(
@@ -2813,6 +2893,16 @@ function scheduledRoleRank(role: UserRole) {
   );
 
   return index >= 0 ? index : scheduledBonusLedgerActorRoles.length;
+}
+
+function tenantExecutionAdmissionNote(
+  decision: TenantExecutionAdmissionDecision,
+) {
+  const failedRequirement = decision.failedRequirement
+    ? ` (${decision.failedRequirement.module}:${decision.failedRequirement.action})`
+    : '';
+
+  return `Tenant execution admission denied: ${decision.reasonCode}${failedRequirement}.`;
 }
 
 function bonusLedgerModeLabel(mode: BonusLedgerMode) {

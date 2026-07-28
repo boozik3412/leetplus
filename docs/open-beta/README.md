@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.7                                          |
+| Версия           | 1.10                                         |
 | Дата             | 28.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -107,6 +107,10 @@ enterprise-isolation option и не сокращает shared gates.
      persisted stage/trial/profile, Platform Admin CAS, runtime admission,
      shared provisioning/revoke candidate, owner onboarding и точный остаток
      до dedicated external activation.
+22. [Initial OWNER identity and activation](./initial-owner-identity-and-activation.md) —
+    shell-only provisioning, canonical email claim, encrypted mail outbox,
+    persisted release gates, activation/suspend state machine и обязательная
+    concurrency/effect-fencing matrix.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -124,13 +128,26 @@ enterprise-isolation option и не сокращает shared gates.
   session/activation policy, запрет generic lifecycle mutation для каждого
   non-`INTERNAL` tenant, owner-invite onboarding transition и удалённый
   database default с `User.role`;
-- shared provisioning/revoke foundation candidate: Platform Admin атомарно
+- legacy shared provisioning/revoke foundation candidate: Platform Admin атомарно
   создаёт `PILOT/SUSPENDED/OWNER_INVITED/revision 1` tenant, один неактивный
   Store, OWNER override, exact six-row profile, email-bound `NETWORK OWNER`
   invite и audit/request digest; replay не создаёт дублей и не раскрывает
   one-time URL повторно; revoke возвращает только pristine pre-owner tenant в
   `SUSPENDED/PROVISIONING`. Real PostgreSQL/concurrency evidence, email
-  delivery, reissue/rotation и dedicated activation ещё pending;
+  delivery, reissue/rotation и dedicated activation ещё pending. Candidate
+  не используется с реальным email и до launch заменяется на shell-only flow:
+  без invite/token/trial до protected activation; controller legacy
+  provisioning возвращает стабильный `503` и не вызывает candidate;
+- external authenticated HTTP admission candidate: обязательные beta-prefixes
+  получают `module + READ|WRITE|OUTBOUND`, неизвестный route запрещён;
+  reusable lower-layer admission перечитывает persisted state на каждый
+  effect и поддерживает cross-module requirements. Уже защищены report
+  email/digest, scheduled Langame sync, bonus-ledger provider и игровой
+  Telegram/MAX delivery/pull. Остальные schedulers, public guest/Telegram
+  identity routes, files и execution fencing ещё pending;
+- scheduled report digest применяет effective role/custom-role overrides и
+  требует `export_reports`; Langame/guest foundation/business snapshot
+  проверяют полный cross-module entitlement и AND-capability contract;
 - CI/security baseline, startup contract и health/version foundation;
 - persisted `NETWORK | STORES` и database invariants;
 - user/role/invite authority; generic direct create, invite issue/rotation и
@@ -297,11 +314,14 @@ Gate 2 и
 - текущая сеть успешно переведена и прошла семь дней internal alpha;
 - persisted lifecycle/stage/trial/entitlements и `TenantExecutionPolicy`
   применяются fail-closed во всех HTTP/background/Telegram paths;
-- idempotent provisioning создаёт отдельный Tenant B, Store B1 и email-bound
-  OWNER invite без manual SQL; real PostgreSQL concurrency подтверждает
-  zero-duplicate replay, а повтор не раскрывает one-time URL;
-- protected email delivery/reissue/rotation и dedicated external activation
-  проверены; generic lifecycle endpoint для Tenant B не используется;
+- idempotent shell provisioning создаёт отдельный Tenant B, Store B1,
+  six-row profile и canonical owner-email claim без User/invite/token/trial;
+- persisted GO и dedicated activation запускают trial и атомарно создают
+  email-bound OWNER invite + encrypted mail outbox; response/replay не
+  раскрывает identity secret, а real PostgreSQL concurrency подтверждает
+  zero-duplicate issue/accept;
+- protected email delivery/reissue/revoke и emergency suspend проверены;
+  generic lifecycle endpoint для Tenant B не используется;
 - owner и все созданные им пользователи ограничены собственной сетью и
   `NETWORK | STORES` scope;
 - shared PostgreSQL/runtime A/A1/A2 ↔ B/B1 IDOR matrix зелёная для API, BFF,

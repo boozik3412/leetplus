@@ -9,6 +9,7 @@ import {
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
+  TenantModule,
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -419,6 +420,17 @@ function createService(
     findActiveGuestForProfileDomain: jest.fn().mockResolvedValue(null),
     listActiveGuestIds: jest.fn().mockResolvedValue([]),
   };
+  const tenantExecutionAdmission = {
+    evaluate: jest.fn().mockResolvedValue({
+      allowed: true,
+      tenantId: user.tenantId,
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      entitlementProfileRevision: 1,
+      customerStage: 'PILOT',
+      internalEntitlementBypass: false,
+    }),
+  };
 
   return {
     prisma,
@@ -428,6 +440,7 @@ function createService(
     bonusLedgerSchedulerService,
     bonusLedgerService,
     guestIdentityResolver,
+    tenantExecutionAdmission,
     service: new GuestGamificationService(
       prisma,
       langameSettingsService as any,
@@ -436,6 +449,7 @@ function createService(
       bonusLedgerSchedulerService as any,
       bonusLedgerService as any,
       guestIdentityResolver as any,
+      tenantExecutionAdmission as any,
       staffTeamChatService as any,
       mediaService as any,
     ),
@@ -17777,7 +17791,7 @@ describe('GuestGamificationService', () => {
 
   describe('prepareDeliveries', () => {
     it('hides wallet-managed reward codes and excludes them from legacy delivery preparation', async () => {
-      const { service, prisma } = createService();
+      const { service, prisma, tenantExecutionAdmission } = createService();
       const walletReward = rewardRow({
         claimRequired: true,
         deliveryRequestedAt: now,
@@ -17810,6 +17824,7 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameDelivery.findFirst).not.toHaveBeenCalled();
       expect(prisma.guestGameDelivery.create).not.toHaveBeenCalled();
       expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect(tenantExecutionAdmission.evaluate).not.toHaveBeenCalled();
     });
 
     it('keeps legacy reward code delivery unchanged when claimRequired is false', async () => {
@@ -18273,6 +18288,100 @@ describe('GuestGamificationService', () => {
       fetchMock.mockRestore();
     });
 
+    it('rechecks outbound admission immediately before a real provider send', async () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
+        'https://max-provider.example/send';
+      process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+      const { service, prisma, tenantExecutionAdmission } = createService();
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('admission denial must block provider'));
+      const maxRow = deliveryRow({
+        channel: 'MAX',
+        channelIdentityMasked: 'max:***',
+        profile: {
+          id: 'profile-1',
+          displayName: 'Guest One',
+          contactMasked: '+7 *** **-11',
+          telegramIdentity: null,
+          maxIdentity: 'max:user-123',
+          xp: 120,
+          level: 2,
+        },
+      });
+
+      prisma.guestGameDelivery.findMany.mockResolvedValue([maxRow]);
+      tenantExecutionAdmission.evaluate.mockResolvedValue({
+        allowed: false,
+        tenantId: user.tenantId,
+        reasonCode: 'ENTITLEMENT_OUTBOUND_DISABLED',
+        failedRequirement: {
+          module: TenantModule.COMMUNICATIONS,
+          action: 'OUTBOUND',
+        },
+        entitlementProfileRevision: 2,
+        customerStage: 'PILOT',
+        internalEntitlementBypass: false,
+      });
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+      jest.spyOn(service, 'getDeliveries').mockResolvedValue([]);
+
+      const result = await service.dispatchDeliveries(user, {
+        dryRun: false,
+        channels: ['MAX'],
+      });
+
+      expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledWith(
+        user.tenantId,
+        [
+          {
+            module: TenantModule.GAMIFICATION,
+            action: 'OUTBOUND',
+          },
+          {
+            module: TenantModule.COMMUNICATIONS,
+            action: 'OUTBOUND',
+          },
+        ],
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+        user,
+        'delivery-1',
+        'reward-1',
+        expect.objectContaining({
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: 'READY',
+          toStatus: 'READY',
+          channel: 'MAX',
+          note:
+            'Tenant execution admission denied: ENTITLEMENT_OUTBOUND_DISABLED (COMMUNICATIONS:OUTBOUND).',
+          payload: expect.objectContaining({
+            reason: 'tenant_execution_not_admitted',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        dryRun: false,
+        checked: 1,
+        sent: 0,
+        failed: 0,
+        skipped: 0,
+        blocked: 1,
+        items: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            rewardId: 'reward-1',
+            status: 'BLOCKED',
+          }),
+        ],
+      });
+    });
+
     it('sends MAX delivery through generic provider when env and canary are explicitly enabled', async () => {
       process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
@@ -18547,6 +18656,129 @@ describe('GuestGamificationService', () => {
       expect(JSON.stringify(outbox.botConsumer)).not.toContain('sync-token');
     });
 
+    it('skips a denied scheduled tenant and continues dispatching admitted tenants', async () => {
+      const { service, prisma, tenantExecutionAdmission } = createService();
+      const dispatch = jest.spyOn(service, 'dispatchDeliveries').mockResolvedValue({
+        dryRun: true,
+        realSendEnabled: false,
+        checked: 1,
+        sent: 0,
+        failed: 0,
+        skipped: 1,
+        blocked: 0,
+        items: [],
+        deliveries: [],
+        dispatcher: {
+          mode: 'DRY_RUN',
+          modeLabel: 'Dry run',
+          realSendEnabled: false,
+          providers: [],
+          note: 'dry run',
+        },
+        note: 'dry run',
+      });
+
+      prisma.tenant.findMany.mockResolvedValue([
+        scheduledTenantRow({
+          id: 'tenant-denied',
+          slug: 'denied',
+        }),
+        scheduledTenantRow({
+          id: 'tenant-admitted',
+          slug: 'admitted',
+          users: [
+            {
+              id: 'owner-admitted',
+              email: 'admitted@example.com',
+              fullName: 'Admitted Owner',
+              role: UserRole.OWNER,
+              customRoleId: null,
+              isPlatformAdmin: false,
+            },
+          ],
+        }),
+      ]);
+      tenantExecutionAdmission.evaluate.mockImplementation((tenantId: string) =>
+        Promise.resolve(
+          tenantId === 'tenant-denied'
+            ? {
+                allowed: false,
+                tenantId,
+                reasonCode: 'ENTITLEMENT_OUTBOUND_DISABLED',
+                failedRequirement: {
+                  module: TenantModule.COMMUNICATIONS,
+                  action: 'OUTBOUND',
+                },
+                entitlementProfileRevision: 3,
+                customerStage: 'PILOT',
+                internalEntitlementBypass: false,
+              }
+            : {
+                allowed: true,
+                tenantId,
+                reasonCode: 'ALLOWED',
+                failedRequirement: null,
+                entitlementProfileRevision: 3,
+                customerStage: 'PILOT',
+                internalEntitlementBypass: false,
+              },
+        ),
+      );
+
+      const result = await service.runDeliveryDispatchScheduled({
+        dryRun: true,
+      });
+
+      expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledTimes(2);
+      expect(tenantExecutionAdmission.evaluate).toHaveBeenNthCalledWith(
+        1,
+        'tenant-denied',
+        [
+          {
+            module: TenantModule.GAMIFICATION,
+            action: 'OUTBOUND',
+          },
+          {
+            module: TenantModule.COMMUNICATIONS,
+            action: 'OUTBOUND',
+          },
+        ],
+      );
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'owner-admitted',
+          tenantId: 'tenant-admitted',
+          tenantSlug: 'admitted',
+        }),
+        expect.objectContaining({ dryRun: true }),
+      );
+      expect(result).toMatchObject({
+        checkedTenants: 2,
+        processedTenants: 1,
+        skippedTenants: 1,
+        erroredTenants: 0,
+        checked: 1,
+        sent: 0,
+        skipped: 1,
+        tenants: [
+          {
+            tenantId: 'tenant-denied',
+            tenantSlug: 'denied',
+            status: 'SKIPPED',
+            reason:
+              'Tenant execution admission denied: ENTITLEMENT_OUTBOUND_DISABLED (COMMUNICATIONS:OUTBOUND).',
+            result: null,
+          },
+          expect.objectContaining({
+            tenantId: 'tenant-admitted',
+            tenantSlug: 'admitted',
+            status: 'PROCESSED',
+          }),
+        ],
+      });
+    });
+
     it('omits empty tenant filters from scheduled gamification jobs', async () => {
       const { service, prisma } = createService();
 
@@ -18569,6 +18801,53 @@ describe('GuestGamificationService', () => {
           where: {},
         }),
       );
+    });
+
+    it('returns an empty deterministic bot pull when outbound admission is denied', async () => {
+      const { service, prisma, tenantExecutionAdmission } = createService();
+      prisma.tenant.findFirst.mockResolvedValue(
+        scheduledTenantRow({ status: TenantLifecycleStatus.SUSPENDED }),
+      );
+      tenantExecutionAdmission.evaluate.mockResolvedValue({
+        allowed: false,
+        tenantId: user.tenantId,
+        reasonCode: 'TENANT_INACTIVE',
+        failedRequirement: {
+          module: TenantModule.GAMIFICATION,
+          action: 'OUTBOUND',
+        },
+        entitlementProfileRevision: 4,
+        customerStage: 'PILOT',
+        internalEntitlementBypass: false,
+      });
+
+      const result = await service.pullBotDeliveries({
+        tenantSlug: user.tenantSlug,
+        channels: 'telegram',
+      });
+
+      expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledWith(
+        user.tenantId,
+        [
+          {
+            module: TenantModule.GAMIFICATION,
+            action: 'OUTBOUND',
+          },
+          {
+            module: TenantModule.COMMUNICATIONS,
+            action: 'OUTBOUND',
+          },
+        ],
+      );
+      expect(prisma.guestGameDelivery.findMany).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note:
+          'Tenant execution admission denied: TENANT_INACTIVE (GAMIFICATION:OUTBOUND).',
+      });
     });
 
     it('pulls only ready bot deliveries with a confirmed bot identity', async () => {
@@ -18682,7 +18961,7 @@ describe('GuestGamificationService', () => {
     });
 
     it('acks bot delivery result and records a sanitized audit event', async () => {
-      const { service, prisma } = createService();
+      const { service, prisma, tenantExecutionAdmission } = createService();
       const current = deliveryRow();
       const sent = {
         ...current,
@@ -18691,7 +18970,9 @@ describe('GuestGamificationService', () => {
         note: 'sent by bot',
       };
 
-      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      prisma.tenant.findFirst.mockResolvedValue(
+        scheduledTenantRow({ status: TenantLifecycleStatus.SUSPENDED }),
+      );
       prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
       prisma.guestGameDelivery.update.mockResolvedValue(sent);
 
@@ -18746,6 +19027,7 @@ describe('GuestGamificationService', () => {
           sentAt: isoNow,
         },
       });
+      expect(tenantExecutionAdmission.evaluate).not.toHaveBeenCalled();
     });
 
     it('treats repeated terminal bot ack as idempotent without duplicating events', async () => {

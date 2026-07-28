@@ -119,18 +119,37 @@ export class ReportsDigestSchedulerService
         { tenantId: tenant.id },
       );
       const sentCount = result.dryRun ? 0 : result.sent;
+      const skippedCount = result.skipped;
+      const scheduleStatus =
+        !result.dryRun && sentCount === 0 && skippedCount > 0
+          ? 'SKIPPED'
+          : 'SENT';
+      const skipReason =
+        scheduleStatus === 'SKIPPED'
+          ? result.skippedResults
+              .map((item) => item.reasonCode)
+              .sort()
+              .join(',')
+          : null;
 
       await this.prisma.reportDigestScheduleRun.update({
         where: { id: run.id },
         data: {
-          status: 'SENT',
+          status: scheduleStatus,
           sentCount,
           completedAt: new Date(),
+          errorMessage: skipReason,
         },
       });
-      this.logger.log(
-        `Sent ${type} report digest for ${tenant.slug}: ${sentCount} recipient(s)`,
-      );
+      if (scheduleStatus === 'SKIPPED') {
+        this.logger.warn(
+          `Skipped ${type} report digest for ${tenant.slug}: ${skipReason}`,
+        );
+      } else {
+        this.logger.log(
+          `Sent ${type} report digest for ${tenant.slug}: ${sentCount} recipient(s), ${skippedCount} skipped`,
+        );
+      }
     } catch (error) {
       await this.prisma.reportDigestScheduleRun.update({
         where: { id: run.id },

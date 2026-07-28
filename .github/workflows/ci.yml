@@ -88,6 +88,9 @@ jobs:
       - name: Lint API security, health, and configuration boundary
         run: pnpm --filter api lint:ci:boundary
 
+      - name: Lint tenant execution admission boundary
+        run: pnpm --filter api lint:ci:tenant-execution
+
       - name: Lint isolated design-partner runtime boundary
         run: pnpm --filter api lint:ci:design-partner
 
@@ -96,6 +99,9 @@ jobs:
 
       - name: Run focused API security tests
         run: pnpm --filter api test:ci:focused
+
+      - name: Run tenant execution admission tests
+        run: pnpm --filter api test:ci:tenant-execution
 
       - name: Run full API test suite
         run: pnpm --filter api test:ci

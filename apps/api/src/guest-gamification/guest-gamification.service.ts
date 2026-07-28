@@ -15,6 +15,7 @@ import {
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
+  TenantModule,
   type GuestGameRewardIntent,
   UserRole,
 } from '@prisma/client';
@@ -36,6 +37,11 @@ import type {
 import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffTeamChatService } from '../staff/staff-team-chat.service';
+import {
+  TenantExecutionAdmissionService,
+  type TenantExecutionAdmissionDecision,
+  type TenantExecutionRequirement,
+} from '../tenancy/tenant-execution-admission.service';
 import { normalizeExternalActionUrl } from '../utilities/external-action-url';
 import {
   GuestBonusLedgerSchedulerService,
@@ -145,6 +151,16 @@ const eventSources = [
   'CHECK_IN',
 ] as const;
 const deliveryChannels = ['TELEGRAM', 'MAX', 'CASHIER', 'MANUAL'] as const;
+const deliveryOutboundRequirements = [
+  {
+    module: TenantModule.GAMIFICATION,
+    action: 'OUTBOUND',
+  },
+  {
+    module: TenantModule.COMMUNICATIONS,
+    action: 'OUTBOUND',
+  },
+] as const satisfies readonly TenantExecutionRequirement[];
 const deliveryStatuses = [
   'READY',
   'BLOCKED',
@@ -3860,6 +3876,7 @@ export class GuestGamificationService {
     private readonly bonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
     private readonly bonusLedgerService: GuestBonusLedgerService,
     private readonly guestIdentityResolver: GuestIdentityResolverService,
+    private readonly tenantExecutionAdmission: TenantExecutionAdmissionService,
     @Optional()
     private readonly staffTeamChatService?: StaffTeamChatService,
     @Optional()
@@ -7752,6 +7769,21 @@ export class GuestGamificationService {
         continue;
       }
 
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        tenant.id,
+        deliveryOutboundRequirements,
+      );
+      if (!admission.allowed) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason: deliveryExecutionAdmissionNote(admission),
+          result: null,
+        });
+        continue;
+      }
+
       const actor = this.pickScheduledPipelineActor(tenant.users);
 
       if (!actor) {
@@ -7811,7 +7843,23 @@ export class GuestGamificationService {
   async pullBotDeliveries(
     dto: GuestGameBotDeliveryPullDto = {},
   ): Promise<GuestGameBotDeliveryPullResult> {
-    const { user, tenantSlug } = await this.resolveScheduledTenantActor(dto);
+    const { user, tenantSlug } = await this.resolveScheduledTenantActor(dto, {
+      allowInactiveTenant: true,
+    });
+    const admission = await this.tenantExecutionAdmission.evaluate(
+      user.tenantId,
+      deliveryOutboundRequirements,
+    );
+    if (!admission.allowed) {
+      return {
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note: deliveryExecutionAdmissionNote(admission),
+      };
+    }
+
     const channels = deliveryDispatchChannels(dto.channels);
     const limit = Math.min(50, Math.max(1, intValue(dto.limit) ?? 25));
     const rows = await this.prisma.guestGameDelivery.findMany({
@@ -7844,7 +7892,11 @@ export class GuestGamificationService {
   async ackBotDelivery(
     dto: GuestGameBotDeliveryAckDto,
   ): Promise<GuestGameBotDeliveryAckResult> {
-    const { user } = await this.resolveScheduledTenantActor(dto);
+    const { user } = await this.resolveScheduledTenantActor(dto, {
+      allowInactiveTenant: true,
+    });
+    // A provider may already have sent the message after pull. Ack must remain
+    // available so that its terminal outcome can reach the reconciliation log.
     const deliveryId = nullableString(dto.deliveryId);
 
     if (!deliveryId) {
@@ -11033,6 +11085,35 @@ export class GuestGamificationService {
             dryRun,
             providerConfigured: provider.configured,
             reason: 'provider_not_ready',
+          }),
+        });
+        continue;
+      }
+
+      const admission = await this.tenantExecutionAdmission.evaluate(
+        user.tenantId,
+        deliveryOutboundRequirements,
+      );
+      if (!admission.allowed) {
+        const note = deliveryExecutionAdmissionNote(admission);
+        blocked += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'BLOCKED',
+          note,
+        });
+        await this.createDeliveryEvent(user, row.id, row.rewardId, {
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: row.status,
+          toStatus: row.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun,
+            providerConfigured: provider.configured,
+            reason: 'tenant_execution_not_admitted',
           }),
         });
         continue;
@@ -17739,10 +17820,13 @@ export class GuestGamificationService {
     return new Set(rows.map((row) => row.audienceId));
   }
 
-  private async resolveScheduledTenantActor(dto: {
-    tenantId?: string | null;
-    tenantSlug?: string | null;
-  }): Promise<{ user: AuthenticatedUser; tenantSlug: string }> {
+  private async resolveScheduledTenantActor(
+    dto: {
+      tenantId?: string | null;
+      tenantSlug?: string | null;
+    },
+    options: { allowInactiveTenant?: boolean } = {},
+  ): Promise<{ user: AuthenticatedUser; tenantSlug: string }> {
     const tenantId = nullableString(dto.tenantId);
     const tenantSlug = nullableString(dto.tenantSlug);
 
@@ -17782,7 +17866,10 @@ export class GuestGamificationService {
       throw new NotFoundException('Tenant was not found for bot consumer.');
     }
 
-    if (tenant.status !== TenantLifecycleStatus.ACTIVE) {
+    if (
+      !options.allowInactiveTenant &&
+      tenant.status !== TenantLifecycleStatus.ACTIVE
+    ) {
       throw new BadRequestException(
         'Tenant is not active; bot consumer is disabled.',
       );
@@ -25109,6 +25196,16 @@ function deliveryDispatchPayload(data: {
   providerMessageId?: string | null;
 }): Prisma.InputJsonValue {
   return clean(data);
+}
+
+function deliveryExecutionAdmissionNote(
+  decision: TenantExecutionAdmissionDecision,
+) {
+  const failedRequirement = decision.failedRequirement
+    ? ` (${decision.failedRequirement.module}:${decision.failedRequirement.action})`
+    : '';
+
+  return `Tenant execution admission denied: ${decision.reasonCode}${failedRequirement}.`;
 }
 
 function deliveryProviderMessage(row: DeliveryRow) {

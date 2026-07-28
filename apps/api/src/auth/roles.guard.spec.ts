@@ -1,7 +1,10 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
-import { resolveUserCapabilities } from './capabilities';
+import {
+  resolveUserCapabilities,
+  SHARED_BETA_INITIAL_OWNER_CAPABILITIES,
+} from './capabilities';
 import { RolesGuard } from './roles.guard';
 
 type RequestWithUser = {
@@ -247,6 +250,225 @@ describe('RolesGuard', () => {
             role: UserRole.STANDARDS_MANAGER,
             hasRoleOverride: true,
             permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it.each([
+    ['GET', '/integrations/langame/settings'],
+    ['PUT', '/integrations/langame/settings'],
+    ['GET', '/integrations/langame/routes-diagnostics'],
+    ['GET', '/integrations/langame/service-diagnostics'],
+    ['POST', '/integrations/langame/endpoint-profile-diagnostics'],
+    ['POST', '/integrations/langame/endpoint-snapshot'],
+    ['POST', '/integrations/langame/guests/search-diagnostics'],
+  ])(
+    'allows an owner role override with manage_integrations to access %s %s',
+    (method, path) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: ['manage_integrations'],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    '/integrations/langame/guests/foundation/sync',
+    '/integrations/langame/guests/foundation/sync/start',
+  ])(
+    'allows the exact shared-beta initial OWNER capability ceiling to POST %s',
+    (path) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'POST',
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: [...SHARED_BETA_INITIAL_OWNER_CAPABILITIES],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    ['GET', '/integrations/langame/business-snapshots/status'],
+    ['GET', '/integrations/langame/sync-jobs/job-1/discrepancy-log'],
+    ['GET', '/integrations/langame/guests/foundation/sync/status'],
+  ])(
+    'allows an owner role override with run_sync to access %s %s',
+    (method, path) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: ['run_sync'],
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    [
+      '/integrations/langame/sync',
+      ['run_sync', 'import_data'],
+    ],
+    [
+      '/integrations/langame/guests/foundation/sync',
+      ['run_sync', 'import_guest_foundation'],
+    ],
+    [
+      '/integrations/langame/guests/foundation/sync/start',
+      ['run_sync', 'import_guest_foundation'],
+    ],
+    [
+      '/integrations/langame/business-snapshots/run',
+      ['run_sync', 'manage_assortment_reports'],
+    ],
+  ])(
+    'requires all cross-module capabilities for POST %s',
+    (path, permissions) => {
+      reflector.getAllAndOverride.mockReturnValue([
+        UserRole.OWNER,
+        UserRole.ADMIN,
+      ]);
+
+      expect(() =>
+        guard.canActivate(
+          createContext({
+            method: 'POST',
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions: ['run_sync'],
+            },
+          }),
+        ),
+      ).toThrow(ForbiddenException);
+
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'POST',
+            path,
+            user: {
+              role: UserRole.OWNER,
+              hasRoleOverride: true,
+              permissions,
+            },
+          }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('keeps Langame integration management and sync capabilities separate', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/endpoint-snapshot',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: true,
+            permissions: ['run_sync'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/business-snapshots/run',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: true,
+            permissions: ['manage_integrations'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('keeps unknown Langame routes fail-closed for an owner role override', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/unclassified-effect',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: true,
+            permissions: ['manage_integrations', 'run_sync'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('keeps unknown Langame routes fail-closed for a standard system role', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/integrations/langame/sync-jobs/job-1/unclassified-effect',
+          user: {
+            role: UserRole.OWNER,
+            hasRoleOverride: false,
+            permissions: ['manage_integrations', 'run_sync'],
           },
         }),
       ),

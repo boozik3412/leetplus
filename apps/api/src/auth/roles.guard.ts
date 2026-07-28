@@ -20,6 +20,26 @@ const staffAttachmentCapabilities: readonly AccessCapability[] = [
   'approve_guest_game_rewards',
 ];
 
+const langameIntegrationManagementPaths = new Set([
+  '/integrations/langame/settings',
+  '/integrations/langame/routes-diagnostics',
+  '/integrations/langame/service-diagnostics',
+  '/integrations/langame/endpoint-profile-diagnostics',
+  '/integrations/langame/endpoint-snapshot',
+  '/integrations/langame/guests/search-diagnostics',
+]);
+
+const langameSyncPaths = new Set([
+  '/integrations/langame/business-snapshots/status',
+  '/integrations/langame/business-snapshots/run',
+  '/integrations/langame/sync',
+  '/integrations/langame/guests/foundation/sync',
+  '/integrations/langame/guests/foundation/sync/start',
+  '/integrations/langame/guests/foundation/sync/status',
+]);
+const langameSyncJobDiscrepancyPath =
+  /^\/integrations\/langame\/sync-jobs\/[^/]+\/discrepancy-log$/;
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -86,6 +106,14 @@ export class RolesGuard implements CanActivate {
     }
 
     const capability = this.resolveRequiredCapability(request, role);
+    const additionalCapabilities =
+      this.resolveAdditionalRequiredCapabilities(request);
+    if (
+      this.isIntegrationPath(request) &&
+      capability === null
+    ) {
+      throw new ForbiddenException('Insufficient role permissions');
+    }
     const mustUseCapabilityDecision = Boolean(
       user?.customRoleId ||
       user?.hasRoleOverride ||
@@ -98,7 +126,13 @@ export class RolesGuard implements CanActivate {
         !handlerRoles?.length ||
         Boolean(role && handlerRoles.includes(role));
 
-      if (roleAllowsCapability && hasCapability(user, capability)) {
+      if (
+        roleAllowsCapability &&
+        hasCapability(user, capability) &&
+        additionalCapabilities.every((requiredCapability) =>
+          hasCapability(user, requiredCapability),
+        )
+      ) {
         return true;
       }
 
@@ -131,15 +165,8 @@ export class RolesGuard implements CanActivate {
       return 'view_dashboard';
     }
 
-    if (path.startsWith('/integrations/langame/settings')) {
-      return 'manage_integrations';
-    }
-
-    if (
-      path.startsWith('/integrations/langame/sync') ||
-      path.startsWith('/integrations/langame/guests/foundation/sync')
-    ) {
-      return 'run_sync';
+    if (path.startsWith('/integrations/langame')) {
+      return this.resolveLangameCapability(path);
     }
 
     if (path.startsWith('/imports')) {
@@ -236,6 +263,49 @@ export class RolesGuard implements CanActivate {
     return this.isReadMethod(method)
       ? 'view_assortment_reports'
       : 'manage_assortment_reports';
+  }
+
+  private resolveLangameCapability(path: string): AccessCapability | null {
+    if (langameIntegrationManagementPaths.has(path)) {
+      return 'manage_integrations';
+    }
+
+    if (
+      langameSyncPaths.has(path) ||
+      langameSyncJobDiscrepancyPath.test(path)
+    ) {
+      return 'run_sync';
+    }
+
+    return null;
+  }
+
+  private resolveAdditionalRequiredCapabilities(
+    request: AuthenticatedRequest,
+  ): readonly AccessCapability[] {
+    const path = this.normalizePath(request);
+    const method = request.method?.toUpperCase() ?? 'GET';
+
+    if (method !== 'POST') {
+      return [];
+    }
+
+    if (path === '/integrations/langame/sync') {
+      return ['import_data'];
+    }
+
+    if (
+      path === '/integrations/langame/guests/foundation/sync' ||
+      path === '/integrations/langame/guests/foundation/sync/start'
+    ) {
+      return ['import_guest_foundation'];
+    }
+
+    if (path === '/integrations/langame/business-snapshots/run') {
+      return ['manage_assortment_reports'];
+    }
+
+    return [];
   }
 
   private resolveGuestCapability(
@@ -526,7 +596,20 @@ export class RolesGuard implements CanActivate {
       return '';
     }
 
-    return rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+    const withLeadingSlash = rawPath.startsWith('/')
+      ? rawPath
+      : `/${rawPath}`;
+    return withLeadingSlash.length > 1 && withLeadingSlash.endsWith('/')
+      ? withLeadingSlash.slice(0, -1)
+      : withLeadingSlash;
+  }
+
+  private isIntegrationPath(request: AuthenticatedRequest) {
+    const path = this.normalizePath(request);
+    return (
+      path === '/integrations' ||
+      path.startsWith('/integrations/')
+    );
   }
 
   private isUserAccessPath(request: AuthenticatedRequest) {

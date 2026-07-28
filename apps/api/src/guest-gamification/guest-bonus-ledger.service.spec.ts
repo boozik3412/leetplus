@@ -5,6 +5,7 @@ import {
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
+  TenantModule,
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -97,12 +98,24 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   const secretEncryptionService = {
     decrypt: jest.fn((value: string) => value),
   };
+  const tenantExecutionAdmission = {
+    evaluate: jest.fn().mockResolvedValue({
+      allowed: true,
+      tenantId: user.tenantId,
+      reasonCode: 'ALLOWED',
+      failedRequirement: null,
+      entitlementProfileRevision: 1,
+      customerStage: 'PILOT',
+      internalEntitlementBypass: false,
+    }),
+  };
   const service = new GuestBonusLedgerService(
     prisma,
     configService,
     langameClient as any,
     langameSettingsService as any,
     secretEncryptionService as any,
+    tenantExecutionAdmission as any,
   );
 
   prisma.guestBonusLedgerEntry.groupBy.mockResolvedValue([]);
@@ -144,6 +157,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
     langameClient,
     langameSettingsService,
     secretEncryptionService,
+    tenantExecutionAdmission,
     service,
   };
 }
@@ -841,8 +855,122 @@ describe('GuestBonusLedgerService', () => {
     ]);
   });
 
+  it('skips a scheduled tenant denied by either outbound requirement and continues the batch', async () => {
+    const { service, prisma, tenantExecutionAdmission } = createService({
+      LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+    });
+    const dispatch = jest.spyOn(service, 'dispatch').mockResolvedValue(
+      dispatchResult({
+        checked: 1,
+        confirmed: 1,
+      }),
+    );
+    const owner = {
+      id: 'owner-1',
+      email: 'owner@example.com',
+      fullName: 'Owner',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      isPlatformAdmin: false,
+    };
+
+    prisma.tenant.findMany.mockResolvedValue([
+      {
+        id: 'tenant-denied',
+        slug: 'denied',
+        status: TenantLifecycleStatus.ACTIVE,
+        users: [owner],
+      },
+      {
+        id: 'tenant-admitted',
+        slug: 'admitted',
+        status: TenantLifecycleStatus.ACTIVE,
+        users: [{ ...owner, id: 'owner-2' }],
+      },
+    ]);
+    tenantExecutionAdmission.evaluate.mockImplementation((tenantId: string) =>
+      Promise.resolve(
+        tenantId === 'tenant-denied'
+          ? {
+              allowed: false,
+              tenantId,
+              reasonCode: 'ENTITLEMENT_OUTBOUND_DISABLED',
+              failedRequirement: {
+                module: TenantModule.INTEGRATIONS,
+                action: 'OUTBOUND',
+              },
+              entitlementProfileRevision: 1,
+              customerStage: 'PILOT',
+              internalEntitlementBypass: false,
+            }
+          : {
+              allowed: true,
+              tenantId,
+              reasonCode: 'ALLOWED',
+              failedRequirement: null,
+              entitlementProfileRevision: 1,
+              customerStage: 'PILOT',
+              internalEntitlementBypass: false,
+            },
+      ),
+    );
+
+    const result = await service.runScheduledDispatch({
+      dryRun: false,
+      queueApprovedRewards: false,
+    });
+
+    expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledTimes(2);
+    expect(tenantExecutionAdmission.evaluate).toHaveBeenNthCalledWith(
+      1,
+      'tenant-denied',
+      [
+        {
+          module: TenantModule.GAMIFICATION,
+          action: 'OUTBOUND',
+        },
+        {
+          module: TenantModule.INTEGRATIONS,
+          action: 'OUTBOUND',
+        },
+      ],
+    );
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(
+      { id: 'owner-2', tenantId: 'tenant-admitted' },
+      expect.objectContaining({ queueApprovedRewards: false }),
+    );
+    expect(result).toMatchObject({
+      checkedTenants: 2,
+      processedTenants: 1,
+      skippedTenants: 1,
+      erroredTenants: 0,
+      checked: 1,
+      confirmed: 1,
+      tenants: [
+        {
+          tenantId: 'tenant-denied',
+          tenantSlug: 'denied',
+          status: 'SKIPPED',
+          reason:
+            'Tenant execution admission denied: ENTITLEMENT_OUTBOUND_DISABLED (INTEGRATIONS:OUTBOUND).',
+          result: null,
+        },
+        expect.objectContaining({
+          tenantId: 'tenant-admitted',
+          status: 'PROCESSED',
+        }),
+      ],
+    });
+  });
+
   it('queues approved rewards for the Langame phone balance endpoint without storing raw phones', async () => {
-    const { service, prisma, secretEncryptionService } = createService();
+    const {
+      service,
+      prisma,
+      secretEncryptionService,
+      tenantExecutionAdmission,
+    } = createService();
 
     secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
     prisma.guestGameReward.findMany.mockResolvedValue([
@@ -938,6 +1066,7 @@ describe('GuestBonusLedgerService', () => {
     expect(
       JSON.stringify(prisma.guestBonusLedgerEntry.createMany.mock.calls[0][0]),
     ).not.toContain('79991112233');
+    expect(tenantExecutionAdmission.evaluate).not.toHaveBeenCalled();
   });
 
   it('does not persist guest portal pseudo-user as ledger creator', async () => {
@@ -1514,6 +1643,111 @@ describe('GuestBonusLedgerService', () => {
         phone: '***2233',
       }),
     );
+  });
+
+  it('rechecks both outbound requirements after DISPATCHING and returns the entry to the queue when denied', async () => {
+    const {
+      service,
+      prisma,
+      langameClient,
+      secretEncryptionService,
+      tenantExecutionAdmission,
+    } = createService();
+    const entry = ledgerEntry({
+      status: 'PROCESSING',
+      attempts: 1,
+      metadata: { rewardType: 'BONUS', langameBalanceType: 'bonus_balance' },
+    });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    jest.spyOn(service as any, 'markEntryDispatching').mockResolvedValue(true);
+    const confirmEntry = jest
+      .spyOn(service as any, 'confirmEntry')
+      .mockResolvedValue(null);
+    tenantExecutionAdmission.evaluate.mockResolvedValue({
+      allowed: false,
+      tenantId: user.tenantId,
+      reasonCode: 'TENANT_INACTIVE',
+      failedRequirement: {
+        module: TenantModule.GAMIFICATION,
+        action: 'OUTBOUND',
+      },
+      entitlementProfileRevision: 1,
+      customerStage: 'PILOT',
+      internalEntitlementBypass: false,
+    });
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        mode: 'READY',
+        dryRun: false,
+        ready: true,
+        enabled: true,
+        path: '/master_api/guests/balance/phone',
+        rewardTypes: ['BONUS'],
+        limit: 50,
+        maxAttempts: 5,
+        retryMinutes: 1,
+        staleLockMinutes: 15,
+      },
+      access,
+    );
+
+    expect(tenantExecutionAdmission.evaluate).toHaveBeenCalledWith(
+      user.tenantId,
+      [
+        {
+          module: TenantModule.GAMIFICATION,
+          action: 'OUTBOUND',
+        },
+        {
+          module: TenantModule.INTEGRATIONS,
+          action: 'OUTBOUND',
+        },
+      ],
+    );
+    expect(result).toMatchObject({
+      ledgerEntryId: entry.id,
+      status: 'BLOCKED',
+      note:
+        'Tenant execution admission denied: TENANT_INACTIVE (GAMIFICATION:OUTBOUND).',
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
+    expect(confirmEntry).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: entry.id,
+        tenantId: entry.tenantId,
+        status: 'DISPATCHING',
+      },
+      data: {
+        status: 'PENDING',
+        processedByUserId: user.id,
+        attempts: { decrement: 1 },
+        lockedAt: null,
+        processedAt: null,
+        failedAt: null,
+        nextAttemptAt: null,
+        errorCode: 'TENANT_EXECUTION_NOT_ADMITTED',
+        errorMessage:
+          'Tenant execution admission denied: TENANT_INACTIVE (GAMIFICATION:OUTBOUND).',
+      },
+    });
   });
 
   it('returns an unclaimed wallet reward to PENDING and never calls Langame', async () => {

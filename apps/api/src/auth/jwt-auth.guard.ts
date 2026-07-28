@@ -1,15 +1,23 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { TenantCustomerStage } from '@prisma/client';
 import { resolveAccessScopeEnforcementMode } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
+import {
+  isTenantExecutionHttpExempt,
+  resolveTenantExecutionHttpAccess,
+  resolveTenantExecutionHttpRequirements,
+  TENANT_EXECUTION_HTTP_UNCLASSIFIED_REASON,
+} from '../tenancy/tenant-execution-http-policy';
 import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { AuthenticatedRequest, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
@@ -34,7 +42,35 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Authorization bearer token is required');
     }
 
-    request.user = await this.verifyToken(token);
+    const verifiedUser = await this.verifyToken(token);
+    const { tenantExecutionSubject, ...user } = verifiedUser;
+    request.user = user;
+    if (
+      !user.isPlatformAdmin &&
+      user.tenantCustomerStage !== TenantCustomerStage.INTERNAL
+    ) {
+      const moduleAccess = resolveTenantExecutionHttpAccess(request);
+      if (moduleAccess) {
+        if (!tenantExecutionSubject) {
+          throw new UnauthorizedException(
+            'Tenant execution subject is unavailable',
+          );
+        }
+        for (const requirement of resolveTenantExecutionHttpRequirements(
+          request,
+        )) {
+          this.tenantExecutionPolicy.assertModuleAllowed(
+            tenantExecutionSubject,
+            requirement.module,
+            requirement.action,
+          );
+        }
+      } else if (!isTenantExecutionHttpExempt(request)) {
+        throw new ForbiddenException(
+          `Tenant module route is not admitted: ${TENANT_EXECUTION_HTTP_UNCLASSIFIED_REASON}`,
+        );
+      }
+    }
     return true;
   }
 
@@ -55,6 +91,17 @@ export class JwtAuthGuard implements CanActivate {
               trialStartsAt: true,
               trialEndsAt: true,
               entitlementProfileRevision: true,
+              moduleEntitlements: {
+                select: {
+                  module: true,
+                  readEnabled: true,
+                  writeEnabled: true,
+                  outboundEnabled: true,
+                  validFrom: true,
+                  validUntil: true,
+                  profileRevision: true,
+                },
+              },
             },
           },
           customRole: {
@@ -140,6 +187,7 @@ export class JwtAuthGuard implements CanActivate {
         tenantTrialEndsAt: user.tenant.trialEndsAt,
         tenantEntitlementProfileRevision:
           user.tenant.entitlementProfileRevision,
+        tenantExecutionSubject: user.tenant,
         accessScope: accessScope.mode,
         allowedStoreIds: accessScope.storeIds,
       };

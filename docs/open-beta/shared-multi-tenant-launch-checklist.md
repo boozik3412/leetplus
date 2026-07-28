@@ -2,7 +2,7 @@
 
 | Поле        | Значение                                                     |
 | ----------- | ------------------------------------------------------------ |
-| Версия      | 1.2                                                          |
+| Версия      | 1.4                                                          |
 | Дата        | 28.07.2026                                                   |
 | Статус      | `NO-GO`; checklist не выполнен                               |
 | Data plane  | Shared web/API/workers/PostgreSQL/Telegram                   |
@@ -48,10 +48,14 @@ API keys, encryption/signing secrets и raw business data запрещено с�
 - [ ] Generic profile mutation отклоняет любое `outbound=ON`; dedicated
       outbound workflow ещё не является выполненным условием initial access.
 - [ ] Generic onboarding mutation допускает только same-state update; все
-      cross-state transitions принадлежат dedicated workflows, а provisioning
-      создаёт tenant сразу в `OWNER_INVITED`.
+      cross-state transitions принадлежат dedicated workflows, а shell
+      provisioning оставляет tenant в `PROVISIONING` без invite/token/trial.
 - [ ] Generic lifecycle mutation отклоняет любой non-`INTERNAL` tenant;
       dedicated external activation/suspend/offboarding приняты отдельно.
+- [ ] `executionRevision` увеличивается при lifecycle/onboarding/trial/profile
+      mutation; старый job permit не может commit/ack/send после suspend.
+- [ ] Persisted `SHARED BETA GO` привязан к exact release SHA, environment,
+      schema head, policy manifest, profile digest и execution revision.
 - [ ] Unknown/missing/expired state прекращает действие fail-closed.
 - [ ] Tenant suspend действует на login/invite/API/BFF/files/jobs/sync/
       rewards/Telegram без restart.
@@ -59,25 +63,33 @@ API keys, encryption/signing secrets и raw business data запрещено с�
 Evidence:
 
 - [ ] topology manifest;
-- [ ] real PostgreSQL provisioning/replay/revoke concurrency report;
+- [ ] real PostgreSQL shell-provision/activation/suspend concurrency report;
 - [ ] entitlement/lifecycle contract tests;
 - [ ] dedicated activation/suspend и expiry propagation smoke.
 
 ## C. OWNER invite и delegation
 
-- [ ] Одна serializable provisioning-транзакция создаёт
-      `PILOT/SUSPENDED/OWNER_INVITED/revision 1` tenant, неактивный Store,
-      OWNER override, exact six-row профиль, audit/request digest и один
-      email-bound opaque `NETWORK OWNER` invite.
-- [ ] БД хранит token hash; raw token не попадает в logs/evidence.
-- [ ] Первый ответ возвращает one-time URL, а идентичный replay не создаёт
-      дублей и не раскрывает URL повторно.
-- [ ] Platform Admin revoke разрешён только pristine pre-owner tenant и
-      атомарно возвращает его в `SUSPENDED/PROVISIONING`.
-- [ ] Защищённые email delivery, resend/reissue/rotation и recovery
-      one-time URL проверены до передачи invite владельцу.
-- [ ] Dedicated external activation переводит tenant в допустимый active state;
-      generic lifecycle endpoint не используется.
+- [ ] Shell provisioning одной serializable-транзакцией создаёт
+      `PILOT/SUSPENDED/PROVISIONING/revision 1` tenant, inactive Store, OWNER
+      override, exact six-row профиль, canonical owner-email claim и
+      audit/request digest; `UserInvite`, token, outbox и trial ещё отсутствуют.
+- [ ] Case-insensitive email claim уникален между User/live invite/pending
+      email change и защищён единым advisory-lock namespace.
+- [ ] Dedicated activation принимает persisted GO, запускает trial и атомарно
+      создаёт email-bound `NETWORK OWNER` invite hash + encrypted mail outbox,
+      переводя tenant в `ACTIVE/OWNER_INVITED`.
+- [ ] Activation response/replay не содержит email, token, registration URL
+      или ciphertext.
+- [ ] Identity mail worker использует lease/CAS/retry, stable Message-ID,
+      отдельный versioned encryption key и очищает ciphertext после terminal
+      state.
+- [ ] Invite transport использует browser fragment + немедленную очистку URL,
+      а API принимает token только в POST body; query/path transport удалён.
+- [ ] Reissue/revoke отменяет старый invite/outbox, ротирует token и делает
+      старый secret недействительным без его возврата actor.
+- [ ] Mail/HTTPS/TLS/key configuration валидируется fail-closed; production
+      не использует `localhost:1025` или placeholder sender.
+- [ ] Generic lifecycle endpoint для activation не используется.
 - [ ] Accept атомарен; concurrent accept создаёт ровно одного owner.
 - [ ] OWNER получает `NETWORK` только внутри `Tenant B`.
 - [ ] Platform Admin не является tenant role и не назначается через tenant API.
@@ -97,8 +109,9 @@ Evidence:
 
 Evidence:
 
-- [ ] real PostgreSQL concurrent provision/replay/revoke/accept matrix;
-- [ ] email delivery/reissue/rotation drill без утечки raw token;
+- [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
+      matrix, включая case-variant email collision;
+- [ ] email outbox lease/crash/retry drill без утечки raw token;
 - [ ] delegation/escalation negative matrix;
 - [ ] stale-token и immediate-revoke tests;
 - [ ] owner/network/store browser journeys.
@@ -264,8 +277,10 @@ evidence index:
 ```
 
 - [ ] Решение — `GO`.
-- [ ] Invite создан только после timestamp решения.
-- [ ] Raw invite URL/token передан защищённым каналом, не через git.
+- [ ] Activation использовала этот exact persisted GO; invite/outbox созданы
+      только после timestamp решения.
+- [ ] Raw invite token доставлен только verified mail worker, не раскрыт
+      оператору/actor и не прошёл через path/query.
 - [ ] В evidence нет email, пароля, токена, secrets и raw business data.
 
 ## K. Day-0

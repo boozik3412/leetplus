@@ -11,8 +11,13 @@ import {
   DailyDataCoverageStatus,
   IntegrationProvider,
   Prisma,
+  TenantModule,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  TenantExecutionAdmissionDecision,
+  TenantExecutionAdmissionService,
+} from '../tenancy/tenant-execution-admission.service';
 import {
   BusinessSnapshotService,
   type BusinessSnapshotRunResult,
@@ -27,6 +32,12 @@ import type { LangameSyncResult } from './langame.types';
 const DEFAULT_DAILY_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_DAILY_SYNC_LOCAL_TIME = '04:30';
 const DEFAULT_UTC_OFFSET_MINUTES = 5 * 60;
+const DAILY_SYNC_OUTBOUND_REQUIREMENTS = [
+  { module: TenantModule.INTEGRATIONS, action: 'OUTBOUND' },
+  { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+  { module: TenantModule.GAMIFICATION, action: 'OUTBOUND' },
+  { module: TenantModule.STAFF, action: 'OUTBOUND' },
+] as const;
 
 type DailySyncInput = {
   date?: string;
@@ -44,7 +55,12 @@ type DailySyncTenantResult = {
   tenantId: string;
   slug: string;
   date: string;
+  status: 'PROCESSED' | 'SKIPPED';
   skipped: boolean;
+  reasonCode: TenantExecutionAdmissionDecision['reasonCode'] | null;
+  failedRequirement:
+    | TenantExecutionAdmissionDecision['failedRequirement']
+    | null;
   scopes: DailySyncScopeResult[];
 };
 
@@ -52,6 +68,8 @@ type DailySyncResult = {
   date: string;
   force: boolean;
   tenants: number;
+  processedTenants: number;
+  skippedTenants: number;
   results: DailySyncTenantResult[];
 };
 
@@ -67,6 +85,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     private readonly langameSyncService: LangameSyncService,
     private readonly guestDataFoundationService: GuestDataFoundationService,
     private readonly businessSnapshotService: BusinessSnapshotService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
   ) {}
 
   onModuleInit() {
@@ -104,6 +123,22 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
     const results: DailySyncTenantResult[] = [];
 
     for (const tenant of tenants) {
+      const admission = await this.tenantExecutionAdmissionService.evaluate(
+        tenant.id,
+        DAILY_SYNC_OUTBOUND_REQUIREMENTS,
+      );
+      if (!admission.allowed) {
+        results.push(
+          this.admissionSkippedTenant({
+            tenantId: tenant.id,
+            slug: tenant.slug,
+            dateInput,
+            admission,
+          }),
+        );
+        continue;
+      }
+
       results.push(
         await this.runTenantDailySync({
           tenantId: tenant.id,
@@ -119,6 +154,11 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       date: dateInput,
       force,
       tenants: tenants.length,
+      processedTenants: results.filter(
+        (tenant) => tenant.status === 'PROCESSED',
+      ).length,
+      skippedTenants: results.filter((tenant) => tenant.status === 'SKIPPED')
+        .length,
       results,
     };
   }
@@ -182,7 +222,41 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
       tenantId: input.tenantId,
       slug: input.slug,
       date: input.dateInput,
+      status: 'PROCESSED',
       skipped: scopes.every((scope) => scope.skipped),
+      reasonCode: null,
+      failedRequirement: null,
+      scopes,
+    };
+  }
+
+  private admissionSkippedTenant(input: {
+    tenantId: string;
+    slug: string;
+    dateInput: string;
+    admission: TenantExecutionAdmissionDecision;
+  }): DailySyncTenantResult {
+    const errorMessage = `Tenant execution is not admitted: ${input.admission.reasonCode}`;
+    const scopes = [
+      DailyDataCoverageScope.BUSINESS_FACTS,
+      DailyDataCoverageScope.GUEST_FOUNDATION,
+      DailyDataCoverageScope.STAFF_SHIFTS,
+      DailyDataCoverageScope.BUSINESS_SNAPSHOTS,
+    ].map((scope) => ({
+      scope,
+      status: DailyDataCoverageStatus.SKIPPED,
+      skipped: true,
+      errorMessage,
+    }));
+
+    return {
+      tenantId: input.tenantId,
+      slug: input.slug,
+      date: input.dateInput,
+      status: 'SKIPPED',
+      skipped: true,
+      reasonCode: input.admission.reasonCode,
+      failedRequirement: input.admission.failedRequirement,
       scopes,
     };
   }
@@ -254,6 +328,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           includeCashTransactions: true,
           includeWorkingShifts: true,
         },
+        'OUTBOUND',
       );
 
       if (result.failedSources > 0) {
@@ -328,6 +403,7 @@ export class LangameDailySyncService implements OnModuleInit, OnModuleDestroy {
           dateFrom: input.dateInput,
           dateTo: input.dateInput,
         },
+        'OUTBOUND',
       );
       const failedRuns = result.runs.filter((run) => run.status === 'FAILED');
 

@@ -1,9 +1,14 @@
-import { UnauthorizedException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
   TenantCustomerStage,
   TenantLifecycleStatus,
+  TenantModule,
   TenantOnboardingStatus,
   UserRole,
 } from '@prisma/client';
@@ -18,6 +23,18 @@ class TestJwtAuthGuard extends JwtAuthGuard {
   }
 }
 
+function createHttpContext(request: {
+  headers: { authorization: string };
+  method: string;
+  path: string;
+}): ExecutionContext {
+  return {
+    switchToHttp: () => ({
+      getRequest: () => request,
+    }),
+  } as unknown as ExecutionContext;
+}
+
 describe('JwtAuthGuard access scope', () => {
   const admittedTenant = {
     id: 'tenant-a',
@@ -28,6 +45,7 @@ describe('JwtAuthGuard access scope', () => {
     trialStartsAt: null,
     trialEndsAt: null,
     entitlementProfileRevision: 0,
+    moduleEntitlements: [],
   };
   const jwtService = {
     verifyAsync: jest.fn(),
@@ -202,5 +220,193 @@ describe('JwtAuthGuard access scope', () => {
     await expect(guard.verify('token')).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
+  });
+
+  it('enforces module read access for an external tenant from fresh persisted entitlements', async () => {
+    const now = Date.now();
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-a',
+      email: 'current@example.test',
+      fullName: 'Current User',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      customRole: null,
+      isActive: true,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-a',
+      accessScope: 'NETWORK',
+      storeAccesses: [],
+      tenant: {
+        ...admittedTenant,
+        customerStage: TenantCustomerStage.PILOT,
+        trialStartsAt: new Date(now - 60_000),
+        trialEndsAt: new Date(now + 60_000),
+        entitlementProfileRevision: 1,
+        moduleEntitlements: Object.values(TenantModule).map((module) => ({
+          module,
+          readEnabled: true,
+          writeEnabled: true,
+          outboundEnabled: false,
+          validFrom: new Date(now - 60_000),
+          validUntil: new Date(now + 60_000),
+          profileRevision: 1,
+        })),
+      },
+    });
+
+    await expect(
+      guard.canActivate(
+        createHttpContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'GET',
+          path: '/products',
+        }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('blocks external outbound effects even when the role capability allows the route', async () => {
+    const now = Date.now();
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-a',
+      email: 'current@example.test',
+      fullName: 'Current User',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      customRole: null,
+      isActive: true,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-a',
+      accessScope: 'NETWORK',
+      storeAccesses: [],
+      tenant: {
+        ...admittedTenant,
+        customerStage: TenantCustomerStage.PILOT,
+        trialStartsAt: new Date(now - 60_000),
+        trialEndsAt: new Date(now + 60_000),
+        entitlementProfileRevision: 1,
+        moduleEntitlements: Object.values(TenantModule).map((module) => ({
+          module,
+          readEnabled: true,
+          writeEnabled: true,
+          outboundEnabled: false,
+          validFrom: new Date(now - 60_000),
+          validUntil: new Date(now + 60_000),
+          profileRevision: 1,
+        })),
+      },
+    });
+
+    await expect(
+      guard.canActivate(
+        createHttpContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'POST',
+          path: '/reports/email',
+        }),
+      ),
+    ).rejects.toThrow(
+      'Tenant module action is not admitted: ENTITLEMENT_OUTBOUND_DISABLED',
+    );
+    await expect(
+      guard.canActivate(
+        createHttpContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'POST',
+          path: '/guests/gamification/bonus-ledger/dispatch',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await expect(
+      guard.canActivate(
+        createHttpContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'POST',
+          path: '/integrations/langame/sync',
+        }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('rejects every unclassified authenticated route for an external tenant', async () => {
+    const now = Date.now();
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-a',
+      email: 'current@example.test',
+      fullName: 'Current User',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      customRole: null,
+      isActive: true,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-a',
+      accessScope: 'NETWORK',
+      storeAccesses: [],
+      tenant: {
+        ...admittedTenant,
+        customerStage: TenantCustomerStage.PILOT,
+        trialStartsAt: new Date(now - 60_000),
+        trialEndsAt: new Date(now + 60_000),
+        entitlementProfileRevision: 1,
+        moduleEntitlements: Object.values(TenantModule).map((module) => ({
+          module,
+          readEnabled: true,
+          writeEnabled: true,
+          outboundEnabled: false,
+          validFrom: new Date(now - 60_000),
+          validUntil: new Date(now + 60_000),
+          profileRevision: 1,
+        })),
+      },
+    });
+
+    await expect(
+      guard.canActivate(
+        createHttpContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'GET',
+          path: '/marketing',
+        }),
+      ),
+    ).rejects.toThrow(
+      'Tenant module route is not admitted: TENANT_MODULE_ROUTE_UNCLASSIFIED',
+    );
+    await expect(
+      guard.canActivate(
+        createHttpContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'GET',
+          path: '/auth/me',
+        }),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('does not require module rows from the existing INTERNAL tenant during migration adoption', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-a',
+      email: 'current@example.test',
+      fullName: 'Current User',
+      role: UserRole.OWNER,
+      customRoleId: null,
+      customRole: null,
+      isActive: true,
+      isPlatformAdmin: false,
+      tenantId: 'tenant-a',
+      accessScope: 'NETWORK',
+      storeAccesses: [],
+      tenant: admittedTenant,
+    });
+
+    await expect(
+      guard.canActivate(
+        createHttpContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'POST',
+          path: '/products',
+        }),
+      ),
+    ).resolves.toBe(true);
   });
 });

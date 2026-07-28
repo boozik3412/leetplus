@@ -2,18 +2,21 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.4                                                             |
+| Версия           | 1.7                                                             |
 | Дата             | 28.07.2026                                                      |
-| Статус           | Foundation + provisioning candidate; adoption/evidence pending   |
+| Статус           | Foundation + HTTP/lower-layer adoption; evidence pending          |
 | Release decision | `NO-GO` для внешнего owner invite                               |
 | Migration        | `20260728120000_tenant_execution_control_plane_expand`           |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть        |
 
-Этот документ фиксирует фактически реализованный первый срез
+Этот документ фиксирует фактически реализованный срез
 `BETA-TEN-001..004` и `BETA-MT-002..004`. Shared provisioning остаётся
-foundation candidate: он не имеет real PostgreSQL/concurrency evidence,
-email delivery, reissue/rotation и dedicated activation workflow. Документ
-не является разрешением на production migration или выдачу доступа.
+небезопасным foundation candidate: он преждевременно создаёт invite/trial и
+на первом вызове возвращает raw registration URL. Его нельзя использовать с
+реальным email; целевой shell-only/identity-outbox/activation contract
+зафиксирован в
+[initial OWNER identity and activation](./initial-owner-identity-and-activation.md).
+Документ не разрешает production migration или выдачу доступа.
 
 ## 1. Persisted control plane
 
@@ -164,7 +167,7 @@ Provisioning создаёт tenant сразу в `OWNER_INVITED`; generic profil
 отклоняется. При CAS conflict никакие rows или audit не сохраняются. В
 транзакции нет email, HTTP или другого внешнего вызова.
 
-## 4. Shared provisioning candidate
+## 4. Legacy shared provisioning candidate
 
 Реализованы два Platform Admin endpoint:
 
@@ -174,7 +177,7 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 guards: JwtAuthGuard + PlatformAdminGuard
 ```
 
-Provisioning выполняется одной serializable-транзакцией и создаёт:
+Текущая реализация выполняет одну serializable-транзакцию и создаёт:
 
 1. отдельный tenant в
    `PILOT + SUSPENDED + OWNER_INVITED + profileRevision=1`;
@@ -203,9 +206,14 @@ serializable-транзакции invite удаляется, tenant возвра
 digest. Revoke не является reissue: безопасные resend/reissue/rotation и
 защищённая email delivery ещё не реализованы.
 
-Этот candidate пока подтверждён focused tests, но не real PostgreSQL
-provision/revoke concurrency matrix. Его endpoint нельзя вызывать с данными
-реального тестера до Gate 1MT, Gate 2 и protected `SHARED BETA GO`.
+Этот candidate подтверждён focused tests, но не real PostgreSQL
+provision/revoke concurrency matrix. Даже после такого evidence он не является
+целевым launch flow: сначала он должен быть заменён на
+`SUSPENDED/PROVISIONING` shell без invite/token/trial, canonical email claim и
+protected activation, атомарно создающую invite + encrypted mail outbox.
+До этой замены controller fail-closed возвращает
+`503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING`, не вызывая legacy
+service. Endpoint нельзя вызывать с данными реального тестера.
 
 ## 5. Runtime policy
 
@@ -239,11 +247,15 @@ lifecycle SUSPENDED
 ∩ valid trial
 ∩ exactly six current-revision rows
 ∩ read+write enabled for all six modules
-∩ outbound disabled for the initial OWNER_INVITED activation
+∩ outbound disabled in every module for every initial activation/reactivation
 ```
 
 Activation policy реализована как fail-closed проверочный primitive для
-будущего dedicated workflow. Generic Platform Admin lifecycle endpoint
+текущего legacy candidate. Она ещё ожидает pre-populated trial и
+post-provisioning onboarding state, поэтому не является реализацией целевой
+shell activation. Dedicated workflow должен под persisted GO атомарно
+сформировать новое trial-окно и переход `PROVISIONING → OWNER_INVITED`, затем
+проверить proposed state. Generic Platform Admin lifecycle endpoint
 разрешён только для `INTERNAL` tenant и отклоняет любую lifecycle mutation
 non-`INTERNAL` tenant, включая `ACTIVATE`, `SUSPEND` и `ARCHIVE`. Поэтому
 наличие валидного activation policy decision само по себе не меняет состояние
@@ -255,8 +267,43 @@ shared external tenant и не является разрешением на до
 - Login до выпуска JWT проверяет lifecycle/onboarding/trial.
 - `JwtAuthGuard` повторяет session admission на каждом запросе по свежим
   persisted данным.
-- Invite preview/accept разрешены только active tenant в допустимом onboarding
-  state, действующем trial-окне и с initialized external profile.
+- Для authenticated external tenant HTTP classifier назначает обязательным
+  beta-prefixes `module + READ|WRITE|OUTBOUND`. Неизвестный route отклоняется
+  с `TENANT_MODULE_ROUTE_UNCLASSIFIED`; только `GET|HEAD /auth/me` — явное
+  session-only исключение. Existing `INTERNAL` tenant временно обходит только
+  module rows, но не lifecycle/session admission.
+- Routes/service/guest-search Langame diagnostics имеют `READ`; persisted
+  endpoint-profile/snapshot runs, manual pull/read-only ingest, reward redeem
+  и local ledger queue имеют `WRITE`; report email,
+  delivery dispatch и bonus-ledger provider dispatch имеют `OUTBOUND`.
+- `TenantExecutionAdmissionService` для lower-layer/background callers на
+  каждом вызове перечитывает tenant и module rows из PostgreSQL, поддерживает
+  несколько обязательных modules и возвращает stable denial. `INTERNAL`
+  compatibility bypass распространяется только на entitlement rows.
+- Lower-layer adoption текущего checkpoint покрывает report email/digest,
+  scheduled Langame sync и daily composite sync, bonus-ledger provider
+  dispatch, scheduled delivery pipeline, Telegram/MAX provider dispatch и
+  bot-delivery pull. Denied tenant получает `SKIPPED`/`BLOCKED`, не останавливая
+  остальные tenants. Непосредственно перед SMTP, bonus-ledger и Telegram/MAX
+  provider effect выполняется fresh admission; Langame пока имеет только
+  tenant preflight перед длинным sync. Это ещё не заменяет
+  `executionRevision`, per-source recheck и durable claim/lease.
+- Scheduled report digest вычисляет фактические capabilities системной или
+  custom role с tenant overrides; без `export_reports` recipient получает
+  `CAPABILITY_EXPORT_REPORTS_REQUIRED`, а export и SMTP не запускаются.
+  Непосредственно перед SMTP повторно читаются active/network scope, role,
+  custom role и tenant override; отозванный recipient получает
+  `RECIPIENT_AUTHORITY_REVOKED`.
+- Cross-module Langame admission требует одновременно `INTEGRATIONS` и
+  `ASSORTMENT`; guest foundation и business snapshot дополнительно требуют
+  `GAMIFICATION` и `STAFF`. HTTP entrypoints синхронизации требуют
+  AND-capabilities соответствующих модулей, а не только `run_sync`.
+  Guest-foundation import использует отдельную capability
+  `import_guest_foundation` и не открывает широкий `manage_guest_crm`.
+- Login, invite preview/accept и каждый module action для external tenant
+  разрешены только при exact профиле: ровно шесть уникальных rows текущей
+  `entitlementProfileRevision`. Partial, duplicate и mixed-revision profile
+  отклоняются до выдачи JWT, принятия invite или выполнения module action.
 - На `OWNER_INVITED` допускается только email-bound
   `OWNER + NETWORK + no stores + no custom role`, причём в tenant ещё нет
   другого OWNER.
@@ -291,8 +338,12 @@ generic lifecycle mutation for non-INTERNAL tenant
   → DENY
 generic customerStage transition
   → DENY
-dedicated shared external activation
+target shell provisioning replacement
+  → PILOT / SUSPENDED / PROVISIONING / revision 1
+  → no invite/token/trial; canonical owner-email claim only
+protected SHARED BETA GO + dedicated activation
   → pending; intended transition to ACTIVE / OWNER_INVITED
+  → trial + invite hash + encrypted mail outbox atomically
 first OWNER invite acceptance after dedicated activation
   → ACTIVE / ONBOARDING
 READY / ACTIVE / OFFBOARDING onboarding transitions
@@ -303,16 +354,16 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
 
 Этот checkpoint не закрывает Gate 1MT. До первого внешнего владельца нужны:
 
-1. real PostgreSQL и конкурентные provision/replay/revoke/accept tests;
-2. защищённая email delivery, resend/reissue/rotation и recovery one-time URL;
-3. dedicated external activation/suspend/offboarding workflows;
-4. module metadata/guard на всех API/BFF routes обязательных модулей;
-5. применение policy к exports, files, jobs, sync, Telegram и rewards;
-6. двухtenantная/двухклубная real-PostgreSQL и browser isolation matrix;
-7. завершение dedicated owner-transfer и немедленный session revoke;
-8. безопасный integration preview/select/map;
-9. shared worker leases/fencing и tenant-aware Telegram delivery;
-10. migration smoke в PostgreSQL 16, backup/restore и operational rollout.
+1. exhaustive route manifest/decorators и policy для BFF/files/guest/Telegram;
+2. adoption lower-layer admission в оставшихся schedulers/provider effects;
+3. `executionRevision`, worker lease/fencing и immediate suspend contract;
+4. canonical email claim, encrypted outbox и fail-closed mail config;
+5. shell-only provisioning вместо текущего raw-URL candidate;
+6. persisted release gates и dedicated activation/suspend/reissue/revoke;
+7. real PostgreSQL provision/activate/accept/suspend concurrency tests;
+8. двухtenantная/двухклубная PostgreSQL/browser isolation matrix;
+9. безопасный integration preview/select/map и tenant-aware Telegram;
+10. PostgreSQL 16 migration/rollback, backup/restore и operational rollout.
 
 До выполнения этого списка endpoint не вызывается с тестовым email, реальный
 external tenant/invite не создаётся и release decision остаётся `NO-GO`.
@@ -333,6 +384,14 @@ git diff --check
 
 PostgreSQL migration smoke выполняется CI на чистой PostgreSQL 16. Локальная
 машина без PostgreSQL/Docker не считается migration evidence.
+
+Последняя локальная проверка checkpoint:
+
+- tenant-execution suite: `16 suites / 618 tests`;
+- focused security suite: `32 suites / 518 tests`;
+- полный API regression: `95 suites / 1808 passed / 2 todo`;
+- API typecheck, production build, boundary/tenant-execution lint,
+  Prisma validate и `git diff --check`: `PASS`.
 
 StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migration
 `163` принимается только как явно allowlisted additive tail, не затрагивающий

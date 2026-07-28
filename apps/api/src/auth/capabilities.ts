@@ -239,6 +239,12 @@ export const accessCapabilityCatalog = [
       'Запуск ручной синхронизации данных и просмотр статусов загрузки.',
   },
   {
+    key: 'import_guest_foundation',
+    label: 'Импорт гостевого контура',
+    description:
+      'Запуск загрузки гостевой основы для геймификации и персонала без доступа к CRM-действиям.',
+  },
+  {
     key: 'import_data',
     label: 'Импорт данных',
     description: 'Ручной импорт товаров, остатков, продаж и движений.',
@@ -307,6 +313,7 @@ export const SHARED_BETA_INITIAL_OWNER_CAPABILITIES = [
   'manage_users',
   'manage_integrations',
   'run_sync',
+  'import_guest_foundation',
   'import_data',
   'use_utilities',
   'edit_products',
@@ -465,6 +472,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'manage_users',
     'manage_integrations',
     'run_sync',
+    'import_guest_foundation',
     'import_data',
     'use_utilities',
     ...productEditCapabilities,
@@ -489,6 +497,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'manage_users',
     'manage_integrations',
     'run_sync',
+    'import_guest_foundation',
     'import_data',
     'use_utilities',
     ...productEditCapabilities,

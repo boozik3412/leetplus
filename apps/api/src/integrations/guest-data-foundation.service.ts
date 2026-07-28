@@ -5,6 +5,7 @@ import {
   GuestCrmStatus,
   IntegrationProvider,
   Prisma,
+  TenantModule,
 } from '@prisma/client';
 import {
   createCipheriv,
@@ -16,6 +17,8 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { resolveSecuritySecret } from '../config/environment-validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
+import type { TenantExecutionAction } from '../tenancy/tenant-execution-policy.service';
 import {
   GuestIdentityResolverService,
   type GuestIdentitySnapshotCandidate,
@@ -52,6 +55,12 @@ const STALE_RUNNING_SYNC_MS = 2 * 60 * 60 * 1000;
 const STALE_RUNNING_SYNC_MESSAGE =
   'Синхронизация остановлена: не было завершения больше 2 часов. Запустите повторно.';
 const FRESH_GUEST_SYNC_MS = 24 * 60 * 60 * 1000;
+const GUEST_FOUNDATION_MODULES = [
+  TenantModule.INTEGRATIONS,
+  TenantModule.ASSORTMENT,
+  TenantModule.GAMIFICATION,
+  TenantModule.STAFF,
+] as const;
 
 export type GuestDataFoundationSyncQuery = {
   dateFrom?: string;
@@ -300,12 +309,14 @@ export class GuestDataFoundationService {
     private readonly langameSettingsService: LangameSettingsService,
     private readonly configService: ConfigService,
     private readonly guestIdentityResolver: GuestIdentityResolverService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
   ) {}
 
   async syncTenant(
     user: AuthenticatedUser,
     query: GuestDataFoundationSyncQuery,
   ): Promise<GuestDataFoundationSyncResult> {
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     const { tenantId } = await this.tenantContextService.resolve(user);
     return this.syncTenantById(tenantId, query);
   }
@@ -336,7 +347,7 @@ export class GuestDataFoundationService {
     const results: GuestDataFoundationSyncResult[] = [];
 
     for (const tenant of tenants) {
-      results.push(await this.syncTenantById(tenant.id, query));
+      results.push(await this.syncTenantById(tenant.id, query, 'OUTBOUND'));
     }
 
     return {
@@ -348,7 +359,9 @@ export class GuestDataFoundationService {
   async syncTenantById(
     tenantId: string,
     query: GuestDataFoundationSyncQuery,
+    executionAction: TenantExecutionAction = 'WRITE',
   ): Promise<GuestDataFoundationSyncResult> {
+    await this.assertExecutionAllowed(tenantId, executionAction);
     await this.failStaleRunningRuns(tenantId);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
@@ -443,7 +456,9 @@ export class GuestDataFoundationService {
     user: AuthenticatedUser,
     query: GuestDataFoundationSyncQuery,
   ): Promise<GuestDataFoundationStartResult> {
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.assertExecutionAllowed(tenantId, 'WRITE');
     await this.failStaleRunningRuns(tenantId);
     const { sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
@@ -495,6 +510,7 @@ export class GuestDataFoundationService {
   async getTenantSyncStatus(
     user: AuthenticatedUser,
   ): Promise<GuestDataFoundationStatusResult> {
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.failStaleRunningRuns(tenantId);
     const nextPeriod = await this.resolvePeriod(tenantId, {});
@@ -593,6 +609,10 @@ export class GuestDataFoundationService {
   }
 
   async syncComputerCountsForTenant(tenantId: string) {
+    await this.tenantExecutionAdmissionService.assertAllowed(tenantId, [
+      { module: TenantModule.INTEGRATIONS, action: 'WRITE' },
+      { module: TenantModule.ASSORTMENT, action: 'WRITE' },
+    ]);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
     const syncedAt = new Date();
@@ -622,6 +642,16 @@ export class GuestDataFoundationService {
     }
 
     return updatedStores;
+  }
+
+  private assertExecutionAllowed(
+    tenantId: string,
+    action: TenantExecutionAction,
+  ) {
+    return this.tenantExecutionAdmissionService.assertAllowed(
+      tenantId,
+      GUEST_FOUNDATION_MODULES.map((module) => ({ module, action })),
+    );
   }
 
   private profileRunStatusSelect() {

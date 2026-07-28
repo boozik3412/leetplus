@@ -132,6 +132,7 @@ describe('TenantExecutionPolicyService', () => {
           customerStage: TenantCustomerStage.PILOT,
           trialStartsAt: new Date('2026-08-01T00:00:00.000Z'),
           trialEndsAt: new Date('2026-09-01T00:00:00.000Z'),
+          moduleEntitlements: completeEntitlements(),
         }),
         now,
       ),
@@ -162,6 +163,7 @@ describe('TenantExecutionPolicyService', () => {
       onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
       trialStartsAt: new Date('2026-08-01T00:00:00.000Z'),
       trialEndsAt: new Date('2026-09-01T00:00:00.000Z'),
+      moduleEntitlements: completeEntitlements(),
     });
 
     expect(service.evaluateInvite(candidate, now)).toMatchObject({
@@ -199,6 +201,58 @@ describe('TenantExecutionPolicyService', () => {
     });
     expect(() => service.assertActivationAllowed(candidate, now)).not.toThrow();
   });
+
+  it.each([
+    [
+      completeEntitlements().slice(0, 5),
+      'ENTITLEMENT_PROFILE_INCOMPLETE',
+    ],
+    [
+      [
+        ...completeEntitlements().slice(0, 5),
+        {
+          ...completeEntitlements()[0],
+        },
+      ],
+      'ENTITLEMENT_PROFILE_INCOMPLETE',
+    ],
+    [
+      completeEntitlements().map((entry, index) =>
+        index === 0 ? { ...entry, profileRevision: 2 } : entry,
+      ),
+      'ENTITLEMENT_PROFILE_REVISION_MISMATCH',
+    ],
+  ] as const)(
+    'denies an external session with a partial, duplicate or mixed-revision profile',
+    (moduleEntitlements, reasonCode) => {
+      const candidate = subject({
+        customerStage: TenantCustomerStage.PILOT,
+        trialStartsAt: new Date('2026-08-01T00:00:00.000Z'),
+        trialEndsAt: new Date('2026-09-01T00:00:00.000Z'),
+        moduleEntitlements,
+      });
+
+      expect(service.evaluateSession(candidate, now)).toMatchObject({
+        allowed: false,
+        reasonCode,
+      });
+      expect(service.evaluateInvite(candidate, now)).toMatchObject({
+        allowed: false,
+        reasonCode,
+      });
+      expect(
+        service.evaluateModule(
+          candidate,
+          TenantModule.ASSORTMENT,
+          'READ',
+          now,
+        ),
+      ).toMatchObject({
+        allowed: false,
+        reasonCode,
+      });
+    },
+  );
 
   it.each([
     [
@@ -254,6 +308,34 @@ describe('TenantExecutionPolicyService', () => {
           reasonCode,
         },
       );
+    },
+  );
+
+  it.each([
+    TenantOnboardingStatus.OWNER_INVITED,
+    TenantOnboardingStatus.ONBOARDING,
+    TenantOnboardingStatus.READY,
+    TenantOnboardingStatus.ACTIVE,
+  ])(
+    'keeps outbound disabled when activating from %s',
+    (onboardingStatus) => {
+      expect(
+        service.evaluateActivation(
+          subject({
+            status: TenantLifecycleStatus.SUSPENDED,
+            onboardingStatus,
+            moduleEntitlements: completeEntitlements().map((entry) =>
+              entry.module === TenantModule.COMMUNICATIONS
+                ? { ...entry, outboundEnabled: true }
+                : entry,
+            ),
+          }),
+          now,
+        ),
+      ).toMatchObject({
+        allowed: false,
+        reasonCode: 'TENANT_ACTIVATION_OUTBOUND_ENABLED',
+      });
     },
   );
 

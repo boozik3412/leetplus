@@ -20,6 +20,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
 import {
+  type PersistedTenantModuleEntitlement,
   type PersistedTenantExecutionSubject,
   TenantExecutionPolicyService,
 } from '../tenancy/tenant-execution-policy.service';
@@ -35,6 +36,15 @@ type AuthResponse = {
 };
 
 const AUTH_TOKEN_EXPIRES_IN = '24h';
+const tenantModuleEntitlementExecutionSelect = {
+  module: true,
+  readEnabled: true,
+  writeEnabled: true,
+  outboundEnabled: true,
+  validFrom: true,
+  validUntil: true,
+  profileRevision: true,
+} satisfies Prisma.TenantModuleEntitlementSelect;
 
 type UserWithTenant = {
   id: string;
@@ -61,6 +71,7 @@ type UserWithTenant = {
     trialStartsAt: Date | null;
     trialEndsAt: Date | null;
     entitlementProfileRevision: number;
+    moduleEntitlements: PersistedTenantModuleEntitlement[];
   };
   customRole?: {
     id: string;
@@ -206,10 +217,18 @@ export class AuthService {
       if (!lockedTenant) {
         throw new ConflictException('Tenant changed while accepting invite');
       }
+      const lockedEntitlements =
+        await tx.tenantModuleEntitlement.findMany({
+          where: { tenantId: invite.tenantId },
+          select: tenantModuleEntitlementExecutionSelect,
+        });
       this.assertInviteAdmitted(
         {
           ...invite,
-          tenant: lockedTenant,
+          tenant: {
+            ...lockedTenant,
+            moduleEntitlements: lockedEntitlements,
+          },
         },
         acceptedAt,
       );
@@ -319,6 +338,9 @@ export class AuthService {
               trialStartsAt: true,
               trialEndsAt: true,
               entitlementProfileRevision: true,
+              moduleEntitlements: {
+                select: tenantModuleEntitlementExecutionSelect,
+              },
             },
           },
           customRole: {
@@ -362,6 +384,9 @@ export class AuthService {
             trialStartsAt: true,
             trialEndsAt: true,
             entitlementProfileRevision: true,
+            moduleEntitlements: {
+              select: tenantModuleEntitlementExecutionSelect,
+            },
           },
         },
         customRole: {
@@ -417,6 +442,9 @@ export class AuthService {
             trialStartsAt: true,
             trialEndsAt: true,
             entitlementProfileRevision: true,
+            moduleEntitlements: {
+              select: tenantModuleEntitlementExecutionSelect,
+            },
           },
         },
         customRole: {
@@ -483,6 +511,9 @@ export class AuthService {
             trialStartsAt: true,
             trialEndsAt: true,
             entitlementProfileRevision: true,
+            moduleEntitlements: {
+              select: tenantModuleEntitlementExecutionSelect,
+            },
           },
         },
         customRole: {
@@ -705,6 +736,7 @@ export class AuthService {
       trialStartsAt: user.tenant.trialStartsAt,
       trialEndsAt: user.tenant.trialEndsAt,
       entitlementProfileRevision: user.tenant.entitlementProfileRevision,
+      moduleEntitlements: user.tenant.moduleEntitlements,
     });
   }
 

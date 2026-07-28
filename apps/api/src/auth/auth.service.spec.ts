@@ -8,6 +8,7 @@ import { JwtService } from '@nestjs/jwt';
 import {
   TenantCustomerStage,
   TenantLifecycleStatus,
+  TenantModule,
   TenantOnboardingStatus,
   UserAccessScope,
   UserRole,
@@ -15,6 +16,7 @@ import {
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessScopeService } from '../tenancy/access-scope.service';
+import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-profile.service';
 import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
@@ -34,6 +36,9 @@ type PrismaMock = {
     create: jest.Mock;
     updateMany: jest.Mock;
   };
+  tenantModuleEntitlement: {
+    findMany: jest.Mock;
+  };
   userInvite: {
     findUnique: jest.Mock;
     updateMany: jest.Mock;
@@ -47,6 +52,18 @@ type PrismaMock = {
   $queryRaw: jest.Mock;
   $transaction: jest.Mock;
 };
+
+function completeEntitlements(profileRevision = 1) {
+  return COMPLETE_TENANT_MODULE_PROFILE.map((module) => ({
+    module,
+    readEnabled: true,
+    writeEnabled: true,
+    outboundEnabled: false,
+    validFrom: null,
+    validUntil: null,
+    profileRevision,
+  }));
+}
 
 type PasswordMock = {
   hash: jest.Mock;
@@ -84,6 +101,7 @@ function createUserWithTenant() {
       trialStartsAt: null,
       trialEndsAt: null,
       entitlementProfileRevision: 0,
+      moduleEntitlements: [],
     },
   };
 }
@@ -99,6 +117,7 @@ function createInviteTenant(onboardingStatus = TenantOnboardingStatus.ACTIVE) {
     trialStartsAt: new Date(Date.now() - 60_000),
     trialEndsAt: new Date(Date.now() + 3_600_000),
     entitlementProfileRevision: 1,
+    moduleEntitlements: completeEntitlements(),
   };
 }
 
@@ -152,6 +171,9 @@ describe('AuthService', () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         updateMany: jest.fn(),
+      },
+      tenantModuleEntitlement: {
+        findMany: jest.fn().mockResolvedValue(completeEntitlements()),
       },
       userInvite: {
         findUnique: jest.fn(),
@@ -255,6 +277,27 @@ describe('AuthService', () => {
     expect(jwtService.signAsync).not.toHaveBeenCalled();
   });
 
+  it('does not issue a session for an external tenant with a partial profile', async () => {
+    const tenant = createInviteTenant(TenantOnboardingStatus.ACTIVE);
+    prisma.user.findUnique.mockResolvedValue({
+      ...createUserWithTenant(),
+      tenant: {
+        ...tenant,
+        moduleEntitlements: tenant.moduleEntitlements.slice(0, 5),
+      },
+    });
+    passwordService.verify.mockResolvedValue(true);
+
+    await expect(
+      service.login({
+        email: 'owner@club-a.leetplus.ru',
+        password: 'strong-password',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid credentials', async () => {
     prisma.user.findUnique.mockResolvedValue(createUserWithTenant());
     passwordService.verify.mockResolvedValue(false);
@@ -326,6 +369,39 @@ describe('AuthService', () => {
       }),
     );
   });
+
+  it.each([
+    [
+      'duplicate',
+      [
+        ...completeEntitlements().slice(0, 5),
+        { ...completeEntitlements()[0] },
+      ],
+    ],
+    [
+      'mixed revision',
+      completeEntitlements().map((entry) =>
+        entry.module === TenantModule.INTEGRATIONS
+          ? { ...entry, profileRevision: 2 }
+          : entry,
+      ),
+    ],
+  ])(
+    'does not expose an invite with a %s entitlement profile',
+    async (_profileCase, moduleEntitlements) => {
+      prisma.userInvite.findUnique.mockResolvedValue({
+        ...createMemberInvite(),
+        tenant: {
+          ...createInviteTenant(),
+          moduleEntitlements,
+        },
+      });
+
+      await expect(
+        service.getInvite('opaque-bearer-token'),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    },
+  );
 
   it('transitions the first owner invite into ONBOARDING atomically', async () => {
     prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());

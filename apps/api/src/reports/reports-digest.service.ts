@@ -4,10 +4,18 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { TenantModule, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  hasCapability,
+  resolveUserCapabilities,
+} from '../auth/capabilities';
 import { TransactionalMailService } from '../mail/transactional-mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  TenantExecutionAdmissionDecision,
+  TenantExecutionAdmissionService,
+} from '../tenancy/tenant-execution-admission.service';
 import type {
   ReportDigestType,
   SendReportDigestEmailDto,
@@ -18,6 +26,38 @@ import { ReportsService, type OperationalReport } from './reports.service';
 
 const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const REPORT_DIGEST_OUTBOUND_REQUIREMENTS = [
+  { module: TenantModule.ASSORTMENT, action: 'OUTBOUND' },
+  { module: TenantModule.COMMUNICATIONS, action: 'OUTBOUND' },
+] as const;
+
+type ScheduledDigestSkippedResult = {
+  status: 'SKIPPED';
+  tenantId: string;
+  tenantSlug: string;
+  recipientEmail: string;
+  reasonCode:
+    | TenantExecutionAdmissionDecision['reasonCode']
+    | 'CAPABILITY_EXPORT_REPORTS_REQUIRED'
+    | 'RECIPIENT_AUTHORITY_REVOKED';
+  failedRequirement: TenantExecutionAdmissionDecision['failedRequirement'];
+};
+
+type ScheduledDigestRecipient = {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: UserRole;
+  isPlatformAdmin: boolean;
+  tenantId: string;
+  customRoleId: string | null;
+  customRole: {
+    id: string;
+    name: string;
+    permissions: string[];
+  } | null;
+  tenant: { slug: string };
+};
 
 @Injectable()
 export class ReportsDigestService {
@@ -28,6 +68,7 @@ export class ReportsDigestService {
     private readonly reportsService: ReportsService,
     private readonly reportsExportService: ReportsExportService,
     private readonly transactionalMailService: TransactionalMailService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
   ) {}
 
   async sendDigest(user: AuthenticatedUser, dto: SendReportDigestEmailDto) {
@@ -36,8 +77,16 @@ export class ReportsDigestService {
       dto.recipientEmail,
       user.email,
     );
+    await this.tenantExecutionAdmissionService.assertAllowed(
+      user.tenantId,
+      REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+    );
     const digest = await this.buildDigest(user, type);
 
+    await this.tenantExecutionAdmissionService.assertAllowed(
+      user.tenantId,
+      REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+    );
     await this.sendDigestEmail(recipientEmail, digest);
 
     return {
@@ -68,19 +117,81 @@ export class ReportsDigestService {
             slug: true,
           },
         },
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            permissions: true,
+          },
+        },
       },
       orderBy: [{ tenantId: 'asc' }, { email: 'asc' }],
     });
     const validRecipients = recipients.filter((user) =>
       EMAIL_REGEXP.test(user.email.trim().toLowerCase()),
     );
+    const roleOverrides = validRecipients.length
+      ? await this.prisma.userRoleOverride.findMany({
+          where: {
+            tenantId: {
+              in: Array.from(
+                new Set(validRecipients.map((recipient) => recipient.tenantId)),
+              ),
+            },
+            role: {
+              in: Array.from(
+                new Set(validRecipients.map((recipient) => recipient.role)),
+              ),
+            },
+          },
+          select: {
+            tenantId: true,
+            role: true,
+            permissions: true,
+          },
+        })
+      : [];
+    const roleOverridesByTenantRole = new Map(
+      roleOverrides.map((override) => [
+        this.tenantRoleKey(override.tenantId, override.role),
+        override,
+      ]),
+    );
 
     if (dto.dryRun) {
+      const skippedResults: ScheduledDigestSkippedResult[] = [];
+      let eligible = 0;
+
+      for (const recipient of validRecipients) {
+        const user = this.userToAuthenticatedUser(
+          recipient,
+          roleOverridesByTenantRole,
+        );
+        if (!hasCapability(user, 'export_reports')) {
+          skippedResults.push(this.toCapabilitySkippedResult(recipient));
+          continue;
+        }
+
+        const admission = await this.tenantExecutionAdmissionService.evaluate(
+          recipient.tenantId,
+          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+        );
+        if (!admission.allowed) {
+          skippedResults.push(this.toSkippedResult(recipient, admission));
+          continue;
+        }
+
+        eligible += 1;
+      }
+
       return {
         ok: true,
         type,
-        dryRun: true,
+        dryRun: true as const,
         recipients: validRecipients.length,
+        eligible,
+        skipped: skippedResults.length,
+        skippedResults,
       };
     }
 
@@ -90,14 +201,67 @@ export class ReportsDigestService {
       from: string;
       to: string;
     }[] = [];
+    const skippedResults: ScheduledDigestSkippedResult[] = [];
 
     for (const recipient of validRecipients) {
-      const user = this.userToAuthenticatedUser(recipient);
+      const user = this.userToAuthenticatedUser(
+        recipient,
+        roleOverridesByTenantRole,
+      );
+      if (!hasCapability(user, 'export_reports')) {
+        skippedResults.push(this.toCapabilitySkippedResult(recipient));
+        continue;
+      }
+
+      const initialAdmission =
+        await this.tenantExecutionAdmissionService.evaluate(
+          user.tenantId,
+          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+        );
+      if (!initialAdmission.allowed) {
+        skippedResults.push(
+          this.toSkippedResult(recipient, initialAdmission),
+        );
+        continue;
+      }
+
       const digest = await this.buildDigest(user, type);
-      await this.sendDigestEmail(recipient.email, digest);
+      const effectAdmission =
+        await this.tenantExecutionAdmissionService.evaluate(
+          user.tenantId,
+          REPORT_DIGEST_OUTBOUND_REQUIREMENTS,
+        );
+      if (!effectAdmission.allowed) {
+        skippedResults.push(
+          this.toSkippedResult(recipient, effectAdmission),
+        );
+        continue;
+      }
+
+      const freshRecipient = await this.loadFreshScheduledRecipient(recipient);
+      if (!freshRecipient) {
+        skippedResults.push(
+          this.toAuthorityRevokedSkippedResult(recipient),
+        );
+        continue;
+      }
+      const freshRoleOverrides =
+        await this.loadScheduledRecipientRoleOverrides(freshRecipient);
+      const freshUser = this.userToAuthenticatedUser(
+        freshRecipient,
+        freshRoleOverrides,
+      );
+      if (!hasCapability(freshUser, 'export_reports')) {
+        skippedResults.push(
+          this.toCapabilitySkippedResult(freshRecipient),
+        );
+        continue;
+      }
+
+      await this.sendDigestEmail(freshRecipient.email, digest);
       results.push({
-        tenantSlug: user.tenantSlug,
-        recipientEmail: recipient.email,
+        tenantSlug: freshUser.tenantSlug,
+        recipientEmail: freshRecipient.email,
         from: digest.from,
         to: digest.to,
       });
@@ -106,10 +270,119 @@ export class ReportsDigestService {
     return {
       ok: true,
       type,
-      dryRun: false,
+      dryRun: false as const,
       sent: results.length,
+      skipped: skippedResults.length,
       results,
+      skippedResults,
     };
+  }
+
+  private toSkippedResult(
+    recipient: {
+      tenantId: string;
+      email: string;
+      tenant: { slug: string };
+    },
+    admission: TenantExecutionAdmissionDecision,
+  ): ScheduledDigestSkippedResult {
+    return {
+      status: 'SKIPPED' as const,
+      tenantId: recipient.tenantId,
+      tenantSlug: recipient.tenant.slug,
+      recipientEmail: recipient.email,
+      reasonCode: admission.reasonCode,
+      failedRequirement: admission.failedRequirement,
+    };
+  }
+
+  private toCapabilitySkippedResult(
+    recipient: Pick<
+      ScheduledDigestRecipient,
+      'tenantId' | 'email' | 'tenant'
+    >,
+  ): ScheduledDigestSkippedResult {
+    return {
+      status: 'SKIPPED',
+      tenantId: recipient.tenantId,
+      tenantSlug: recipient.tenant.slug,
+      recipientEmail: recipient.email,
+      reasonCode: 'CAPABILITY_EXPORT_REPORTS_REQUIRED',
+      failedRequirement: null,
+    };
+  }
+
+  private toAuthorityRevokedSkippedResult(
+    recipient: Pick<
+      ScheduledDigestRecipient,
+      'tenantId' | 'email' | 'tenant'
+    >,
+  ): ScheduledDigestSkippedResult {
+    return {
+      status: 'SKIPPED',
+      tenantId: recipient.tenantId,
+      tenantSlug: recipient.tenant.slug,
+      recipientEmail: recipient.email,
+      reasonCode: 'RECIPIENT_AUTHORITY_REVOKED',
+      failedRequirement: null,
+    };
+  }
+
+  private loadFreshScheduledRecipient(
+    recipient: Pick<ScheduledDigestRecipient, 'id' | 'tenantId'>,
+  ): Promise<ScheduledDigestRecipient | null> {
+    return this.prisma.user.findFirst({
+      where: {
+        id: recipient.id,
+        tenantId: recipient.tenantId,
+        isActive: true,
+        accessScope: 'NETWORK',
+        role: { in: [UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER] },
+      },
+      include: {
+        tenant: {
+          select: {
+            slug: true,
+          },
+        },
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            permissions: true,
+          },
+        },
+      },
+    });
+  }
+
+  private async loadScheduledRecipientRoleOverrides(
+    recipient: ScheduledDigestRecipient,
+  ): Promise<
+    ReadonlyMap<string, { permissions: string[] }>
+  > {
+    if (recipient.customRole) {
+      return new Map();
+    }
+
+    const overrides = await this.prisma.userRoleOverride.findMany({
+      where: {
+        tenantId: recipient.tenantId,
+        role: recipient.role,
+      },
+      select: {
+        tenantId: true,
+        role: true,
+        permissions: true,
+      },
+    });
+
+    return new Map(
+      overrides.map((override) => [
+        this.tenantRoleKey(override.tenantId, override.role),
+        override,
+      ]),
+    );
   }
 
   private async buildDigest(user: AuthenticatedUser, type: ReportDigestType) {
@@ -344,26 +617,42 @@ export class ReportsDigestService {
     return email;
   }
 
-  private userToAuthenticatedUser(user: {
-    id: string;
-    email: string;
-    fullName: string | null;
-    role: UserRole;
-    isPlatformAdmin: boolean;
-    tenantId: string;
-    tenant: { slug: string };
-  }): AuthenticatedUser {
+  private userToAuthenticatedUser(
+    user: ScheduledDigestRecipient,
+    roleOverridesByTenantRole: ReadonlyMap<
+      string,
+      { permissions: string[] }
+    >,
+  ): AuthenticatedUser {
+    const roleOverride = user.customRole
+      ? null
+      : (roleOverridesByTenantRole.get(
+          this.tenantRoleKey(user.tenantId, user.role),
+        ) ?? null);
+
     return {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      customRoleId: user.customRole?.id ?? user.customRoleId,
+      customRoleName: user.customRole?.name ?? null,
+      hasRoleOverride: Boolean(roleOverride),
+      permissions: resolveUserCapabilities({
+        role: user.role,
+        customRole: user.customRole,
+        roleOverride,
+      }),
       isPlatformAdmin: user.isPlatformAdmin,
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
       accessScope: 'NETWORK',
       allowedStoreIds: [],
     };
+  }
+
+  private tenantRoleKey(tenantId: string, role: UserRole) {
+    return `${tenantId}:${role}`;
   }
 
   private formatMoney(value: number) {

@@ -117,12 +117,9 @@ export class TenantExecutionPolicyService {
       return trialDecision;
     }
 
-    if (
-      subject.customerStage !== TenantCustomerStage.INTERNAL &&
-      (!Number.isSafeInteger(subject.entitlementProfileRevision) ||
-        subject.entitlementProfileRevision < 1)
-    ) {
-      return this.deny(subject, 'ENTITLEMENT_PROFILE_REVISION_UNINITIALIZED');
+    const profileDecision = this.evaluateExternalProfile(subject);
+    if (profileDecision) {
+      return profileDecision;
     }
 
     return this.allow(subject);
@@ -145,12 +142,9 @@ export class TenantExecutionPolicyService {
       return trialDecision;
     }
 
-    if (
-      subject.customerStage !== TenantCustomerStage.INTERNAL &&
-      (!Number.isSafeInteger(subject.entitlementProfileRevision) ||
-        subject.entitlementProfileRevision < 1)
-    ) {
-      return this.deny(subject, 'ENTITLEMENT_PROFILE_REVISION_UNINITIALIZED');
+    const profileDecision = this.evaluateExternalProfile(subject);
+    if (profileDecision) {
+      return profileDecision;
     }
 
     return this.allow(subject);
@@ -198,10 +192,7 @@ export class TenantExecutionPolicyService {
         return this.deny(subject, 'ENTITLEMENT_PROFILE_INCOMPLETE');
       }
 
-      if (
-        subject.onboardingStatus === TenantOnboardingStatus.OWNER_INVITED &&
-        entitlement.outboundEnabled
-      ) {
+      if (entitlement.outboundEnabled) {
         return this.deny(subject, 'TENANT_ACTIVATION_OUTBOUND_ENABLED');
       }
 
@@ -334,6 +325,48 @@ export class TenantExecutionPolicyService {
 
     if (now >= subject.trialEndsAt) {
       return this.deny(subject, 'TRIAL_EXPIRED');
+    }
+
+    return null;
+  }
+
+  private evaluateExternalProfile(
+    subject: PersistedTenantExecutionSubject,
+  ): TenantExecutionDecision | null {
+    if (subject.customerStage === TenantCustomerStage.INTERNAL) {
+      return null;
+    }
+
+    if (
+      !Number.isSafeInteger(subject.entitlementProfileRevision) ||
+      subject.entitlementProfileRevision < 1
+    ) {
+      return this.deny(
+        subject,
+        'ENTITLEMENT_PROFILE_REVISION_UNINITIALIZED',
+      );
+    }
+
+    const entitlements = subject.moduleEntitlements ?? [];
+    const modules = new Set(entitlements.map((entry) => entry.module));
+    if (
+      entitlements.length !== COMPLETE_TENANT_MODULE_PROFILE.length ||
+      modules.size !== entitlements.length ||
+      COMPLETE_TENANT_MODULE_PROFILE.some((module) => !modules.has(module))
+    ) {
+      return this.deny(subject, 'ENTITLEMENT_PROFILE_INCOMPLETE');
+    }
+
+    if (
+      entitlements.some(
+        (entry) =>
+          entry.profileRevision !== subject.entitlementProfileRevision,
+      )
+    ) {
+      return this.deny(
+        subject,
+        'ENTITLEMENT_PROFILE_REVISION_MISMATCH',
+      );
     }
 
     return null;

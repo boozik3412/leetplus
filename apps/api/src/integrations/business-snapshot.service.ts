@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, type BusinessSnapshotRun } from '@prisma/client';
+import {
+  Prisma,
+  TenantModule,
+  type BusinessSnapshotRun,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantExecutionAdmissionService } from '../tenancy/tenant-execution-admission.service';
+import type { TenantExecutionAction } from '../tenancy/tenant-execution-policy.service';
 
 export type BusinessSnapshotType =
   | 'REVENUE'
@@ -80,6 +86,12 @@ type SnapshotBuildResult = {
 
 const businessSnapshotFreshMs = 24 * 60 * 60 * 1000;
 const businessSnapshotStaleAfterHours = 24;
+const BUSINESS_SNAPSHOT_MODULES = [
+  TenantModule.INTEGRATIONS,
+  TenantModule.ASSORTMENT,
+  TenantModule.GAMIFICATION,
+  TenantModule.STAFF,
+] as const;
 const businessSnapshotDefinitions: SnapshotDefinition[] = [
   {
     type: 'REVENUE',
@@ -115,7 +127,10 @@ const businessSnapshotDefinitions: SnapshotDefinition[] = [
 
 @Injectable()
 export class BusinessSnapshotService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantExecutionAdmissionService: TenantExecutionAdmissionService,
+  ) {}
 
   async getStatus(
     user: AuthenticatedUser,
@@ -126,6 +141,7 @@ export class BusinessSnapshotService {
   async getStatusForTenant(
     tenantId: string,
   ): Promise<BusinessSnapshotStatusResult> {
+    await this.assertExecutionAllowed(tenantId, 'READ');
     const latestRuns = await this.prisma.businessSnapshotRun.findMany({
       where: { tenantId },
       orderBy: { startedAt: 'desc' },
@@ -154,7 +170,9 @@ export class BusinessSnapshotService {
   async runSnapshotsForTenant(
     tenantId: string,
     query: BusinessSnapshotRunQuery,
+    executionAction: TenantExecutionAction = 'WRITE',
   ): Promise<BusinessSnapshotRunResult> {
+    await this.assertExecutionAllowed(tenantId, executionAction);
     const startedAt = new Date();
     const period = this.resolvePeriod(query);
     const types = this.resolveTypes(query.type);
@@ -171,6 +189,16 @@ export class BusinessSnapshotService {
       runs,
       status: await this.getStatusForTenant(tenantId),
     };
+  }
+
+  private assertExecutionAllowed(
+    tenantId: string,
+    action: TenantExecutionAction,
+  ) {
+    return this.tenantExecutionAdmissionService.assertAllowed(
+      tenantId,
+      BUSINESS_SNAPSHOT_MODULES.map((module) => ({ module, action })),
+    );
   }
 
   private async createSnapshotRun(

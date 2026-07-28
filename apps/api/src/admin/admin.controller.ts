@@ -5,6 +5,7 @@ import {
   Param,
   Post,
   Query,
+  ServiceUnavailableException,
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
@@ -70,7 +71,13 @@ export class AdminController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: unknown,
   ) {
-    return this.sharedTenantProvisioningService.provision(user, body ?? {});
+    void user;
+    void body;
+    throw new ServiceUnavailableException({
+      message:
+        'Shared beta provisioning is disabled until the initial OWNER identity outbox and protected activation workflow are implemented',
+      reasonCode: 'SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING',
+    });
   }
 
   @Post('tenants/:tenantId/initial-owner-invite/revoke')

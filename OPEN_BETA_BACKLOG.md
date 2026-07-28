@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 28.07.2026
-- Версия: 1.37
+- Версия: 1.39
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -1957,10 +1957,20 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   prefix `1..163`, сохраняет существующие tenant/report-run/bonus-ledger
   rows, проверяет backfill/defaults/constraints/trigger/CAS, три
   zero-in-flight rejection с SQLSTATE `55000`, `lock_timeout`, late-DDL
-  transactional rollback и повторный `migrate deploy`. Offline contract и
-  self-test проходят локально, но реальный PostgreSQL 16 PASS удалённого
-  runner ещё не получен, поэтому это не production-like evidence и не
-  закрывает backup/restore/operational rollout;
+  transactional rollback и повторный `migrate deploy`. Exact committed
+  preflight `DO` block теперь отдельно исполняется через PostgreSQL connection
+  и проверяется по SQLSTATE + reason; сам `migrate deploy` отдельно проверяется
+  по bounded failure, `_prisma_migrations`, отсутствию partial DDL/data и
+  recovery. Exact lock и late-index statements также отдельно доказывают
+  database SQLSTATE `55P03` и `42P07`, а Prisma CLI обязан как минимум
+  идентифицировать target-migration failure. Это устраняет зависимость от того,
+  раскрывает ли Prisma CLI исходный SQLSTATE из explicit transaction.
+  Изолированный локальный
+  PostgreSQL `16.14` diagnostic run прошёл с `6` tenants, `6` report runs и
+  `10` ledger rows, тремя drain rejection, lock-timeout/late-DDL rollback,
+  пятью rolled-back attempts и recovery deploy. Он не привязан к remote
+  exact-SHA artifact и не заменяет обязательный remote PASS; production-like
+  evidence, backup/restore и operational rollout остаются pending;
 - runtime database role пока не запечатана от прямого изменения
   `TenantModuleEntitlement`: штатный profile API повышает parent revision, но
   обходной DML должен быть запрещён privilege/trigger boundary до external
@@ -1987,16 +1997,17 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   control-plane migrations `163..164` допускаются только как проверенный
   additive tail, не меняющий protected `StaffTask*` relations. Current
   release state — `CURRENT_164`.
-- checkpoint проходит `16 suites / 646 tests` tenant-execution,
+- checkpoint проходит `16 suites / 663 tests` tenant-execution,
   `32 suites / 523 tests` focused security и полный API regression
-  `95 suites / 1843 passed / 2 todo` (`1845 total`). Design-partner subset
+  `96 suites / 1873 passed / 2 todo` (`1875 total`). Design-partner subset
   проходит `7 suites / 68 tests`. API production build, production env
   contract, API/database/web
   typecheck, API boundary/tenant-execution lint, web lint без ошибок, seed
   safety `9/9`, Prisma validate/generate, migration-164 offline contract
-  `6/6`, populated-upgrade rehearsal self-test и diff-check зелёные; real
-  PostgreSQL smoke подключён в CI и локально не имитируется без
-  PostgreSQL/Docker. До первого remote PASS он остаётся pending evidence.
+  `6/6`, populated-upgrade rehearsal self-test и diff-check зелёные; отдельный
+  real PostgreSQL `16.14` local diagnostic rehearsal также зелёный. CI smoke
+  остаётся обязательным, а до первого remote exact-SHA PASS результат остаётся
+  pending release evidence.
 
 Этот checkpoint закрывает foundation, но не Gate 1MT. Следующий обязательный
 P0-порядок: закончить durable lease/job/guest/Telegram effect fencing →
@@ -2059,6 +2070,15 @@ outbound — `OFF`, owner invite — `NO-GO`.
 
 Полный контракт, матрица job kinds, проверки и следующий порядок:
 [background-execution-containment.md](./docs/open-beta/background-execution-containment.md).
+Design candidate первого durable vertical slice с включёнными замечаниями
+независимого review зафиксирован отдельно:
+[migration 165 delivery claim design](./docs/open-beta/delivery-claim-migration-165-design.md).
+Он выбирает typed claim state в `GuestGameDelivery`, opaque capability-token,
+canonical delivery↔reward Store invariant, fresh consent/reward/provider
+revalidation, provider-attempt marker, durable reaper/reconciliation,
+old-worker cutoff и отдельный populated `164 → 165` rehearsal. Migration и
+runtime code намеренно не созданы до remote exact-SHA PostgreSQL 16 PASS для
+`CURRENT_164`.
 
 ## 6. Release gates
 

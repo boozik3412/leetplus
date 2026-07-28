@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.12                                                                        |
+| Версия           | 1.13                                                                        |
 | Дата             | 28.07.2026                                                                  |
 | Статус           | Foundation + revision fencing slice; evidence pending                       |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
@@ -438,8 +438,8 @@ seed safety
 git diff --check
 ```
 
-PostgreSQL migration smoke выполняется CI на чистой PostgreSQL 16. Локальная
-машина без PostgreSQL/Docker не считается migration evidence.
+PostgreSQL migration smoke выполняется CI на чистой PostgreSQL 16. Локальный
+run не заменяет remote exact-SHA evidence.
 
 Для migration `164` обязательный CI дополнительно запускает безопасный
 disposable rehearsal:
@@ -452,9 +452,25 @@ pnpm --filter database db:smoke:tenant-execution-revision-fence-upgrade
 Rehearsal создаёт две случайные test-БД из `template0`, не изменяет source
 database и проверяет populated success, три SQLSTATE `55000` drain rejection,
 `lock_timeout`, rollback после late DDL failure и idempotent повторный deploy.
-Локально доступны `--help`, `--self-test` и offline migration contract; без
-реального PostgreSQL 16 они не засчитываются как database evidence. Remote
-PASS текущего candidate пока pending.
+Так как Prisma CLI при explicit `BEGIN/COMMIT` может скрыть исходный SQLSTATE
+после попытки записать migration log из уже aborted transaction, harness:
+
+1. извлекает exact committed preflight `DO` block migration `164`;
+2. исполняет его через отдельное PostgreSQL connection и проверяет
+   SQLSTATE `55000` вместе с точным reason;
+3. отдельно запускает `migrate deploy` и проверяет non-zero bounded failure,
+   attempt state в `_prisma_migrations`, отсутствие partial DDL/data,
+   `resolve --rolled-back` и recovery deploy;
+4. исполняет exact lock и late-index statements через отдельные connections и
+   проверяет database SQLSTATE `55P03`/`42P07`; Prisma CLI output при этом
+   обязан как минимум идентифицировать target-migration failure.
+
+Изолированный локальный PostgreSQL `16.14` diagnostic run этого контракта
+прошёл: сохранены `6` tenants, `6` report runs и `10` ledger rows; подтверждены
+три drain rejection (`55000`), lock timeout (`55P03`), late-DDL conflict
+(`42P07`) и rollback, `5` rolled-back attempts и recovery deploy. Этот запуск
+не является remote exact-SHA artifact и не
+закрывает release evidence. Remote PASS текущего candidate пока pending.
 
 Последняя локальная проверка checkpoint:
 
@@ -467,7 +483,8 @@ PASS текущего candidate пока pending.
 - API typecheck, production build, boundary/tenant-execution lint,
   production environment contract, Prisma validate/generate, database
   typecheck, seed safety `9/9`, migration-164 offline contract `6/6` и
-  populated-upgrade rehearsal self-test, `git diff --check`: `PASS`.
+  populated-upgrade rehearsal self-test, real PostgreSQL `16.14` local
+  diagnostic rehearsal, `git diff --check`: `PASS`.
 
 StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migrations
 `163..164` принимаются только как явно allowlisted additive tail, не

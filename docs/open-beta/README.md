@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.14                                         |
+| Версия           | 1.16                                         |
 | Дата             | 28.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -114,6 +114,12 @@ enterprise-isolation option и не сокращает shared gates.
     shell-only provisioning, canonical email claim, encrypted mail outbox,
     persisted release gates, activation/suspend state machine и обязательная
     concurrency/effect-fencing matrix.
+24. [Migration 165 delivery claim design](./delivery-claim-migration-165-design.md) —
+    typed claim-generation/lease/revision для direct и bot delivery,
+    canonical Store fence, fresh consent/reward/provider revalidation,
+    provider-attempt marker, durable reaper/reconciliation, old-worker cutoff
+    и обязательный populated `164 → 165` rehearsal. Это design candidate с
+    включёнными замечаниями review; migration и runtime ещё не созданы.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -172,9 +178,10 @@ enterprise-isolation option и не сокращает shared gates.
   tenant/report-run/bonus-ledger fixtures и проверяет upgrade `164`,
   preservation/backfill/defaults, trigger/CAS, три SQLSTATE `55000`,
   `lock_timeout`, late-DDL rollback и повторный deploy. Source database не
-  мигрируется и не используется как template. Offline self-test зелёный;
-  remote PostgreSQL PASS и отдельный production-like backup/restore остаются
-  pending, поэтому этот пункт не меняет `NO-GO`;
+  мигрируется и не используется как template. Offline self-test и отдельный
+  local PostgreSQL `16.14` diagnostic rehearsal зелёные; remote exact-SHA
+  PostgreSQL PASS и production-like backup/restore остаются pending, поэтому
+  этот пункт не меняет `NO-GO`;
 - scheduled report digest применяет effective role/custom-role overrides и
   требует `export_reports`; Langame/guest foundation/business snapshot
   проверяют полный cross-module entitlement и AND-capability contract;

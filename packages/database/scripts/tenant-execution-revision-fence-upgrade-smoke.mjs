@@ -325,6 +325,52 @@ async function assertTargetMigrationArtifact(migrationPlan) {
     migrationSql,
     /CREATE INDEX "guest_bonus_ledger_execution_revision_idx"/u,
   );
+  assert.equal(
+    migrationSql.match(/\bDO \$\$/gu)?.length,
+    1,
+    "Migration 164 must retain exactly one in-flight preflight block.",
+  );
+
+  const preflightSql = migrationSql.match(
+    /DO \$\$\s*BEGIN[\s\S]*?END;\s*\$\$;/u,
+  )?.[0];
+  assert(
+    preflightSql,
+    "Migration 164 must retain one executable in-flight preflight block.",
+  );
+  const lockSql = migrationSql.match(
+    /LOCK TABLE "Tenant", "ReportDigestScheduleRun", "GuestBonusLedgerEntry"\s+IN ACCESS EXCLUSIVE MODE;/u,
+  )?.[0];
+  assert(lockSql, "Migration 164 must retain the exact table-lock statement.");
+  const lateDdlSql = migrationSql.match(
+    /CREATE INDEX "report_digest_schedule_execution_revision_idx"\s+ON "ReportDigestScheduleRun" \("tenantId", "executionRevision", "status"\);/u,
+  )?.[0];
+  assert(
+    lateDdlSql,
+    "Migration 164 must retain the exact late-DDL conflict statement.",
+  );
+  const orderedBoundaries = [
+    migrationSql.indexOf("BEGIN;"),
+    migrationSql.indexOf("SET LOCAL lock_timeout = '5s';"),
+    migrationSql.indexOf("SET LOCAL statement_timeout = '120s';"),
+    migrationSql.indexOf(
+      'LOCK TABLE "Tenant", "ReportDigestScheduleRun", "GuestBonusLedgerEntry"',
+    ),
+    migrationSql.indexOf(preflightSql),
+    migrationSql.indexOf(
+      'ALTER TABLE "Tenant"\n  ADD COLUMN "executionRevision"',
+    ),
+    migrationSql.lastIndexOf("COMMIT;"),
+  ];
+  assert(
+    orderedBoundaries.every(
+      (boundary, index) =>
+        boundary >= 0 &&
+        (index === 0 || boundary > orderedBoundaries[index - 1]),
+    ),
+    "Migration 164 must retain BEGIN -> timeouts -> LOCK -> preflight -> first ALTER -> COMMIT ordering.",
+  );
+  return { preflightSql, lockSql, lateDdlSql };
 }
 
 async function createMigrationArtifact(tempRoot, migrationPlan) {
@@ -495,7 +541,7 @@ function runMigrateResolveRolledBack(schemaPath, databaseUrl, migrationName) {
   }
 }
 
-function assertPreconditionFailure(attempt, expectedMarker) {
+function assertPreconditionFailure(attempt) {
   assert.equal(
     attempt.result.error,
     undefined,
@@ -512,10 +558,9 @@ function assertPreconditionFailure(attempt, expectedMarker) {
   );
   assert.match(
     attempt.output,
-    /55000/u,
-    "Migration failure did not expose PostgreSQL SQLSTATE 55000.",
+    /(?:P3018|failed to apply|20260728150000_tenant_execution_revision_fence)/iu,
+    "Prisma did not report a target-migration failure.",
   );
-  assert.match(attempt.output, expectedMarker);
 }
 
 function assertLockTimeoutFailure(attempt) {
@@ -535,8 +580,8 @@ function assertLockTimeoutFailure(attempt) {
   );
   assert.match(
     attempt.output,
-    /(?:55P03|lock timeout|lock_timeout)/iu,
-    "Migration failure did not contain a PostgreSQL lock-timeout marker.",
+    /(?:P3018|failed to apply|20260728150000_tenant_execution_revision_fence)/iu,
+    "Prisma did not report a target-migration failure.",
   );
 }
 
@@ -557,8 +602,8 @@ function assertLateDdlFailure(attempt) {
   );
   assert.match(
     attempt.output,
-    /(?:42P07|already exists|duplicate table)/iu,
-    "Migration failure did not contain the expected duplicate-relation marker.",
+    /(?:P3018|failed to apply|20260728150000_tenant_execution_revision_fence)/iu,
+    "Prisma did not report a target-migration failure.",
   );
 }
 
@@ -1167,6 +1212,65 @@ async function expectSqlState(expectedState, operation) {
     expectedState,
     "PostgreSQL rejected the operation with an unexpected SQLSTATE.",
   );
+  return caught;
+}
+
+async function assertMigrationPreflightSqlState(
+  databaseUrl,
+  preflightSql,
+  expectedMarker,
+) {
+  // With an explicit BEGIN/COMMIT in the migration, Prisma CLI can mask the
+  // original SQLSTATE when it tries to persist migration logs from the
+  // already-aborted transaction. Execute the exact committed DO block through
+  // a dedicated connection, then verify migrate-deploy failure and rollback
+  // state separately.
+  const client = prismaClient(databaseUrl);
+  try {
+    const error = await expectSqlState("55000", () =>
+      client.$executeRawUnsafe(preflightSql),
+    );
+    assert.match(
+      `${error?.message ?? ""}\n${JSON.stringify(error?.meta ?? {})}`,
+      expectedMarker,
+      "The exact migration preflight raised SQLSTATE 55000 for an unexpected reason.",
+    );
+  } finally {
+    await client.$disconnect();
+  }
+}
+
+async function assertMigrationLockSqlState(databaseUrl, lockSql) {
+  const client = prismaClient(databaseUrl);
+  try {
+    await expectSqlState("55P03", () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(
+          `SET LOCAL lock_timeout = '250ms'`,
+        );
+        await transaction.$executeRawUnsafe(lockSql);
+      }),
+    );
+  } finally {
+    await client.$disconnect();
+  }
+}
+
+async function assertMigrationLateDdlSqlState(databaseUrl, lateDdlSql) {
+  const client = prismaClient(databaseUrl);
+  try {
+    await expectSqlState("42P07", () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(
+          `ALTER TABLE "ReportDigestScheduleRun"
+           ADD COLUMN "executionRevision" INTEGER NOT NULL DEFAULT 0`,
+        );
+        await transaction.$executeRawUnsafe(lateDdlSql);
+      }),
+    );
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 async function assertPreservedRevisionRows(client, fixtures) {
@@ -1471,16 +1575,22 @@ async function runPreconditionFailure(
   fixtureKey,
   expectedCounts,
   expectedMarker,
+  preflightSql,
 ) {
   const baselineCatalog = await readRevisionCatalog(client);
   const baselineSnapshot = await readFixtureSnapshot(client, fixtureKey);
   assertPre164Catalog(baselineCatalog);
+  await assertMigrationPreflightSqlState(
+    databaseUrl,
+    preflightSql,
+    expectedMarker,
+  );
   const attempt = spawnMigrateDeploy(
     schemaPath,
     databaseUrl,
     FAILURE_TIMEOUT_MS,
   );
-  assertPreconditionFailure(attempt, expectedMarker);
+  assertPreconditionFailure(attempt);
   await assertFailedAttemptState(
     client,
     fixtureKey,
@@ -1497,6 +1607,7 @@ async function runFailureAndRecoveryScenario(
   migrationPlan,
   fixtures,
   fixtureKey,
+  migrationSqlContract,
 ) {
   const client = prismaClient(databaseUrl);
   try {
@@ -1513,6 +1624,7 @@ async function runFailureAndRecoveryScenario(
       fixtureKey,
       { total: 1, unfinished: 1, rolled_back: 0, applied: 0 },
       /zero RUNNING report digest jobs/u,
+      migrationSqlContract.preflightSql,
     );
     assert.deepEqual(await readTargetAttemptCounts(client), {
       total: 1,
@@ -1547,6 +1659,7 @@ async function runFailureAndRecoveryScenario(
       fixtureKey,
       { total: 2, unfinished: 1, rolled_back: 1, applied: 0 },
       /zero in-flight bonus ledger claims/u,
+      migrationSqlContract.preflightSql,
     );
     assert.deepEqual(await readTargetAttemptCounts(client), {
       total: 2,
@@ -1578,6 +1691,7 @@ async function runFailureAndRecoveryScenario(
       fixtureKey,
       { total: 3, unfinished: 1, rolled_back: 2, applied: 0 },
       /zero in-flight bonus ledger claims/u,
+      migrationSqlContract.preflightSql,
     );
     assert.deepEqual(await readTargetAttemptCounts(client), {
       total: 3,
@@ -1609,6 +1723,10 @@ async function runFailureAndRecoveryScenario(
       async (transaction) => {
         await transaction.$executeRawUnsafe(
           `LOCK TABLE "GuestBonusLedgerEntry" IN ACCESS SHARE MODE`,
+        );
+        await assertMigrationLockSqlState(
+          databaseUrl,
+          migrationSqlContract.lockSql,
         );
         const attempt = await spawnMigrateDeployAsync(
           schemaPath,
@@ -1653,6 +1771,10 @@ async function runFailureAndRecoveryScenario(
     const lateDdlBaselineSnapshot = await readFixtureSnapshot(
       lateDdlClient,
       fixtureKey,
+    );
+    await assertMigrationLateDdlSqlState(
+      databaseUrl,
+      migrationSqlContract.lateDdlSql,
     );
     const lateDdlAttempt = spawnMigrateDeploy(
       schemaPath,
@@ -1795,14 +1917,18 @@ async function runOfflineSelfTest() {
       DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/leetplus_ci",
     }),
   );
-  assertPreconditionFailure(
-    {
+  assertPreconditionFailure({
+    result: { error: undefined, status: 1 },
+    elapsedMs: 100,
+    output:
+      "P3018 database error 55000: Tenant execution revision migration requires zero RUNNING report digest jobs",
+  });
+  expectOfflineFailure(() =>
+    assertPreconditionFailure({
       result: { error: undefined, status: 1 },
       elapsedMs: 100,
-      output:
-        "P3018 database error 55000: Tenant execution revision migration requires zero RUNNING report digest jobs",
-    },
-    /zero RUNNING report digest jobs/u,
+      output: "unrelated failure",
+    }),
   );
   assertLockTimeoutFailure({
     result: { error: undefined, status: 1 },
@@ -1813,8 +1939,15 @@ async function runOfflineSelfTest() {
   expectOfflineFailure(() =>
     assertLockTimeoutFailure({
       result: { error: undefined, status: 1 },
-      elapsedMs: 25,
+      elapsedMs: 5_000,
       output: "unrelated failure",
+    }),
+  );
+  expectOfflineFailure(() =>
+    assertLockTimeoutFailure({
+      result: { error: undefined, status: 1 },
+      elapsedMs: 25,
+      output: "P3018 migration failed",
     }),
   );
   assertLateDdlFailure({
@@ -1823,6 +1956,13 @@ async function runOfflineSelfTest() {
     output:
       'P3018 database error 42P07: relation "report_digest_schedule_execution_revision_idx" already exists',
   });
+  expectOfflineFailure(() =>
+    assertLateDdlFailure({
+      result: { error: undefined, status: 1 },
+      elapsedMs: 100,
+      output: "unrelated failure",
+    }),
+  );
 
   const migrationPlan = await readMigrationPlan();
   await assertTargetMigrationArtifact(migrationPlan);
@@ -1849,7 +1989,8 @@ async function runRealSmoke(environment) {
   const { sourceUrl, databaseName: sourceDatabaseName } =
     assertRealEnvironment(environment);
   const migrationPlan = await readMigrationPlan();
-  await assertTargetMigrationArtifact(migrationPlan);
+  const migrationSqlContract =
+    await assertTargetMigrationArtifact(migrationPlan);
   const { successDatabaseName, failureDatabaseName } = generatedDatabaseNames();
   const sourceDatabaseUrl = databaseUrlFor(sourceUrl, sourceDatabaseName);
   const successDatabaseUrl = databaseUrlFor(sourceUrl, successDatabaseName);
@@ -1931,6 +2072,7 @@ async function runRealSmoke(environment) {
       migrationPlan,
       failureFixtures,
       failureFixtureKey,
+      migrationSqlContract,
     );
 
     assert.deepEqual(
@@ -1957,6 +2099,9 @@ async function runRealSmoke(environment) {
           ledgerProcessing: 1,
           ledgerDispatching: 1,
         },
+        databasePreflightSqlStateVerified: "55000",
+        databaseLockSqlStateVerified: "55P03",
+        databaseLateDdlSqlStateVerified: "42P07",
         lockTimeoutRollbackVerified: true,
         lateDdlRollbackVerified: true,
         rolledBackTargetAttemptsBeforeRecovery: 5,

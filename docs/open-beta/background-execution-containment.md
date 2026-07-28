@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.0                                                     |
+| Версия           | 1.1                                                     |
 | Дата             | 28.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -188,6 +188,14 @@ retention и quality collection не объявляются unattended entrypoin
 - migration `165` и новые delivery lease-поля намеренно не добавлены до
   получения exact PostgreSQL 16 evidence для `CURRENT_164`.
 
+Локальный isolated PostgreSQL `16.14` diagnostic rehearsal populated
+`163 → 164` уже прошёл после усиления проверки exact preflight SQLSTATE:
+`6` tenants, `6` report runs, `10` ledger rows, три drain rejection,
+database SQLSTATE `55000/55P03/42P07`, lock-timeout/late-DDL rollback, пять
+rolled-back attempts и recovery deploy.
+Он не является remote exact-SHA evidence, поэтому порядок и `NO-GO` ниже не
+изменяются.
+
 Поэтому `BETA-MT-008` остаётся `В работе`, outbound первого внешнего tenant
 остаётся `OFF`, а release decision остаётся `NO-GO`.
 
@@ -225,7 +233,9 @@ Suite проверяет:
 1. Получить remote PostgreSQL 16 PASS populated rehearsal `163 → 164`.
 2. Отдельным reviewed migration `165` добавить durable delivery
    claim-generation, captured execution revision, lease owner/expiry,
-   provider-attempt marker и fenced finalize/reconcile.
+   provider-attempt marker, Store revision fence и fenced
+   finalize/reconcile согласно
+   [delivery claim design](./delivery-claim-migration-165-design.md).
 3. Перевести direct dispatcher и bot pull на один claim primitive.
 4. Добавить durable claims и fresh per-source/provider boundary для обычного
    Langame sync и остальных job kinds.

@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.12                                         |
+| Версия           | 1.13                                         |
 | Дата             | 28.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -69,7 +69,7 @@ enterprise-isolation option и не сокращает shared gates.
 9. [Матрица внедрения](../security/access-scope/v1/module-adoption-matrix.md) —
    фактический статус поверхностей.
 10. [Стратегия тестирования](../security/access-scope/v1/test-strategy.md) —
-   обязательные positive/negative topology-сценарии.
+    обязательные positive/negative topology-сценарии.
 11. [Attachment ACL rollout](../security/access-scope/v1/attachment-acl-rollout.md)
     и
     [implementation checkpoint](../security/access-scope/v1/attachment-acl-implementation-checkpoint.md).
@@ -104,9 +104,9 @@ enterprise-isolation option и не сокращает shared gates.
 20. [Шаблон release evidence](../security/access-scope/evidence/README.md) —
     какие обезличенные доказательства сохранять для каждого SHA.
 21. [Tenant execution control-plane checkpoint](./tenant-execution-control-plane.md) —
-     persisted stage/trial/profile, Platform Admin CAS, runtime admission,
-     shared provisioning/revoke candidate, owner onboarding и точный остаток
-     до dedicated external activation.
+    persisted stage/trial/profile, Platform Admin CAS, runtime admission,
+    shared provisioning/revoke candidate, owner onboarding и точный остаток
+    до dedicated external activation.
 22. [Initial OWNER identity and activation](./initial-owner-identity-and-activation.md) —
     shell-only provisioning, canonical email claim, encrypted mail outbox,
     persisted release gates, activation/suspend state machine и обязательная
@@ -153,6 +153,14 @@ enterprise-isolation option и не сокращает shared gates.
   provider.
   Durable lease/reclaim для delivery/общего Langame sync, public
   guest/Telegram identity routes, files и strict suspend/drain ещё pending;
+- populated migration rehearsal candidate: обязательный CI создаёт две
+  disposable PostgreSQL 16 test-БД, поднимает exact schema `1..163` с
+  tenant/report-run/bonus-ledger fixtures и проверяет upgrade `164`,
+  preservation/backfill/defaults, trigger/CAS, три SQLSTATE `55000`,
+  `lock_timeout`, late-DDL rollback и повторный deploy. Source database не
+  мигрируется и не используется как template. Offline self-test зелёный;
+  remote PostgreSQL PASS и отдельный production-like backup/restore остаются
+  pending, поэтому этот пункт не меняет `NO-GO`;
 - scheduled report digest применяет effective role/custom-role overrides и
   требует `export_reports`; Langame/guest foundation/business snapshot
   проверяют полный cross-module entitlement и AND-capability contract;

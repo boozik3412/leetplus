@@ -728,7 +728,23 @@ pnpm --filter api typecheck
 pnpm --filter web typecheck
 pnpm --filter database check:staff-task-integrity-snapshot-admission
 pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
+pnpm --filter database check:tenant-execution-revision-fence
 ```
+
+Populated upgrade migration `163 → 164` репетируется только на одноразовом
+local/CI PostgreSQL 16. Smoke принимает только loopback test/ci database и
+test superuser, создаёт две случайные БД из `template0`, никогда не мигрирует
+source database и удаляет только созданные им БД:
+
+```powershell
+$env:DATABASE_URL = "<disposable local/CI PostgreSQL 16 URL>"
+$env:TENANT_EXECUTION_REVISION_FENCE_UPGRADE_SMOKE_CONFIRM = "run-tenant-execution-revision-fence-upgrade-smoke"
+pnpm --filter database db:smoke:tenant-execution-revision-fence-upgrade
+```
+
+Без реального PostgreSQL 16 локальные `--self-test` и offline contract не
+заменяют CI database evidence. Запуск на общем или production-кластере
+запрещён.
 
 Полный StaffTask admission/proposal PostgreSQL rehearsal запускается только на
 выделенном одноразовом local/CI PostgreSQL 16, поскольку smoke создаёт и

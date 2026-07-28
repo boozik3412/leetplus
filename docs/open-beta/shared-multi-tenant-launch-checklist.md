@@ -1,14 +1,14 @@
 # Launch checklist: `SHARED_MULTI_TENANT_BETA_V1`
 
-| Поле        | Значение                                                     |
-| ----------- | ------------------------------------------------------------ |
-| Версия      | 1.4                                                          |
-| Дата        | 28.07.2026                                                   |
-| Статус      | `NO-GO`; checklist не выполнен                               |
-| Data plane  | Shared web/API/workers/PostgreSQL/Telegram                   |
-| Topology    | `Tenant A/A1..A4` + новый `Tenant B/B1`                      |
-| Доступ      | Email-bound OWNER invite после Gate 1MT, Gate 2 и final GO   |
-| Ориентир    | `31.08–07.09.2026`, условно; failed gate сдвигает окно       |
+| Поле       | Значение                                                   |
+| ---------- | ---------------------------------------------------------- |
+| Версия     | 1.5                                                        |
+| Дата       | 28.07.2026                                                 |
+| Статус     | `NO-GO`; checklist не выполнен                             |
+| Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
+| Topology   | `Tenant A/A1..A4` + новый `Tenant B/B1`                    |
+| Доступ     | Email-bound OWNER invite после Gate 1MT, Gate 2 и final GO |
+| Ориентир   | `31.08–07.09.2026`, условно; failed gate сдвигает окно     |
 
 Этот checklist исполняется вместе с
 [профилем доступа](./shared-multi-tenant-beta-profile.md) и
@@ -72,6 +72,10 @@ API keys, encryption/signing secrets и raw business data запрещено с�
 Evidence:
 
 - [ ] topology manifest;
+- [ ] remote PostgreSQL 16 populated `163 → 164` rehearsal exact candidate:
+      preserved fixtures, три SQLSTATE `55000`, lock-timeout, late-DDL
+      rollback, idempotent deploy; CI wiring/self-test без remote PASS не
+      закрывают этот checkbox;
 - [ ] real PostgreSQL shell-provision/activation/suspend concurrency report;
 - [ ] entitlement/lifecycle contract tests;
 - [ ] dedicated activation/suspend и expiry propagation smoke.

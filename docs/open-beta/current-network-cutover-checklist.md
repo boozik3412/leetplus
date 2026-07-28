@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.10.0                                             |
+| Версия          | 1.11.0                                             |
 | Дата            | 28.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -168,6 +168,9 @@ admission.
       existing migration `163` tenant/report-run/bonus-ledger rows, подтвердил
       backfill/data preservation/defaults и атомарный rollback при
       `lock_timeout`.
+      Candidate уже подключён к CI и дополнительно проверяет три SQLSTATE
+      `55000`, late-DDL rollback и повторный deploy; checkbox остаётся пустым
+      до remote PostgreSQL 16 PASS exact candidate.
 - [ ] EXPAND rehearsal начинается с populated legacy baseline 156 и применяет
       ровно шесть migration `157..162`; пять concurrent indexes строятся на
       заполненных parent-таблицах.
@@ -365,6 +368,11 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.11.0`, 28.07.2026 — в обязательный CI подключён disposable populated
+  PostgreSQL 16 rehearsal migration `163 → 164`: success/data preservation,
+  три zero-in-flight rejection, lock-timeout, late-DDL transactional rollback
+  и idempotent deploy. Remote PASS и production-like evidence ещё pending,
+  поэтому соответствующие cutover checkbox не закрыты.
 - `1.10.0`, 28.07.2026 — migration `164` получила fail-closed database
   precondition для zero in-flight report/bonus effects; manual SMTP повторно
   проверяет tenant revision, active actor, capability и exact scope, а

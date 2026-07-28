@@ -144,7 +144,7 @@ jobs:
   migration-smoke:
     name: PostgreSQL migration smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 75
     env:
       PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=120000
 
@@ -196,6 +196,11 @@ jobs:
         run: pnpm --filter database db:smoke:tenant-execution-control-plane-upgrade
         env:
           TENANT_EXECUTION_CONTROL_PLANE_UPGRADE_SMOKE_CONFIRM: run-tenant-execution-control-plane-upgrade-smoke
+
+      - name: Rehearse tenant execution revision fence 163 to 164 upgrade and rollback
+        run: pnpm --filter database db:smoke:tenant-execution-revision-fence-upgrade
+        env:
+          TENANT_EXECUTION_REVISION_FENCE_UPGRADE_SMOKE_CONFIRM: run-tenant-execution-revision-fence-upgrade-smoke
 
       - name: Verify database connectivity and migration state
         run: pnpm --filter database db:smoke

@@ -1,13 +1,13 @@
 # Tenant execution control plane: implementation checkpoint
 
-| Поле             | Значение                                                        |
-| ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.10                                                            |
-| Дата             | 28.07.2026                                                      |
-| Статус           | Foundation + revision fencing slice; evidence pending            |
-| Release decision | `NO-GO` для внешнего owner invite                               |
+| Поле             | Значение                                                                    |
+| ---------------- | --------------------------------------------------------------------------- |
+| Версия           | 1.11                                                                        |
+| Дата             | 28.07.2026                                                                  |
+| Статус           | Foundation + revision fencing slice; evidence pending                       |
+| Release decision | `NO-GO` для внешнего owner invite                                           |
 | Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` |
-| Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть        |
+| Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
 
 Этот документ фиксирует фактически реализованный срез
 `BETA-TEN-001..004` и `BETA-MT-002..004`. Shared provisioning остаётся
@@ -402,10 +402,10 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
 6. real PostgreSQL provision/activate/accept/suspend concurrency tests;
 7. двухtenantная/двухклубная PostgreSQL/browser isolation matrix;
 8. безопасный integration preview/select/map и tenant-aware Telegram;
-9. PostgreSQL 16 populated `163 → 164` upgrade/lock-timeout rollback,
-   backup/restore и operational rollout с
-   обязательным pre-migration drain старого API/workers и zero in-flight
-   evidence до apply revision fence.
+9. Получить remote PASS подключённого PostgreSQL 16 populated
+   `163 → 164` rehearsal, затем отдельно выполнить production-like
+   backup/restore и operational rollout с обязательным pre-migration drain
+   старого API/workers и zero in-flight evidence до apply revision fence.
 10. DB-role/trigger sealing для прямого `TenantModuleEntitlement` DML:
     profile API уже повышает parent execution revision, но обходной runtime
     write должен быть запрещён до external `GO`.
@@ -430,6 +430,21 @@ git diff --check
 PostgreSQL migration smoke выполняется CI на чистой PostgreSQL 16. Локальная
 машина без PostgreSQL/Docker не считается migration evidence.
 
+Для migration `164` обязательный CI дополнительно запускает безопасный
+disposable rehearsal:
+
+```text
+TENANT_EXECUTION_REVISION_FENCE_UPGRADE_SMOKE_CONFIRM=run-tenant-execution-revision-fence-upgrade-smoke
+pnpm --filter database db:smoke:tenant-execution-revision-fence-upgrade
+```
+
+Rehearsal создаёт две случайные test-БД из `template0`, не изменяет source
+database и проверяет populated success, три SQLSTATE `55000` drain rejection,
+`lock_timeout`, rollback после late DDL failure и idempotent повторный deploy.
+Локально доступны `--help`, `--self-test` и offline migration contract; без
+реального PostgreSQL 16 они не засчитываются как database evidence. Remote
+PASS текущего candidate пока pending.
+
 Последняя локальная проверка checkpoint:
 
 - tenant-execution suite: `16 suites / 646 tests`;
@@ -440,7 +455,7 @@ PostgreSQL migration smoke выполняется CI на чистой PostgreSQ
 - API typecheck, production build, boundary/tenant-execution lint,
   production environment contract, Prisma validate/generate, database
   typecheck, seed safety `9/9`, migration-164 offline contract `6/6` и
-  `git diff --check`: `PASS`.
+  populated-upgrade rehearsal self-test, `git diff --check`: `PASS`.
 
 StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migrations
 `163..164` принимаются только как явно allowlisted additive tail, не

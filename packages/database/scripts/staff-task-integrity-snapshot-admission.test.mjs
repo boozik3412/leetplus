@@ -12,6 +12,7 @@ import {
   EXPAND_STATE,
   ISOLATION_ATTESTATION,
   PRIVILEGE_STATE_SQL,
+  RELEASE_RUNTIME_SOURCE_PATHS,
   REQUIRED_COLUMN_SELECTS,
   RUN_CONFIRMATION,
   buildAdmissionReport,
@@ -34,11 +35,21 @@ import {
   STAFF_TASK_FROZEN_PREFIX_LATEST,
 } from "./staff-task-integrity-migration-state.mjs";
 import { computeNonceBoundDatabaseIdentityDigest } from "./staff-task-integrity-snapshot-authority.mjs";
+import { CEREMONY_RELEASE_SOURCE_PATHS } from "./staff-task-integrity-snapshot-authority-offline-sign.cli.mjs";
 import { PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS } from "./staff-task-integrity-snapshot-authority-roots.mjs";
 
 const NOW = new Date("2026-07-27T00:00:00.000Z");
 const HMAC_KEY = "unit-test-snapshot-admission-hmac-key-aaaaaaaa";
 const SYNTHETIC_DATABASE = "lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa";
+
+test("admission release evidence covers the detached ceremony runtime", () => {
+  for (const ceremonySource of CEREMONY_RELEASE_SOURCE_PATHS) {
+    assert.ok(
+      RELEASE_RUNTIME_SOURCE_PATHS.includes(ceremonySource),
+      `unbound ceremony source: ${ceremonySource}`,
+    );
+  }
+});
 
 function environment(overrides = {}) {
   return {
@@ -271,7 +282,34 @@ test("remote targets stay NO-GO and production-like authority fails closed", () 
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION: "PRODUCTION_LIKE",
     STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
       "leetplus_snapshot_rehearsal",
+    STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE: `acquisition-v1:${"a".repeat(64)}`,
   });
+  assert.throws(
+    () =>
+      parseRuntimeContract(
+        {
+          ...localProductionLike,
+          STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE:
+            "security-approval:caller-controlled",
+        },
+        NOW,
+      ),
+    { code: "PRODUCTION_LIKE_ACQUISITION_REFERENCE_REQUIRED" },
+  );
+  const ambiguousMarker = "leetplus_contest";
+  assert.throws(
+    () =>
+      parseRuntimeContract(
+        {
+          ...localProductionLike,
+          DATABASE_URL: `postgresql://reader:secret@127.0.0.1:5432/${ambiguousMarker}`,
+          STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
+            ambiguousMarker,
+        },
+        NOW,
+      ),
+    { code: "PRODUCTION_LIKE_TARGET_INVALID" },
+  );
   assert.throws(() => parseRuntimeContract(localProductionLike, NOW), {
     code: "PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED",
   });
@@ -439,6 +477,7 @@ test("database marker, public schema, HMAC, expiry, and timeout order are exact"
             "PRODUCTION_LIKE",
           STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE:
             "leetplus_snapshot_rehearsal",
+          STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE: `acquisition-v1:${"a".repeat(64)}`,
           STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPIRES_AT:
             "2026-07-31T00:00:00.000Z",
         }),

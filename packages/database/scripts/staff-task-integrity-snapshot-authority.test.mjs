@@ -54,6 +54,10 @@ function keyMaterial() {
       publicKeyFingerprint: computePublicKeyFingerprint(publicKeyPem),
       notBefore: "2026-07-27T00:00:00.000Z",
       notAfter: "2026-08-01T00:00:00.000Z",
+      status: "ACTIVE",
+      supersedesKeyId: null,
+      retiredAt: null,
+      revokedAt: null,
     }),
   };
 }

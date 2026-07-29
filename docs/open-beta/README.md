@@ -3,8 +3,8 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.16                                         |
-| Дата             | 28.07.2026                                   |
+| Версия           | 1.18                                         |
+| Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
 
@@ -97,6 +97,9 @@ enterprise-isolation option и не сокращает shared gates.
     обязательный fail-closed checkpoint перед production-like inventory и
     planner: PostgreSQL 16, frozen `BASELINE_156 | EXPAND_162`, current
     `CURRENT_164`, release manifest, catalog и отдельная SELECT-only роль.
+    18a. [Runbook production-like authority operations](../security/access-scope/v1/staff-task-integrity-snapshot-authority-operations.md) —
+    strict acquisition evidence, public-root lifecycle и detached Ed25519
+    ceremony без private-key path внутри LeetPlus.
 19. [Runbook SYNTHETIC reconciliation proposal dry-run](../security/access-scope/v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
     read-only row-evidence rehearsal только для подписанной disposable
     harness-БД: восемь proposal-кодов, HMAC-токены, coalescing и явный запрет
@@ -246,10 +249,23 @@ enterprise-isolation option и не сокращает shared gates.
   roots намеренно пусты: production-like authority fail-closed и остаётся
   `NO-GO`. HMAC не заменяет authority; production-like report доверяется
   только как same-process/non-transferable evidence.
+- Detached authority operations имеют `IMPLEMENTED_CANDIDATE`: strict
+  canonical acquisition request, derived `acquisition-v1:<digest>`, lifecycle
+  registry `ACTIVE/RETIRED/REVOKED` и ceremony
+  `prepare → external Ed25519 sign → finalize`. LeetPlus не читает private key
+  или signer secret; `finalize` re-hash исходный request, root history
+  проверяется actual parent→HEAD CI gate, а payload/envelope публикуются
+  последними readiness files. Каждая output-пара своей фазы находится в одном
+  protected каталоге; каталоги prepare/finalize могут различаться. Локально authority
+  bundle прошёл `38/38`, admission — `21/21`. Реальный
+  public root, внешний signer/HSM, snapshot acquisition/restore и exact-SHA
+  remote CI этого изменения ещё не выполнены.
 - Historical public-only pinned-path test evidence
   `2341b99937e54cc50d1763a0a794d975816c72ce` —
-  `LOCAL PASS`, remote CI pending. Runtime candidate остаётся
-  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`. Pre-signed fixture не содержит
+  включён в полностью зелёный remote CI SHA
+  `d77c74393c510b688f9f2a5c43eaa908390450b5`. Historical runtime
+  `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` не является current candidate.
+  Pre-signed fixture не содержит
   private key, generation или signing API; production root registry остаётся
   пустым. Изолированный Node.js 22 child проверяет реальный pinned wrapper,
   marker/nonce-bound identity, expiry и отказ detached report; admission suite
@@ -276,30 +292,39 @@ enterprise-isolation option и не сокращает shared gates.
 1. Исторические test/runtime SHA `2341b999...`/`044ceca2...` не использовать
    как current evidence; сначала создать exact candidate SHA текущего рабочего
    дерева, получить зелёные mandatory remote CI checks и independent review.
-2. Выполнить reviewed Ed25519 root enrollment, protected signer и approved
-   snapshot acquisition для exact current SHA.
-3. отдельно production-like admission: новый state-bound `BASELINE_156`
-   envelope/marker → admission → migrations `157..162` → новый
+2. Независимо проверить detached authority candidate, утвердить внешний
+   signer/HSM, separation of duties и key custody; затем отдельным reviewed
+   change enrol Ed25519 public root и получить зелёный remote CI exact
+   enrolled-root SHA до acquisition.
+3. Выполнить approved acquisition/restore в protected evidence boundary для
+   exact current SHA; произвольный approval alias не использовать. Создать
+   отдельную `LOGIN NOINHERIT` reader role, выдать exact grants и пройти
+   negative ACL gate.
+4. отдельно production-like admission: новый request/nonce/envelope/marker для
+   `BASELINE_156` → admission → migrations `157..162` → новый request и
    `EXPAND_162` envelope/marker → admission → exact allowlisted migration
    `20260728120000_tenant_execution_control_plane_expand` → exact
    `20260728150000_tenant_execution_revision_fence` → новый
-   `CURRENT_164` envelope/marker → третий admission. Protected StaffTask
+   третий request и `CURRENT_164` envelope/marker → третий admission. Protected StaffTask
    evidence остаётся bound к prefix 162; planner работает только на current
    DB 164;
-4. отдельно production-like inventory и aggregate planner;
-5. отдельно production-like row dry-run;
-6. отдельно explicit apply, rollback и доказательство zero-diff;
-7. только после zero blocking — отдельные решения по `VALIDATE`, N-1 window,
+5. отдельно production-like inventory и aggregate planner;
+6. отдельно production-like row dry-run;
+7. отдельно explicit apply, rollback и доказательство zero-diff;
+8. только после zero blocking — отдельные решения по `VALIDATE`, N-1 window,
    `CONTRACT` и deployment;
-8. после выполнения всех platform/module prerequisites и отдельного `Gate 2A`
+9. после выполнения всех platform/module prerequisites и отдельного `Gate 2A`
    explicit `CUTOVER GO` — in-place cutover четырёх `Store` текущей сети
    внутри одного существующего `Tenant`;
-9. параллельно закрыть `BETA-MT-001..009`: shared topology, persisted
-   stage/trial/entitlements, `TenantExecutionPolicy`, owner provisioning,
-   delegation/integrations, A/B isolation и tenant-aware workers/Telegram;
-10. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только
+10. параллельно закрыть `BETA-MT-001..009`: shared topology, persisted
+    stage/trial/entitlements, `TenantExecutionPolicy`, owner provisioning,
+    delegation/integrations, A/B isolation и tenant-aware workers/Telegram;
+11. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только
     затем возможен protected `SHARED BETA GO` и owner invite нового
     `Tenant B/Store B1`.
+
+После повторного zero-diff inventory/planner reader role отзывается и удаляется
+до уничтожения disposable snapshot.
 
 Это не означает готовность к внешнему тесту. В launch scope ещё остаются
 непроверенные staff surfaces, остальные attachment parent kinds, полный

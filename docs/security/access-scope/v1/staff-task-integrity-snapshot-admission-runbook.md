@@ -1,17 +1,18 @@
 # Staff task integrity: snapshot admission runbook
 
-| Поле                     | Значение                                                                   |
-| ------------------------ | -------------------------------------------------------------------------- |
-| Статус                   | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE `NO-GO` |
-| Версия                   | 0.7.0                                                                      |
-| Дата                     | 28.07.2026                                                                 |
-| Backlog                  | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`       |
-| Current candidate SHA    | Не назначен: current-state change находится в рабочем дереве                |
-| Historical runtime SHA   | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence            |
-| Historical test SHA      | `2341b99937e54cc50d1763a0a794d975816c72ce`; не current evidence            |
-| Report schema version    | 2                                                                          |
-| PostgreSQL               | Только major version `16`                                                  |
-| Разрешённая schema       | Только `public`                                                            |
+| Поле                    | Значение                                                                   |
+| ----------------------- | -------------------------------------------------------------------------- |
+| Статус                  | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE `NO-GO` |
+| Версия                  | 0.10.0                                                                     |
+| Дата                    | 29.07.2026                                                                 |
+| Backlog                 | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`       |
+| Current candidate SHA   | Exact PR/release SHA; принимается только с green remote CI evidence        |
+| Latest green remote SHA | `d77c74393c510b688f9f2a5c43eaa908390450b5`; до authority operations        |
+| Historical runtime SHA  | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence            |
+| Historical test SHA     | `2341b99937e54cc50d1763a0a794d975816c72ce`; не current evidence            |
+| Report schema version   | 2                                                                          |
+| PostgreSQL              | Только major version `16`                                                  |
+| Разрешённая schema      | Только `public`                                                            |
 
 Этот документ описывает реализованный fail-closed admission candidate для
 изолированного StaffTask snapshot. Candidate только проверяет runtime, exact
@@ -61,15 +62,16 @@ Candidate:
 
 ```text
 implementation candidate               = IMPLEMENTED_CANDIDATE
-admission contract tests                 = LOCAL PASS (19/19)
-authority contract tests                 = PASS (9/9)
-public-only positive pinned path          = LOCAL PASS (isolated test-only child)
+admission contract tests               = LOCAL PASS (21/21)
+authority/acquisition/detached tests    = LOCAL PASS (38/38)
+public-only positive pinned path        = LOCAL PASS (isolated test-only child)
 test evidence commit                      = 2341b99937e54cc50d1763a0a794d975816c72ce
-offline/integrated smoke self-test       = PASS (46 checks)
+offline/integrated smoke self-test       = PASS (48 checks)
 SYNTHETIC real PostgreSQL verification = PASS (23 scenarios; PostgreSQL 16.13)
 PRODUCTION_LIKE acquisition/restore/run = NOT EXECUTED
 production-like authority roots         = EMPTY; FAIL-CLOSED
-remote CI evidence                       = PENDING
+latest pre-authority remote CI          = PASS / d77c743...
+exact authority-candidate remote CI     = REQUIRED / RELEASE EVIDENCE
 Node 22 experimental module mocks        = P2 TEST-INFRA RISK
 remote admission                        = NO-GO
 production apply/VALIDATE/deploy        = NO-GO
@@ -84,9 +86,15 @@ evidence`, отрицательные marker/expiry/detached-report сценар
 preload. Fixture исполняется отдельным test-only child process с direct-entry
 realpath guard, не содержит private signing material и не изменяет пустой
 production root registry. Это test evidence, а не production-like operational
-trust или root enrollment. Signer/key custody, acquisition pipeline и
-enrollment production-like public root остаются P0 перед первым таким
-rehearsal; remote CI для test evidence commit ещё не получен. Использование
+trust или root enrollment. Strict acquisition contract, root lifecycle и
+detached `prepare → external sign → finalize` реализованы отдельным candidate:
+finalize re-hash исходный request, actual root history проходит parent→HEAD CI
+gate, runtime bytes сверяются с Git blobs exact SHA, а payload/envelope
+публикуются последними readiness files. LeetPlus не читает private key,
+passphrase или HSM credential. External signer/HSM, separation of duties,
+protected transport и enrollment production-like public root остаются P0
+перед первым rehearsal; remote CI для exact authority candidate ещё не
+получен. Использование
 экспериментального Node 22 `--experimental-test-module-mocks` остаётся P2
 риском тестовой инфраструктуры.
 
@@ -142,7 +150,8 @@ rehearsal; remote CI для test evidence commit ещё не получен. И�
 1. находит repository root из фактического runtime path;
 2. требует `HEAD === RELEASE_SHA`;
 3. читает через `git cat-file` exact release blobs admission, smoke, authority,
-   authority roots, inventory/planner/proposal runtime;
+   authority roots/root lifecycle, acquisition contract, detached ceremony и
+   inventory/planner/proposal runtime;
 4. требует, чтобы фактический runtime content этих файлов совпадал с Git blobs
    exact release после нормализации UTF-8/LF;
 5. требует clean status для всех этих runtime sources и
@@ -188,14 +197,22 @@ fingerprint и интервалом действия. Freshness проверяе
 конфигурации, по DB `generatedAt` при создании report и повторно по текущему
 времени перед exit. Просроченный manifest/report не может получить exit `0`.
 
-Реализованный модуль является только verifier: в нём нет signing/private-key
-API, получения snapshot или authority manifest acquisition. Текущий
-`staff-task-integrity-snapshot-authority-roots.mjs` содержит намеренно пустой
-registry. Поэтому любой `PRODUCTION_LIKE` запуск exact SHA
-`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` завершается fail-closed
-`PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED`. До отдельного signer/key-custody
-design, acquisition pipeline и security-reviewed root enrollment статус
-production-like остаётся P0/`NO-GO`.
+Admission runtime остаётся только verifier: в нём нет signing/private-key API,
+получения snapshot или restore. Detached authority CLI формирует payload и
+проверяет внешнюю signature, но также не принимает private key, seed,
+passphrase, HSM PIN или signing secret через file/env/argv/stdin. Acquisition
+request целиком связан с envelope через
+`acquisition-v1:<requestDigest>` и nonce-bound approval digest.
+
+Canonical
+`staff-task-integrity-snapshot-authority-roots.json` содержит намеренно пустой
+registry `{}`, а `staff-task-integrity-snapshot-authority-roots.mjs` только
+загружает и deep-freeze data. Actual parent→HEAD transition проверяется
+отдельным CI gate. Поэтому любой `PRODUCTION_LIKE` prepare/admission
+завершается fail-closed `PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED`. До отдельного
+external signer/key-custody approval, protected transport,
+security-reviewed public root enrollment и зелёного CI exact enrolled-root SHA
+статус production-like остаётся P0/`NO-GO`.
 
 ## 5. Exact schema states
 
@@ -343,11 +360,16 @@ ACQUIRED_AT <= RESTORED_AT
 EXPIRES_AT > current time
 ```
 
-Допускается clock skew не более пяти минут для acquisition/restore. TTL
-считается строго от `RESTORED_AT`, а не от acquisition или admission:
+Допускается clock skew не более пяти минут для acquisition/restore. Runtime
+admission считает свой лимит от `RESTORED_AT`:
 
 - `SYNTHETIC`: не более 7 дней;
 - `PRODUCTION_LIKE`: не более 72 часов.
+
+Дополнительно canonical production-like acquisition request требует полный
+интервал `EXPIRES_AT - ACQUIRED_AT <= 72 часа`. Оба ограничения обязательны;
+эффективный deadline выбирается более ранним. Поэтому acquisition request не
+может продлить срок за счёт позднего restore.
 
 Продление требует нового approval до expiry. Expired либо превышающий лимит
 snapshot получает contract error/exit `1`.
@@ -469,7 +491,7 @@ STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM=run-staff-task-integrity-snapsho
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION=I_ATTEST_THIS_IS_AN_ISOLATED_ENCRYPTED_NO_EGRESS_NON_PRODUCTION_SNAPSHOT
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_HMAC_KEY=<32..4096 UTF-8 bytes>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_SNAPSHOT_DIGEST=<64 lowercase hex>
-STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE=<opaque 3..128 character alias>
+STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE=<synthetic:* for SYNTHETIC; acquisition-v1:<64 lowercase hex> for PRODUCTION_LIKE>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ACQUIRED_AT=<canonical ISO-8601>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_RESTORED_AT=<canonical ISO-8601>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPIRES_AT=<canonical ISO-8601>
@@ -804,9 +826,10 @@ exact DB marker. Они коррелируются с report/release SHA, но �
 обычный JSON/stdout.
 
 `BASELINE_156`, `EXPAND_162` и `CURRENT_164` используют три разных state-bound
-authority envelope. После migrations `157..162` signer выпускает
-`EXPAND_162` envelope с новым nonce-bound binding; после exact allowlisted
-migrations 163 и 164 — третий `CURRENT_164` envelope с ещё одним новым binding.
+authority envelope. После migrations `157..162` повторная detached ceremony
+`prepare → external sign → finalize` выпускает `EXPAND_162` envelope с новым
+nonce-bound binding; после exact allowlisted migrations 163 и 164 третья
+ceremony выпускает `CURRENT_164` envelope с ещё одним новым binding.
 DB `COMMENT` marker заменяется digest соответствующего envelope до каждого
 следующего admission. Protected evidence хранит все три authority bundle,
 первоначальную установку marker и обе ротации. Raw marker или manifest в
@@ -828,20 +851,23 @@ Snapshot isolation, encryption, no-egress и destruction подтверждаю�
 ## 15. Обязательная последовательность
 
 ```text
+reviewed public-root enrollment → green CI exact enrolled-root SHA
 acquisition approval
   → encrypted snapshot acquisition
   → isolated PostgreSQL 16 loopback restore
-  → trusted signer creates BASELINE_156 envelope for exact restore/approval/artifact/release
+  → create LOGIN NOINHERIT reader role → exact grants → negative ACL gate
+  → canonical BASELINE_156 request → prepare package/payload
+  → approved external signer/HSM verifies request+package+payload → finalize envelope
   → install exact BASELINE_156 signed-envelope DB comment marker
   → admission(BASELINE_156)
   → populated baseline 156 evidence
   → exact migrations 157..162
-  → trusted signer creates distinct EXPAND_162 envelope with a new nonce-bound binding
+  → new EXPAND_162 request → prepare → external signer/HSM → finalize
   → replace DB comment marker with exact EXPAND_162 envelope digest
   → admission(EXPAND_162)
   → exact allowlisted migration 20260728120000_tenant_execution_control_plane_expand
   → exact allowlisted migration 20260728150000_tenant_execution_revision_fence
-  → trusted signer creates distinct CURRENT_164 envelope with a new nonce-bound binding
+  → new CURRENT_164 request → prepare → external signer/HSM → finalize
   → replace DB comment marker with exact CURRENT_164 envelope digest
   → admission(CURRENT_164)
   → read-only integrity inventory
@@ -851,6 +877,8 @@ acquisition approval
   → separate approved apply
   → zero-diff dry-run
   → repeat inventory/planner
+  → revoke login → terminate sessions → drop reader role
+  → destroy snapshot/artifact/temp files → save destruction evidence
 ```
 
 Для `SYNTHETIC` эта последовательность является только engineering/CI
@@ -910,12 +938,12 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
 
 До повышения operational статуса остаются:
 
-1. P0: утвердить threat model, signer implementation, separation of duties,
-   key custody/rotation/revocation и защищённый acquisition-to-signature
-   transport;
-2. считать commit `2341b99937e54cc50d1763a0a794d975816c72ce` только historical
-   test evidence и получить clean remote CI evidence для exact current
-   candidate SHA; прежний локальный public-only pinned-path `PASS` не заменяет
+1. P0: независимо проверить detached signer/acquisition/root-lifecycle
+   candidate; утвердить внешний signer/HSM, separation of duties, key custody
+   и защищённый acquisition-to-signature transport;
+2. считать SHA `d77c74393c510b688f9f2a5c43eaa908390450b5` только зелёным
+   pre-authority evidence и получить clean remote CI для нового exact
+   authority candidate SHA; прежний public-only pinned-path `PASS` не заменяет
    этот gate;
 3. P2: зафиксировать поддерживаемую Node 22 версию для test-only
    `--experimental-test-module-mocks` и отслеживать/заменить experimental API,
@@ -943,6 +971,34 @@ deploy или внешний beta-доступ. После production-like admis
 apply/rollback, zero-diff и повторные проверки.
 
 ## 18. Changelog
+
+- `0.10.0`, 29.07.2026 — exact-release boundary дополнена
+  dependency-free canonical JSON runtime; ceremony closure больше не
+  импортирует Prisma/inventory. Readiness pair проходит explicit
+  open/write/`fsync`/close cleanup, parent-root registry считается пустым
+  только при доказанно отсутствующем Git blob. Local authority bundle —
+  38/38, admission — 21/21; production-like/external beta остаются `NO-GO`.
+
+- `0.9.0`, 29.07.2026 — security review findings закрыты в candidate:
+  `finalize` повторно читает canonical acquisition request и сверяет всю
+  binding chain; string-only actors устраняют type-confusion; DB-name contract
+  общий с admission; canonical root JSON защищён actual parent→HEAD CI gate с
+  emergency revoke-to-zero/recovery; ceremony сверяет runtime с exact Git
+  blobs до publication; ADS paths запрещены; receipt/package пишутся первыми,
+  а envelope/payload — последними readiness files с flush. Local authority
+  bundle — 35/35, admission — 20/20. Registry остаётся пустым,
+  production-like/external beta — `NO-GO`.
+
+- `0.8.0`, 29.07.2026 — добавлены strict canonical acquisition evidence и
+  derived `acquisition-v1:<digest>` approval authority, lifecycle root registry
+  `ACTIVE/RETIRED/REVOKED` с rotation/revocation transition guards и detached
+  ceremony `prepare → external Ed25519 sign → finalize`. LeetPlus source не
+  импортирует private-key/signing API, не принимает signing secrets через
+  env/argv/stdin и пишет package/payload/envelope/receipt только во внешнее
+  protected storage без overwrite и удаляет созданную часть набора при
+  невозможности записать весь pair. Local authority bundle — 30/30, admission
+  — 20/20. Production registry остаётся пустым; external signer, root
+  enrollment, acquisition/restore и remote exact-SHA CI — P0/PENDING.
 
 - `0.7.0`, 28.07.2026 — current admission синхронизирован с
   `CURRENT_164`: exact additive tail теперь состоит из reviewed migrations

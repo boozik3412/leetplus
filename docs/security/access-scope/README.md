@@ -3,8 +3,8 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.16.0                                                                                              |
-| Дата                           | 28.07.2026                                                                                          |
+| Версия контракта               | 1.18.0                                                                                              |
+| Дата                           | 29.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
 | Исходный baseline              | `eb7ad9ef7d4783c47a7ddb5efbc271e5eb8a2fe2`                                                          |
@@ -17,7 +17,8 @@
 | Staff task integrity EXPAND    | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401` — 162 migrations / 28 guarded FK; not deployed           |
 | Staff reconciliation planner   | `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only; no apply; not deployed                 |
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
-| Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — local pinned-path PASS; remote CI pending              |
+| Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
+| Authority operations           | Detached candidate; local 38/38; production public root EMPTY / FAIL-CLOSED                         |
 | Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
@@ -85,6 +86,10 @@ invite-only открытому тесту. Она отвечает на вопр
     exact release/runtime/migration/catalog state, отдельная роль с table
     `SELECT` на восьми relations и пятью разрешёнными колонками `User`, а также
     независимый Ed25519 authority contract.
+    15a. [Staff task authority operations](./v1/staff-task-integrity-snapshot-authority-operations.md) —
+    strict acquisition evidence, lifecycle public-root registry и detached
+    `prepare → external sign → finalize`, при котором LeetPlus никогда не
+    читает private key.
 16. [Staff task SYNTHETIC proposal dry-run](./v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md) —
     disposable harness-fixture, повторный admission, read-only
     row evidence только для восьми proposal codes и явный запрет
@@ -267,22 +272,25 @@ Git blobs exact release. Положительный production-like report до�
 привязан к private same-process evidence и не является standalone
 transferable audit proof; аудит опирается на protected signed manifest.
 
-Authority envelope подписывает `expectedState`, поэтому `BASELINE_156` и
-`EXPAND_162` требуют двух отдельных envelope. После migrations `157..162`
-signer выпускает новый `EXPAND_162` envelope с новым nonce-bound binding, DB
-marker заменяется его digest до второго admission, а protected evidence хранит
-обе state-specific bundle и marker-rotation attestation. Baseline marker reuse
+Authority envelope подписывает `expectedState`, поэтому `BASELINE_156`,
+`EXPAND_162` и `CURRENT_164` требуют три отдельных envelope. После migrations
+`157..162` и затем после allowlisted migrations `163..164` выполняются новые
+detached ceremony `prepare → external Ed25519 sign → finalize` с новым
+nonce-bound binding. DB marker заменяется digest нового envelope до каждого
+следующего admission, а protected evidence хранит три state-specific bundle,
+первоначальную установку marker и две rotation attestation. Marker reuse
 запрещён.
 
-Runtime admission candidate остаётся
-`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; отдельное test evidence commit —
-`2341b99937e54cc50d1763a0a794d975816c72ce`. Admission tests 19/19, authority
-tests 9/9, offline/integrated smoke self-test 46 и real PostgreSQL 16.13 smoke
-23 scenarios прошли, включая
-`baseline 156 → ровно шесть migrations → expand 162`,
-privilege/tamper/privacy/cleanup guards. Pinned production-like roots в этом
-release намеренно пусты, поэтому production-like запуск fail-closed остаётся
-`NO-GO`.
+Historical runtime admission candidate
+`044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` и test evidence
+`2341b99937e54cc50d1763a0a794d975816c72ce` входят в историю; SHA
+`d77c74393c510b688f9f2a5c43eaa908390450b5` имеет полностью зелёный remote CI
+до текущего authority-operations изменения. Текущий detached candidate
+добавляет strict acquisition request, derived `acquisition-v1:<digest>`, root
+lifecycle и no-private-key signing ceremony. Локально admission прошёл 21/21,
+authority bundle — 38/38, smoke self-test — 48, real PostgreSQL 16.13 smoke —
+23 scenarios. Pinned production-like roots намеренно пусты, поэтому
+production-like запуск fail-closed остаётся `NO-GO`.
 
 Следующим bounded candidate реализован
 [StaffTask SYNTHETIC proposal dry-run](./v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
@@ -308,15 +316,16 @@ commit `2341b99937e54cc50d1763a0a794d975816c72ce` локально прошла 
 positive pinned path: pinned wrapper, marker/nonce-bound identity, private
 same-process report evidence, marker/expiry, detached-report и preload negative
 cases. Fixture исполняется только в изолированном child process с direct-entry
-realpath guard; production root registry на диске остаётся пустым. Remote CI
-для этого commit ещё pending. Экспериментальный Node 22
+realpath guard; production root registry на диске остаётся пустым. Evidence
+входит в полностью зелёный remote CI `d77c7439...`. Экспериментальный Node 22
 `--experimental-test-module-mocks` остаётся P2 test-infra risk и не является
 частью production authority.
 
 Выполнены `SYNTHETIC` rehearsal и локальный public-only test-only pinned-path.
 Production-like acquisition/restore/admission, inventory/planner/row dry-run,
 reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
-не выполнялись; remote CI evidence также ещё не получен.
+не выполнялись; exact remote CI текущего authority-operations candidate ещё не
+получен.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -334,6 +343,22 @@ reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
 
 ## Changelog
 
+- `1.18.0`, 29.07.2026 — ceremony runtime closure отделён от Prisma и
+  привязан к exact release через dependency-free canonical JSON module;
+  admission release boundary покрывает тот же closure. Readiness outputs
+  проходят explicit `fsync` и cleanup даже при сбое после создания, а
+  parent-root fallback допускается только для доказанно отсутствующего blob.
+  Локально authority operations прошли 38/38, admission — 21/21.
+- `1.17.0`, 29.07.2026 — добавлены strict canonical acquisition request,
+  derived production-like approval alias, root lifecycle
+  `ACTIVE/RETIRED/REVOKED` и detached
+  `prepare → external Ed25519 sign → finalize`. LeetPlus не читает private key
+  или signer secret; `finalize` повторно связывает тот же request, root history
+  защищена actual parent→HEAD CI gate, runtime сверяется с exact Git blobs,
+  ADS запрещены, payload/envelope публикуются последними readiness files.
+  Локально authority operations прошли 35/35, admission — 20/20, self-test — 48. Последний pre-authority remote CI `d77c7439...` зелёный; exact
+  authority-candidate CI, внешний signer/HSM, root enrollment,
+  acquisition/restore и production-like run остаются P0/`NO-GO`.
 - `1.16.0`, 28.07.2026 — runtime admission candidate сохранён на
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`, test evidence отделено commit
   `2341b99937e54cc50d1763a0a794d975816c72ce`. Public-only pre-signed fixture

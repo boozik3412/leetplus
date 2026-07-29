@@ -273,8 +273,7 @@ function reportFor({
   plannerPlan,
   gates = {},
 } = {}) {
-  const plan =
-    plannerPlan ?? planFor(dryRunConfig, findings, { generatedAt });
+  const plan = plannerPlan ?? planFor(dryRunConfig, findings, { generatedAt });
   return buildDryRunReport({
     config: dryRunConfig,
     admissionReport: admission,
@@ -354,6 +353,7 @@ test("runtime contract accepts only a distinct-key SYNTHETIC EXPAND_162 loopback
       {
         STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION:
           "PRODUCTION_LIKE",
+        STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE: `acquisition-v1:${"e".repeat(64)}`,
       },
       "PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED",
     ],
@@ -664,9 +664,13 @@ test("row, RLS, and relation-lock SQL stay bounded and read-only", () => {
 
 test("proposal reports reject correctly signed CURRENT_164 planner evidence", () => {
   const dryRunConfig = config();
-  const currentPlan = planFor(dryRunConfig, {}, {
-    schemaContract: CURRENT_SCHEMA_CONTRACT,
-  });
+  const currentPlan = planFor(
+    dryRunConfig,
+    {},
+    {
+      schemaContract: CURRENT_SCHEMA_CONTRACT,
+    },
+  );
   assert.equal(currentPlan.schema.ready, true);
   assert.equal(
     currentPlan.schema.expected.migrationCount,

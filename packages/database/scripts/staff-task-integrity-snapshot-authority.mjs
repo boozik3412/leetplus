@@ -1,6 +1,11 @@
 import { createHash, createPublicKey, verify } from "node:crypto";
 
-import { canonicalStringify } from "./staff-task-integrity-reconciliation-plan.mjs";
+import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
+import {
+  computeAuthorityPublicKeyFingerprint,
+  selectActiveAuthorityRoot,
+  validateAuthorityRootRegistry,
+} from "./staff-task-integrity-snapshot-authority-root-registry.mjs";
 import { PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS } from "./staff-task-integrity-snapshot-authority-roots.mjs";
 import { STAFF_TASK_CURRENT_RELEASE_STATE } from "./staff-task-integrity-migration-state.mjs";
 
@@ -249,24 +254,7 @@ export function parseAuthorityEnvelope(encodedEnvelope) {
 }
 
 export function computePublicKeyFingerprint(publicKey) {
-  let key;
-  try {
-    key = createPublicKey(publicKey);
-  } catch {
-    authorityError(
-      "PRODUCTION_LIKE_AUTHORITY_ROOT_INVALID",
-      "The pinned authority public key is invalid.",
-    );
-  }
-  if (key.asymmetricKeyType !== "ed25519") {
-    authorityError(
-      "PRODUCTION_LIKE_AUTHORITY_ROOT_INVALID",
-      "The pinned authority key must be Ed25519.",
-    );
-  }
-  return createHash("sha256")
-    .update(key.export({ type: "spki", format: "der" }))
-    .digest("hex");
+  return computeAuthorityPublicKeyFingerprint(publicKey);
 }
 
 export function computeApprovalReferenceDigest(
@@ -330,16 +318,6 @@ export function authorityDatabaseMarker(envelopeDigest) {
     );
   }
   return `${AUTHORITY_DATABASE_MARKER_PREFIX}${envelopeDigest}`;
-}
-
-function normalizeRoots(roots) {
-  if (!roots || Array.isArray(roots) || typeof roots !== "object") {
-    authorityError(
-      "PRODUCTION_LIKE_AUTHORITY_ROOTS_INVALID",
-      "The pinned authority root registry is invalid.",
-    );
-  }
-  return roots;
 }
 
 function validateEnvelopeContract(envelope, expected) {
@@ -434,36 +412,15 @@ export function verifyAuthorityEnvelopeAgainstRoots(
 ) {
   strictEnvelopeShape(envelope);
   const normalizedExpected = normalizedExpectedContract(expected);
-  const normalizedRoots = normalizeRoots(roots);
-  const root = Object.hasOwn(normalizedRoots, envelope.signingKeyId)
-    ? normalizedRoots[envelope.signingKeyId]
-    : null;
-  if (!root) {
+  const normalizedRoots = validateAuthorityRootRegistry(roots);
+  const root = selectActiveAuthorityRoot(normalizedRoots, now);
+  if (root.keyId !== envelope.signingKeyId) {
     authorityError(
       "PRODUCTION_LIKE_AUTHORITY_KEY_NOT_TRUSTED",
       "The authority signing key is not pinned in this release.",
     );
   }
-  if (
-    root.keyId !== envelope.signingKeyId ||
-    root.algorithm !== AUTHORITY_SIGNATURE_ALGORITHM ||
-    root.classification !== AUTHORITY_CLASSIFICATION ||
-    root.profile !== AUTHORITY_PROFILE ||
-    root.purpose !== AUTHORITY_PURPOSE ||
-    !SHA_256_PATTERN.test(String(root.publicKeyFingerprint ?? ""))
-  ) {
-    authorityError(
-      "PRODUCTION_LIKE_AUTHORITY_ROOT_INVALID",
-      "The pinned authority root contract is invalid.",
-    );
-  }
-  const actualFingerprint = computePublicKeyFingerprint(root.publicKeyPem);
-  if (actualFingerprint !== root.publicKeyFingerprint) {
-    authorityError(
-      "PRODUCTION_LIKE_AUTHORITY_ROOT_INVALID",
-      "The pinned authority root fingerprint does not match its public key.",
-    );
-  }
+  const actualFingerprint = root.publicKeyFingerprint;
   validateEnvelopeContract(envelope, normalizedExpected);
   validateTimeline(envelope, root, now);
   const signature = strictSignature(envelope.signature);
@@ -534,12 +491,7 @@ export function verifyPinnedProductionLikeAuthority(
   expected,
   now = new Date(),
 ) {
-  if (Object.keys(PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS).length === 0) {
-    authorityError(
-      "PRODUCTION_LIKE_AUTHORITY_NOT_ENROLLED",
-      "This release has no pinned production-like snapshot authority root.",
-    );
-  }
+  selectActiveAuthorityRoot(PINNED_PRODUCTION_LIKE_AUTHORITY_ROOTS, now);
   const normalizedExpected = normalizedExpectedContract(expected);
   const envelope = parseAuthorityEnvelope(encodedEnvelope);
   const verifiedAuthority = verifyAuthorityEnvelopeAgainstRoots(

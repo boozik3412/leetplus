@@ -9,7 +9,8 @@ const HMAC_KEY = "public-only-pinned-path-report-hmac-key-aaaaaaaa";
 const DATABASE_NAME = "leetplus_snapshot_rehearsal";
 const RELEASE_SHA = "f".repeat(40);
 const SNAPSHOT_ARTIFACT_DIGEST = "b".repeat(64);
-const APPROVAL_REFERENCE = "security-approval:pinned-path-fixture";
+const APPROVAL_REFERENCE =
+  "acquisition-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const KEY_ID = "staff-task-pinned-path-fixture-2026";
 const fixturePath = realpathSync(fileURLToPath(import.meta.url));
 let entrypointPath = null;
@@ -39,12 +40,16 @@ const FIXTURE_ROOT = Object.freeze({
   purpose: "STAFF_TASK_INTEGRITY_RECONCILIATION",
   publicKeyPem:
     "-----BEGIN PUBLIC KEY-----\n" +
-    "MCowBQYDK2VwAyEACu8yo2CldSNLybcfv3ID2iHbUK5Fy62psc88AMe/I3c=\n" +
+    "MCowBQYDK2VwAyEADBvrBgcmVajYs83H8xNKF3aZ7Im0C0gN2v4Mub9C0IM=\n" +
     "-----END PUBLIC KEY-----\n",
   publicKeyFingerprint:
-    "51c04480be9252a36196ece1f74e3c13e177cdaa7a0adc6003f28f0936a7c792",
+    "de040f071d34167ff42d2b6d5aa48cc166e81e163c0c227f2bac5baf76e69074",
   notBefore: "2026-07-27T00:00:00.000Z",
   notAfter: "2026-08-01T00:00:00.000Z",
+  status: "ACTIVE",
+  supersedesKeyId: null,
+  retiredAt: null,
+  revokedAt: null,
 });
 
 const FIXTURE_ENVELOPE = Object.freeze({
@@ -63,14 +68,14 @@ const FIXTURE_ENVELOPE = Object.freeze({
   databaseIdentityDigest:
     "fa4b5416cb50c6723eb57d479820cc36f1dc3a04b6e6a8fb142eb952f155a785",
   approvalReferenceDigest:
-    "e579e5b2c4f55b7c080e9949209751e3bb45d927294a94d15dacf7f60dbd2bb3",
+    "97321f25570176fcab725a3989733229ed44c3a5e9c98c536f2dd87def13caab",
   isolationProfile: "ISOLATED_ENCRYPTED_NO_EGRESS_V1",
   acquiredAt: "2026-07-28T00:00:00.000Z",
   restoredAt: "2026-07-28T00:05:00.000Z",
   issuedAt: "2026-07-28T00:10:00.000Z",
   expiresAt: "2026-07-28T01:10:00.000Z",
   signature:
-    "MsixzD_YYzpeAF6zTLKr3VC5fCpsRjE9L-Zeab6P-UZKjOSnOGwQKwPo8QylecPG3AJw7msqPsgVz8x46r4pBA",
+    "c28ZBf-3wPm1MP2TWB1iq29fLICxLYRrAlBIbZC2dnpYlVSLA7u89nRzzDSNu4IelshoeLJKUIRTgk-BLQOBCA",
 });
 
 const rootsModuleUrl = new URL(

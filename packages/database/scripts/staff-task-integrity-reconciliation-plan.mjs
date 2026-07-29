@@ -10,6 +10,7 @@ import {
   buildReadOnlyDatabaseUrl,
   parseBoundedInteger,
 } from "./staff-task-integrity-inventory.mjs";
+import { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 import {
   CURRENT_EXPECTED_LATEST_MIGRATION,
   CURRENT_EXPECTED_MIGRATION_COUNT,
@@ -17,6 +18,8 @@ import {
   STAFF_TASK_FROZEN_PREFIX_COUNT,
   STAFF_TASK_FROZEN_PREFIX_LATEST,
 } from "./staff-task-integrity-migration-state.mjs";
+
+export { canonicalStringify } from "./staff-task-integrity-canonical-json.mjs";
 
 export const SCRIPT_NAME = "staff-task-integrity-reconciliation-plan";
 export const REPORT_SCHEMA_VERSION = 1;
@@ -1448,38 +1451,6 @@ function classificationSummary(findings, classification) {
       0,
     ),
   };
-}
-
-export function canonicalStringify(value) {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean"
-  ) {
-    return JSON.stringify(value);
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      contractError(
-        "DIGEST_INPUT_INVALID",
-        "Digest input contains a non-finite number.",
-      );
-    }
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalStringify(item)).join(",")}]`;
-  }
-  if (typeof value === "object") {
-    const entries = Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalStringify(value[key])}`);
-    return `{${entries.join(",")}}`;
-  }
-  contractError(
-    "DIGEST_INPUT_INVALID",
-    "Digest input contains an unsupported value.",
-  );
 }
 
 function computeHmac(domain, value, hmacKey) {

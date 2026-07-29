@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 
 import { parseBoundedInteger } from "./staff-task-integrity-inventory.mjs";
+import { isProductionLikeSnapshotDatabaseName } from "./staff-task-integrity-snapshot-acquisition-request.mjs";
 import {
   CATALOG_STATE_SQL,
   COMPOSITE_CONSTRAINTS,
@@ -44,19 +45,15 @@ export const BASELINE_LATEST_MIGRATION =
   "20260727120000_staff_task_catalog_audit_expand";
 
 const CLASSIFICATIONS = new Set(["SYNTHETIC", "PRODUCTION_LIKE"]);
-const EXPECTED_STATES = new Set([
-  BASELINE_STATE,
-  EXPAND_STATE,
-  CURRENT_STATE,
-]);
+const EXPECTED_STATES = new Set([BASELINE_STATE, EXPAND_STATE, CURRENT_STATE]);
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const SYNTHETIC_DATABASE_PATTERN = /^lp_snapshot_admission_ci_[0-9a-f]{16}$/u;
-const PRODUCTION_LIKE_DATABASE_PATTERN =
-  /(?:^|[_-])(?:snapshot|rehearsal|preprod|staging|stage|test)(?:$|[_-])/i;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const HMAC_PATTERN = /^[0-9a-f]{64}$/;
 const APPROVAL_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{2,127}$/;
+const PRODUCTION_LIKE_APPROVAL_REFERENCE_PATTERN =
+  /^acquisition-v1:[0-9a-f]{64}$/u;
 const MIGRATION_NAME_PATTERN = /^\d{14}_[a-z0-9_]+$/;
 const DEFAULT_LOCK_TIMEOUT_MS = 500;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 30_000;
@@ -65,11 +62,16 @@ const MAX_HMAC_KEY_BYTES = 4_096;
 const MAX_SYNTHETIC_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAX_PRODUCTION_LIKE_LIFETIME_MS = 72 * 60 * 60 * 1_000;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
-const RELEASE_RUNTIME_SOURCE_PATHS = Object.freeze([
+export const RELEASE_RUNTIME_SOURCE_PATHS = Object.freeze([
+  "packages/database/scripts/staff-task-integrity-canonical-json.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-admission.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-admission-smoke.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-authority.mjs",
+  "packages/database/scripts/staff-task-integrity-snapshot-authority-offline-sign.cli.mjs",
+  "packages/database/scripts/staff-task-integrity-snapshot-authority-root-registry.mjs",
+  "packages/database/scripts/staff-task-integrity-snapshot-authority-roots.json",
   "packages/database/scripts/staff-task-integrity-snapshot-authority-roots.mjs",
+  "packages/database/scripts/staff-task-integrity-snapshot-acquisition-request.mjs",
   "packages/database/scripts/staff-task-integrity-reconciliation-plan.mjs",
   "packages/database/scripts/staff-task-integrity-migration-state.mjs",
   "packages/database/scripts/staff-task-integrity-reconciliation-proposal-dry-run.mjs",
@@ -259,7 +261,8 @@ Required environment:
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_SNAPSHOT_DIGEST
     SHA-256 of the encrypted snapshot artifact (64 lowercase hex).
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_APPROVAL_REFERENCE
-    Opaque 3..128 character approval or synthetic-provenance alias.
+    SYNTHETIC: bounded synthetic:<harness-reference>.
+    PRODUCTION_LIKE: exact acquisition-v1:<64 lowercase hex request digest>.
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ACQUIRED_AT
     Canonical ISO-8601 timestamp of snapshot acquisition.
   STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_RESTORED_AT
@@ -1067,7 +1070,7 @@ export function parseRuntimeContract(environment, now = new Date()) {
       );
     }
   } else {
-    if (!PRODUCTION_LIKE_DATABASE_PATTERN.test(databaseName)) {
+    if (!isProductionLikeSnapshotDatabaseName(databaseName)) {
       contractError(
         "PRODUCTION_LIKE_TARGET_INVALID",
         "Production-like admission requires a snapshot/rehearsal database marker.",
@@ -1112,6 +1115,15 @@ export function parseRuntimeContract(environment, now = new Date()) {
     contractError(
       "SYNTHETIC_PROVENANCE_REFERENCE_REQUIRED",
       "Synthetic admission requires an explicit harness provenance reference.",
+    );
+  }
+  if (
+    classification === "PRODUCTION_LIKE" &&
+    !PRODUCTION_LIKE_APPROVAL_REFERENCE_PATTERN.test(approvalReference)
+  ) {
+    contractError(
+      "PRODUCTION_LIKE_ACQUISITION_REFERENCE_REQUIRED",
+      "Production-like admission requires an exact acquisition evidence digest reference.",
     );
   }
   const expectedIdentityDigest = String(

@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -63,6 +65,9 @@ jobs:
 
       - name: Validate staff task snapshot authority boundary
         run: pnpm --filter database check:staff-task-integrity-snapshot-authority
+
+      - name: Validate pinned authority root transition
+        run: pnpm --filter database db:check:staff-task-integrity-authority-root-transition
 
       - name: Validate staff task snapshot admission
         run: pnpm --filter database check:staff-task-integrity-snapshot-admission

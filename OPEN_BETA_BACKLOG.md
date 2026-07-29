@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
-- Дата актуализации: 28.07.2026
-- Версия: 1.39
+- Дата актуализации: 29.07.2026
+- Версия: 1.41
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -296,8 +296,10 @@ admission/inventory/planner допускается только на `CURRENT_16
 плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence`. Новый exact candidate
-SHA и production-like evidence ещё pending; статус остаётся `В работе /
-NO-GO`.
+SHA и production-like evidence ещё pending. Strict acquisition contract,
+root lifecycle и detached `prepare → external sign → finalize` реализованы как
+candidate; реальный public root намеренно не enrolled. Статус остаётся
+`В работе / NO-GO`.
 
 ### 5.9. Обязательный модуль: коммуникации
 
@@ -1566,7 +1568,8 @@ temporary cluster ACL       = restored
 admission report schema     = v2
 planner/proposal schema     = v1
 public-only pinned path     = LOCAL PASS
-admission contract suite    = 19/19 PASS
+historical admission suite  = 19/19 PASS
+historical authority suite  = 9/9 PASS
 test evidence commit        = 2341b99937e54cc50d1763a0a794d975816c72ce
 ```
 
@@ -1578,7 +1581,8 @@ column-scoped User evidence access  = IMPLEMENTED_CANDIDATE
 independent Ed25519 verifier        = IMPLEMENTED_CANDIDATE
 pinned production authority roots  = EMPTY / FAIL-CLOSED
 positive pinned-path integration   = LOCAL PASS / TEST EVIDENCE 2341b999
-remote CI for test evidence        = PENDING
+remote CI including test evidence  = PASS / d77c7439
+remote CI for exact authority SHA  = REQUIRED / RELEASE EVIDENCE
 PRODUCTION_LIKE admission           = PENDING / NO-GO
 PRODUCTION_LIKE inventory/planner   = PENDING / NO-GO
 PRODUCTION_LIKE row dry-run         = PENDING / NO-GO
@@ -1588,16 +1592,18 @@ current-network cutover             = PENDING / NO-GO
 external beta                       = NO-GO
 ```
 
-Ближайший security/data slice детализирует первую фазу канонической
-последовательности из раздела 7:
+Следующий список сохранён как историческая детализация прежнего security/data
+slice. Он полностью заменён актуальной последовательностью раздела 7 и не
+используется как operational runbook:
 
 1. считать `2341b999...`/`044ceca2...` historical evidence; назначить exact
    current candidate SHA и получить для него зелёный remote CI и независимый
    review;
-2. отдельно утвердить и enrol reviewed Ed25519 public root, создать
-   защищённый signer и acquisition/evidence record вне caller-controlled env,
-   database `COMMENT` и output report;
-3. после approval/minimization/encryption/no-egress/TTL/destruction controls
+2. независимо проверить реализованный detached authority candidate, утвердить
+   внешний signer/HSM, separation of duties, key custody и защищённый
+   acquisition-to-signature transport;
+3. отдельным reviewed release enrol Ed25519 public root; затем после
+   approval/minimization/encryption/no-egress/TTL/destruction controls
    получить свежий disposable production-like snapshot и подписанный
    authority manifest с marker/freshness/artifact binding;
 4. отдельно выполнить production-like admission: подписанный state-bound
@@ -1653,7 +1659,8 @@ enrollment, не production-like admission и не разрешение на dep
 
 Границы evidence:
 
-- remote CI для `2341b99937e54cc50d1763a0a794d975816c72ce` ещё не получен;
+- public-only test evidence входит в полностью зелёный remote CI exact SHA
+  `d77c74393c510b688f9f2a5c43eaa908390450b5`;
 - `node:test` module mock требует experimental Node.js 22 flag. Это `P2`
   test-infrastructure risk: он не расширяет production authority, но требует
   отдельного контроля совместимости CI/runtime upgrades;
@@ -1662,13 +1669,15 @@ enrollment, не production-like admission и не разрешение на dep
 - pinned production authority roots остаются `EMPTY / FAIL-CLOSED`, поэтому
   `PRODUCTION_LIKE` и внешний beta остаются `NO-GO`.
 
-Канонический следующий порядок:
+Исторический порядок ниже полностью заменён разделом 7:
 
 1. считать `2341b999...` historical test evidence; назначить current candidate
    SHA и получить для него зелёный remote CI и независимый review;
-2. отдельным security change enrol reviewed public root и развернуть
-   protected signer/acquisition evidence boundary;
-3. получить свежий approved production-like snapshot;
+2. независимо проверить detached authority candidate и получить зелёный CI
+   exact SHA; утвердить внешний signer/HSM, separation of duties и key custody;
+3. отдельным security change enrol reviewed public root, затем получить свежий
+   approved production-like snapshot через protected acquisition/evidence
+   boundary;
 4. выпустить отдельный signed `BASELINE_156` envelope, установить его exact
    marker и пройти первый admission;
 5. применить только migrations `157..162`, выпустить новый signed
@@ -1689,6 +1698,56 @@ Gate 2 получает полные геймификацию, ассортим�
 Store.
 
 Release decision остаётся `NO-GO`.
+
+### 5.25.1. Detached authority operations candidate — 29.07.2026
+
+Зафиксирован следующий security/data slice для `BETA-MOD-STAFF-003`,
+`BETA-OPS-002` и `BETA-OPS-006`:
+
+- canonical acquisition request schema `v1` связывает exact release SHA,
+  schema state, snapshot artifact digest, restored DB identity, TTL не более
+  72 часов, четыре разные actor reference и обязательные
+  encryption/no-egress/disposable/destruction controls;
+- production-like approval reference больше не является произвольной строкой:
+  допускается только derived `acquisition-v1:<SHA-256 request digest>`;
+- public root registry получил lifecycle `ACTIVE/RETIRED/REVOKED`,
+  единственный active root, canonical JSON history, actual parent→HEAD CI
+  transition gate, guarded rotation/emergency revoke-to-zero/recovery и
+  supersession без cycle;
+- LeetPlus выполняет только detached ceremony
+  `prepare → external Ed25519 sign → finalize`, не принимает private key,
+  passphrase, HSM PIN или signing secret и не подключается к БД/сети;
+- `finalize` обязательно перечитывает тот же canonical request и пересчитывает
+  request/approval/DB identity/state/artifact/release/timeline binding; valid
+  signature для другого request отклоняется;
+- каждая output-пара (`package+payload` и `receipt+envelope`) создаётся в своём
+  одном внешнем protected каталоге без overwrite и с `fsync`; каталоги двух
+  фаз могут различаться; payload/envelope публикуются последними как readiness
+  files, ADS paths запрещены, caught partial write очищается;
+- admission release binding включает acquisition/root-lifecycle/detached
+  runtime и canonical root JSON; ceremony отдельно сравнивает runtime bytes с
+  exact Git blobs до publication; production-like admission отклоняет legacy
+  arbitrary approval alias.
+
+Локальная verification:
+
+```text
+authority/acquisition/root/detached tests = 38/38 PASS
+admission contract tests                  = 21/21 PASS
+admission smoke self-test                 = PASS
+latest green pre-authority remote SHA     = d77c74393c510b688f9f2a5c43eaa908390450b5
+production public root registry           = EMPTY / FAIL-CLOSED
+production-like acquisition/restore       = NOT EXECUTED
+production-like admission                 = NO-GO
+external beta                             = NO-GO
+```
+
+До operational use обязательны повторный independent review исправлений и
+зелёный remote CI exact authority-candidate SHA; выбор внешнего signer/HSM и
+key-custody процесса; отдельный reviewed public-root enrollment с собственным
+parent-transition CI; защищённый snapshot acquisition/restore; три
+state-bound request/signing ceremony и marker rotation. Candidate не разрешает
+production deploy, reconciliation apply или выдачу доступа тестеру.
 
 ### 5.26. `SINGLE_DESIGN_PARTNER`: contingency/enterprise isolation — 28.07.2026
 
@@ -2204,30 +2263,36 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    current candidate. Создать exact clean SHA текущего рабочего дерева,
    получить зелёные обязательные remote CI checks и независимый review;
    bundle не передавать в auto-deploy `main`.
-2. После принятия current test evidence отдельным security change утвердить и enrol
-   pinned Ed25519 public root, создать защищённый signer и
-   acquisition/evidence record вне
-   caller-controlled env, database `COMMENT` и HMAC report. Private signing
-   key в repository, CI variables общего назначения или snapshot не хранить.
-3. Оформить approval/minimization/encryption/no-egress/TTL/destruction
-   controls и получить свежий disposable production-like snapshot baseline.
+2. После принятия current test evidence независимо проверить detached
+   authority candidate, утвердить внешний signer/HSM, separation of duties,
+   key custody и защищённый acquisition-to-signature transport. Private
+   signing key в repository, LeetPlus process, CI variables общего назначения
+   или snapshot не хранить.
+3. Отдельным reviewed security change enrol pinned Ed25519 public root и
+   получить зелёный remote CI exact enrolled-root SHA до любого acquisition.
+   Затем оформить первый canonical acquisition request с
+   approval/minimization/encryption/no-egress/TTL/destruction controls и
+   получить свежий disposable production-like snapshot baseline.
    Подписанный authority manifest обязан связать release SHA, database
    identity, artifact digest, approval, database marker и freshness.
-4. Отдельно выполнить production-like admission schema `v2`: state-bound
-   `BASELINE_156` envelope/marker и первый admission; затем применить только
-   migrations `157..162`, получить новый `EXPAND_162` envelope с новым
+4. Создать отдельную `LOGIN NOINHERIT` reader role с exact grants, пройти
+   negative ACL gate и выполнить production-like admission schema `v2`:
+   отдельные request/nonce/envelope/marker для `BASELINE_156` и первый
+   admission; затем применить только migrations `157..162`, создать новый
+   acquisition request и получить новый `EXPAND_162` envelope с новым
    nonce-bound binding, заменить DB marker его digest и выполнить второй
    admission. Затем применить только exact allowlisted migration
    `20260728120000_tenant_execution_control_plane_expand`, затем exact
    `20260728150000_tenant_execution_revision_fence`, выпустить третий
-   `CURRENT_164` envelope с новым binding, повторно заменить marker и пройти
-   третий admission. Protected StaffTask evidence остаётся bound к prefix 162;
+   `CURRENT_164` request/envelope с новым binding, повторно заменить marker и
+   пройти третий admission. Protected StaffTask evidence остаётся bound к prefix 162;
    baseline/expand marker не переиспользовать; все три authority bundle и обе
    marker-rotation attestation сохранить. Exact роль
    получает table `SELECT` на восьми разрешённых relations и только
    `User(id, tenantId, isPlatformAdmin, isActive, accessScope)`; любой
    non-zero exit или authority/marker/freshness/blob/ACL mismatch
-   останавливает работу.
+   останавливает работу. После повторного zero-diff inventory/planner login
+   reader role отзывается и удаляется до уничтожения snapshot.
 5. Только после всех трёх admission отдельно выполнить read-only inventory и
    aggregate reconciliation planner schema `v1` на exact current
    `CURRENT_164` (`migrationCount=164`, latest

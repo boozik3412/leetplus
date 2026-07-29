@@ -2,10 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
+  IdentityEmailClaimType,
   TenantCustomerStage,
   TenantLifecycleStatus,
   TenantModule,
@@ -20,11 +22,13 @@ import { COMPLETE_TENANT_MODULE_PROFILE } from '../tenancy/tenant-entitlement-pr
 import { TenantExecutionPolicyService } from '../tenancy/tenant-execution-policy.service';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
+import { IdentityEmailClaimService } from './identity-email-claim.service';
 
 type PrismaMock = {
   user: {
     findUnique: jest.Mock;
     create: jest.Mock;
+    update: jest.Mock;
     findUniqueOrThrow: jest.Mock;
     count: jest.Mock;
   };
@@ -79,6 +83,12 @@ type EmailVerificationMock = {
   sendVerificationEmail: jest.Mock;
   confirmEmail: jest.Mock;
   resendByEmail: jest.Mock;
+};
+
+type IdentityEmailClaimMock = {
+  bindTransaction: jest.Mock;
+  assertInvite: jest.Mock;
+  transitionInvite: jest.Mock;
 };
 
 function createUserWithTenant() {
@@ -137,7 +147,10 @@ function createMemberInvite(onboardingStatus = TenantOnboardingStatus.ACTIVE) {
     storeIds: [],
     expiresAt: new Date(Date.now() + 60_000),
     acceptedAt: null,
+    revokedAt: null,
+    revokedByUserId: null,
     updatedAt: new Date(),
+    identityClaimRevision: 2,
     tenant: createInviteTenant(onboardingStatus),
   };
 }
@@ -157,6 +170,7 @@ describe('AuthService', () => {
   let passwordService: PasswordMock;
   let jwtService: JwtMock;
   let emailVerificationService: EmailVerificationMock;
+  let identityEmailClaim: IdentityEmailClaimMock;
   let service: AuthService;
 
   beforeEach(() => {
@@ -164,6 +178,7 @@ describe('AuthService', () => {
       user: {
         findUnique: jest.fn(),
         create: jest.fn(),
+        update: jest.fn(),
         findUniqueOrThrow: jest.fn(),
         count: jest.fn(),
       },
@@ -214,6 +229,27 @@ describe('AuthService', () => {
       confirmEmail: jest.fn(),
       resendByEmail: jest.fn(),
     };
+    identityEmailClaim = {
+      bindTransaction: jest.fn((tx: PrismaMock) => tx),
+      assertInvite: jest.fn().mockResolvedValue({
+        schemaVersion: 1,
+        operation: 'ASSERT_INVITE',
+        decision: 'MATCHED',
+        claimType: IdentityEmailClaimType.INVITE,
+        tenantId: 'tenant-1',
+        subjectId: 'invite-member-1',
+        revision: 2,
+      }),
+      transitionInvite: jest.fn().mockResolvedValue({
+        schemaVersion: 2,
+        operation: 'TRANSITION_INVITE',
+        decision: 'TRANSITIONED',
+        claimType: IdentityEmailClaimType.USER,
+        tenantId: 'tenant-1',
+        subjectId: 'user-1',
+        revision: 3,
+      }),
+    };
     service = new AuthService(
       prisma as unknown as PrismaService,
       passwordService,
@@ -222,6 +258,7 @@ describe('AuthService', () => {
       { get: jest.fn() } as never,
       new AccessScopeService(),
       new TenantExecutionPolicyService(),
+      identityEmailClaim as unknown as IdentityEmailClaimService,
     );
   });
 
@@ -373,6 +410,7 @@ describe('AuthService', () => {
           tokenHash: createHash('sha256')
             .update('opaque-bearer-token')
             .digest('hex'),
+          revokedAt: null,
         },
       }),
     );
@@ -381,10 +419,7 @@ describe('AuthService', () => {
   it.each([
     [
       'duplicate',
-      [
-        ...completeEntitlements().slice(0, 5),
-        { ...completeEntitlements()[0] },
-      ],
+      [...completeEntitlements().slice(0, 5), { ...completeEntitlements()[0] }],
     ],
     [
       'mixed revision',
@@ -412,28 +447,53 @@ describe('AuthService', () => {
   );
 
   it('transitions the first owner invite into ONBOARDING atomically', async () => {
-    prisma.userInvite.findUnique.mockResolvedValue(createOwnerInvite());
+    const ownerInvite = createOwnerInvite();
+    prisma.userInvite.findUnique.mockResolvedValue(ownerInvite);
     prisma.$queryRaw.mockResolvedValue([
       createInviteTenant(TenantOnboardingStatus.OWNER_INVITED),
     ]);
     prisma.user.findUnique.mockResolvedValue(null);
-    prisma.user.create.mockResolvedValue({ id: 'user-1' });
+    prisma.user.create.mockResolvedValue({ id: 'ignored-generated-user' });
     prisma.userInvite.updateMany.mockResolvedValue({ count: 1 });
     prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
     prisma.platformAdminAuditEvent.create.mockResolvedValue({ id: 'audit-1' });
-    prisma.user.findUniqueOrThrow.mockResolvedValue(createUserWithTenant());
-
-    await expect(
-      service.acceptInvite('opaque-owner-token', {
-        password: 'strong-password',
-        confirmPassword: 'strong-password',
+    prisma.user.findUniqueOrThrow.mockImplementation(
+      ({ where }: { where: { id: string } }) => ({
+        ...createUserWithTenant(),
+        id: where.id,
       }),
-    ).resolves.toMatchObject({
+    );
+
+    const response = await service.acceptInvite('opaque-owner-token', {
+      password: 'strong-password',
+      confirmPassword: 'strong-password',
+    });
+    const userCreate = prisma.user.create as jest.Mock<
+      Promise<unknown>,
+      [{ data: Record<string, unknown> }]
+    >;
+    const generatedUserId = userCreate.mock.calls[0]?.[0].data.id;
+    if (typeof generatedUserId !== 'string') {
+      throw new Error('Expected acceptance to create a user with a string id');
+    }
+    expect(generatedUserId).toEqual(
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
+    );
+    expect(response).toMatchObject({
       accessToken: 'signed-token',
       user: {
-        id: 'user-1',
+        id: generatedUserId,
         role: UserRole.OWNER,
       },
+    });
+    expect(userCreate).toHaveBeenCalledTimes(1);
+    expect(userCreate.mock.calls[0]?.[0].data).toMatchObject({
+      id: generatedUserId,
+      tenantId: 'tenant-1',
+      email: 'owner@club-a.leetplus.ru',
+      identityClaimRevision: null,
     });
 
     expect(prisma.tenant.updateMany).toHaveBeenCalledWith({
@@ -455,7 +515,7 @@ describe('AuthService', () => {
     const auditCall = auditCreate.mock.calls[0];
     expect(auditCall?.[0].data).toMatchObject({
       tenantId: 'tenant-1',
-      actorUserId: 'user-1',
+      actorUserId: generatedUserId,
       action: 'TENANT_OWNER_INVITE_ACCEPTED',
       before: {
         onboardingStatus: TenantOnboardingStatus.OWNER_INVITED,
@@ -466,10 +526,177 @@ describe('AuthService', () => {
         executionRevision: 2,
       },
       metadata: {
+        inviteId: 'invite-owner-1',
+        ownerUserId: generatedUserId,
         executionRevisionBefore: 1,
         executionRevisionAfter: 2,
       },
     });
+    expect(JSON.stringify(auditCall?.[0].data)).not.toContain(
+      'opaque-owner-token',
+    );
+    expect(JSON.stringify(auditCall?.[0].data)).not.toContain(
+      'owner@club-a.leetplus.ru',
+    );
+
+    expect(identityEmailClaim.bindTransaction).toHaveBeenCalledWith(prisma);
+    expect(identityEmailClaim.assertInvite).toHaveBeenCalledWith(prisma, {
+      email: 'owner@club-a.leetplus.ru',
+      tenantId: 'tenant-1',
+      subjectId: 'invite-owner-1',
+      expectedRevision: 2,
+    });
+    const inviteUpdateMany = prisma.userInvite.updateMany as jest.Mock<
+      Promise<unknown>,
+      [
+        {
+          where: Record<string, unknown>;
+          data: Record<string, unknown>;
+        },
+      ]
+    >;
+    const inviteUpdateCall = inviteUpdateMany.mock.calls[0]?.[0];
+    if (!inviteUpdateCall) {
+      throw new Error('Expected acceptance to update the invite');
+    }
+    const acceptedAt = inviteUpdateCall.data.acceptedAt;
+    expect(acceptedAt).toBeInstanceOf(Date);
+    expect(inviteUpdateCall).toEqual({
+      where: {
+        id: 'invite-owner-1',
+        acceptedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: acceptedAt },
+        updatedAt: ownerInvite.updatedAt,
+      },
+      data: {
+        acceptedAt,
+        acceptedByUserId: generatedUserId,
+      },
+    });
+    expect(identityEmailClaim.transitionInvite).toHaveBeenCalledWith(prisma, {
+      email: 'owner@club-a.leetplus.ru',
+      tenantId: 'tenant-1',
+      expectedSubjectId: 'invite-owner-1',
+      expectedRevision: 2,
+      nextClaimType: IdentityEmailClaimType.USER,
+      nextSubjectId: generatedUserId,
+    });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: generatedUserId },
+      data: { identityClaimRevision: 3 },
+    });
+
+    const firstInvocation = (mock: jest.Mock): number => {
+      const invocationOrder = mock.mock.invocationCallOrder[0];
+      if (invocationOrder === undefined) {
+        throw new Error('Expected mock to have been invoked');
+      }
+      return invocationOrder;
+    };
+    expect(firstInvocation(identityEmailClaim.assertInvite)).toBeLessThan(
+      firstInvocation(prisma.$queryRaw),
+    );
+    expect(firstInvocation(prisma.$queryRaw)).toBeLessThan(
+      firstInvocation(prisma.user.create),
+    );
+    expect(firstInvocation(prisma.user.create)).toBeLessThan(
+      firstInvocation(prisma.userInvite.updateMany),
+    );
+    expect(firstInvocation(prisma.userInvite.updateMany)).toBeLessThan(
+      firstInvocation(identityEmailClaim.transitionInvite),
+    );
+    expect(firstInvocation(identityEmailClaim.transitionInvite)).toBeLessThan(
+      firstInvocation(prisma.user.update),
+    );
+    expect(firstInvocation(prisma.user.update)).toBeLessThan(
+      firstInvocation(prisma.user.findUniqueOrThrow),
+    );
+  });
+
+  it('fails closed for a legacy invite without identity provenance before writes', async () => {
+    const token = 'legacy-opaque-token';
+    const email = 'invitee@example.test';
+    prisma.userInvite.findUnique.mockResolvedValue({
+      ...createMemberInvite(),
+      email,
+      identityClaimRevision: null,
+    });
+
+    let rejection: unknown;
+    try {
+      await service.acceptInvite(token, {
+        password: 'strong-password',
+        confirmPassword: 'strong-password',
+      });
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(ServiceUnavailableException);
+    const response = (rejection as ServiceUnavailableException).getResponse();
+    expect(response).toMatchObject({
+      reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED',
+    });
+    expect(JSON.stringify(response)).not.toContain(token);
+    expect(JSON.stringify(response)).not.toContain(email);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(passwordService.hash).not.toHaveBeenCalled();
+    expect(identityEmailClaim.bindTransaction).not.toHaveBeenCalled();
+    expect(identityEmailClaim.assertInvite).not.toHaveBeenCalled();
+    expect(identityEmailClaim.transitionInvite).not.toHaveBeenCalled();
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.userInvite.updateMany).not.toHaveBeenCalled();
+    expect(prisma.userStoreAccess.createMany).not.toHaveBeenCalled();
+    expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+    expect(prisma.platformAdminAuditEvent.create).not.toHaveBeenCalled();
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
+  });
+
+  it('propagates identity transition failure so the acceptance transaction rolls back', async () => {
+    const transitionError = new ConflictException({
+      message: 'Identity claim state changed',
+      reasonCode: 'IDENTITY_CLAIM_STATE_MISMATCH',
+    });
+    prisma.userInvite.findUnique.mockResolvedValue(createMemberInvite());
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'ignored-generated-user' });
+    prisma.userInvite.updateMany.mockResolvedValue({ count: 1 });
+    identityEmailClaim.transitionInvite.mockRejectedValue(transitionError);
+    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation();
+    const debugSpy = jest.spyOn(console, 'debug').mockImplementation();
+
+    try {
+      await expect(
+        service.acceptInvite('opaque-member-token', {
+          password: 'strong-password',
+          confirmPassword: 'strong-password',
+        }),
+      ).rejects.toBe(transitionError);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.user.create).toHaveBeenCalledTimes(1);
+      expect(prisma.userInvite.updateMany).toHaveBeenCalledTimes(1);
+      expect(identityEmailClaim.transitionInvite).toHaveBeenCalledTimes(1);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(infoSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(debugSpy).not.toHaveBeenCalled();
+    } finally {
+      logSpy.mockRestore();
+      infoSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+      debugSpy.mockRestore();
+    }
   });
 
   it('rejects a bootstrap invite that is not the exact NETWORK OWNER shape', async () => {

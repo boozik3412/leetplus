@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.24                                         |
+| Версия           | 1.25                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -96,7 +96,7 @@ enterprise-isolation option и не сокращает shared gates.
 18. [Runbook admission StaffTask snapshot](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md) —
     обязательный fail-closed checkpoint перед production-like inventory и
     planner: PostgreSQL 16, frozen `BASELINE_156 | EXPAND_162`, current
-    implementation candidate `CURRENT_168`, release manifest, catalog и
+    implementation candidate `CURRENT_169`, release manifest, catalog и
     отдельная SELECT-only роль.
     18a. [Runbook production-like authority operations](../security/access-scope/v1/staff-task-integrity-snapshot-authority-operations.md) —
     strict acquisition evidence, public-root lifecycle и detached Ed25519
@@ -130,19 +130,27 @@ enterprise-isolation option и не сокращает shared gates.
     migrations 167/168, global canonical reservation, private advisory-lock
     namespace, sealed reserve/assert/transition/release RPC и zero-DML
     runtime-role contract для shell-only provisioning.
+26. [Identity invite writer boundary](./identity-invite-writer-boundary.md) —
+    migration 169, persisted claim provenance, explicit revoke history,
+    sealed issue/reissue/revoke/accept, direct-create/email-change fail-closed
+    и точный список оставшихся activation/backfill blockers.
 
-Текущий schema target рабочего кандидата — `CURRENT_168`. Локальный
-disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`, identity
-idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
-`INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
-cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`, exact
-six-RPC runtime allowlist и zero `IdentityEmailClaim` table DML. Remote
-exact-head implementation
-`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+Текущий schema target рабочего кандидата — `CURRENT_169`. Локальный
+disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`, exact
+six-RPC runtime allowlist, zero `IdentityEmailClaim` table DML, identity
+idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, retained revoked-history
+release и повторную same-email reservation после explicit revoke. Focused
+application tests прошли `89/89`, full API — `99 suites / 1940 passed /
+2 todo`, shell PostgreSQL integration — `2/2`. Exact-head remote CI и
+independent review для `CURRENT_169` ещё pending.
+
+Предыдущий принятый `CURRENT_168` exact-head
+`3b8228dd278fae062c753bf4301e0339ba93738b` прошёл GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
-`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
-evidence не являются production-like admission, persisted GO или production
-deploy. Production apply/deploy не выполнялись.
+`3/3 PASS`, и независимый review без новых P0. Он остаётся историческим
+prerequisite, но не является evidence текущего candidate. Local и remote
+engineering evidence не являются production-like admission, persisted GO
+или production deploy. Production apply/deploy не выполнялись.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -170,18 +178,20 @@ deploy. Production apply/deploy не выполнялись.
   initial-owner revoke route — с
   `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`;
 - identity email claim candidate: migration 167 создаёт global canonical
-  claim/lock namespace, migration 168 — sealed
-  reserve/assert/transition/release boundary. Runtime role имеет exact six
-  application RPC и zero effective `IdentityEmailClaim` table DML. Combined
-  subject invariant охватывает `INVITE | USER`, reserve recheck legacy state
-  выполняется до replay, exact `search_path=pg_catalog` проверяется по
-  PostgreSQL catalog. Local PostgreSQL `16.14` evidence: `168/168`, identity
-  `1/99`, shell `2/2`. Production startup-validation candidate уже требует
-  отдельный fingerprint HMAC key version `v1`, запрещает reuse и включён в CI
-  environment contract; до deploy нужно настроить отдельное production
-  значение. Legacy
-  `User`/`UserInvite` writers, activation locator,
-  outbox/invite/accept/reissue/revoke и persisted GO ещё pending;
+  claim/lock namespace, migration 168 — sealed foundation, а migration 169 —
+  persisted `User`/`UserInvite` claim provenance, explicit revoke history и
+  sealed application issue/reissue/revoke/accept writers. Runtime role имеет
+  exact six application RPC и zero effective `IdentityEmailClaim` table DML;
+  identity allowlist использует
+  `reserve_v2/assert_v1/transition_v2/release_v2`. Local PostgreSQL `16.13`
+  evidence: `169/169`, identity `1/99`, revoked-history/re-reservation checks
+  и shell `2/2`; focused application `89/89`, full API
+  `99 suites / 1940 passed / 2 todo`. Production startup-validation candidate
+  требует отдельный fingerprint HMAC key version `v1`, запрещает reuse и
+  включён в CI environment contract; до deploy нужно настроить отдельное
+  production значение. Activation locator, admitted legacy provenance
+  backfill, design-partner CLI boundary, encrypted outbox/verified delivery и
+  persisted GO ещё pending;
 - external authenticated HTTP admission candidate: обязательные beta-prefixes
   получают `module + READ|WRITE|OUTBOUND`, неизвестный route запрещён;
   reusable lower-layer admission перечитывает persisted state на каждый
@@ -322,8 +332,8 @@ deploy. Production apply/deploy не выполнялись.
   confirmation / production attestation / 40-hex SHA / HMAC и expected
   database binding. Frozen StaffTask evidence остаётся на exact
   `EXPAND_162`, а current implementation candidate schema-first gate требует
-  `CURRENT_168`, `migrationCount=168`, latest
-  `20260729210000_identity_email_claim_write_boundary`,
+  `CURRENT_169`, `migrationCount=169`, latest
+  `20260729230000_identity_invite_writer_boundary`,
   `unfinished=0`, `14 composite exact`, `14 simple exact`,
   `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact` и
   `0 index mismatch`; expected/actual database names не выводятся, а
@@ -348,12 +358,13 @@ deploy. Production apply/deploy не выполнялись.
   `30447467729` (`run #28`) — `3/3 PASS`. Последний принятый provider-write
   exact-head
   `be8c94c4...` / CI `30449026506` (`run #29`) — `3/3 PASS`; все четыре
-  исходных engineering provider-write P1 закрыты. Текущий accepted
-  `CURRENT_168` implementation — `3b8228dd...` / CI `30460154200`,
-  `3/3 PASS`. Это не production-like admission.
+  исходных engineering provider-write P1 закрыты. Принятый `CURRENT_168`
+  implementation — `3b8228dd...` / CI `30460154200`, `3/3 PASS` — является
+  предыдущим historical prerequisite. Exact-head remote evidence
+  `CURRENT_169` ещё pending. Это не production-like admission.
   `IMPLEMENTED_CANDIDATE`, not deployed. Admission принимает только
   изолированную loopback PostgreSQL 16 копию в точном `BASELINE_156`,
-  `EXPAND_162` или `CURRENT_168`,
+  `EXPAND_162` или `CURRENT_169`,
   сверяет ordered migration names/checksums, exact Git blob content, catalog,
   database marker и freshness. Отдельная `LOGIN NOINHERIT` роль получает
   table-level `SELECT` ровно на восьми разрешённых relations и column-level
@@ -410,11 +421,10 @@ deploy. Production apply/deploy не выполнялись.
 
 Ближайшая последовательность намеренно разделена на независимые решения:
 
-1. Exact `CURRENT_168` implementation
-   `3b8228dd278fae062c753bf4301e0339ba93738b` уже принят mandatory remote CI
-   `30460154200`, `3/3 PASS`, и independent review без новых P0.
-   Исторические test/runtime SHA `2341b999...`/`044ceca2...` не использовать
-   как current evidence.
+1. Зафиксировать exact `CURRENT_169` SHA, пройти mandatory remote CI и
+   independent review без новых P0. Принятый `CURRENT_168`
+   `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
+   `3/3 PASS`, использовать только как historical prerequisite.
 2. Независимо проверить detached authority candidate, утвердить внешний
    signer/HSM, separation of duties и key custody; затем отдельным reviewed
    change enrol Ed25519 public root и получить зелёный remote CI exact
@@ -430,11 +440,13 @@ deploy. Production apply/deploy не выполнялись.
    `20260728150000_tenant_execution_revision_fence` → exact fail-closed
    migration `20260729120000_store_background_execution_fence` → exact
    migration `20260729160000_guest_game_delivery_claim_fence` → foundation
-   migration `20260729190000_identity_email_claim_foundation` → sealed
-   boundary migration `20260729210000_identity_email_claim_write_boundary` →
-   новый третий `CURRENT_168` request/envelope/marker и третий admission.
-   Protected StaffTask evidence остаётся bound к prefix 162; planner работает
-   только на current DB 168;
+    migration `20260729190000_identity_email_claim_foundation` → sealed
+    boundary migration `20260729210000_identity_email_claim_write_boundary` →
+    persisted writer migration
+    `20260729230000_identity_invite_writer_boundary` → новый третий
+    `CURRENT_169` request/envelope/marker и третий admission.
+    Protected StaffTask evidence остаётся bound к prefix 162; planner работает
+    только на current DB 169;
 5. отдельно production-like inventory и aggregate planner;
 6. отдельно production-like row dry-run;
 7. отдельно explicit apply, rollback и доказательство zero-diff;
@@ -443,11 +455,11 @@ deploy. Production apply/deploy не выполнялись.
 9. после выполнения всех platform/module prerequisites и отдельного `Gate 2A`
    explicit `CUTOVER GO` — in-place cutover четырёх `Store` текущей сети
    внутри одного существующего `Tenant`;
-10. параллельно закрыть `BETA-MT-001..009`: перевести legacy
-    `User`/`UserInvite` writers на sealed claim boundary, реализовать
-    activation locator, outbox/invite/accept/reissue/revoke и
-    persisted GO; затем закрыть delegation/integrations, A/B isolation и
-    tenant-aware workers/Telegram;
+10. параллельно закрыть `BETA-MT-001..009`: выполнить admitted
+    inventory/backfill исторических identity rows, изолировать design-partner
+    CLI, реализовать activation locator, encrypted outbox/verified OWNER
+    delivery и persisted GO; затем закрыть delegation/integrations, A/B
+    isolation и tenant-aware workers/Telegram;
 11. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только
     затем возможен protected `SHARED BETA GO` и owner invite нового
     `Tenant B/Store B1`.
@@ -534,8 +546,8 @@ Gate 2 и
 - тот же production-like snapshot до inventory прошёл
   [обязательный admission checkpoint](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
   в `BASELINE_156`, после migrations `157..162` — в frozen-prefix
-  `EXPAND_162`, а после exact allowlisted migrations `163..168` — в
-  `CURRENT_168`;
+  `EXPAND_162`, а после exact allowlisted migrations `163..169` — в
+  `CURRENT_169`;
   для каждого состояния использован отдельный signed envelope, перед каждым
   следующим admission DB marker заменён digest нового envelope, а
   state-specific protected evidence и marker-rotation attestation
@@ -555,8 +567,8 @@ Gate 2 и
   findings имеют owner и принятое решение;
 - aggregate reconciliation planner запущен на том же production-like
   snapshot и прошёл exact schema-first gate:
-  `CURRENT_168`, `migrationCount=168`, latest
-  `20260729210000_identity_email_claim_write_boundary`, `unfinished=0`,
+  `CURRENT_169`, `migrationCount=169`, latest
+  `20260729230000_identity_invite_writer_boundary`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
   `databaseIdentityMatched=true`, `databaseIdentityDigest` зафиксирован,

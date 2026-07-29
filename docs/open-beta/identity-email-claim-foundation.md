@@ -2,12 +2,13 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.2 |
+| Версия | 1.3 |
 | Дата | 29.07.2026 |
-| Schema target | `CURRENT_168` |
+| Schema target | `CURRENT_169` |
 | Foundation migration | `20260729190000_identity_email_claim_foundation` |
 | Write-boundary migration | `20260729210000_identity_email_claim_write_boundary` |
-| Статус | `IMPLEMENTED_CANDIDATE`; exact-head CI/review приняты, not deployed |
+| Writer-boundary migration | `20260729230000_identity_invite_writer_boundary` |
+| Статус | `IMPLEMENTED_CANDIDATE`; local PostgreSQL принято, exact-head CI pending, not deployed |
 | Release decision | `NO-GO` для реального Tenant B, OWNER invite и production deploy |
 
 ## Назначение
@@ -22,14 +23,15 @@ sealed write boundary и runtime-role enrollment. Вместе они уже п�
 shell-only provisioning атомарно зарезервировать owner identity, не создавая
 login identity или invite.
 
-Это всё ещё не готовый onboarding:
+Migration 169 перевела основные application writers на sealed boundary и
+добавила persisted provenance/revocation. Это всё ещё не готовый onboarding:
 
 - таблица и boundary не создают `User`, `UserInvite`, пароль, token или URL;
 - trial не начинается;
 - письмо не формируется и не отправляется;
-- outbox, activation, acceptance, reissue и revoke workflow ещё не готовы;
-- legacy `User`/`UserInvite` writers ещё не переведены на общий claim
-  invariant;
+- outbox, activation и verified delivery ещё не готовы;
+- issue/reissue/revoke/accept работают как application candidate, но
+  historical rows ещё не прошли inventory/backfill;
 - оба Platform Admin route остаются fail-closed с `503`;
 - production migration/deploy и реальный external tenant не выполнялись.
 
@@ -121,13 +123,42 @@ Boundary:
 - не выдаёт runtime role прямой `EXECUTE` на lock helper;
 - не выдаёт runtime role worker-only delivery event function.
 
+## Runtime writer adoption: migration 169
+
+Migration 169 добавляет persisted `identityClaimRevision` в `User` и
+`UserInvite`, explicit `revokedAt/revokedByUserId`, canonical lookup indexes и
+три исправленные boundary:
+
+- `reserve_invite_v2` исключает explicitly revoked invite history;
+- `transition_v2` валидирует destination до replay и не освобождает email
+  inactive user;
+- `release_v2` сохраняет revoked invite history и требует exact persisted
+  provenance.
+
+Основные runtime-пути теперь используют:
+
+```text
+issue: reserve → assert → create invite → transition → persist revision
+reissue: assert old → create new → revoke old → transition → persist revision
+revoke: assert → explicit CAS revoke → release
+accept: assert → create User → CAS accept → transition → persist revision
+```
+
+Direct user creation и реальная смена email остаются fail-closed. Legacy
+строка с `NULL identityClaimRevision` также fail-closed до отдельного
+admitted backfill. Полный контракт описан в
+[identity invite writer boundary](./identity-invite-writer-boundary.md).
+
 ### Runtime-role contract
 
-Enrollment на `CURRENT_168` выдаёт ровно шесть application RPC:
+Enrollment на `CURRENT_169` выдаёт ровно шесть application RPC:
 
 - `guest_game_delivery_transition_key_v1`;
 - `guest_game_reward_delivery_lock_v1`;
-- четыре identity RPC, перечисленные выше.
+- `identity_email_claim_reserve_invite_v2`;
+- `identity_email_claim_assert_invite_v1`;
+- `identity_email_claim_transition_v2`;
+- `identity_email_claim_release_v2`.
 
 Одновременно runtime role имеет нулевые эффективные table privileges на
 `IdentityEmailClaim`: нет `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`,
@@ -147,7 +178,7 @@ Shared tenant shell candidate одной serializable-транзакцией:
 4. создаёт OWNER capability override;
 5. сохраняет ровно шесть entitlement rows revision 1:
    `read/write=ON`, `outbound=OFF`, без validity window;
-6. резервирует owner email через `reserve_invite_v1`, используя заранее
+6. резервирует owner email через `reserve_invite_v2`, используя заранее
    созданный UUID reservation subject;
 7. сохраняет только domain-separated HMAC fingerprint и его key version в
    audit;
@@ -171,23 +202,26 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 
 ## Локальное PostgreSQL evidence кандидата
 
-На disposable PostgreSQL `16.14`, без production data и без production
+На disposable PostgreSQL `16.13`, без production data и без production
 deployment, получены:
 
-- clean deploy `168/168`;
+- clean deploy `169/169`;
 - identity boundary idempotency: `100` конкурентных попыток,
   `1 CREATED + 99 ALREADY_RESERVED`;
 - combined `INVITE | USER` same-subject collision отклонён;
+- retained revoked invite history освобождает claim без удаления invite;
+- `reserve_v2` допускает same-email reservation после explicit revoke;
 - shell provisioning PostgreSQL integration: `2/2`;
 - 100-way cross-slug shell race:
   `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`;
 - runtime enrollment подтвердил exact six-RPC allowlist и zero
   `IdentityEmailClaim` table DML.
 
-Remote exact-head implementation
+Предыдущий `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
-`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
+`3/3 PASS`, и независимым review без новых P0. Exact-head CI/review для
+`CURRENT_169` ещё pending. Local и remote engineering
 evidence не являются production-like admission, persisted GO, production
 deploy или разрешением на выдачу доступа.
 
@@ -201,23 +235,26 @@ secrets и требует version `v1`; CI environment contract обновлён
 
 До реального OWNER invite обязательны:
 
-1. Перевести все legacy `User` и `UserInvite` writers на sealed claim
-   invariant; обход таблицы или lock-before-read запрещён.
+1. Выполнить inventory/backfill исторических `User` и `UserInvite`;
+   ambiguous/collision rows должны остаться fail-closed. Основные runtime
+   writers уже переведены, isolated design-partner CLI требует отдельного
+   решения.
 2. Реализовать безопасный activation locator: shell хранит claim UUID и HMAC,
    но не raw email; activation должна найти нужную identity без PII lookup
    leak и перепроверить её под lock.
 3. Реализовать persisted `SHARED BETA GO`, activation, trial start,
    `UserInvite`, encrypted leased outbox и verified delivery.
-4. Реализовать fragment + POST-body invite transport, acceptance,
-   reissue/revoke/resend и session revoke поверх `assert → write → transition`.
+4. Реализовать fragment + POST-body invite transport, resend/session revoke и
+   bounded expiry sweeper; application acceptance/reissue/revoke candidate уже
+   использует `assert → write → transition`.
 5. Выполнить полный 100-way accept/accept, accept/revoke и accept/reissue
    PostgreSQL matrix.
 6. Пройти production-like upgrade/rollback/zero-diff и полноценную
    two-tenant rehearsal.
 
-Remote exact-head CI и независимый review текущего кандидата закрыты:
-`3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
-`3/3 PASS`, review PASS без новых P0.
+Remote exact-head CI и независимый review текущего `CURRENT_169` кандидата
+ещё не закрыты. `3b8228dd...` / CI `30460154200` относится к предыдущему
+`CURRENT_168` prerequisite.
 
 До внешней активации также закрываются P1 hardening items:
 
@@ -226,6 +263,6 @@ Remote exact-head CI и независимый review текущего канд�
 - shell replay перечитывает фактические Tenant/Store, OWNER override и six-row
   entitlement state, не доверяя одному audit receipt.
 
-До закрытия этих пунктов migration 168 нельзя считать разрешением на
+До закрытия этих пунктов migrations 168/169 нельзя считать разрешением на
 production deploy, создание учётной записи или отправку приглашения внешнему
 тестеру.

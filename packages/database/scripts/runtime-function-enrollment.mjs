@@ -5,8 +5,8 @@ export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260729210000_identity_email_claim_write_boundary";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 168;
+  "20260729230000_identity_invite_writer_boundary";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 169;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -30,9 +30,9 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
     key: "identityEmailClaimReserveInvite",
     catalogSignature:
-      'public."identity_email_claim_reserve_invite_v1"(text,text,text)',
+      'public."identity_email_claim_reserve_invite_v2"(text,text,text)',
     grantSignature:
-      'public."identity_email_claim_reserve_invite_v1"(TEXT, TEXT, TEXT)',
+      'public."identity_email_claim_reserve_invite_v2"(TEXT, TEXT, TEXT)',
     securityDefiner: true,
     volatility: "v",
   }),
@@ -48,18 +48,18 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
     key: "identityEmailClaimTransition",
     catalogSignature:
-      'public."identity_email_claim_transition_v1"(text,text,text,text,integer,text,text)',
+      'public."identity_email_claim_transition_v2"(text,text,text,text,integer,text,text)',
     grantSignature:
-      'public."identity_email_claim_transition_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT)',
+      'public."identity_email_claim_transition_v2"(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT)',
     securityDefiner: true,
     volatility: "v",
   }),
   Object.freeze({
     key: "identityEmailClaimRelease",
     catalogSignature:
-      'public."identity_email_claim_release_v1"(text,text,text,text,integer)',
+      'public."identity_email_claim_release_v2"(text,text,text,text,integer)',
     grantSignature:
-      'public."identity_email_claim_release_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER)',
+      'public."identity_email_claim_release_v2"(TEXT, TEXT, TEXT, TEXT, INTEGER)',
     securityDefiner: true,
     volatility: "v",
   }),
@@ -85,6 +85,33 @@ export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
     grantSignature:
       'public."identity_email_claim_lock_v1"(TEXT)',
     securityDefiner: false,
+    volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityEmailClaimReserveInviteV1",
+    catalogSignature:
+      'public."identity_email_claim_reserve_invite_v1"(text,text,text)',
+    grantSignature:
+      'public."identity_email_claim_reserve_invite_v1"(TEXT, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityEmailClaimTransitionV1",
+    catalogSignature:
+      'public."identity_email_claim_transition_v1"(text,text,text,text,integer,text,text)',
+    grantSignature:
+      'public."identity_email_claim_transition_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityEmailClaimReleaseV1",
+    catalogSignature:
+      'public."identity_email_claim_release_v1"(text,text,text,text,integer)',
+    grantSignature:
+      'public."identity_email_claim_release_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER)',
+    securityDefiner: true,
     volatility: "v",
   }),
 ]);
@@ -1052,15 +1079,18 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
+  assert.match(sql, /identity_email_claim_reserve_invite_v2/u);
   assert.match(sql, /identity_email_claim_assert_invite_v1/u);
-  assert.match(sql, /identity_email_claim_transition_v1/u);
-  assert.match(sql, /identity_email_claim_release_v1/u);
+  assert.match(sql, /identity_email_claim_transition_v2/u);
+  assert.match(sql, /identity_email_claim_release_v2/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
   );
   assert.match(sql, /REVOKE EXECUTE.*guest_game_delivery_record_event_v1/su);
   assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_lock_v1/su);
+  assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_transition_v1/su);
+  assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_release_v1/su);
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
   assert.equal(runtimeFunctionContractDigest().length, 64);

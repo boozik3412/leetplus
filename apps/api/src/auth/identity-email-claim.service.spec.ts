@@ -137,7 +137,7 @@ describe('IdentityEmailClaimService', () => {
     tx.$queryRaw.mockResolvedValue([
       {
         receipt: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           operation: 'RESERVE_INVITE',
           decision: 'CREATED',
           claimType: 'INVITE',
@@ -155,7 +155,7 @@ describe('IdentityEmailClaimService', () => {
     });
 
     expect(result).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'RESERVE_INVITE',
       decision: 'CREATED',
       claimType: IdentityEmailClaimType.INVITE,
@@ -173,7 +173,7 @@ describe('IdentityEmailClaimService', () => {
       throw new Error('Expected a parameterized identity claim query');
     }
     expect(query.strings.join('')).toContain(
-      'identity_email_claim_reserve_invite_v1',
+      'identity_email_claim_reserve_invite_v2',
     );
     expect(query.values).toContain(EMAIL);
   });
@@ -212,7 +212,7 @@ describe('IdentityEmailClaimService', () => {
     tx.$queryRaw.mockResolvedValue([
       {
         receipt: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           operation: 'TRANSITION_INVITE',
           decision: 'TRANSITIONED',
           claimType: 'USER',
@@ -233,10 +233,17 @@ describe('IdentityEmailClaimService', () => {
         nextSubjectId: NEXT_SUBJECT_ID,
       }),
     ).resolves.toMatchObject({
+      schemaVersion: 2,
       decision: 'TRANSITIONED',
       claimType: IdentityEmailClaimType.USER,
       revision: 2,
     });
+    const query = (tx.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+      | Prisma.Sql
+      | undefined;
+    expect(query?.strings.join('')).toContain(
+      'identity_email_claim_transition_v2',
+    );
 
     await expect(
       service().transitionInvite(tx, {
@@ -250,12 +257,50 @@ describe('IdentityEmailClaimService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('releases through the retained-history v2 boundary', async () => {
+    const tx = transaction();
+    tx.$queryRaw.mockResolvedValue([
+      {
+        receipt: {
+          schemaVersion: 2,
+          operation: 'RELEASE_INVITE',
+          decision: 'RELEASED',
+          tenantId: TENANT_ID,
+          subjectId: RESERVATION_ID,
+          releasedRevision: 2,
+        },
+      },
+    ]);
+
+    await expect(
+      service().releaseInvite(tx, {
+        email: EMAIL,
+        tenantId: TENANT_ID,
+        expectedSubjectId: RESERVATION_ID,
+        expectedRevision: 2,
+      }),
+    ).resolves.toEqual({
+      schemaVersion: 2,
+      operation: 'RELEASE_INVITE',
+      decision: 'RELEASED',
+      tenantId: TENANT_ID,
+      subjectId: RESERVATION_ID,
+      releasedRevision: 2,
+    });
+    const query = (tx.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+      | Prisma.Sql
+      | undefined;
+    expect(query?.strings.join('')).toContain(
+      'identity_email_claim_release_v2',
+    );
+  });
+
   it('strictly rejects a receipt with an identity-bearing extra field', async () => {
     const tx = transaction();
     tx.$queryRaw.mockResolvedValue([
       {
         receipt: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           operation: 'RESERVE_INVITE',
           decision: 'CREATED',
           claimType: 'INVITE',

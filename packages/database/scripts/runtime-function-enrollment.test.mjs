@@ -46,10 +46,10 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 168,
+      completedCount: 169,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260729210000_identity_email_claim_write_boundary",
+        "20260729230000_identity_invite_writer_boundary",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -151,7 +151,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260729210000_identity_email_claim_write_boundary 168$/u,
+    /20260729230000_identity_invite_writer_boundary 169$/u,
   );
 });
 
@@ -208,7 +208,7 @@ for (const [environment, expectedCode] of [
 test("builds only the exact application grants and worker exclusion", () => {
   const statements =
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
-  assert.equal(statements.length, 15);
+  assert.equal(statements.length, 18);
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
@@ -224,7 +224,7 @@ test("builds only the exact application grants and worker exclusion", () => {
     statements.filter((statement) =>
       statement.startsWith("REVOKE EXECUTE"),
     ).length,
-    2,
+    5,
   );
 
   const sql = statements.join("\n");
@@ -233,9 +233,12 @@ test("builds only the exact application grants and worker exclusion", () => {
   assert.match(sql, /guest_game_delivery_record_event_v1/u);
   assert.match(sql, /identity_email_claim_lock_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
+  assert.match(sql, /identity_email_claim_reserve_invite_v2/u);
   assert.match(sql, /identity_email_claim_assert_invite_v1/u);
   assert.match(sql, /identity_email_claim_transition_v1/u);
   assert.match(sql, /identity_email_claim_release_v1/u);
+  assert.match(sql, /identity_email_claim_transition_v2/u);
+  assert.match(sql, /identity_email_claim_release_v2/u);
   assert.match(
     sql,
     /REVOKE ALL PRIVILEGES ON TABLE public\."IdentityEmailClaim"/u,
@@ -315,7 +318,7 @@ test("detects authority, migration and function ACL drift independently", () => 
   );
 });
 
-test("binds enrollment to exact current migration 168 and exact count 168", () => {
+test("binds enrollment to exact current migration 169 and exact count 169", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

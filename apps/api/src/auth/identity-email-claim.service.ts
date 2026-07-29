@@ -64,7 +64,7 @@ export type ReleaseIdentityInviteInput = {
 };
 
 export type ReserveIdentityInviteReceipt = IdentityEmailFingerprint & {
-  schemaVersion: 1;
+  schemaVersion: 2;
   operation: 'RESERVE_INVITE';
   decision: 'CREATED' | 'ALREADY_RESERVED';
   claimType: typeof IdentityEmailClaimType.INVITE;
@@ -84,7 +84,7 @@ export type AssertIdentityInviteReceipt = {
 };
 
 export type TransitionIdentityInviteReceipt = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   operation: 'TRANSITION_INVITE';
   decision: 'TRANSITIONED' | 'ALREADY_TRANSITIONED';
   claimType:
@@ -96,7 +96,7 @@ export type TransitionIdentityInviteReceipt = {
 };
 
 export type ReleaseIdentityInviteReceipt = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   operation: 'RELEASE_INVITE';
   decision: 'RELEASED';
   tenantId: string;
@@ -149,7 +149,7 @@ export class IdentityEmailClaimService {
 
     try {
       const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
-        SELECT public."identity_email_claim_reserve_invite_v1"(
+        SELECT public."identity_email_claim_reserve_invite_v2"(
           ${canonicalEmail}::TEXT,
           ${tenantId}::TEXT,
           ${subjectId}::TEXT
@@ -225,7 +225,7 @@ export class IdentityEmailClaimService {
 
     try {
       const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
-        SELECT public."identity_email_claim_transition_v1"(
+        SELECT public."identity_email_claim_transition_v2"(
           ${canonicalEmail}::TEXT,
           ${tenantId}::TEXT,
           ${IdentityEmailClaimType.INVITE}::TEXT,
@@ -261,7 +261,7 @@ export class IdentityEmailClaimService {
 
     try {
       const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
-        SELECT public."identity_email_claim_release_v1"(
+        SELECT public."identity_email_claim_release_v2"(
           ${canonicalEmail}::TEXT,
           ${tenantId}::TEXT,
           ${IdentityEmailClaimType.INVITE}::TEXT,
@@ -296,7 +296,7 @@ export class IdentityEmailClaimService {
       'revision',
     ]);
     if (
-      receipt.schemaVersion !== 1 ||
+      receipt.schemaVersion !== 2 ||
       receipt.operation !== 'RESERVE_INVITE' ||
       (receipt.decision !== 'CREATED' &&
         receipt.decision !== 'ALREADY_RESERVED') ||
@@ -305,7 +305,7 @@ export class IdentityEmailClaimService {
       throw this.invalidReceipt();
     }
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'RESERVE_INVITE',
       decision: receipt.decision,
       claimType: IdentityEmailClaimType.INVITE,
@@ -357,7 +357,7 @@ export class IdentityEmailClaimService {
       'revision',
     ]);
     if (
-      receipt.schemaVersion !== 1 ||
+      receipt.schemaVersion !== 2 ||
       receipt.operation !== 'TRANSITION_INVITE' ||
       (receipt.decision !== 'TRANSITIONED' &&
         receipt.decision !== 'ALREADY_TRANSITIONED') ||
@@ -367,7 +367,7 @@ export class IdentityEmailClaimService {
       throw this.invalidReceipt();
     }
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'TRANSITION_INVITE',
       decision: receipt.decision,
       claimType: receipt.claimType,
@@ -387,14 +387,14 @@ export class IdentityEmailClaimService {
       'releasedRevision',
     ]);
     if (
-      receipt.schemaVersion !== 1 ||
+      receipt.schemaVersion !== 2 ||
       receipt.operation !== 'RELEASE_INVITE' ||
       receipt.decision !== 'RELEASED'
     ) {
       throw this.invalidReceipt();
     }
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'RELEASE_INVITE',
       decision: receipt.decision,
       tenantId: this.receiptUuid(receipt.tenantId),

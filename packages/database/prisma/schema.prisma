@@ -382,19 +382,20 @@ model TenantModuleEntitlement {
 }
 
 model User {
-  id              String           @id @default(uuid())
-  tenantId        String
-  email           String           @unique
-  passwordHash    String
-  fullName        String?
-  role            UserRole
-  accessScope     UserAccessScope?
-  customRoleId    String?
-  isActive        Boolean          @default(true)
-  isPlatformAdmin Boolean          @default(false)
-  emailVerifiedAt DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id                    String           @id @default(uuid())
+  tenantId              String
+  email                 String           @unique
+  passwordHash          String
+  fullName              String?
+  role                  UserRole
+  accessScope           UserAccessScope?
+  customRoleId          String?
+  isActive              Boolean          @default(true)
+  isPlatformAdmin       Boolean          @default(false)
+  emailVerifiedAt       DateTime?
+  identityClaimRevision Int?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
   tenant                               Tenant                                @relation(fields: [tenantId], references: [id])
   customRole                           UserAccessRole?                       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
@@ -475,6 +476,7 @@ model User {
   storeAccesses                        UserStoreAccess[]
   createdUserInvites                   UserInvite[]                          @relation("UserInviteCreatedBy")
   acceptedUserInvites                  UserInvite[]                          @relation("UserInviteAcceptedBy")
+  revokedUserInvites                   UserInvite[]                          @relation("UserInviteRevokedBy")
   createdStaffChatChannels             StaffChatChannel[]                    @relation("StaffChatChannelCreatedBy")
   staffChatChannelMemberships          StaffChatChannelMember[]              @relation("StaffChatChannelMemberUser")
   addedStaffChatChannelMembers         StaffChatChannelMember[]              @relation("StaffChatChannelMemberAddedBy")
@@ -556,26 +558,30 @@ model UserRoleOverride {
 }
 
 model UserInvite {
-  id               String           @id @default(uuid())
-  tenantId         String
-  email            String?
-  fullName         String?
-  role             UserRole
-  accessScope      UserAccessScope?
-  customRoleId     String?
-  storeIds         String[]         @default([])
-  tokenHash        String           @unique
-  expiresAt        DateTime
-  acceptedAt       DateTime?
-  acceptedByUserId String?
-  createdByUserId  String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id                    String           @id @default(uuid())
+  tenantId              String
+  email                 String?
+  fullName              String?
+  role                  UserRole
+  accessScope           UserAccessScope?
+  customRoleId          String?
+  storeIds              String[]         @default([])
+  tokenHash             String           @unique
+  expiresAt             DateTime
+  acceptedAt            DateTime?
+  acceptedByUserId      String?
+  createdByUserId       String?
+  revokedAt             DateTime?
+  revokedByUserId       String?
+  identityClaimRevision Int?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
   tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customRole UserAccessRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   createdBy  User?           @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   acceptedBy User?           @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  revokedBy  User?           @relation("UserInviteRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([tenantId, accessScope])
@@ -584,6 +590,7 @@ model UserInvite {
   @@index([customRoleId])
   @@index([createdByUserId])
   @@index([acceptedByUserId])
+  @@index([revokedByUserId])
 }
 
 /// Global, canonical reservation for an email participating in an identity

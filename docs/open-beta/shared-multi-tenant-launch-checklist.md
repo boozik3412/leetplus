@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.8                                                        |
+| Версия     | 1.9                                                        |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -19,24 +19,26 @@ Production IDs, email, телефоны, invite URL/token, password, database UR
 API keys, encryption/signing secrets и raw business data запрещено сохранять
 в git. В документах используются только aliases `Tenant A/B` и `Store A1..A4/B1`.
 
-## Текущий engineering checkpoint: `CURRENT_168`
+## Текущий engineering checkpoint: `CURRENT_169`
 
-В рабочем кандидате реализованы sealed identity write boundary и shell-only
-service, но launch checkboxes ниже этим не закрываются:
+Рабочий кандидат сохраняет shell-only service из `CURRENT_168` и переводит
+обычные application invite/accept writers на persisted provenance и sealed
+identity state machine. Launch checkboxes ниже этим не закрываются:
 
-- schema clean deploy на disposable PostgreSQL `16.14`: `168/168`;
+- schema clean deploy на disposable PostgreSQL `16.13`: `169/169`;
 - identity idempotency: `100` конкурентных попыток,
   `1 CREATED + 99 ALREADY_RESERVED`;
-- combined `INVITE | USER` same-subject collision отклонён;
+- transition replay повторно проверяет destination, explicit revoke сохраняет
+  history и позволяет новую same-email reservation;
 - shell PostgreSQL integration: `2/2`;
-- 100-way cross-slug shell race:
-  `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`;
 - runtime role: exact six application RPC, из них четыре
-  `reserve/assert/transition/release` identity boundary, и zero effective
-  `IdentityEmailClaim` table DML;
-- combined subject invariant охватывает `INVITE | USER`, reserve повторно
-  проверяет legacy identity rows до replay, exact
-  `search_path=pg_catalog` аттестуется по PostgreSQL `proconfig`;
+  `reserve_v2/assert_v1/transition_v2/release_v2` identity boundary, и zero
+  effective `IdentityEmailClaim` table DML;
+- application boundary разрешает `User` create только в `AuthService`, а
+  `UserInvite` mutation — только в `AuthService`/`UsersService`; direct user
+  create и user/invite email change закрыты fail-closed;
+- focused application tests: `89/89`; full API:
+  `99 suites / 1940 passed / 2 todo`;
 - production startup-validation candidate требует отдельный
   `IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY`, запрещает reuse и принимает version
   `v1`; CI environment contract обновлён;
@@ -49,12 +51,13 @@ service, но launch checkboxes ниже этим не закрываются:
 - legacy initial-owner revoke route возвращает
   `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`.
 
-Remote exact-head implementation
+Remote exact-head CI и independent review текущего `CURRENT_169` SHA ещё
+pending. Предыдущий `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
-`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
-evidence не являются production-like admission: persisted GO, production
-deploy и доступ тестеру ещё не приняты.
+`3/3 PASS`, и независимым review без новых P0 только как historical
+prerequisite. Local engineering evidence не является production-like
+admission: persisted GO, production deploy и доступ тестеру ещё не приняты.
 
 ## A. Gate 0: source и release
 
@@ -135,6 +138,9 @@ Evidence:
 - [ ] Все legacy `User`/`UserInvite` writers используют sealed
       `assert → write → transition`/reserve/release invariant и не обходят его
       прямым table DML.
+      Обычные `UsersService`/`AuthService` paths переведены в `CURRENT_169`,
+      но checkbox остаётся открытым до inventory/backfill строк без provenance,
+      изоляции design-partner CLI и реализации activation/outbox writers.
 - [ ] До production deploy создано, защищённо установлено и аттестовано
       отдельное fingerprint HMAC secret value version `v1`; оно не
       переиспользует другой production secret.
@@ -176,6 +182,9 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
+- [ ] remote exact-head CI и independent review для `CURRENT_169`; local
+      `169/169`, focused `89/89`, full API `99 suites / 1940 passed / 2 todo`
+      и shell PostgreSQL `2/2` являются только engineering prerequisites;
 - [x] remote exact-head CI и independent review для `CURRENT_168`:
       `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
       `3/3 PASS`, review PASS без новых P0; local `168/168`, identity `1/99`

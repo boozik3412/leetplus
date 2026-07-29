@@ -141,11 +141,11 @@ test("missing, extra, accessor, duplicate, and noncanonical fields reject", () =
   });
 });
 
-test("the ceremony accepts CURRENT_168 and rejects previous CURRENT_167", () => {
+test("the ceremony accepts CURRENT_169 and rejects previous CURRENT_168", () => {
   assert.equal(
-    normalizeAcquisitionRequest(request({ expectedState: "CURRENT_168" }), NOW)
+    normalizeAcquisitionRequest(request({ expectedState: "CURRENT_169" }), NOW)
       .expectedState,
-    "CURRENT_168",
+    "CURRENT_169",
   );
   assert.throws(
     () =>

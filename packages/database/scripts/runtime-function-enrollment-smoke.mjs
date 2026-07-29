@@ -34,7 +34,7 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 168 and exact completed count 168 are mandatory.
+  - Exact latest migration 169 and exact completed count 169 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - The generated role and every grant are removed in finally.
@@ -246,7 +246,7 @@ function callPendingIdentityBoundary(runtime) {
 function callIdentityReserveBoundary(runtime) {
   return runtime.$queryRawUnsafe(
     `
-      SELECT public."identity_email_claim_reserve_invite_v1"(
+      SELECT public."identity_email_claim_reserve_invite_v2"(
         CAST($1 AS TEXT),
         CAST($2 AS TEXT),
         CAST($3 AS TEXT)
@@ -278,7 +278,7 @@ function callIdentityAssertBoundary(runtime) {
 function callIdentityTransitionBoundary(runtime) {
   return runtime.$queryRawUnsafe(
     `
-      SELECT public."identity_email_claim_transition_v1"(
+      SELECT public."identity_email_claim_transition_v2"(
         CAST($1 AS TEXT),
         CAST($2 AS TEXT),
         CAST($3 AS TEXT),
@@ -301,7 +301,7 @@ function callIdentityTransitionBoundary(runtime) {
 function callIdentityReleaseBoundary(runtime) {
   return runtime.$queryRawUnsafe(
     `
-      SELECT public."identity_email_claim_release_v1"(
+      SELECT public."identity_email_claim_release_v2"(
         CAST($1 AS TEXT),
         CAST($2 AS TEXT),
         CAST($3 AS TEXT),
@@ -432,7 +432,7 @@ async function runSmoke() {
     await expectSqlState(
       "42501",
       () => callIdentityReserveBoundary(runtime),
-      /permission denied for function identity_email_claim_reserve_invite_v1/iu,
+      /permission denied for function identity_email_claim_reserve_invite_v2/iu,
     );
     await expectSqlState(
       "42501",
@@ -442,12 +442,12 @@ async function runSmoke() {
     await expectSqlState(
       "42501",
       () => callIdentityTransitionBoundary(runtime),
-      /permission denied for function identity_email_claim_transition_v1/iu,
+      /permission denied for function identity_email_claim_transition_v2/iu,
     );
     await expectSqlState(
       "42501",
       () => callIdentityReleaseBoundary(runtime),
-      /permission denied for function identity_email_claim_release_v1/iu,
+      /permission denied for function identity_email_claim_release_v2/iu,
     );
     const preEnrollmentClaims = await selectIdentityClaimTable(runtime);
     assert.equal(preEnrollmentClaims.length, 1);

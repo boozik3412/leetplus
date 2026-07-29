@@ -51,6 +51,7 @@ describe('UsersService role override permissions', () => {
       tenantContextService,
       {} as never,
       new AccessScopeService(),
+      {} as never,
     );
 
     return { prisma, service, tenantContextService };

@@ -97,7 +97,7 @@ async function expectSqlState(label, expected, operation) {
 async function reserve(runtime, email, tenantId, subjectId) {
   const rows = await runtime.$queryRawUnsafe(
     `
-      SELECT public."identity_email_claim_reserve_invite_v1"(
+      SELECT public."identity_email_claim_reserve_invite_v2"(
         CAST($1 AS TEXT),
         CAST($2 AS TEXT),
         CAST($3 AS TEXT)
@@ -145,7 +145,7 @@ async function transition(
 ) {
   const rows = await runtime.$queryRawUnsafe(
     `
-      SELECT public."identity_email_claim_transition_v1"(
+      SELECT public."identity_email_claim_transition_v2"(
         CAST($1 AS TEXT),
         CAST($2 AS TEXT),
         CAST($3 AS TEXT),
@@ -172,7 +172,7 @@ async function release(
 ) {
   const rows = await runtime.$queryRawUnsafe(
     `
-      SELECT public."identity_email_claim_release_v1"(
+      SELECT public."identity_email_claim_release_v2"(
         CAST($1 AS TEXT),
         CAST($2 AS TEXT),
         CAST($3 AS TEXT),
@@ -217,11 +217,16 @@ const tenantBId = randomUUID();
 const raceSubjectId = randomUUID();
 const flowReservationId = randomUUID();
 const releaseReservationId = randomUUID();
+const revokedReservationId = randomUUID();
+const revokedInviteId = randomUUID();
+const revokedReplacementReservationId = randomUUID();
 const inviteId = randomUUID();
+const staleDestinationInviteId = randomUUID();
 const userId = randomUUID();
 const raceEmail = `race.${suffix}@example.test`;
 const flowEmail = `flow.${suffix}@example.test`;
 const releaseEmail = `release.${suffix}@example.test`;
+const revokedEmail = `revoked.${suffix}@example.test`;
 let runtime = null;
 let roleCreated = false;
 
@@ -279,10 +284,10 @@ try {
     `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public."UserInvite", public."User" TO ${role}`,
   );
   for (const signature of [
-    'public."identity_email_claim_reserve_invite_v1"(TEXT, TEXT, TEXT)',
+    'public."identity_email_claim_reserve_invite_v2"(TEXT, TEXT, TEXT)',
     'public."identity_email_claim_assert_invite_v1"(TEXT, TEXT, TEXT, INTEGER)',
-    'public."identity_email_claim_transition_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT)',
-    'public."identity_email_claim_release_v1"(TEXT, TEXT, TEXT, TEXT, INTEGER)',
+    'public."identity_email_claim_transition_v2"(TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT, TEXT)',
+    'public."identity_email_claim_release_v2"(TEXT, TEXT, TEXT, TEXT, INTEGER)',
   ]) {
     await admin.$executeRawUnsafe(
       `GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`,
@@ -331,10 +336,10 @@ try {
         ON function_schema.oid = function_object.pronamespace
       WHERE function_schema.nspname = 'public'
         AND function_object.proname IN (
-          'identity_email_claim_reserve_invite_v1',
+          'identity_email_claim_reserve_invite_v2',
           'identity_email_claim_assert_invite_v1',
-          'identity_email_claim_transition_v1',
-          'identity_email_claim_release_v1'
+          'identity_email_claim_transition_v2',
+          'identity_email_claim_release_v2'
         )
     `,
   );
@@ -449,7 +454,7 @@ try {
       "subjectId",
       "tenantId",
     ]);
-    assert.equal(receipt.schemaVersion, 1);
+    assert.equal(receipt.schemaVersion, 2);
     assert.equal(receipt.operation, "RESERVE_INVITE");
     assert.equal(receipt.claimType, "INVITE");
     assert.equal(receipt.tenantId, tenantAId);
@@ -477,7 +482,7 @@ try {
   assert.deepEqual(
     await reserve(runtime, flowEmail, tenantAId, flowReservationId),
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: "RESERVE_INVITE",
       decision: "CREATED",
       claimType: "INVITE",
@@ -526,7 +531,7 @@ try {
       },
     });
     assert.deepEqual(await transition(tx, rebindInput), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: "TRANSITION_INVITE",
       decision: "TRANSITIONED",
       claimType: "INVITE",
@@ -536,7 +541,7 @@ try {
     });
   });
   assert.deepEqual(await transition(runtime, rebindInput), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: "TRANSITION_INVITE",
     decision: "ALREADY_TRANSITIONED",
     claimType: "INVITE",
@@ -553,23 +558,30 @@ try {
       expectedRevision: 2,
     }),
   );
+  await admin.userInvite.create({
+    data: {
+      id: staleDestinationInviteId,
+      tenantId: tenantAId,
+      email: flowEmail,
+      role: "MANAGER",
+      accessScope: "NETWORK",
+      storeIds: [],
+      tokenHash: `identity-boundary-stale-${suffix}`,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    },
+  });
   await expectSqlState("stale transition", "23514", () =>
     transition(runtime, {
       ...rebindInput,
       expectedSubjectId: randomUUID(),
-      nextSubjectId: randomUUID(),
+      nextSubjectId: staleDestinationInviteId,
     }),
   );
+  await admin.userInvite.delete({ where: { id: staleDestinationInviteId } });
   await admin.userInvite.delete({ where: { id: inviteId } });
-  assert.deepEqual(await transition(runtime, rebindInput), {
-    schemaVersion: 1,
-    operation: "TRANSITION_INVITE",
-    decision: "ALREADY_TRANSITIONED",
-    claimType: "INVITE",
-    tenantId: tenantAId,
-    subjectId: inviteId,
-    revision: 2,
-  });
+  await expectSqlState("transition replay without destination", "23503", () =>
+    transition(runtime, rebindInput),
+  );
   const promoteInput = {
     email: flowEmail,
     tenantId: tenantAId,
@@ -609,7 +621,7 @@ try {
       },
     });
     assert.deepEqual(await transition(tx, promoteInput), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: "TRANSITION_INVITE",
       decision: "TRANSITIONED",
       claimType: "USER",
@@ -619,7 +631,7 @@ try {
     });
   });
   assert.deepEqual(await transition(runtime, promoteInput), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: "TRANSITION_INVITE",
     decision: "ALREADY_TRANSITIONED",
     claimType: "USER",
@@ -655,7 +667,7 @@ try {
       expectedRevision: 1,
     }),
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: "RELEASE_INVITE",
       decision: "RELEASED",
       tenantId: tenantAId,
@@ -671,6 +683,109 @@ try {
       subjectId: releaseReservationId,
       expectedRevision: 1,
     }),
+  );
+
+  await reserve(runtime, revokedEmail, tenantAId, revokedReservationId);
+  await runtime.$transaction(async (tx) => {
+    await tx.userInvite.create({
+      data: {
+        id: revokedInviteId,
+        tenantId: tenantAId,
+        email: revokedEmail,
+        role: "MANAGER",
+        accessScope: "NETWORK",
+        storeIds: [],
+        tokenHash: `identity-boundary-revoked-${suffix}`,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+    });
+    assert.deepEqual(
+      await transition(tx, {
+        email: revokedEmail,
+        tenantId: tenantAId,
+        expectedType: "INVITE",
+        expectedSubjectId: revokedReservationId,
+        expectedRevision: 1,
+        nextType: "INVITE",
+        nextSubjectId: revokedInviteId,
+      }),
+      {
+        schemaVersion: 2,
+        operation: "TRANSITION_INVITE",
+        decision: "TRANSITIONED",
+        claimType: "INVITE",
+        tenantId: tenantAId,
+        subjectId: revokedInviteId,
+        revision: 2,
+      },
+    );
+    const revokedAt = new Date();
+    await tx.userInvite.update({
+      where: { id: revokedInviteId },
+      data: {
+        revokedAt,
+        identityClaimRevision: 2,
+      },
+    });
+    assert.deepEqual(
+      await release(tx, {
+        email: revokedEmail,
+        tenantId: tenantAId,
+        expectedType: "INVITE",
+        subjectId: revokedInviteId,
+        expectedRevision: 2,
+      }),
+      {
+        schemaVersion: 2,
+        operation: "RELEASE_INVITE",
+        decision: "RELEASED",
+        tenantId: tenantAId,
+        subjectId: revokedInviteId,
+        releasedRevision: 2,
+      },
+    );
+  });
+  assert.equal(
+    (
+      await admin.userInvite.findUniqueOrThrow({
+        where: { id: revokedInviteId },
+      })
+    ).revokedAt instanceof Date,
+    true,
+  );
+  assert.deepEqual(
+    await reserve(
+      runtime,
+      revokedEmail,
+      tenantAId,
+      revokedReplacementReservationId,
+    ),
+    {
+      schemaVersion: 2,
+      operation: "RESERVE_INVITE",
+      decision: "CREATED",
+      claimType: "INVITE",
+      tenantId: tenantAId,
+      subjectId: revokedReplacementReservationId,
+      revision: 1,
+    },
+  );
+  assert.deepEqual(
+    await release(runtime, {
+      email: revokedEmail,
+      tenantId: tenantAId,
+      expectedType: "INVITE",
+      subjectId: revokedReplacementReservationId,
+      expectedRevision: 1,
+    }),
+    {
+      schemaVersion: 2,
+      operation: "RELEASE_INVITE",
+      decision: "RELEASED",
+      tenantId: tenantAId,
+      subjectId: revokedReplacementReservationId,
+      releasedRevision: 1,
+    },
   );
 
   const finalClaims = await admin.identityEmailClaim.findMany({
@@ -700,7 +815,10 @@ try {
       createdReservations: 1,
       replayedReservations: 99,
       transitionReplayVerified: true,
+      transitionReplayDestinationChecked: true,
       boundReleaseRejected: true,
+      retainedRevokedInviteReleased: true,
+      revokedInviteReReserveVerified: true,
       userReleaseRejected: true,
       missingReleaseFailsClosed: true,
       canonicalEmailAbsentFromReceipts: true,

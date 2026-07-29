@@ -2,13 +2,22 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 const ALLOWED_IMPLEMENTATION = 'auth/identity-email-claim.service.ts';
+const ALLOWED_USER_OWNERSHIP_WRITERS = new Set(['auth/auth.service.ts']);
+const ALLOWED_INVITE_WRITERS = new Set([
+  'auth/auth.service.ts',
+  'users/users.service.ts',
+]);
 const FORBIDDEN_BOUNDARY_REFERENCES = [
-  '.identityEmailClaim',
+  'prisma.identityEmailClaim',
+  'tx.identityEmailClaim',
   'identity_email_claim_lock_v1',
   'identity_email_claim_reserve_invite_v1',
+  'identity_email_claim_reserve_invite_v2',
   'identity_email_claim_assert_invite_v1',
   'identity_email_claim_transition_v1',
   'identity_email_claim_release_v1',
+  'identity_email_claim_transition_v2',
+  'identity_email_claim_release_v2',
 ] as const;
 
 describe('Identity email claim application boundary', () => {
@@ -27,6 +36,38 @@ describe('Identity email claim application boundary', () => {
         if (source.includes(reference)) {
           violations.push(`${path}:${reference}`);
         }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps User creation and UserInvite mutation inside admitted workflows', async () => {
+    const sourceRoot = join(__dirname, '..');
+    const files = await typescriptFiles(sourceRoot);
+    const violations: string[] = [];
+
+    for (const file of files) {
+      const path = relative(sourceRoot, file).replaceAll('\\', '/');
+      if (path.endsWith('.spec.ts')) {
+        continue;
+      }
+      const source = await readFile(file, 'utf8');
+      if (
+        /\b(?:this\.)?(?:prisma|tx)\.user\.(?:create|createMany|upsert)\s*\(/u.test(
+          source,
+        ) &&
+        !ALLOWED_USER_OWNERSHIP_WRITERS.has(path)
+      ) {
+        violations.push(`${path}:User ownership writer`);
+      }
+      if (
+        /\b(?:this\.)?(?:prisma|tx)\.userInvite\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/u.test(
+          source,
+        ) &&
+        !ALLOWED_INVITE_WRITERS.has(path)
+      ) {
+        violations.push(`${path}:UserInvite writer`);
       }
     }
 

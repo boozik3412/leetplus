@@ -7,8 +7,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
+  IdentityEmailClaimType,
   Prisma,
   TenantCustomerStage,
   UserAccessScope,
@@ -23,6 +24,7 @@ import {
   resolveUserCapabilities,
   type AccessCapability,
 } from '../auth/capabilities';
+import { IdentityEmailClaimService } from '../auth/identity-email-claim.service';
 import { PasswordService } from '../auth/password.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -315,6 +317,7 @@ export class UsersService {
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
     private readonly accessScopeService: AccessScopeService,
+    private readonly identityClaimBoundary: IdentityEmailClaimService,
   ) {}
 
   async getUsers(user: AuthenticatedUser): Promise<UserAccountsResponse> {
@@ -340,6 +343,7 @@ export class UsersService {
           where: {
             tenantId,
             acceptedAt: null,
+            revokedAt: null,
             expiresAt: { gt: new Date() },
           },
           include: userInviteInclude,
@@ -383,69 +387,18 @@ export class UsersService {
     };
   }
 
-  async createUser(
+  createUser(
     actor: AuthenticatedUser,
     dto: UserAccountDto,
   ): Promise<UserAccount> {
-    const { tenantId } = this.tenantContextService.resolve(actor);
-    await this.assertGenericIdentityMutationAllowed(
-      tenantId,
-      'direct user creation',
+    void actor;
+    void dto;
+    return Promise.reject(
+      new ForbiddenException({
+        message: 'Direct user creation requires an email-bound invite',
+        reasonCode: 'DIRECT_USER_CREATION_REQUIRES_INVITE',
+      }),
     );
-    const email = this.normalizeEmail(dto.email);
-    const customRoleId = this.normalizeOptionalId(dto.customRoleId);
-    const role = customRoleId
-      ? UserRole.CLUB_ADMINISTRATOR
-      : this.parseRole(dto.role);
-    const fullName = this.normalizeNullableText(dto.fullName);
-    const password = dto.password?.trim() ?? '';
-    const scope = this.parseAccessScope(dto.scope);
-
-    this.assertEmail(email);
-    this.assertPassword(password);
-    this.assertOwnerAssignmentUsesTransferWorkflow(role);
-
-    const [existingUser, storeIds, customRole] = await Promise.all([
-      this.prisma.user.findUnique({ where: { email } }),
-      this.resolveStoreIds(tenantId, dto.storeIds),
-      this.resolveCustomRole(tenantId, customRoleId),
-    ]);
-    await this.assertCanAssignAccountRole(actor, role, customRole, tenantId);
-    this.assertNewScope(scope, storeIds);
-    this.accessScopeService.assertCanDelegate(actor, {
-      mode: scope,
-      storeIds,
-    });
-
-    if (existingUser) {
-      throw new ConflictException('Пользователь с таким email уже существует');
-    }
-
-    const passwordHash = await this.passwordService.hash(password);
-    const created = await this.prisma.$transaction(async (tx) => {
-      const account = await tx.user.create({
-        data: {
-          tenantId,
-          email,
-          fullName,
-          passwordHash,
-          role,
-          customRoleId: customRole?.id ?? null,
-          accessScope: scope,
-          isActive: dto.isActive ?? true,
-          emailVerifiedAt: new Date(),
-        },
-      });
-
-      await this.replaceStoreAccesses(tx, account.id, storeIds);
-
-      return tx.user.findUniqueOrThrow({
-        where: { id: account.id },
-        include: userAccountInclude,
-      });
-    });
-
-    return this.toAccount(created, await this.getRoleOverrideMap(tenantId));
   }
 
   async createInvite(
@@ -473,8 +426,7 @@ export class UsersService {
     }
     this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
-    const [existingUser, storeIds, customRole, stores] = await Promise.all([
-      email ? this.prisma.user.findUnique({ where: { email } }) : null,
+    const [storeIds, customRole, stores] = await Promise.all([
       this.resolveStoreIds(tenantId, dto.storeIds),
       this.resolveCustomRole(tenantId, customRoleId),
       this.prisma.store.findMany({
@@ -490,25 +442,68 @@ export class UsersService {
       storeIds,
     });
 
-    if (existingUser) {
-      throw new ConflictException('Пользователь с таким email уже существует');
-    }
-
     const rawToken = randomBytes(32).toString('base64url');
-    const invite = await this.prisma.userInvite.create({
-      data: {
-        tenantId,
-        email,
-        fullName,
-        role,
-        customRoleId: customRole?.id ?? null,
-        accessScope: scope,
-        storeIds,
-        tokenHash: this.hashInviteToken(rawToken),
-        expiresAt,
-        createdByUserId: actor.id,
-      },
-      include: userInviteInclude,
+    const reservationId = randomUUID();
+    const inviteId = randomUUID();
+    const invite = await this.prisma.$transaction(async (tx) => {
+      const identityTransaction =
+        this.identityClaimBoundary.bindTransaction(tx);
+      const reservation = await this.identityClaimBoundary.reserveInvite(
+        identityTransaction,
+        {
+          email,
+          tenantId,
+          subjectId: reservationId,
+        },
+      );
+      if (reservation.decision !== 'CREATED') {
+        throw new ConflictException(
+          'Invite identity reservation was already used',
+        );
+      }
+      const assertion = await this.identityClaimBoundary.assertInvite(
+        identityTransaction,
+        {
+          email,
+          tenantId,
+          subjectId: reservationId,
+          expectedRevision: reservation.revision,
+        },
+      );
+      await tx.userInvite.create({
+        data: {
+          id: inviteId,
+          tenantId,
+          email,
+          fullName,
+          role,
+          customRoleId: customRole?.id ?? null,
+          accessScope: scope,
+          storeIds,
+          tokenHash: this.hashInviteToken(rawToken),
+          expiresAt,
+          createdByUserId: actor.id,
+          identityClaimRevision: null,
+          revokedAt: null,
+          revokedByUserId: null,
+        },
+      });
+      const transition = await this.identityClaimBoundary.transitionInvite(
+        identityTransaction,
+        {
+          email,
+          tenantId,
+          expectedSubjectId: reservationId,
+          expectedRevision: assertion.revision,
+          nextClaimType: IdentityEmailClaimType.INVITE,
+          nextSubjectId: inviteId,
+        },
+      );
+      return tx.userInvite.update({
+        where: { id: inviteId },
+        data: { identityClaimRevision: transition.revision },
+        include: userInviteInclude,
+      });
     });
 
     return this.toInvite(
@@ -529,7 +524,7 @@ export class UsersService {
       'invite delivery',
     );
     const existing = await this.prisma.userInvite.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, revokedAt: null },
       include: userInviteInclude,
     });
 
@@ -594,6 +589,19 @@ export class UsersService {
         'Invite must be bound to a valid email address',
       );
     }
+    const existingEmail = this.normalizeOptionalEmail(existing.email);
+    if (!existingEmail) {
+      throw this.identityInviteProvenanceRequired();
+    }
+    if (email !== existingEmail) {
+      throw new ForbiddenException({
+        message: 'Invite email changes require the dedicated identity workflow',
+        reasonCode: 'INVITE_EMAIL_CHANGE_WORKFLOW_REQUIRED',
+      });
+    }
+    const identityClaimRevision = this.requireIdentityClaimRevision(
+      existing.identityClaimRevision,
+    );
     this.assertOwnerAssignmentUsesTransferWorkflow(role);
 
     await this.assertCanAssignAccountRole(actor, role, customRole, tenantId);
@@ -607,55 +615,79 @@ export class UsersService {
       storeIds,
     });
 
-    if (email && email !== existing.email) {
-      const existingUser = await this.prisma.user.findUnique({
-        where: { email },
-        select: { id: true },
-      });
-
-      if (existingUser) {
-        throw new ConflictException(
-          'Пользователь с таким email уже существует',
-        );
-      }
-    }
-
     const rawToken = randomBytes(32).toString('base64url');
-    const updatedCount = await this.prisma.userInvite.updateMany({
-      where: {
-        id: existing.id,
-        tenantId,
-        acceptedAt: null,
-        expiresAt: { gt: new Date() },
-        updatedAt: existing.updatedAt,
-      },
-      data: {
-        email,
-        fullName,
-        role,
-        customRoleId: customRole?.id ?? null,
-        accessScope: scope,
-        storeIds,
-        tokenHash: this.hashInviteToken(rawToken),
-        expiresAt,
-      },
-    });
-
-    if (updatedCount.count !== 1) {
-      throw new ConflictException('Invite changed or was already accepted');
-    }
-
-    const [updated, stores] = await Promise.all([
-      this.prisma.userInvite.findUniqueOrThrow({
-        where: { id: existing.id },
+    const reissuedInviteId = randomUUID();
+    const revokedAt = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const identityTransaction =
+        this.identityClaimBoundary.bindTransaction(tx);
+      const assertion = await this.identityClaimBoundary.assertInvite(
+        identityTransaction,
+        {
+          email,
+          tenantId,
+          subjectId: existing.id,
+          expectedRevision: identityClaimRevision,
+        },
+      );
+      await tx.userInvite.create({
+        data: {
+          id: reissuedInviteId,
+          tenantId,
+          email,
+          fullName,
+          role,
+          customRoleId: customRole?.id ?? null,
+          accessScope: scope,
+          storeIds,
+          tokenHash: this.hashInviteToken(rawToken),
+          expiresAt,
+          createdByUserId: actor.id,
+          identityClaimRevision: null,
+          revokedAt: null,
+          revokedByUserId: null,
+        },
+      });
+      const revoked = await tx.userInvite.updateMany({
+        where: {
+          id: existing.id,
+          tenantId,
+          acceptedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: revokedAt },
+          updatedAt: existing.updatedAt,
+        },
+        data: {
+          expiresAt: revokedAt,
+          revokedAt,
+          revokedByUserId: actor.id,
+        },
+      });
+      if (revoked.count !== 1) {
+        throw new ConflictException('Invite changed or was already accepted');
+      }
+      const transition = await this.identityClaimBoundary.transitionInvite(
+        identityTransaction,
+        {
+          email,
+          tenantId,
+          expectedSubjectId: existing.id,
+          expectedRevision: assertion.revision,
+          nextClaimType: IdentityEmailClaimType.INVITE,
+          nextSubjectId: reissuedInviteId,
+        },
+      );
+      return tx.userInvite.update({
+        where: { id: reissuedInviteId },
+        data: { identityClaimRevision: transition.revision },
         include: userInviteInclude,
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: { name: 'asc' },
-      }),
-    ]);
+      });
+    });
+    const stores = await this.prisma.store.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, isActive: true },
+      orderBy: { name: 'asc' },
+    });
 
     return this.toInvite(
       updated,
@@ -667,7 +699,7 @@ export class UsersService {
   async cancelInvite(actor: AuthenticatedUser, id: string) {
     const { tenantId } = this.tenantContextService.resolve(actor);
     const existing = await this.prisma.userInvite.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, revokedAt: null },
       include: userInviteInclude,
     });
 
@@ -691,24 +723,54 @@ export class UsersService {
       tenantId,
     );
 
-    if (existing.expiresAt.getTime() <= Date.now()) {
-      return { id: existing.id };
+    const email = this.normalizeOptionalEmail(existing.email);
+    if (!email) {
+      throw this.identityInviteProvenanceRequired();
     }
-
-    const canceled = await this.prisma.userInvite.updateMany({
-      where: {
-        id: existing.id,
+    const identityClaimRevision = this.requireIdentityClaimRevision(
+      existing.identityClaimRevision,
+    );
+    const canceledAt = new Date();
+    const terminalExpiresAt =
+      existing.expiresAt.getTime() <= canceledAt.getTime()
+        ? existing.expiresAt
+        : canceledAt;
+    await this.prisma.$transaction(async (tx) => {
+      const identityTransaction =
+        this.identityClaimBoundary.bindTransaction(tx);
+      const assertion = await this.identityClaimBoundary.assertInvite(
+        identityTransaction,
+        {
+          email,
+          tenantId,
+          subjectId: existing.id,
+          expectedRevision: identityClaimRevision,
+        },
+      );
+      const canceled = await tx.userInvite.updateMany({
+        where: {
+          id: existing.id,
+          tenantId,
+          acceptedAt: null,
+          revokedAt: null,
+          updatedAt: existing.updatedAt,
+        },
+        data: {
+          expiresAt: terminalExpiresAt,
+          revokedAt: canceledAt,
+          revokedByUserId: actor.id,
+        },
+      });
+      if (canceled.count !== 1) {
+        throw new ConflictException('Invite changed or was already accepted');
+      }
+      await this.identityClaimBoundary.releaseInvite(identityTransaction, {
+        email,
         tenantId,
-        acceptedAt: null,
-        expiresAt: { gt: new Date() },
-        updatedAt: existing.updatedAt,
-      },
-      data: { expiresAt: new Date() },
+        expectedSubjectId: existing.id,
+        expectedRevision: assertion.revision,
+      });
     });
-
-    if (canceled.count !== 1) {
-      throw new ConflictException('Invite changed or was already accepted');
-    }
 
     return { id: existing.id };
   }
@@ -778,24 +840,12 @@ export class UsersService {
       const email = this.normalizeEmail(dto.email);
       this.assertEmail(email);
 
-      if (email !== existing.email) {
-        await this.assertGenericIdentityMutationAllowed(
-          tenantId,
-          'email change',
-        );
-        const emailOwner = await this.prisma.user.findUnique({
-          where: { email },
-          select: { id: true },
+      if (email !== this.normalizeEmail(existing.email)) {
+        throw new ForbiddenException({
+          message:
+            'User email changes require the verified email-change workflow',
+          reasonCode: 'USER_EMAIL_CHANGE_WORKFLOW_REQUIRED',
         });
-
-        if (emailOwner && emailOwner.id !== existing.id) {
-          throw new ConflictException(
-            'Пользователь с таким email уже существует',
-          );
-        }
-
-        data.email = email;
-        data.emailVerifiedAt = new Date();
       }
     }
 
@@ -1528,6 +1578,25 @@ export class UsersService {
 
     this.assertEmail(normalizedEmail);
     return normalizedEmail;
+  }
+
+  private requireIdentityClaimRevision(value: unknown): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 1
+    ) {
+      throw this.identityInviteProvenanceRequired();
+    }
+
+    return value;
+  }
+
+  private identityInviteProvenanceRequired(): ConflictException {
+    return new ConflictException({
+      message: 'Invite identity claim provenance is required',
+      reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED',
+    });
   }
 
   private normalizeNullableText(value: unknown): string | null {

@@ -11,6 +11,25 @@ import { UsersService } from './users.service';
 const tenantId = 'tenant-a';
 const now = new Date('2026-07-27T00:00:00.000Z');
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function firstMockArgument<T>(
+  callable: { mock: { calls: unknown } },
+  argumentIndex = 0,
+): T {
+  const calls = callable.mock.calls;
+  if (!isUnknownArray(calls)) {
+    throw new Error('Expected mock call list');
+  }
+  const firstCall: unknown = calls[0];
+  if (!isUnknownArray(firstCall) || argumentIndex >= firstCall.length) {
+    throw new Error('Expected mock call argument');
+  }
+  return firstCall[argumentIndex] as T;
+}
+
 const storeActor = {
   id: 'manager-a1-a2',
   email: 'manager@example.test',
@@ -91,6 +110,9 @@ function inviteRow(
     acceptedAt: null,
     acceptedByUserId: null,
     createdByUserId: storeActor.id,
+    revokedAt: null,
+    revokedByUserId: null,
+    identityClaimRevision: 1,
     createdAt: now,
     updatedAt: now,
   };
@@ -109,6 +131,7 @@ function createService(overrides: {
       name: id.toUpperCase(),
       isActive: true,
     }));
+  const createdInvites = new Map<string, Record<string, unknown>>();
   const prisma = {
     tenant: {
       findUnique: jest.fn().mockResolvedValue({
@@ -141,7 +164,34 @@ function createService(overrides: {
       findMany: jest.fn().mockResolvedValue(overrides.invites ?? []),
       findFirst: jest.fn().mockResolvedValue(null),
       findUniqueOrThrow: jest.fn(),
-      updateMany: jest.fn(),
+      create: jest
+        .fn()
+        .mockImplementation((args: { data: Record<string, unknown> }) => {
+          const row = {
+            ...args.data,
+            acceptedAt: null,
+            acceptedByUserId: null,
+            customRole: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          createdInvites.set(String(args.data.id), row);
+          return Promise.resolve(row);
+        }),
+      update: jest
+        .fn()
+        .mockImplementation(
+          (args: { where: { id: string }; data: Record<string, unknown> }) => {
+            const row = {
+              ...(createdInvites.get(args.where.id) ?? {}),
+              ...args.data,
+              updatedAt: now,
+            };
+            createdInvites.set(args.where.id, row);
+            return Promise.resolve(row);
+          },
+        ),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     userRoleOverride: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -171,15 +221,92 @@ function createService(overrides: {
       return undefined;
     }),
   };
+  const identityClaimBoundary = {
+    bindTransaction: jest.fn((tx: unknown) => tx),
+    reserveInvite: jest.fn(
+      (
+        _tx: unknown,
+        input: { email: string; tenantId: string; subjectId: string },
+      ) =>
+        Promise.resolve({
+          schemaVersion: 2,
+          operation: 'RESERVE_INVITE',
+          decision: 'CREATED',
+          claimType: 'INVITE',
+          tenantId: input.tenantId,
+          subjectId: input.subjectId,
+          revision: 1,
+          fingerprint: 'fingerprint',
+          keyVersion: 'v1',
+        }),
+    ),
+    assertInvite: jest.fn(
+      (
+        _tx: unknown,
+        input: {
+          tenantId: string;
+          subjectId: string;
+          expectedRevision: number;
+        },
+      ) =>
+        Promise.resolve({
+          schemaVersion: 1,
+          operation: 'ASSERT_INVITE',
+          decision: 'MATCHED',
+          claimType: 'INVITE',
+          tenantId: input.tenantId,
+          subjectId: input.subjectId,
+          revision: input.expectedRevision,
+        }),
+    ),
+    transitionInvite: jest.fn(
+      (
+        _tx: unknown,
+        input: {
+          tenantId: string;
+          nextSubjectId: string;
+          expectedRevision: number;
+        },
+      ) =>
+        Promise.resolve({
+          schemaVersion: 2,
+          operation: 'TRANSITION_INVITE',
+          decision: 'TRANSITIONED',
+          claimType: 'INVITE',
+          tenantId: input.tenantId,
+          subjectId: input.nextSubjectId,
+          revision: input.expectedRevision + 1,
+        }),
+    ),
+    releaseInvite: jest.fn(
+      (
+        _tx: unknown,
+        input: {
+          tenantId: string;
+          expectedSubjectId: string;
+          expectedRevision: number;
+        },
+      ) =>
+        Promise.resolve({
+          schemaVersion: 2,
+          operation: 'RELEASE_INVITE',
+          decision: 'RELEASED',
+          tenantId: input.tenantId,
+          subjectId: input.expectedSubjectId,
+          releasedRevision: input.expectedRevision,
+        }),
+    ),
+  };
   const service = new UsersService(
     prisma as never,
     { hash: jest.fn() } as never,
     tenantContextService,
     configService as never,
     new AccessScopeService(),
+    identityClaimBoundary as never,
   );
 
-  return { prisma, service };
+  return { identityClaimBoundary, prisma, service };
 }
 
 describe('UsersService AccessScope boundary', () => {
@@ -213,8 +340,8 @@ describe('UsersService AccessScope boundary', () => {
     expect(result.invites[0]).not.toHaveProperty('registrationUrl');
   });
 
-  it('does not allow a store-scoped manager to issue network access', async () => {
-    const { service } = createService({});
+  it('requires every direct user creation to use an email-bound invite', async () => {
+    const { prisma, service } = createService({});
 
     await expect(
       service.createUser(storeActor, {
@@ -224,10 +351,17 @@ describe('UsersService AccessScope boundary', () => {
         scope: 'NETWORK',
         storeIds: [],
       }),
-    ).rejects.toThrow(ForbiddenException);
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'DIRECT_USER_CREATION_REQUIRES_INVITE',
+      },
+    });
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('requires external tenants to create users through email-bound invites', async () => {
+  it('also rejects direct creation for network owners without inspecting tenant data', async () => {
     const { prisma, service } = createService({
       tenantCustomerStage: TenantCustomerStage.PILOT,
     });
@@ -240,9 +374,13 @@ describe('UsersService AccessScope boundary', () => {
         scope: 'NETWORK',
         storeIds: [],
       }),
-    ).rejects.toThrow(
-      'External tenants must create users through email-bound invites',
-    );
+    ).rejects.toMatchObject({
+      response: {
+        message: 'Direct user creation requires an email-bound invite',
+        reasonCode: 'DIRECT_USER_CREATION_REQUIRES_INVITE',
+      },
+    });
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(prisma.store.findMany).not.toHaveBeenCalled();
   });
@@ -266,7 +404,7 @@ describe('UsersService AccessScope boundary', () => {
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  it('keeps external email changes fail-closed until mailbox verification is available', async () => {
+  it('keeps every real user email change fail-closed until mailbox verification is available', async () => {
     const target = userRow('employee-a1', 'STORES', ['a1']);
     const { prisma, service } = createService({
       tenantCustomerStage: TenantCustomerStage.PILOT,
@@ -277,11 +415,17 @@ describe('UsersService AccessScope boundary', () => {
       service.updateUser(networkOwnerActor, target.id, {
         email: 'unverified@example.test',
       }),
-    ).rejects.toThrow(
-      'External tenant email changes require the verified email-change workflow',
-    );
+    ).rejects.toMatchObject({
+      response: {
+        message:
+          'User email changes require the verified email-change workflow',
+        reasonCode: 'USER_EMAIL_CHANGE_WORKFLOW_REQUIRED',
+      },
+    });
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('does not allow a store-scoped manager to issue a sibling store', async () => {
@@ -353,58 +497,348 @@ describe('UsersService AccessScope boundary', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('rotates the opaque token and conditionally updates an active invite', async () => {
-    const existing = inviteRow('invite-a1', 'STORES', ['a1']);
-    const { prisma, service } = createService({});
-    let updateCall:
-      | {
-          where: {
-            id: string;
-            tenantId: string;
-            acceptedAt: null;
-            updatedAt: Date;
-          };
-          data: { tokenHash: string };
-        }
-      | undefined;
-    prisma.userInvite.findFirst.mockResolvedValue(existing);
-    prisma.userInvite.updateMany.mockImplementation((args: unknown) => {
-      updateCall = args as typeof updateCall;
-      return Promise.resolve({ count: 1 });
-    });
-    prisma.userInvite.findUniqueOrThrow.mockResolvedValue({
-      ...existing,
-      email: 'updated@example.test',
+  it('creates the invite and identity provenance atomically in boundary order', async () => {
+    const { identityClaimBoundary, prisma, service } = createService({});
+
+    const result = await service.createInvite(networkOwnerActor, {
+      email: 'new-user@example.test',
+      fullName: 'New User',
+      role: UserRole.CLUB_ADMINISTRATOR,
+      scope: 'NETWORK',
+      storeIds: [],
     });
 
-    const result = await service.updateInvite(storeActor, existing.id, {
-      email: 'updated@example.test',
+    const createArgs = firstMockArgument<{
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.create);
+    const inviteId = String(createArgs.data.id);
+    const reserveInput = identityClaimBoundary.reserveInvite.mock.calls[0]?.[1];
+    const transitionInput =
+      identityClaimBoundary.transitionInvite.mock.calls[0]?.[1];
+    const persistArgs = firstMockArgument<{
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.update);
+    const invocationOrder = [
+      identityClaimBoundary.bindTransaction.mock.invocationCallOrder[0],
+      identityClaimBoundary.reserveInvite.mock.invocationCallOrder[0],
+      identityClaimBoundary.assertInvite.mock.invocationCallOrder[0],
+      prisma.userInvite.create.mock.invocationCallOrder[0],
+      identityClaimBoundary.transitionInvite.mock.invocationCallOrder[0],
+      prisma.userInvite.update.mock.invocationCallOrder[0],
+    ];
+
+    expect(invocationOrder).toEqual(
+      [...invocationOrder].sort((left, right) => left - right),
+    );
+    expect(inviteId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(reserveInput?.subjectId).not.toBe(inviteId);
+    expect(createArgs.data).toMatchObject({
+      id: inviteId,
+      email: 'new-user@example.test',
+      identityClaimRevision: null,
+      revokedAt: null,
+      revokedByUserId: null,
     });
-    expect(result.id).toBe(existing.id);
+    expect(transitionInput).toMatchObject({
+      expectedSubjectId: reserveInput?.subjectId,
+      expectedRevision: 1,
+      nextClaimType: 'INVITE',
+      nextSubjectId: inviteId,
+    });
+    expect(persistArgs).toMatchObject({
+      where: { id: inviteId },
+      data: { identityClaimRevision: 2 },
+    });
+    expect(result).toMatchObject({
+      id: inviteId,
+      email: 'new-user@example.test',
+    });
     expect(result.registrationUrl).toMatch(
       /^https:\/\/example\.test\/register\?invite=/,
     );
-    expect(updateCall?.where).toMatchObject({
-      id: existing.id,
-      tenantId,
-      acceptedAt: null,
-      updatedAt: existing.updatedAt,
-    });
-    expect(updateCall?.data.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('does not update an invite that changed or was accepted concurrently', async () => {
+  it('propagates an identity transition failure without persisting provenance', async () => {
+    const { identityClaimBoundary, prisma, service } = createService({});
+    identityClaimBoundary.transitionInvite.mockRejectedValueOnce(
+      new Error('transition failed'),
+    );
+
+    await expect(
+      service.createInvite(networkOwnerActor, {
+        email: 'new-user@example.test',
+        role: UserRole.CLUB_ADMINISTRATOR,
+        scope: 'NETWORK',
+        storeIds: [],
+      }),
+    ).rejects.toThrow('transition failed');
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.userInvite.create).toHaveBeenCalledTimes(1);
+    expect(prisma.userInvite.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects changing the canonical email of an existing invite', async () => {
     const existing = inviteRow('invite-a1', 'STORES', ['a1']);
     const { prisma, service } = createService({});
     prisma.userInvite.findFirst.mockResolvedValue(existing);
-    prisma.userInvite.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(
       service.updateInvite(storeActor, existing.id, {
         email: 'updated@example.test',
       }),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'INVITE_EMAIL_CHANGE_WORKFLOW_REQUIRED',
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('reissues a same-email invite as a new immutable subject', async () => {
+    const existing = inviteRow('invite-a1', 'STORES', ['a1']);
+    const { identityClaimBoundary, prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    const result = await service.updateInvite(storeActor, existing.id, {
+      email: existing.email.toUpperCase(),
+      fullName: 'Reissued User',
+    });
+
+    const createArgs = firstMockArgument<{
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.create);
+    const reissuedInviteId = String(createArgs.data.id);
+    const revokeArgs = firstMockArgument<{
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.updateMany);
+    const transitionInput =
+      identityClaimBoundary.transitionInvite.mock.calls[0]?.[1];
+    const persistArgs = firstMockArgument<{
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.update);
+    const invocationOrder = [
+      identityClaimBoundary.bindTransaction.mock.invocationCallOrder[0],
+      identityClaimBoundary.assertInvite.mock.invocationCallOrder[0],
+      prisma.userInvite.create.mock.invocationCallOrder[0],
+      prisma.userInvite.updateMany.mock.invocationCallOrder[0],
+      identityClaimBoundary.transitionInvite.mock.invocationCallOrder[0],
+      prisma.userInvite.update.mock.invocationCallOrder[0],
+    ];
+
+    expect(invocationOrder).toEqual(
+      [...invocationOrder].sort((left, right) => left - right),
+    );
+    expect(reissuedInviteId).not.toBe(existing.id);
+    expect(createArgs.data).toMatchObject({
+      id: reissuedInviteId,
+      email: existing.email,
+      identityClaimRevision: null,
+      revokedAt: null,
+      revokedByUserId: null,
+    });
+    expect(revokeArgs.where).toMatchObject({
+      id: existing.id,
+      tenantId,
+      acceptedAt: null,
+      revokedAt: null,
+      updatedAt: existing.updatedAt,
+    });
+    expect(revokeArgs.data).toMatchObject({
+      revokedByUserId: storeActor.id,
+    });
+    expect(revokeArgs.data.revokedAt).toBeInstanceOf(Date);
+    expect(revokeArgs.data.expiresAt).toBe(revokeArgs.data.revokedAt);
+    expect(transitionInput).toMatchObject({
+      expectedSubjectId: existing.id,
+      expectedRevision: existing.identityClaimRevision,
+      nextSubjectId: reissuedInviteId,
+    });
+    expect(persistArgs).toMatchObject({
+      where: { id: reissuedInviteId },
+      data: { identityClaimRevision: 2 },
+    });
+    expect(result).toMatchObject({
+      id: reissuedInviteId,
+      email: existing.email,
+      fullName: 'Reissued User',
+    });
+    expect(result.registrationUrl).toMatch(
+      /^https:\/\/example\.test\/register\?invite=/,
+    );
+  });
+
+  it('does not transition identity when an invite changed concurrently', async () => {
+    const existing = inviteRow('invite-a1', 'STORES', ['a1']);
+    const { identityClaimBoundary, prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+    prisma.userInvite.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.updateInvite(storeActor, existing.id, {
+        email: existing.email,
+      }),
     ).rejects.toThrow(ConflictException);
-    expect(prisma.userInvite.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.assertInvite).toHaveBeenCalledTimes(1);
+    expect(prisma.userInvite.create).toHaveBeenCalledTimes(1);
+    expect(identityClaimBoundary.transitionInvite).not.toHaveBeenCalled();
+    expect(prisma.userInvite.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects legacy invites that do not carry identity provenance', async () => {
+    const existing = {
+      ...inviteRow('invite-a1', 'STORES', ['a1']),
+      identityClaimRevision: null,
+    };
+    const { prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.updateInvite(storeActor, existing.id, {
+        email: existing.email,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED',
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('revokes an invite and releases its identity claim in boundary order', async () => {
+    const existing = inviteRow('invite-a1', 'STORES', ['a1']);
+    const { identityClaimBoundary, prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.cancelInvite(storeActor, existing.id),
+    ).resolves.toEqual({ id: existing.id });
+
+    const revokeArgs = firstMockArgument<{
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.updateMany);
+    const releaseInput = identityClaimBoundary.releaseInvite.mock.calls[0]?.[1];
+    const invocationOrder = [
+      identityClaimBoundary.bindTransaction.mock.invocationCallOrder[0],
+      identityClaimBoundary.assertInvite.mock.invocationCallOrder[0],
+      prisma.userInvite.updateMany.mock.invocationCallOrder[0],
+      identityClaimBoundary.releaseInvite.mock.invocationCallOrder[0],
+    ];
+
+    expect(invocationOrder).toEqual(
+      [...invocationOrder].sort((left, right) => left - right),
+    );
+    expect(revokeArgs.where).toMatchObject({
+      id: existing.id,
+      tenantId,
+      acceptedAt: null,
+      revokedAt: null,
+      updatedAt: existing.updatedAt,
+    });
+    expect(revokeArgs.data).toMatchObject({
+      revokedByUserId: storeActor.id,
+    });
+    expect(revokeArgs.data.revokedAt).toBeInstanceOf(Date);
+    expect(revokeArgs.data.expiresAt).toBe(revokeArgs.data.revokedAt);
+    expect(releaseInput).toMatchObject({
+      email: existing.email,
+      tenantId,
+      expectedSubjectId: existing.id,
+      expectedRevision: existing.identityClaimRevision,
+    });
+  });
+
+  it('explicitly revokes and releases a naturally expired invite', async () => {
+    const expiredAt = new Date('2026-07-01T00:00:00.000Z');
+    const existing = {
+      ...inviteRow('invite-expired-a1', 'STORES', ['a1']),
+      expiresAt: expiredAt,
+    };
+    const { identityClaimBoundary, prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.cancelInvite(storeActor, existing.id),
+    ).resolves.toEqual({ id: existing.id });
+
+    const revokeArgs = firstMockArgument<{
+      data: Record<string, unknown>;
+    }>(prisma.userInvite.updateMany);
+    expect(revokeArgs.data.expiresAt).toBe(expiredAt);
+    expect(revokeArgs.data.revokedAt).toBeInstanceOf(Date);
+    expect(identityClaimBoundary.assertInvite).toHaveBeenCalledTimes(1);
+    expect(identityClaimBoundary.releaseInvite).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not release identity when invite revocation loses its CAS', async () => {
+    const existing = inviteRow('invite-a1', 'STORES', ['a1']);
+    const { identityClaimBoundary, prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+    prisma.userInvite.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.cancelInvite(storeActor, existing.id)).rejects.toThrow(
+      ConflictException,
+    );
+    expect(identityClaimBoundary.assertInvite).toHaveBeenCalledTimes(1);
+    expect(identityClaimBoundary.releaseInvite).not.toHaveBeenCalled();
+  });
+
+  it('rejects canceling a live legacy invite without identity provenance', async () => {
+    const existing = {
+      ...inviteRow('invite-a1', 'STORES', ['a1']),
+      identityClaimRevision: null,
+    };
+    const { identityClaimBoundary, prisma, service } = createService({});
+    prisma.userInvite.findFirst.mockResolvedValue(existing);
+
+    await expect(
+      service.cancelInvite(storeActor, existing.id),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED',
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(identityClaimBoundary.releaseInvite).not.toHaveBeenCalled();
+  });
+
+  it('permits non-email updates when the supplied email has the same canonical form', async () => {
+    const target = userRow('employee-a1', 'STORES', ['a1']);
+    const { prisma, service } = createService({});
+    prisma.user.findFirst.mockResolvedValue(target);
+    prisma.user.update.mockResolvedValue({
+      ...target,
+      fullName: 'Updated Employee',
+    });
+
+    await expect(
+      service.updateUser(networkOwnerActor, target.id, {
+        email: target.email.toUpperCase(),
+        fullName: 'Updated Employee',
+      }),
+    ).resolves.toMatchObject({
+      id: target.id,
+      email: target.email,
+      fullName: 'Updated Employee',
+    });
+
+    const updateArgs = firstMockArgument<{
+      data: Record<string, unknown>;
+    }>(prisma.user.update);
+    expect(updateArgs.data).toMatchObject({
+      fullName: 'Updated Employee',
+    });
+    expect(updateArgs.data).not.toHaveProperty('email');
+    expect(updateArgs.data).not.toHaveProperty('emailVerifiedAt');
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   describe('last active NETWORK OWNER invariant', () => {

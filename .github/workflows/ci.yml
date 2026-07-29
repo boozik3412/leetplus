@@ -145,7 +145,7 @@ jobs:
       - name: Validate identity email claim foundation
         run: pnpm --filter database check:identity-email-claim
 
-      - name: Validate identity email claim sealed write boundary
+      - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 
       - name: Test database seed safety
@@ -195,8 +195,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260729210000_identity_email_claim_write_boundary
-          EXPECTED_DATABASE_MIGRATION_COUNT: "168"
+          EXPECTED_DATABASE_MIGRATION: 20260729230000_identity_invite_writer_boundary
+          EXPECTED_DATABASE_MIGRATION_COUNT: "169"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 

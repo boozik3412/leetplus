@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.18.0                                             |
+| Версия          | 1.19.0                                             |
 | Дата            | 29.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -15,8 +15,8 @@
 
 Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
 `Full candidate SHA` и не заменяют CI/review/evidence нового exact current
-candidate, который должен включать additive migrations `163..166` и пройти
-`CURRENT_166`
+candidate, который должен включать additive migrations `163..169` и пройти
+`CURRENT_169`
 admission.
 
 ## A. Release identity и authority
@@ -66,8 +66,8 @@ admission.
       два закрыты exact-head checkpoint `d525b736...`, четвёртый
       lock-order/`40P01` — exact-head `be8c94c4...`. Все четыре engineering P1
       закрыты; provider writes остаются `NO-GO` до operational gates.
-- [x] Schema target зафиксирован как `CURRENT_166`. Previous accepted
-      engineering baseline связан с PR head:
+- [x] Historical schema target `CURRENT_166` был связан с previous accepted
+      engineering PR-head baseline:
       `bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
       [`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
       (`run #23`), выполненным через merge-ref; это не exact-SHA checkout
@@ -76,6 +76,11 @@ admission.
       `90549245372` на PostgreSQL major `16`. Authority job не выполнял root
       enrollment; registry остаётся `{}`. `c1fee42c...` / CI `30442286822`
       остаётся historical precursor.
+- [x] Historical `CURRENT_168` exact-head
+      `3b8228dd278fae062c753bf4301e0339ba93738b` прошёл CI `30460154200`,
+      `3/3 PASS`, и independent review без новых P0.
+- [ ] Exact `CURRENT_169` candidate SHA, remote CI и independent review
+      приняты; local `169/169`/application evidence не закрывает этот пункт.
 - [x] Rejected exact-head candidate
       `a644b81e909ea97c21e3c404480505bf97b19935`, CI
       [`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
@@ -184,16 +189,19 @@ admission.
       `20260728120000_tenant_execution_control_plane_expand` и
       `20260728150000_tenant_execution_revision_fence` и
       `20260729120000_store_background_execution_fence` и
-      `20260729160000_guest_game_delivery_claim_fence`; они не изменили
-      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_166`
+      `20260729160000_guest_game_delivery_claim_fence` и
+      `20260729190000_identity_email_claim_foundation` и
+      `20260729210000_identity_email_claim_write_boundary` и
+      `20260729230000_identity_invite_writer_boundary`; они не изменили
+      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_169`
       envelope с новым nonce-bound binding, DB marker повторно заменён, третий
       admission schema `v2` завершился exit `0`; reuse expand marker запрещён.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
       release SHA и thresholds; schema-first gate равен
-      `CURRENT_166`, `migrationCount=166`, latest
-      `20260729160000_guest_game_delivery_claim_fence`, `unfinished=0`,
+      `CURRENT_169`, `migrationCount=169`, latest
+      `20260729230000_identity_invite_writer_boundary`, `unfinished=0`,
       `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
       `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
       actionable cap не превышен.
@@ -474,6 +482,12 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.19.0`, 29.07.2026 — current cutover target синхронизирован с
+  `CURRENT_169` (`163..169`, latest
+  `20260729230000_identity_invite_writer_boundary`). Local engineering
+  evidence зафиксировано только как prerequisite; exact-head CI/review,
+  production-like admission, cutover и внешний доступ остаются unchecked
+  `NO-GO`.
 - `1.18.0`, 29.07.2026 — единая retroactive evidence correction:
   schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref
   baseline —

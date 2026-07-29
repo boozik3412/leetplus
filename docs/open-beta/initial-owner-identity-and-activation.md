@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.3                                                             |
+| Версия           | 1.4                                                             |
 | Дата             | 29.07.2026                                                      |
-| Статус           | `CURRENT_168` shell/claim candidate; activation ещё pending      |
+| Статус           | `CURRENT_169` writer-boundary candidate; activation ещё pending  |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -106,13 +106,13 @@ Migration `20260729190000_identity_email_claim_foundation` создаёт claim 
 identity-email:v1:<canonical-email>
 ```
 
-Migration `20260729210000_identity_email_claim_write_boundary` закрывает
-runtime DML четырьмя `SECURITY DEFINER` RPC:
+Migration `20260729210000_identity_email_claim_write_boundary` ввела sealed
+runtime DML. После successor migration 169 текущий exact allowlist содержит:
 
-- `reserve_invite_v1`;
+- `reserve_invite_v2`;
 - `assert_invite_v1`;
-- `transition_v1`;
-- `release_v1`.
+- `transition_v2`;
+- `release_v2`.
 
 Обычная runtime role имеет нулевые effective table privileges на
 `IdentityEmailClaim` и exact `EXECUTE` только на эти четыре identity RPC плюс
@@ -127,8 +127,21 @@ Canonicalization и uniqueness case-insensitive.
 
 Для будущего accept/reissue обязателен порядок
 `assert (lock retained) → User/UserInvite write → transition → commit`.
-Legacy `User`/`UserInvite` writers пока не используют этот invariant, поэтому
-identity workflow остаётся `NO-GO`.
+
+Migration `20260729230000_identity_invite_writer_boundary` переводит основные
+application writers на этот invariant:
+
+- issue использует `reserve_v2 → assert → create → transition_v2`;
+- same-email reissue создаёт новый immutable invite и явно отзывает старый;
+- revoke сохраняет history и вызывает `release_v2`;
+- accept атомарно переводит claim `INVITE → USER`;
+- direct user creation и user/invite email change fail-closed;
+- legacy строки без persisted revision fail-closed.
+
+Исторические строки ещё требуют inventory/backfill, а activation/outbox/mail
+delivery не реализованы, поэтому identity workflow остаётся `NO-GO`.
+Подробный checkpoint:
+[identity invite writer boundary](./identity-invite-writer-boundary.md).
 
 ### 3.2. Identity mail outbox
 
@@ -267,7 +280,8 @@ Serializable transaction:
 
 Provisioning не запускает trial и не создаёт mail outbox.
 
-Service-level shell candidate реализован на `CURRENT_168`, но route остаётся
+Service-level shell candidate и writer boundary реализованы на `CURRENT_169`,
+но route остаётся
 намеренно закрыт:
 
 ```text
@@ -280,14 +294,16 @@ Legacy initial-owner revoke route также закрыт:
 503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING
 ```
 
-Локальный disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`,
+Локальный disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
-`INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
-cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`.
-Remote exact-head implementation
+`INVITE | USER` same-subject rejection, explicit revoke → release →
+same-email reserve, shell integration `2/2` и 100-way cross-slug race
+`50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`.
+Предыдущий `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
-`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
+`3/3 PASS`, и независимым review без новых P0; exact-head CI/review
+`CURRENT_169` ещё pending. Local и remote engineering
 evidence не являются production-like admission или разрешением вызвать route.
 
 ### 5.2. Activation
@@ -452,23 +468,30 @@ Two-tenant:
 Завершённый candidate foundation:
 
 - migration 167: canonical claim и единый lock namespace;
-- migration 168: sealed reserve/assert/transition/release boundary;
+- migration 168: initial sealed reserve/assert/transition/release boundary;
+- migration 169: persisted provenance/revocation и sealed runtime
+  issue/reissue/revoke/accept candidate;
 - shell-only service: `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six-row
   profile, HMAC audit, без User/UserInvite/token/trial/outbox;
-- local PostgreSQL `16.14`: `168/168`, identity `1/99`, shell `2/2`;
-- exact-head `3b8228dd278fae062c753bf4301e0339ba93738b`, CI `30460154200`:
-  `3/3 PASS`; independent review: PASS без новых P0.
+- local PostgreSQL `16.13`: `169/169`, identity `1/99`, revoke→reserve,
+  shell `2/2`;
+- previous `CURRENT_168` exact-head
+  `3b8228dd278fae062c753bf4301e0339ba93738b`, CI `30460154200`:
+  `3/3 PASS`; `CURRENT_169` exact-head evidence pending.
 
 Следующие обязательные шаги:
 
-1. Перевести legacy `User`/`UserInvite` writers на sealed claim invariant и
-   доказать отсутствие direct runtime table DML.
+1. Выполнить privacy-safe inventory/admitted backfill исторических
+   `User`/`UserInvite` без provenance, изолировать design-partner CLI и
+   подтвердить отсутствие direct application runtime table DML.
 2. Спроектировать activation locator без хранения и раскрытия raw email;
    lookup и повторная проверка claim должны выполняться fail-closed под lock.
 3. Добавить encrypted identity mail outbox и fail-closed mail config.
 4. Реализовать release-gate attestations и tenant admission decision.
-5. Реализовать activation, trial start, issue/reissue/revoke/resend/accept и
-   emergency suspend; оба admin route до этого сохраняют `503`.
+5. Реализовать initial OWNER activation, trial start, encrypted
+   issue/reissue/resend delivery и emergency suspend поверх уже sealed
+   application revoke/accept state machine; оба admin route до этого
+   сохраняют `503`.
 6. Перевести invite transport на fragment + POST body.
 7. Выполнить полный real PostgreSQL concurrency matrix и two-tenant tests.
 8. Довести durable lease/effect fencing для оставшихся workers, guest и

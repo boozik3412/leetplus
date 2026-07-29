@@ -147,7 +147,7 @@ describe('SharedTenantProvisioningService shell boundary', () => {
     reserveInvite = jest.spyOn(identity, 'reserveInvite');
     reserveInvite.mockImplementation((_tx, input) =>
       Promise.resolve({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'RESERVE_INVITE',
         decision: 'CREATED',
         claimType: IdentityEmailClaimType.INVITE,

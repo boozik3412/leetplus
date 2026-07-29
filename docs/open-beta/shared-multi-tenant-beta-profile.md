@@ -3,7 +3,7 @@
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.4                                                             |
+| Версия           | 1.5                                                             |
 | Дата             | 29.07.2026                                                      |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
 | Формат           | Первый friendly external club, invite-only                      |
@@ -91,8 +91,8 @@ deny-by-default. Frontend visibility не является авторизаци�
 ## 3. Владелец и delegation
 
 Platform operator в целевом workflow сначала выполняет idempotent shell-only
-provisioning. Реализованный `CURRENT_168` service candidate одной
-serializable-транзакцией:
+provisioning. Текущий `CURRENT_169` candidate сохраняет реализованный в
+`CURRENT_168` shell service, который одной serializable-транзакцией:
 
 1. создаёт `Tenant B` как
    `PILOT/SUSPENDED/PROVISIONING/profileRevision=1`;
@@ -106,21 +106,28 @@ serializable-транзакцией:
 7. возвращает только несекретный shell snapshot.
 
 Shell не создаёт invite, token, registration URL, trial, outbox или письмо.
-Runtime role имеет zero `IdentityEmailClaim` DML и exact `EXECUTE` на четыре
-identity RPC; полный application allowlist содержит ровно шесть RPC с учётом
-двух guest-game boundaries. Combined subject invariant охватывает
-`INVITE | USER`, reserve проверяет legacy identity rows до replay, а exact
-`search_path=pg_catalog` всех definer RPC аттестуется по PostgreSQL catalog.
+Migration 169 добавляет persisted revision provenance и explicit revoke
+history для `User`/`UserInvite`; обычные issue/reissue/revoke/accept paths
+используют sealed state machine. Runtime role имеет zero
+`IdentityEmailClaim` DML и exact `EXECUTE` на
+`reserve_v2/assert_v1/transition_v2/release_v2`; полный application allowlist
+содержит ровно шесть RPC с учётом двух guest-game boundaries. Direct user
+creation и user/invite email change остаются fail-closed.
 
-Локальный disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`,
-identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
-`INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
-cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`.
-Remote exact-head implementation
+Локальный disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`,
+identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, transition
+destination replay-check, retained revoked history, новую same-email
+reservation после explicit revoke и shell integration `2/2`. Focused
+application tests прошли `89/89`, full API —
+`99 suites / 1940 passed / 2 todo`. Remote exact-head CI и independent review
+для `CURRENT_169` ещё pending.
+
+Предыдущий `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
-`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
-evidence не являются launch approval.
+`3/3 PASS`, и независимым review без новых P0 только как historical
+prerequisite. Ни local, ни remote engineering evidence не являются launch
+approval.
 
 Оба Platform Admin route остаются закрытыми:
 
@@ -134,11 +141,12 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 
 OWNER invite появится только в отдельной protected activation после
 persisted `SHARED BETA GO`. До неё необходимо реализовать activation locator,
-encrypted outbox, issue/reissue/revoke/accept и перевести legacy
-`User`/`UserInvite` writers на общий claim invariant. Fingerprint HMAC
-startup validation уже реализована candidate; до deploy требуется только
-защищённо настроить и аттестовать отдельный production secret version `v1`.
-Поэтому реальный tester email в route не передаётся.
+encrypted outbox и verified delivery, выполнить inventory/backfill
+исторических identity rows, закрыть design-partner CLI и пройти полный
+issue/reissue/revoke/accept race. Fingerprint HMAC startup validation уже
+реализована candidate; до deploy требуется защищённо настроить и аттестовать
+отдельный production secret version `v1`. Поэтому реальный tester email в
+route не передаётся.
 
 После принятия invite OWNER:
 
@@ -274,7 +282,7 @@ system/custom roles, capabilities, `NETWORK | STORES` scope и audit.
 
 Дополнительно до любого внешнего доступа обязательны production-like
 upgrade/rollback/zero-diff и полноценная two-tenant rehearsal. Local
-`CURRENT_168` PostgreSQL evidence не заменяет эти gates.
+`CURRENT_169` PostgreSQL evidence не заменяет эти gates.
 
 Немедленные stop conditions:
 

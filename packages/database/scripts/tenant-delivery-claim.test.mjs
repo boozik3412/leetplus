@@ -306,19 +306,19 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
     migrationNames.at(-1),
     CURRENT_EXPECTED_LATEST_MIGRATION,
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_168");
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_169");
   assert.deepEqual(
-    STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-4, -2),
+    STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-5, -3),
     [PREFIX_MIGRATION, TARGET_MIGRATION],
   );
-  assert.equal(targetIndex, migrationNames.length - 3);
+  assert.equal(targetIndex, migrationNames.length - 4);
   assert.equal(migrationNames[targetIndex - 1], PREFIX_MIGRATION);
   assert.equal(
     migrationNames[targetIndex + 1],
     IDENTITY_FOUNDATION_MIGRATION,
   );
   assert.equal(
-    migrationNames[targetIndex + 2],
+    migrationNames[targetIndex + 3],
     CURRENT_EXPECTED_LATEST_MIGRATION,
   );
   assert.deepEqual(

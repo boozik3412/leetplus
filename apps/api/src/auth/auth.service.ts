@@ -4,12 +4,14 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
+  IdentityEmailClaimType,
   Prisma,
   TenantCustomerStage,
   TenantLifecycleStatus,
@@ -28,6 +30,7 @@ import { AcceptUserInviteDto, LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 import { EmailVerificationService } from './email-verification.service';
+import { IdentityEmailClaimService } from './identity-email-claim.service';
 import { PasswordService } from './password.service';
 
 type AuthResponse = {
@@ -125,6 +128,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly accessScopeService: AccessScopeService,
     private readonly tenantExecutionPolicy: TenantExecutionPolicyService,
+    private readonly identityEmailClaim: IdentityEmailClaimService,
   ) {}
 
   register(dto: RegisterDto): never {
@@ -176,6 +180,9 @@ export class AuthService {
   ): Promise<AuthResponse> {
     const invite = await this.resolveActiveInvite(token);
     this.assertInviteAdmitted(invite);
+    const identityClaimRevision = this.requireInviteIdentityClaimRevision(
+      invite.identityClaimRevision,
+    );
     const email = this.resolveInviteEmail(invite.email, dto.email);
     const fullName = this.resolveInviteFullName(invite.fullName, dto.fullName);
     const password = dto.password;
@@ -198,6 +205,14 @@ export class AuthService {
 
     const passwordHash = await this.passwordService.hash(password);
     const created = await this.prisma.$transaction(async (tx) => {
+      const identityTransaction = this.identityEmailClaim.bindTransaction(tx);
+      await this.identityEmailClaim.assertInvite(identityTransaction, {
+        email,
+        tenantId: invite.tenantId,
+        subjectId: invite.id,
+        expectedRevision: identityClaimRevision,
+      });
+
       const acceptedAt = new Date();
       const lockedTenants = await tx.$queryRaw<
         Array<PersistedTenantExecutionSubject>
@@ -219,11 +234,10 @@ export class AuthService {
       if (!lockedTenant) {
         throw new ConflictException('Tenant changed while accepting invite');
       }
-      const lockedEntitlements =
-        await tx.tenantModuleEntitlement.findMany({
-          where: { tenantId: invite.tenantId },
-          select: tenantModuleEntitlementExecutionSelect,
-        });
+      const lockedEntitlements = await tx.tenantModuleEntitlement.findMany({
+        where: { tenantId: invite.tenantId },
+        select: tenantModuleEntitlementExecutionSelect,
+      });
       this.assertInviteAdmitted(
         {
           ...invite,
@@ -249,8 +263,10 @@ export class AuthService {
         }
       }
 
-      const user = await tx.user.create({
+      const userId = randomUUID();
+      await tx.user.create({
         data: {
+          id: userId,
           tenantId: invite.tenantId,
           email,
           fullName,
@@ -260,12 +276,13 @@ export class AuthService {
           accessScope: inviteAccessScope.mode,
           isActive: true,
           emailVerifiedAt: new Date(),
+          identityClaimRevision: null,
         },
       });
 
       if (storeIds.length > 0) {
         await tx.userStoreAccess.createMany({
-          data: storeIds.map((storeId) => ({ userId: user.id, storeId })),
+          data: storeIds.map((storeId) => ({ userId, storeId })),
           skipDuplicates: true,
         });
       }
@@ -274,12 +291,13 @@ export class AuthService {
         where: {
           id: invite.id,
           acceptedAt: null,
+          revokedAt: null,
           expiresAt: { gt: acceptedAt },
           updatedAt: invite.updatedAt,
         },
         data: {
           acceptedAt,
-          acceptedByUserId: user.id,
+          acceptedByUserId: userId,
         },
       });
 
@@ -328,7 +346,7 @@ export class AuthService {
         await tx.platformAdminAuditEvent.create({
           data: {
             tenantId: invite.tenantId,
-            actorUserId: user.id,
+            actorUserId: userId,
             action: 'TENANT_OWNER_INVITE_ACCEPTED',
             targetType: 'TENANT_ONBOARDING',
             targetId: invite.tenantId,
@@ -343,7 +361,7 @@ export class AuthService {
             },
             metadata: {
               inviteId: invite.id,
-              ownerUserId: user.id,
+              ownerUserId: userId,
               executionRevisionBefore: lockedTenant.executionRevision,
               executionRevisionAfter: transitionedTenant.executionRevision,
             },
@@ -351,8 +369,24 @@ export class AuthService {
         });
       }
 
+      const identityTransition = await this.identityEmailClaim.transitionInvite(
+        identityTransaction,
+        {
+          email,
+          tenantId: invite.tenantId,
+          expectedSubjectId: invite.id,
+          expectedRevision: identityClaimRevision,
+          nextClaimType: IdentityEmailClaimType.USER,
+          nextSubjectId: userId,
+        },
+      );
+      await tx.user.update({
+        where: { id: userId },
+        data: { identityClaimRevision: identityTransition.revision },
+      });
+
       return tx.user.findUniqueOrThrow({
-        where: { id: user.id },
+        where: { id: userId },
         include: {
           tenant: {
             select: {
@@ -518,6 +552,20 @@ export class AuthService {
     return this.emailVerificationService.resendByEmail(normalizedEmail);
   }
 
+  private requireInviteIdentityClaimRevision(value: unknown): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < 1
+    ) {
+      throw new ServiceUnavailableException({
+        message: 'Invite identity provenance is unavailable',
+        reasonCode: 'IDENTITY_INVITE_PROVENANCE_REQUIRED',
+      });
+    }
+    return value;
+  }
+
   private async resolveActiveInvite(token: string) {
     const normalizedToken = typeof token === 'string' ? token.trim() : '';
 
@@ -526,7 +574,10 @@ export class AuthService {
     }
 
     const invite = await this.prisma.userInvite.findUnique({
-      where: { tokenHash: this.hashInviteToken(normalizedToken) },
+      where: {
+        tokenHash: this.hashInviteToken(normalizedToken),
+        revokedAt: null,
+      },
       include: {
         tenant: {
           select: {

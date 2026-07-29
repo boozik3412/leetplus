@@ -962,6 +962,14 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     transition,
+    /OLD\."integrityState" = 'LEGACY_QUARANTINED'[\s\S]*Legacy quarantined delivery is immutable; dedicated reconciliation is not enabled[\s\S]*ERRCODE = '55000'[\s\S]*status_changed :=/u,
+  );
+  assert.doesNotMatch(
+    transition,
+    /Legacy quarantined delivery requires reconciliation/u,
+  );
+  assert.match(
+    transition,
     /Fresh delivery must start without claim or transition revisions/u,
   );
   assert.match(

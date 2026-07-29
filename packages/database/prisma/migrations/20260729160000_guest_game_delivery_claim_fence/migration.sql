@@ -1438,6 +1438,12 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  IF OLD."integrityState" = 'LEGACY_QUARANTINED' THEN
+    RAISE EXCEPTION
+      'Legacy quarantined delivery is immutable; dedicated reconciliation is not enabled'
+      USING ERRCODE = '55000';
+  END IF;
+
   status_changed := OLD."status" IS DISTINCT FROM NEW."status";
   retry_transition :=
     OLD."status" IN ('FAILED', 'BLOCKED', 'RECONCILIATION_REQUIRED')
@@ -1595,14 +1601,6 @@ BEGIN
   THEN
     RAISE EXCEPTION
       'Provider outcome evidence can change only during finalize or reconciliation'
-      USING ERRCODE = '23514';
-  END IF;
-
-  IF OLD."integrityState" = 'LEGACY_QUARANTINED'
-     AND NEW."status" IN ('READY', 'PROCESSING', 'DISPATCHING')
-  THEN
-    RAISE EXCEPTION
-      'Legacy quarantined delivery requires reconciliation'
       USING ERRCODE = '23514';
   END IF;
 

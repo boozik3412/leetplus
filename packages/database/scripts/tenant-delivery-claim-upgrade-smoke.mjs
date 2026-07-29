@@ -156,7 +156,8 @@ legacy events, then upgraded to CURRENT_166. The smoke verifies deterministic
 Store backfill, legacy quarantine, evidence preservation, same-scope RESTRICT
 foreign keys, CHECK/index/function/trigger catalogs, append-only evidence,
 three revision-fenced READY/BLOCKED transitions under a restricted runtime
-role, stale/future event replay rejection, and idempotent deploy.
+role, stale/future event replay rejection, five rejected legacy-quarantine
+mutations with zero state/evidence drift, and idempotent deploy.
 
 The failure database proves separate cross-tenant reward/event preflights, all
 eight reserved typed-event collisions, a five-second migration lock timeout,
@@ -2180,6 +2181,128 @@ async function assertNullClosedStateMatrices(client, fixtures) {
 }
 
 async function assertTriggerSemantics(client, fixtures) {
+  const quarantinedDeliveryId = fixtures.deliveries.mismatch;
+  const readQuarantineSnapshot = async () => {
+    const [delivery] = await client.$queryRawUnsafe(
+      `SELECT
+         "status",
+         "integrityState",
+         "integrityReasonCode",
+         "stateReasonCode",
+         "transitionRevision"::TEXT AS "transitionRevision",
+         "note",
+         "updatedAt"::TEXT AS "updatedAt"
+       FROM "GuestGameDelivery"
+       WHERE "tenantId" = $1
+         AND "id" = $2`,
+      fixtures.tenantA,
+      quarantinedDeliveryId,
+    );
+    const [evidence] = await client.$queryRawUnsafe(
+      `SELECT
+         (
+           SELECT COUNT(*)::INTEGER
+           FROM "GuestGameDeliveryEvent"
+           WHERE "tenantId" = $1
+             AND "deliveryId" = $2
+         ) AS event_count,
+         (
+           SELECT COUNT(*)::INTEGER
+           FROM "GuestGameDeliveryAttempt"
+           WHERE "tenantId" = $1
+             AND "deliveryId" = $2
+         ) AS attempt_count`,
+      fixtures.tenantA,
+      quarantinedDeliveryId,
+    );
+    return { delivery, evidence };
+  };
+  const quarantineBefore = await readQuarantineSnapshot();
+  assert.equal(
+    quarantineBefore.delivery.integrityState,
+    "LEGACY_QUARANTINED",
+  );
+
+  const immutableQuarantineError =
+    /Legacy quarantined delivery is immutable; dedicated reconciliation is not enabled/u;
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `UPDATE "GuestGameDelivery"
+         SET
+           "status" = 'CANCELED',
+           "stateReasonCode" = 'TEST_QUARANTINE_CANCELED'
+         WHERE "tenantId" = $1
+           AND "id" = $2`,
+        fixtures.tenantA,
+        quarantinedDeliveryId,
+      ),
+    immutableQuarantineError,
+  );
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `UPDATE "GuestGameDelivery"
+         SET "stateReasonCode" = 'TEST_QUARANTINE_REASON_DRIFT'
+         WHERE "tenantId" = $1
+           AND "id" = $2`,
+        fixtures.tenantA,
+        quarantinedDeliveryId,
+      ),
+    immutableQuarantineError,
+  );
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `UPDATE "GuestGameDelivery"
+         SET "integrityReasonCode" = 'TEST_QUARANTINE_INTEGRITY_DRIFT'
+         WHERE "tenantId" = $1
+           AND "id" = $2`,
+        fixtures.tenantA,
+        quarantinedDeliveryId,
+      ),
+    immutableQuarantineError,
+  );
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `UPDATE "GuestGameDelivery"
+         SET
+           "integrityState" = 'VERIFIED',
+           "integrityReasonCode" = NULL,
+           "transitionRevision" = "transitionRevision" + 1
+         WHERE "tenantId" = $1
+           AND "id" = $2`,
+        fixtures.tenantA,
+        quarantinedDeliveryId,
+      ),
+    immutableQuarantineError,
+  );
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `UPDATE "GuestGameDelivery"
+         SET
+           "note" = 'TEST_QUARANTINE_METADATA_DRIFT',
+           "updatedAt" = CURRENT_TIMESTAMP
+         WHERE "tenantId" = $1
+           AND "id" = $2`,
+        fixtures.tenantA,
+        quarantinedDeliveryId,
+      ),
+    immutableQuarantineError,
+  );
+  assert.deepEqual(
+    await readQuarantineSnapshot(),
+    quarantineBefore,
+    "A rejected legacy-quarantine mutation changed durable state or evidence.",
+  );
+
   const invalidRewardId = randomUUID();
   await insertReward(client, {
     id: invalidRewardId,
@@ -2788,6 +2911,7 @@ async function runOfflineSelfTest() {
       lateDdlRollbackScenarios: 1,
       revisionFencedTransitions: 3,
       antiReplayScenarios: 2,
+      legacyQuarantineFreezeScenarios: 5,
       destructiveSourceDatabaseActions: 0,
     })}\n`,
   );
@@ -2921,6 +3045,10 @@ async function runRealSmoke(environment) {
         deliveryProviderStateRejected: true,
         eventOutcomeRejected: true,
         durableEventRevisionRejected: true,
+      },
+      legacyQuarantineFreezeEvidence: {
+        immutableMutationsRejected: 5,
+        finalStateAndEvidenceUnchanged: true,
       },
       rollbackEvidence: {
         crossTenantPreflights: 2,

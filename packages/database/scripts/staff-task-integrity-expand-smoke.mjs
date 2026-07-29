@@ -340,13 +340,17 @@ const DB_NATIVE_REQUIRED_COLUMNS = Object.freeze([
 ]);
 
 // This smoke intentionally stops at migration 162 while running with the
-// current generated Prisma Client. Keep Store writes projected to columns
-// that exist in the frozen baseline so later additive Store fields cannot
-// invalidate the historical rehearsal before its FK assertions execute.
+// current generated Prisma Client. Keep parent writes projected to columns
+// that exist in the frozen baseline so later additive fields cannot invalidate
+// the historical rehearsal before its FK assertions execute.
 const BASELINE_STORE_SELECT = Object.freeze({
   id: true,
   tenantId: true,
   isActive: true,
+});
+const BASELINE_USER_SELECT = Object.freeze({
+  id: true,
+  tenantId: true,
 });
 
 const EXPECTED_COMPATIBILITY_CONSTRAINT_NAMES = [
@@ -999,6 +1003,22 @@ async function createUser(prisma, tenantId, fixtureId, suffix) {
       role: "MANAGER",
       accessScope: "NETWORK",
     },
+    select: BASELINE_USER_SELECT,
+  });
+}
+
+function updateBaselineUser(prisma, id, data) {
+  return prisma.user.update({
+    where: { id },
+    data,
+    select: BASELINE_USER_SELECT,
+  });
+}
+
+function deleteBaselineUser(prisma, id) {
+  return prisma.user.delete({
+    where: { id },
+    select: BASELINE_USER_SELECT,
   });
 }
 
@@ -2010,10 +2030,7 @@ async function assertParentIdentifierUpdatesRejected(
         "StaffTask_tenantId_createdByUserId_fkey",
       ],
       operation: () =>
-        prisma.user.update({
-          where: { id: user.id },
-          data: { id: randomUUID() },
-        }),
+        updateBaselineUser(prisma, user.id, { id: randomUUID() }),
     },
     {
       label: "template identifier update",
@@ -2074,9 +2091,8 @@ async function assertParentIdentifierUpdatesRejected(
       label: "User tenant update",
       constraint: "StaffTask_tenantId_createdByUserId_fkey",
       operation: () =>
-        prisma.user.update({
-          where: { id: user.id },
-          data: { tenantId: fixtures.tenantB.id },
+        updateBaselineUser(prisma, user.id, {
+          tenantId: fixtures.tenantB.id,
         }),
     },
     {
@@ -2156,7 +2172,7 @@ async function assertDeleteActions(prisma, fixtures, fixtureId) {
       assignedToUserId: actor.id,
     },
   );
-  await prisma.user.delete({ where: { id: actor.id } });
+  await deleteBaselineUser(prisma, actor.id);
   const [templateAfterActor, ruleAfterActor, taskAfterActor] =
     await Promise.all([
       prisma.staffTaskTemplate.findUnique({
@@ -2506,6 +2522,11 @@ async function runOfflineSelfTest() {
     Object.keys(BASELINE_STORE_SELECT),
     ["id", "tenantId", "isActive"],
     "Frozen Store mutation projection includes post-baseline columns.",
+  );
+  assertEqualArray(
+    Object.keys(BASELINE_USER_SELECT),
+    ["id", "tenantId"],
+    "Frozen User mutation projection includes post-baseline columns.",
   );
 
   const migrationPlan = await readMigrationPlan();

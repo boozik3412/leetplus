@@ -835,7 +835,17 @@ test("invite rotation is confirmed, hash-only, audited and keeps one live invite
   };
   const writes = [];
   const tx = {
-    $queryRawUnsafe: async () => [{ pg_advisory_xact_lock: null }],
+    $queryRawUnsafe: async (query, lockKey) => {
+      assert.equal(
+        query,
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text AS lock_result",
+      );
+      assert.equal(
+        lockKey,
+        `leetplus-design-partner-invite-rotation:${normalized.tenantSlug}`,
+      );
+      return [{ lock_result: "" }];
+    },
     tenant: { findMany: async () => [topology] },
     userInvite: {
       updateMany: async (operation) => {

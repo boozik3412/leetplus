@@ -1066,7 +1066,7 @@ export async function rotateDesignPartnerInvite(
   const result = await client.$transaction(
     async (tx) => {
       await tx.$queryRawUnsafe(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text AS lock_result",
         `leetplus-design-partner-invite-rotation:${manifest.tenantSlug}`,
       );
       const topology = await readDesignPartnerTopology(tx);

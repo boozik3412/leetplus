@@ -258,6 +258,7 @@
 | BETA-MOD-GAME-006 | P0        | Запланировано | Добавить game isolation and concurrency suite                     | Проверены cross-tenant/store, повтор события, параллельное открытие, лимиты, restart, stale leases, replay и неоднозначный Langame write                                                                                                        | BETA-SEC-006, BETA-MOD-GAME-004 |
 | BETA-MOD-GAME-007 | P0        | Запланировано | Закрыть module browser QA и performance                           | Все admin/guest/mobile/Telegram критические сценарии проходят; нет unbounded responses; журнал и diagnostics позволяют расследовать событие по trace ID                                                                                         | BETA-OPS-003, BETA-OPS-010      |
 | BETA-MOD-GAME-008 | P0        | Запланировано | Убрать hardcoded pilot-store и сделать readiness per tenant/store | В коде и runbook нет специального поиска клуба `1337`; оператор явно выбирает tenant/store; readiness проверяет mapping, timezone/geo/public slug, auth channel, freshness facts, scheduler owner и отсутствие unresolved ledger reconciliation | BETA-MOD-GAME-001, BETA-OPS-008 |
+| BETA-MOD-GAME-009 | P0        | В работе      | Ввести durable provider-delivery protocol                         | Один Store-scoped claim primitive обслуживает direct и bot paths; generation/lease/revisions, immutable attempt, typed event, provider/workload authority, reaper/reconcile и terminal CAS исключают duplicate/unsafe send; legacy paths hard-denied; populated `165 → 166`, old-worker cutoff и tenant/store concurrency matrix зелёные | BETA-MOD-GAME-001, BETA-TEN-008, BETA-OPS-002 |
 
 ### 5.7. Обязательный модуль: ассортимент и товары
 
@@ -292,13 +293,20 @@
 Current-state уточнение `BETA-MOD-STAFF-003`: перечисленные в строке
 `EXPAND_162` gate и старые SHA являются frozen/historical evidence. Protected
 StaffTask prefix остаётся 162, но current production-like
-admission/inventory/planner допускается только на `CURRENT_165` — exact prefix
+admission/inventory/planner для текущего implementation candidate допускается
+только на `CURRENT_166` — exact prefix
 плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence`. Exact engineering
-candidate `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote
-CI `30428288353`; production-like evidence ещё pending. Strict acquisition contract,
+`20260729120000_store_background_execution_fence` и
+`20260729160000_guest_game_delivery_claim_fence`. Исторический exact
+engineering prerequisite `CURRENT_165` на
+`4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote CI
+`30428288353`; documentation/evidence successor
+`7c20adec4ee7cb0a390f1e38ec8e7dd333fa367f` также прошёл remote CI
+`30429463161`. Оба SHA являются historical `CURRENT_165` evidence; remote
+exact-SHA и PostgreSQL evidence для `CURRENT_166`, как и production-like
+evidence, ещё pending. Strict acquisition contract,
 root lifecycle и detached `prepare → external sign → finalize` реализованы как
 candidate; реальный public root намеренно не enrolled. Статус остаётся
 `В работе / NO-GO`.
@@ -1612,13 +1620,15 @@ slice. Он полностью заменён актуальной послед�
    `BASELINE_156` envelope → exact DB marker → admission → migrations
    `157..162` → новый `EXPAND_162` envelope с новым nonce-bound binding →
    marker rotation → второй admission → exact allowlisted migrations
-   `163..165` → новый `CURRENT_165` envelope/marker → current admission.
+   `163..166`, включая
+   `20260729160000_guest_game_delivery_claim_fence` → новый `CURRENT_166`
+   envelope/marker → current admission.
    Protected StaffTask
    prefix остаётся 162; предыдущие envelope/marker не переиспользовать; любой
    non-zero exit или
    marker/freshness/blob/authority/ACL mismatch останавливает работу;
 5. только после всех state-specific admission отдельно выполнить read-only
-   inventory и aggregate planner на current DB 165, назначить owner каждому
+   inventory и aggregate planner на current DB 166, назначить owner каждому
    non-zero code;
 6. отдельно спроектировать, утвердить и выполнить production-like row
    dry-run с protected row evidence; synthetic/HMAC report не засчитывать;
@@ -1686,13 +1696,14 @@ enrollment, не production-like admission и не разрешение на dep
 5. применить только migrations `157..162`, выпустить новый signed
    `EXPAND_162` envelope с новым nonce-bound identity, выполнить marker
    rotation и второй admission; baseline envelope/marker reuse запрещён;
-6. применить exact allowlisted migration
+6. применить exact allowlisted migrations
    `20260728120000_tenant_execution_control_plane_expand`, затем
    `20260728150000_tenant_execution_revision_fence`, затем
-   `20260729120000_store_background_execution_fence`, выпустить отдельный
-   `CURRENT_165` envelope, снова ротировать marker и пройти current admission;
+   `20260729120000_store_background_execution_fence`, затем
+   `20260729160000_guest_game_delivery_claim_fence`, выпустить отдельный
+   `CURRENT_166` envelope, снова ротировать marker и пройти current admission;
    StaffTask protected prefix остаётся 162;
-7. затем отдельно проходить inventory/planner на current DB 165, row dry-run,
+7. затем отдельно проходить inventory/planner на current DB 166, row dry-run,
    apply/rollback/zero-diff и последующие Gate 2A/Gate 2 этапы из раздела 7.
 
 Топология и обязательный beta scope не меняются: четыре текущих клуба остаются
@@ -2060,11 +2071,13 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   canonical email claim + encrypted mail outbox + persisted GO согласно
   [initial OWNER contract](./docs/open-beta/initial-owner-identity-and-activation.md);
 - StaffTask integrity contract сохранён как immutable migrations `1..162`;
-  control-plane migrations `163..165` допускаются только как проверенный
-  additive tail, не меняющий protected `StaffTask*` relations. Current
-  release state — `CURRENT_165`, `migrationCount=165`, latest
-  `20260729120000_store_background_execution_fence`.
-- checkpoint проходит `16 suites / 663 tests` tenant-execution,
+  migrations `163..166` допускаются только как проверенный additive tail, не
+  меняющий protected `StaffTask*` relations. Current implementation candidate
+  release state — `CURRENT_166`, `migrationCount=166`, latest
+  `20260729160000_guest_game_delivery_claim_fence`; remote exact-SHA и
+  populated PostgreSQL evidence для этого состояния ещё pending.
+- последний принятый checkpoint `CURRENT_165` проходит
+  `16 suites / 663 tests` tenant-execution,
   `32 suites / 523 tests` focused security и полный API regression
   `96 suites / 1873 passed / 2 todo` (`1875 total`). Design-partner subset
   проходит `7 suites / 68 tests`. API production build, production env
@@ -2146,7 +2159,9 @@ Design candidate первого durable vertical slice с включёнными
 canonical delivery↔reward Store invariant, fresh consent/reward/provider
 revalidation, provider-attempt marker, durable reaper/reconciliation,
 old-worker cutoff и отдельный populated `165 → 166` rehearsal. Delivery claim
-migration `166` и runtime code ещё не созданы; это по-прежнему `NO-GO`.
+migration `166` и fail-closed legacy runtime containment теперь находятся в
+implementation candidate (§5.30), но effect-capable coordinator и обязательные
+PostgreSQL/cutover evidence ещё не приняты; это по-прежнему `NO-GO`.
 
 ### 5.29. Store background execution fence candidate — 29.07.2026
 
@@ -2164,13 +2179,85 @@ job завершились `PASS`; real PostgreSQL шаг подтвердил p
 `164 → 165`, а StaffTask EXPAND/admission/security/inventory/planner/catalog
 drift и application/authority gates зелёные. Это engineering/release evidence,
 не production-like acquisition/admission, deploy или разрешение доступа.
+Documentation/evidence successor
+`7c20adec4ee7cb0a390f1e38ec8e7dd333fa367f` также прошёл все remote job в CI
+`30429463161`; оба checkpoint являются historical prerequisite для
+`CURRENT_166`, а не evidence migration `166`.
 
 Authority bundle локально проходит `40/40`, включая child-process positive
 ceremony E2E; canonical root registry остаётся `{}`. В `main` нет branch
 protection/ruleset и `CODEOWNERS`, поэтому root enrollment запрещён до
 независимого reviewer и защищённого approval path. Delivery claim перенесён в
-не реализованную migration `166`; Gate 1MT, owner invite и внешний доступ
-остаются `NO-GO`.
+implementation candidate migration `166`; её remote PostgreSQL evidence,
+effect-capable coordinator и Store-scoped effect enforcement ещё pending.
+Gate 1MT, owner invite и внешний доступ остаются `NO-GO`.
+
+### 5.30. Guest-game delivery claim fence candidate — 29.07.2026
+
+Начата реализация exact additive migration
+`20260729160000_guest_game_delivery_claim_fence`, переводящей release contract
+в `CURRENT_166` (`migrationCount=166`). Candidate добавляет active
+generation-bound claim в `GuestGameDelivery`, immutable provider-attempt
+evidence в `GuestGameDeliveryAttempt`, typed transition events, canonical
+tenant/reward/profile/guest/Store bindings, lease/reaper/reconciliation
+состояния и database-enforced fail-closed transition matrix. Frozen manifest
+фиксирует exact ordered/checksummed базу `CURRENT_165`; migration не может
+тихо примениться к другой истории.
+
+Legacy direct provider и bot-pull paths в API переведены в hard containment:
+env/canary flags не разрешают реальную отправку, direct request принудительно
+становится dry-run, bot pull не возвращает sendable payload, а readiness не
+показывает provider как готовый. Это временный deny, а не новый delivery
+coordinator и не разрешение outbound.
+
+Containment также закрывает legacy provider prepare/update/bot ack до
+delivery row/event mutation. Bonus-ledger revoke и Telegram unsubscribe
+продолжают основную ledger/reward cancellation и consent update, но сохраняют
+provider delivery rows/events неизменными; `CASHIER/MANUAL` cancellation
+остаётся доступным. Это сохранение бизнес-операции без legacy provider-state
+write, а не effect-capable protocol.
+
+До принятия candidate обязательны:
+
+- clean и populated real PostgreSQL rehearsal `165 → 166`, включая backfill,
+  quarantine, lock timeout, late-DDL rollback, idempotent repeat и catalog
+  contract; migration preflight обязан до DDL отклонять понятным `55000`
+  любые pre-166 Event с collision по одному из восьми новых typed event names,
+  а smoke — покрывать все восемь collision fixtures;
+- runtime coordinator с claim/attempt/finalize/reaper/reconcile API,
+  opaque generation-bound token, provider/workload authority и old-worker
+  cutoff;
+- server-side `NETWORK | STORES` enforcement: delivery list, claim, manual
+  mutation, retry, cancel, evidence и provider effect обязаны пересекаться с
+  `allowedStoreIds`; текущие tenant-only CLUB_MANAGER paths не допускаются в
+  effect-capable release;
+- operational enrollment отдельной retention identity/procedure и exact
+  grants для evidence cleanup; migration намеренно не создаёт DB role без
+  отдельного reviewed operations change;
+- закрыть P1 independent review до provider activation:
+  - установить единый порядок
+    `advisory → Reward FOR UPDATE → Delivery FOR UPDATE` до первой mutation,
+    добавить двухсессионный PostgreSQL deadlock test и bounded `40P01`
+    retry/reconciliation;
+  - сделать `stateReasonCode`/`integrityReasonCode` event-bearing и
+    проверять final Delivery row против immutable event, включая reason-drift
+    negative smoke;
+  - либо запретить все transitions из `LEGACY_QUARANTINED`, либо реализовать
+    отдельный generation-0 legacy reconciliation event/procedure с
+    provenance и operator approval, без синтетического provider Attempt;
+  - отозвать прямой runtime `INSERT` в `GuestGameDeliveryEvent` в пользу
+    узкой SECURITY INVOKER procedure/подписанной provenance boundary;
+- versioned provider authority/configuration, workload identity, egress
+  isolation, credential rotation и cutover/drain rehearsal;
+- remote exact-SHA CI. Независимый adversarial review не нашёл P0-блокера для
+  inert schema candidate, но перечисленные P1 остаются жёстким `NO-GO` для
+  provider writes.
+
+Migration/runtime containment являются implementation candidate и не
+применялись к production. Все Store остаются
+`backgroundExecutionEnabled=false`, outbound остаётся `OFF`, canonical root
+registry — `{}`. Gate 1MT, создание external tenant, owner invite и тестовый
+доступ для второго клуба остаются `NO-GO`.
 
 ## 6. Release gates
 
@@ -2314,11 +2401,12 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    admission; затем применить только migrations `157..162`, создать новый
    acquisition request и получить новый `EXPAND_162` envelope с новым
    nonce-bound binding, заменить DB marker его digest и выполнить второй
-   admission. Затем применить только exact allowlisted migration
+   admission. Затем применить только exact allowlisted migrations
    `20260728120000_tenant_execution_control_plane_expand`, затем exact
-   `20260728150000_tenant_execution_revision_fence` и exact
-   `20260729120000_store_background_execution_fence`, выпустить новый
-   `CURRENT_165` request/envelope с новым binding, повторно заменить marker и
+   `20260728150000_tenant_execution_revision_fence`, exact
+   `20260729120000_store_background_execution_fence` и exact
+   `20260729160000_guest_game_delivery_claim_fence`, выпустить новый
+   `CURRENT_166` request/envelope с новым binding, повторно заменить marker и
    пройти current admission. Protected StaffTask evidence остаётся bound к prefix 162;
    предыдущие marker не переиспользовать; все state-specific authority bundle и
    marker-rotation attestation сохранить. Exact роль
@@ -2329,8 +2417,8 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    reader role отзывается и удаляется до уничтожения snapshot.
 5. Только после всех state-specific admission отдельно выполнить read-only inventory и
    aggregate reconciliation planner schema `v1` на exact current
-   `CURRENT_165` (`migrationCount=165`, latest
-   `20260729120000_store_background_execution_fence`) с
+   `CURRENT_166` (`migrationCount=166`, latest
+   `20260729160000_guest_game_delivery_claim_fence`) с
    одинаковыми thresholds, exact protected StaffTask catalog gate и owner для
    каждого non-zero code. HMAC
    `databaseIdentityDigest`, `contentDigest` и `executionDigest` являются

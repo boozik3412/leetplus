@@ -3,13 +3,14 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.7                                                    |
+| Версия        | 1.8                                                    |
 | Дата          | 29.07.2026                                             |
 | Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
 | Область       | Собственная сеть или явно разрешённые клубы            |
 | Назначение    | Первый shared external tenant и последующая когорта    |
-| Candidate SHA | `4bd6a036...`; remote engineering CI `30428288353` PASS |
+| Current target | `CURRENT_166`; exact-SHA remote CI ещё pending         |
+| Accepted prerequisite | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS |
 | Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
 
 Этот профиль фиксирует обязательный продуктовый состав тестового доступа.
@@ -35,8 +36,12 @@ web/API/workers/PostgreSQL/Telegram data plane. Отдельный runtime/DB о
 только optional contingency/enterprise-isolation lane.
 
 Local public-only pinned-path evidence прошёл admission suite `19/19`; его
-current successor вместе с authority/application/PostgreSQL gates прошёл
-remote CI на `4bd6a036...` / `30428288353`. Production authority roots
+исторический prerequisite вместе с authority/application/PostgreSQL gates
+прошёл remote CI как `CURRENT_165` на
+`4bd6a036...` / `30428288353`; documentation/evidence successor
+`7c20adec...` / `30429463161` также зелёный. Current implementation candidate
+`CURRENT_166` ещё не имеет принятого exact-SHA remote CI и populated
+PostgreSQL `165 → 166` evidence. Production authority roots
 остаются `EMPTY / FAIL-CLOSED`, поэтому fixture не является production-like
 authority или Gate 2 evidence. Experimental Node.js 22 module mock учитывается
 как `P2` test-infrastructure risk и не меняет entitlement или продуктовый

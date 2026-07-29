@@ -24,6 +24,10 @@ import {
   tenantBackgroundStageForCustomerStage,
   type TenantBackgroundExecutionPolicyDecision,
 } from '../tenancy/tenant-background-execution-policy';
+import {
+  evaluateLegacyGuestGameDeliveryProtocolGate,
+  isLegacyGuestGameProviderDeliveryChannel,
+} from './guest-game-delivery-protocol-gate';
 
 const langameBalancePhonePath = '/guests/balance/phone';
 const langameBalancePhoneMasterPath = `/master_api${langameBalancePhonePath}`;
@@ -175,6 +179,7 @@ export type GuestGameBonusLedgerDispatchItem = {
   amount: number;
   externalDomain: string | null;
   externalGuestId: string | null;
+  protocolBlockedDeliveries?: number;
   note: string;
 };
 
@@ -915,6 +920,8 @@ export class GuestBonusLedgerService {
     }
 
     const config = this.resolveConfig();
+    const deliveryProtocolGate =
+      evaluateLegacyGuestGameDeliveryProtocolGate('LEGACY_PROVIDER_REVOKE');
     const result = await this.prisma.$transaction(async (tx) => {
       // Match the worker lock order (reward -> ledger). The pre-read is only
       // a lock-order hint; all authorization and status decisions use the
@@ -1010,7 +1017,7 @@ export class GuestBonusLedgerService {
       if (!row.rewardId) {
         return {
           row,
-          canceled: { rewards: 0, deliveries: 0 },
+          canceled: { rewards: 0, deliveries: 0, protocolBlocked: 0 },
         };
       }
 
@@ -1026,6 +1033,7 @@ export class GuestBonusLedgerService {
       });
 
       let deliveryCount = 0;
+      let protocolBlockedDeliveryCount = 0;
 
       if (rewards.count > 0) {
         const deliveries = await tx.guestGameDelivery.findMany({
@@ -1048,6 +1056,14 @@ export class GuestBonusLedgerService {
         );
 
         for (const delivery of deliveries) {
+          if (
+            !deliveryProtocolGate.allowed &&
+            isLegacyGuestGameProviderDeliveryChannel(delivery.channel)
+          ) {
+            protocolBlockedDeliveryCount += 1;
+            continue;
+          }
+
           const updated = await tx.guestGameDelivery.updateMany({
             where: {
               id: delivery.id,
@@ -1056,6 +1072,7 @@ export class GuestBonusLedgerService {
             },
             data: {
               status: 'CANCELED',
+              stateReasonCode: 'BONUS_LEDGER_CANCELED',
               canceledAt,
               note,
             },
@@ -1072,6 +1089,7 @@ export class GuestBonusLedgerService {
               fromStatus: delivery.status,
               toStatus: 'CANCELED',
               channel: delivery.channel,
+              stateReasonCode: 'BONUS_LEDGER_CANCELED',
               note,
               payload: {
                 ledgerEntryId: row.id,
@@ -1088,7 +1106,11 @@ export class GuestBonusLedgerService {
 
       return {
         row,
-        canceled: { rewards: rewards.count, deliveries: deliveryCount },
+        canceled: {
+          rewards: rewards.count,
+          deliveries: deliveryCount,
+          protocolBlocked: protocolBlockedDeliveryCount,
+        },
       };
     });
 
@@ -1099,6 +1121,7 @@ export class GuestBonusLedgerService {
       amount: decimalToNumber(result.row.amount),
       externalDomain: result.row.externalDomain,
       externalGuestId: result.row.externalGuestId,
+      protocolBlockedDeliveries: result.canceled.protocolBlocked,
       note: bonusLedgerCancelNote(reason, result.canceled),
     };
   }
@@ -3406,11 +3429,18 @@ function staffTestLedgerNote() {
 
 function bonusLedgerCancelNote(
   reason: string,
-  canceled: { rewards: number; deliveries: number },
+  canceled: {
+    rewards: number;
+    deliveries: number;
+    protocolBlocked: number;
+  },
 ) {
   const details = [
     canceled.rewards ? `reward canceled: ${canceled.rewards}` : null,
     canceled.deliveries ? `deliveries canceled: ${canceled.deliveries}` : null,
+    canceled.protocolBlocked
+      ? `provider deliveries protocol-blocked: ${canceled.protocolBlocked}`
+      : null,
   ].filter(Boolean);
 
   return details.length ? `${reason} ${details.join(', ')}.` : reason;

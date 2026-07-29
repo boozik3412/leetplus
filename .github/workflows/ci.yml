@@ -119,6 +119,9 @@ jobs:
       - name: Validate Store background execution fence contract
         run: pnpm --filter database check:store-background-execution-fence
 
+      - name: Validate tenant delivery claim contract
+        run: pnpm --filter database check:tenant-delivery-claim
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -164,8 +167,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260729120000_store_background_execution_fence
-          EXPECTED_DATABASE_MIGRATION_COUNT: "165"
+          EXPECTED_DATABASE_MIGRATION: 20260729160000_guest_game_delivery_claim_fence
+          EXPECTED_DATABASE_MIGRATION_COUNT: "166"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -245,6 +248,11 @@ jobs:
         run: pnpm --filter database db:smoke:store-background-execution-fence-upgrade
         env:
           STORE_BACKGROUND_EXECUTION_FENCE_UPGRADE_SMOKE_CONFIRM: run-store-background-execution-fence-upgrade-smoke
+
+      - name: Rehearse tenant delivery claims 165 to 166 upgrade and rollback
+        run: pnpm --filter database db:smoke:tenant-delivery-claim-upgrade
+        env:
+          TENANT_DELIVERY_CLAIM_UPGRADE_SMOKE_CONFIRM: run-tenant-delivery-claim-upgrade-smoke
 
       - name: Verify database connectivity and migration state
         run: pnpm --filter database db:smoke

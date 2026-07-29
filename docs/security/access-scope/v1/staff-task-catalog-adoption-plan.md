@@ -3,7 +3,7 @@
 | Поле           | Значение                                                                                                                                                  |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner, SYNTHETIC proposal dry-run и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.13.0                                                                                                                                                    |
+| Версия         | 1.14.0                                                                                                                                                    |
 | Дата           | 29.07.2026                                                                                                                                                |
 | Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                                                      |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                                                    |
@@ -28,12 +28,14 @@ Scheduler и scheduled all-tenant HTTP не зарегистрированы и 
 
 State contract после control-plane EXPAND разделён: StaffTask evidence
 остаётся bound к frozen `EXPAND_162`, а current production-like
-inventory/planner допускается только после `CURRENT_165` admission — exact
+inventory/planner допускается только после `CURRENT_166` admission — exact
 prefix плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence`. Historical SHA ниже не
-являются evidence текущего незакоммиченного candidate.
+`20260729120000_store_background_execution_fence` и
+`20260729160000_guest_game_delivery_claim_fence`. Remote exact-SHA и
+populated `165 → 166` для implementation candidate ещё pending; historical
+SHA ниже не являются evidence current `CURRENT_166`.
 
 ## 1. Инвентаризация поверхности
 
@@ -214,8 +216,11 @@ Schema-only EXPAND реализован отдельным bounded candidate
 Aggregate-only reconciliation planner описан в отдельном
 [runbook](./staff-task-integrity-reconciliation-plan-runbook.md):
 historical candidate `2c74c663...` не является current evidence; exact
-engineering candidate `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по
-зелёному remote CI `30428288353`, а production-like evidence ещё pending.
+`CURRENT_165` engineering candidate
+`4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote CI
+`30428288353`, а documentation/evidence successor `7c20adec...` — по CI
+`30429463161`. Это historical prerequisite; remote/current production-like
+evidence для `CURRENT_166` ещё pending.
 
 - использует одно соединение и одну `READ ONLY REPEATABLE READ` transaction;
 - требует exact target/confirmation, production attestation, 40-hex
@@ -227,8 +232,8 @@ engineering candidate `4bd6a036df16579f68b2c96a14b6475c8311b231` принят п
 - считает actionable cap только по proposal/operator, исключая review-only
   counts;
 - сохраняет protected StaffTask prefix `EXPAND_162`, но выполняет current
-  schema-first exact gate `CURRENT_165`, `migrationCount=165`, latest
-  `20260729120000_store_background_execution_fence`, `unfinished=0`,
+  schema-first exact gate `CURRENT_166`, `migrationCount=166`, latest
+  `20260729160000_guest_game_delivery_claim_fence`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
 - использует exits `0/1/2/3`;
@@ -247,10 +252,11 @@ idempotent apply, locks/recheck, audit, rollback и повторный zero-diff
 
 Historical snapshot admission evidence boundary зафиксирован на
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; это не current candidate
-evidence. Current admission также поддерживает `CURRENT_165` после exact
-allowlisted migrations `163..165`; exact engineering candidate
-`4bd6a036...` прошёл remote CI `30428288353`. Production-like evidence
-остаётся отдельным незакрытым gate.
+evidence. Current admission поддерживает `CURRENT_166` после exact
+allowlisted migrations `163..166`; exact-SHA remote CI и populated
+PostgreSQL `165 → 166` ещё pending. Historical `CURRENT_165` engineering
+candidate `4bd6a036...` / CI `30428288353` и evidence successor
+`7c20adec...` / CI `30429463161` не закрывают этот gate.
 Admission допускает только loopback snapshot, точные runtime bytes и migration
 manifest из Git artifact. Logical allowlist содержит девять
 relations, но роль получает table-level `SELECT` только на восемь; для `User`
@@ -263,8 +269,9 @@ production-like admission, inventory и planner остаются fail-closed `NO
 Отдельный historical test evidence
 `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
 admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в
-изолированном child-процессе. Его successor в exact `CURRENT_165` candidate
-прошёл remote CI `4bd6a036...` / `30428288353`; используемый
+изолированном child-процессе. Его historical successor в exact
+`CURRENT_165` candidate прошёл remote CI
+`4bd6a036...` / `30428288353` и `7c20adec...` / `30429463161`; используемый
 экспериментальный Node 22 module mock классифицирован как P2. Это тест verifier
 path, а не enrollment production root: reviewed root enrollment, operational
 signer и approved snapshot acquisition остаются P0.
@@ -295,7 +302,7 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 - historical integrity inventory contract — 9/9; frozen clean PostgreSQL
   prefix 162 `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
 - historical aggregate reconciliation planner contract — pass на prefix 162;
-  current `CURRENT_165` production-like evidence ещё pending;
+  current `CURRENT_166` production-like evidence ещё pending;
 - historical snapshot admission contract — `19` admission unit, `9` authority unit и
   `46` offline smoke checks; staged PostgreSQL 16.13 smoke прошёл `23`
   сценария `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact восемь
@@ -340,9 +347,11 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 6. Свежий production-like snapshot прошёл Git-bound admission сначала с
    отдельным `BASELINE_156` authority envelope/DB marker, затем после exact
    migrations `157..162` — с новым `EXPAND_162` envelope, новым nonce-bound
-   binding и заменённым DB marker; обе state-specific protected evidence
-   bundle и marker-rotation attestation сохранены. Remote target, baseline
-   marker reuse и mutable worktree artifact не использовались.
+   binding и заменённым DB marker, затем после exact allowlisted tail
+   `163..166` — с отдельным `CURRENT_166` envelope и второй marker rotation;
+   все state-specific protected evidence bundle и rotation attestation
+   сохранены. Remote target, marker reuse и mutable worktree artifact не
+   использовались.
 7. Production-like legacy inventory и reconciliation имеют объяснённый zero
    critical mismatch.
 8. Focused/full CI и production builds зелёные.
@@ -360,7 +369,14 @@ ownership и общий Gate 2.
 
 ## 7. Changelog
 
-- `1.13.0`, 29.07.2026 — current `CURRENT_165` catalog/admission/planner
+- `1.14.0`, 29.07.2026 — current operational catalog/admission/planner target
+  переведён на implementation candidate `CURRENT_166`: tail `163..166`, count
+  `166`, latest `20260729160000_guest_game_delivery_claim_fence`. Remote
+  exact-SHA и populated `165 → 166` pending; `CURRENT_165`
+  `4bd6a036...`/`7c20adec...` остаётся historical evidence, scheduler и
+  production-like — `NO-GO`.
+- `1.13.0`, 29.07.2026 — historical `CURRENT_165`
+  catalog/admission/planner
   engineering gates прошли remote CI `4bd6a036...` / `30428288353`;
   production-like evidence и scheduler остаются `NO-GO`.
 - `1.10.0`, 28.07.2026 — runtime candidate сохранён на

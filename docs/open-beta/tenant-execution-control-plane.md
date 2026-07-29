@@ -2,11 +2,11 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.15                                                                        |
+| Версия           | 1.16                                                                        |
 | Дата             | 29.07.2026                                                                  |
-| Статус           | Foundation + revision/Store fencing; remote engineering PASS; operational evidence pending |
+| Статус           | `CURRENT_166` implementation candidate; remote `CURRENT_165` prerequisite PASS; current evidence pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
-| Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` + `20260729120000...store_background_execution_fence` |
+| Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` + `20260729120000...store_background_execution_fence` + `20260729160000...guest_game_delivery_claim_fence` |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
 
 Этот документ фиксирует фактически реализованный срез
@@ -58,7 +58,13 @@ Migration `165` добавляет отдельный fail-closed Store fence:
 `backgroundExecutionEnabled=false` и `executionRevision=0`. Trigger увеличивает
 revision при изменении execution-состояния и атомарно выключает background
 execution при archive/deactivation. Миграция не включает ни один Store,
-outbound остаётся `OFF`, runtime delivery claim ещё не реализован.
+outbound остаётся `OFF`. Migration `166` уже добавляет durable delivery-claim
+schema как implementation candidate, а legacy provider paths fail-closed
+заблокированы до delivery mutation. При bonus-ledger revoke/Telegram
+unsubscribe основная ledger/reward/consent mutation продолжается, но provider
+delivery rows/events не меняются; `CASHIER/MANUAL` cancellation сохраняется.
+Effect-capable coordinator, Store-scoped enforcement и PostgreSQL/remote
+evidence ещё pending.
 
 ## 2. Полный entitlement profile
 
@@ -480,10 +486,17 @@ Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на
 Exact `CURRENT_165` engineering candidate затем прошёл все три job на SHA
 `4bd6a036df16579f68b2c96a14b6475c8311b231`, CI run `30428288353`, включая
 populated Store rehearsal `164 → 165` и полный migration-smoke tail.
+Documentation/evidence successor
+`7c20adec4ee7cb0a390f1e38ec8e7dd333fa367f` также прошёл remote CI
+`30429463161`.
 Локальный diagnostic запуск сам по себе production-like evidence не является.
 Migration `165` не применялась в production и не меняет release decision.
+Это принятое historical prerequisite evidence. Current implementation
+candidate уже включает
+`20260729160000_guest_game_delivery_claim_fence`/`CURRENT_166`; его remote
+exact-SHA и populated PostgreSQL `165 → 166` evidence ещё pending.
 
-Последняя локальная проверка checkpoint:
+Последняя принятая проверка checkpoint `CURRENT_165`:
 
 - tenant-execution suite: `16 suites / 663 tests`;
 - background-execution containment suite: `15 suites / 665 tests`;
@@ -499,9 +512,10 @@ Migration `165` не применялась в production и не меняет r
   diagnostic rehearsal, `git diff --check`: `PASS`.
 
 StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migrations
-`163..165` принимаются только как явно allowlisted additive tail, не
+`163..166` принимаются только как явно allowlisted additive tail, не
 затрагивающий protected `StaffTask*` relations. Frozen StaffTask evidence
 остаётся в state `EXPAND_162`; фактическая текущая БД и downstream
-inventory/planner должны проходить отдельный admission как `CURRENT_165`
-(`migrationCount=165`, latest
-`20260729120000_store_background_execution_fence`).
+inventory/planner для current implementation candidate должны проходить
+отдельный admission как `CURRENT_166` (`migrationCount=166`, latest
+`20260729160000_guest_game_delivery_claim_fence`). Это operational target, а
+не утверждение о завершённом remote или production-like evidence.

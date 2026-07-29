@@ -2,8 +2,8 @@
 
 | Поле                    | Значение                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Статус                  | `IMPLEMENTED_CANDIDATE`; local EXPAND и remote CURRENT_165 engineering rehearsal пройдены; не deployed                                                        |
-| Версия                  | 1.9.0                                                                                                                                                        |
+| Статус                  | `IMPLEMENTED_CANDIDATE`; local EXPAND и historical remote CURRENT_165 пройдены; CURRENT_166 evidence pending; не deployed                                      |
+| Версия                  | 1.10.0                                                                                                                                                       |
 | Дата                    | 29.07.2026                                                                                                                                                   |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                                                         |
 | Migration count         | 162                                                                                                                                                          |
@@ -13,7 +13,7 @@
 | Historical EXPAND SHA   | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401`; frozen prefix evidence                                                                                           |
 | Historical admission    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence                                                                                              |
 | Входной gate            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `BASELINE_156`                                                                    |
-| После EXPAND            | `EXPAND_162` admission → allowlisted migrations `163..165` → `CURRENT_165` admission → [inventory](./staff-task-integrity-inventory-runbook.md)              |
+| После EXPAND            | `EXPAND_162` admission → allowlisted migrations `163..166` → `CURRENT_166` admission → [inventory](./staff-task-integrity-inventory-runbook.md)              |
 | Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                                                       |
 | Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)                                                                                         |
 
@@ -28,11 +28,15 @@ Production-like inventory, reconciliation, `VALIDATE`, deployment и
 операционный rollback drill остаются отдельными обязательными шагами.
 До production-like inventory/planner обязательны три Git-bound admission:
 `BASELINE_156` до EXPAND, frozen-prefix `EXPAND_162` после exact migrations
-`157..162` и `CURRENT_165` после трёх allowlisted additive migrations
+`157..162` и `CURRENT_166` после четырёх allowlisted additive migrations
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence`. Третий state не
+`20260729120000_store_background_execution_fence` и
+`20260729160000_guest_game_delivery_claim_fence`. Третий state не
 изменяет reviewed StaffTask prefix и не переиспользует его envelope/marker.
+Remote exact-SHA и populated PostgreSQL `165 → 166` для `CURRENT_166` ещё
+pending; historical remote `CURRENT_165`
+`4bd6a036...`/`30428288353` и `7c20adec...`/`30429463161` их не заменяют.
 
 ## 1. Зафиксированный контекст запуска
 
@@ -272,11 +276,13 @@ checks. Smoke обязан работать в собственной случа
   clean schema; inventory возвращает 43 reason code и zero blocking/review.
 - exact scoped Prisma drift check возвращает `prismaDriftDrops=14`; URL и
   credentials не попадают в argv.
-- aggregate planner проходит schema-first exact gate
+- historical prefix-162 planner candidate внутри EXPAND rehearsal проходит
+  свой schema-first exact gate
   `162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
 0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
 0 index mismatch`; migration state читается из
-  `public._prisma_migrations`.
+  `public._prisma_migrations`. Это не operational planner target; current
+  planner запускается только после tail `163..166` и `CURRENT_166` admission.
 - adversarial catalog smoke на disposable local/CI clone сохраняет все 28
   expected FK, добавляет дополнительный конфликтующий FK с другим именем и
   отдельно создаёт parent index с неверным порядком колонок; оба сценария
@@ -314,17 +320,19 @@ production-данных.
    пройти snapshot admission; baseline envelope/marker не переиспользовать;
 7. применить только exact allowlisted additive migrations
    `20260728120000_tenant_execution_control_plane_expand`,
-   `20260728150000_tenant_execution_revision_fence` и
-   `20260729120000_store_background_execution_fence`; подтвердить, что
+   `20260728150000_tenant_execution_revision_fence`,
+   `20260729120000_store_background_execution_fence` и
+   `20260729160000_guest_game_delivery_claim_fence`; подтвердить, что
    protected `StaffTask*` relations не изменились;
-8. получить отдельный `CURRENT_165` authority envelope с новым nonce-bound
+8. получить отдельный `CURRENT_166` authority envelope с новым nonce-bound
    binding, повторно заменить DB marker и пройти третий admission;
 9. выполнить guarded read-only inventory и сохранить только aggregate
    evidence;
-10. на exact current schema `CURRENT_165` выполнить
+10. на exact current schema `CURRENT_166` выполнить
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md):
-   migration count `165`, latest Store background-execution fence, unfinished `0`,
-   14 composite exact, 14 simple exact,
+   migration count `166`, latest
+   `20260729160000_guest_game_delivery_claim_fence`, unfinished `0`, 14
+   composite exact, 14 simple exact,
    `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes exact,
    `0` index mismatch, hidden expected/actual database identity,
    domain-separated HMAC `databaseIdentityDigest`,
@@ -491,10 +499,17 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 
 ## 11. Changelog
 
-- `1.9.0`, 29.07.2026 — exact `CURRENT_165` additive-tail/EXPAND engineering
+- `1.10.0`, 29.07.2026 — post-EXPAND operational target переведён на
+  implementation candidate `CURRENT_166`: allowlisted tail `163..166`, count
+  `166`, latest `20260729160000_guest_game_delivery_claim_fence`. Remote
+  exact-SHA/`165 → 166` pending; `CURRENT_165`
+  `4bd6a036...`/`7c20adec...` остаётся historical engineering evidence,
+  production apply — `NO-GO`.
+- `1.9.0`, 29.07.2026 — historical exact `CURRENT_165`
+  additive-tail/EXPAND engineering
   gates и populated `164 → 165` прошли remote CI
   `4bd6a036...` / `30428288353`; production apply остаётся `NO-GO`.
-- `1.8.0`, 29.07.2026 — current additive tail расширен migration `165`;
+- `1.8.0`, 29.07.2026 — then-current additive tail расширен migration `165`;
   admission/planner state теперь `CURRENT_165`, migration count `165`, latest
   `20260729120000_store_background_execution_fence`. Store остаются
   fail-closed, outbound `OFF`; production apply не выполнялся.

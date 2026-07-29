@@ -3,11 +3,12 @@
 | Поле                    | Значение                                                                   |
 | ----------------------- | -------------------------------------------------------------------------- |
 | Статус                  | `IMPLEMENTED_CANDIDATE`; SYNTHETIC real-PG `PASS`; PRODUCTION_LIKE `NO-GO` |
-| Версия                  | 0.12.0                                                                     |
+| Версия                  | 0.13.0                                                                     |
 | Дата                    | 29.07.2026                                                                 |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-OPS-002`, `BETA-OPS-006`, `BETA-CUT-001`       |
 | Current candidate SHA   | Exact PR/release SHA; принимается только с green remote CI evidence        |
-| Latest green remote SHA | `4bd6a036df16579f68b2c96a14b6475c8311b231`; CI `30428288353`; CURRENT_165 PASS |
+| Current operational     | `CURRENT_166`; exact-SHA remote CI и populated `165 → 166` pending         |
+| Historical green remote | `CURRENT_165`: `4bd6a036...` / `30428288353`; `7c20adec...` / `30429463161` |
 | Historical runtime SHA  | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence            |
 | Historical test SHA     | `2341b99937e54cc50d1763a0a794d975816c72ce`; не current evidence            |
 | Report schema version   | 2                                                                          |
@@ -42,7 +43,7 @@ Remote target, production process, reconciliation apply, `VALIDATE`,
 Candidate:
 
 - принимает только `SYNTHETIC` или `PRODUCTION_LIKE`;
-- принимает только `BASELINE_156`, `EXPAND_162` или `CURRENT_165`;
+- принимает только `BASELINE_156`, `EXPAND_162` или `CURRENT_166`;
 - разрешает PostgreSQL только на `127.0.0.1`, `localhost` или `::1`;
 - отвергает `NODE_ENV=production`;
 - использует exact committed `RELEASE_SHA`, а не содержимое mutable worktree;
@@ -63,7 +64,7 @@ Candidate:
 ```text
 implementation candidate               = IMPLEMENTED_CANDIDATE
 admission contract tests               = LOCAL PASS (21/21)
-authority/acquisition/detached tests    = LOCAL PASS (40/40; positive E2E; CURRENT_164 rejected)
+authority/acquisition/detached tests    = LOCAL PASS (40/40; positive E2E; CURRENT_164/CURRENT_165 rejected)
 public-only positive pinned path        = LOCAL PASS (isolated test-only child)
 test evidence commit                      = 2341b99937e54cc50d1763a0a794d975816c72ce
 offline/integrated smoke self-test       = PASS (48 checks)
@@ -71,9 +72,11 @@ SYNTHETIC real PostgreSQL verification = PASS (23 scenarios; PostgreSQL 16.13)
 PRODUCTION_LIKE acquisition/restore/run = NOT EXECUTED
 production-like authority roots         = {} / EMPTY; FAIL-CLOSED
 remote CURRENT_164 prerequisite          = PASS / 37f8cc88... / CI 30423839760
-remote CURRENT_165 engineering candidate = PASS / 4bd6a036... / CI 30428288353
+historical CURRENT_165 engineering       = PASS / 4bd6a036... / CI 30428288353
+historical CURRENT_165 docs successor    = PASS / 7c20adec... / CI 30429463161
+current CURRENT_166 remote/PG evidence   = PENDING
 main protection/ruleset/CODEOWNERS       = ABSENT
-exact authority-candidate remote CI     = PASS / 4bd6a036...
+exact current authority-candidate CI     = PENDING
 Node 22 experimental module mocks        = P2 TEST-INFRA RISK
 remote admission                        = NO-GO
 production apply/VALIDATE/deploy        = NO-GO
@@ -274,11 +277,11 @@ State 157–161, post-`VALIDATE`, post-`CONTRACT`, иной PostgreSQL major, д
 schema, лишний protected FK или altered/disabled FK trigger получают
 `REJECTED`/exit `3`.
 
-### 5.3. `CURRENT_165`
+### 5.3. `CURRENT_166`
 
 ```text
-migrationCount                         = 165
-latestMigration                        = 20260729120000_store_background_execution_fence
+migrationCount                         = 166
+latestMigration                        = 20260729160000_guest_game_delivery_claim_fence
 unfinishedMigrationCount               = 0
 compositeContractMatchCount             = 14
 simpleContractMatchCount                = 14
@@ -289,16 +292,23 @@ parentIndexContractMismatchCount         = 0
 enforcement triggers per expected FK    = 4 enabled
 ```
 
-`CURRENT_165` содержит exact frozen StaffTask prefix `EXPAND_162` плюс ровно
-три allowlisted additive tail migrations:
+`CURRENT_166` содержит exact frozen StaffTask prefix `EXPAND_162` плюс ровно
+четыре allowlisted additive tail migrations:
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence` и
-`20260729120000_store_background_execution_fence`. Migration `165` добавляет
-только fail-closed Store background-execution fence: ни один Store не
+`20260729120000_store_background_execution_fence` и
+`20260729160000_guest_game_delivery_claim_fence`. Migration `165` добавляет
+fail-closed Store background-execution fence, migration `166` — delivery
+claim/attempt/transition fence как implementation candidate. Ни один Store не
 активируется, outbound остаётся `OFF`. Tail не может менять protected
-`StaffTask*` relations, FK, indexes или triggers. Иная 163-я, 164-я или 165-я
-migration, дополнительная migration либо изменённый prefix получают
+`StaffTask*` relations, FK, indexes или triggers. Иная migration в tail,
+дополнительная migration либо изменённый prefix получают
 `REJECTED`/exit `3`.
+
+`CURRENT_165` сохраняется только как historical accepted engineering evidence
+на `4bd6a036...`/`30428288353` и
+`7c20adec...`/`30429463161`; current admission его не принимает. Remote
+exact-SHA и populated PostgreSQL `165 → 166` для `CURRENT_166` ещё pending.
 
 ## 6. Acquisition, restore и operational approval
 
@@ -490,7 +500,7 @@ node packages/database/scripts/staff-task-integrity-snapshot-admission.mjs --pre
 DATABASE_URL=<loopback PostgreSQL URL with schema=public>
 RELEASE_SHA=<exact 40-character lowercase Git SHA>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CLASSIFICATION=SYNTHETIC|PRODUCTION_LIKE
-STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE=BASELINE_156|EXPAND_162|CURRENT_165
+STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_STATE=BASELINE_156|EXPAND_162|CURRENT_166
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_EXPECTED_DATABASE=<exact restored DB name>
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_CONFIRM=run-staff-task-integrity-snapshot-admission
 STAFF_TASK_INTEGRITY_SNAPSHOT_ADMISSION_ISOLATION_ATTESTATION=I_ATTEST_THIS_IS_AN_ISOLATED_ENCRYPTED_NO_EGRESS_NON_PRODUCTION_SNAPSHOT
@@ -830,11 +840,11 @@ fingerprint/key id, acquisition/restore approvals и доказательств�
 exact DB marker. Они коррелируются с report/release SHA, но не копируются в
 обычный JSON/stdout.
 
-`BASELINE_156`, `EXPAND_162` и `CURRENT_165` используют три разных state-bound
+`BASELINE_156`, `EXPAND_162` и `CURRENT_166` используют три разных state-bound
 authority envelope. После migrations `157..162` повторная detached ceremony
 `prepare → external sign → finalize` выпускает `EXPAND_162` envelope с новым
-nonce-bound binding; после exact allowlisted migrations 163, 164 и 165 третья
-ceremony выпускает `CURRENT_165` envelope с ещё одним новым binding.
+nonce-bound binding; после exact allowlisted migrations `163..166` третья
+ceremony выпускает `CURRENT_166` envelope с ещё одним новым binding.
 DB `COMMENT` marker заменяется digest соответствующего envelope до каждого
 следующего admission. Protected evidence хранит все три authority bundle,
 первоначальную установку marker и обе ротации. Raw marker или manifest в
@@ -873,9 +883,10 @@ acquisition approval
   → exact allowlisted migration 20260728120000_tenant_execution_control_plane_expand
   → exact allowlisted migration 20260728150000_tenant_execution_revision_fence
   → exact allowlisted migration 20260729120000_store_background_execution_fence
-  → new CURRENT_165 request → prepare → external signer/HSM → finalize
-  → replace DB comment marker with exact CURRENT_165 envelope digest
-  → admission(CURRENT_165)
+  → exact allowlisted migration 20260729160000_guest_game_delivery_claim_fence
+  → new CURRENT_166 request → prepare → external signer/HSM → finalize
+  → replace DB comment marker with exact CURRENT_166 envelope digest
+  → admission(CURRENT_166)
   → read-only integrity inventory
   → aggregate reconciliation planner
   → owner decision for every non-zero code
@@ -948,8 +959,10 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
    candidate; утвердить внешний signer/HSM, separation of duties, key custody
    и защищённый acquisition-to-signature transport;
 2. считать `37f8cc88...` historical prerequisite `CURRENT_164`, а
-   `4bd6a036...` / CI `30428288353` — зелёным exact `CURRENT_165` engineering
-   candidate evidence; ни одно из них не является production-like evidence;
+   `4bd6a036...` / CI `30428288353` и
+   `7c20adec...` / CI `30429463161` — historical `CURRENT_165` engineering
+   evidence; ни одно из них не является current `CURRENT_166` или
+   production-like evidence;
 3. P2: зафиксировать поддерживаемую Node 22 версию для test-only
    `--experimental-test-module-mocks` и отслеживать/заменить experimental API,
    если он изменится;
@@ -959,7 +972,7 @@ Production-like acquisition/restore/admission, production apply, `VALIDATE`,
    Ed25519 public root с exact fingerprint, profile/purpose и validity window;
    private key не должен попадать в admission runtime, environment или repo;
 5. P0: одобрить acquisition/restore workflow, три state-bound nonce-signed
-   envelope (`BASELINE_156`, `EXPAND_162`, `CURRENT_165`), первоначальную
+   envelope (`BASELINE_156`, `EXPAND_162`, `CURRENT_166`), первоначальную
    установку и две обязательные ротации exact DB comment marker, а также
    protected evidence storage;
 6. получить clean remote CI evidence для exact enrolled-root SHA;
@@ -979,12 +992,20 @@ apply/rollback, zero-diff и повторные проверки.
 
 ## 18. Changelog
 
-- `0.12.0`, 29.07.2026 — exact `CURRENT_165` remote engineering candidate
+- `0.13.0`, 29.07.2026 — current admission contract переведён на
+  implementation candidate `CURRENT_166`: count `166`, latest
+  `20260729160000_guest_game_delivery_claim_fence`, exact allowlisted tail
+  `163..166`. Remote exact-SHA и populated `165 → 166` pending; production
+  roots остаются `{}` и все production-like/external действия — `NO-GO`.
+  `4bd6a036...`/`30428288353` и `7c20adec...`/`30429463161` сохранены как
+  historical `CURRENT_165` evidence.
+- `0.12.0`, 29.07.2026 — historical exact `CURRENT_165` remote engineering
+  candidate
   `4bd6a036...` прошёл CI `30428288353`: все три job, real PostgreSQL
   `164 → 165`, admission/application/authority gates зелёные.
   Production-like acquisition/admission, root enrollment, deploy и внешний
   beta остаются `NO-GO`.
-- `0.11.0`, 29.07.2026 — current admission contract переведён в
+- `0.11.0`, 29.07.2026 — then-current admission contract переведён в
   `CURRENT_165`: `migrationCount=165`, latest
   `20260729120000_store_background_execution_fence`, exact allowlisted tail
   `163..165`. Remote `CURRENT_164` prerequisite прошёл на `37f8cc88...`, CI

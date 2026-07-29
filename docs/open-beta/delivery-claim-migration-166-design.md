@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                   |
 | ---------------- | ---------------------------------------------------------- |
-| Версия           | 0.6                                                        |
+| Версия           | 0.10                                                       |
 | Дата             | 29.07.2026                                                 |
-| Статус           | Design candidate; 4 review включены, code отсутствует      |
+| Статус           | Implementation candidate; PostgreSQL/remote evidence pending |
 | Release decision | `NO-GO` для external delivery и owner invite               |
 | Базовая схема    | Exact `CURRENT_165`                                        |
 | Первый scope     | `GuestGameDelivery`, Store fence consumption, direct и bot send paths |
@@ -28,27 +28,49 @@ Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на
 `37f8cc88cdba05b3c73f6bc14e14528f831228ee` (CI run `30423839760`).
 Migration `165` добавляет только fail-closed Store background-execution fence,
 не включает ни один Store и не разрешает outbound. Delivery claim migration
-`166` всё ещё не создана. Отдельный remote PostgreSQL 16 PASS exact-SHA
-кандидата `CURRENT_165`, включая populated rehearsal `164 → 165`, получен на
-`4bd6a036...` / CI `30428288353`. Этот документ
-является design contract, а не разрешением создать migration, применить DDL
-или включить outbound.
+`166`, Prisma contract и fail-closed legacy runtime containment созданы в
+рабочей ветке как implementation candidate. Отдельный remote PostgreSQL 16
+PASS exact-SHA кандидата `CURRENT_165`, включая populated rehearsal
+`164 → 165`, получен на `4bd6a036...` / CI `30428288353`. Независимый
+adversarial review candidate `166` не нашёл P0-блокера для применения схемы
+как неактивного фундамента, но зафиксировал четыре P1-блокера до разрешения
+любых provider writes: глобальный lock order, final-row/evidence consistency,
+явный legacy-quarantine reconciliation protocol и запрет прямой вставки
+transition evidence. Для `CURRENT_166` ещё обязательны populated PostgreSQL
+rehearsal, exact-SHA remote CI и effect-capable coordinator. Этот документ
+является design/implementation contract, а не разрешением применить DDL или
+включить outbound.
+
+Текущий candidate намеренно сохраняет hard deny на legacy direct provider,
+bot pull, provider prepare/update/ack, revoke и unsubscribe delivery mutation
+независимо от env/canary. Ledger/reward/consent business mutation при этом
+продолжается, а `CASHIER/MANUAL` delivery остаётся доступным. До effect-capable
+release дополнительно
+обязательны persisted `NETWORK | STORES` enforcement с пересечением
+`allowedStoreIds`, versioned provider/workload authority, operational
+retention identity/procedure и cutover старых worker/bot credentials. Ни один
+из этих пунктов нельзя заменить одной успешной миграцией.
 
 ## 2. Принятое архитектурное решение
 
-Первый срез хранит claim state непосредственно в `GuestGameDelivery`, а общий
-контракт реализует typed coordinator/token API.
+Первый срез хранит active claim state непосредственно в
+`GuestGameDelivery`, permanent provider-attempt evidence — в append-only
+`GuestGameDeliveryAttempt`, а общий контракт реализует typed
+coordinator/token API.
 
 Причины:
 
 1. Claim, token digest, payload snapshot и event фиксируются одной короткой
-   БД-транзакцией.
+   БД-транзакцией; provider marker дополнительно создаёт immutable attempt row
+   в той же транзакции.
 2. Сохраняются настоящие FK и same-tenant Store invariant.
 3. Legacy `prepare`, manual update, cancellation и ack можно защитить
    предикатами той же строки.
 4. Полиморфный `subjectId` в общей таблице не остановит старый безусловный
    update delivery без дополнительного trigger/CAS.
-5. Существующие сильные паттерны bonus ledger и reward materializer уже
+5. Очистка current-attempt mirror при dedicated retry не освобождает
+   `providerAttemptKey` и не стирает provider evidence.
+6. Существующие сильные паттерны bonus ledger и reward materializer уже
    используют domain-row generation fencing.
 
 Общая coordination-модель для Langame, reports и остальных schedulers может
@@ -65,9 +87,11 @@ provider effects.
 attempts               Int       NOT NULL DEFAULT 0
 attemptBudget          Int       NOT NULL DEFAULT 5
 claimGeneration        Int       NOT NULL DEFAULT 0
+transitionRevision     BigInt    NOT NULL DEFAULT 0
 claimJobKind            String?
 integrityState          String    NOT NULL DEFAULT 'VERIFIED'
 integrityReasonCode     String?
+stateReasonCode         String?
 executionRevision      Int?
 storeExecutionRevision Int?
 leaseOwner             String?
@@ -94,6 +118,10 @@ providerReceiptKeyVersion Int?
 terminalAckDigest      String?
 ```
 
+`providerAttemptKey` в delivery является только mirror текущей attempt.
+Permanent uniqueness и immutable marker evidence принадлежат
+`GuestGameDeliveryAttempt`.
+
 Новые runtime states:
 
 ```text
@@ -110,8 +138,10 @@ RECONCILIATION_REQUIRED
 Инварианты:
 
 - CHECK допустимых status разрешает только восемь значений выше;
+- CHECK channel разрешает только `TELEGRAM`, `MAX`, `CASHIER`, `MANUAL`;
 - `integrityState IN ('VERIFIED', 'LEGACY_QUARANTINED')`;
-- non-null `claimJobKind` разрешает только direct dispatch или bot pull;
+- non-null `claimJobKind` разрешает только
+  `GUEST_GAME_DELIVERY_DISPATCH` или `GUEST_GAME_DELIVERY_BOT_PULL`;
 - `0 <= attempts <= attemptBudget <= 10`;
 - `0 <= claimGeneration < 2147483647`; exhaustion блокирует claim и создаёт
   alert;
@@ -124,27 +154,70 @@ RECONCILIATION_REQUIRED
 - `storeId IS NOT NULL` в активной claim требует положительную
   `storeExecutionRevision`;
 - `claimGeneration` не сбрасывается при operator retry;
+- `transitionRevision >= 0`; каждый provider transition, изменение
+  `integrityState` или claim generation повышает её ровно на один, а любой
+  иной UPDATE обязан сохранить значение;
 - `attempts` повышается ровно один раз при каждом `READY → PROCESSING` и
   никогда не сбрасывается; dedicated retry может увеличить `attemptBudget`
   только на один, с reason/event и общим пределом `10`.
 
-Per-state CHECK/nullability contract:
+Per-state CHECK/nullability contract разделён по типу channel.
+
+Provider matrix для `TELEGRAM`/`MAX`:
 
 | State | Обязательные данные | Запрещённые/особые данные |
 | --- | --- | --- |
-| `READY` | verified provider Store/recipient binding | Нет active lease, marker, send grant или outcome |
-| `PROCESSING` | generation/job/revisions, owner+token digests, raw lease owner, claim/effect/config snapshot, lease+ack window | Нет provider marker, send grant, outcome или terminal ack |
-| `DISPATCHING` | всё claim evidence, provider authority/workload digests, marker, one-time send grant и ack window | Нет terminal ack; marker неизменяем |
-| `RECONCILIATION_REQUIRED` | captured claim evidence, marker, digests и sanitized ambiguous outcome evidence | Raw lease/grant очищены; auto retry запрещён |
-| `SENT` | marker, definitive-success evidence и terminal ack digest | Raw lease/grant очищены; status immutable |
-| `FAILED` | либо definitive-not-applied marker/outcome/ack, либо unattempted exhaustion evidence | Generation-terminal; возврат в `READY` только dedicated retry |
-| `BLOCKED` | reason/event; legacy evidence сохраняется | Active lease/grant отсутствуют; claim запрещён |
-| `CANCELED` | cancel reason/event | Active или ambiguous attempt запрещён |
+| `READY` | `VERIFIED`, `readinessStatus=READY_FOR_BOT`, canonical non-null Store и profile binding | Нет active lease, marker, send grant или outcome |
+| `PROCESSING` | generation/attempt/job/revisions, owner+token digests, raw lease owner, claim/effect/config snapshot, lease+ack window | Нет provider marker, send grant, outcome или terminal ack |
+| `DISPATCHING` | всё claim evidence, matching immutable attempt row, provider authority/workload digests, marker, one-time send-grant digest и ack window | Нет outcome или terminal ack; marker неизменяем |
+| `RECONCILIATION_REQUIRED` | captured claim evidence, matching attempt row, marker, digests и `AMBIGUOUS` outcome evidence | Raw lease owner очищен; auto retry запрещён |
+| `SENT` | matching attempt row, `APPLIED` outcome, definitive-success evidence и terminal ack digest | Raw lease owner очищен; status immutable |
+| `FAILED` | либо matching attempt row, `NOT_APPLIED` outcome и terminal ack digest, либо unattempted exhaustion с `stateReasonCode` | Generation-terminal; возврат в `READY` только dedicated retry |
+| `BLOCKED` | `stateReasonCode` и durable event; legacy evidence сохраняется | Active lease/send grant отсутствуют; claim запрещён |
+| `CANCELED` | `stateReasonCode` и durable cancel event | Active или ambiguous attempt запрещён |
+
+Non-provider matrix для `CASHIER`/`MANUAL`:
+
+- допустимы только `READY`, `BLOCKED`, `SENT`, `FAILED`, `CANCELED`;
+- `PROCESSING`, `DISPATCHING`, `RECONCILIATION_REQUIRED` запрещены;
+- все claim, token, provider-attempt, send-grant, provider outcome и provider
+  receipt поля обязаны быть `NULL`;
+- `storeId` и `guestId` могут быть `NULL`; `BLOCKED/FAILED/CANCELED` получают
+  deterministic `stateReasonCode`, включая backfill legacy rows;
+- non-provider terminal row не требует provider marker и может оставаться
+  `VERIFIED`.
 
 Для `LEGACY_QUARANTINED` migration допускает отсутствующее новое evidence,
 но DB запрещает переход в `READY/PROCESSING/DISPATCHING` до reconciliation.
 Для всех новых `VERIFIED` rows state matrix является строгим CHECK, а не
 только service-level validation.
+
+Все существовавшие до migration `166` provider rows в
+`SENT/FAILED/CANCELED` получают `LEGACY_QUARANTINED` независимо от совпадения
+Store/recipient: у них нет доказуемого pre-provider marker. Они сохраняют
+исходный status и получают `integrityReasonCode=LEGACY_PRE_166_PROVIDER_TERMINAL`
+и один `DELIVERY_INTEGRITY_QUARANTINED` event. Они не могут retry/send без
+dedicated reconciliation.
+
+Retention contract:
+
+- raw claim token и raw send grant никогда не записываются;
+- `leaseOwner` очищается при release, terminal transition и переходе в
+  reconciliation; `claimOwnerDigest` хранится как evidence;
+- `claimedAt`, `leaseExpiresAt`, `acknowledgeUntil`,
+  `providerAttemptedAt`, `providerObservedAt` и все captured revisions/digests
+  сохраняются в current row до documented retention;
+- immutable `GuestGameDeliveryAttempt` неизменно сохраняет marker-time
+  timestamps/digests до завершения evidence-retention policy;
+- `claimTokenDigest` хранится в delivery как минимум до
+  `acknowledgeUntil`, затем может быть очищен только retention workflow;
+- current `sendGrantDigest/sendGrantExpiresAt` можно очистить после terminal
+  transition, потому что их immutable копия уже существует в attempt row;
+- dedicated retry может очистить current provider-attempt mirror только после
+  terminal/reconciliation evidence и `DELIVERY_RETRIED` event; attempt/event
+  rows не изменяются;
+- все HMAC/SHA-256 digests — lowercase hex ровно 64 символа; пустые строки
+  запрещены. `transitionKey` имеет формат `v1:` + 64 lowercase hex.
 
 FK и delete policy:
 
@@ -200,12 +273,95 @@ UNIQUE (tenantId, providerAttemptKey)
 Partial indexes остаются explicit SQL migration contract и отдельно
 проверяются catalog smoke.
 
-### 3.2. Canonical effective Store
+### 3.2. `GuestGameDeliveryAttempt`
+
+Каждый committed pre-provider marker создаёт одну immutable attempt row.
+Active claim и current status остаются в `GuestGameDelivery`; attempt table не
+является общей scheduler queue и не claim-ится независимо.
+
+Добавить модель:
+
+```text
+id                        String    PRIMARY KEY
+tenantId                  String    NOT NULL
+deliveryId                String    NOT NULL
+rewardId                  String    NOT NULL
+storeId                   String    NOT NULL
+channel                   String    NOT NULL
+claimGeneration           Int       NOT NULL
+attemptNumber             Int       NOT NULL
+claimJobKind              String    NOT NULL
+executionRevision         Int       NOT NULL
+storeExecutionRevision    Int       NOT NULL
+claimKeyVersion           Int       NOT NULL
+claimOwnerDigest          String    NOT NULL
+claimTokenDigest          String    NOT NULL
+claimedAt                 Timestamptz(3) NOT NULL
+leaseExpiresAt            Timestamptz(3) NOT NULL
+acknowledgeUntil          Timestamptz(3) NOT NULL
+effectInputDigest         String    NOT NULL
+providerConfigDigest      String    NOT NULL
+providerAuthorityRevision Int       NOT NULL
+workloadIdentityDigest    String    NOT NULL
+providerAttemptKey        String    NOT NULL
+providerAttemptedAt       Timestamptz(3) NOT NULL
+sendGrantDigest           String    NOT NULL
+sendGrantExpiresAt        Timestamptz(3) NOT NULL
+createdAt                 Timestamptz(3) NOT NULL DEFAULT now()
+```
+
+Attempt row фиксирует только состояние на момент marker commit. Provider
+outcome появляется позже и записывается typed durable event + current delivery
+mirror; attempt row не обновляется.
+
+Constraints:
+
+- `channel IN ('TELEGRAM', 'MAX')`;
+- `claimJobKind IN ('GUEST_GAME_DELIVERY_DISPATCH',
+  'GUEST_GAME_DELIVERY_BOT_PULL')`;
+- `claimGeneration > 0`, `attemptNumber > 0`, captured revisions/key versions
+  положительны;
+- все digest поля проходят exact lowercase-hex-64 CHECK;
+- `claimedAt <= providerAttemptedAt < sendGrantExpiresAt <= leaseExpiresAt <=
+  acknowledgeUntil`;
+- unique `(tenantId, id)` для same-tenant event FK;
+- unique `(tenantId, deliveryId, claimGeneration)`;
+- permanent unique `(tenantId, providerAttemptKey)`;
+- composite same-tenant `RESTRICT` FK к delivery, reward и Store;
+- deferred trigger требует exact совпадения attempt с current delivery marker
+  и `DELIVERY_PROVIDER_ATTEMPTED` event в той же транзакции.
+
+`GuestGameDeliveryAttempt` — append-only. DB trigger отклоняет `UPDATE` и
+обычный `DELETE`; application runtime role не получает эти privileges.
+Удаление возможно только documented evidence-retention procedure под
+отдельной non-login DB role после удаления зависимых events. Retention order:
+`event → attempt → delivery → reward`.
+
+Индексы:
+
+```text
+UNIQUE (tenantId, deliveryId, claimGeneration)
+UNIQUE (tenantId, providerAttemptKey)
+UNIQUE (tenantId, id)
+(tenantId, storeId, providerAttemptedAt, id)
+(deliveryId)
+(rewardId)
+(storeId)
+```
+
+Partial unique current-row index на
+`GuestGameDelivery(tenantId, providerAttemptKey)` остаётся fast guard, но
+permanent uniqueness обеспечивается только append-only attempt table.
+
+### 3.3. Canonical effective Store
 
 Новая effect-eligible provider delivery (`TELEGRAM`/`MAX`) не может быть
 tenant-global:
 
 - `delivery.storeId` и `reward.storeId` обязаны быть непустыми и равными;
+- `delivery.profileId` и `reward.profileId` обязаны быть непустыми и равными;
+- `delivery.guestId` и `reward.guestId` nullable, но обязаны быть равны через
+  `IS NOT DISTINCT FROM`;
 - claim и provider attempt каждый раз читают актуальный reward и отклоняют
   mismatch;
 - `CASHIER`/`MANUAL` без внешнего provider могут оставаться с `storeId=NULL`,
@@ -224,63 +380,147 @@ tenant-global:
 3. оба значения равны — строка сохраняется;
 4. same-tenant mismatch либо provider delivery без reward Store в
    `READY` — `BLOCKED`, `LEGACY_QUARANTINED`, immutable event и reason;
-5. legacy `FAILED/SENT/CANCELED` mismatch/null сохраняет status/evidence,
-   получает `LEGACY_QUARANTINED` и integrity event; retry запрещён без
-   dedicated reconciliation;
-6. nullable non-provider строки сохраняются без искусственного Store.
+5. все pre-166 provider `FAILED/SENT/CANCELED`, включая matching rows,
+   сохраняют status/evidence, получают `LEGACY_QUARANTINED`,
+   `LEGACY_PRE_166_PROVIDER_TERMINAL` и exact
+   `DELIVERY_INTEGRITY_QUARANTINED` event; retry запрещён без dedicated
+   reconciliation;
+6. nullable non-provider строки сохраняются без искусственного Store и
+   используют отдельную non-provider matrix.
 
-После inventory structurally valid rows получают `VERIFIED`, исключения —
-`LEGACY_QUARANTINED`; только затем колонка становится `NOT NULL DEFAULT
-'VERIFIED'` для новых rows.
+После inventory structurally valid provider non-terminal и non-provider rows
+получают `VERIFIED`; corrupt/mismatched rows и все pre-166 provider terminal
+rows — `LEGACY_QUARANTINED`. Только затем колонка становится
+`NOT NULL DEFAULT 'VERIFIED'` для новых rows.
 
 DB-native deferred constraint triggers на `GuestGameDelivery` и изменение
-`GuestGameReward.storeId` вместе с composite reward FK защищают равенство от
-direct DML и concurrent reward mutation для effect-eligible states и
-immutable Store binding всей `VERIFIED` provider history. Trigger блокирует
+`GuestGameReward.storeId/profileId/guestId` вместе с composite FK защищают
+равенство от direct DML и concurrent reward mutation для effect-eligible
+states и immutable binding всей `VERIFIED` provider history. Trigger блокирует
 соответствующие reward/delivery rows в стабильном порядке. Historical
 terminal/quarantined legacy mismatch остаётся read-only evidence, но не может
 перейти в effect-eligible state. Одного service-level join недостаточно.
 
-### 3.3. Recipient authority
+### 3.4. Recipient authority
 
 `GuestGameProfile` и `Guest` получают explicit unique `(tenantId, id)`, после
 чего delivery использует composite same-tenant `RESTRICT` FK. Provider claim
-дополнительно требует, чтобы delivery profile/guest совпадали с canonical
-recipient graph reward и принадлежали тому же tenant. Consent/unsubscribe и
-channel identity читаются только через этот graph.
+дополнительно требует non-null profile, exact
+`delivery.profileId = reward.profileId` и nullable exact
+`delivery.guestId IS NOT DISTINCT FROM reward.guestId`. Profile, guest и
+reward принадлежат тому же tenant. Consent/unsubscribe и channel identity
+читаются только через этот graph.
 
 Migration inventory:
 
 - cross-tenant profile/guest или event identity — preflight `SQLSTATE 55000`,
   zero partial changes;
-- same-tenant delivery↔reward recipient mismatch — status сохраняется,
+- same-tenant delivery↔reward recipient mismatch, включая null profile для
+  provider channel, — status сохраняется, кроме effect-eligible `READY`,
+  которая становится `BLOCKED`; строка получает
   `integrityState=LEGACY_QUARANTINED`, event и запрет retry;
 - nullable non-provider legacy identity допустима, но не может войти в
   provider claim;
 - hard delete profile/guest с delivery evidence запрещён; PII удаляется
   отдельной anonymization/retention процедурой без стирания effect evidence.
 
-### 3.4. Delivery event evidence
+### 3.5. Delivery event evidence
 
-В `GuestGameDeliveryEvent` добавляется nullable `transitionKey` и unique
-`(tenantId, transitionKey)`. CHECK требует непустой key для versioned durable
-event types: `CLAIMED`, `ATTEMPTED`, `FINALIZED`, `REAPED`, `RETRIED`,
-`CANCELED`, `RECONCILED`, `INTEGRITY_QUARANTINED`. Key имеет фиксированный формат
-`v1:<sha256(canonical-json)>`, где canonical input связывает delivery,
-generation, event type, attempt и outcome; raw PII/secret в key отсутствуют.
-Legacy event types могут сохранить `NULL`.
+В `GuestGameDeliveryEvent` добавляются typed evidence columns:
+
+```text
+transitionKey             String?
+transitionRevision        BigInt?
+storeId                   String?
+attemptId                 String?
+claimGeneration           Int?
+attemptNumber             Int?
+claimJobKind              String?
+executionRevision         Int?
+storeExecutionRevision    Int?
+claimKeyVersion           Int?
+claimOwnerDigest          String?
+claimTokenDigest          String?
+claimedAt                 Timestamptz(3)?
+leaseExpiresAt            Timestamptz(3)?
+acknowledgeUntil          Timestamptz(3)?
+effectInputDigest         String?
+providerConfigDigest      String?
+providerAuthorityRevision Int?
+workloadIdentityDigest    String?
+providerAttemptKey        String?
+providerAttemptedAt       Timestamptz(3)?
+sendGrantDigest           String?
+sendGrantExpiresAt        Timestamptz(3)?
+providerOutcomeClass      String?
+providerOutcomeCode       String?
+providerObservedAt        Timestamptz(3)?
+providerReceiptDigest     String?
+providerReceiptRefEncrypted Bytes?
+providerReceiptKeyVersion Int?
+terminalAckDigest         String?
+stateReasonCode           String?
+adapterVersion            String?
+httpStatusClass           Int?
+provenanceDigest          String?
+```
+
+`payload` остаётся только для allowlisted backward-compatible metadata и не
+является canonical хранилищем revisions/digests/outcome. Новый durable event
+не считается валидным, если обязательное typed evidence спрятано только в
+JSON.
+
+Exact durable event taxonomy v1:
+
+```text
+DELIVERY_CLAIMED
+DELIVERY_PROVIDER_ATTEMPTED
+DELIVERY_FINALIZED
+DELIVERY_REAPED
+DELIVERY_RETRIED
+DELIVERY_CANCELED
+DELIVERY_RECONCILED
+DELIVERY_INTEGRITY_QUARANTINED
+```
+
+CHECK требует non-null `transitionKey` только для этих восьми exact event
+types. Legacy event types могут сохранить `NULL`, но новый runtime не создаёт
+непрефиксованные `CLAIMED/ATTEMPTED/...` aliases.
+
+`transitionKey` имеет фиксированный формат
+`v1:<sha256(canonical-json)>`, где canonical input связывает tenant, delivery,
+reward, monotonic `transitionRevision`, generation, exact event type, attempt
+и outcome. Raw PII/secret в key отсутствуют. Unique
+`(tenantId, transitionKey)` обеспечивает replay dedupe.
+
+Каждый event-bearing transition повышает `delivery.transitionRevision` ровно
+на один; остальные UPDATE не могут менять revision. Exact event хранит ту же
+revision, а insert-trigger сверяет её с текущей Delivery до commit. Поэтому
+старый event нельзя повторно использовать для совпавшего `READY ↔ BLOCKED`,
+в том числе при нескольких переходах одной строки в одной транзакции.
 
 Claim, provider marker, finalize, reaper, release, retry, cancel и
-reconciliation меняют delivery и вставляют event в одной транзакции, поэтому
-replay не создаёт второе событие.
+reconciliation меняют delivery и вставляют event в одной транзакции.
+`DEFERRABLE INITIALLY DEFERRED` transition constraint trigger на delivery
+проверяет при commit наличие ровно одного event с expected exact type/key,
+generation, revisions и outcome. Provider marker дополнительно требует
+matching immutable attempt row и `DELIVERY_PROVIDER_ATTEMPTED` event. Direct
+DML, generic update или crash до event не может commit-ить transition; replay
+не создаёт второе событие.
 
 `GuestGameDelivery` получает unique `(tenantId, id)`, а event — composite
-same-tenant FK `ON DELETE RESTRICT` к delivery и reward. Legacy cascade FK
-delivery→reward и event→delivery/reward заменяются на `RESTRICT`, чтобы delete
-reward не стирал claim/provider evidence. Constraint trigger проверяет, что
-`event.rewardId` равен reward текущей delivery. Runtime role не имеет `UPDATE`
-event; ordered `event → delivery → reward` delete доступен только отдельному
-retention workflow после завершения evidence retention.
+same-tenant FK `ON DELETE RESTRICT ON UPDATE RESTRICT` к delivery, reward,
+Store и optional attempt. Legacy cascade FK delivery→reward и
+event→delivery/reward заменяются на `RESTRICT`, чтобы delete reward не стирал
+claim/provider evidence. Constraint trigger проверяет, что `event.rewardId`
+равен reward текущей delivery, а attempt/store/generation соответствуют
+transition.
+
+`GuestGameDeliveryEvent` — append-only. DB trigger отклоняет `UPDATE` и
+обычный `DELETE`; application runtime role не получает эти privileges.
+Documented retention procedure выполняется отдельной non-login DB role после
+evidence-retention window в порядке
+`event → attempt → delivery → reward`.
 
 Перед FK выполняется inventory legacy events. Cross-tenant
 `event.tenantId/deliveryId/rewardId` либо event reward, не равный delivery
@@ -288,9 +528,10 @@ reward, даёт preflight `SQLSTATE 55000`; migration не перепривяз
 evidence. Отдельная failure fixture доказывает zero partial changes, а success
 fixture — `convalidated=true` для всех новых FK.
 
-Event хранит scope, revision, generation, digests и allowlisted sanitized
-provider evidence: adapter/version, outcome class/code, HTTP class без body,
-opaque provider receipt/message reference, `observedAt` и provenance.
+Event хранит typed scope, revision, generation, digests и allowlisted
+sanitized provider evidence: adapter/version, exact outcome class/code, HTTP
+class без body, opaque provider receipt/message reference, `observedAt` и
+provenance.
 Чувствительный receipt reference хранится только encrypted с key version;
 raw claim/send token, recipient identity, provider credentials, response body
 и payload PII в event/log не попадают.
@@ -301,7 +542,48 @@ raw claim/send token, recipient identity, provider credentials, response body
 provider marker допускает не более трёх retries с jitter; после marker
 автоматический transaction retry запрещён и требуется reconciliation.
 
-### 3.5. Store-level fence
+Exact DB objects migration `166`:
+
+```text
+function guest_game_delivery_transition_key_v1(...)
+
+function guest_game_delivery_transition_guard()
+trigger  GuestGameDelivery_transition_guard
+
+function guest_game_delivery_binding_check()
+constraint trigger GuestGameDelivery_binding_check
+
+function guest_game_reward_delivery_binding_check()
+constraint trigger GuestGameReward_delivery_binding_check
+
+function guest_game_delivery_transition_event_check()
+constraint trigger GuestGameDelivery_transition_event_check
+
+function guest_game_delivery_attempt_append_only()
+trigger  GuestGameDeliveryAttempt_append_only
+
+function guest_game_delivery_event_append_only()
+trigger  GuestGameDeliveryEvent_append_only
+```
+
+Binding/event constraint triggers являются `DEFERRABLE INITIALLY DEFERRED`.
+Transition guard является `BEFORE INSERT OR UPDATE` и защищает generation,
+attempt counter, allowed transition graph, immutable marker и terminal state.
+Append-only triggers являются `BEFORE UPDATE OR DELETE`: `UPDATE` запрещён
+всегда, `DELETE` разрешён только при
+`current_user = leetplus_evidence_retention`. Все trigger functions
+schema-qualified, используют fixed `search_path=pg_catalog,public`, не
+являются `SECURITY DEFINER`; их `EXECUTE FROM PUBLIC` отзывается. Исключение —
+чистая immutable-функция `guest_game_delivery_transition_key_v1(...)`: она
+оставляет `EXECUTE` для `PUBLIC`, потому что invoker-trigger должен иметь право
+вызова. Функция работает только с аргументами и `pg_catalog`, не читает таблицы
+и не повышает привилегии. Dedicated retention использует отдельно audited
+`SECURITY DEFINER` procedure,
+принадлежащую non-login role `leetplus_evidence_retention`, с fixed
+`search_path`, bounded IDs и проверкой retention window. Application role не
+получает прямое членство в этой role и не может отключить triggers.
+
+### 3.6. Store-level fence
 
 Exact base `CURRENT_165` уже содержит:
 
@@ -481,8 +763,12 @@ identity, expiry или cancel.
 2. подтверждаются captured `effectInputDigest`/`providerConfigDigest` и
    записываются authority/workload digests, уникальный `providerAttemptKey`,
    `providerAttemptedAt` и digest короткого one-time send grant;
-3. в той же транзакции создаётся `DELIVERY_PROVIDER_ATTEMPTED` event;
-4. только после commit direct coordinator либо attempt response получает exact
+3. в той же транзакции создаются immutable `GuestGameDeliveryAttempt` и typed
+   `DELIVERY_PROVIDER_ATTEMPTED` event; deferred trigger проверяет их exact
+   соответствие delivery generation/marker;
+4. permanent unique attempt index резервирует `providerAttemptKey` даже после
+   future retry/очистки current mirror;
+5. только после commit direct coordinator либо attempt response получает exact
    immutable send snapshot. Никакой payload, полученный раньше, не является
    sendable.
 
@@ -504,7 +790,7 @@ Crash до marker допускает reclaim. Crash после marker не до�
   `claimTokenDigest + providerAttemptKey + terminalAckDigest`, идемпотентен
   только до `acknowledgeUntil`;
 - конфликтующий terminal ack возвращает conflict;
-- unknown/timeout provider outcome не становится обычным `FAILED` retry.
+- `AMBIGUOUS` provider outcome не становится обычным `FAILED` retry.
 
 Ack после tenant suspend разрешён только как завершение/reconciliation уже
 начатого exact provider attempt. Suspend/revision flip до marker даёт zero
@@ -514,24 +800,48 @@ exact provider call до `sendGrantExpiresAt`; drain обязан дождать
 перевести в reconciliation. «Новый effect после suspend запрещён» означает,
 что новая generation/marker после suspend не создаётся.
 
-При terminal transition очищаются только raw active-lease поля. Generation,
-captured revisions, token digest, effect/config digests, provider marker,
-`acknowledgeUntil` и terminal ack digest сохраняются до retention для аудита.
-Cryptographic duplicate ack проверяется только до `acknowledgeUntil`. После
-retention evidence остаётся в immutable events, а очистка выполняется
-отдельной audited policy.
+При terminal transition очищается raw `leaseOwner`; raw claim token/send grant
+никогда не хранились. Generation, captured revisions, owner/token digests,
+effect/config digests, provider marker timestamps, lease/ack timestamps,
+`acknowledgeUntil` и terminal ack digest сохраняются в delivery до retention.
+Marker-time evidence постоянно остаётся в immutable attempt, outcome —
+в typed immutable event. Current send-grant digest может быть очищен только
+после создания terminal event, поскольку immutable copy уже находится в
+attempt. Cryptographic duplicate ack проверяется только до
+`acknowledgeUntil`. После retention очистка current delivery mirror
+выполняется отдельной audited policy и не меняет attempt/event evidence.
 
 ### 5.4. Provider outcome taxonomy
 
+`providerOutcomeClass` допускает только три exact значения:
+
+```text
+APPLIED
+NOT_APPLIED
+AMBIGUOUS
+```
+
+- `APPLIED` требует definitive provider success evidence;
+- `NOT_APPLIED` требует definitive evidence, что внешний effect не произошёл;
+  permanent rejection является outcome code внутри этого class;
+- `AMBIGUOUS` используется для timeout, connection reset, ambiguous
+  `5xx`/response, crash после marker и любого результата без доказательства
+  `APPLIED` или `NOT_APPLIED`;
+- `providerOutcomeCode` — versioned allowlisted adapter code; пустое,
+  произвольный raw provider text и секреты запрещены;
+- `providerObservedAt` обязателен при любом non-null outcome;
+- `SENT` требует `APPLIED`, provider-attempted `FAILED` требует
+  `NOT_APPLIED`, `RECONCILIATION_REQUIRED` требует `AMBIGUOUS`.
+
 | Наблюдение                                                          | Переход                              |
 | ------------------------------------------------------------------- | ------------------------------------ |
-| Provider однозначно подтвердил отправку с attempt/idempotency key   | `DISPATCHING → SENT`                 |
-| Provider однозначно отверг запрос и гарантирует отсутствие effect   | `DISPATCHING → FAILED`               |
+| Provider однозначно подтвердил отправку с attempt/idempotency key   | `APPLIED`; `DISPATCHING → SENT`      |
+| Provider однозначно отверг запрос и гарантирует отсутствие effect   | `NOT_APPLIED`; `DISPATCHING → FAILED` |
 | Локальная ошибка доказанно произошла до committed provider marker  | `PROCESSING → READY/FAILED` по retry policy |
-| Timeout, reset, ambiguous 5xx/response или crash после marker       | `DISPATCHING → RECONCILIATION_REQUIRED` |
-| Повтор/lookup provider подтвердил ранее выполненный effect          | `RECONCILIATION_REQUIRED → SENT`     |
-| Provider evidence доказало `NOT_APPLIED` после quarantine           | `RECONCILIATION_REQUIRED → READY`    |
-| Permanent rejection подтверждён reconciliation                      | `RECONCILIATION_REQUIRED → FAILED`   |
+| Timeout, reset, ambiguous 5xx/response или crash после marker       | `AMBIGUOUS`; `DISPATCHING → RECONCILIATION_REQUIRED` |
+| Повтор/lookup provider подтвердил ранее выполненный effect          | `APPLIED`; `RECONCILIATION_REQUIRED → SENT` |
+| Provider evidence доказало отсутствие effect после quarantine      | `NOT_APPLIED`; `RECONCILIATION_REQUIRED → READY` |
+| Permanent rejection подтверждён reconciliation                      | `NOT_APPLIED`; `RECONCILIATION_REQUIRED → FAILED` |
 
 Отсутствие ответа не считается `NOT_APPLIED`. Если provider не поддерживает
 status lookup/idempotency, решение `NOT_APPLIED` требует manual evidence,
@@ -541,23 +851,24 @@ status lookup/idempotency, решение `NOT_APPLIED` требует manual ev
 
 | Переход | Кто | Обязательное условие | Retention |
 | --- | --- | --- | --- |
-| `READY → PROCESSING` | coordinator | fresh permit + row winner | Новая generation/token/revisions |
-| `PROCESSING → READY` | release/reaper | marker отсутствует, lease истекла или effect не начинался | Generation и event сохраняются; active lease очищается |
-| `PROCESSING → BLOCKED` | fresh revalidation | consent/identity/reward/config/Store deny | Digests/reason/event сохраняются |
-| `PROCESSING → DISPATCHING` | attempt CAS | exact unexpired token и fresh snapshot | Marker/digests/ack window сохраняются |
-| `DISPATCHING → SENT/FAILED` | finalize | exact token + definitive outcome | Terminal digest/marker сохраняются |
-| `DISPATCHING → RECONCILIATION_REQUIRED` | reaper/finalize | explicit ambiguous outcome или истёк `acknowledgeUntil` | Вся attempt evidence сохраняется |
-| `RECONCILIATION_REQUIRED → SENT/FAILED` | reconciler | documented provider evidence | Resolution event обязателен |
-| `RECONCILIATION_REQUIRED → READY` | reconciler | доказанный `NOT_APPLIED`, quarantine, approval | Старый attempt архивируется в event; row marker очищается только dedicated retry |
-| `FAILED/BLOCKED → READY` | retry workflow | причина устранена, active attempt отсутствует | Generation не сбрасывается; прежнее evidence в event |
-| любой допустимый `→ CANCELED` | operator/domain cancel | active/ambiguous attempt отсутствует | Cancel event и причина обязательны |
+| `READY → PROCESSING` | coordinator | fresh permit + row winner | Новая generation/token/revisions, `transitionRevision + 1` + `DELIVERY_CLAIMED` |
+| `PROCESSING → READY` | release/reaper | marker отсутствует, lease истекла или effect не начинался | Generation и `DELIVERY_REAPED` сохраняются; raw lease очищается |
+| `PROCESSING → BLOCKED` | fresh revalidation | consent/identity/reward/config/Store deny | Digests/`stateReasonCode` + `DELIVERY_FINALIZED` сохраняются |
+| `PROCESSING → DISPATCHING` | attempt CAS | exact unexpired token и fresh snapshot | Immutable attempt + `DELIVERY_PROVIDER_ATTEMPTED` |
+| `DISPATCHING → SENT/FAILED` | finalize | exact token + `APPLIED/NOT_APPLIED` | Terminal digest/marker + `DELIVERY_FINALIZED` |
+| `DISPATCHING → RECONCILIATION_REQUIRED` | reaper/finalize | `AMBIGUOUS` outcome или истёк `acknowledgeUntil` | Attempt immutable; `DELIVERY_REAPED` |
+| `RECONCILIATION_REQUIRED → SENT/FAILED` | reconciler | documented `APPLIED/NOT_APPLIED` evidence | `DELIVERY_RECONCILED` обязателен |
+| `RECONCILIATION_REQUIRED → READY` | reconciler | доказанный `NOT_APPLIED`, quarantine, approval | Attempt остаётся immutable; current mirror очищается только с `DELIVERY_RETRIED` |
+| `FAILED/BLOCKED → READY` | retry workflow | причина устранена, active attempt отсутствует | Generation не сбрасывается; `DELIVERY_RETRIED` |
+| любой допустимый `→ CANCELED` | operator/domain cancel | active/ambiguous attempt отсутствует | `stateReasonCode` + `DELIVERY_CANCELED` |
 | terminal → тот же terminal | duplicate ack | exact token/attempt/outcome digest до `acknowledgeUntil` | No-op; event dedupe |
 
 Generic delivery update не имеет права выполнять reconciliation/retry или
 очищать marker/digests.
 
 `SENT/CANCELED` — row-terminal. `FAILED` — terminal outcome одной generation,
-но row может вернуться в `READY` только dedicated retry после archival event;
+но row может вернуться в `READY` только dedicated retry после
+`DELIVERY_RETRIED`; immutable attempt/event evidence сохраняется;
 migration никогда не переписывает legacy `FAILED` в `BLOCKED`, а ставит
 `LEGACY_QUARANTINED` и сохраняет status/evidence.
 
@@ -681,14 +992,42 @@ Status labels, DTO validators, mappers, metrics и audit payload меняютс�
 4. отвязать rehearsal `165` от предположения, что она всегда latest;
 5. создать отдельный `tenant-delivery-claim-upgrade-smoke`.
 
+Canonical migration выполняется одной транзакцией в таком порядке:
+
+1. exact-base catalog preflight для `CURRENT_165`, bounded
+   `lock_timeout/statement_timeout` и locks всех parent/evidence tables в
+   фиксированном порядке;
+2. authority-corruption preflight (`55000`) до data rewrite;
+3. nullable expand delivery/event columns и создание attempt table;
+4. deterministic inventory, Store/state-reason backfill, provider-terminal
+   quarantine и immutable migration events;
+5. parent unique `(tenantId,id)`, замена legacy
+   `CASCADE/SET NULL` на same-tenant `RESTRICT` FK;
+6. NOT NULL/default, provider/non-provider state CHECK, exact outcome/digest/
+   transition CHECK и partial indexes;
+7. cross-table, same-transition и append-only functions/triggers; все trigger
+   functions получают explicit `search_path`, `PUBLIC EXECUTE` отзывается;
+   исключение — чистый immutable transition-key helper с `pg_catalog`-only
+   body, которому `EXECUTE PUBLIC` нужен для SECURITY INVOKER triggers;
+8. validation всех constraints и catalog assertions до `COMMIT`.
+
+Любая ошибка, включая late DDL/trigger validation, откатывает columns, data,
+events, attempt table и FK целиком. Concurrent index build в canonical
+migration не используется, потому что он разрушил бы zero-partial-change
+contract; production-like rehearsal отдельно подтверждает допустимое lock
+window.
+
 Fixture:
 
 - минимум два tenants `A/B`;
 - Store `A1/A2/B1`, включая минимум один Store с ненулевой допустимой
   `executionRevision`;
-- channels `TELEGRAM/MAX/MANUAL`;
+- channels `TELEGRAM/MAX/CASHIER/MANUAL`;
 - существующие `READY/BLOCKED/SENT/FAILED/CANCELED`;
-- delivery events;
+- matching и mismatched pre-166 provider terminal rows, non-provider terminal
+  rows и delivery events;
+- post-migration immutable attempt/event rows и repeated
+  `providerAttemptKey`;
 - same-tenant mismatch и отдельные intentionally invalid cross-tenant
   Store/reward failure databases;
 - valid/invalid profile, guest и delivery-event tenant/reward bindings;
@@ -698,7 +1037,9 @@ Fixture:
 
 Acceptance:
 
-- legacy rows сохранены, nullable claim state backfill корректен;
+- legacy rows сохранены, nullable claim state backfill корректен; все pre-166
+  provider terminal rows quarantined, non-provider terminal rows не требуют
+  fabricated marker;
 - migration `166` не включает ни один Store, не сбрасывает
   `backgroundExecutionEnabled` и сохраняет каждую существующую неотрицательную
   `executionRevision`, включая ненулевую fixture;
@@ -714,12 +1055,17 @@ Acceptance:
 - legacy Store `SET NULL` отсутствует; simple+composite `RESTRICT` и
   archive-first behavior доказаны;
 - hard delete Store с delivery history отклоняется без dangling/global rows;
-- hard delete reward/delivery не каскадно стирает event evidence; dedicated
-  retention удаляет его только в документированном порядке;
+- hard delete reward/delivery не каскадно стирает attempt/event evidence;
+  dedicated retention удаляет его только в порядке
+  `event → attempt → delivery → reward`;
 - parent unique, все FK/CHECK/trigger и раздельные partial indexes exact;
   `convalidated=true`;
-- per-state nullability matrix и durable-event transition key CHECK
-  отклоняют direct invalid DML;
+- отдельные provider/non-provider matrices, typed outcome evidence и
+  durable-event transition key CHECK отклоняют direct invalid DML;
+- direct transition без exact same-transaction event не commit-ится;
+- attempt/event `UPDATE` и обычный `DELETE` отклоняются DB trigger;
+- повторное использование старого `providerAttemptKey` отклоняется permanent
+  unique attempt index даже после dedicated retry;
 - concurrent reward/delivery/recipient mutation использует единый lock order;
   deadlock retry допускается только до marker;
 - 20 concurrent claimers выдают одну delivery одному owner;
@@ -748,7 +1094,8 @@ Acceptance:
   capability, exact revision и persisted GO;
 - marker/suspend race доказывает: до marker zero calls, после marker не более
   одного bounded in-flight call с drain/reconciliation evidence;
-- outcome taxonomy не классифицирует timeout/reset как обычный retry;
+- exact outcome taxonomy классифицирует timeout/reset как `AMBIGUOUS`, а не
+  обычный retry;
 - migration lock timeout, late-DDL rollback и повторный deploy доказаны;
 - source database не изменяется и disposable databases удаляются.
 
@@ -800,6 +1147,39 @@ Production migration/cutover требует отдельного явного р
 
 ## 10. Что migration `166` не закрывает
 
+- единый до-первой-mutation lock order для Reward и Delivery. Deferred
+  constraint triggers берут advisory/relation locks слишком поздно, поэтому
+  конкурентные Reward/Delivery writers потенциально получают PostgreSQL
+  `40P01`. До activation coordinator и все Reward writers обязаны использовать
+  одну SECURITY INVOKER boundary либо порядок
+  `advisory → Reward FOR UPDATE → Delivery FOR UPDATE`, а также bounded
+  `40P01` retry/reconciliation; обязательна двухсессионная PG-регрессия;
+- final-row/evidence consistency для reason/integrity полей. Deferred checker
+  проверяет queued `OLD/NEW`, а не окончательную строку; отдельное изменение
+  `stateReasonCode`/`integrityReasonCode` может разойтись с immutable event.
+  До activation reason/evidence mutation должна быть event-bearing, checker
+  обязан re-read final Delivery и сопоставлять revision/state/reason, а smoke
+  — доказывать rejection stale reason drift;
+- однозначный lifecycle `LEGACY_QUARANTINED`. Текущая transition matrix не
+  является готовым recovery path для legacy generation `0`: нельзя считать
+  допустимым ни тихий переход без event, ни синтетический Attempt. Нужен
+  отдельный approved legacy-reconciliation event с provenance/operator
+  approval либо полная неизменяемость quarantine;
+- защищённая запись durable events. Прямой column-level `INSERT` позволяет
+  сформировать дополнительный канонически хешированный event на текущей
+  revision, не являющийся фактическим transition. До выдачи runtime-прав
+  прямой `INSERT` должен быть отозван в пользу узкой procedure/подписанной
+  provenance boundary с проверкой current transition;
+- effect-capable coordinator и atomic protocol
+  `claim -> prepare -> provider effect -> finalize/ack/reconcile`: до его
+  реализации legacy direct-send принудительно остаётся dry-run, bot pull
+  возвращает пустой набор, Telegram/MAX prepare пропускается, а legacy provider
+  update и stale bot ack отклоняются до изменения delivery. Bonus-ledger revoke
+  и Telegram unsubscribe продолжают ledger/reward/consent mutation, но
+  сохраняют provider delivery/event без изменения; `CASHIER/MANUAL`
+  cancellation остаётся доступным;
+- server-side `NETWORK|STORES` scope для delivery list/export/manual/claim и
+  всех effect-paths; tenant-only lookup не является допустимой границей доступа;
 - общий scheduler leader/heartbeat;
 - обычный Langame sync lease;
 - activity queue generation/revision;
@@ -807,6 +1187,14 @@ Production migration/cutover требует отдельного явного р
 - shared Telegram update routing и durable `(bot, updateId)` dedupe;
 - owner identity/outbox и activation;
 - remote CI, backup/restore и production deployment.
+
+Дополнительный migration-apply gate: до schema/data rewrite preflight обязан
+явно отклонять pre-166 `GuestGameDeliveryEvent`, если его `eventType` уже
+совпадает с одним из восьми новых typed transition names, но typed evidence
+ещё отсутствует. Ожидаемый SQLSTATE — `55000`; populated smoke покрывает все
+восемь имён и transactional rollback. Это превращает поздний непрозрачный
+`23514` в ранний inventory blocker и не разрешает автоматически
+переинтерпретировать legacy evidence.
 
 Поэтому даже успешная migration `166` сама по себе не закрывает
 `BETA-MT-008`, Gate 1MT или `SHARED BETA GO`.

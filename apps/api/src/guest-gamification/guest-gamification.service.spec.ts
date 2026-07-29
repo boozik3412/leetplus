@@ -1506,6 +1506,20 @@ function profileFixture(
   };
 }
 
+function nonBotProfileFixture(): GuestGameProfile {
+  const profile = profileFixture();
+
+  return {
+    ...profile,
+    communication: {
+      ...profile.communication,
+      telegramReady: false,
+      maxReady: false,
+      botReady: false,
+    },
+  };
+}
+
 function activeMission(
   overrides: Partial<GuestGameMission> = {},
 ): GuestGameMission {
@@ -2382,6 +2396,7 @@ function deliveryRow(overrides: Record<string, unknown> = {}) {
     createdByUserId: user.id,
     channel: 'TELEGRAM',
     status: 'READY',
+    stateReasonCode: null,
     readinessStatus: 'READY_FOR_BOT',
     recipientMasked: 'Guest One',
     channelIdentityMasked: 'tg:***',
@@ -4488,7 +4503,7 @@ describe('GuestGamificationService', () => {
       }
     });
 
-    it('keeps MAX delivery readiness partial until the live canary flag is enabled', () => {
+    it('reports protocol containment before the MAX live canary is enabled', () => {
       process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
@@ -4503,8 +4518,8 @@ describe('GuestGamificationService', () => {
       const maxDeliveryText = JSON.stringify(maxDelivery);
 
       expect(maxDelivery).toMatchObject({
-        status: 'PARTIAL',
-        statusLabel: 'нужен canary',
+        status: 'BLOCKED',
+        statusLabel: 'protocol blocked',
         ready: false,
         configured: true,
         enabled: true,
@@ -4512,17 +4527,15 @@ describe('GuestGamificationService', () => {
       expect(maxDelivery.requiredEnv).toEqual(
         expect.arrayContaining(['GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED']),
       );
-      expect(maxDelivery.note).toContain('live-send заблокирован');
-      expect(maxDelivery.nextAction).toContain(
-        'GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED',
-      );
+      expect(maxDelivery.note).toContain('protocol v1 coordinator');
+      expect(maxDelivery.nextAction).toContain('delivery protocol v1');
       expect(maxDeliveryText).not.toContain('max-token');
       expect(maxDeliveryText).not.toContain(
         'https://max-provider.example/send',
       );
     });
 
-    it('shows MAX delivery canary as explicitly allowed without exposing provider secrets', () => {
+    it('keeps MAX protocol-blocked even when the legacy canary flag is enabled', () => {
       process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
@@ -4538,8 +4551,8 @@ describe('GuestGamificationService', () => {
       const maxDeliveryText = JSON.stringify(maxDelivery);
 
       expect(maxDelivery).toMatchObject({
-        status: 'MANUAL_ONLY',
-        statusLabel: 'canary разрешен',
+        status: 'BLOCKED',
+        statusLabel: 'protocol blocked',
         ready: false,
         configured: true,
         enabled: true,
@@ -4547,8 +4560,8 @@ describe('GuestGamificationService', () => {
       expect(maxDelivery.requiredEnv).toEqual(
         expect.arrayContaining(['GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED']),
       );
-      expect(maxDelivery.note).toContain('live-canary');
-      expect(maxDelivery.nextAction).toContain('MAX canary');
+      expect(maxDelivery.note).toContain('protocol v1 coordinator');
+      expect(maxDelivery.nextAction).toContain('delivery protocol v1');
       expect(maxDeliveryText).not.toContain('max-token');
       expect(maxDeliveryText).not.toContain(
         'https://max-provider.example/send',
@@ -8419,7 +8432,7 @@ describe('GuestGamificationService', () => {
           profileId: 'profile-1',
           storeId: 'store-1',
         },
-      } as any);
+      });
 
       expect(ordinary.rules[0]).toMatchObject({
         id: 'loot-entitled',
@@ -17844,7 +17857,9 @@ describe('GuestGamificationService', () => {
 
     it('revalidates claimRequired under a reward row lock before preparing a legacy delivery', async () => {
       const { service, prisma } = createService();
-      jest.spyOn(service, 'getProfiles').mockResolvedValue([profileFixture()]);
+      jest
+        .spyOn(service, 'getProfiles')
+        .mockResolvedValue([nonBotProfileFixture()]);
       jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
       prisma.$queryRaw.mockResolvedValue([{ claimRequired: true }]);
 
@@ -17868,6 +17883,8 @@ describe('GuestGamificationService', () => {
       async (status) => {
         const { service, prisma } = createService();
         const sentDelivery = deliveryRow({
+          channel: 'CASHIER',
+          readinessStatus: 'READY_FOR_CASHIER',
           status,
           sentAt: status === 'SENT' ? now : null,
           failedAt: status === 'FAILED' ? now : null,
@@ -17875,7 +17892,7 @@ describe('GuestGamificationService', () => {
         });
         jest
           .spyOn(service, 'getProfiles')
-          .mockResolvedValue([profileFixture()]);
+          .mockResolvedValue([nonBotProfileFixture()]);
         jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
         jest
           .spyOn(service as any, 'createDeliveryEvent')
@@ -17902,73 +17919,263 @@ describe('GuestGamificationService', () => {
       },
     );
 
-    it('refreshes blocked consent snapshots after profile-level Telegram consent appears', async () => {
+    it.each([
+      {
+        channel: 'CASHIER' as const,
+        readinessStatus: 'READY_FOR_CASHIER',
+        status: 'READY',
+        stateReasonCode: null,
+        reward: rewardResult(),
+      },
+      {
+        channel: 'MANUAL' as const,
+        readinessStatus: 'NEEDS_CHANNEL',
+        status: 'BLOCKED',
+        stateReasonCode: 'DELIVERY_READINESS_NEEDS_CHANNEL',
+        reward: rewardResult({
+          rewardCode: null,
+          claimPayload: null,
+        }),
+      },
+    ])(
+      'keeps $channel preparation available while provider paths are contained',
+      async ({ channel, readinessStatus, status, stateReasonCode, reward }) => {
+        const { service, prisma } = createService();
+        jest
+          .spyOn(service, 'getProfiles')
+          .mockResolvedValue([nonBotProfileFixture()]);
+        jest.spyOn(service, 'getRewards').mockResolvedValue([reward]);
+        jest
+          .spyOn(service as any, 'createDeliveryEvent')
+          .mockResolvedValue(null);
+        prisma.$queryRaw.mockResolvedValue([{ claimRequired: false }]);
+        prisma.guestGameDelivery.findFirst.mockResolvedValue(null);
+        prisma.guestGameDelivery.create.mockResolvedValue(
+          deliveryRow({
+            channel,
+            readinessStatus,
+            status,
+            stateReasonCode,
+          }),
+        );
+
+        const result = await service.prepareDeliveries(user, {
+          includeBlocked: true,
+        });
+
+        expect(result).toMatchObject({
+          created: 1,
+          updated: 0,
+          skipped: 0,
+          deliveries: [
+            expect.objectContaining({
+              channel,
+              readinessStatus,
+              status,
+              stateReasonCode,
+            }),
+          ],
+        });
+        expect(result).not.toHaveProperty('protocolBlocked');
+        expect(result).not.toHaveProperty('note');
+        expect(prisma.guestGameDelivery.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              channel,
+              readinessStatus,
+              status,
+              stateReasonCode,
+            }),
+          }),
+        );
+        expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not let a denied provider item consume the CASHIER/MANUAL preparation limit', async () => {
       const { service, prisma } = createService();
-      jest.spyOn(service, 'getProfiles').mockResolvedValue([profileFixture()]);
-      jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
+      const providerProfile = {
+        ...profileFixture(),
+        id: 'profile-provider',
+      };
+      const cashierProfile = {
+        ...nonBotProfileFixture(),
+        id: 'profile-cashier',
+      };
+      const providerRewardBase = rewardResult();
+      const cashierRewardBase = rewardResult();
+      const providerReward: GuestGameReward = {
+        ...providerRewardBase,
+        id: 'reward-provider',
+        profile: providerRewardBase.profile
+          ? {
+              ...providerRewardBase.profile,
+              id: providerProfile.id,
+            }
+          : null,
+      };
+      const cashierReward: GuestGameReward = {
+        ...cashierRewardBase,
+        id: 'reward-cashier',
+        profile: cashierRewardBase.profile
+          ? {
+              ...cashierRewardBase.profile,
+              id: cashierProfile.id,
+            }
+          : null,
+      };
+      jest
+        .spyOn(service, 'getProfiles')
+        .mockResolvedValue([providerProfile, cashierProfile]);
+      jest
+        .spyOn(service, 'getRewards')
+        .mockResolvedValue([providerReward, cashierReward]);
       jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
       prisma.$queryRaw.mockResolvedValue([{ claimRequired: false }]);
-      prisma.guestGameDelivery.findFirst.mockResolvedValue(
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(null);
+      prisma.guestGameDelivery.create.mockResolvedValue(
         deliveryRow({
-          status: 'BLOCKED',
-          readinessStatus: 'NEEDS_CONSENT',
-        }),
-      );
-      prisma.guestGameDelivery.update.mockResolvedValue(
-        deliveryRow({
+          rewardId: cashierReward.id,
+          channel: 'CASHIER',
+          readinessStatus: 'READY_FOR_CASHIER',
           status: 'READY',
-          readinessStatus: 'READY_FOR_BOT',
+          stateReasonCode: null,
+          reward: rewardRow({ id: cashierReward.id }),
         }),
       );
 
       const result = await service.prepareDeliveries(user, {
         includeBlocked: true,
+        limit: 1,
       });
 
       expect(result).toMatchObject({
-        created: 0,
-        updated: 1,
-        skipped: 0,
+        created: 1,
+        updated: 0,
+        skipped: 1,
+        protocolBlocked: 1,
+        deliveries: [
+          expect.objectContaining({
+            rewardId: cashierReward.id,
+            channel: 'CASHIER',
+            stateReasonCode: null,
+          }),
+        ],
+        note: expect.stringContaining('CASHIER/MANUAL'),
       });
-      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
+      expect(prisma.guestGameDelivery.findFirst).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameDelivery.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'delivery-1' },
-          data: expect.objectContaining({
-            status: 'READY',
-            readinessStatus: 'READY_FOR_BOT',
-            channel: 'TELEGRAM',
+          where: expect.objectContaining({
+            rewardId: cashierReward.id,
+            channel: 'CASHIER',
           }),
         }),
       );
-      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
-        user,
-        'delivery-1',
-        'reward-1',
-        expect.objectContaining({
-          eventType: 'DELIVERY_REFRESHED',
-          fromStatus: 'BLOCKED',
-          toStatus: 'READY',
-          channel: 'TELEGRAM',
-        }),
-      );
+      expect(prisma.guestGameDelivery.create).toHaveBeenCalledTimes(1);
     });
+
+    it.each(['TELEGRAM', 'MAX'] as const)(
+      'protocol-blocks %s preparation before provider row lookup or refresh',
+      async (channel) => {
+        process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+        process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED = 'true';
+        process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN = 'telegram-token';
+        process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+        process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
+        process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+        const { service, prisma } = createService();
+        const baseProfile = profileFixture();
+        const profile =
+          channel === 'TELEGRAM'
+            ? baseProfile
+            : {
+                ...baseProfile,
+                telegramIdentity: null,
+                maxIdentity: 'max:user-123',
+                communication: {
+                  ...baseProfile.communication,
+                  telegramReady: false,
+                  maxReady: true,
+                  botReady: true,
+                },
+              };
+        jest.spyOn(service, 'getProfiles').mockResolvedValue([profile]);
+        jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
+        jest
+          .spyOn(service as any, 'createDeliveryEvent')
+          .mockResolvedValue(null);
+
+        const result = await service.prepareDeliveries(user, {
+          includeBlocked: true,
+        });
+
+        expect(result).toEqual({
+          created: 0,
+          updated: 0,
+          skipped: 1,
+          deliveries: [],
+          protocolBlocked: 1,
+          note: expect.stringContaining('were not created or refreshed'),
+        });
+        expect(prisma.guestGameDelivery.findFirst).not.toHaveBeenCalled();
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.guestGameDelivery.create).not.toHaveBeenCalled();
+        expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+        expect((service as any).createDeliveryEvent).not.toHaveBeenCalled();
+        expect(JSON.stringify(result)).not.toContain('telegram-token');
+        expect(JSON.stringify(result)).not.toContain('max-token');
+      },
+    );
   });
 
   describe('updateDelivery', () => {
+    it.each(['TELEGRAM', 'MAX'] as const)(
+      'protocol-blocks existing %s updates before mutation even with legacy flags enabled',
+      async (channel) => {
+        process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+        process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED = 'true';
+        process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN = 'telegram-token';
+        process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+        process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
+        process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+        const { service, prisma } = createService();
+        prisma.guestGameDelivery.findFirst.mockResolvedValue(
+          deliveryRow({ channel }),
+        );
+
+        await expect(
+          service.updateDelivery(user, 'delivery-1', {
+            status: 'SENT',
+            note: 'legacy provider result',
+          }),
+        ).rejects.toThrow('provider delivery row was not changed');
+
+        expect(prisma.guestGameDelivery.findFirst).toHaveBeenCalledTimes(1);
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+        expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
+      },
+    );
+
     it('returns failed ready delivery to READY and clears terminal timestamps', async () => {
       const { service, prisma } = createService();
       const failedAt = new Date('2026-06-10T09:00:00.000Z');
       const current = deliveryRow({
+        channel: 'CASHIER',
         status: 'FAILED',
-        readinessStatus: 'READY_FOR_BOT',
+        readinessStatus: 'READY_FOR_CASHIER',
         failedAt,
         note: 'telegram timeout',
       });
       prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
       prisma.guestGameDelivery.update.mockResolvedValue(
         deliveryRow({
+          channel: 'CASHIER',
           status: 'READY',
-          readinessStatus: 'READY_FOR_BOT',
+          readinessStatus: 'READY_FOR_CASHIER',
           failedAt: null,
           canceledAt: null,
           note: 'retry after provider fix',
@@ -17993,6 +18200,7 @@ describe('GuestGamificationService', () => {
           where: { id: 'delivery-1' },
           data: expect.objectContaining({
             status: 'READY',
+            stateReasonCode: null,
             sentAt: null,
             failedAt: null,
             canceledAt: null,
@@ -18008,8 +18216,115 @@ describe('GuestGamificationService', () => {
           eventType: 'DELIVERY_STATUS_UPDATED',
           fromStatus: 'FAILED',
           toStatus: 'READY',
-          channel: 'TELEGRAM',
+          channel: 'CASHIER',
+          stateReasonCode: null,
           note: 'retry after provider fix',
+        }),
+      );
+    });
+
+    it.each([
+      ['BLOCKED', 'MANUAL_DELIVERY_BLOCKED'],
+      ['FAILED', 'MANUAL_DELIVERY_FAILED'],
+      ['CANCELED', 'MANUAL_DELIVERY_CANCELED'],
+    ] as const)(
+      'writes a stable state reason when a CASHIER delivery becomes %s',
+      async (nextStatus, stateReasonCode) => {
+        const { service, prisma } = createService();
+        prisma.guestGameDelivery.findFirst.mockResolvedValue(
+          deliveryRow({
+            channel: 'CASHIER',
+            status: 'READY',
+            readinessStatus: 'READY_FOR_CASHIER',
+          }),
+        );
+        prisma.guestGameDelivery.update.mockResolvedValue(
+          deliveryRow({
+            channel: 'CASHIER',
+            status: nextStatus,
+            readinessStatus: 'READY_FOR_CASHIER',
+            stateReasonCode,
+          }),
+        );
+        jest
+          .spyOn(service as any, 'createDeliveryEvent')
+          .mockResolvedValue(null);
+
+        const result = await service.updateDelivery(user, 'delivery-1', {
+          status: nextStatus,
+          note: 'operator decision',
+        });
+
+        expect(result).toMatchObject({
+          status: nextStatus,
+          stateReasonCode,
+        });
+        expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'delivery-1' },
+            data: expect.objectContaining({
+              status: nextStatus,
+              stateReasonCode,
+              note: 'operator decision',
+            }),
+          }),
+        );
+        expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+          user,
+          'delivery-1',
+          'reward-1',
+          expect.objectContaining({
+            fromStatus: 'READY',
+            toStatus: nextStatus,
+            channel: 'CASHIER',
+            stateReasonCode,
+          }),
+        );
+      },
+    );
+
+    it('clears the failure reason when a CASHIER delivery is marked SENT', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(
+        deliveryRow({
+          channel: 'CASHIER',
+          status: 'FAILED',
+          readinessStatus: 'READY_FOR_CASHIER',
+          stateReasonCode: 'MANUAL_DELIVERY_FAILED',
+          failedAt: now,
+        }),
+      );
+      prisma.guestGameDelivery.update.mockResolvedValue(
+        deliveryRow({
+          channel: 'CASHIER',
+          status: 'SENT',
+          readinessStatus: 'READY_FOR_CASHIER',
+          stateReasonCode: null,
+          sentAt: now,
+          failedAt: null,
+        }),
+      );
+      prisma.$queryRaw.mockResolvedValue([{ claimRequired: false }]);
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+
+      const result = await service.updateDelivery(user, 'delivery-1', {
+        status: 'SENT',
+      });
+
+      expect(result).toMatchObject({
+        status: 'SENT',
+        stateReasonCode: null,
+        failedAt: null,
+      });
+      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'SENT',
+            stateReasonCode: null,
+            sentAt: expect.any(Date),
+            failedAt: null,
+            canceledAt: null,
+          }),
         }),
       );
     });
@@ -18020,6 +18335,8 @@ describe('GuestGamificationService', () => {
         const { service, prisma } = createService();
         prisma.guestGameDelivery.findFirst.mockResolvedValue(
           deliveryRow({
+            channel: 'CASHIER',
+            readinessStatus: 'READY_FOR_CASHIER',
             status: nextStatus === 'READY' ? 'FAILED' : 'READY',
             failedAt: nextStatus === 'READY' ? now : null,
             reward: rewardRow({ claimRequired: false }),
@@ -18045,6 +18362,8 @@ describe('GuestGamificationService', () => {
         const { service, prisma } = createService();
         prisma.guestGameDelivery.findFirst.mockResolvedValue(
           deliveryRow({
+            channel: 'CASHIER',
+            readinessStatus: 'READY_FOR_CASHIER',
             status,
             sentAt: status === 'SENT' ? now : null,
             canceledAt: status === 'CANCELED' ? now : null,
@@ -18053,8 +18372,64 @@ describe('GuestGamificationService', () => {
 
         await expect(
           service.updateDelivery(user, 'delivery-1', { status: 'READY' }),
-        ).rejects.toBeInstanceOf(ConflictException);
+        ).rejects.toThrow('Terminal delivery status cannot be changed.');
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
         expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+        expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['SENT', null],
+      ['CANCELED', 'MANUAL_DELIVERY_CANCELED'],
+    ] as const)(
+      'allows a note-only update for terminal %s without rewriting state evidence',
+      async (status, stateReasonCode) => {
+        const { service, prisma } = createService();
+        const current = deliveryRow({
+          channel: 'CASHIER',
+          readinessStatus: 'READY_FOR_CASHIER',
+          status,
+          stateReasonCode,
+          sentAt: status === 'SENT' ? now : null,
+          canceledAt: status === 'CANCELED' ? now : null,
+        });
+        prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
+        prisma.guestGameDelivery.update.mockResolvedValue({
+          ...current,
+          note: 'operator annotation',
+        });
+        jest
+          .spyOn(service as any, 'createDeliveryEvent')
+          .mockResolvedValue(null);
+
+        await service.updateDelivery(user, 'delivery-1', {
+          note: 'operator annotation',
+        });
+
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'delivery-1' },
+            data: {
+              status,
+              note: 'operator annotation',
+            },
+          }),
+        );
+        expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+          user,
+          'delivery-1',
+          'reward-1',
+          expect.objectContaining({
+            fromStatus: status,
+            toStatus: status,
+            channel: 'CASHIER',
+            note: 'operator annotation',
+          }),
+        );
       },
     );
 
@@ -18062,6 +18437,7 @@ describe('GuestGamificationService', () => {
       const { service, prisma } = createService();
       prisma.guestGameDelivery.findFirst.mockResolvedValue(
         deliveryRow({
+          channel: 'CASHIER',
           status: 'FAILED',
           readinessStatus: 'NEEDS_CONSENT',
           failedAt: now,
@@ -18078,6 +18454,7 @@ describe('GuestGamificationService', () => {
       const { service, prisma } = createService();
       prisma.guestGameDelivery.findFirst.mockResolvedValue(
         deliveryRow({
+          channel: 'CASHIER',
           status: 'FAILED',
           readinessStatus: 'NEEDS_CONSENT',
           failedAt: now,
@@ -18276,7 +18653,8 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(result).toMatchObject({
-        dryRun: false,
+        dryRun: true,
+        realSendEnabled: false,
         checked: 1,
         sent: 0,
         failed: 0,
@@ -18367,7 +18745,8 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(result).toMatchObject({
-        dryRun: false,
+        dryRun: true,
+        realSendEnabled: false,
         checked: 1,
         sent: 0,
         failed: 0,
@@ -18444,7 +18823,7 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(result).toMatchObject({
-        dryRun: false,
+        dryRun: true,
         checked: 1,
         sent: 0,
         failed: 0,
@@ -18463,7 +18842,7 @@ describe('GuestGamificationService', () => {
       });
     });
 
-    it('sends MAX delivery through generic provider when env and canary are explicitly enabled', async () => {
+    it('forces an enabled legacy MAX real-send request into protocol dry-run', async () => {
       process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
       process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
@@ -18507,48 +18886,54 @@ describe('GuestGamificationService', () => {
         channels: ['MAX'],
       });
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://max-provider.example/send',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            authorization: 'Bearer max-token',
-          }),
-          body: expect.stringContaining('"identity":"max:user-123"'),
-        }),
-      );
-      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'delivery-1' },
-          data: expect.objectContaining({
-            status: 'SENT',
-            sentAt: expect.any(Date),
-          }),
-        }),
-      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
       expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
         user,
         'delivery-1',
         'reward-1',
         expect.objectContaining({
-          eventType: 'DELIVERY_SENT_BY_PROVIDER',
+          eventType: 'DELIVERY_DISPATCH_DRY_RUN',
           fromStatus: 'READY',
-          toStatus: 'SENT',
+          toStatus: 'READY',
           channel: 'MAX',
           payload: expect.objectContaining({
-            provider: 'MAX',
-            providerMessageId: 'max-message-1',
-            providerStatus: 'max:ok',
+            dryRun: true,
+            reason: 'LEGACY_DELIVERY_PROTOCOL_NOT_ACCEPTED',
           }),
         }),
       );
       expect(result).toMatchObject({
-        dryRun: false,
+        dryRun: true,
+        realSendEnabled: false,
         checked: 1,
-        sent: 1,
+        sent: 0,
         failed: 0,
-        skipped: 0,
+        skipped: 1,
         blocked: 0,
+        items: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            rewardId: 'reward-1',
+            status: 'DRY_RUN',
+            note: expect.stringContaining('protocol v1 coordinator'),
+          }),
+        ],
+        note: expect.stringContaining('forced to dry-run'),
+        dispatcher: {
+          mode: 'DRY_RUN',
+          modeLabel: 'dry-run',
+          realSendEnabled: false,
+          providers: expect.arrayContaining([
+            expect.objectContaining({
+              channel: 'MAX',
+              canAttemptSend: false,
+              dryRunOnly: true,
+              note: expect.stringContaining('protocol v1 coordinator'),
+            }),
+          ]),
+          note: expect.stringContaining('protocol v1 coordinator'),
+        },
       });
       expect(JSON.stringify(result)).not.toContain('max-token');
       expect(JSON.stringify(result)).not.toContain('max:user-123');
@@ -18595,9 +18980,10 @@ describe('GuestGamificationService', () => {
       const outbox = (service as any).buildDeliveryOutbox([pending, sent]);
 
       expect(outbox.botConsumer).toMatchObject({
-        mode: 'READY',
-        dryRun: false,
-        configured: true,
+        mode: 'BLOCKED',
+        modeLabel: 'protocol blocked',
+        dryRun: true,
+        configured: false,
         limit: 10,
         canaryLimit: false,
         canaryRequired: false,
@@ -18631,8 +19017,9 @@ describe('GuestGamificationService', () => {
             expiresAt: null,
           }),
         ],
+        note: expect.stringContaining('no sendable payload'),
       });
-      expect(outbox.botConsumer.nextAction).toContain('ack');
+      expect(outbox.botConsumer.nextAction).toContain('delivery protocol v1');
       expect(JSON.stringify(outbox.botConsumer)).not.toContain(
         'telegram-token',
       );
@@ -18652,8 +19039,8 @@ describe('GuestGamificationService', () => {
 
       expect(outbox.botConsumer).toMatchObject({
         mode: 'BLOCKED',
-        modeLabel: 'нужен canary LIMIT=1',
-        dryRun: false,
+        modeLabel: 'protocol blocked',
+        dryRun: true,
         configured: false,
         limit: 10,
         canaryLimit: false,
@@ -18673,7 +19060,7 @@ describe('GuestGamificationService', () => {
         ],
       });
       expect(outbox.botConsumer.nextAction).toContain(
-        'GUEST_GAME_BOT_CONSUMER_LIMIT=1',
+        'delivery protocol v1',
       );
       expect(JSON.stringify(outbox.botConsumer)).not.toContain(
         'telegram-token',
@@ -18708,9 +19095,10 @@ describe('GuestGamificationService', () => {
       ]);
 
       expect(outbox.botConsumer).toMatchObject({
-        mode: 'READY',
-        dryRun: false,
-        configured: true,
+        mode: 'BLOCKED',
+        modeLabel: 'protocol blocked',
+        dryRun: true,
+        configured: false,
         limit: 1,
         canaryLimit: true,
         canaryRequired: false,
@@ -19046,7 +19434,7 @@ describe('GuestGamificationService', () => {
       });
     });
 
-    it('pulls only ready bot deliveries with a confirmed bot identity', async () => {
+    it('returns no sendable payload from the admitted internal legacy bot pull', async () => {
       const { service, prisma } = createService();
 
       prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
@@ -19073,17 +19461,7 @@ describe('GuestGamificationService', () => {
         channels: 'telegram',
       });
 
-      expect(prisma.guestGameDelivery.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            tenantId: user.tenantId,
-            status: 'READY',
-            readinessStatus: 'READY_FOR_BOT',
-            channel: { in: ['TELEGRAM'] },
-            reward: { is: { claimRequired: false } },
-          }),
-        }),
-      );
+      expect(prisma.guestGameDelivery.findMany).not.toHaveBeenCalled();
       expect(prisma.tenant.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
@@ -19091,38 +19469,20 @@ describe('GuestGamificationService', () => {
           },
         }),
       );
-      expect(result).toMatchObject({
-        checked: 2,
-        ready: 1,
-        skipped: 1,
+      expect(result).toEqual({
+        checked: 0,
+        ready: 0,
+        skipped: 0,
+        items: [],
+        note: expect.stringContaining('no sendable payload'),
       });
-      expect(result.items[0]).toMatchObject({
-        tenantId: user.tenantId,
-        tenantSlug: user.tenantSlug,
-        deliveryId: 'delivery-1',
-        rewardId: 'reward-1',
-        channel: 'TELEGRAM',
-        recipient: {
-          telegramChatId: '123456',
-          maxIdentity: null,
-          identityMasked: 'tg:***',
-          recipientMasked: 'Guest One',
-        },
-        message: {
-          title: 'Reward ready',
-          body: 'Your reward is ready',
-        },
-        reward: {
-          label: '100 bonus points',
-          amount: 100,
-          type: 'BONUS',
-          code: 'LP-100',
-          expiresAt: null,
-        },
-      });
+      expect(JSON.stringify(result)).not.toContain('LP-100');
     });
 
-    it('filters a wallet-managed reward returned by a stale bot outbox query', async () => {
+    it('does not let legacy delivery flags unlock the bot payload', async () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN = 'telegram-token';
       const { service, prisma } = createService();
       prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
       prisma.guestGameDelivery.findMany.mockResolvedValue([
@@ -19140,152 +19500,23 @@ describe('GuestGamificationService', () => {
         channels: 'telegram',
       });
 
-      expect(prisma.guestGameDelivery.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            reward: { is: { claimRequired: false } },
-          }),
-        }),
-      );
-      expect(result).toMatchObject({
-        checked: 1,
+      expect(prisma.guestGameDelivery.findMany).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        checked: 0,
         ready: 0,
-        skipped: 1,
+        skipped: 0,
         items: [],
+        note: expect.stringContaining('protocol v1 coordinator'),
       });
       expect(JSON.stringify(result)).not.toContain('LP-100');
+      expect(JSON.stringify(result)).not.toContain('telegram-token');
     });
 
-    it('acks bot delivery result and records a sanitized audit event', async () => {
+    it('hard-denies bot ack before delivery lookup or mutation', async () => {
       const { service, prisma, tenantExecutionAdmission } = createService();
-      const current = deliveryRow();
-      const sent = {
-        ...current,
-        status: 'SENT',
-        sentAt: now,
-        note: 'sent by bot',
-      };
 
       prisma.tenant.findFirst.mockResolvedValue(
         scheduledTenantRow({ status: TenantLifecycleStatus.SUSPENDED }),
-      );
-      prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
-      prisma.guestGameDelivery.update.mockResolvedValue(sent);
-
-      const result = await service.ackBotDelivery({
-        tenantSlug: user.tenantSlug,
-        deliveryId: 'delivery-1',
-        status: 'sent',
-        note: 'sent by bot',
-        providerMessageId: 'tg-message-1',
-        providerStatus: 'ok',
-        externalEventId: 'update-1',
-      });
-
-      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
-        data: expect.objectContaining({
-          status: 'SENT',
-          note: 'sent by bot',
-          sentAt: expect.any(Date),
-          failedAt: null,
-        }),
-        include: expect.any(Object),
-      });
-      expect(prisma.guestGameDeliveryEvent.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          tenantId: user.tenantId,
-          deliveryId: 'delivery-1',
-          rewardId: 'reward-1',
-          actorUserId: user.id,
-          eventType: 'DELIVERY_BOT_CONSUMER_SENT',
-          fromStatus: 'READY',
-          toStatus: 'SENT',
-          channel: 'TELEGRAM',
-          note: 'sent by bot',
-          payload: {
-            source: 'guest_game_bot_consumer',
-            status: 'SENT',
-            channel: 'TELEGRAM',
-            providerMessageId: 'tg-message-1',
-            providerStatus: 'ok',
-            errorCode: null,
-            externalEventId: 'update-1',
-          },
-        }),
-      });
-      expect(result).toMatchObject({
-        eventType: 'DELIVERY_BOT_CONSUMER_SENT',
-        idempotent: false,
-        delivery: {
-          id: 'delivery-1',
-          status: 'SENT',
-          sentAt: isoNow,
-        },
-      });
-      expect(tenantExecutionAdmission.evaluate).not.toHaveBeenCalled();
-    });
-
-    it('treats repeated terminal bot ack as idempotent without duplicating events', async () => {
-      const { service, prisma } = createService();
-      const current = deliveryRow({
-        status: 'SENT',
-        sentAt: now,
-        events: [
-          {
-            id: 'event-sent',
-            eventType: 'DELIVERY_BOT_CONSUMER_SENT',
-            fromStatus: 'READY',
-            toStatus: 'SENT',
-            channel: 'TELEGRAM',
-            note: 'sent by bot',
-            payload: {
-              source: 'guest_game_bot_consumer',
-              status: 'SENT',
-              channel: 'TELEGRAM',
-              providerMessageId: 'tg-message-1',
-            },
-            createdAt: now,
-            actor: null,
-          },
-        ],
-      });
-
-      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
-      prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
-
-      const result = await service.ackBotDelivery({
-        tenantSlug: user.tenantSlug,
-        deliveryId: 'delivery-1',
-        status: 'sent',
-        note: 'same provider retry',
-        providerMessageId: 'tg-message-1',
-      });
-
-      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
-      expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
-      expect(result).toMatchObject({
-        eventType: 'DELIVERY_BOT_CONSUMER_SENT',
-        idempotent: true,
-        note: 'Duplicate bot consumer ack ignored.',
-        delivery: {
-          id: 'delivery-1',
-          status: 'SENT',
-          sentAt: isoNow,
-        },
-      });
-    });
-
-    it('blocks changing a terminal bot ack to a different status', async () => {
-      const { service, prisma } = createService();
-
-      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
-      prisma.guestGameDelivery.findFirst.mockResolvedValue(
-        deliveryRow({
-          status: 'FAILED',
-          failedAt: now,
-          note: 'provider failed',
-        }),
       );
 
       await expect(
@@ -19293,10 +19524,66 @@ describe('GuestGamificationService', () => {
           tenantSlug: user.tenantSlug,
           deliveryId: 'delivery-1',
           status: 'sent',
-          note: 'late success',
+          note: 'sent by bot',
+          providerMessageId: 'tg-message-1',
+          providerStatus: 'ok',
+          externalEventId: 'update-1',
         }),
-      ).rejects.toThrow('Terminal bot delivery ack can only be repeated');
+      ).rejects.toThrow('stale provider acknowledgements cannot mutate');
 
+      expect(prisma.guestGameDelivery.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
+      expect(tenantExecutionAdmission.evaluate).not.toHaveBeenCalled();
+    });
+
+    it('hard-denies a stale terminal bot ack without inspecting its delivery row', async () => {
+      const { service, prisma } = createService();
+
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(
+        deliveryRow({
+          id: 'stale-delivery',
+          status: 'SENT',
+          sentAt: now,
+        }),
+      );
+
+      await expect(
+        service.ackBotDelivery({
+          tenantSlug: user.tenantSlug,
+          deliveryId: 'stale-delivery',
+          status: 'sent',
+          note: 'same provider retry',
+          providerMessageId: 'tg-message-1',
+        }),
+      ).rejects.toThrow('stale provider acknowledgements cannot mutate');
+
+      expect(prisma.guestGameDelivery.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
+    });
+
+    it('does not let legacy real-send and bot-consumer flags unlock ack mutation', async () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED = 'true';
+      process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN = 'telegram-token';
+      process.env.GUEST_GAME_BOT_CONSUMER_DRY_RUN = 'false';
+      process.env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN = 'telegram-token';
+      const { service, prisma } = createService();
+
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+
+      await expect(
+        service.ackBotDelivery({
+          tenantSlug: user.tenantSlug,
+          deliveryId: 'delivery-1',
+          status: 'failed',
+          note: 'legacy provider retry',
+        }),
+      ).rejects.toThrow('protocol v1 coordinator is not deployed');
+
+      expect(prisma.guestGameDelivery.findFirst).not.toHaveBeenCalled();
       expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
       expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
     });

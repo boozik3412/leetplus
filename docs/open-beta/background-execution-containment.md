@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.4                                                     |
+| Версия           | 1.6                                                     |
 | Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -124,16 +124,17 @@ application graph.
 - scheduled snapshot и supplemental pipeline проверяются до actor selection и
   processing;
 - scheduled delivery dispatch проверяется до вызова dispatcher;
-- bot pull для внешнего tenant возвращает пустой детерминированный результат
-  до чтения outbox;
-- встроенный in-API dispatcher непосредственно перед реальным Telegram/MAX
-  provider-вызовом выполняет fresh tenant admission и background policy;
-- внешний bot consumer защищён policy только в момент pull; уже выданный ему
-  payload не имеет повторной проверки перед provider и остаётся
-  launch-blocking ограничением до durable claim migration `165`;
+- legacy bot pull возвращает пустой детерминированный результат и не выдаёт
+  provider payload;
+- legacy direct dispatcher принудительно переводит реальную Telegram/MAX
+  отправку в dry-run до provider-вызова и delivery mutation;
+- legacy provider prepare/update и bot ack отклоняются до изменения delivery
+  row/event; они не считаются coordinator или reconciliation path;
+- bonus-ledger revoke и Telegram unsubscribe продолжают ledger/reward
+  cancellation и consent update, но сохраняют связанные provider delivery
+  rows/events неизменными. Cancellation для `CASHIER/MANUAL` остаётся;
 - manual delivery dry-run остаётся доступным;
-- bot ack остаётся доступным для фиксации терминального исхода уже
-  отправленного provider effect и последующей reconciliation.
+- ни один из этих deny-path не разрешает outbound.
 
 ### 4.3. Guest database background
 
@@ -164,7 +165,9 @@ retention и quality collection не объявляются unattended entrypoin
 - Новый tenant, уже находящийся в `PILOT/BETA/LIVE`, не запускает
   перечисленные unfenced scheduled/AUTO jobs.
 - Неизвестный stage/job kind не получает неявного разрешения.
-- Текущий `INTERNAL` tenant сохраняет существующую функциональность.
+- Текущий `INTERNAL` tenant сохраняет совместимость разрешённых registry
+  paths, но legacy provider delivery effects намеренно отключены до
+  coordinator.
 - Ручные integration preview/read/write сценарии не смешиваются с unattended
   execution.
 - Провайдеры Langame/Telegram/MAX не вызываются после background denial в
@@ -174,8 +177,10 @@ retention и quality collection не объявляются unattended entrypoin
 
 Это containment, а не завершённый shared worker plane:
 
-- нет общей durable claim generation для delivery и обычного Langame sync;
-- нет database-enforced CAS/finalize для каждого перечисленного job;
+- migration `166` содержит durable delivery claim/CAS schema только как
+  implementation candidate; effect-capable runtime coordinator отсутствует;
+- нет общей durable claim generation для обычного Langame sync и
+  database-enforced CAS/finalize для каждого перечисленного job;
 - смена stage или revision посреди уже начатого `INTERNAL` выполнения не
   останавливает stale worker;
 - нет двухфазного suspend/drain для всех очередей;
@@ -186,7 +191,8 @@ retention и quality collection не объявляются unattended entrypoin
 - некоторые legacy services сохраняют существующий lint debt, который не
   возник в этом срезе;
 - migration `165` добавляет только fail-closed Store execution fence;
-  delivery lease-поля перенесены в ещё не реализованную migration `166`.
+  migration `166` с delivery lease/attempt/transition fence создана, но её
+  PostgreSQL/remote evidence и cutover ещё не приняты.
 
 Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
 `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
@@ -222,14 +228,22 @@ Suite проверяет:
 - отсутствие provider/credential и защищённой business mutation после denial;
   детерминированная audit-запись `SKIPPED`/`BLOCKED` разрешена;
 - deterministic `SKIPPED`, empty bot pull и delivery `BLOCKED`;
-- сохранение manual integration и delivery dry-run paths.
+- сохранение manual integration и delivery dry-run paths;
+- запрет legacy provider prepare/update/bot ack и provider delivery mutation
+  при bonus-ledger revoke/Telegram unsubscribe без отмены основной
+  ledger/reward/consent business mutation;
+- сохранение `CASHIER/MANUAL` cancellation.
 
-Последний локальный результат candidate:
+Последний принятый baseline-результат до расширения migration-166 containment:
 
 - background execution gate: `15 suites / 665 tests`;
 - tenant execution gate: `16 suites / 663 tests`;
 - полный API regression: `96 suites / 1873 passed / 2 todo`;
 - tenant-execution lint, API production typecheck и API build: `PASS`.
+
+Для expanded containment выше обязательны повторный focused/full API run,
+typecheck/lint и remote exact-SHA CI; они не заявлены этим документом как
+завершённые.
 
 ## 8. Следующий обязательный порядок
 
@@ -238,18 +252,29 @@ Suite проверяет:
    `30423839760`.
 2. Remote exact-SHA `CURRENT_165` PASS populated rehearsal `164 → 165`
    получен: `4bd6a036...` / CI `30428288353`; это engineering evidence, не
-   production apply.
-3. Отдельным reviewed migration `166` добавить durable delivery
-   claim-generation, captured execution revision, lease owner/expiry,
-   provider-attempt marker, потребление Store revision fence и fenced
-   finalize/reconcile согласно
-   [delivery claim design](./delivery-claim-migration-166-design.md).
-4. Перевести direct dispatcher и bot pull на один claim primitive.
-5. Добавить durable claims и fresh per-source/provider boundary для обычного
+   production apply. Documentation/evidence successor `7c20adec...` / CI
+   `30429463161` также зелёный; оба checkpoint исторические.
+3. Exact additive migration
+   `20260729160000_guest_game_delivery_claim_fence` уже создана как
+   implementation candidate `CURRENT_166`; до принятия обязательны clean и
+   populated PostgreSQL rehearsal `165 → 166` и remote exact-SHA CI.
+   Independent adversarial review не нашёл P0-блокера для inert schema, но
+   зафиксировал P1 перед provider activation: общий Reward→Delivery lock
+   order/`40P01` rehearsal, final-row reason/evidence consistency,
+   однозначный legacy-quarantine recovery и procedure-only durable event
+   writes. Полученный `CURRENT_165` PASS остаётся только историческим
+   prerequisite и не доказывает migration `166`.
+4. Закрыть четыре P1 review отдельными PostgreSQL regression-сценариями и
+   запретить выдачу runtime direct `INSERT` на transition evidence.
+5. Реализовать effect-capable coordinator поверх durable
+   claim/attempt/finalize/reaper/reconcile primitive и перевести на него direct
+   dispatcher и bot pull. Текущий legacy runtime только fail-closed блокирует
+   provider effects; это не готовый coordinator и не разрешение outbound.
+6. Добавить durable claims и fresh per-source/provider boundary для обычного
    Langame sync и остальных job kinds.
-6. Реализовать shared Telegram tenant/store identity, durable update dedupe и
+7. Реализовать shared Telegram tenant/store identity, durable update dedupe и
    per-store kill switches.
-7. Реализовать двухфазный suspend/drain и race tests для stage/revision flip.
-8. Пройти real PostgreSQL A/A1/A2 + B/B1 job/provider negative matrix.
-9. Только после этого переходить к canonical owner-email claim, encrypted
+8. Реализовать двухфазный suspend/drain и race tests для stage/revision flip.
+9. Пройти real PostgreSQL A/A1/A2 + B/B1 job/provider negative matrix.
+10. Только после этого переходить к canonical owner-email claim, encrypted
    outbox, shell provisioning и protected activation.

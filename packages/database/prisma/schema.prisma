@@ -267,6 +267,7 @@ model Tenant {
   guestGameRewardWalletItems           GuestGameRewardWalletItem[]
   guestGameDeliveries                  GuestGameDelivery[]
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
+  guestGameDeliveryAttempts            GuestGameDeliveryAttempt[]
   guestGameEvents                      GuestGameEvent[]
   guestGameAuditEvents                 GuestGameAuditEvent[]
   guestGameRuleDecisions               GuestGameRuleDecision[]
@@ -673,6 +674,8 @@ model Store {
   guestGameRewards                GuestGameReward[]
   guestGameRewardWalletItems      GuestGameRewardWalletItem[]
   guestGameDeliveries             GuestGameDelivery[]
+  guestGameDeliveryEvents         GuestGameDeliveryEvent[]
+  guestGameDeliveryAttempts       GuestGameDeliveryAttempt[]
   guestGameAuditEvents            GuestGameAuditEvent[]
   guestGameRuleDecisions          GuestGameRuleDecision[]
   guestGameEntitlements           GuestGameEntitlement[]
@@ -1417,6 +1420,7 @@ model Guest {
   guestPortalOtpChallenges   GuestPortalOtpChallenge[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
+  @@unique([tenantId, id], map: "guest_tenant_id_uidx")
   @@index([tenantId])
   @@index([tenantId, externalGuestTypeId])
   @@index([tenantId, lastActivityAt])
@@ -1802,6 +1806,7 @@ model GuestGameProfile {
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
+  @@unique([tenantId, id], map: "guest_game_profile_tenant_id_uidx")
   @@index([tenantId, status, updatedAt], map: "guest_game_profile_status_idx")
   @@index([tenantId, isStaffTest], map: "guest_game_profile_staff_test_idx")
   @@index([tenantId, phoneHash], map: "guest_game_profile_phone_idx")
@@ -2053,6 +2058,7 @@ model GuestGameReward {
   approvedByUser          User?                             @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   deliveries              GuestGameDelivery[]
   deliveryEvents          GuestGameDeliveryEvent[]
+  deliveryAttempts        GuestGameDeliveryAttempt[]
   bonusLedgerEntries      GuestBonusLedgerEntry[]
   entitlements            GuestGameEntitlement[]
   rewardIntents           GuestGameRewardIntent[]
@@ -2062,6 +2068,7 @@ model GuestGameReward {
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
   @@unique([tenantId, idempotencyKey], map: "guest_game_reward_idempotency_uidx")
+  @@unique([tenantId, id], map: "guest_game_reward_tenant_id_uidx")
   @@index([tenantId, originKey], map: "guest_game_reward_origin_idx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
   @@index([tenantId, claimRequired, deliveryRequestedAt, claimExpiresAt, status], map: "guest_game_reward_claim_queue_idx")
@@ -2135,39 +2142,76 @@ model GuestGameRewardWalletItem {
 }
 
 model GuestGameDelivery {
-  id                    String    @id @default(uuid())
-  tenantId              String
-  rewardId              String
-  profileId             String?
-  guestId               String?
-  storeId               String?
-  createdByUserId       String?
-  channel               String    @default("MANUAL")
-  status                String    @default("READY")
-  readinessStatus       String
-  recipientMasked       String?
-  channelIdentityMasked String?
-  messageTitle          String
-  messageBody           String
-  blockers              Json?
-  metadata              Json?
-  preparedAt            DateTime  @default(now())
-  sentAt                DateTime?
-  failedAt              DateTime?
-  canceledAt            DateTime?
-  note                  String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                          String    @id @default(uuid())
+  tenantId                    String
+  rewardId                    String
+  profileId                   String?
+  guestId                     String?
+  storeId                     String?
+  createdByUserId             String?
+  channel                     String    @default("MANUAL")
+  status                      String    @default("READY")
+  readinessStatus             String
+  recipientMasked             String?
+  channelIdentityMasked       String?
+  messageTitle                String
+  messageBody                 String
+  blockers                    Json?
+  metadata                    Json?
+  preparedAt                  DateTime  @default(now())
+  sentAt                      DateTime?
+  failedAt                    DateTime?
+  canceledAt                  DateTime?
+  note                        String?
+  attempts                    Int       @default(0)
+  attemptBudget               Int       @default(5)
+  claimGeneration             Int       @default(0)
+  transitionRevision          BigInt    @default(0)
+  claimJobKind                String?
+  integrityState              String    @default("VERIFIED")
+  integrityReasonCode         String?
+  stateReasonCode             String?
+  executionRevision           Int?
+  storeExecutionRevision      Int?
+  leaseOwner                  String?
+  claimKeyVersion             Int?
+  claimOwnerDigest            String?
+  claimTokenDigest            String?
+  claimedAt                   DateTime? @db.Timestamptz(3)
+  leaseExpiresAt              DateTime? @db.Timestamptz(3)
+  acknowledgeUntil            DateTime? @db.Timestamptz(3)
+  effectInputDigest           String?
+  providerConfigDigest        String?
+  providerAuthorityRevision   Int?
+  workloadIdentityDigest      String?
+  sendGrantDigest             String?
+  sendGrantExpiresAt          DateTime? @db.Timestamptz(3)
+  providerAttemptKey          String?
+  providerAttemptedAt         DateTime? @db.Timestamptz(3)
+  providerOutcomeClass        String?
+  providerOutcomeCode         String?
+  providerObservedAt          DateTime? @db.Timestamptz(3)
+  providerReceiptDigest       String?
+  providerReceiptRefEncrypted Bytes?
+  providerReceiptKeyVersion   Int?
+  terminalAckDigest           String?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
 
-  tenant        Tenant                   @relation(fields: [tenantId], references: [id])
-  reward        GuestGameReward          @relation(fields: [rewardId], references: [id], onDelete: Cascade)
-  profile       GuestGameProfile?        @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  guest         Guest?                   @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  store         Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?                    @relation("GuestGameDeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  events        GuestGameDeliveryEvent[]
+  // Migration 166 intentionally retains an additional DB-native
+  // GuestGameDelivery_storeId_fkey to Store(id). Prisma models the composite
+  // relation below; the direct FK preserves the legacy referential contract.
+  tenant           Tenant                     @relation(fields: [tenantId], references: [id])
+  reward           GuestGameReward            @relation(fields: [tenantId, rewardId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_rewardId_fkey")
+  profile          GuestGameProfile?          @relation(fields: [tenantId, profileId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_profileId_fkey")
+  guest            Guest?                     @relation(fields: [tenantId, guestId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_guestId_fkey")
+  store            Store?                     @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDelivery_tenantId_storeId_fkey")
+  createdByUser    User?                      @relation("GuestGameDeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  events           GuestGameDeliveryEvent[]
+  deliveryAttempts GuestGameDeliveryAttempt[]
 
   @@unique([tenantId, rewardId, channel], map: "guest_game_delivery_reward_channel_uidx")
+  @@unique([tenantId, id], map: "guest_game_delivery_tenant_id_uidx")
   @@index([tenantId, status, preparedAt], map: "guest_game_delivery_status_idx")
   @@index([tenantId, readinessStatus], map: "guest_game_delivery_readiness_idx")
   @@index([rewardId], map: "guest_game_delivery_reward_idx")
@@ -2177,29 +2221,115 @@ model GuestGameDelivery {
   @@index([createdByUserId], map: "guest_game_delivery_created_by_idx")
 }
 
+// Migration 166 enforces append-only Event evidence with a DB trigger:
+// UPDATE always fails and ordinary DELETE is denied.
 model GuestGameDeliveryEvent {
-  id          String   @id @default(uuid())
-  tenantId    String
-  deliveryId  String
-  rewardId    String
-  actorUserId String?
-  eventType   String
-  fromStatus  String?
-  toStatus    String?
-  channel     String?
-  note        String?
-  payload     Json?
-  createdAt   DateTime @default(now())
+  id                          String    @id @default(uuid())
+  tenantId                    String
+  deliveryId                  String
+  rewardId                    String
+  storeId                     String?
+  attemptId                   String?
+  actorUserId                 String?
+  eventType                   String
+  transitionKey               String?
+  transitionRevision          BigInt?
+  fromStatus                  String?
+  toStatus                    String?
+  channel                     String?
+  claimGeneration             Int?
+  attemptNumber               Int?
+  claimJobKind                String?
+  executionRevision           Int?
+  storeExecutionRevision      Int?
+  claimKeyVersion             Int?
+  claimOwnerDigest            String?
+  claimTokenDigest            String?
+  claimedAt                   DateTime? @db.Timestamptz(3)
+  leaseExpiresAt              DateTime? @db.Timestamptz(3)
+  acknowledgeUntil            DateTime? @db.Timestamptz(3)
+  effectInputDigest           String?
+  providerConfigDigest        String?
+  providerAuthorityRevision   Int?
+  workloadIdentityDigest      String?
+  providerAttemptKey          String?
+  providerAttemptedAt         DateTime? @db.Timestamptz(3)
+  sendGrantDigest             String?
+  sendGrantExpiresAt          DateTime? @db.Timestamptz(3)
+  providerOutcomeClass        String?
+  providerOutcomeCode         String?
+  providerObservedAt          DateTime? @db.Timestamptz(3)
+  providerReceiptDigest       String?
+  providerReceiptRefEncrypted Bytes?
+  providerReceiptKeyVersion   Int?
+  terminalAckDigest           String?
+  stateReasonCode             String?
+  adapterVersion              String?
+  httpStatusClass             Int?
+  provenanceDigest            String?
+  note                        String?
+  payload                     Json?
+  createdAt                   DateTime  @default(now())
 
-  tenant    Tenant            @relation(fields: [tenantId], references: [id])
-  delivery  GuestGameDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
-  reward    GuestGameReward   @relation(fields: [rewardId], references: [id], onDelete: Cascade)
-  actorUser User?             @relation("GuestGameDeliveryEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id])
+  delivery  GuestGameDelivery         @relation(fields: [tenantId, deliveryId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_deliveryId_fkey")
+  reward    GuestGameReward           @relation(fields: [tenantId, rewardId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_rewardId_fkey")
+  store     Store?                    @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_storeId_fkey")
+  attempt   GuestGameDeliveryAttempt? @relation(fields: [tenantId, attemptId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryEvent_tenantId_attemptId_fkey")
+  actorUser User?                     @relation("GuestGameDeliveryEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, transitionKey], map: "guest_game_delivery_event_transition_uidx")
   @@index([tenantId, eventType, createdAt], map: "guest_game_delivery_event_type_idx")
   @@index([deliveryId], map: "guest_game_delivery_event_delivery_idx")
   @@index([rewardId], map: "guest_game_delivery_event_reward_idx")
+  @@index([tenantId, storeId], map: "guest_game_delivery_event_store_idx")
+  @@index([tenantId, attemptId], map: "guest_game_delivery_event_attempt_idx")
   @@index([actorUserId], map: "guest_game_delivery_event_actor_idx")
+}
+
+// Migration 166 validates Attempt inserts against their Delivery and enforces
+// append-only evidence with a DB trigger.
+model GuestGameDeliveryAttempt {
+  id                        String   @id @default(uuid())
+  tenantId                  String
+  deliveryId                String
+  rewardId                  String
+  storeId                   String
+  channel                   String
+  claimGeneration           Int
+  attemptNumber             Int
+  claimJobKind              String
+  executionRevision         Int
+  storeExecutionRevision    Int
+  claimKeyVersion           Int
+  claimOwnerDigest          String
+  claimTokenDigest          String
+  claimedAt                 DateTime @db.Timestamptz(3)
+  leaseExpiresAt            DateTime @db.Timestamptz(3)
+  acknowledgeUntil          DateTime @db.Timestamptz(3)
+  effectInputDigest         String
+  providerConfigDigest      String
+  providerAuthorityRevision Int
+  workloadIdentityDigest    String
+  providerAttemptKey        String
+  providerAttemptedAt       DateTime @db.Timestamptz(3)
+  sendGrantDigest           String
+  sendGrantExpiresAt        DateTime @db.Timestamptz(3)
+  createdAt                 DateTime @default(now()) @db.Timestamptz(3)
+
+  tenant   Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_fkey")
+  delivery GuestGameDelivery        @relation(fields: [tenantId, deliveryId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_deliveryId_fkey")
+  reward   GuestGameReward          @relation(fields: [tenantId, rewardId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_rewardId_fkey")
+  store    Store                    @relation(fields: [tenantId, storeId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "GuestGameDeliveryAttempt_tenantId_storeId_fkey")
+  events   GuestGameDeliveryEvent[]
+
+  @@unique([tenantId, id], map: "guest_game_delivery_attempt_tenant_id_uidx")
+  @@unique([tenantId, deliveryId, claimGeneration], map: "guest_game_delivery_attempt_generation_uidx")
+  @@unique([tenantId, providerAttemptKey], map: "guest_game_delivery_attempt_provider_key_uidx")
+  @@index([tenantId, storeId, providerAttemptedAt, id], map: "guest_game_delivery_attempt_store_idx")
+  @@index([deliveryId], map: "guest_game_delivery_attempt_delivery_idx")
+  @@index([rewardId], map: "guest_game_delivery_attempt_reward_idx")
+  @@index([storeId], map: "guest_game_delivery_attempt_store_fk_idx")
 }
 
 model GuestGameEvent {

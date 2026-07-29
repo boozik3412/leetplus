@@ -34,6 +34,7 @@ import {
   resolveSecuritySecret,
 } from '../config/environment-validation';
 import { GuestActivityLedgerService } from '../guest-gamification/guest-activity-ledger.service';
+import { evaluateLegacyGuestGameDeliveryProtocolGate } from '../guest-gamification/guest-game-delivery-protocol-gate';
 import {
   GuestGamificationService,
   guestGameRewardUsesBonusLedger,
@@ -735,6 +736,7 @@ export type GuestPortalTelegramWebhookResponse = {
   profileId: string | null;
   profilesAffected?: number;
   deliveriesBlocked?: number;
+  deliveriesProtocolBlocked?: number;
   telegramIdentityMasked: string | null;
   message: string;
   reply?: {
@@ -5729,7 +5731,7 @@ export class GuestPortalService {
     let cursor: { expiresAt: Date; id: string } | null = null;
 
     for (let batch = 0; batch < maxBatches; batch += 1) {
-      const rows = await this.prisma.guestGameRewardWalletItem.findMany({
+      const rows = (await this.prisma.guestGameRewardWalletItem.findMany({
         where: {
           tenantId,
           profileId,
@@ -5820,7 +5822,14 @@ export class GuestPortalService {
         },
         orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
         take: batchSize,
-      });
+      })) as Array<{
+        id: string;
+        status: string;
+        rewardId: string | null;
+        entitlementId: string | null;
+        eventId: string | null;
+        expiresAt: Date;
+      }>;
       if (rows.length === 0) {
         break;
       }
@@ -9442,6 +9451,10 @@ export class GuestPortalService {
     const preferenceNote = `${COMMUNICATION_PREFERENCE_EVENT_PREFIX}UNSUBSCRIBE: Telegram bot stop command.`;
     const deliveryNote =
       'Guest unsubscribed from Telegram bot through webhook stop command.';
+    const deliveryProtocolGate =
+      evaluateLegacyGuestGameDeliveryProtocolGate(
+        'LEGACY_PROVIDER_UNSUBSCRIBE',
+      );
 
     const result = await this.prisma.$transaction(async (tx) => {
       if (guestIds.length > 0) {
@@ -9497,7 +9510,7 @@ export class GuestPortalService {
         },
       });
 
-      if (pendingDeliveries.length > 0) {
+      if (pendingDeliveries.length > 0 && deliveryProtocolGate.allowed) {
         await tx.guestGameDelivery.updateMany({
           where: {
             id: { in: pendingDeliveries.map((delivery) => delivery.id) },
@@ -9530,7 +9543,14 @@ export class GuestPortalService {
         });
       }
 
-      return { deliveriesBlocked: pendingDeliveries.length };
+      return {
+        deliveriesBlocked: deliveryProtocolGate.allowed
+          ? pendingDeliveries.length
+          : 0,
+        deliveriesProtocolBlocked: deliveryProtocolGate.allowed
+          ? 0
+          : pendingDeliveries.length,
+      };
     });
 
     return {
@@ -9539,9 +9559,11 @@ export class GuestPortalService {
       profileId: profiles.length === 1 ? profiles[0].id : null,
       profilesAffected: profiles.length,
       deliveriesBlocked: result.deliveriesBlocked,
+      deliveriesProtocolBlocked: result.deliveriesProtocolBlocked,
       telegramIdentityMasked,
-      message:
-        'Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED and pending Telegram deliveries are blocked.',
+      message: result.deliveriesProtocolBlocked
+        ? `Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED. ${deliveryProtocolGate.note}`
+        : 'Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED and pending Telegram deliveries are blocked.',
     };
   }
 

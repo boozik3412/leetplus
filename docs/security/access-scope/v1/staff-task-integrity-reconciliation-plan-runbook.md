@@ -2,17 +2,18 @@
 
 | Поле                  | Значение                                                                   |
 | --------------------- | -------------------------------------------------------------------------- |
-| Статус                | `IMPLEMENTED_CANDIDATE`; current remote engineering CI PASS; не deployed   |
-| Версия                | 1.10.0                                                                     |
+| Статус                | `IMPLEMENTED_CANDIDATE`; CURRENT_166 remote/PG evidence pending; не deployed |
+| Версия                | 1.11.0                                                                     |
 | Дата                  | 29.07.2026                                                                 |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                       |
-| Current candidate SHA | `4bd6a036...`; remote CURRENT_165 engineering CI PASS                      |
+| Current target        | `CURRENT_166`; exact-SHA remote CI / populated `165 → 166` pending         |
+| Historical remote     | `CURRENT_165`: `4bd6a036...` / `30428288353`; `7c20adec...` / `30429463161` |
 | Historical planner    | `2c74c663780b3f183be708a01431c22efe57a723`; не current evidence            |
 | Historical dry-run    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; SYNTHETIC, не current evidence |
 | Report schema version | 1                                                                          |
 | Admission schema      | 2                                                                          |
 | Protected prefix      | 162; latest `20260727131000_staff_task_integrity_expand`                   |
-| Требуемая current DB  | `CURRENT_165`; latest `20260729120000_store_background_execution_fence`    |
+| Требуемая current DB  | `CURRENT_166`; latest `20260729160000_guest_game_delivery_claim_fence`     |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) |
 | Предыдущий этап       | [Integrity inventory](./staff-task-integrity-inventory-runbook.md)         |
 | Связанный EXPAND      | [StaffTask integrity EXPAND](./staff-task-integrity-expand-runbook.md)     |
@@ -25,9 +26,9 @@ reconciliation и распределить классы работы, но не 
 Наличие слова `proposal` в отчёте не является разрешением на изменение данных.
 В candidate отсутствуют `--apply`, DML, row-level plan и любой путь мутации.
 Production-like planner разрешено запускать только после успешного Git-bound
-snapshot admission в состоянии `CURRENT_165`. StaffTask authority при этом
+snapshot admission в состоянии `CURRENT_166`. StaffTask authority при этом
 остаётся привязана к reviewed immutable prefix `EXPAND_162`; migrations
-`163..165` принимаются только как exact allowlisted additive tail, не меняющий
+`163..166` принимаются только как exact allowlisted additive tail, не меняющий
 protected `StaffTask*` relations.
 
 ## 1. Зафиксированный контекст
@@ -174,14 +175,16 @@ Review-only counts требуют owner и решения, но не входя�
 
 - `EXPAND_162` — frozen reviewed StaffTask prefix и его отдельный protected
   authority/admission evidence;
-- `CURRENT_165` — фактическая БД текущего release: тот же exact prefix плюс
+- `CURRENT_166` — фактическая БД current implementation candidate: тот же exact
+  prefix плюс
   allowlisted tail
   `20260728120000_tenant_execution_control_plane_expand` и
   `20260728150000_tenant_execution_revision_fence` и
-  `20260729120000_store_background_execution_fence`.
+  `20260729120000_store_background_execution_fence` и
+  `20260729160000_guest_game_delivery_claim_fence`.
 
 Наличие `EXPAND_162` evidence не разрешает planner на БД из 162 migrations
-после появления current tail. И наоборот, `CURRENT_165` не переписывает
+после появления current tail. И наоборот, `CURRENT_166` не переписывает
 исторический StaffTask prefix evidence: новый current envelope/marker/admission
 добавляется поверх него.
 
@@ -191,8 +194,8 @@ Planner сначала выполняет schema-first gate и запускае�
 ```text
 currentSchemaIsPublic                    = true
 databaseIdentityMatched                 = true
-migrationCount                           = 165
-latestMigration                          = 20260729120000_store_background_execution_fence
+migrationCount                           = 166
+latestMigration                          = 20260729160000_guest_game_delivery_claim_fence
 unfinishedMigrationCount                 = 0
 compositeContractMatchCount              = 14
 simpleContractMatchCount                 = 14
@@ -303,15 +306,16 @@ row identifiers в git запрещены.
    protected marker-rotation attestation остановить процесс.
 7. Применить только exact allowlisted additive tail migrations
    `20260728120000_tenant_execution_control_plane_expand`,
-   `20260728150000_tenant_execution_revision_fence` и
-   `20260729120000_store_background_execution_fence`. Они не должны изменять
+   `20260728150000_tenant_execution_revision_fence`,
+   `20260729120000_store_background_execution_fence` и
+   `20260729160000_guest_game_delivery_claim_fence`. Они не должны изменять
    protected `StaffTask*` tables, FK, indexes или triggers.
 8. Для той же БД, release SHA и acquisition lineage получить третий
-   state-bound `CURRENT_165` authority envelope с новым nonce-bound binding,
-   заменить DB marker и пройти `admission(CURRENT_165)`. `EXPAND_162`
+   state-bound `CURRENT_166` authority envelope с новым nonce-bound binding,
+   заменить DB marker и пройти `admission(CURRENT_166)`. `EXPAND_162`
    envelope/marker не переиспользовать.
 9. Проверить `databaseIdentityMatched=true` и current schema-first gate:
-   `165/latest/unfinished 0`, `14 composite exact`, `14 simple exact`,
+   `166/latest/unfinished 0`, `14 composite exact`, `14 simple exact`,
    `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact`,
    `0 index mismatch`. Убедиться, что `inventoryExecuted === schema.ready`, а
    evidence содержит HMAC `databaseIdentityDigest` без raw identity.
@@ -403,8 +407,11 @@ acquisition production-like admission/dry-run fail-closed запрещены.
 Отдельный test evidence
 `2341b99937e54cc50d1763a0a794d975816c72ce` подтверждает authority `9/9`,
 admission `19/19` и public-only pre-signed pinned-path `LOCAL PASS` в isolated
-child. Current `CURRENT_165` engineering CI
-`4bd6a036...` / `30428288353` прошёл; experimental Node 22 module mock — P2.
+child. Historical `CURRENT_165` engineering CI
+`4bd6a036...` / `30428288353` и documentation/evidence successor
+`7c20adec...` / `30429463161` прошли как historical prerequisite. Exact-SHA
+remote CI и populated `165 → 166` для current `CURRENT_166` pending;
+experimental Node 22 module mock — P2.
 Production root enrollment, operational signer и approved acquisition
 остаются P0.
 
@@ -447,8 +454,8 @@ database_revision:
 currentSchemaIsPublic: true
 databaseIdentityMatched: true
 databaseIdentityDigest:
-migrationCount: 165
-latestMigration: 20260729120000_store_background_execution_fence
+migrationCount: 166
+latestMigration: 20260729160000_guest_game_delivery_claim_fence
 unfinishedMigrationCount: 0
 compositeContractMatchCount: 14
 simpleContractMatchCount: 14
@@ -477,10 +484,17 @@ release_decision: NO-GO | RECONCILE | READY_FOR_VALIDATE_REHEARSAL
 
 ## 11. Changelog
 
-- `1.10.0`, 29.07.2026 — current `CURRENT_165` planner/catalog/admission
+- `1.11.0`, 29.07.2026 — operational planner/admission target переведён на
+  implementation candidate `CURRENT_166`: allowlisted tail `163..166`, count
+  `166`, latest `20260729160000_guest_game_delivery_claim_fence`. Remote
+  exact-SHA/`165 → 166` pending; `CURRENT_165`
+  `4bd6a036...`/`7c20adec...` остаётся historical evidence.
+  Production-like planner/apply — `NO-GO`.
+- `1.10.0`, 29.07.2026 — historical `CURRENT_165`
+  planner/catalog/admission
   engineering gates прошли remote CI `4bd6a036...` / `30428288353`;
   production-like planner/apply остаются `NO-GO`.
-- `1.9.0`, 29.07.2026 — current planner gate расширен до `CURRENT_165` с
+- `1.9.0`, 29.07.2026 — then-current planner gate расширен до `CURRENT_165` с
   allowlisted migrations `163..165`; count `165`, latest
   `20260729120000_store_background_execution_fence`. Frozen StaffTask
   authority остаётся `EXPAND_162`.

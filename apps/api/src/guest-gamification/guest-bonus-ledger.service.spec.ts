@@ -290,6 +290,12 @@ function dispatchResult(
 describe('GuestBonusLedgerService', () => {
   afterEach(() => {
     jest.restoreAllMocks();
+    delete process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED;
+    delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED;
+    delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_GAME_MAX_DELIVERY_ENABLED;
+    delete process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED;
+    delete process.env.GUEST_GAME_MAX_BOT_TOKEN;
   });
 
   it('reports dry-run mode by default when Langame write config is absent', async () => {
@@ -3914,7 +3920,13 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
-  it('cancels the linked approved reward and pending deliveries when a ledger entry is canceled', async () => {
+  it('cancels reward and non-provider deliveries but protocol-blocks provider revoke mutations', async () => {
+    process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+    process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED = 'true';
+    process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN = 'telegram-token';
+    process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+    process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
+    process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
     const { service, prisma } = createService();
     const entry = ledgerEntry({
       id: 'ledger-cancel-1',
@@ -3938,6 +3950,18 @@ describe('GuestBonusLedgerService', () => {
         rewardId: 'reward-cancel-1',
         status: 'FAILED',
         channel: 'MAX',
+      },
+      {
+        id: 'delivery-cancel-3',
+        rewardId: 'reward-cancel-1',
+        status: 'READY',
+        channel: 'CASHIER',
+      },
+      {
+        id: 'delivery-cancel-4',
+        rewardId: 'reward-cancel-1',
+        status: 'BLOCKED',
+        channel: 'MANUAL',
       },
     ]);
     prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 1 });
@@ -3970,26 +3994,29 @@ describe('GuestBonusLedgerService', () => {
       },
       data: { status: 'CANCELED' },
     });
-    expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
+    expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.guestGameDelivery.updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         tenantId: user.tenantId,
-        id: 'delivery-cancel-1',
+        id: 'delivery-cancel-3',
         status: { notIn: ['SENT', 'CANCELED'] },
       },
       data: expect.objectContaining({
         status: 'CANCELED',
+        stateReasonCode: 'BONUS_LEDGER_CANCELED',
         canceledAt: expect.any(Date),
         note: expect.stringContaining('Wrong guest match'),
       }),
     });
-    expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
+    expect(prisma.guestGameDelivery.updateMany).toHaveBeenNthCalledWith(2, {
       where: {
         tenantId: user.tenantId,
-        id: 'delivery-cancel-2',
+        id: 'delivery-cancel-4',
         status: { notIn: ['SENT', 'CANCELED'] },
       },
       data: expect.objectContaining({
         status: 'CANCELED',
+        stateReasonCode: 'BONUS_LEDGER_CANCELED',
         canceledAt: expect.any(Date),
         note: expect.stringContaining('Wrong guest match'),
       }),
@@ -3998,13 +4025,14 @@ describe('GuestBonusLedgerService', () => {
       data: [
         expect.objectContaining({
           tenantId: user.tenantId,
-          deliveryId: 'delivery-cancel-1',
+          deliveryId: 'delivery-cancel-3',
           rewardId: 'reward-cancel-1',
           actorUserId: user.id,
           eventType: 'DELIVERY_CANCELED_BY_LEDGER',
           fromStatus: 'READY',
           toStatus: 'CANCELED',
-          channel: 'TELEGRAM',
+          channel: 'CASHIER',
+          stateReasonCode: 'BONUS_LEDGER_CANCELED',
           note: expect.stringContaining('Wrong guest match'),
           payload: expect.objectContaining({
             ledgerEntryId: 'ledger-cancel-1',
@@ -4012,20 +4040,30 @@ describe('GuestBonusLedgerService', () => {
           }),
         }),
         expect.objectContaining({
-          deliveryId: 'delivery-cancel-2',
-          fromStatus: 'FAILED',
-          channel: 'MAX',
+          deliveryId: 'delivery-cancel-4',
+          fromStatus: 'BLOCKED',
+          channel: 'MANUAL',
+          stateReasonCode: 'BONUS_LEDGER_CANCELED',
         }),
       ],
     });
+    expect(
+      prisma.guestGameDelivery.updateMany.mock.calls.map(
+        ([input]) => input.where.id,
+      ),
+    ).toEqual(['delivery-cancel-3', 'delivery-cancel-4']);
     expect(result).toMatchObject({
       ledgerEntryId: 'ledger-cancel-1',
       rewardId: 'reward-cancel-1',
       status: 'CANCELED',
       amount: 40,
+      protocolBlockedDeliveries: 2,
       note: expect.stringContaining('reward canceled: 1'),
     });
     expect(result.note).toContain('deliveries canceled: 2');
+    expect(result.note).toContain('provider deliveries protocol-blocked: 2');
+    expect(JSON.stringify(result)).not.toContain('telegram-token');
+    expect(JSON.stringify(result)).not.toContain('max-token');
   });
 
   it('blocks cancellation while a ledger entry has a fresh processing lock', async () => {

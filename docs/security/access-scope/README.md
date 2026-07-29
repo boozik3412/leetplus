@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.20.0                                                                                              |
+| Версия контракта               | 1.21.0                                                                                              |
 | Дата                           | 29.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -19,7 +19,8 @@
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
 | Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
 | Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
-| Current remote candidate       | `4bd6a036...` / CI `30428288353`; CURRENT_165 engineering gates PASS; not deployed                  |
+| Current operational target     | `CURRENT_166`; exact-SHA remote CI и populated `165 → 166` pending; not deployed                    |
+| Historical remote evidence     | `CURRENT_165`: `4bd6a036...` / CI `30428288353`; `7c20adec...` / CI `30429463161` PASS              |
 | Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
@@ -237,7 +238,8 @@ evidence с database name, PostgreSQL `system_identifier` и database OID без
 Полный каталог из 43 reason codes классифицирован как `8 proposal +
 29 operator + 6 review`; `TASK_ASSIGNEE_GLOBAL_SCOPE_INVALID` является
 `BLOCKING`. Schema-first gate требует exact
-`162/latest/unfinished 0 + 14 composite exact + 14 simple exact +
+`166/20260729160000_guest_game_delivery_claim_fence/unfinished 0 +
+14 composite exact + 14 simple exact +
 0 expected-FK mismatch + 0 unexpected protected FK + 5 indexes exact +
 0 index mismatch` и `databaseIdentityMatched=true`. Exits — `0/1/2/3`,
 actionable cap исключает review-only counts. Proposal не является
@@ -275,8 +277,8 @@ transferable audit proof; аудит опирается на protected signed ma
 
 Authority envelope подписывает `expectedState`, поэтому production-like
 ceremony поддерживает ровно три состояния: `BASELINE_156`, `EXPAND_162` и
-`CURRENT_165`. После migrations `157..162`, а затем после единого exact
-allowlisted tail `163..165` выполняются новые
+`CURRENT_166`. После migrations `157..162`, а затем после единого exact
+allowlisted tail `163..166` выполняются новые
 detached ceremony `prepare → external Ed25519 sign → finalize` с новым
 nonce-bound binding. DB marker заменяется digest нового envelope до каждого
 следующего admission, а protected evidence хранит все state-specific bundle,
@@ -334,9 +336,12 @@ realpath guard; production root registry на диске остаётся пус
 Выполнены `SYNTHETIC` rehearsal и локальный public-only test-only pinned-path.
 Production-like acquisition/restore/admission, inventory/planner/row dry-run,
 reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
-не выполнялись. Remote CI текущего `CURRENT_165` engineering candidate,
-включая application/authority и real PostgreSQL `164 → 165`, пройден; это не
-production-like evidence.
+не выполнялись. Historical `CURRENT_165` engineering candidate
+`4bd6a036...` / CI `30428288353` и documentation/evidence successor
+`7c20adec...` / CI `30429463161` прошли remote CI, включая real PostgreSQL
+`164 → 165`; это prerequisite, а не evidence текущего `CURRENT_166`.
+Exact-SHA remote CI и populated PostgreSQL `165 → 166` для implementation
+candidate ещё pending.
 
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
@@ -354,11 +359,20 @@ production-like evidence.
 
 ## Changelog
 
-- `1.20.0`, 29.07.2026 — remote `CURRENT_165` engineering evidence принято:
+- `1.21.0`, 29.07.2026 — operational admission/authority/inventory/planner
+  target переведён в implementation candidate `CURRENT_166`: additive tail
+  `163..166`, migration count `166`, latest
+  `20260729160000_guest_game_delivery_claim_fence`. Remote exact-SHA и
+  populated `165 → 166` pending; root registry `{}`, production-like и внешний
+  beta остаются `NO-GO`. `4bd6a036...`/`30428288353` и
+  `7c20adec...`/`30429463161` сохранены как historical `CURRENT_165` evidence.
+- `1.20.0`, 29.07.2026 — historical remote `CURRENT_165` engineering evidence
+  принято:
   `4bd6a036...` / CI `30428288353`, все три job и real PostgreSQL
   `164 → 165` зелёные. Root registry остаётся `{}`; production-like
   acquisition/admission, deploy и внешний beta остаются `NO-GO`.
-- `1.19.0`, 29.07.2026 — current release contract переведён в `CURRENT_165`:
+- `1.19.0`, 29.07.2026 — release contract этой historical версии переведён в
+  `CURRENT_165`:
   exact additive tail `163..165`, migration count `165`, latest
   `20260729120000_store_background_execution_fence`. Remote `CURRENT_164`
   prerequisite зелёный на `37f8cc88...` / CI `30423839760`; migration `165`

@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.14.0                                             |
+| Версия          | 1.16.0                                             |
 | Дата            | 29.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -15,8 +15,8 @@
 
 Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
 `Full candidate SHA` и не заменяют CI/review/evidence нового exact current
-candidate, который должен включать additive migrations `163..165` и пройти
-`CURRENT_165`
+candidate, который должен включать additive migrations `163..166` и пройти
+`CURRENT_166`
 admission.
 
 ## A. Release identity и authority
@@ -54,9 +54,31 @@ admission.
 - [x] Remote PostgreSQL 16 prerequisite `CURRENT_164` зелёный на
       `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI `30423839760`; это
       SYNTHETIC evidence, runtime `CURRENT_164` не принимает.
-- [x] Remote `CURRENT_165` candidate и populated `164 → 165` rehearsal
+- [x] Historical prerequisite `CURRENT_165` и populated `164 → 165` rehearsal
       зелёные на `4bd6a036...` / CI `30428288353`; все три CI job успешны.
-      Это не закрывает production-like или deployment checkbox ниже.
+      Documentation/evidence successor `7c20adec...` / CI `30429463161` также
+      зелёный.
+      Это не evidence для migration `166` и не закрывает production-like или
+      deployment checkbox ниже.
+- [x] Независимый adversarial review `CURRENT_166` не нашёл P0-блокера для
+      применения как inert schema foundation; найденные четыре P1 явно
+      зафиксированы ниже и остаются `NO-GO` для provider writes.
+- [ ] Для current implementation candidate `CURRENT_166` зафиксированы
+      exact-SHA remote CI и clean/populated PostgreSQL rehearsal `165 → 166`.
+      До этого migration `166` не считается принятой.
+- [ ] До provider activation единый lock protocol берёт
+      `advisory → Reward FOR UPDATE → Delivery FOR UPDATE` до первой mutation;
+      двухсессионный PG test не получает необработанный `40P01`, а bounded
+      retry/reconciliation доказан.
+- [ ] Reason/integrity mutation является event-bearing; deferred validation
+      re-read окончательной Delivery строки отклоняет queued-tuple/reason
+      drift.
+- [ ] `LEGACY_QUARANTINED` либо полностью immutable, либо имеет отдельный
+      approved generation-0 reconciliation event/procedure с provenance и
+      operator approval, без синтетического Attempt.
+- [ ] Runtime не имеет прямого `INSERT` в durable transition evidence;
+      разрешена только узкая reviewed procedure/подписанная provenance
+      boundary, отклоняющая fabricated extra event.
 - [ ] `main` защищён branch protection/ruleset, CODEOWNERS/approval routing
       настроены и независимый reviewer одобрил root-enrollment change.
 - [ ] Reviewed Ed25519 public authority root enrolment выполнен отдельным
@@ -95,16 +117,17 @@ admission.
 - [ ] После `EXPAND_162` применены только exact allowlisted migrations
       `20260728120000_tenant_execution_control_plane_expand` и
       `20260728150000_tenant_execution_revision_fence` и
-      `20260729120000_store_background_execution_fence`; они не изменили
-      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_165`
+      `20260729120000_store_background_execution_fence` и
+      `20260729160000_guest_game_delivery_claim_fence`; они не изменили
+      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_166`
       envelope с новым nonce-bound binding, DB marker повторно заменён, третий
       admission schema `v2` завершился exit `0`; reuse expand marker запрещён.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
       release SHA и thresholds; schema-first gate равен
-      `CURRENT_165`, `migrationCount=165`, latest
-      `20260729120000_store_background_execution_fence`, `unfinished=0`,
+      `CURRENT_166`, `migrationCount=166`, latest
+      `20260729160000_guest_game_delivery_claim_fence`, `unfinished=0`,
       `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
       `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
       actionable cap не превышен.
@@ -297,8 +320,8 @@ admission.
 
 - [ ] Accepted artifact, migration apply и production runtime environment
       обновляются одной release-операцией:
-      `EXPECTED_DATABASE_MIGRATION=20260729120000_store_background_execution_fence`
-      и `EXPECTED_DATABASE_MIGRATION_COUNT=165`; старые значения не допускаются
+      `EXPECTED_DATABASE_MIGRATION=20260729160000_guest_game_delivery_claim_fence`
+      и `EXPECTED_DATABASE_MIGRATION_COUNT=166`; старые значения не допускаются
       после apply.
 - [ ] `/health/live`, `/health/ready`, `/version` проверены внешним probe.
 - [ ] Migration identity/count подтверждены именно через `/health/ready`;
@@ -385,13 +408,24 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.16.0`, 29.07.2026 — independent migration `166` review не нашёл
+  P0-блокера для inert schema, но зафиксировал четыре P1 до provider
+  activation: lock order/deadlock rehearsal, final-row reason/evidence
+  consistency, legacy-quarantine recovery и procedure-only event writes.
+  Remote PostgreSQL/CI и сами P1 остаются `NO-GO`.
+- `1.15.0`, 29.07.2026 — cutover target переведён на implementation candidate
+  `CURRENT_166` (`migrationCount=166`, latest
+  `20260729160000_guest_game_delivery_claim_fence`). Remote exact-SHA,
+  populated `165 → 166`, production-like admission и effect-capable
+  coordinator остаются pending; статус `NO-GO`.
 - `1.14.0`, 29.07.2026 — remote `CURRENT_165` и populated `164 → 165`
-  rehearsal приняты на `4bd6a036...` / CI `30428288353`; production-like,
+  rehearsal приняты на `4bd6a036...` / CI `30428288353`; documentation/evidence
+  successor `7c20adec...` / CI `30429463161` также зелёный. Production-like,
   backup/restore, apply/cutover и внешний доступ остаются незакрытыми.
 - `1.13.0`, 29.07.2026 — перед любым production apply добавлен atomic
   release-env gate для exact migration `165`/count `165`; миграционная
   совместимость подтверждается `/health/ready`, а не legacy `/health`.
-- `1.12.0`, 29.07.2026 — current schema checkpoint переведён в
+- `1.12.0`, 29.07.2026 — schema checkpoint этой исторической версии переведён в
   `CURRENT_165` (`migrationCount=165`, latest
   `20260729120000_store_background_execution_fence`). Migration `165`
   fail-closed, не активирует Store и не включает outbound; production

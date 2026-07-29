@@ -3,7 +3,7 @@
 | Поле          | Значение                                                             |
 | ------------- | -------------------------------------------------------------------- |
 | Статус        | `IMPLEMENTED_CANDIDATE`; production root не enrolled                 |
-| Версия        | `1.1.0`                                                              |
+| Версия        | `1.2.0`                                                              |
 | Дата          | `29.07.2026`                                                         |
 | Решение       | Detached Ed25519 signing; LeetPlus не читает private key             |
 | Scope         | Только production-like StaffTask rehearsal на loopback PostgreSQL 16 |
@@ -16,8 +16,13 @@ reconciliation apply, deployment или внешний доступ.
 Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
 `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`; это
 SYNTHETIC prerequisite evidence, а не отдельное production-like state.
+Historical `CURRENT_165` engineering evidence принято на
+`4bd6a036...` / CI `30428288353`, а documentation/evidence successor
+`7c20adec...` прошёл CI `30429463161`. Current operational target —
+implementation candidate `CURRENT_166`; его exact-SHA remote CI и populated
+PostgreSQL `165 → 166` ещё pending.
 Authority tests проходят `40/40`, включая child-process positive ceremony E2E
-и rejection промежуточного `CURRENT_164`.
+и rejection промежуточных `CURRENT_164`/`CURRENT_165`.
 Canonical root registry остаётся `{}`. Ветка `main` без branch
 protection/ruleset и `CODEOWNERS`, поэтому root enrollment запрещён до
 независимого reviewer и защищённого approval path. Для operational
@@ -90,7 +95,8 @@ Email, URL, credentials и свободный текст запрещены. `co
 Timeline: `acquiredAt <= restoredAt < expiresAt`; acquisition contract требует
 `expiresAt - acquiredAt <= 72 часа`, а admission отдельно требует
 `expiresAt - restoredAt <= 72 часа`. Оба ограничения обязательны.
-Поддерживаются только `BASELINE_156`, `EXPAND_162` и `CURRENT_165`.
+Поддерживаются только `BASELINE_156`, `EXPAND_162` и `CURRENT_166`.
+Historical `CURRENT_165` не является допустимым current authority state.
 
 Request обязан быть canonical UTF-8 JSON без BOM, newline, duplicate, missing
 или extra keys. Digest:
@@ -322,7 +328,7 @@ storage и записывается раньше envelope; наличие envelo
 1. `BASELINE_156`: новый request, nonce, signature, envelope и DB marker;
 2. после exact migrations `157..162` — `EXPAND_162` с новым request/nonce и
    обязательной marker rotation;
-3. после exact migrations `163..165` — `CURRENT_165` с третьим request/nonce и
+3. после exact migrations `163..166` — `CURRENT_166` с третьим request/nonce и
    второй marker rotation.
 
 Ни один envelope, signature, marker или approval не переиспользуется между
@@ -349,3 +355,12 @@ admission разрешены отдельные read-only inventory и aggregate
 Enrollment реального public root, acquisition/restore, marker installation,
 reader-role lifecycle и первый production-like admission остаются отдельными
 P0-решениями.
+
+## 9. Changelog
+
+- `1.2.0`, 29.07.2026 — operational authority state переведён на
+  implementation candidate `CURRENT_166` после exact tail `163..166`. Remote
+  exact-SHA и populated `165 → 166` pending; production root не enrolled,
+  external beta остаётся `NO-GO`. `CURRENT_165`
+  `4bd6a036...`/`30428288353` и
+  `7c20adec...`/`30429463161` сохранён как historical evidence.

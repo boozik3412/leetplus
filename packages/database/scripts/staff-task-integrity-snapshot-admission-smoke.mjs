@@ -177,7 +177,7 @@ It then injects synthetic cross-tenant legacy fixtures,
 including a positive matrix for all eight proposal codes and the two-reason
 last-task overlap, binds a signed short-lived provenance manifest to the
 disposable database, and exercises the read-only row-level proposal dry-run.
-Finally it applies the exact reviewed additive tail and admits CURRENT_165,
+Finally it applies the exact reviewed additive tail and admits CURRENT_166,
 while preserving the independently verified EXPAND_162 evidence boundary.
 The generated database and login are destroyed in a finally block.
 
@@ -3064,7 +3064,7 @@ export async function runSmoke(environment = process.env) {
     assert.equal(
       currentAdmission.exitCode,
       0,
-      `CURRENT_165 admission failed: ${JSON.stringify(
+      `CURRENT_166 admission failed: ${JSON.stringify(
         currentAdmission.report,
       )}`,
     );

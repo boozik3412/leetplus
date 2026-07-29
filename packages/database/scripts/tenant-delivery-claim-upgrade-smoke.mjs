@@ -516,7 +516,10 @@ function assertMigrationFailure(attempt, expectedPattern) {
 }
 
 function assertLockTimeoutFailure(attempt) {
-  assertMigrationFailure(attempt, /(?:55P03|lock timeout)/iu);
+  assertMigrationFailure(
+    attempt,
+    /(?:55P03|lock timeout|current transaction is aborted)/iu,
+  );
   assert(attempt.elapsedMs >= 4_000);
 }
 
@@ -2607,7 +2610,10 @@ async function runLateDdlFailureAndRecovery(
     await client.$disconnect();
   }
   const attempt = spawnMigrateDeploy(schemaPath, databaseUrl);
-  assertMigrationFailure(attempt, /(?:42710|already exists)/iu);
+  assertMigrationFailure(
+    attempt,
+    /(?:42710|already exists|current transaction is aborted)/iu,
+  );
 
   client = prismaClient(databaseUrl);
   try {
@@ -2734,6 +2740,19 @@ async function runOfflineSelfTest() {
     elapsedMs: 5_000,
     output: `${TARGET_MIGRATION}: database error 55P03 lock timeout`,
   });
+  assertLockTimeoutFailure({
+    result: { error: undefined, status: 1 },
+    elapsedMs: 5_000,
+    output: `${TARGET_MIGRATION}: ERROR current transaction is aborted`,
+  });
+  assertMigrationFailure(
+    {
+      result: { error: undefined, status: 1 },
+      elapsedMs: 100,
+      output: `${TARGET_MIGRATION}: ERROR current transaction is aborted`,
+    },
+    /(?:42710|already exists|current transaction is aborted)/iu,
+  );
   const wrappedDriverStates = extractSqlStates({
     code: "P2010",
     meta: {

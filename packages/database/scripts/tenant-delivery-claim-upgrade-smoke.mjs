@@ -1390,18 +1390,39 @@ async function assertSuccessfulBackfillAndQuarantine(client, fixtures) {
   );
 }
 
-function extractSqlState(error) {
-  for (const candidate of [
-    error?.meta?.code,
-    error?.code,
-    error?.cause?.code,
-  ]) {
-    if (typeof candidate === "string" && /^[0-9A-Z]{5}$/u.test(candidate)) {
-      return candidate;
+function extractSqlStates(error) {
+  const states = new Set();
+  const visited = new Set();
+  const pending = [error];
+
+  while (pending.length > 0 && visited.size < 64) {
+    const candidate = pending.shift();
+    if (typeof candidate === "string") {
+      for (const match of candidate.matchAll(/\b([0-9A-Z]{5})\b/gu)) {
+        states.add(match[1]);
+      }
+      continue;
+    }
+    if (
+      candidate === null ||
+      (typeof candidate !== "object" && typeof candidate !== "function") ||
+      visited.has(candidate)
+    ) {
+      continue;
+    }
+    visited.add(candidate);
+
+    for (const property of Reflect.ownKeys(candidate)) {
+      try {
+        pending.push(candidate[property]);
+      } catch {
+        // Some driver error accessors may throw. Other enumerable/nested
+        // fields still carry the PostgreSQL originalCode and message.
+      }
     }
   }
-  const match = String(error?.message ?? "").match(/\b([0-9A-Z]{5})\b/u);
-  return match?.[1] ?? null;
+
+  return states;
 }
 
 async function expectSqlState(expected, operation) {
@@ -1412,7 +1433,11 @@ async function expectSqlState(expected, operation) {
     caught = error;
   }
   assert(caught, `Expected SQLSTATE ${expected}.`);
-  assert.equal(extractSqlState(caught), expected);
+  const states = extractSqlStates(caught);
+  assert(
+    states.has(expected),
+    `Expected SQLSTATE ${expected}; observed ${JSON.stringify([...states])}.`,
+  );
 }
 
 async function expectCheckConstraint(constraintName, operation) {
@@ -1423,7 +1448,11 @@ async function expectCheckConstraint(constraintName, operation) {
     caught = error;
   }
   assert(caught, `Expected CHECK ${constraintName} to reject the fixture.`);
-  assert.equal(extractSqlState(caught), "23514");
+  const states = extractSqlStates(caught);
+  assert(
+    states.has("23514"),
+    `Expected SQLSTATE 23514; observed ${JSON.stringify([...states])}.`,
+  );
   const details = [
     caught?.message,
     caught?.meta?.message,
@@ -2610,6 +2639,22 @@ async function runOfflineSelfTest() {
     elapsedMs: 5_000,
     output: `${TARGET_MIGRATION}: database error 55P03 lock timeout`,
   });
+  const wrappedDriverStates = extractSqlStates({
+    code: "P2010",
+    meta: {
+      code: "ERROR",
+      driverAdapterError: {
+        cause: {
+          originalCode: "23514",
+          originalMessage:
+            "Delivery transition requires exactly one typed durable event",
+        },
+      },
+    },
+  });
+  assert(wrappedDriverStates.has("23514"));
+  assert(wrappedDriverStates.has("P2010"));
+  assert(wrappedDriverStates.has("ERROR"));
   const plan = await readMigrationPlan();
   assert.equal(plan.prefixMigrations.length, 165);
   assert.equal(plan.prefixMigrations.at(-1), PREFIX_MIGRATION);

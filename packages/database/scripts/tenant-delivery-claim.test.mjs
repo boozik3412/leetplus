@@ -958,6 +958,10 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     transition,
+    /TG_OP = 'DELETE'[\s\S]*OLD\."integrityState" = 'LEGACY_QUARANTINED'[\s\S]*Legacy quarantined delivery is immutable; dedicated reconciliation is not enabled[\s\S]*ERRCODE = '55000'[\s\S]*RETURN OLD;[\s\S]*is_provider :=/u,
+  );
+  assert.match(
+    transition,
     /TG_OP = 'INSERT'[\s\S]*Fresh delivery cannot self-assign legacy quarantine[\s\S]*ERRCODE = '23514'/u,
   );
   assert.match(
@@ -1009,7 +1013,7 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     sql,
-    /CREATE TRIGGER "GuestGameDelivery_transition_guard"\s+BEFORE INSERT OR UPDATE ON "GuestGameDelivery"\s+FOR EACH ROW\s+EXECUTE FUNCTION public\."guest_game_delivery_transition_guard"\(\);/u,
+    /CREATE TRIGGER "GuestGameDelivery_transition_guard"\s+BEFORE INSERT OR UPDATE OR DELETE ON "GuestGameDelivery"\s+FOR EACH ROW\s+EXECUTE FUNCTION public\."guest_game_delivery_transition_guard"\(\);/u,
   );
 
   const binding = functionBlock(sql, "guest_game_delivery_binding_check");

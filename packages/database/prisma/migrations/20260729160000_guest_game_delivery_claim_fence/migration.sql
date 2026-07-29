@@ -1409,6 +1409,16 @@ DECLARE
   retry_transition BOOLEAN;
   requires_transition_event BOOLEAN;
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD."integrityState" = 'LEGACY_QUARANTINED' THEN
+      RAISE EXCEPTION
+        'Legacy quarantined delivery is immutable; dedicated reconciliation is not enabled'
+        USING ERRCODE = '55000';
+    END IF;
+
+    RETURN OLD;
+  END IF;
+
   is_provider := NEW."channel" IN ('TELEGRAM', 'MAX');
 
   IF TG_OP = 'INSERT' THEN
@@ -1652,7 +1662,7 @@ ON FUNCTION public."guest_game_delivery_transition_guard"()
 FROM PUBLIC;
 
 CREATE TRIGGER "GuestGameDelivery_transition_guard"
-BEFORE INSERT OR UPDATE ON "GuestGameDelivery"
+BEFORE INSERT OR UPDATE OR DELETE ON "GuestGameDelivery"
 FOR EACH ROW
 EXECUTE FUNCTION public."guest_game_delivery_transition_guard"();
 

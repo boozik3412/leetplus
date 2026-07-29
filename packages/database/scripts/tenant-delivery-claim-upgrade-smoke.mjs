@@ -156,8 +156,9 @@ legacy events, then upgraded to CURRENT_166. The smoke verifies deterministic
 Store backfill, legacy quarantine, evidence preservation, same-scope RESTRICT
 foreign keys, CHECK/index/function/trigger catalogs, append-only evidence,
 three revision-fenced READY/BLOCKED transitions under a restricted runtime
-role, stale/future event replay rejection, seven rejected legacy-quarantine
-mutations with zero state/evidence drift, and idempotent deploy.
+role, stale/future event replay rejection, final-row reason/integrity evidence
+consistency, seven rejected legacy-quarantine mutations with zero state/evidence
+drift, and idempotent deploy.
 
 The failure database proves separate cross-tenant reward/event preflights, all
 eight reserved typed-event collisions, a five-second migration lock timeout,
@@ -1132,6 +1133,14 @@ function assertPost166Catalog(catalog) {
       { data_type: "bigint", is_nullable: "YES", column_default: null },
     ],
     [
+      "GuestGameDeliveryEvent.integrityState",
+      { data_type: "text", is_nullable: "YES", column_default: null },
+    ],
+    [
+      "GuestGameDeliveryEvent.integrityReasonCode",
+      { data_type: "text", is_nullable: "YES", column_default: null },
+    ],
+    [
       "GuestGameDeliveryAttempt.providerAttemptKey",
       { data_type: "text", is_nullable: "NO", column_default: null },
     ],
@@ -1279,6 +1288,9 @@ async function assertSuccessfulBackfillAndQuarantine(client, fixtures) {
   assert.equal(byId.get(fixtures.deliveries.match).integrityState, "VERIFIED");
   assert.equal(byId.get(fixtures.deliveries.manual).integrityState, "VERIFIED");
   assert.equal(byId.get(fixtures.deliveries.blocked).integrityState, "VERIFIED");
+  assert.equal(byId.get(fixtures.deliveries.match).integrityReasonCode, null);
+  assert.equal(byId.get(fixtures.deliveries.manual).integrityReasonCode, null);
+  assert.equal(byId.get(fixtures.deliveries.blocked).integrityReasonCode, null);
   assert.equal(byId.get(fixtures.deliveries.match).transitionRevision, "0");
   assert.equal(byId.get(fixtures.deliveries.manual).transitionRevision, "0");
   assert.equal(byId.get(fixtures.deliveries.blocked).transitionRevision, "0");
@@ -1349,11 +1361,36 @@ async function assertSuccessfulBackfillAndQuarantine(client, fixtures) {
          )`,
   );
   assert.equal(canonicalQuarantine.count, 6);
+  const [integritySnapshots] = await client.$queryRawUnsafe(
+    `SELECT
+       COUNT(*) FILTER (
+         WHERE event."eventType" = 'DELIVERY_INTEGRITY_QUARANTINED'
+           AND event."integrityState" = delivery."integrityState"
+           AND event."integrityReasonCode" = delivery."integrityReasonCode"
+       )::int AS quarantine_snapshot_count,
+       COUNT(*) FILTER (
+         WHERE event."eventType" = 'DELIVERY_STORE_BACKFILLED'
+           AND event."integrityState" IS NULL
+           AND event."integrityReasonCode" IS NULL
+       )::int AS legacy_store_snapshot_count
+     FROM "GuestGameDeliveryEvent" AS event
+     JOIN "GuestGameDelivery" AS delivery
+       ON delivery."tenantId" = event."tenantId"
+      AND delivery."id" = event."deliveryId"
+     WHERE event."eventType" IN (
+       'DELIVERY_STORE_BACKFILLED',
+       'DELIVERY_INTEGRITY_QUARANTINED'
+     )`,
+  );
+  assert.deepEqual(integritySnapshots, {
+    quarantine_snapshot_count: 6,
+    legacy_store_snapshot_count: 1,
+  });
   const [legacyEvent] = await client.$queryRawUnsafe(
     `SELECT
        "eventType", "transitionKey",
        "transitionRevision"::text AS "transitionRevision",
-       "deliveryId", "rewardId"
+       "deliveryId", "rewardId", "integrityState", "integrityReasonCode"
      FROM "GuestGameDeliveryEvent"
      WHERE "id" = $1`,
     fixtures.legacyEvent,
@@ -1364,6 +1401,8 @@ async function assertSuccessfulBackfillAndQuarantine(client, fixtures) {
     transitionRevision: null,
     deliveryId: fixtures.deliveries.sent,
     rewardId: fixtures.rewards.sent,
+    integrityState: null,
+    integrityReasonCode: null,
   });
 
   const stores = await client.$queryRawUnsafe(
@@ -1564,6 +1603,8 @@ async function grantRestrictedRuntimeRole(client, roleName) {
        "channel",
        "claimGeneration",
        "attemptNumber",
+       "integrityState",
+       "integrityReasonCode",
        "stateReasonCode",
        "note"
      ) ON TABLE "GuestGameDeliveryEvent" TO ${quotedRole}`,
@@ -1656,6 +1697,24 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
          'transitionRevision',
          'UPDATE'
        ) AS revision_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameDelivery"',
+         'stateReasonCode',
+         'UPDATE'
+       ) AS state_reason_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameDelivery"',
+         'integrityState',
+         'UPDATE'
+       ) AS integrity_state_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameDelivery"',
+         'integrityReasonCode',
+         'UPDATE'
+       ) AS integrity_reason_update,
        pg_catalog.has_table_privilege(
          $1,
          'public."GuestGameDeliveryEvent"',
@@ -1667,6 +1726,18 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
          'transitionRevision',
          'INSERT'
        ) AS event_revision_insert,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameDeliveryEvent"',
+         'integrityState',
+         'INSERT'
+       ) AS event_integrity_state_insert,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameDeliveryEvent"',
+         'integrityReasonCode',
+         'INSERT'
+       ) AS event_integrity_reason_insert,
        pg_catalog.has_table_privilege(
          $1,
          'public."GuestGameDeliveryEvent"',
@@ -1700,8 +1771,13 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
     reward_status_update: false,
     status_update: true,
     revision_update: true,
+    state_reason_update: true,
+    integrity_state_update: false,
+    integrity_reason_update: false,
     broad_event_insert: false,
     event_revision_insert: true,
+    event_integrity_state_insert: true,
+    event_integrity_reason_insert: true,
     event_update: false,
     event_delete: false,
   });
@@ -1765,6 +1841,8 @@ async function insertCanonicalTransitionEvent(
     eventType,
     fromStatus,
     toStatus,
+    integrityState,
+    integrityReasonCode,
     stateReasonCode,
   },
 ) {
@@ -1795,6 +1873,8 @@ async function insertCanonicalTransitionEvent(
        "channel",
        "claimGeneration",
        "attemptNumber",
+       "integrityState",
+       "integrityReasonCode",
        "stateReasonCode",
        "note"
      ) VALUES (
@@ -1812,6 +1892,8 @@ async function insertCanonicalTransitionEvent(
        0,
        0,
        $12,
+       $13,
+       $14,
        'Restricted runtime role revision-fence rehearsal.'
      )`,
     eventId,
@@ -1825,6 +1907,8 @@ async function insertCanonicalTransitionEvent(
     fromStatus,
     toStatus,
     channel,
+    integrityState,
+    integrityReasonCode,
     stateReasonCode,
   );
   return { eventId, transitionKey };
@@ -1876,6 +1960,8 @@ async function applyRevisionFencedTransition(
     eventType,
     fromStatus,
     toStatus,
+    integrityState: "VERIFIED",
+    integrityReasonCode: null,
     stateReasonCode: eventReasonCode,
   });
 }
@@ -1884,6 +1970,8 @@ async function readRevisionFenceState(client, deliveryId) {
   const [delivery] = await client.$queryRawUnsafe(
     `SELECT
        "status",
+       "integrityState",
+       "integrityReasonCode",
        "stateReasonCode",
        "transitionRevision"::text AS "transitionRevision"
      FROM "GuestGameDelivery"
@@ -1898,6 +1986,8 @@ async function readRevisionFenceState(client, deliveryId) {
        "transitionRevision"::text AS "transitionRevision",
        "fromStatus",
        "toStatus",
+       "integrityState",
+       "integrityReasonCode",
        "stateReasonCode"
      FROM "GuestGameDeliveryEvent"
      WHERE "deliveryId" = $1
@@ -1973,6 +2063,8 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
   );
   assert.deepEqual(committedState.delivery, {
     status: "BLOCKED",
+    integrityState: "VERIFIED",
+    integrityReasonCode: null,
     stateReasonCode: "TEST_REVISION_BLOCKED_TWO",
     transitionRevision: "3",
   });
@@ -1983,6 +2075,8 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
       transitionRevision: event.transitionRevision,
       fromStatus: event.fromStatus,
       toStatus: event.toStatus,
+      integrityState: event.integrityState,
+      integrityReasonCode: event.integrityReasonCode,
       stateReasonCode: event.stateReasonCode,
     })),
     [
@@ -1992,6 +2086,8 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
         transitionRevision: "1",
         fromStatus: "READY",
         toStatus: "BLOCKED",
+        integrityState: "VERIFIED",
+        integrityReasonCode: null,
         stateReasonCode: "TEST_REVISION_BLOCKED_ONE",
       },
       {
@@ -2000,6 +2096,8 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
         transitionRevision: "2",
         fromStatus: "BLOCKED",
         toStatus: "READY",
+        integrityState: "VERIFIED",
+        integrityReasonCode: null,
         stateReasonCode: "TEST_REVISION_RETRY",
       },
       {
@@ -2008,6 +2106,8 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
         transitionRevision: "3",
         fromStatus: "READY",
         toStatus: "BLOCKED",
+        integrityState: "VERIFIED",
+        integrityReasonCode: null,
         stateReasonCode: "TEST_REVISION_BLOCKED_TWO",
       },
     ],
@@ -2053,17 +2153,150 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
           eventType: "DELIVERY_RETRIED",
           fromStatus: "BLOCKED",
           toStatus: "READY",
+          integrityState: "VERIFIED",
+          integrityReasonCode: null,
           stateReasonCode: "TEST_FUTURE_REVISION_PREINSERT",
         });
       }),
     /Durable event revision does not match its current delivery transition/u,
   );
 
+  const reasonOnlyError =
+    /Provider delivery reason can change only with an event-bearing state transition/u;
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameDelivery"
+           SET "stateReasonCode" = 'TEST_REASON_ONLY_DRIFT'
+           WHERE "tenantId" = $1
+             AND "id" = $2`,
+          delivery.tenantId,
+          delivery.deliveryId,
+        );
+      }),
+    reasonOnlyError,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameDelivery"
+           SET
+             "stateReasonCode" = 'TEST_REASON_REVISION_DRIFT',
+             "transitionRevision" = "transitionRevision" + 1
+           WHERE "tenantId" = $1
+             AND "id" = $2`,
+          delivery.tenantId,
+          delivery.deliveryId,
+        );
+      }),
+    reasonOnlyError,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$executeRawUnsafe(
+        `UPDATE "GuestGameDelivery"
+         SET "integrityReasonCode" = 'TEST_INTEGRITY_REASON_DRIFT'
+         WHERE "tenantId" = $1
+           AND "id" = $2`,
+        delivery.tenantId,
+        delivery.deliveryId,
+      ),
+    reasonOnlyError,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await applyRevisionFencedTransition(transaction, {
+          ...delivery,
+          oldRevision: 3,
+          transitionRevision: 4,
+          eventType: "DELIVERY_RETRIED",
+          fromStatus: "BLOCKED",
+          toStatus: "READY",
+          deliveryReasonCode: null,
+          eventReasonCode: "TEST_MISMATCH_SETUP_RETRY",
+        });
+        await applyRevisionFencedTransition(transaction, {
+          ...delivery,
+          oldRevision: 4,
+          transitionRevision: 5,
+          eventType: "DELIVERY_FINALIZED",
+          fromStatus: "READY",
+          toStatus: "BLOCKED",
+          deliveryReasonCode: "TEST_EXPECTED_FINAL_REASON",
+          eventReasonCode: "TEST_WRONG_FINAL_REASON",
+        });
+      }),
+    /Durable event final state does not match its current delivery/u,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(
+          `ALTER TABLE "GuestGameDelivery"
+           DISABLE TRIGGER "GuestGameDelivery_transition_guard"`,
+        );
+        await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameDelivery"
+           SET "stateReasonCode" = 'TEST_FINAL_ROW_REREAD_DRIFT'
+           WHERE "tenantId" = $1
+             AND "id" = $2`,
+          delivery.tenantId,
+          delivery.deliveryId,
+        );
+        await transaction.$executeRawUnsafe(
+          `ALTER TABLE "GuestGameDelivery"
+           ENABLE TRIGGER "GuestGameDelivery_transition_guard"`,
+        );
+      }),
+    /Final delivery state requires exactly one matching immutable durable event/u,
+  );
+
   assert.deepEqual(
     await readRevisionFenceState(client, delivery.deliveryId),
     committedState,
-    "Stale-event replay or future-revision preinsert changed durable state.",
+    "Rejected replay or reason/integrity drift changed durable state.",
   );
+
+  const manualChanged = await client.$executeRawUnsafe(
+    `UPDATE "GuestGameDelivery"
+     SET "stateReasonCode" = 'TEST_MANUAL_REASON_ONLY_ALLOWED'
+     WHERE "tenantId" = $1
+       AND "id" = $2`,
+    fixtures.tenantA,
+    fixtures.deliveries.manual,
+  );
+  assert.equal(manualChanged, 1);
+  const [manualState] = await client.$queryRawUnsafe(
+    `SELECT
+       "channel",
+       "integrityState",
+       "integrityReasonCode",
+       "stateReasonCode",
+       "transitionRevision"::TEXT AS "transitionRevision"
+     FROM "GuestGameDelivery"
+     WHERE "tenantId" = $1
+       AND "id" = $2`,
+    fixtures.tenantA,
+    fixtures.deliveries.manual,
+  );
+  assert.deepEqual(manualState, {
+    channel: "MANUAL",
+    integrityState: "VERIFIED",
+    integrityReasonCode: null,
+    stateReasonCode: "TEST_MANUAL_REASON_ONLY_ALLOWED",
+    transitionRevision: "0",
+  });
 }
 
 async function assertNullClosedStateMatrices(client, fixtures) {
@@ -2157,7 +2390,8 @@ async function assertNullClosedStateMatrices(client, fixtures) {
            "executionRevision", "storeExecutionRevision", "claimKeyVersion",
            "claimOwnerDigest", "claimTokenDigest", "claimedAt",
            "leaseExpiresAt", "acknowledgeUntil", "effectInputDigest",
-           "providerConfigDigest", "stateReasonCode", "note"
+           "providerConfigDigest", "integrityState", "integrityReasonCode",
+           "stateReasonCode", "note"
          ) VALUES (
            $1, $2, $3, $4, $5, 'DELIVERY_FINALIZED',
            $6, $7::BIGINT, 'READY', 'BLOCKED', 'MAX', 1, 1,
@@ -2165,7 +2399,7 @@ async function assertNullClosedStateMatrices(client, fixtures) {
            $8, $8, CURRENT_TIMESTAMP,
            CURRENT_TIMESTAMP + INTERVAL '5 minutes',
            CURRENT_TIMESTAMP + INTERVAL '10 minutes',
-           $8, $8, 'NULL_REVISION_REJECTED',
+           $8, $8, 'VERIFIED', NULL, 'TEST_REVISION_BLOCKED_TWO',
            'NULL must not satisfy the durable evidence matrix.'
          )`,
         randomUUID(),
@@ -2198,29 +2432,44 @@ async function assertTriggerSemantics(client, fixtures) {
       fixtures.tenantA,
       quarantinedDeliveryId,
     );
-    const [evidence] = await client.$queryRawUnsafe(
+    const events = await client.$queryRawUnsafe(
       `SELECT
-         (
-           SELECT COUNT(*)::INTEGER
-           FROM "GuestGameDeliveryEvent"
-           WHERE "tenantId" = $1
-             AND "deliveryId" = $2
-         ) AS event_count,
-         (
-           SELECT COUNT(*)::INTEGER
-           FROM "GuestGameDeliveryAttempt"
-           WHERE "tenantId" = $1
-             AND "deliveryId" = $2
-         ) AS attempt_count`,
+         "id",
+         "eventType",
+         "transitionKey",
+         "transitionRevision"::TEXT AS "transitionRevision",
+         "fromStatus",
+         "toStatus",
+         "integrityState",
+         "integrityReasonCode",
+         "stateReasonCode"
+       FROM "GuestGameDeliveryEvent"
+       WHERE "tenantId" = $1
+         AND "deliveryId" = $2
+       ORDER BY "id"`,
       fixtures.tenantA,
       quarantinedDeliveryId,
     );
-    return { delivery, evidence };
+    const [attempts] = await client.$queryRawUnsafe(
+      `SELECT COUNT(*)::INTEGER AS count
+       FROM "GuestGameDeliveryAttempt"
+       WHERE "tenantId" = $1
+         AND "deliveryId" = $2`,
+      fixtures.tenantA,
+      quarantinedDeliveryId,
+    );
+    return { delivery, events, attemptCount: attempts.count };
   };
   const quarantineBefore = await readQuarantineSnapshot();
   assert.equal(
     quarantineBefore.delivery.integrityState,
     "LEGACY_QUARANTINED",
+  );
+  assert.equal(quarantineBefore.events.length, 1);
+  assert.equal(quarantineBefore.events[0].integrityState, "LEGACY_QUARANTINED");
+  assert.equal(
+    quarantineBefore.events[0].integrityReasonCode,
+    quarantineBefore.delivery.integrityReasonCode,
   );
 
   const immutableQuarantineError =
@@ -2936,6 +3185,7 @@ async function runOfflineSelfTest() {
       revisionFencedTransitions: 3,
       antiReplayScenarios: 2,
       legacyQuarantineFreezeScenarios: 7,
+      reasonIntegrityConsistencyScenarios: 6,
       destructiveSourceDatabaseActions: 0,
     })}\n`,
   );
@@ -3073,6 +3323,13 @@ async function runRealSmoke(environment) {
       legacyQuarantineFreezeEvidence: {
         immutableMutationsRejected: 7,
         finalStateAndEvidenceUnchanged: true,
+      },
+      reasonIntegrityConsistencyEvidence: {
+        migrationSnapshotsExact: true,
+        providerReasonMutationsRejected: 3,
+        mismatchedEventSnapshotRejected: true,
+        deferredFinalRowRereadRejected: true,
+        nonProviderCompatibilityPreserved: true,
       },
       rollbackEvidence: {
         crossTenantPreflights: 2,

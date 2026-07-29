@@ -299,6 +299,8 @@ ALTER TABLE "GuestGameDeliveryEvent"
   ADD COLUMN "providerReceiptRefEncrypted" BYTEA,
   ADD COLUMN "providerReceiptKeyVersion" INTEGER,
   ADD COLUMN "terminalAckDigest" TEXT,
+  ADD COLUMN "integrityState" TEXT,
+  ADD COLUMN "integrityReasonCode" TEXT,
   ADD COLUMN "stateReasonCode" TEXT,
   ADD COLUMN "adapterVersion" TEXT,
   ADD COLUMN "httpStatusClass" INTEGER,
@@ -558,6 +560,8 @@ INSERT INTO "GuestGameDeliveryEvent" (
   "channel",
   "claimGeneration",
   "attemptNumber",
+  "integrityState",
+  "integrityReasonCode",
   "stateReasonCode",
   "provenanceDigest",
   "note",
@@ -589,6 +593,8 @@ SELECT
   quarantined."channel",
   0,
   0,
+  'LEGACY_QUARANTINED',
+  quarantined."integrityReasonCode",
   'INTEGRITY_QUARANTINED',
   pg_catalog.encode(
     pg_catalog.sha256(
@@ -793,6 +799,16 @@ ALTER TABLE "GuestGameDelivery"
       AND (
         "stateReasonCode" IS NULL
         OR "stateReasonCode" ~ '^[A-Z][A-Z0-9_]{2,95}$'
+      )
+      AND (
+        (
+          "integrityState" = 'VERIFIED'
+          AND "integrityReasonCode" IS NULL
+        )
+        OR (
+          "integrityState" = 'LEGACY_QUARANTINED'
+          AND "integrityReasonCode" IS NOT NULL
+        )
       )
     ),
   ADD CONSTRAINT "GuestGameDelivery_runtime_identity_check"
@@ -1156,6 +1172,24 @@ ALTER TABLE "GuestGameDeliveryEvent"
         )
       )
       AND (
+        "integrityReasonCode" IS NULL
+        OR "integrityReasonCode" ~ '^[A-Z][A-Z0-9_]{2,95}$'
+      )
+      AND (
+        (
+          "integrityState" IS NULL
+          AND "integrityReasonCode" IS NULL
+        )
+        OR (
+          "integrityState" = 'VERIFIED'
+          AND "integrityReasonCode" IS NULL
+        )
+        OR (
+          "integrityState" = 'LEGACY_QUARANTINED'
+          AND "integrityReasonCode" IS NOT NULL
+        )
+      )
+      AND (
         "stateReasonCode" IS NULL
         OR "stateReasonCode" ~ '^[A-Z][A-Z0-9_]{2,95}$'
       )
@@ -1249,6 +1283,19 @@ ALTER TABLE "GuestGameDeliveryEvent"
         AND
         "claimGeneration" IS NOT NULL
         AND "attemptNumber" IS NOT NULL
+        AND "integrityState" IS NOT NULL
+        AND (
+          (
+            "eventType" = 'DELIVERY_INTEGRITY_QUARANTINED'
+            AND "integrityState" = 'LEGACY_QUARANTINED'
+            AND "integrityReasonCode" IS NOT NULL
+          )
+          OR (
+            "eventType" <> 'DELIVERY_INTEGRITY_QUARANTINED'
+            AND "integrityState" = 'VERIFIED'
+            AND "integrityReasonCode" IS NULL
+          )
+        )
         AND (
           (
             "claimGeneration" = 0
@@ -1405,6 +1452,8 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   status_changed BOOLEAN;
+  integrity_changed BOOLEAN;
+  reason_changed BOOLEAN;
   is_provider BOOLEAN;
   retry_transition BOOLEAN;
   requires_transition_event BOOLEAN;
@@ -1455,17 +1504,37 @@ BEGIN
   END IF;
 
   status_changed := OLD."status" IS DISTINCT FROM NEW."status";
+  integrity_changed :=
+    OLD."integrityState" IS DISTINCT FROM NEW."integrityState";
+  reason_changed :=
+    OLD."stateReasonCode" IS DISTINCT FROM NEW."stateReasonCode"
+    OR OLD."integrityReasonCode" IS DISTINCT FROM NEW."integrityReasonCode";
+
+  IF is_provider
+     AND reason_changed
+     AND NOT (
+       status_changed
+       OR OLD."claimGeneration" IS DISTINCT FROM NEW."claimGeneration"
+       OR integrity_changed
+     )
+  THEN
+    RAISE EXCEPTION
+      'Provider delivery reason can change only with an event-bearing state transition'
+      USING ERRCODE = '23514';
+  END IF;
+
   retry_transition :=
     OLD."status" IN ('FAILED', 'BLOCKED', 'RECONCILIATION_REQUIRED')
     AND NEW."status" = 'READY';
   requires_transition_event :=
-    OLD."integrityState" IS DISTINCT FROM NEW."integrityState"
+    integrity_changed
     OR (
       is_provider
       AND NEW."integrityState" = 'VERIFIED'
       AND (
         status_changed
         OR OLD."claimGeneration" IS DISTINCT FROM NEW."claimGeneration"
+        OR reason_changed
       )
     );
 
@@ -1881,6 +1950,9 @@ DECLARE
   expected_event_type TEXT;
   matching_events INTEGER;
   matching_attempts INTEGER;
+  final_events INTEGER;
+  matching_final_events INTEGER;
+  final_delivery RECORD;
 BEGIN
   IF OLD."integrityState" IS DISTINCT FROM NEW."integrityState" THEN
     expected_event_type := CASE
@@ -1891,7 +1963,7 @@ BEGIN
   ELSIF OLD."claimGeneration" IS DISTINCT FROM NEW."claimGeneration" THEN
     expected_event_type := 'DELIVERY_CLAIMED';
   ELSIF OLD."status" IS NOT DISTINCT FROM NEW."status" THEN
-    RETURN NULL;
+    expected_event_type := NULL;
   ELSIF OLD."status" = 'PROCESSING' AND NEW."status" = 'DISPATCHING' THEN
     expected_event_type := 'DELIVERY_PROVIDER_ATTEMPTED';
   ELSIF OLD."status" = 'PROCESSING' AND NEW."status" = 'READY' THEN
@@ -1910,6 +1982,7 @@ BEGIN
     expected_event_type := 'DELIVERY_FINALIZED';
   END IF;
 
+  IF expected_event_type IS NOT NULL THEN
   SELECT pg_catalog.count(*)::INTEGER
   INTO matching_events
   FROM public."GuestGameDeliveryEvent" AS event
@@ -1939,6 +2012,9 @@ BEGIN
     AND event."toStatus" IS NOT DISTINCT FROM NEW."status"
     AND event."claimGeneration" IS NOT DISTINCT FROM NEW."claimGeneration"
     AND event."attemptNumber" IS NOT DISTINCT FROM NEW."attempts"
+    AND event."integrityState" IS NOT DISTINCT FROM NEW."integrityState"
+    AND event."integrityReasonCode"
+      IS NOT DISTINCT FROM NEW."integrityReasonCode"
     AND event."claimJobKind" IS NOT DISTINCT FROM (
       CASE WHEN expected_event_type = 'DELIVERY_RETRIED'
         THEN OLD."claimJobKind" ELSE NEW."claimJobKind" END
@@ -2183,6 +2259,88 @@ BEGIN
     END IF;
   END IF;
 
+  END IF;
+
+  SELECT
+    delivery."rewardId",
+    delivery."storeId",
+    delivery."channel",
+    delivery."status",
+    delivery."transitionRevision",
+    delivery."claimGeneration",
+    delivery."attempts",
+    delivery."integrityState",
+    delivery."integrityReasonCode",
+    delivery."stateReasonCode"
+  INTO STRICT final_delivery
+  FROM public."GuestGameDelivery" AS delivery
+  WHERE delivery."tenantId" = NEW."tenantId"
+    AND delivery."id" = NEW."id";
+
+  SELECT
+    pg_catalog.count(*)::INTEGER,
+    pg_catalog.count(*) FILTER (
+      WHERE event."rewardId" = final_delivery."rewardId"
+        AND event."storeId" IS NOT DISTINCT FROM final_delivery."storeId"
+        AND event."channel" IS NOT DISTINCT FROM final_delivery."channel"
+        AND event."toStatus" IS NOT DISTINCT FROM final_delivery."status"
+        AND event."claimGeneration"
+          IS NOT DISTINCT FROM final_delivery."claimGeneration"
+        AND event."attemptNumber" IS NOT DISTINCT FROM final_delivery."attempts"
+        AND event."integrityState"
+          IS NOT DISTINCT FROM final_delivery."integrityState"
+        AND event."integrityReasonCode"
+          IS NOT DISTINCT FROM final_delivery."integrityReasonCode"
+        AND event."transitionKey" =
+          public."guest_game_delivery_transition_key_v1"(
+            event."tenantId",
+            event."deliveryId",
+            event."rewardId",
+            event."transitionRevision",
+            event."claimGeneration",
+            event."eventType",
+            event."attemptNumber",
+            event."providerOutcomeClass",
+            event."providerOutcomeCode",
+            event."fromStatus",
+            event."toStatus"
+          )
+        AND (
+          (
+            event."eventType" = 'DELIVERY_RETRIED'
+            AND final_delivery."status" = 'READY'
+            AND final_delivery."stateReasonCode" IS NULL
+            AND event."stateReasonCode" IS NOT NULL
+          )
+          OR (
+            event."eventType" <> 'DELIVERY_RETRIED'
+            AND event."stateReasonCode"
+              IS NOT DISTINCT FROM final_delivery."stateReasonCode"
+          )
+        )
+    )::INTEGER
+  INTO final_events, matching_final_events
+  FROM public."GuestGameDeliveryEvent" AS event
+  WHERE event."tenantId" = NEW."tenantId"
+    AND event."deliveryId" = NEW."id"
+    AND event."transitionRevision" = final_delivery."transitionRevision"
+    AND event."eventType" IN (
+      'DELIVERY_CLAIMED',
+      'DELIVERY_PROVIDER_ATTEMPTED',
+      'DELIVERY_FINALIZED',
+      'DELIVERY_REAPED',
+      'DELIVERY_RETRIED',
+      'DELIVERY_CANCELED',
+      'DELIVERY_RECONCILED',
+      'DELIVERY_INTEGRITY_QUARANTINED'
+    );
+
+  IF final_events <> 1 OR matching_final_events <> 1 THEN
+    RAISE EXCEPTION
+      'Final delivery state requires exactly one matching immutable durable event'
+      USING ERRCODE = '23514';
+  END IF;
+
   RETURN NULL;
 END;
 $$;
@@ -2198,7 +2356,9 @@ AFTER UPDATE OF
   "claimGeneration",
   "transitionRevision",
   "providerAttemptedAt",
-  "providerOutcomeClass"
+  "providerOutcomeClass",
+  "stateReasonCode",
+  "integrityReasonCode"
 ON "GuestGameDelivery"
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW
@@ -2210,6 +2370,9 @@ WHEN (
     AND (
       OLD."status" IS DISTINCT FROM NEW."status"
       OR OLD."claimGeneration" IS DISTINCT FROM NEW."claimGeneration"
+      OR OLD."transitionRevision" IS DISTINCT FROM NEW."transitionRevision"
+      OR OLD."stateReasonCode" IS DISTINCT FROM NEW."stateReasonCode"
+      OR OLD."integrityReasonCode" IS DISTINCT FROM NEW."integrityReasonCode"
     )
   )
 )
@@ -2347,7 +2510,13 @@ BEGIN
         USING ERRCODE = '23514';
     END IF;
 
-    SELECT delivery."rewardId", delivery."transitionRevision"
+    SELECT
+      delivery."rewardId",
+      delivery."status",
+      delivery."transitionRevision",
+      delivery."integrityState",
+      delivery."integrityReasonCode",
+      delivery."stateReasonCode"
     INTO STRICT delivery_record
     FROM public."GuestGameDelivery" AS delivery
     WHERE delivery."tenantId" = NEW."tenantId"
@@ -2365,6 +2534,33 @@ BEGIN
     THEN
       RAISE EXCEPTION
         'Durable event revision does not match its current delivery transition'
+        USING ERRCODE = '23514';
+    END IF;
+
+    IF is_durable_event
+       AND (
+         NEW."toStatus" IS DISTINCT FROM delivery_record."status"
+         OR NEW."integrityState"
+           IS DISTINCT FROM delivery_record."integrityState"
+         OR NEW."integrityReasonCode"
+           IS DISTINCT FROM delivery_record."integrityReasonCode"
+         OR (
+           NEW."eventType" = 'DELIVERY_RETRIED'
+           AND (
+             delivery_record."status" <> 'READY'
+             OR delivery_record."stateReasonCode" IS NOT NULL
+             OR NEW."stateReasonCode" IS NULL
+           )
+         )
+         OR (
+           NEW."eventType" <> 'DELIVERY_RETRIED'
+           AND NEW."stateReasonCode"
+             IS DISTINCT FROM delivery_record."stateReasonCode"
+         )
+       )
+    THEN
+      RAISE EXCEPTION
+        'Durable event final state does not match its current delivery'
         USING ERRCODE = '23514';
     END IF;
 

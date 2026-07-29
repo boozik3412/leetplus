@@ -2263,6 +2263,8 @@ model GuestGameDeliveryEvent {
   providerReceiptRefEncrypted Bytes?
   providerReceiptKeyVersion   Int?
   terminalAckDigest           String?
+  integrityState              String?
+  integrityReasonCode         String?
   stateReasonCode             String?
   adapterVersion              String?
   httpStatusClass             Int?

@@ -88,6 +88,8 @@ const EVENT_COLUMNS = Object.freeze([
   ['providerReceiptRefEncrypted', 'BYTEA'],
   ['providerReceiptKeyVersion', 'INTEGER'],
   ['terminalAckDigest', 'TEXT'],
+  ['integrityState', 'TEXT'],
+  ['integrityReasonCode', 'TEXT'],
   ['stateReasonCode', 'TEXT'],
   ['adapterVersion', 'TEXT'],
   ['httpStatusClass', 'INTEGER'],
@@ -786,6 +788,10 @@ test("all named CHECK constraints retain the state, evidence, and time-window co
     deliveryChecks,
     /"channel" IN \('TELEGRAM', 'MAX'\)[\s\S]*"status" IN \('READY', 'BLOCKED', 'SENT', 'FAILED', 'CANCELED'\)/u,
   );
+  assert.match(
+    deliveryChecks,
+    /GuestGameDelivery_reason_code_check"[\s\S]*"integrityState" = 'VERIFIED'[\s\S]*"integrityReasonCode" IS NULL[\s\S]*"integrityState" = 'LEGACY_QUARANTINED'[\s\S]*"integrityReasonCode" IS NOT NULL/u,
+  );
 
   const eventChecks = sql.slice(
     sql.indexOf(
@@ -817,7 +823,15 @@ test("all named CHECK constraints retain the state, evidence, and time-window co
   );
   assert.match(
     eventChecks,
+    /GuestGameDeliveryEvent_scope_value_check"[\s\S]*"integrityState" IS NULL[\s\S]*"integrityReasonCode" IS NULL[\s\S]*"integrityState" = 'VERIFIED'[\s\S]*"integrityState" = 'LEGACY_QUARANTINED'[\s\S]*"integrityReasonCode" IS NOT NULL/u,
+  );
+  assert.match(
+    eventChecks,
     /GuestGameDeliveryEvent_durable_evidence_check"[\s\S]*"channel" IS NOT NULL[\s\S]*"channel" IN \('TELEGRAM', 'MAX'\)[\s\S]*"executionRevision" IS NOT NULL[\s\S]*"executionRevision" > 0[\s\S]*"storeExecutionRevision" IS NOT NULL[\s\S]*"storeExecutionRevision" > 0/u,
+  );
+  assert.match(
+    eventChecks,
+    /GuestGameDeliveryEvent_durable_evidence_check"[\s\S]*"eventType" = 'DELIVERY_INTEGRITY_QUARANTINED'[\s\S]*"integrityState" = 'LEGACY_QUARANTINED'[\s\S]*"integrityReasonCode" IS NOT NULL[\s\S]*"eventType" <> 'DELIVERY_INTEGRITY_QUARANTINED'[\s\S]*"integrityState" = 'VERIFIED'[\s\S]*"integrityReasonCode" IS NULL/u,
   );
   assert.match(
     eventChecks,
@@ -990,6 +1004,14 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     transition,
+    /reason_changed :=[\s\S]*OLD\."stateReasonCode" IS DISTINCT FROM NEW\."stateReasonCode"[\s\S]*OLD\."integrityReasonCode" IS DISTINCT FROM NEW\."integrityReasonCode"[\s\S]*Provider delivery reason can change only with an event-bearing state transition[\s\S]*ERRCODE = '23514'/u,
+  );
+  assert.match(
+    transition,
+    /requires_transition_event :=[\s\S]*integrity_changed[\s\S]*OR reason_changed/u,
+  );
+  assert.match(
+    transition,
     /requires_transition_event[\s\S]*NEW\."transitionRevision" <> OLD\."transitionRevision" \+ 1[\s\S]*Event-bearing transition must advance transition revision exactly once/u,
   );
   assert.match(
@@ -1070,11 +1092,27 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     eventCheck,
+    /event\."integrityState" IS NOT DISTINCT FROM NEW\."integrityState"[\s\S]*event\."integrityReasonCode"[\s\S]*IS NOT DISTINCT FROM NEW\."integrityReasonCode"/u,
+  );
+  assert.match(
+    eventCheck,
     /matching_attempts <> 1[\s\S]*Provider marker requires one matching immutable attempt/u,
   );
   assert.match(
     eventCheck,
     /OLD\."claimGeneration" IS DISTINCT FROM NEW\."claimGeneration"[\s\S]*expected_event_type := 'DELIVERY_CLAIMED'[\s\S]*OLD\."status" IS NOT DISTINCT FROM NEW\."status"/u,
+  );
+  assert.doesNotMatch(
+    eventCheck,
+    /OLD\."status" IS NOT DISTINCT FROM NEW\."status" THEN\s+RETURN NULL;/u,
+  );
+  assert.match(
+    eventCheck,
+    /INTO STRICT final_delivery[\s\S]*FROM public\."GuestGameDelivery" AS delivery[\s\S]*event\."transitionRevision" = final_delivery\."transitionRevision"[\s\S]*final_events <> 1 OR matching_final_events <> 1[\s\S]*Final delivery state requires exactly one matching immutable durable event/u,
+  );
+  assert.match(
+    eventCheck,
+    /event\."eventType" = 'DELIVERY_RETRIED'[\s\S]*final_delivery\."stateReasonCode" IS NULL[\s\S]*event\."stateReasonCode" IS NOT NULL/u,
   );
   assert.match(
     sql,
@@ -1091,6 +1129,10 @@ test("transition, binding, and durable-event functions are hardened and attached
   assert.match(
     sql,
     /CREATE CONSTRAINT TRIGGER "GuestGameDelivery_transition_event_check"[\s\S]*DEFERRABLE INITIALLY DEFERRED[\s\S]*EXECUTE FUNCTION public\."guest_game_delivery_transition_event_check"\(\);/u,
+  );
+  assert.match(
+    sql,
+    /AFTER UPDATE OF[\s\S]*"transitionRevision",[\s\S]*"stateReasonCode",[\s\S]*"integrityReasonCode"[\s\S]*OLD\."transitionRevision" IS DISTINCT FROM NEW\."transitionRevision"[\s\S]*OLD\."stateReasonCode" IS DISTINCT FROM NEW\."stateReasonCode"[\s\S]*OLD\."integrityReasonCode" IS DISTINCT FROM NEW\."integrityReasonCode"/u,
   );
 });
 
@@ -1168,6 +1210,10 @@ test("delivery events validate scope and deny all updates/deletes pending bounde
   assert.match(
     body,
     /delivery_record\."transitionRevision"[\s\S]*IS DISTINCT FROM NEW\."transitionRevision"[\s\S]*Durable event revision does not match its current delivery transition[\s\S]*ERRCODE = '23514'/u,
+  );
+  assert.match(
+    body,
+    /NEW\."toStatus" IS DISTINCT FROM delivery_record\."status"[\s\S]*NEW\."integrityState"[\s\S]*delivery_record\."integrityState"[\s\S]*NEW\."integrityReasonCode"[\s\S]*delivery_record\."integrityReasonCode"[\s\S]*Durable event final state does not match its current delivery/u,
   );
   assert.match(
     body,

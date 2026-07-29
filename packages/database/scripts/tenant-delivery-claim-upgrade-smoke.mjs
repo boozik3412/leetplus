@@ -344,20 +344,20 @@ async function readMigrationPlan() {
     migrationDirectories.at(-1),
     CURRENT_EXPECTED_LATEST_MIGRATION,
   );
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_169");
-  assert.deepEqual(STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-5, -3), [
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_170");
+  assert.deepEqual(STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-6, -4), [
     PREFIX_MIGRATION,
     TARGET_MIGRATION,
   ]);
   const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
-  assert.equal(targetIndex, migrationDirectories.length - 4);
+  assert.equal(targetIndex, migrationDirectories.length - 5);
   assert.equal(migrationDirectories[targetIndex - 1], PREFIX_MIGRATION);
   assert.equal(
     migrationDirectories[targetIndex + 1],
     IDENTITY_FOUNDATION_MIGRATION,
   );
   assert.equal(
-    migrationDirectories[targetIndex + 3],
+    migrationDirectories[targetIndex + 4],
     CURRENT_EXPECTED_LATEST_MIGRATION,
   );
 

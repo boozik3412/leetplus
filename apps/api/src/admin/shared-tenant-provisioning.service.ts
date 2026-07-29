@@ -560,10 +560,10 @@ export class SharedTenantProvisioningService {
         'Stored shell provisioning receipt is invalid',
       );
     }
-    await this.identityClaimBoundary.assertInvite(
+    await this.identityClaimBoundary.assertInviteLocator(
       this.identityClaimBoundary.bindTransaction(tx),
       {
-        email: parsed.ownerEmail,
+        workflowLocator: receipt.ownerIdentity.reservationId,
         tenantId: expectedTenantId,
         subjectId: receipt.ownerIdentity.reservationId,
         expectedRevision: receipt.ownerIdentity.claimRevision,

@@ -2,13 +2,14 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.6 |
+| Версия | 1.7 |
 | Дата | 29.07.2026 |
-| Schema target | `CURRENT_169` |
+| Schema target | `CURRENT_170` candidate |
 | Foundation migration | `20260729190000_identity_email_claim_foundation` |
 | Write-boundary migration | `20260729210000_identity_email_claim_write_boundary` |
 | Writer-boundary migration | `20260729230000_identity_invite_writer_boundary` |
-| Статус | `IMPLEMENTED_CANDIDATE`; local PostgreSQL и exact-head engineering CI/review приняты, not deployed |
+| Activation-locator migration | `20260729233000_identity_activation_locator` |
+| Статус | `IMPLEMENTED_CANDIDATE`; locator local PostgreSQL PASS, exact-head CI/review для `CURRENT_170` pending, not deployed |
 | Release decision | `NO-GO` для реального Tenant B, OWNER invite и production deploy |
 
 ## Назначение
@@ -26,10 +27,15 @@ login identity или invite.
 Migration 169 перевела основные application writers на sealed boundary и
 добавила persisted provenance/revocation. Это всё ещё не готовый onboarding:
 
+Migration 170 добавляет immutable opaque `workflowLocator` и PII-free sealed
+locator assert. Shell replay теперь подтверждает reservation по persisted UUID
+без передачи raw e-mail, но locator остаётся correlation key и не является
+authority или activation command.
+
 - таблица и boundary не создают `User`, `UserInvite`, пароль, token или URL;
 - trial не начинается;
 - письмо не формируется и не отправляется;
-- outbox, activation и verified delivery ещё не готовы;
+- sealed issue-by-locator, outbox, activation и verified delivery ещё не готовы;
 - issue/reissue/revoke/accept работают как application candidate, но
   historical rows ещё не прошли inventory/backfill;
 - оба Platform Admin route остаются fail-closed с `503`;
@@ -149,14 +155,32 @@ Direct user creation и реальная смена email остаются fail-
 admitted backfill. Полный контракт описан в
 [identity invite writer boundary](./identity-invite-writer-boundary.md).
 
+## Activation locator: migration 170
+
+Migration 170 добавляет `workflowLocator TEXT NOT NULL`. На insert trigger
+выводит его из canonical UUID `subjectId`; при любом claim transition значение
+остаётся неизменным. Partial unique index действует для `INVITE | USER`.
+Upgrade требует exact lowercase trimmed UUID и выполняет bounded backfill в
+одной транзакции; uppercase, surrounding whitespace или иной non-canonical
+legacy subject откатывает весь DDL fail-closed.
+
+Sealed `identity_email_claim_assert_invite_locator_v1` принимает locator,
+expected tenant/subject/revision, выполняет bounded lookup без row lock, берёт
+canonical e-mail advisory lock и только затем блокирует и повторно проверяет
+exact claim. Receipt не содержит e-mail, HMAC, token, URL или ciphertext.
+Runtime не получает table/column `SELECT`, а inventory reader намеренно не
+получает column grant на `workflowLocator`. Полный контракт:
+[identity activation locator](./identity-activation-locator.md).
+
 ### Runtime-role contract
 
-Enrollment на `CURRENT_169` выдаёт ровно шесть application RPC:
+Enrollment candidate на `CURRENT_170` выдаёт ровно семь application RPC:
 
 - `guest_game_delivery_transition_key_v1`;
 - `guest_game_reward_delivery_lock_v1`;
 - `identity_email_claim_reserve_invite_v2`;
 - `identity_email_claim_assert_invite_v1`;
+- `identity_email_claim_assert_invite_locator_v1`;
 - `identity_email_claim_transition_v2`;
 - `identity_email_claim_release_v2`.
 
@@ -203,7 +227,7 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 ## Локальное PostgreSQL evidence кандидата
 
 На disposable PostgreSQL `16.13`, без production data и без production
-deployment, получены:
+deployment, для historical `CURRENT_169` получены:
 
 - clean deploy `169/169`;
 - identity boundary idempotency: `100` конкурентных попыток,
@@ -214,7 +238,7 @@ deployment, получены:
 - shell provisioning PostgreSQL integration: `2/2`;
 - 100-way cross-slug shell race:
   `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`;
-- runtime enrollment подтвердил exact six-RPC allowlist и zero
+- runtime enrollment подтвердил historical exact six-RPC allowlist и zero
   `IdentityEmailClaim` table DML.
 
 Первый `CURRENT_169` exact-head
@@ -233,6 +257,14 @@ exact-head — `f5d39fd89145c995c51e7005698327f5581a5cd8`, GitHub CI
 `90630292169`, PostgreSQL 16 `90630292257`. Independent
 implementation/security review и review compatibility fix не нашли новых
 P0/P1; у fix нет P2.
+
+Для `CURRENT_170` candidate локально подтверждены populated upgrade
+`169 → 170`, clean state `170/170`, backfill и immutability locator, exact
+PII-free receipt, seven-RPC runtime enrollment при zero sealed-table
+privileges, lock race, shell integration `2/2` и полный transactional rollback
+при любом legacy subject не в exact lowercase trimmed UUID. Exact committed
+SHA, CI, independent review и
+новый release-bound inventory для migration 170 ещё pending.
 
 Предыдущий `CURRENT_168` exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` / CI
@@ -259,33 +291,37 @@ secrets и требует version `v1`; CI environment contract обновлён
    local unit/boundary `23/23 PASS`, independent review без actionable
    P0/P1/P2; exact-head `f4224072f60507bd97f8e49440e3bda89ffe2aaa` /
    CI `30483184102` (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke.
-2. Реализовать безопасный activation locator: shell хранит claim UUID и HMAC,
-   но не raw email; activation должна найти нужную identity без PII lookup
-   leak и перепроверить её под lock.
-3. Реализовать persisted `SHARED BETA GO`, activation, trial start,
-   `UserInvite`, encrypted leased outbox и verified delivery.
-4. Exact-head CI/review уже реализованного
+2. Принять exact committed SHA, CI, independent review и новый release-bound
+   inventory для локально реализованного `CURRENT_170` activation locator.
+3. Реализовать sealed issue-by-locator, который внутри PostgreSQL копирует
+   canonical e-mail непосредственно в `UserInvite`, атомарно переводит claim и
+   возвращает только PII-free receipt.
+4. Реализовать persisted `SHARED BETA GO`, activation, trial start,
+   encrypted leased outbox и verified delivery.
+5. Exact-head CI/review уже реализованного
    [`BETA-IAM-004E`](./invite-secret-transport.md) fragment + fixed POST-body
    transport приняты; отдельно принять production
    proxy/APM/CSP/browser/mail-client evidence и реализовать resend/session
    revoke и bounded expiry sweeper. Application acceptance/reissue/revoke
    candidate уже использует `assert → write → transition`.
-5. Выполнить полный 100-way accept/accept, accept/revoke и accept/reissue
+6. Выполнить полный 100-way accept/accept, accept/revoke и accept/reissue
    PostgreSQL matrix.
-6. Пройти production-like upgrade/rollback/zero-diff и полноценную
+7. Пройти production-like upgrade/rollback/zero-diff и полноценную
    two-tenant rehearsal.
 
-Engineering exact-head CI и независимый review текущего `CURRENT_169`
-закрыты на `f5d39fd...` / CI `30467882578`. Это не закрывает перечисленные
-launch blockers, production-like admission или deploy.
+Historical engineering exact-head CI и независимый review `CURRENT_169`
+закрыты на `f5d39fd...` / CI `30467882578`. Они не принимают `CURRENT_170`
+locator candidate и не закрывают перечисленные launch blockers,
+production-like admission или deploy.
 
 До внешней активации также закрываются P1 hardening items:
 
-- body digest и ожидаемый definer-owner четырёх `SECURITY DEFINER` RPC должны
-  входить в runtime admission; definer получает только least-privilege доступ;
+- body digest и ожидаемый definer-owner пяти current `SECURITY DEFINER` RPC
+  должны входить в runtime admission; definer получает только least-privilege
+  доступ;
 - shell replay перечитывает фактические Tenant/Store, OWNER override и six-row
   entitlement state, не доверяя одному audit receipt.
 
-До закрытия этих пунктов migrations 168/169 нельзя считать разрешением на
+До закрытия этих пунктов migrations 168..170 нельзя считать разрешением на
 production deploy, создание учётной записи или отправку приглашения внешнему
 тестеру.

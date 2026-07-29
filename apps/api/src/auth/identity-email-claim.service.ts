@@ -45,6 +45,13 @@ export type AssertIdentityInviteInput = {
   expectedRevision: number;
 };
 
+export type AssertIdentityInviteLocatorInput = {
+  workflowLocator: string;
+  tenantId: string;
+  subjectId: string;
+  expectedRevision: number;
+};
+
 export type TransitionIdentityInviteInput = {
   email: string;
   tenantId: string;
@@ -80,6 +87,17 @@ export type AssertIdentityInviteReceipt = {
   claimType: typeof IdentityEmailClaimType.INVITE;
   tenantId: string;
   subjectId: string;
+  revision: number;
+};
+
+export type AssertIdentityInviteLocatorReceipt = {
+  schemaVersion: 1;
+  operation: 'ASSERT_INVITE_LOCATOR';
+  decision: 'MATCHED';
+  claimType: typeof IdentityEmailClaimType.INVITE;
+  tenantId: string;
+  subjectId: string;
+  workflowLocator: string;
   revision: number;
 };
 
@@ -192,6 +210,39 @@ export class IdentityEmailClaimService {
       `);
       const receipt = this.assertReceipt(rows);
       if (
+        receipt.tenantId !== tenantId ||
+        receipt.subjectId !== subjectId ||
+        receipt.revision !== expectedRevision
+      ) {
+        throw this.invalidReceipt();
+      }
+      return receipt;
+    } catch (error) {
+      throw this.boundaryError(error);
+    }
+  }
+
+  async assertInviteLocator(
+    tx: IdentityEmailClaimTransaction,
+    input: AssertIdentityInviteLocatorInput,
+  ): Promise<AssertIdentityInviteLocatorReceipt> {
+    const workflowLocator = this.uuid(input.workflowLocator);
+    const tenantId = this.uuid(input.tenantId);
+    const subjectId = this.uuid(input.subjectId);
+    const expectedRevision = this.revision(input.expectedRevision);
+
+    try {
+      const rows = await tx.$queryRaw<JsonRpcRow[]>(Prisma.sql`
+        SELECT public."identity_email_claim_assert_invite_locator_v1"(
+          ${workflowLocator}::TEXT,
+          ${tenantId}::TEXT,
+          ${subjectId}::TEXT,
+          ${expectedRevision}::INTEGER
+        ) AS receipt
+      `);
+      const receipt = this.assertLocatorReceipt(rows);
+      if (
+        receipt.workflowLocator !== workflowLocator ||
         receipt.tenantId !== tenantId ||
         receipt.subjectId !== subjectId ||
         receipt.revision !== expectedRevision
@@ -340,6 +391,39 @@ export class IdentityEmailClaimService {
       claimType: IdentityEmailClaimType.INVITE,
       tenantId: this.receiptUuid(receipt.tenantId),
       subjectId: this.receiptUuid(receipt.subjectId),
+      revision: this.receiptRevision(receipt.revision),
+    };
+  }
+
+  private assertLocatorReceipt(
+    rows: JsonRpcRow[],
+  ): AssertIdentityInviteLocatorReceipt {
+    const receipt = this.receiptRecord(rows, [
+      'schemaVersion',
+      'operation',
+      'decision',
+      'claimType',
+      'tenantId',
+      'subjectId',
+      'workflowLocator',
+      'revision',
+    ]);
+    if (
+      receipt.schemaVersion !== 1 ||
+      receipt.operation !== 'ASSERT_INVITE_LOCATOR' ||
+      receipt.decision !== 'MATCHED' ||
+      receipt.claimType !== IdentityEmailClaimType.INVITE
+    ) {
+      throw this.invalidReceipt();
+    }
+    return {
+      schemaVersion: 1,
+      operation: 'ASSERT_INVITE_LOCATOR',
+      decision: 'MATCHED',
+      claimType: IdentityEmailClaimType.INVITE,
+      tenantId: this.receiptUuid(receipt.tenantId),
+      subjectId: this.receiptUuid(receipt.subjectId),
+      workflowLocator: this.receiptUuid(receipt.workflowLocator),
       revision: this.receiptRevision(receipt.revision),
     };
   }

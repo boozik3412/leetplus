@@ -3,8 +3,9 @@
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.11                                                            |
+| Версия           | 1.12                                                            |
 | Дата             | 29.07.2026                                                      |
+| Schema target    | `CURRENT_170` candidate; exact-head CI/review pending           |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
 | Формат           | Первый friendly external club, invite-only                      |
 | Data plane       | Shared web, API, workers, PostgreSQL и Telegram                 |
@@ -91,7 +92,7 @@ deny-by-default. Frontend visibility не является авторизаци�
 ## 3. Владелец и delegation
 
 Platform operator в целевом workflow сначала выполняет idempotent shell-only
-provisioning. Текущий `CURRENT_169` candidate сохраняет реализованный в
+provisioning. Текущий `CURRENT_170` candidate сохраняет реализованный в
 `CURRENT_168` shell service, который одной serializable-транзакцией:
 
 1. создаёт `Tenant B` как
@@ -108,18 +109,22 @@ provisioning. Текущий `CURRENT_169` candidate сохраняет реал
 Shell не создаёт invite, token, registration URL, trial, outbox или письмо.
 Migration 169 добавляет persisted revision provenance и explicit revoke
 history для `User`/`UserInvite`; обычные issue/reissue/revoke/accept paths
-используют sealed state machine. Runtime role имеет zero
-`IdentityEmailClaim` DML и exact `EXECUTE` на
-`reserve_v2/assert_v1/transition_v2/release_v2`; полный application allowlist
-содержит ровно шесть RPC с учётом двух guest-game boundaries. Direct user
-creation и user/invite email change остаются fail-closed.
+используют sealed state machine. Migration 170 добавляет immutable opaque
+`workflowLocator` и PII-free sealed locator assert; shell replay использует
+persisted reservation UUID без raw e-mail. Runtime role имеет zero
+`IdentityEmailClaim` table privileges и exact `EXECUTE` на
+`reserve_v2/assert_v1/assert_invite_locator_v1/transition_v2/release_v2`;
+полный application allowlist содержит ровно семь RPC с учётом двух guest-game
+boundaries. Direct user creation и user/invite email change остаются
+fail-closed.
 
-Локальный disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`,
+Локальный disposable PostgreSQL `16.13` подтвердил clean deploy `170/170`,
+populated upgrade `169 → 170`, locator/ACL/rollback checks,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, transition
 destination replay-check, retained revoked history, новую same-email
-reservation после explicit revoke и shell integration `2/2`. Focused
-application tests прошли `89/89`, full API —
-`99 suites / 1940 passed / 2 todo`. Engineering exact-head
+reservation после explicit revoke и shell integration `2/2`. Full API —
+`101 suites / 1960 passed / 2 todo`. Exact-head CI/review для `CURRENT_170`
+ещё pending. Historical engineering exact-head `CURRENT_169`
 `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
 [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
 (`run #37`), `3/3 PASS`, и independent review без новых P0/P1.
@@ -142,8 +147,9 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
 ```
 
 OWNER invite появится только в отдельной protected activation после
-persisted `SHARED BETA GO`. До неё необходимо реализовать activation locator,
-encrypted outbox и verified delivery, закрыть
+persisted `SHARED BETA GO`. До неё необходимо принять locator exact-head,
+реализовать sealed issue-by-locator, encrypted outbox и verified delivery,
+закрыть
 [`BETA-IAM-004B`](./identity-legacy-backfill.md): local evidence, финальный
 independent security review и exact-head
 `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI `30479020686`
@@ -294,7 +300,7 @@ system/custom roles, capabilities, `NETWORK | STORES` scope и audit.
 
 Дополнительно до любого внешнего доступа обязательны production-like
 upgrade/rollback/zero-diff и полноценная two-tenant rehearsal. Local
-`CURRENT_169` PostgreSQL evidence не заменяет эти gates.
+`CURRENT_170` PostgreSQL evidence не заменяет эти gates.
 
 Немедленные stop conditions:
 

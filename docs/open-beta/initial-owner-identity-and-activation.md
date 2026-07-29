@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.12                                                            |
+| Версия           | 1.13                                                            |
 | Дата             | 29.07.2026                                                      |
-| Статус           | `CURRENT_169`; transport engineering accepted, activation pending |
+| Статус           | `CURRENT_170` candidate; locator local PASS, exact-head CI/review pending |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
 | Scope            | Первый OWNER нового tenant, email delivery, activation, suspend |
 
@@ -90,6 +90,7 @@ emailCanonical          primary key
 claimType               INVITE | USER | EMAIL_CHANGE
 tenantId
 subjectId               invite/user/change id
+workflowLocator         immutable opaque workflow UUID
 revision
 createdAt
 updatedAt
@@ -107,20 +108,22 @@ identity-email:v1:<canonical-email>
 ```
 
 Migration `20260729210000_identity_email_claim_write_boundary` ввела sealed
-runtime DML. После successor migration 169 текущий exact allowlist содержит:
+runtime DML. После migrations 169/170 текущий candidate allowlist содержит
+пять identity RPC:
 
 - `reserve_invite_v2`;
 - `assert_invite_v1`;
+- `assert_invite_locator_v1`;
 - `transition_v2`;
 - `release_v2`.
 
 Обычная runtime role имеет нулевые effective table privileges на
-`IdentityEmailClaim` и exact `EXECUTE` только на эти четыре identity RPC плюс
+`IdentityEmailClaim` и exact `EXECUTE` только на эти пять identity RPC плюс
 две разрешённые guest-game RPC. Direct lock helper и worker event function
 недоступны. Combined partial unique invariant запрещает одному
 `(tenantId, subjectId)` одновременно быть `INVITE` и `USER`, сохраняя
 отдельный pending `EMAIL_CHANGE`. Reserve повторно проверяет legacy
-`User`/live `UserInvite` до replay decision. Все четыре definer RPC имеют
+`User`/live `UserInvite` до replay decision. Все пять definer RPC имеют
 exact `search_path=pg_catalog`, который проверяется по PostgreSQL `proconfig`.
 При операции с двумя email locks они берутся в лексикографическом порядке.
 Canonicalization и uniqueness case-insensitive.
@@ -138,8 +141,19 @@ application writers на этот invariant:
 - direct user creation и user/invite email change fail-closed;
 - legacy строки без persisted revision fail-closed.
 
-Исторические строки ещё требуют inventory/backfill, а activation/outbox/mail
-delivery не реализованы, поэтому identity workflow остаётся `NO-GO`.
+Migration `20260729233000_identity_activation_locator` добавляет immutable
+opaque UUID `workflowLocator` и sealed PII-free
+`assert_invite_locator_v1(locator, tenant, subject, revision)`. Shell replay
+теперь адресует reservation по persisted UUID без raw e-mail, затем функция
+берёт canonical e-mail advisory lock и повторно проверяет exact claim под
+`FOR UPDATE`. Runtime по-прежнему не имеет table/column `SELECT`; locator не
+является authority и не заменяет persisted GO. Кандидат локально проверен на
+PostgreSQL 16, но exact-head CI и independent review ещё не приняты. Подробный
+контракт: [identity activation locator](./identity-activation-locator.md).
+
+Исторические строки ещё требуют inventory/backfill, а sealed issue-by-locator,
+activation/outbox/mail delivery не реализованы, поэтому identity workflow
+остаётся `NO-GO`.
 Подробный checkpoint:
 [identity invite writer boundary](./identity-invite-writer-boundary.md).
 
@@ -282,9 +296,8 @@ Serializable transaction:
 
 Provisioning не запускает trial и не создаёт mail outbox.
 
-Service-level shell candidate и writer boundary реализованы на `CURRENT_169`,
-но route остаётся
-намеренно закрыт:
+Service-level shell, writer boundary и PII-free locator replay реализованы в
+`CURRENT_170` candidate, но routes остаются намеренно закрыты:
 
 ```text
 503 SHARED_BETA_PROVISIONING_IDENTITY_WORKFLOW_PENDING
@@ -296,7 +309,8 @@ Legacy initial-owner revoke route также закрыт:
 503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING
 ```
 
-Локальный disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`,
+Для принятого historical `CURRENT_169` локальный disposable PostgreSQL
+`16.13` подтвердил clean deploy `169/169`,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
 `INVITE | USER` same-subject rejection, explicit revoke → release →
 same-email reserve, shell integration `2/2` и 100-way cross-slug race
@@ -311,6 +325,15 @@ prerequisite. Engineering exact-head `CURRENT_169`
 (`run #37`), `3/3 PASS`, и independent review без новых P0/P1. Local и
 remote engineering evidence не являются production-like admission или
 разрешением вызвать route.
+
+Локальный `CURRENT_170` candidate дополнительно подтвердил populated upgrade
+`169 → 170`, clean state `170/170`, immutable
+`workflowLocator = initial subjectId`, PII-free locator receipt, exact seven
+application RPC при zero effective `IdentityEmailClaim` table privileges,
+shell integration `2/2` и fail-closed transactional rollback при любом legacy
+subject не в exact lowercase trimmed UUID, включая uppercase/whitespace.
+Exact committed SHA, CI, independent review и новый
+release-bound inventory для этого head ещё pending.
 
 ### 5.2. Activation
 
@@ -477,10 +500,14 @@ Two-tenant:
 - migration 168: initial sealed reserve/assert/transition/release boundary;
 - migration 169: persisted provenance/revocation и sealed runtime
   issue/reissue/revoke/accept candidate;
+- migration 170: immutable opaque `workflowLocator`, partial unique
+  `INVITE | USER` index и PII-free sealed locator assert; local PostgreSQL
+  evidence получен, exact-head CI/review pending;
 - shell-only service: `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six-row
   profile, HMAC audit, без User/UserInvite/token/trial/outbox;
-- local PostgreSQL `16.13`: `169/169`, identity `1/99`, revoke→reserve,
-  shell `2/2`;
+- local PostgreSQL `16.13`: historical `169/169` identity `1/99`,
+  revoke→reserve и shell `2/2`; candidate populated `169 → 170`, clean
+  `170/170`, locator/ACL/rollback checks и shell `2/2`;
 - engineering exact-head `CURRENT_169`
   `f5d39fd89145c995c51e7005698327f5581a5cd8`, CI `30467882578`
   (`run #37`): `3/3 PASS`, independent review без новых P0/P1;
@@ -512,25 +539,25 @@ Two-tenant:
    (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke. CLI/exported
    `provision` и `rotate-invite` fail-closed до manifest/Prisma/БД/token,
    local unit/boundary `23/23 PASS`.
-2. Спроектировать activation locator без хранения и раскрытия raw email;
-   lookup и повторная проверка claim должны выполняться fail-closed под lock.
-   Schema-neutral вариант на `CURRENT_169` отсутствует: текущие RPC требуют
-   raw email, runtime не имеет table `SELECT`, поэтому
-   `MIGRATION_170_ACTIVATION_LOCATOR` остаётся отдельным pending decision без
-   full-table/column-wide SELECT fallback.
-3. Добавить encrypted identity mail outbox и fail-closed mail config.
-4. Реализовать release-gate attestations и tenant admission decision.
-5. Реализовать initial OWNER activation, trial start, encrypted
+2. Принять exact committed SHA, CI, independent review и новый release-bound
+   inventory для `MIGRATION_170_ACTIVATION_LOCATOR`; full-table/column-wide
+   `IdentityEmailClaim` SELECT fallback остаётся запрещён.
+3. Реализовать sealed issue-by-locator: внутри PostgreSQL скопировать canonical
+   e-mail непосредственно в `UserInvite`, атомарно перевести claim и вернуть
+   только PII-free receipt.
+4. Добавить encrypted identity mail outbox и fail-closed mail config.
+5. Реализовать release-gate attestations и tenant admission decision.
+6. Реализовать initial OWNER activation, trial start, encrypted
    issue/reissue/resend delivery и emergency suspend поверх уже sealed
    application revoke/accept state machine; оба admin route до этого
    сохраняют `503`.
-6. Принять production proxy/APM/logging/CSP/browser/mail-client evidence для
+7. Принять production proxy/APM/logging/CSP/browser/mail-client evidence для
    реализованного fragment + fixed POST-body transport и удалить INTERNAL
    raw `registrationUrl` compatibility residual после готовности outbox.
-7. Выполнить полный real PostgreSQL concurrency matrix и two-tenant tests.
-8. Довести durable lease/effect fencing для оставшихся workers, guest и
+8. Выполнить полный real PostgreSQL concurrency matrix и two-tenant tests.
+9. Довести durable lease/effect fencing для оставшихся workers, guest и
    Telegram surfaces поверх реализованного `executionRevision`.
-9. Провести production-like upgrade/rollback/zero-diff, backup/restore и
+10. Провести production-like upgrade/rollback/zero-diff, backup/restore и
     two-tenant rehearsal; только затем принимать отдельные persisted GO,
     production deployment и owner invite.
 

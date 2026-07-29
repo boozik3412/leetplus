@@ -15,6 +15,8 @@ const describePostgres = integrationEnabled ? describe : describe.skip;
 const FINGERPRINT_KEY =
   'shared-shell-postgres-fingerprint-key-aaaaaaaaaaaaaaaa';
 
+jest.setTimeout(30_000);
+
 describePostgres('shared tenant shell provisioning PostgreSQL boundary', () => {
   let prisma: PrismaService;
   let service: SharedTenantProvisioningService;
@@ -163,6 +165,7 @@ describePostgres('shared tenant shell provisioning PostgreSQL boundary', () => {
       userCount,
       inviteCount,
       claimCount,
+      locatorClaim,
       audit,
     ] = await Promise.all([
       prisma.tenant.findUniqueOrThrow({
@@ -200,6 +203,15 @@ describePostgres('shared tenant shell provisioning PostgreSQL boundary', () => {
           revision: 1,
         },
       }),
+      prisma.identityEmailClaim.findUniqueOrThrow({
+        where: { emailCanonical: email },
+        select: {
+          tenantId: true,
+          subjectId: true,
+          workflowLocator: true,
+          revision: true,
+        },
+      }),
       prisma.platformAdminAuditEvent.findFirstOrThrow({
         where: {
           tenantId: created.tenant.id,
@@ -234,6 +246,12 @@ describePostgres('shared tenant shell provisioning PostgreSQL boundary', () => {
     expect(JSON.stringify(audit)).not.toMatch(
       /registrationUrl|tokenHash|ciphertext/u,
     );
+    expect(locatorClaim).toEqual({
+      tenantId: created.tenant.id,
+      subjectId: created.ownerIdentity.reservationId,
+      workflowLocator: created.ownerIdentity.reservationId,
+      revision: 1,
+    });
   });
 
   it('serializes 100 case-variant reservations across two tenant shells with no loser residue', async () => {

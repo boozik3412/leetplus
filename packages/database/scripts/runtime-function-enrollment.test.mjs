@@ -46,10 +46,10 @@ function compliantSnapshot() {
     migration: {
       completedTargetCount: 1,
       completedRequiredCount: 1,
-      completedCount: 169,
+      completedCount: 170,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260729230000_identity_invite_writer_boundary",
+        "20260729233000_identity_activation_locator",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -151,7 +151,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260729230000_identity_invite_writer_boundary 169$/u,
+    /20260729233000_identity_activation_locator 170$/u,
   );
 });
 
@@ -208,17 +208,17 @@ for (const [environment, expectedCode] of [
 test("builds only the exact application grants and worker exclusion", () => {
   const statements =
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
-  assert.equal(statements.length, 18);
+  assert.equal(statements.length, 20);
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
-    6,
+    7,
   );
   assert.equal(
     statements.filter((statement) =>
       statement.startsWith("REVOKE GRANT OPTION"),
     ).length,
-    6,
+    7,
   );
   assert.equal(
     statements.filter((statement) =>
@@ -235,6 +235,7 @@ test("builds only the exact application grants and worker exclusion", () => {
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v2/u);
   assert.match(sql, /identity_email_claim_assert_invite_v1/u);
+  assert.match(sql, /identity_email_claim_assert_invite_locator_v1/u);
   assert.match(sql, /identity_email_claim_transition_v1/u);
   assert.match(sql, /identity_email_claim_release_v1/u);
   assert.match(sql, /identity_email_claim_transition_v2/u);
@@ -280,6 +281,9 @@ test("detects authority, migration and function ACL drift independently", () => 
     (entry) => entry.key === "identityEmailClaimReserveInvite",
   ).searchPathPgCatalogOnly = false;
   snapshot.functions.find(
+    (entry) => entry.key === "identityEmailClaimAssertInviteLocator",
+  ).securityDefiner = false;
+  snapshot.functions.find(
     (entry) => entry.key === "durableDeliveryEventWriter",
   ).effectiveExecute = true;
   snapshot.functions.find(
@@ -306,6 +310,7 @@ test("detects authority, migration and function ACL drift independently", () => 
       "deliveryTransitionKey:PUBLIC_EXECUTE_PRESENT",
       "rewardDeliveryLock:SECURITY_MODE_MISMATCH",
       "identityEmailClaimReserveInvite:SEARCH_PATH_MISMATCH",
+      "identityEmailClaimAssertInviteLocator:SECURITY_MODE_MISMATCH",
     ],
   );
   assert.deepEqual(
@@ -318,7 +323,7 @@ test("detects authority, migration and function ACL drift independently", () => 
   );
 });
 
-test("binds enrollment to exact current migration 169 and exact count 169", () => {
+test("binds enrollment to exact current migration 170 and exact count 170", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

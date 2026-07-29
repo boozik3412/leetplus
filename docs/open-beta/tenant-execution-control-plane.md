@@ -2,11 +2,11 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.31                                                                        |
+| Версия           | 1.32                                                                        |
 | Дата             | 29.07.2026                                                                  |
-| Статус           | Schema target `CURRENT_169`; engineering exact-head accepted, production-like admission pending |
+| Статус           | Schema target `CURRENT_170` candidate; locator local PASS, exact-head CI/review pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
-| Migrations       | control-plane/revision/store/delivery fences + identity claim foundation/runtime writers (`163..169`) |
+| Migrations       | control-plane/revision/store/delivery fences + identity claim/writers/locator (`163..170`) |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
 
 Этот документ фиксирует фактически реализованный срез
@@ -16,19 +16,26 @@ service-level shell-only candidate: invite/trial/User/UserInvite/outbox не
 candidate нельзя использовать с реальным email. Целевой
 identity-outbox/activation contract зафиксирован в
 [initial OWNER identity and activation](./initial-owner-identity-and-activation.md).
+Текущий locator candidate описан отдельно в
+[identity activation locator](./identity-activation-locator.md).
 Legacy reconciliation ведётся по отдельному
 [read-only inventory/backfill contract](./identity-legacy-backfill.md).
-Обычные application invite/reissue/revoke/accept writers в `CURRENT_169`
-переведены на persisted claim provenance, но это не открывает Platform Admin
-activation route и не заменяет legacy inventory/backfill.
+Обычные application invite/reissue/revoke/accept writers, принятые в
+`CURRENT_169`, переведены на persisted claim provenance. `CURRENT_170`
+candidate добавляет immutable activation locator и PII-free replay assert, но
+это не открывает Platform Admin activation route и не заменяет legacy
+inventory/backfill.
 Legacy isolated design-partner writers теперь fail-closed по
 [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md):
 `provision`/`rotate-invite` отклоняются до manifest/Prisma/БД/token,
-`status` остаётся read-only, emergency `suspend` — narrowing-only. Schema,
-exact six-RPC allowlist и admin routes не изменены; exact-head
+`status` остаётся read-only, emergency `suspend` — narrowing-only. Для того
+historical `CURRENT_169` checkpoint schema, exact six-RPC allowlist и admin
+routes не изменялись; exact-head
 `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
 (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke; independent review —
 без actionable P0/P1/P2.
+Migration 170 отдельно повышает current candidate allowlist до семи RPC.
+Её exact-head CI/review ещё не приняты.
 Документ не разрешает production migration или выдачу доступа.
 
 ## 1. Persisted control plane
@@ -222,7 +229,8 @@ slug/email или неполная authority отклоняются fail-closed.
 Migration `20260729230000_identity_invite_writer_boundary` сохраняет exact
 four-identity-RPC contract runtime role, заменяя application grants на
 `reserve_v2/assert_v1/transition_v2/release_v2`. Вместе с двумя guest-game
-RPC полный allowlist равен шести. Runtime role имеет zero effective table
+RPC historical `CURRENT_169` allowlist равен шести. Runtime role имеет zero
+effective table
 privileges на `IdentityEmailClaim`; direct DML, raw lock helper и старые
 writer RPC запрещены.
 
@@ -233,7 +241,17 @@ release в одной транзакции; direct user creation и user/invite 
 закрыты fail-closed. Исторические строки с `NULL` provenance не
 автодоверяются и требуют отдельного inventory/backfill.
 
-Локальный disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`,
+Migration `20260729233000_identity_activation_locator` добавляет immutable
+opaque `workflowLocator`, partial unique index для `INVITE | USER` и sealed
+PII-free `identity_email_claim_assert_invite_locator_v1`. Current candidate
+allowlist равен семи RPC: две guest-game и пять identity. Locator assert
+выполняет bounded lookup, затем берёт тот же canonical e-mail advisory lock и
+повторно проверяет exact claim под `FOR UPDATE`; runtime table/column SELECT не
+получает. Shell replay использует persisted reservation UUID. Locator является
+correlation key, а не authority или persisted GO.
+
+Для historical `CURRENT_169` локальный disposable PostgreSQL `16.13`
+подтвердил clean deploy `169/169`,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, transition
 destination replay-check, retained revoked history, новую same-email
 reservation после explicit revoke и shell integration `2/2`. Focused
@@ -250,6 +268,14 @@ application tests прошли `89/89`, full API —
 prerequisite. Эти engineering prerequisites не являются production-like
 admission или launch approval.
 
+Локальный `CURRENT_170` candidate подтвердил populated upgrade `169 → 170`,
+clean state `170/170`, locator backfill/immutability, PII-free receipt,
+seven-RPC ACL при zero sealed-table privileges, lock race, transactional
+rollback при legacy subject не в exact lowercase trimmed UUID, включая
+uppercase/whitespace, и shell integration `2/2`. Exact committed SHA, CI,
+independent review и новый release-bound inventory для
+этого head ещё pending.
+
 Production startup-validation candidate уже требует отдельный fingerprint
 HMAC secret, запрещает reuse и принимает только version `v1`; CI environment
 contract обновлён. До deploy остаётся защищённо настроить и аттестовать
@@ -265,8 +291,10 @@ POST /admin/tenants/:tenantId/initial-owner-invite/revoke
   → 503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING
 ```
 
-Protected activation locator, encrypted mail outbox, initial OWNER delivery,
-trial start и signed legacy proposal/apply/rollback ещё не реализованы.
+Sealed issue-by-locator, encrypted mail outbox, initial OWNER delivery, trial
+start и signed legacy proposal/apply/rollback ещё не реализованы. Сам locator
+реализован только как `CURRENT_170` engineering candidate и не активирует
+tenant.
 `BETA-IAM-004E` fragment + fixed POST-body transport принят как engineering
 checkpoint на неизменном `CURRENT_169`: exact-head
 `f09383563bbcc22e11e0e67ca597360cf8996f4b` / CI `30488598755`
@@ -483,8 +511,9 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
    proposal/apply/rollback исторических identity rows без provenance;
    использовать принятый exact-head PostgreSQL/CI/review checkpoint fail-closed
    изоляции design-partner identity writers;
-4. реализовать privacy-safe activation locator, encrypted outbox и
-   fail-closed mail config;
+4. принять exact-head CI/review и release-bound inventory для уже
+   реализованного `CURRENT_170` locator candidate, затем реализовать sealed
+   issue-by-locator, encrypted outbox и fail-closed mail config;
 5. persisted release gates и dedicated initial OWNER
    activation/suspend/encrypted issue/reissue delivery;
 6. полный PostgreSQL provision/activate/accept/revoke/reissue concurrency
@@ -625,12 +654,13 @@ invite остаются pending/`NO-GO`.
   diagnostic rehearsal, `git diff --check`: `PASS`.
 
 StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migrations
-`163..169` принимаются только как явно allowlisted additive tail, не
+`163..170` принимаются только как явно allowlisted additive tail, не
 затрагивающий protected `StaffTask*` relations. Frozen StaffTask evidence
 остаётся в state `EXPAND_162`; фактическая текущая БД и downstream
 inventory/planner для current implementation candidate должны проходить
-отдельный admission как `CURRENT_169` (`migrationCount=169`, latest
-`20260729230000_identity_invite_writer_boundary`). Engineering exact-head
+отдельный admission как `CURRENT_170` (`migrationCount=170`, latest
+`20260729233000_identity_activation_locator`). Exact-head CI/review для этого
+candidate ещё pending. Historical `CURRENT_169` engineering exact-head
 `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
 (`run #37`) принят, `3/3 PASS`, и independent review без новых P0/P1.
 Принятый `CURRENT_168` `3b8228dd...` / CI `30460154200`, `3/3 PASS`,

@@ -14,6 +14,7 @@ const FORBIDDEN_BOUNDARY_REFERENCES = [
   'identity_email_claim_reserve_invite_v1',
   'identity_email_claim_reserve_invite_v2',
   'identity_email_claim_assert_invite_v1',
+  'identity_email_claim_assert_invite_locator_v1',
   'identity_email_claim_transition_v1',
   'identity_email_claim_release_v1',
   'identity_email_claim_transition_v2',

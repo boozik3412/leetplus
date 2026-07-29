@@ -145,6 +145,9 @@ jobs:
       - name: Validate identity email claim foundation
         run: pnpm --filter database check:identity-email-claim
 
+      - name: Validate identity activation locator upgrade smoke
+        run: pnpm --filter database check:identity-activation-locator
+
       - name: Validate identity email claim and invite writer boundaries
         run: pnpm --filter database check:identity-email-claim-boundary
 
@@ -211,8 +214,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260729230000_identity_invite_writer_boundary
-          EXPECTED_DATABASE_MIGRATION_COUNT: "169"
+          EXPECTED_DATABASE_MIGRATION: 20260729233000_identity_activation_locator
+          EXPECTED_DATABASE_MIGRATION_COUNT: "170"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -321,6 +324,11 @@ jobs:
         run: pnpm --filter database db:smoke:identity-email-claim
         env:
           IDENTITY_EMAIL_CLAIM_SMOKE_CONFIRM: run-identity-email-claim-smoke
+
+      - name: Rehearse identity activation locator CURRENT_169 to CURRENT_170 upgrade
+        run: pnpm --filter database db:smoke:identity-activation-locator-upgrade
+        env:
+          IDENTITY_ACTIVATION_LOCATOR_UPGRADE_SMOKE_CONFIRM: run-identity-activation-locator-upgrade-smoke
 
       - name: Verify sealed identity email claim write boundaries
         run: pnpm --filter database db:smoke:identity-email-claim-boundary

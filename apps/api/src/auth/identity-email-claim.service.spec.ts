@@ -207,6 +207,82 @@ describe('IdentityEmailClaimService', () => {
     });
   });
 
+  it('asserts an exact invite through the PII-free activation locator', async () => {
+    const tx = transaction();
+    tx.$queryRaw.mockResolvedValue([
+      {
+        receipt: {
+          schemaVersion: 1,
+          operation: 'ASSERT_INVITE_LOCATOR',
+          decision: 'MATCHED',
+          claimType: 'INVITE',
+          tenantId: TENANT_ID,
+          subjectId: RESERVATION_ID,
+          workflowLocator: RESERVATION_ID,
+          revision: 1,
+        },
+      },
+    ]);
+
+    const result = await service().assertInviteLocator(tx, {
+      workflowLocator: RESERVATION_ID,
+      tenantId: TENANT_ID,
+      subjectId: RESERVATION_ID,
+      expectedRevision: 1,
+    });
+
+    expect(result).toEqual({
+      schemaVersion: 1,
+      operation: 'ASSERT_INVITE_LOCATOR',
+      decision: 'MATCHED',
+      claimType: IdentityEmailClaimType.INVITE,
+      tenantId: TENANT_ID,
+      subjectId: RESERVATION_ID,
+      workflowLocator: RESERVATION_ID,
+      revision: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain(EMAIL);
+    const query = (tx.$queryRaw.mock.calls as unknown[][])[0]?.[0] as
+      | Prisma.Sql
+      | undefined;
+    expect(query?.strings.join('')).toContain(
+      'identity_email_claim_assert_invite_locator_v1',
+    );
+    expect(query?.values).not.toContain(EMAIL);
+  });
+
+  it('rejects a locator receipt with an undeclared identity-bearing field', async () => {
+    const tx = transaction();
+    tx.$queryRaw.mockResolvedValue([
+      {
+        receipt: {
+          schemaVersion: 1,
+          operation: 'ASSERT_INVITE_LOCATOR',
+          decision: 'MATCHED',
+          claimType: 'INVITE',
+          tenantId: TENANT_ID,
+          subjectId: RESERVATION_ID,
+          workflowLocator: RESERVATION_ID,
+          revision: 1,
+          emailCanonical: EMAIL,
+        },
+      },
+    ]);
+
+    await expect(
+      service().assertInviteLocator(tx, {
+        workflowLocator: RESERVATION_ID,
+        tenantId: TENANT_ID,
+        subjectId: RESERVATION_ID,
+        expectedRevision: 1,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_CLAIM_RECEIPT_INVALID',
+      },
+    });
+  });
+
   it('transitions only from INVITE with a new UUID subject', async () => {
     const tx = transaction();
     tx.$queryRaw.mockResolvedValue([

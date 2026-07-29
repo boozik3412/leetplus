@@ -396,6 +396,15 @@ const EXPECTED_CATALOG_COLUMNS = Object.freeze([
     "CURRENT_TIMESTAMP",
     "",
   ],
+  [
+    "IdentityEmailClaim",
+    "workflowLocator",
+    8,
+    "text",
+    true,
+    "",
+    "pg_catalog.default",
+  ],
 ]);
 
 function expectedCatalogRelationValues() {
@@ -457,6 +466,13 @@ const EXPECTED_CONSTRAINT_MANIFEST = Object.freeze([
       "518d70febe8734ae03d750e213d962eba121dfe56e4ff1f4e85641af60ac5feb",
   },
   {
+    name: "IdentityEmailClaim_workflow_locator_check",
+    relation: "IdentityEmailClaim",
+    type: "c",
+    definitionSha256:
+      "6e0abd4cccc01c0a8412c04faee92b9ec93984ccc9a840557178b27837422096",
+  },
+  {
     name: "IdentityEmailClaim_tenantId_fkey",
     relation: "IdentityEmailClaim",
     type: "f",
@@ -508,6 +524,14 @@ const EXPECTED_INDEX_MANIFEST = Object.freeze([
     primary: true,
     definitionSha256:
       "2026aac1de3ba521461084e10d3df6bc56c800febd8e6238b68396ef2b711a87",
+  },
+  {
+    name: "identity_email_claim_workflow_locator_uidx",
+    relation: "IdentityEmailClaim",
+    unique: true,
+    primary: false,
+    definitionSha256:
+      "b06323d8a990d2e1d76457425cf9051e08d916ee5f25d0649836186a53dbf920",
   },
   {
     name: "UserInvite_revokedByUserId_idx",
@@ -578,6 +602,15 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
       "960e4d44cde91a0729f8947e058b591320fcae1ce71cd36e861d0353ce21f447",
   },
   {
+    name: "identity_email_claim_assert_invite_locator_v1",
+    identityArguments:
+      "requested_workflow_locator text, expected_tenant_id text, expected_subject_id text, expected_revision integer",
+    result: "jsonb",
+    securityDefiner: true,
+    definitionSha256:
+      "f0da633f430e049b5577070b0e665a7911f1ef053011eeeeb43baa0e72cd4fa5",
+  },
+  {
     name: "identity_email_claim_lock_v1",
     identityArguments: "candidate_email text",
     result: "text",
@@ -627,7 +660,7 @@ const EXPECTED_FUNCTION_MANIFEST = Object.freeze([
     result: "trigger",
     securityDefiner: false,
     definitionSha256:
-      "f13eb0a1579dd42d9f3e3d7990dddbef1c51b205fed24a9240a7c9783373baab",
+      "433e282c5ce0920ebad6d1ced19220f870e3944d84ed6a0e7ddb7d53fd9cd411",
   },
   {
     name: "identity_email_claim_transition_v1",
@@ -2895,7 +2928,7 @@ export async function loadExpectedMigrationArtifact(releaseSha) {
   ) {
     contractError(
       "SOURCE_MIGRATION_MANIFEST_INVALID",
-      "The source migration manifest does not match exact CURRENT_169.",
+      "The source migration manifest does not match exact CURRENT_170.",
     );
   }
 

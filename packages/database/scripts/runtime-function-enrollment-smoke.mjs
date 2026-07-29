@@ -34,7 +34,7 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 169 and exact completed count 169 are mandatory.
+  - Exact latest migration 170 and exact completed count 170 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - The generated role and every grant are removed in finally.
@@ -275,6 +275,23 @@ function callIdentityAssertBoundary(runtime) {
   );
 }
 
+function callIdentityLocatorBoundary(runtime) {
+  return runtime.$queryRawUnsafe(
+    `
+      SELECT public."identity_email_claim_assert_invite_locator_v1"(
+        CAST($1 AS TEXT),
+        CAST($2 AS TEXT),
+        CAST($3 AS TEXT),
+        CAST($4 AS INTEGER)
+      )
+    `,
+    "00000000-0000-4000-8000-000000000002",
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+    1,
+  );
+}
+
 function callIdentityTransitionBoundary(runtime) {
   return runtime.$queryRawUnsafe(
     `
@@ -441,6 +458,11 @@ async function runSmoke() {
     );
     await expectSqlState(
       "42501",
+      () => callIdentityLocatorBoundary(runtime),
+      /permission denied for function identity_email_claim_assert_invite_locator_v1/iu,
+    );
+    await expectSqlState(
+      "42501",
       () => callIdentityTransitionBoundary(runtime),
       /permission denied for function identity_email_claim_transition_v2/iu,
     );
@@ -522,6 +544,11 @@ async function runSmoke() {
     );
     await expectSqlState(
       "23503",
+      () => callIdentityLocatorBoundary(runtime),
+      /locator was not found/iu,
+    );
+    await expectSqlState(
+      "23503",
       () => callIdentityTransitionBoundary(runtime),
       /claim was not found/iu,
     );
@@ -573,7 +600,7 @@ async function runSmoke() {
         ok: true,
         schemaVersion: 1,
         database: databaseName,
-        preEnrollmentPermissionDenials: 8,
+        preEnrollmentPermissionDenials: 9,
         applicationFunctionGrants:
           APPLICATION_RUNTIME_FUNCTIONS.length,
         excludedWorkerFunctionGrants: 0,

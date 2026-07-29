@@ -87,14 +87,14 @@ function catalogRow(overrides = {}) {
   return {
     expected_relation_count: "5",
     matched_relation_count: "5",
-    expected_column_count: "29",
-    matched_column_count: "29",
-    matched_constraint_count: "10",
-    actual_constraint_count: "10",
-    matched_index_count: "8",
-    actual_index_count: "8",
-    matched_function_count: "9",
-    actual_function_count: "9",
+    expected_column_count: "30",
+    matched_column_count: "30",
+    matched_constraint_count: "11",
+    actual_constraint_count: "11",
+    matched_index_count: "9",
+    actual_index_count: "9",
+    matched_function_count: "10",
+    actual_function_count: "10",
     matched_enum_label_count: "3",
     total_enum_label_count: "3",
     matched_trigger_count: "1",
@@ -543,6 +543,11 @@ test("timeouts are bounded and embedded in the one-connection read-only URL", ()
 });
 
 test("the manifest exposes exactly two create-only proposal codes and exact column ACL", () => {
+  assert.equal(CURRENT_EXPECTED_MIGRATION_COUNT, 170);
+  assert.equal(
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+    "20260729233000_identity_activation_locator",
+  );
   assert.deepEqual(
     Object.entries(FINDING_MANIFEST)
       .filter(([, severity]) => severity === "PROPOSAL")
@@ -594,6 +599,10 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     REQUIRED_COLUMN_SELECTS._prisma_migrations.includes("checksum"),
     false,
   );
+  assert.equal(
+    REQUIRED_COLUMN_SELECTS.IdentityEmailClaim.includes("workflowLocator"),
+    false,
+  );
   for (const unsafePrivilege of [
     { current_database_connect_grant_option: true },
     { public_schema_usage_grant_option: true },
@@ -615,10 +624,10 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
     );
   }
   for (const catalogDrift of [
-    { matched_column_count: "28" },
-    { matched_constraint_count: "9" },
-    { actual_index_count: "9" },
-    { actual_function_count: "10" },
+    { matched_column_count: "29" },
+    { matched_constraint_count: "10" },
+    { actual_index_count: "10" },
+    { actual_function_count: "11" },
     { total_enum_label_count: "4" },
     { actual_identity_claim_trigger_count: "2" },
     { matched_ri_trigger_count: "7" },
@@ -628,6 +637,47 @@ test("the manifest exposes exactly two create-only proposal codes and exact colu
   }
   assert.match(CATALOG_STATE_SQL, /pg_catalog\.sha256/iu);
   assert.match(CATALOG_STATE_SQL, /pg_get_function_identity_arguments/iu);
+  assert.match(CATALOG_STATE_SQL, /workflowLocator/u);
+  assert.match(
+    CATALOG_STATE_SQL,
+    /IdentityEmailClaim_workflow_locator_check/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /6e0abd4cccc01c0a8412c04faee92b9ec93984ccc9a840557178b27837422096/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /identity_email_claim_workflow_locator_uidx/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /b06323d8a990d2e1d76457425cf9051e08d916ee5f25d0649836186a53dbf920/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /identity_email_claim_assert_invite_locator_v1/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /requested_workflow_locator text, expected_tenant_id text, expected_subject_id text, expected_revision integer/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /f0da633f430e049b5577070b0e665a7911f1ef053011eeeeb43baa0e72cd4fa5/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /433e282c5ce0920ebad6d1ced19220f870e3944d84ed6a0e7ddb7d53fd9cd411/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /IdentityEmailClaim_revision_guard_trigger/u,
+  );
+  assert.match(
+    CATALOG_STATE_SQL,
+    /388dcc06ff27451656b844d302b4a536f7720062f470f0c2b8befd884be9c6a7/u,
+  );
   assert.match(CATALOG_STATE_SQL, /format_type/iu);
   assert.match(CATALOG_STATE_SQL, /matched_ri_trigger_count/iu);
   assert.match(CATALOG_STATE_SQL, /trigger_row\.tgenabled = 'O'/u);

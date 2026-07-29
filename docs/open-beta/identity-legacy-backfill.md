@@ -2,12 +2,12 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.4 |
+| Версия | 1.5 |
 | Дата | 29.07.2026 |
 | Backlog | `BETA-IAM-004B` |
 | Contract | `IDENTITY_LEGACY_RECONCILIATION_V1` |
-| Schema target | exact `CURRENT_169` |
-| Текущий статус | `IMPLEMENTED_CANDIDATE`: local, exact-head CI и финальный independent security review приняты; production-like inventory pending |
+| Schema target | exact `CURRENT_170` candidate |
+| Текущий статус | Locator-aware contract реализован локально; exact-head CI/review для `CURRENT_170` pending, production-like inventory pending |
 | Release decision | `NO-GO`; production inventory не выполнялся, proposal/apply/rollback отсутствуют |
 | Deployment | `NOT DEPLOYED`; аккаунты, invites, tokens и outbound effects не создаются |
 
@@ -20,7 +20,7 @@ Migration 169 намеренно оставила историческим `User
 
 Текущий bounded slice выполняет только privacy-safe inventory:
 
-- читает глобальный identity namespace на exact `CURRENT_169`;
+- читает глобальный identity namespace на exact `CURRENT_170`;
 - классифицирует текущих owner-кандидатов, terminal history, collision,
   mismatch и review-only строки;
 - выдаёт только aggregate/HMAC-bound evidence;
@@ -34,8 +34,10 @@ fail-closed attestation path, но в рамках текущего решени
 zero-diff являются будущими отдельными решениями. Наличие decision
 `READY_FOR_PROPOSAL` не является таким разрешением.
 
-Обе Platform Admin route сохраняют `503`, application runtime сохраняет exact
-six-RPC allowlist и zero effective `IdentityEmailClaim` table DML.
+Обе Platform Admin route сохраняют `503`, application runtime candidate
+сохраняет exact seven-RPC allowlist и zero effective `IdentityEmailClaim`
+table DML. Reader остаётся column-scoped: новый `workflowLocator` входит в
+exact catalog, но намеренно не входит в его `22` разрешённые SELECT columns.
 
 ## 2. Модель ownership
 
@@ -202,10 +204,10 @@ Exact catalog admission проверяет:
 
 ```text
 relations                 = 5
-catalog columns           = 29 IAM columns
-constraints               = 10
-indexes                   = 8
-functions                 = 9
+catalog columns           = 30 IAM columns
+constraints               = 11
+indexes                   = 9
+functions                 = 10
 IdentityEmailClaimType    = INVITE, USER, EMAIL_CHANGE / exact order
 IdentityEmailClaim trigger = 1
 enabled PG16 internal RI FK triggers = 8
@@ -301,8 +303,8 @@ password/token/hash, invite URL, database URL/name, ciphertext и secrets.
 
 Inventory немедленно прекращается с zero DML, если:
 
-1. schema не exact `CURRENT_169`, migrations unfinished либо latest migration
-   отличается от `20260729230000_identity_invite_writer_boundary`;
+1. schema не exact `CURRENT_170`, migrations unfinished либо latest migration
+   отличается от `20260729233000_identity_activation_locator`;
 2. release SHA/artifact, target, expected database, production attestation
    либо approved database identity digest не совпадают;
 3. remote transport не использует exact strict TLS либо production backend
@@ -333,8 +335,8 @@ authorization из read-only report:
 3. выполнить disposable-clone row dry-run с lock/recheck/CAS;
 4. отдельно принять production apply authority, backup и rollback;
 5. выполнить apply, rollback rehearsal и повторный zero-diff inventory;
-6. только после zero blocking перейти к activation locator, encrypted outbox,
-   persisted GO и initial OWNER invite.
+6. только после zero blocking и принятия locator exact-head перейти к sealed
+   issue-by-locator, encrypted outbox, persisted GO и initial OWNER invite.
 
 Production proposal/apply нельзя добавлять как скрытый flag текущего script.
 Это должен быть отдельный reviewed contract с явной authority,
@@ -342,7 +344,7 @@ idempotency, audit и rollback evidence.
 
 ## 10. Acceptance evidence
 
-На момент версии `1.3` принято local engineering evidence текущего worktree:
+Для historical `CURRENT_169` версии `1.3` принято local engineering evidence:
 
 ```text
 core --self-test                         = PASS / 18 checks
@@ -364,7 +366,7 @@ cleanup residue                          = 0 databases / 0 roles / 0 parameter A
 Smoke использовал три отдельные exact-column least-privilege reader role.
 Все его reports явно имели `SYNTHETIC_FIXTURE /
 releaseArtifactBound=false`. Local harness не является production-like
-inventory и не использует production data. Local evidence также подтвердило
+inventory и не использует production data. Historical evidence подтвердило
 exact catalog `5 relations / 29 IAM columns / 10 constraints / 8 indexes /
 9 functions / 3 ordered enum labels / 1 identity trigger / 8 enabled PG16
 internal RI FK triggers`, reader allowlist `22 columns` без `updatedAt`,
@@ -381,6 +383,16 @@ negative и все authority grants гарантированно очищают�
 cleanup подтвердил `clusterAclRestored=true` и zero DB/role/parameter-ACL
 residue в source cluster.
 
+`CURRENT_170` candidate обновляет exact catalog до
+`5 relations / 30 IAM columns / 11 constraints / 9 indexes / 10 functions`.
+Он проверяет `workflowLocator`, его CHECK/partial unique index, sealed locator
+RPC и изменённый revision guard по exact definitions/digests. Reader allowlist
+остаётся прежним: `22` column grants, без `workflowLocator`, `updatedAt`,
+password/token material или full-row `SELECT`. Exact-head artifact binding,
+CI и independent security review для нового head ещё pending. Locator-aware
+`CURRENT_170` full PostgreSQL inventory smoke локально прошёл; принятые
+`CURRENT_169` результаты не являются exact-head evidence нового candidate.
+
 В CI добавлены отдельные gates:
 
 - `Validate legacy identity read-only inventory` запускает
@@ -390,7 +402,7 @@ residue в source cluster.
 - `Rehearse legacy identity inventory on disposable clones` запускает
   `pnpm --filter database db:smoke:identity-legacy-backfill-inventory`.
 
-Exact-head implementation
+Historical `CURRENT_169` exact-head implementation
 `d1162eed042893ec3b27ed823bdaddfa64c7e90f` принят GitHub Actions
 [`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
 (`run #39`), все три job — `PASS`. Финальный independent security review
@@ -404,12 +416,13 @@ Exact-head implementation
 Принятый `CURRENT_169` writer-boundary checkpoint
 `f5d39fd89145c995c51e7005698327f5581a5cd8` / GitHub CI
 [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
-(`run #37`), `3/3 PASS`, является prerequisite, но не evidence нового
-inventory slice и не production-like admission.
+(`run #37`), `3/3 PASS`, является historical prerequisite, но не evidence
+locator-aware `CURRENT_170` inventory slice и не production-like admission.
 
 Связанные документы:
 
 - [identity invite writer boundary](./identity-invite-writer-boundary.md);
 - [identity email claim foundation](./identity-email-claim-foundation.md);
+- [identity activation locator](./identity-activation-locator.md);
 - [initial OWNER identity and activation](./initial-owner-identity-and-activation.md);
 - [shared multi-tenant launch checklist](./shared-multi-tenant-launch-checklist.md).

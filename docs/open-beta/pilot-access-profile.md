@@ -3,17 +3,18 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.14                                                   |
+| Версия        | 1.15                                                   |
 | Дата          | 29.07.2026                                             |
 | Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
 | Область       | Собственная сеть или явно разрешённые клубы            |
 | Назначение    | Первый shared external tenant и последующая когорта    |
-| Schema target | `CURRENT_169` |
+| Schema target | `CURRENT_170` candidate |
 | Previous accepted baseline | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
 | Previous accepted exact-head | `d525b736...` / CI `30447467729`; `3/3 PASS` |
 | Previous accepted checkpoint | exact-head `3b8228dd...` / CI `30460154200`; `3/3 PASS` |
-| Current engineering checkpoint | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS`, not deployed |
+| Current engineering checkpoint | `CURRENT_170`; local PostgreSQL PASS, exact-head CI/review pending, not deployed |
+| Historical accepted checkpoint | `CURRENT_169` exact-head `f5d39fd...` / CI `30467882578`; `3/3 PASS` |
 | Accepted prerequisite | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS |
 | Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
 
@@ -22,12 +23,16 @@ Persisted stage/trial, атомарный six-row entitlement profile и баз�
 deny-by-default policy уже реализованы. Shared shell provisioning candidate
 атомарно создаёт suspended tenant/store/profile, OWNER capability override и
 canonical owner-email claim, но намеренно не создаёт `User`, `UserInvite`,
-token, trial, outbox или письмо. Engineering exact-head `CURRENT_169`
+token, trial, outbox или письмо. Historical engineering exact-head `CURRENT_169`
 `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
 [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
 (`run #37`), `3/3 PASS`, и independent review без новых P0/P1; принятый
 remote `CURRENT_168` относится только к предыдущему shell-only prerequisite.
-Email delivery, dedicated activation,
+Migration 170 добавляет immutable opaque locator и PII-free sealed replay
+assert; current runtime allowlist содержит exact семь RPC при zero
+`IdentityEmailClaim` table privileges. Local PostgreSQL evidence принято
+только как candidate, exact-head CI/review ещё pending. Sealed issue-by-locator,
+email delivery и dedicated activation,
 route/job/Telegram/integration adoption, role matrix и production-like
 evidence ещё не завершены.
 Initial shared-beta profile содержит пять product modules и supporting
@@ -49,8 +54,8 @@ Local public-only pinned-path evidence прошёл admission suite `19/19`; е�
 исторический prerequisite вместе с authority/application/PostgreSQL gates
 прошёл remote CI как `CURRENT_165` на
 `4bd6a036...` / `30428288353`; documentation/evidence successor
-`7c20adec...` / `30429463161` также зелёный. Schema target —
-`CURRENT_169`. Previous accepted engineering baseline связан с PR head
+`7c20adec...` / `30429463161` также зелёный. Current schema target —
+`CURRENT_170`. Previous accepted engineering baseline связан с PR head
 `bbef153a288bfdf1c3573eb704f27c013cc0e856` / merge-ref CI `30443837684`
 (`run #23`), не exact-SHA checkout evidence: `3/3 PASS`, PostgreSQL job
 `90549245372` подтвердил
@@ -90,17 +95,19 @@ provider-write P1 закрыты. Actual non-owner runtime/app DB role всё е
 пройти admission и получить explicit `EXECUTE` grant (`PUBLIC EXECUTE`
 revoked); batch/rebind/future provider writers остаются fail-closed,
 whole-transaction bounded retry — defense-in-depth.
-Текущий `CURRENT_169` implementation локально подтвердил clean migrations
-`169/169`, identity `1 CREATED + 99 ALREADY_RESERVED`, revoke→same-email
-reserve, shell integration `2/2`, focused `89/89` и full API
-`99 suites / 1940 passed / 2 todo`. Engineering exact-head
+Текущий `CURRENT_170` candidate локально подтвердил clean migrations
+`170/170`, populated `169 → 170`, identity
+`1 CREATED + 99 ALREADY_RESERVED`, revoke→same-email reserve, locator/ACL/
+rollback checks и shell integration `2/2`; full API —
+`101 suites / 1960 passed / 2 todo`. Exact-head CI/review для этого candidate
+pending. Historical engineering exact-head
 `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
 (`run #37`) принят, `3/3 PASS`, и independent review без новых P0/P1.
 Предыдущий `CURRENT_168` implementation
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
 `3/3 PASS`, и независимым review без новых P0; он остаётся prerequisite, но
-не является exact-head evidence текущей migration 169.
+не является exact-head evidence текущей migration 170.
 Production authority roots
 остаются `EMPTY / FAIL-CLOSED`, поэтому fixture не является production-like
 authority или Gate 2 evidence. Experimental Node.js 22 module mock учитывается

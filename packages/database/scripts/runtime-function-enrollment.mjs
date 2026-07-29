@@ -5,8 +5,8 @@ export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
 export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
 export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
-  "20260729230000_identity_invite_writer_boundary";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 169;
+  "20260729233000_identity_activation_locator";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 170;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -42,6 +42,15 @@ export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
       'public."identity_email_claim_assert_invite_v1"(text,text,text,integer)',
     grantSignature:
       'public."identity_email_claim_assert_invite_v1"(TEXT, TEXT, TEXT, INTEGER)',
+    securityDefiner: true,
+    volatility: "v",
+  }),
+  Object.freeze({
+    key: "identityEmailClaimAssertInviteLocator",
+    catalogSignature:
+      'public."identity_email_claim_assert_invite_locator_v1"(text,text,text,integer)',
+    grantSignature:
+      'public."identity_email_claim_assert_invite_locator_v1"(TEXT, TEXT, TEXT, INTEGER)',
     securityDefiner: true,
     volatility: "v",
   }),
@@ -1081,6 +1090,7 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /identity_email_claim_reserve_invite_v1/u);
   assert.match(sql, /identity_email_claim_reserve_invite_v2/u);
   assert.match(sql, /identity_email_claim_assert_invite_v1/u);
+  assert.match(sql, /identity_email_claim_assert_invite_locator_v1/u);
   assert.match(sql, /identity_email_claim_transition_v2/u);
   assert.match(sql, /identity_email_claim_release_v2/u);
   assert.match(

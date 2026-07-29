@@ -19,9 +19,9 @@ const SOURCE_DATABASE_PATTERN = /^[a-z][a-z0-9_]{0,59}_ci$/u;
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const EXPECTED_MIGRATION_COUNT = 169;
+const EXPECTED_MIGRATION_COUNT = 170;
 const EXPECTED_LATEST_MIGRATION =
-  "20260729230000_identity_invite_writer_boundary";
+  "20260729233000_identity_activation_locator";
 const ADMIN_CONNECT_TIMEOUT_SECONDS = 10;
 const ADMIN_LOCK_TIMEOUT_MS = 5_000;
 const ADMIN_STATEMENT_TIMEOUT_MS = 120_000;
@@ -62,6 +62,7 @@ const IDENTITY_FUNCTION_SIGNATURES = Object.freeze([
   'public."identity_email_claim_reserve_invite_v1"(text,text,text)',
   'public."identity_email_claim_reserve_invite_v2"(text,text,text)',
   'public."identity_email_claim_assert_invite_v1"(text,text,text,integer)',
+  'public."identity_email_claim_assert_invite_locator_v1"(text,text,text,integer)',
   'public."identity_email_claim_transition_v1"(text,text,text,text,integer,text,text)',
   'public."identity_email_claim_transition_v2"(text,text,text,text,integer,text,text)',
   'public."identity_email_claim_release_v1"(text,text,text,text,integer)',
@@ -489,6 +490,7 @@ async function createClaim(
     claimType,
     tenantId,
     subjectId,
+    workflowLocator = subjectId,
     revision = 1,
   },
 ) {
@@ -498,10 +500,29 @@ async function createClaim(
       claimType,
       tenantId,
       subjectId,
+      workflowLocator,
       revision,
     },
   });
   collectSensitive(state, emailCanonical, tenantId, subjectId);
+}
+
+async function createLegacyClaimBypassingRevisionGuard(
+  prisma,
+  state,
+  claim,
+) {
+  const trigger = '"IdentityEmailClaim_revision_guard_trigger"';
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE public."IdentityEmailClaim" DISABLE TRIGGER ${trigger}`,
+  );
+  try {
+    await createClaim(prisma, state, claim);
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE public."IdentityEmailClaim" ENABLE TRIGGER ${trigger}`,
+    );
+  }
 }
 
 async function transitionClaim(
@@ -900,11 +921,12 @@ async function seedAdversarialScenario(prisma, state) {
     tenantId: tenantA,
     subjectId: randomUUID(),
   });
-  await createClaim(prisma, state, {
+  await createLegacyClaimBypassingRevisionGuard(prisma, state, {
     emailCanonical: `email-change.${state.suffix}@example.test`,
     claimType: "EMAIL_CHANGE",
     tenantId: tenantA,
     subjectId: `legacy-claim-${state.suffix}`,
+    workflowLocator: randomUUID(),
   });
 
   await createInvite(prisma, state, {
@@ -1692,6 +1714,17 @@ export function runSelfTest() {
   ]);
   assert.equal(READER_COLUMN_GRANTS.User.includes("passwordHash"), false);
   assert.equal(READER_COLUMN_GRANTS.UserInvite.includes("tokenHash"), false);
+  assert.equal(EXPECTED_MIGRATION_COUNT, 170);
+  assert.equal(
+    EXPECTED_LATEST_MIGRATION,
+    "20260729233000_identity_activation_locator",
+  );
+  assert.equal(
+    IDENTITY_FUNCTION_SIGNATURES.includes(
+      'public."identity_email_claim_assert_invite_locator_v1"(text,text,text,integer)',
+    ),
+    true,
+  );
   const boundedAdminUrl = new URL(
     databaseUrlFor(
       new URL(
@@ -1713,7 +1746,7 @@ export function runSelfTest() {
     /statement_timeout=120000/u,
   );
   return {
-    checks: 18,
+    checks: 21,
     destructiveTarget: "generated-clones-only",
     script: SCRIPT_NAME,
     sourceDatabaseWrites: false,

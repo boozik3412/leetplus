@@ -598,13 +598,14 @@ model UserInvite {
 /// subjectId is deliberately polymorphic until Identity and TenantMembership
 /// become separate first-class models.
 model IdentityEmailClaim {
-  emailCanonical String                 @id @db.VarChar(320)
-  claimType      IdentityEmailClaimType
-  tenantId       String
-  subjectId      String
-  revision       Int                    @default(1)
-  createdAt      DateTime               @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime               @default(now()) @updatedAt @db.Timestamptz(3)
+  emailCanonical  String                 @id @db.VarChar(320)
+  claimType       IdentityEmailClaimType
+  tenantId        String
+  subjectId       String
+  workflowLocator String
+  revision        Int                    @default(1)
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime               @default(now()) @updatedAt @db.Timestamptz(3)
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 

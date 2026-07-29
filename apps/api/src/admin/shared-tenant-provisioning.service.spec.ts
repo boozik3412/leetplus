@@ -125,8 +125,8 @@ describe('SharedTenantProvisioningService shell boundary', () => {
   let reserveInvite: jest.SpiedFunction<
     IdentityEmailClaimService['reserveInvite']
   >;
-  let assertInvite: jest.SpiedFunction<
-    IdentityEmailClaimService['assertInvite']
+  let assertInviteLocator: jest.SpiedFunction<
+    IdentityEmailClaimService['assertInviteLocator']
   >;
   let service: SharedTenantProvisioningService;
 
@@ -157,15 +157,16 @@ describe('SharedTenantProvisioningService shell boundary', () => {
         ...identity.fingerprint(input.email),
       }),
     );
-    assertInvite = jest.spyOn(identity, 'assertInvite');
-    assertInvite.mockImplementation((_tx, input) =>
+    assertInviteLocator = jest.spyOn(identity, 'assertInviteLocator');
+    assertInviteLocator.mockImplementation((_tx, input) =>
       Promise.resolve({
         schemaVersion: 1,
-        operation: 'ASSERT_INVITE',
+        operation: 'ASSERT_INVITE_LOCATOR',
         decision: 'MATCHED',
         claimType: IdentityEmailClaimType.INVITE,
         tenantId: input.tenantId,
         subjectId: input.subjectId,
+        workflowLocator: input.workflowLocator,
         revision: input.expectedRevision,
       }),
     );
@@ -322,7 +323,7 @@ describe('SharedTenantProvisioningService shell boundary', () => {
   });
 
   it('replays the exact HMAC-bound shell without a second reservation', async () => {
-    await service.provision(platformAdmin, provisioningDto());
+    const created = await service.provision(platformAdmin, provisioningDto());
     const audit = firstCallData(prisma.platformAdminAuditEvent.create);
 
     prisma.tenant.findFirst.mockResolvedValue({ id: TENANT_ID });
@@ -345,11 +346,11 @@ describe('SharedTenantProvisioningService shell boundary', () => {
       },
     });
     expect(reserveInvite).not.toHaveBeenCalled();
-    expect(assertInvite).toHaveBeenCalledWith(
+    expect(assertInviteLocator).toHaveBeenCalledWith(
       prisma,
       expect.objectContaining({
-        email: 'OWNER@EXAMPLE.TEST',
         tenantId: TENANT_ID,
+        workflowLocator: created.ownerIdentity.reservationId,
       }),
     );
 

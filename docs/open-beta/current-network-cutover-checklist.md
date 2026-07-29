@@ -3,7 +3,7 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.19.1                                             |
+| Версия          | 1.20.0                                             |
 | Дата            | 29.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
@@ -15,8 +15,8 @@
 
 Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
 `Full candidate SHA` и не заменяют CI/review/evidence нового exact current
-candidate, который должен включать additive migrations `163..169` и пройти
-`CURRENT_169`
+candidate, который должен включать additive migrations `163..170` и пройти
+`CURRENT_170`
 admission.
 
 ## A. Release identity и authority
@@ -79,7 +79,7 @@ admission.
 - [x] Historical `CURRENT_168` exact-head
       `3b8228dd278fae062c753bf4301e0339ba93738b` прошёл CI `30460154200`,
       `3/3 PASS`, и independent review без новых P0.
-- [x] Engineering exact `CURRENT_169` candidate
+- [x] Historical engineering exact `CURRENT_169` checkpoint
       `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
       [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
       (`run #37`), `3/3 PASS`: Application `90630292527`, authority-root
@@ -87,6 +87,12 @@ admission.
       implementation/security review и review compatibility fix не нашли
       новых P0/P1; у fix нет P2. Это engineering checkpoint, не production-like
       admission и не разрешение на cutover.
+- [ ] Exact-head CI и independent review current `CURRENT_170` candidate
+      приняты. Локальный PostgreSQL `16.13` уже подтвердил clean `170/170`,
+      populated `169 → 170`, exact seven-RPC runtime enrollment при zero
+      `IdentityEmailClaim` table privileges, locator/ACL/rollback и shell
+      `2/2`, но это не заполняет checkbox и не является production-like
+      admission.
 - [x] Rejected initial `CURRENT_169` exact-head
       `f9db2643b576778fbb0c651229c37e42d3f0892c`, CI
       [`30467211571`](https://github.com/boozik3412/leetplus/actions/runs/30467211571)
@@ -205,16 +211,17 @@ admission.
       `20260729160000_guest_game_delivery_claim_fence` и
       `20260729190000_identity_email_claim_foundation` и
       `20260729210000_identity_email_claim_write_boundary` и
-      `20260729230000_identity_invite_writer_boundary`; они не изменили
-      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_169`
+      `20260729230000_identity_invite_writer_boundary` и
+      `20260729233000_identity_activation_locator`; они не изменили protected
+      `StaffTask*` relations. Выпущен отдельный `CURRENT_170`
       envelope с новым nonce-bound binding, DB marker повторно заменён, третий
       admission schema `v2` завершился exit `0`; reuse expand marker запрещён.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
       release SHA и thresholds; schema-first gate равен
-      `CURRENT_169`, `migrationCount=169`, latest
-      `20260729230000_identity_invite_writer_boundary`, `unfinished=0`,
+      `CURRENT_170`, `migrationCount=170`, latest
+      `20260729233000_identity_activation_locator`, `unfinished=0`,
       `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
       `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
       actionable cap не превышен.
@@ -495,6 +502,11 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.20.0`, 29.07.2026 — current cutover target синхронизирован с
+  `CURRENT_170` (`163..170`, latest
+  `20260729233000_identity_activation_locator`). Локальный PostgreSQL 16
+  candidate подтверждён, но exact-head CI/review, production-like admission,
+  cutover и внешний доступ остаются unchecked `NO-GO`.
 - `1.19.1`, 29.07.2026 — engineering exact-head `CURRENT_169`
   `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
   `30467882578` (`run #37`), `3/3 PASS`, и independent review без новых

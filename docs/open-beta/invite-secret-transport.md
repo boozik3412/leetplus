@@ -2,16 +2,18 @@
 
 | Поле             | Значение                                                       |
 | ---------------- | -------------------------------------------------------------- |
-| Версия           | 1.1                                                            |
+| Версия           | 1.2                                                            |
 | Дата             | 29.07.2026                                                     |
 | Статус           | `ACCEPTED_ENGINEERING_CHECKPOINT`; exact-head CI/review приняты |
-| Schema target    | `CURRENT_169`; migration и runtime RPC allowlist не изменялись |
+| Schema target    | `CURRENT_170` candidate; locator CI/review ещё не приняты       |
 | Release decision | `NO-GO` для external tenant, initial OWNER invite и production |
 
 Этот checkpoint изолирует bearer-secret приглашения от HTTP path и query.
 Он закрывает только transport implementation. Он не реализует mailbox
-delivery, identity outbox, activation locator, initial OWNER activation,
-persisted `SHARED BETA GO` или право создать учётную запись тестера.
+delivery, identity outbox, initial OWNER issue/activation, persisted
+`SHARED BETA GO` или право создать учётную запись тестера. Activation locator
+реализован отдельно только как локально проверенный schema/application
+candidate; он не меняет принятый transport checkpoint и не открывает routes.
 
 ## 1. Канонический контракт
 
@@ -143,7 +145,7 @@ token-bearing legacy path patterns — raw request target, включая все
 
 Не реализованы:
 
-- privacy-safe activation locator;
+- sealed issue-by-locator, который создаёт initial OWNER invite;
 - encrypted leased `IdentityMailOutbox`;
 - verified SMTP/provider delivery, resend и delivery reconciliation;
 - protected initial OWNER issue/reissue/revoke/resend;
@@ -156,18 +158,34 @@ Email verification (`confirm-email`) использует отдельный leg
 
 ### MIGRATION_170_ACTIVATION_LOCATOR
 
-Решение о migration `170` ещё не принято. Schema-neutral locator сейчас
-невозможен без ослабления границы:
+Migration `20260729233000_identity_activation_locator` реализована как
+`CURRENT_170` candidate. Она добавляет в `IdentityEmailClaim` immutable opaque
+UUID `workflowLocator`: для initial OWNER он равен server-generated
+reservation UUID и не меняется при transition `INVITE → USER`.
 
-- `IdentityEmailClaim` адресуется по `emailCanonical`;
-- shell сохраняет reservation UUID/HMAC evidence, но не raw email;
-- все текущие sealed identity RPC требуют raw email;
-- runtime имеет zero table `SELECT` на `IdentityEmailClaim`.
+Новый sealed
+`identity_email_claim_assert_invite_locator_v1(locator, tenant, subject,
+revision)`:
 
-Full-table или column-wide runtime `SELECT` fallback запрещён. Если будет
-принят новый sealed locator/outbox primitive, schema target станет
-`CURRENT_170`, а inventory, release artifact и admission evidence
-`CURRENT_169` должны быть заново собраны и привязаны к новому exact head.
+- находит только exact `INVITE` claim без передачи raw e-mail caller'ом;
+- соблюдает порядок
+  `bounded lookup → canonical e-mail advisory lock → SELECT ... FOR UPDATE`;
+- после lock повторно проверяет tenant/type/subject/revision;
+- возвращает exact PII-free receipt без email, HMAC, token, URL или ciphertext;
+- не даёт runtime table/column `SELECT` на `IdentityEmailClaim`.
+
+Application allowlist кандидата содержит семь RPC: две guest-game, четыре
+прежние identity writer RPC и locator assert. Shell replay использует
+persisted `ownerIdentity.reservationId`, но locator остаётся только correlation
+key, не authority и не заменяет persisted GO.
+
+Migration не создаёт `UserInvite`, token, outbox, trial или письмо и не
+включает admin route. Локальный PostgreSQL 16 upgrade/ACL/concurrency evidence
+получен, но exact committed SHA, CI, independent review и новый release-bound
+inventory ещё не приняты. Поэтому принятые `CURRENT_169` artifact/admission
+evidence сохраняются только как historical prerequisite и должны быть заново
+собраны для `CURRENT_170`. Полный контракт:
+[identity activation locator](./identity-activation-locator.md).
 
 ## 7. Production acceptance
 

@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.20                                                       |
+| Версия     | 1.21                                                       |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -21,11 +21,25 @@ Production IDs, email, телефоны, invite URL/token, password, database UR
 API keys, encryption/signing secrets и raw business data запрещено сохранять
 в git. В документах используются только aliases `Tenant A/B` и `Store A1..A4/B1`.
 
-## Текущий engineering checkpoint: `CURRENT_169`
+## Текущий engineering candidate: `CURRENT_170`
 
-Рабочий кандидат сохраняет shell-only service из `CURRENT_168` и переводит
-обычные application invite/accept writers на persisted provenance и sealed
-identity state machine. Launch checkboxes ниже этим не закрываются:
+Migration `20260729233000_identity_activation_locator` расширяет принятый
+`CURRENT_169` prerequisite immutable opaque `workflowLocator` и sealed
+PII-free locator assert. Shell replay теперь подтверждает reservation по
+persisted UUID без raw e-mail. Runtime candidate имеет exact семь application
+RPC — две guest-game и пять identity — при zero effective
+`IdentityEmailClaim` table privileges.
+
+Локальный PostgreSQL `16.13` подтвердил populated upgrade `169 → 170`, clean
+state `170/170`, locator backfill/immutability, PII-free exact receipt,
+lock-race/ACL checks, transactional rollback при legacy subject не в exact
+lowercase trimmed UUID, включая uppercase/whitespace, и shell integration
+`2/2`. Exact committed SHA, CI, independent review и новый
+release-bound inventory для `CURRENT_170` ещё pending. Migration не создаёт
+`UserInvite`, token, outbox, trial или письмо и не включает admin route.
+Launch checkboxes ниже этим не закрываются.
+
+Принятый historical `CURRENT_169` prerequisite сохраняет следующие evidence:
 
 - schema clean deploy на disposable PostgreSQL `16.13`: `169/169`;
 - identity idempotency: `100` конкурентных попыток,
@@ -33,7 +47,7 @@ identity state machine. Launch checkboxes ниже этим не закрыва�
 - transition replay повторно проверяет destination, explicit revoke сохраняет
   history и позволяет новую same-email reservation;
 - shell PostgreSQL integration: `2/2`;
-- runtime role: exact six application RPC, из них четыре
+- runtime role: historical exact six application RPC, из них четыре
   `reserve_v2/assert_v1/transition_v2/release_v2` identity boundary, и zero
   effective `IdentityEmailClaim` table DML;
 - application boundary разрешает `User` create только в `AuthService`, а
@@ -60,7 +74,7 @@ identity state machine. Launch checkboxes ниже этим не закрыва�
   `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
   (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke.
 
-Engineering exact-head
+Historical engineering exact-head
 `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
 [`30467882578`](https://github.com/boozik3412/leetplus/actions/runs/30467882578)
 (`run #37`), `3/3 PASS`, и independent review без новых P0/P1. Предыдущий
@@ -68,8 +82,9 @@ Engineering exact-head
 `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
 [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
 `3/3 PASS`, и независимым review без новых P0 только как historical
-prerequisite. Local engineering evidence не является production-like
-admission: persisted GO, production deploy и доступ тестеру ещё не приняты.
+prerequisite. Ни historical evidence, ни локальный `CURRENT_170` candidate не
+являются production-like admission: persisted GO, production deploy и доступ
+тестеру ещё не приняты.
 
 ## A. Gate 0: source и release
 
@@ -114,7 +129,8 @@ admission: persisted GO, production deploy и доступ тестеру ещё
 - [ ] Runtime DB role либо DB invariant запрещает прямое изменение
       `TenantModuleEntitlement` в обход profile-revision workflow.
 - [ ] Runtime DB role enrolled как отдельная non-owner identity: имеет exact
-      six-RPC allowlist и zero effective `IdentityEmailClaim` table DML;
+      seven-RPC allowlist на `CURRENT_170` и zero effective
+      `IdentityEmailClaim` table DML;
       migration owner/superuser не используется приложением.
 - [ ] Delivery, общий Langame sync и остальные jobs имеют durable
       claim/lease; старый permit не может commit/ack/send после suspend, а
@@ -176,6 +192,9 @@ Evidence:
       переиспользует другой production secret.
 - [ ] Activation имеет privacy-safe locator для зарезервированной identity и
       повторно проверяет exact claim под lock без raw email в audit/response.
+      Migration 170 реализует этот engineering candidate локально, но checkbox
+      остаётся открытым до exact-head CI/review, release-bound inventory и
+      использования locator в admitted activation.
 - [ ] Dedicated activation принимает persisted GO, запускает trial и атомарно
       создаёт email-bound `NETWORK OWNER` invite hash + encrypted mail outbox,
       переводя tenant в `ACTIVE/OWNER_INVITED`.
@@ -218,6 +237,9 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
+- [ ] exact-head CI и independent review для `CURRENT_170` activation locator;
+      local populated/clean PostgreSQL 16, ACL, rollback и shell evidence не
+      являются production-like admission;
 - [x] remote exact-head CI и independent review для `CURRENT_169`:
       `f5d39fd89145c995c51e7005698327f5581a5cd8` / CI `30467882578`
       (`run #37`), `3/3 PASS`, review PASS без новых P0/P1; это только

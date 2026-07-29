@@ -1,7 +1,12 @@
-import { PrismaClient } from "@prisma/client";
 import assert from "node:assert/strict";
-import { DESIGN_PARTNER_REQUIRED_ENV } from "./design-partner-access-profile.mjs";
 import {
+  DESIGN_PARTNER_OWNER_CAPABILITIES,
+  DESIGN_PARTNER_PROFILE_VERSION,
+} from "./design-partner-access-profile.mjs";
+import {
+  computeDesignPartnerManifestDigest,
+  computeDesignPartnerProvisionedInviteDigest,
+  DesignPartnerProvisioningError,
   hashInviteToken,
   normalizeDesignPartnerManifest,
   previewDesignPartnerProvisioning,
@@ -9,9 +14,11 @@ import {
   rotateDesignPartnerInvite,
   suspendDesignPartner,
 } from "./design-partner-provisioning.mjs";
+import { assertDesignPartnerSmokeDatabaseTarget } from "./design-partner-provisioning-smoke-target.mjs";
 
 const REQUIRED_CONFIRMATION = "run-design-partner-provisioning-smoke";
 const MANIFEST_HMAC_KEY = "synthetic-design-partner-manifest-hmac-key-aaaaaaaa";
+const DISABLED_CODE = "DESIGN_PARTNER_IDENTITY_WRITER_DISABLED";
 
 if (process.env.NODE_ENV === "production") {
   throw new Error(
@@ -26,7 +33,9 @@ if (
     `Set DESIGN_PARTNER_PROVISIONING_SMOKE_CONFIRM=${REQUIRED_CONFIRMATION}.`,
   );
 }
+assertDesignPartnerSmokeDatabaseTarget(process.env.DATABASE_URL);
 
+const { PrismaClient } = await import("@prisma/client");
 const prisma = new PrismaClient({ log: [] });
 const now = new Date();
 let tenantId = null;
@@ -43,6 +52,45 @@ async function cleanup() {
     await tx.store.deleteMany({ where: { tenantId } });
     await tx.tenant.deleteMany({ where: { id: tenantId } });
   });
+  const residue = await Promise.all([
+    prisma.tenant.count({ where: { id: tenantId } }),
+    prisma.userInvite.count({ where: { tenantId } }),
+    prisma.platformAdminAuditEvent.count({ where: { tenantId } }),
+    prisma.integrationSource.count({ where: { tenantId } }),
+    prisma.integrationCredential.count({ where: { tenantId } }),
+    prisma.store.count({ where: { tenantId } }),
+  ]);
+  assert.deepEqual(residue, [0, 0, 0, 0, 0, 0]);
+  tenantId = null;
+}
+
+async function assertIdentityWriterDisabled(operation, manifest, confirmation) {
+  let databaseAccessed = false;
+  let tokenGenerated = false;
+  const forbiddenClient = new Proxy(
+    {},
+    {
+      get() {
+        databaseAccessed = true;
+        throw new Error("Disabled writer attempted database access");
+      },
+    },
+  );
+
+  await assert.rejects(
+    operation(forbiddenClient, manifest, {
+      confirmation,
+      tokenFactory: () => {
+        tokenGenerated = true;
+        return "must-not-be-generated";
+      },
+    }),
+    (error) =>
+      error instanceof DesignPartnerProvisioningError &&
+      error.code === DISABLED_CODE,
+  );
+  assert.equal(databaseAccessed, false);
+  assert.equal(tokenGenerated, false);
 }
 
 try {
@@ -51,6 +99,10 @@ try {
     0,
     "Smoke requires the clean dedicated migration database.",
   );
+  assert.equal(await prisma.user.count(), 0);
+  assert.equal(await prisma.userInvite.count(), 0);
+  assert.equal(await prisma.identityEmailClaim.count(), 0);
+  assert.equal(await prisma.platformAdminAuditEvent.count(), 0);
   const manifest = normalizeDesignPartnerManifest(
     {
       partnerAlias: "DP_SMOKE",
@@ -64,211 +116,154 @@ try {
       ownerEmail: "design-partner-smoke@invalid.example",
       ownerFullName: "Synthetic Owner",
       supportOwnerAlias: "CI",
-      reason: "Disposable design-partner provisioning smoke",
+      reason: "Disposable design-partner isolation smoke",
       supportTicket: "CI-DP",
       accessExpiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
     },
     now,
   );
 
-  const preview = await previewDesignPartnerProvisioning(prisma, manifest, {
-    manifestHmacKey: MANIFEST_HMAC_KEY,
-  });
-  assert.equal(preview.decision, "READY_TO_PROVISION");
-
-  const provisioned = await provisionDesignPartner(prisma, manifest, {
-    now,
-    confirmation: `PROVISION ${manifest.tenantSlug}`,
-    manifestHmacKey: MANIFEST_HMAC_KEY,
-    runtimeEnv: DESIGN_PARTNER_REQUIRED_ENV,
-    tokenFactory: () => "ci-design-partner-token-000000000000000000000000",
-    webUrl: "https://design-partner-smoke.leetplus.ru",
-  });
-  assert.equal(provisioned.decision, "PROVISIONED_SUSPENDED");
-  assert.equal(provisioned.tenant.status, "SUSPENDED");
-  assert.equal(provisioned.store.isActive, false);
-  assert.equal(provisioned.store.gamificationEnabled, false);
-  assert.equal(
-    provisioned.ownerInvite.expiresAt,
-    manifest.accessExpiresAt.toISOString(),
-  );
-  assert.match(
-    provisioned.ownerInvite.url,
-    /^https:\/\/design-partner-smoke\.leetplus\.ru/,
-  );
-  tenantId = provisioned.tenant.id;
-
-  const repeated = await provisionDesignPartner(prisma, manifest, {
-    now,
-    confirmation: `PROVISION ${manifest.tenantSlug}`,
-    manifestHmacKey: MANIFEST_HMAC_KEY,
-    runtimeEnv: DESIGN_PARTNER_REQUIRED_ENV,
-    tokenFactory: () => {
-      throw new Error("An idempotent repeat must not generate another token.");
-    },
-    webUrl: "https://design-partner-smoke.leetplus.ru",
-  });
-  assert.equal(repeated.decision, "ALREADY_PROVISIONED");
-  assert.equal(repeated.inviteUrl, null);
-
-  const rotatedAt = new Date(now.getTime() + 500);
-  const generatedRotationTokens = [];
-  const rotationAttempts = await Promise.all(
-    [
-      "ci-rotated-design-partner-token-a-000000000000000000",
-      "ci-rotated-design-partner-token-b-000000000000000000",
-    ].map((candidateToken) =>
-      rotateDesignPartnerInvite(prisma, manifest, {
-        now: rotatedAt,
-        confirmation: `ROTATE_INVITE ${manifest.tenantSlug}`,
-        manifestHmacKey: MANIFEST_HMAC_KEY,
-        operationReason: "Rotate synthetic onboarding invite in CI smoke",
-        operationTicket: "CI-DP-ROTATE",
-        requestId: "CI-DP-ROTATE-0001",
-        runtimeEnv: DESIGN_PARTNER_REQUIRED_ENV,
-        tokenFactory: () => {
-          generatedRotationTokens.push(candidateToken);
-          return candidateToken;
-        },
-        webUrl: "https://design-partner-smoke.leetplus.ru",
-      }),
-    ),
-  );
-  const rotated = rotationAttempts.find(
-    (attempt) => attempt.decision === "INVITE_ROTATED",
-  );
-  const concurrentReplay = rotationAttempts.find(
-    (attempt) => attempt.decision === "INVITE_ROTATION_ALREADY_APPLIED",
-  );
-  assert.ok(rotated);
-  assert.ok(concurrentReplay);
-  assert.equal(generatedRotationTokens.length, 1);
-  assert.equal(rotated.decision, "INVITE_ROTATED");
-  assert.equal(rotated.previousPendingInvitesRevoked, 1);
-  assert.match(
-    rotated.ownerInvite.url,
-    /^https:\/\/design-partner-smoke\.leetplus\.ru/,
-  );
-  const inviteStateAfterRotation = await prisma.userInvite.findMany({
-    where: { tenantId },
-    orderBy: { createdAt: "asc" },
-    select: { tokenHash: true, expiresAt: true, acceptedAt: true },
-  });
-  assert.equal(inviteStateAfterRotation.length, 2);
-  assert.equal(
-    inviteStateAfterRotation.filter(
-      (invite) => invite.acceptedAt === null && invite.expiresAt > rotatedAt,
-    ).length,
-    1,
-  );
-  assert.equal(
-    inviteStateAfterRotation[1].tokenHash,
-    hashInviteToken(generatedRotationTokens[0]),
-  );
-  assert.notEqual(
-    inviteStateAfterRotation[1].tokenHash,
-    generatedRotationTokens[0],
-  );
-
-  const repeatedRotation = await rotateDesignPartnerInvite(prisma, manifest, {
-    now: new Date(rotatedAt.getTime() + 100),
-    confirmation: `ROTATE_INVITE ${manifest.tenantSlug}`,
-    manifestHmacKey: MANIFEST_HMAC_KEY,
-    operationReason: "Retry synthetic onboarding invite rotation",
-    operationTicket: "CI-DP-ROTATE",
-    requestId: "CI-DP-ROTATE-0001",
-    runtimeEnv: DESIGN_PARTNER_REQUIRED_ENV,
-    tokenFactory: () => {
-      throw new Error(
-        "An idempotent invite rotation repeat must not generate a token.",
-      );
-    },
-    webUrl: "https://design-partner-smoke.leetplus.ru",
-  });
-  assert.equal(repeatedRotation.decision, "INVITE_ROTATION_ALREADY_APPLIED");
-  assert.equal(await prisma.userInvite.count({ where: { tenantId } }), 2);
-
-  const postRotationPreview = await previewDesignPartnerProvisioning(
+  const emptyPreview = await previewDesignPartnerProvisioning(
     prisma,
     manifest,
     {
-      now: new Date(rotatedAt.getTime() + 200),
       manifestHmacKey: MANIFEST_HMAC_KEY,
     },
   );
-  assert.equal(postRotationPreview.decision, "ALREADY_PROVISIONED");
+  assert.equal(emptyPreview.decision, DISABLED_CODE);
+  assert.equal(emptyPreview.sharedSealedIdentityActivationRequired, true);
 
-  const rotationAudit = await prisma.platformAdminAuditEvent.findFirstOrThrow({
-    where: {
-      tenantId,
-      action: "SINGLE_DESIGN_PARTNER_INVITE_ROTATED",
-    },
-    select: {
-      action: true,
-      targetType: true,
-      targetId: true,
-      reason: true,
-      metadata: true,
-    },
-  });
-  const duplicateRotationAudit = await prisma.platformAdminAuditEvent.create({
-    data: {
-      tenantId,
-      ...rotationAudit,
-    },
-    select: { id: true },
-  });
-  await assert.rejects(
-    previewDesignPartnerProvisioning(prisma, manifest, {
-      now: new Date(rotatedAt.getTime() + 250),
-      manifestHmacKey: MANIFEST_HMAC_KEY,
-    }),
-    (error) => error?.code === "PROVISIONING_EVIDENCE_MISSING",
+  await assertIdentityWriterDisabled(
+    provisionDesignPartner,
+    manifest,
+    `PROVISION ${manifest.tenantSlug}`,
   );
-  await prisma.platformAdminAuditEvent.delete({
-    where: { id: duplicateRotationAudit.id },
-  });
+  await assertIdentityWriterDisabled(
+    rotateDesignPartnerInvite,
+    manifest,
+    `ROTATE_INVITE ${manifest.tenantSlug}`,
+  );
+  assert.equal(await prisma.tenant.count(), 0);
+  assert.equal(await prisma.userInvite.count(), 0);
 
-  const latestInvite = await prisma.userInvite.findFirstOrThrow({
-    where: { tenantId },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, tokenHash: true, expiresAt: true },
+  const fixture = await prisma.$transaction(async (tx) => {
+    const tenant = await tx.tenant.create({
+      data: {
+        name: manifest.tenantName,
+        slug: manifest.tenantSlug,
+        domain: manifest.tenantDomain,
+        status: "SUSPENDED",
+        statusChangedAt: now,
+        statusReason: "Synthetic legacy isolation fixture",
+      },
+      select: { id: true, slug: true, status: true },
+    });
+    const store = await tx.store.create({
+      data: {
+        tenantId: tenant.id,
+        name: manifest.storeName,
+        publicSlug: manifest.storePublicSlug,
+        address: manifest.storeAddress,
+        city: manifest.storeCity,
+        timeZone: manifest.storeTimeZone,
+        isActive: false,
+        gamificationEnabled: false,
+      },
+      select: { id: true, isActive: true, gamificationEnabled: true },
+    });
+    await tx.userRoleOverride.create({
+      data: {
+        tenantId: tenant.id,
+        role: "OWNER",
+        permissions: [...DESIGN_PARTNER_OWNER_CAPABILITIES],
+      },
+    });
+    const inviteTokenHash = hashInviteToken(
+      "synthetic-legacy-invite-token-for-disposable-smoke-only",
+    );
+    const invite = await tx.userInvite.create({
+      data: {
+        tenantId: tenant.id,
+        email: manifest.ownerEmail,
+        fullName: manifest.ownerFullName,
+        role: "OWNER",
+        accessScope: "NETWORK",
+        storeIds: [],
+        tokenHash: inviteTokenHash,
+        expiresAt: manifest.accessExpiresAt,
+      },
+      select: { id: true, tokenHash: true, expiresAt: true },
+    });
+    const manifestDigest = computeDesignPartnerManifestDigest(
+      manifest,
+      MANIFEST_HMAC_KEY,
+    );
+    const ownerInviteDigest = computeDesignPartnerProvisionedInviteDigest(
+      manifestDigest,
+      tenant.id,
+      store.id,
+      invite.id,
+      invite.tokenHash,
+      invite.expiresAt,
+      MANIFEST_HMAC_KEY,
+    );
+    await tx.platformAdminAuditEvent.create({
+      data: {
+        tenantId: tenant.id,
+        action: "SINGLE_DESIGN_PARTNER_PROVISIONED",
+        targetType: "TENANT",
+        targetId: tenant.id,
+        reason: manifest.reason,
+        metadata: {
+          profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
+          partnerAlias: manifest.partnerAlias,
+          supportOwnerAlias: manifest.supportOwnerAlias,
+          supportTicket: manifest.supportTicket,
+          storeId: store.id,
+          accessExpiresAt: manifest.accessExpiresAt.toISOString(),
+          dataMode: manifest.dataMode,
+          dedicatedDatabaseRequired: true,
+          inviteEmailBound: true,
+          initialTenantStatus: "SUSPENDED",
+          outboundDefault: "OFF",
+          manifestDigest,
+          manifestHmacKeyVersion: "v1",
+          ownerInviteId: invite.id,
+          ownerInviteExpiresAt: invite.expiresAt.toISOString(),
+          ownerInviteDigest,
+        },
+      },
+    });
+    return { tenant, store, invite };
   });
+  tenantId = fixture.tenant.id;
+
+  const legacyPreview = await previewDesignPartnerProvisioning(
+    prisma,
+    manifest,
+    {
+      now: new Date(now.getTime() + 100),
+      manifestHmacKey: MANIFEST_HMAC_KEY,
+    },
+  );
+  assert.equal(legacyPreview.decision, "ALREADY_PROVISIONED");
+  assert.equal(legacyPreview.tenant.status, "SUSPENDED");
+
   await prisma.userInvite.update({
-    where: { id: latestInvite.id },
+    where: { id: fixture.invite.id },
     data: { tokenHash: "0".repeat(64) },
   });
   await assert.rejects(
     previewDesignPartnerProvisioning(prisma, manifest, {
-      now: new Date(rotatedAt.getTime() + 300),
+      now: new Date(now.getTime() + 200),
       manifestHmacKey: MANIFEST_HMAC_KEY,
     }),
     (error) => error?.code === "PROVISIONING_EVIDENCE_MISSING",
   );
   await prisma.userInvite.update({
-    where: { id: latestInvite.id },
-    data: { tokenHash: latestInvite.tokenHash },
+    where: { id: fixture.invite.id },
+    data: { tokenHash: fixture.invite.tokenHash },
   });
-
-  await prisma.userInvite.update({
-    where: { id: latestInvite.id },
-    data: {
-      expiresAt: new Date(manifest.accessExpiresAt.getTime() + 60 * 1000),
-    },
-  });
-  await assert.rejects(
-    previewDesignPartnerProvisioning(prisma, manifest, {
-      now: new Date(rotatedAt.getTime() + 400),
-      manifestHmacKey: MANIFEST_HMAC_KEY,
-    }),
-    (error) => error?.code === "PROVISIONING_EVIDENCE_MISSING",
-  );
-  await prisma.userInvite.update({
-    where: { id: latestInvite.id },
-    data: { expiresAt: latestInvite.expiresAt },
-  });
-
-  assert.ok(Object.keys(DESIGN_PARTNER_REQUIRED_ENV).length > 10);
 
   const credential = await prisma.integrationCredential.create({
     data: {
@@ -291,12 +286,13 @@ try {
     },
   });
   await prisma.store.update({
-    where: { id: provisioned.store.id },
+    where: { id: fixture.store.id },
     data: { isActive: true, gamificationEnabled: true },
   });
 
+  const suspendedAt = new Date(now.getTime() + 1000);
   const suspended = await suspendDesignPartner(prisma, manifest, {
-    now: new Date(now.getTime() + 1000),
+    now: suspendedAt,
     confirmation: `SUSPEND ${manifest.tenantSlug}`,
     manifestHmacKey: MANIFEST_HMAC_KEY,
     operationReason: "Exercise emergency design-partner suspension in CI",
@@ -325,13 +321,11 @@ try {
   assert.deepEqual(finalState.integrationSources, [{ isActive: false }]);
   assert.deepEqual(finalState.integrationCredentials, [{ isActive: false }]);
   assert.ok(
-    finalState.userInvites.every(
-      (invite) => invite.expiresAt <= new Date(now.getTime() + 1000),
-    ),
+    finalState.userInvites.every((invite) => invite.expiresAt <= suspendedAt),
   );
 
   process.stdout.write(
-    "Design-partner provisioning PostgreSQL smoke passed: empty-database guard, suspended bootstrap, idempotent concurrent invite rotation, HMAC-bound invite receipts and drift-tolerant emergency suspend.\n",
+    "Design-partner writer-isolation PostgreSQL smoke passed: provision/rotate fail before DB/token, historical status stays read-only, and emergency suspend only narrows effects.\n",
   );
 } finally {
   await cleanup();

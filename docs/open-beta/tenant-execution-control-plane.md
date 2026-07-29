@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.29                                                                        |
+| Версия           | 1.30                                                                        |
 | Дата             | 29.07.2026                                                                  |
 | Статус           | Schema target `CURRENT_169`; engineering exact-head accepted, production-like admission pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
@@ -21,6 +21,12 @@ Legacy reconciliation ведётся по отдельному
 Обычные application invite/reissue/revoke/accept writers в `CURRENT_169`
 переведены на persisted claim provenance, но это не открывает Platform Admin
 activation route и не заменяет legacy inventory/backfill.
+Legacy isolated design-partner writers теперь fail-closed по
+[`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md):
+`provision`/`rotate-invite` отклоняются до manifest/Prisma/БД/token,
+`status` остаётся read-only, emergency `suspend` — narrowing-only. Schema,
+exact six-RPC allowlist и admin routes не изменены; PostgreSQL smoke, remote
+exact-head CI и independent review этой изоляции ещё pending.
 Документ не разрешает production migration или выдачу доступа.
 
 ## 1. Persisted control plane
@@ -468,7 +474,8 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
    prerequisite, затем отдельно выполнить production-like inventory и
    будущий signed
    proposal/apply/rollback исторических identity rows без provenance;
-   изолировать design-partner CLI от application runtime;
+   принять PostgreSQL smoke и remote exact-head CI уже прошедшей independent
+   review fail-closed изоляции design-partner identity writers;
 4. реализовать privacy-safe activation locator, encrypted outbox и
    fail-closed mail config;
 5. persisted release gates и dedicated initial OWNER

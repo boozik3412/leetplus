@@ -10,7 +10,6 @@ import {
 } from "./design-partner-access-profile.mjs";
 import {
   assertDesignPartnerRuntimeSafetyOverlay,
-  buildInviteUrl,
   computeDesignPartnerProvisionedInviteDigest,
   computeDesignPartnerManifestDigest,
   DesignPartnerProvisioningError,
@@ -19,6 +18,7 @@ import {
   previewDesignPartnerProvisioning,
   provisionDesignPartner,
   rotateDesignPartnerInvite,
+  suspendDesignPartner,
 } from "./design-partner-provisioning.mjs";
 
 const NOW = new Date("2026-07-28T12:00:00.000Z");
@@ -300,44 +300,14 @@ test("runtime safety overlay is exact and fails closed", () => {
   );
 });
 
-test("invite token hashing is deterministic while invite URL requires HTTPS", () => {
+test("legacy invite token hashing remains deterministic for read-only evidence", () => {
   assert.equal(
     hashInviteToken("secret"),
     "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b",
   );
-  assert.equal(
-    buildInviteUrl(
-      "https://partner-club.leetplus.ru/",
-      "a token",
-      "https://partner-club.leetplus.ru",
-    ),
-    "https://partner-club.leetplus.ru/register?invite=a%20token",
-  );
-  expectCode(
-    () => buildInviteUrl("http://pilot.leetplus.ru", "token"),
-    "UNSAFE_RUNTIME_ENVIRONMENT",
-  );
-  expectCode(
-    () =>
-      buildInviteUrl(
-        "https://partner-club.leetplus.ru@evil.example",
-        "token",
-        "https://partner-club.leetplus.ru",
-      ),
-    "UNSAFE_RUNTIME_ENVIRONMENT",
-  );
-  expectCode(
-    () =>
-      buildInviteUrl(
-        "https://partner-club.leetplus.ru/path?redirect=evil",
-        "token",
-        "https://partner-club.leetplus.ru",
-      ),
-    "UNSAFE_RUNTIME_ENVIRONMENT",
-  );
 });
 
-test("preview allows only an empty dedicated database", async () => {
+test("empty-database preview remains read-only and reports the disabled writer", async () => {
   const normalized = normalizeDesignPartnerManifest(manifest(), NOW);
   const emptyClient = {
     tenant: { findMany: async () => [] },
@@ -351,9 +321,10 @@ test("preview allows only an empty dedicated database", async () => {
         manifestHmacKey: MANIFEST_HMAC_KEY,
       },
     );
-    assert.equal(result.decision, "READY_TO_PROVISION");
+    assert.equal(result.decision, "DESIGN_PARTNER_IDENTITY_WRITER_DISABLED");
     assert.equal(result.emptyTenantDatabase, true);
     assert.equal(result.physicalIsolationEvidenceRequired, true);
+    assert.equal(result.sharedSealedIdentityActivationRequired, true);
     assert.equal(result.initialTenantStatus, "SUSPENDED");
   });
 
@@ -720,217 +691,112 @@ test("preview rejects every extra IAM principal, custom role and role override",
   }
 });
 
-test("provision requires explicit confirmation before any database read", async () => {
-  const normalized = normalizeDesignPartnerManifest(manifest(), NOW);
-  let read = false;
-  const client = {
-    tenant: {
-      findMany: async () => {
-        read = true;
-        return [];
-      },
-    },
-  };
+for (const [name, operation] of [
+  ["provision", provisionDesignPartner],
+  ["rotate-invite", rotateDesignPartnerInvite],
+]) {
+  test(`${name} is disabled before database access or token generation`, async () => {
+    const normalized = normalizeDesignPartnerManifest(manifest(), NOW);
+    let generated = false;
+    let transacted = false;
+    let read = false;
 
-  await assert.rejects(
-    provisionDesignPartner(client, normalized, {
-      now: NOW,
-      webUrl: "https://partner-club.leetplus.ru",
-      confirmation: "wrong",
-    }),
-    (error) =>
-      error instanceof DesignPartnerProvisioningError &&
-      error.code === "CONFIRMATION_REQUIRED",
-  );
-  assert.equal(read, false);
-});
-
-test("provision requires the exact isolated runtime overlay before any database read", async () => {
-  const normalized = normalizeDesignPartnerManifest(manifest(), NOW);
-  let read = false;
-  const client = {
-    tenant: {
-      findMany: async () => {
-        read = true;
-        return [];
-      },
-    },
-  };
-
-  await assert.rejects(
-    provisionDesignPartner(client, normalized, {
-      now: NOW,
-      webUrl: "https://partner-club.leetplus.ru",
-      confirmation: `PROVISION ${normalized.tenantSlug}`,
-      runtimeEnv: {},
-      manifestHmacKey: MANIFEST_HMAC_KEY,
-    }),
-    (error) =>
-      error instanceof DesignPartnerProvisioningError &&
-      error.code === "UNSAFE_RUNTIME_ENVIRONMENT",
-  );
-  assert.equal(read, false);
-});
-
-test("invite rotation is confirmed, hash-only, audited and keeps one live invite", async () => {
-  const normalized = normalizeDesignPartnerManifest(manifest(), NOW);
-  const topology = {
-    id: "tenant-d",
-    name: normalized.tenantName,
-    slug: normalized.tenantSlug,
-    domain: normalized.tenantDomain,
-    status: "SUSPENDED",
-    stores: [
-      {
-        id: "store-d1",
-        name: normalized.storeName,
-        publicSlug: normalized.storePublicSlug,
-        address: normalized.storeAddress,
-        city: normalized.storeCity,
-        timeZone: normalized.storeTimeZone,
-        isActive: false,
-        gamificationEnabled: false,
-        externalProvider: null,
-        externalDomain: null,
-        externalClubId: null,
-      },
-    ],
-    userRoleOverrides: [
-      {
-        id: "override-owner",
-        role: "OWNER",
-        permissions: [...DESIGN_PARTNER_OWNER_CAPABILITIES],
-      },
-    ],
-    userAccessRoles: [],
-    platformAdminAuditEvents: [
-      {
-        id: "audit-provision",
-        action: "SINGLE_DESIGN_PARTNER_PROVISIONED",
-        metadata: provisioningAuditMetadata(
-          normalized,
-          "store-d1",
-          "old-invite",
-        ),
-        createdAt: NOW,
-      },
-    ],
-    users: [],
-    userInvites: [
-      {
-        id: "old-invite",
-        email: normalized.ownerEmail,
-        role: "OWNER",
-        accessScope: "NETWORK",
-        customRoleId: null,
-        storeIds: [],
-        tokenHash: OWNER_INVITE_TOKEN_HASH,
-        expiresAt: OWNER_INVITE_EXPIRES_AT,
-        acceptedAt: null,
-        acceptedByUserId: null,
-      },
-    ],
-    integrationSources: [],
-    integrationCredentials: [],
-  };
-  const writes = [];
-  const tx = {
-    $queryRawUnsafe: async (query, lockKey) => {
-      assert.equal(
-        query,
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text AS lock_result",
-      );
-      assert.equal(
-        lockKey,
-        `leetplus-design-partner-invite-rotation:${normalized.tenantSlug}`,
-      );
-      return [{ lock_result: "" }];
-    },
-    tenant: { findMany: async () => [topology] },
-    userInvite: {
-      updateMany: async (operation) => {
-        writes.push({ type: "expire", operation });
-        return { count: 1 };
-      },
-      create: async (operation) => {
-        writes.push({ type: "create", operation });
-        return {
-          id: "new-invite",
-          tokenHash: operation.data.tokenHash,
-          expiresAt: new Date("2026-07-31T12:00:00.000Z"),
-        };
-      },
-    },
-    platformAdminAuditEvent: {
-      findMany: async () => [],
-      create: async (operation) => {
-        writes.push({ type: "audit", operation });
-        return { id: "audit-rotate" };
-      },
-    },
-  };
-  const client = {
-    $transaction: async (operation) => operation(tx),
-  };
-  const rawToken = "rotated-token-0000000000000000000000000000";
-
-  const result = await rotateDesignPartnerInvite(client, normalized, {
-    now: NOW,
-    confirmation: `ROTATE_INVITE ${normalized.tenantSlug}`,
-    manifestHmacKey: MANIFEST_HMAC_KEY,
-    operationReason: "Rotate expired onboarding invitation",
-    operationTicket: "DP-ROTATE-1",
-    requestId: "UNIT-ROTATE-0001",
-    runtimeEnv: DESIGN_PARTNER_REQUIRED_ENV,
-    tokenFactory: () => rawToken,
-    webUrl: "https://partner-club.leetplus.ru",
-  });
-
-  assert.equal(result.decision, "INVITE_ROTATED");
-  assert.equal(result.previousPendingInvitesRevoked, 1);
-  assert.match(result.ownerInvite.url, /invite=rotated-token/);
-  assert.equal(
-    writes.find((write) => write.type === "create").operation.data.tokenHash,
-    hashInviteToken(rawToken),
-  );
-  const auditPayload = JSON.stringify(
-    writes.find((write) => write.type === "audit").operation,
-  );
-  assert.ok(!auditPayload.includes(rawToken));
-  assert.ok(!auditPayload.includes(normalized.ownerEmail));
-});
-
-test("invite rotation requires confirmation before generating a token or reading the database", async () => {
-  const normalized = normalizeDesignPartnerManifest(manifest(), NOW);
-  let generated = false;
-  let transacted = false;
-
-  await assert.rejects(
-    rotateDesignPartnerInvite(
-      {
-        $transaction: async () => {
-          transacted = true;
+    await assert.rejects(
+      operation(
+        {
+          $transaction: async () => {
+            transacted = true;
+          },
+          tenant: {
+            findMany: async () => {
+              read = true;
+              return [];
+            },
+          },
         },
+        normalized,
+        {
+          now: NOW,
+          confirmation:
+            name === "provision"
+              ? `PROVISION ${normalized.tenantSlug}`
+              : `ROTATE_INVITE ${normalized.tenantSlug}`,
+          manifestHmacKey: MANIFEST_HMAC_KEY,
+          operationReason: "Rotate expired onboarding invitation",
+          requestId: "UNIT-ROTATE-0002",
+          runtimeEnv: DESIGN_PARTNER_REQUIRED_ENV,
+          tokenFactory: () => {
+            generated = true;
+            return "should-not-be-generated-000000000000000000000";
+          },
+          webUrl: "https://partner-club.leetplus.ru",
+        },
+      ),
+      (error) =>
+        error instanceof DesignPartnerProvisioningError &&
+        error.code === "DESIGN_PARTNER_IDENTITY_WRITER_DISABLED",
+    );
+    assert.equal(generated, false);
+    assert.equal(transacted, false);
+    assert.equal(read, false);
+  });
+}
+
+test("emergency suspend cannot revive an archived tenant", async () => {
+  const normalized = normalizeDesignPartnerManifest(manifest(), NOW, {
+    allowExpiredAccess: true,
+  });
+  const manifestDigest = computeDesignPartnerManifestDigest(
+    normalized,
+    MANIFEST_HMAC_KEY,
+  );
+  let wrote = false;
+  const forbiddenWrite = async () => {
+    wrote = true;
+    throw new Error("Archived tenant must not be mutated");
+  };
+  const tx = {
+    tenant: {
+      findUnique: async () => ({
+        id: "tenant-d",
+        slug: normalized.tenantSlug,
+        status: "ARCHIVED",
+        platformAdminAuditEvents: [
+          {
+            metadata: {
+              profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
+              partnerAlias: normalized.partnerAlias,
+              manifestHmacKeyVersion: "v1",
+              manifestDigest,
+            },
+          },
+        ],
+      }),
+      update: forbiddenWrite,
+    },
+    store: { updateMany: forbiddenWrite },
+    integrationSource: { updateMany: forbiddenWrite },
+    integrationCredential: { updateMany: forbiddenWrite },
+    userInvite: { updateMany: forbiddenWrite },
+    platformAdminAuditEvent: { create: forbiddenWrite },
+  };
+
+  await assert.rejects(
+    suspendDesignPartner(
+      {
+        $transaction: async (operation) => operation(tx),
       },
       normalized,
       {
         now: NOW,
-        confirmation: "wrong",
+        confirmation: `SUSPEND ${normalized.tenantSlug}`,
         manifestHmacKey: MANIFEST_HMAC_KEY,
-        operationReason: "Rotate expired onboarding invitation",
-        requestId: "UNIT-ROTATE-0002",
-        runtimeEnv: DESIGN_PARTNER_REQUIRED_ENV,
-        tokenFactory: () => {
-          generated = true;
-          return "should-not-be-generated-000000000000000000000";
-        },
-        webUrl: "https://partner-club.leetplus.ru",
+        operationReason: "Do not revive archived isolated tenant",
       },
     ),
     (error) =>
       error instanceof DesignPartnerProvisioningError &&
-      error.code === "CONFIRMATION_REQUIRED",
+      error.code === "SUSPEND_STATE_NOT_NARROWING",
   );
-  assert.equal(generated, false);
-  assert.equal(transacted, false);
+  assert.equal(wrote, false);
 });

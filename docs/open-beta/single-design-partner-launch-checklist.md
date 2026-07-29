@@ -2,8 +2,8 @@
 
 | Поле        | Значение                                                      |
 | ----------- | ------------------------------------------------------------- |
-| Версия      | 1.4                                                           |
-| Дата        | 28.07.2026                                                    |
+| Версия      | 1.5                                                           |
+| Дата        | 29.07.2026                                                    |
 | Статус      | `NO-GO`; checklist не выполнен                                |
 | Область     | Contingency/enterprise isolation, Tenant D/Store D1           |
 | Не меняется | Current production Tenant A с четырьмя Store A1..A4           |
@@ -20,14 +20,16 @@ Gate 1DP не заменяет Gate 1MT/Gate 2 shared beta.
 
 Текущая граница реализации:
 
-- `IMPLEMENTED_CANDIDATE`: `status`, fail-closed `provision` в пустую отдельную
-  БД, idempotent `rotate-invite` и emergency `suspend`;
+- `IMPLEMENTED_CANDIDATE`: legacy `provision`/`rotate-invite` отключены с
+  `DESIGN_PARTNER_IDENTITY_WRITER_DISABLED` до manifest/Prisma/БД/token;
+  read-only `status` для исторических fixtures и emergency narrowing-only
+  `suspend` сохранены;
 - `IMPLEMENTED_CANDIDATE`: API startup-проверка обязательного isolated overlay
   и database topology, запрет generic Platform Admin activation для
   provisioned DP tenant;
 - `NOT IMPLEMENTED`: persisted stage/cohort/surface entitlements, authoritative
-  expiry, reviewed activation flow, session revoke и развёрнутый isolated
-  runtime;
+  expiry, shared sealed provisioning/activation writer, reviewed activation
+  flow, session revoke и развёрнутый isolated runtime;
 - следствие: invitation URL пока нельзя передавать клубу, а credentials
   остаются `NO-GO`.
 
@@ -111,118 +113,66 @@ Gate 1DP не заменяет Gate 1MT/Gate 2 shared beta.
 
 - [ ] Profile `SINGLE_DESIGN_PARTNER_V1` сохранён с revision, reason, start,
       expiry и audit.
-- [ ] Idempotent provisioning создал ровно один Tenant D.
-- [ ] В Tenant D создан ровно один Store D1.
-- [ ] Повтор provisioning не создаёт дубль tenant/store/invite.
-- [ ] OWNER invite email-bound, opaque, TTL-bound и хранится только как hash.
-- [ ] OWNER получил `NETWORK` только внутри Tenant D.
-- [ ] Club actor, если нужен, получил только `STORES[D1]`.
+- [ ] `BLOCKED`: отдельно reviewed shared sealed activation writer создал ровно
+      один Tenant D; legacy design-partner `provision` для этого запрещён.
+- [ ] `BLOCKED`: тем же атомарным workflow в Tenant D создан ровно один Store
+      D1.
+- [ ] `BLOCKED`: replay shared sealed workflow не создаёт дубль
+      tenant/store/invite.
+- [ ] `BLOCKED`: OWNER invite email-bound, opaque, TTL-bound и хранится только
+      как hash; legacy `rotate-invite` не используется.
+- [ ] `BLOCKED`: OWNER получил `NETWORK` только внутри Tenant D.
+- [ ] `BLOCKED`: club actor, если нужен, получил только `STORES[D1]`.
 - [ ] Platform Admin не назначается через tenant API/UI.
-- [ ] Revoke/expire invite и accept race проверены.
-- [ ] Real-PostgreSQL bridge создаёт candidate штатным provisioning workflow и
-      на той же неизменённой БД успешно запускает API database admission; два
-      независимых hand-written fixtures не засчитываются.
-- [ ] Stale token после role/scope/suspend не сохраняет прежние полномочия.
+- [ ] `BLOCKED`: revoke/expire invite и accept race проверены shared sealed
+      identity workflow.
+- [ ] Exact-head
+      [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md)
+      принят: local unit/boundary `23/23 PASS`, independent review без
+      actionable P0/P1/P2; PostgreSQL smoke и remote CI пока pending.
+- [ ] `BLOCKED`: Real-PostgreSQL bridge создаёт candidate штатным shared sealed
+      provisioning/activation workflow и на той же неизменённой БД успешно
+      запускает API database admission; два независимых hand-written fixtures
+      не засчитываются.
+- [ ] `BLOCKED`: stale token после role/scope/suspend не сохраняет прежние
+      полномочия.
 - [ ] `TenantExecutionPolicy` останавливает login, writes, exports и jobs при
       `Tenant D → SUSPENDED`.
 
-### D.1. Точные команды implementation candidate
+### D.1. Writer isolation и допустимые operator actions
 
-Сначала скопировать
-[`design-partner-manifest.example.json`](../../packages/database/scripts/design-partner-manifest.example.json)
-за пределы git и заполнить реальными данными клуба в защищённом месте.
-`DATABASE_URL`, manifest и вывод с invite URL не сохранять в shell history,
-ticket, CI log или репозиторий.
-`DATABASE_URL` здесь принадлежит только migration/provisioning identity.
-`DESIGN_PARTNER_MANIFEST_HMAC_KEY` загружается из отдельного secret manager,
-не передаётся runtime-процессам и не сохраняется рядом с manifest.
-Digest связывает manifest с provisioning evidence и обнаруживает дрейф, но сам
-по себе не является `DESIGN_PARTNER GO` или разрешением на activation.
-Отдельный HMAC receipt связывает Tenant, Store, invite ID, hash токена и
-исходный TTL. Ранний revoke может только сократить TTL; подмена hash либо
-продление TTL блокируют следующий status/rotate admission. Rotation receipt
-дополнительно связывает уникальный operation ID. API и standalone-процессы
-fail-closed отклоняют наличие provisioning HMAC key в runtime environment.
+Legacy `provision` и `rotate-invite` больше не являются implementation
+commands. CLI и exported writers всегда fail-closed с
+`DESIGN_PARTNER_IDENTITY_WRITER_DISABLED` до чтения manifest, создания Prisma
+client, обращения к БД или генерации token. Их нельзя включать feature flag,
+использовать для реального клуба или заменять manual SQL. Новый Tenant D,
+Store D1 и OWNER invite заблокированы до separately reviewed shared sealed
+activation writer.
 
-```powershell
-$manifestPath = 'C:\secure\leetplus\design-partner-manifest.json'
-$env:DATABASE_URL = '<isolated provisioning PostgreSQL URL>'
-$env:DESIGN_PARTNER_MANIFEST_HMAC_KEY = '<load from protected secret manager>'
+Для уже существующей isolated fixture допускается только read-only `status`.
+Manifest и `DESIGN_PARTNER_MANIFEST_HMAC_KEY` остаются вне git/runtime и
+загружаются защищённо. Status сохраняет historical verification:
 
-pnpm --filter database design-partner:provision -- status --manifest $manifestPath
-```
+- exact Tenant/Store topology и provisioning marker;
+- initial HMAC receipt, связывающий Tenant, Store, invite ID, token hash и
+  исходный TTL;
+- rotation receipts, дополнительно связанные с unique operation ID;
+- rejection при подмене token hash или продлении expiry;
+- отсутствие лишних IAM/integration rows.
 
-`status` должен вернуть `READY_TO_PROVISION`, `emptyTenantDatabase=true` и
-`initialTenantStatus=SUSPENDED`. Это подтверждает только пустую БД, но не
-физическую изоляцию; отдельный infrastructure evidence остаётся обязательным.
+На пустой БД `status` обязан вернуть decision
+`DESIGN_PARTNER_IDENTITY_WRITER_DISABLED`,
+`emptyTenantDatabase=true` и `sharedSealedIdentityActivationRequired=true`.
+Это read-only topology result и явный запрет legacy provisioning. Для
+historical provisioned fixture status подтверждает receipt consistency, но не
+является `DESIGN_PARTNER GO`, activation или правом выдать credentials.
 
-Provision выполняется только непосредственно перед контролируемым onboarding
-окном. Перед командой API и standalone-процессы этого контура остановлены;
-после команды обязателен restart с isolated overlay и повторный
-readiness/database-admission smoke. Непосредственно перед restart оператор
-повторяет HMAC-authenticated `status`; runtime startup без provisioning key
-дополнительно проверяет exact receipt IDs, SHA-256 shapes и запрет продления
-signed expiry. Audit/invite columns должны быть недоступны для ручного
-изменения runtime-ролью вне штатных application paths. Это закрывает окно между
-проверкой пустой БД и уже запущенным обычным API. Invite URL выводится один раз,
-а TTL равен минимуму из 72 часов и `accessExpiresAt`.
-
-Все пары `KEY=value` из
-[`design-partner-runtime.env.example`](./design-partner-runtime.env.example)
-должны быть экспортированы в process environment CLI и будущего API. Ниже
-`<tenant-slug>` — exact slug из manifest:
-
-```powershell
-$env:WEB_URL = 'https://<tenant-slug>.leetplus.ru'
-$env:DESIGN_PARTNER_CONFIRMATION = 'PROVISION <tenant-slug>'
-
-pnpm --filter database design-partner:provision -- provision --manifest $manifestPath
-
-Remove-Item Env:DESIGN_PARTNER_CONFIRMATION
-Remove-Item Env:DESIGN_PARTNER_MANIFEST_HMAC_KEY
-Remove-Item Env:DATABASE_URL
-Remove-Item Env:WEB_URL
-```
-
-API не запускается из этого operator shell. Service manager создаёт чистый
-process environment и отдельно inject-ит restricted runtime `DATABASE_URL`;
+API не запускается из operator shell. Service manager создаёт чистый process
+environment и отдельно inject-ит restricted runtime `DATABASE_URL`;
 migration/provisioning URL и manifest HMAC key в API environment запрещены.
-
-Ожидаемый результат — `PROVISIONED_SUSPENDED`: Tenant `SUSPENDED`, Store
-inactive, gamification `false`, integrations отсутствуют. Пока tenant
-`SUSPENDED`, API не разрешает принять invite. CLI намеренно не содержит
-`activate`; generic Platform Admin activation для provisioning marker также
-запрещена. Не передавать URL партнёру до отдельного reviewed activation flow и
-раздела H.
-
-Потерянная или истёкшая ссылка восстанавливается без ручного SQL. Новый
-operation ID создаётся один раз на операторскую операцию и делает повтор
-идемпотентным; повтор с тем же ID не инвалидирует уже выданную новую ссылку:
-
-```powershell
-$env:DATABASE_URL = '<isolated provisioning PostgreSQL URL>'
-$env:DESIGN_PARTNER_MANIFEST_HMAC_KEY = '<load from protected secret manager>'
-$env:WEB_URL = 'https://<tenant-slug>.leetplus.ru'
-$env:DESIGN_PARTNER_ROTATION_REQUEST_ID = '<new opaque operation id>'
-$env:DESIGN_PARTNER_OPERATION_REASON = '<why this invitation is rotated>'
-$env:DESIGN_PARTNER_OPERATION_TICKET = '<protected operation/ticket reference>'
-$env:DESIGN_PARTNER_CONFIRMATION = 'ROTATE_INVITE <tenant-slug>'
-
-pnpm --filter database design-partner:provision -- rotate-invite --manifest $manifestPath
-
-Remove-Item Env:DESIGN_PARTNER_CONFIRMATION
-Remove-Item Env:DESIGN_PARTNER_ROTATION_REQUEST_ID
-Remove-Item Env:DESIGN_PARTNER_OPERATION_REASON
-Remove-Item Env:DESIGN_PARTNER_OPERATION_TICKET
-Remove-Item Env:DESIGN_PARTNER_MANIFEST_HMAC_KEY
-Remove-Item Env:DATABASE_URL
-Remove-Item Env:WEB_URL
-```
-
-Результат первой операции — `INVITE_ROTATED` с one-time URL. Повтор того же
-request ID возвращает `INVITE_ROTATION_ALREADY_APPLIED` без URL и без создания
-нового invite. Причина и ticket относятся к текущей операции и не изменяют
-подписанный исходный manifest.
+Runtime startup без provisioning key проверяет только receipt topology,
+64-hex shapes и верхнюю границу signed expiry; он не считается
+криптографическим verifier и не заменяет read-only operator status.
 
 Обязательный runtime overlay:
 [`design-partner-runtime.env.example`](./design-partner-runtime.env.example).
@@ -230,11 +180,13 @@ request ID возвращает `INVITE_ROTATION_ALREADY_APPLIED` без URL и 
 проверяется API startup при `DESIGN_PARTNER_ISOLATED_MODE=true`. Startup
 разрешает только пустую tenant DB до provisioning либо один exact
 `SUSPENDED` Tenant с одним inactive Store и provisioning marker. Наличие файла
-не заменяет проверку DNS, process, database role, network route и secrets.
+не заменяет проверку DNS, process, database role, network route и secrets, а
+empty topology не включает отключённый legacy provisioning writer.
 
 Emergency DB stop допускает истёкший manifest:
 
 ```powershell
+$manifestPath = 'C:\secure\leetplus\design-partner-manifest.json'
 $env:DATABASE_URL = '<isolated provisioning PostgreSQL URL>'
 $env:DESIGN_PARTNER_MANIFEST_HMAC_KEY = '<load from protected secret manager>'
 $env:DESIGN_PARTNER_OPERATION_REASON = '<incident or controlled stop reason>'

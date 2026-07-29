@@ -118,7 +118,7 @@ jobs:
       - name: Validate synthetic staff task reconciliation proposal dry-run
         run: pnpm --filter database check:staff-task-integrity-reconciliation-proposal-dry-run
 
-      - name: Validate isolated design-partner provisioning command
+      - name: Validate isolated design-partner identity writer boundary
         run: pnpm --filter database check:design-partner-provisioning
 
       - name: Validate isolated design-partner PostgreSQL runtime-role smoke
@@ -329,7 +329,7 @@ jobs:
         env:
           SHARED_TENANT_SHELL_PROVISIONING_PG_CONFIRM: run-shared-tenant-shell-provisioning-postgres-fixtures
 
-      - name: Verify isolated design-partner provisioning lifecycle
+      - name: Verify isolated design-partner writer isolation lifecycle
         run: pnpm --filter database db:smoke:design-partner-provisioning
         env:
           DESIGN_PARTNER_PROVISIONING_SMOKE_CONFIRM: run-design-partner-provisioning-smoke

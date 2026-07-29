@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.9                                                             |
+| Версия           | 1.10                                                            |
 | Дата             | 29.07.2026                                                      |
 | Статус           | `CURRENT_169` engineering accepted; activation ещё pending       |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
@@ -494,8 +494,12 @@ Two-tenant:
    (`run #39`), `3/3 PASS`, local evidence и финальный independent security
    review как engineering prerequisites; item остаётся открытым до отдельного
    production-like inventory и будущего signed proposal/apply/rollback
-   исторических `User`/`UserInvite` без provenance. Изолировать design-partner
-   CLI и подтвердить отсутствие direct application runtime table DML.
+   исторических `User`/`UserInvite` без provenance. Для уже реализованной
+   [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md)
+   independent review принят без actionable P0/P1/P2; остаётся принять local
+   PostgreSQL smoke и remote exact-head CI. CLI/exported `provision` и
+   `rotate-invite` уже fail-closed до manifest/Prisma/БД/token, local
+   unit/boundary `23/23 PASS`.
 2. Спроектировать activation locator без хранения и раскрытия raw email;
    lookup и повторная проверка claim должны выполняться fail-closed под lock.
 3. Добавить encrypted identity mail outbox и fail-closed mail config.

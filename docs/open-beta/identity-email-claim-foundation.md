@@ -2,7 +2,7 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.4 |
+| Версия | 1.5 |
 | Дата | 29.07.2026 |
 | Schema target | `CURRENT_169` |
 | Foundation migration | `20260729190000_identity_email_claim_foundation` |
@@ -253,8 +253,11 @@ secrets и требует version `v1`; CI environment contract обновлён
 
 1. Выполнить inventory/backfill исторических `User` и `UserInvite`;
    ambiguous/collision rows должны остаться fail-closed. Основные runtime
-   writers уже переведены, isolated design-partner CLI требует отдельного
-   решения.
+   writers уже переведены. Legacy isolated design-partner `provision` и
+   `rotate-invite` изолированы fail-closed до manifest/Prisma/БД/token по
+   [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md);
+   local unit/boundary `23/23 PASS`, independent review принят без actionable
+   P0/P1/P2; PostgreSQL smoke и remote exact-head CI ещё pending.
 2. Реализовать безопасный activation locator: shell хранит claim UUID и HMAC,
    но не raw email; activation должна найти нужную identity без PII lookup
    leak и перепроверить её под lock.

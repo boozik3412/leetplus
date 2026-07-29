@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.33                                         |
+| Версия           | 1.34                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -143,9 +143,16 @@ enterprise-isolation option и не сокращает shared gates.
     unit `17/17` + three-clone PostgreSQL 16 smoke `PASS`; финальный independent
     security review — `PASS` без actionable P0/P1/P2, exact-head
     `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI
-    [`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
-    (`run #39`) — `3/3 PASS`. Production-like inventory и signed
-    proposal/apply/rollback остаются отдельной будущей lane.
+     [`30479020686`](https://github.com/boozik3412/leetplus/actions/runs/30479020686)
+     (`run #39`) — `3/3 PASS`. Production-like inventory и signed
+     proposal/apply/rollback остаются отдельной будущей lane.
+28. [Design-partner identity writer isolation](./design-partner-identity-writer-isolation.md) —
+    `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`: legacy
+    `provision`/`rotate-invite` fail-closed до manifest/Prisma/БД/token,
+    `status` остаётся read-only для исторических isolated fixtures, emergency
+    `suspend` — narrowing-only. Local unit/boundary `23/23 PASS`; independent
+    review принят без actionable P0/P1/P2 в заявленном scope. PostgreSQL smoke
+    не запускался без `DATABASE_URL`/Postgres, remote exact-head CI pending.
 
 Текущий schema target рабочего кандидата — `CURRENT_169`. Локальный
 disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`, exact
@@ -204,8 +211,11 @@ engineering evidence не являются production-like admission, persisted 
   требует отдельный fingerprint HMAC key version `v1`, запрещает reuse и
   включён в CI environment contract; до deploy нужно настроить отдельное
   production значение. Activation locator, admitted legacy provenance
-  backfill, design-partner CLI boundary, encrypted outbox/verified delivery и
-  persisted GO ещё pending;
+  backfill, encrypted outbox/verified delivery и persisted GO ещё pending.
+  Design-partner identity writer boundary реализована как local candidate:
+  legacy `provision`/`rotate-invite` fail-closed до manifest/Prisma/БД/token;
+  schema, six-RPC allowlist и shared admin route не изменены. PostgreSQL smoke,
+  remote exact-head CI и independent review этой изоляции ещё pending;
 - external authenticated HTTP admission candidate: обязательные beta-prefixes
   получают `module + READ|WRITE|OUTBOUND`, неизвестный route запрещён;
   reusable lower-layer admission перечитывает persisted state на каждый
@@ -475,7 +485,8 @@ engineering evidence не являются production-like admission, persisted 
 10. параллельно закрыть `BETA-MT-001..009`: использовать принятые exact-head
     CI/review `BETA-IAM-004B` как engineering prerequisite, отдельно выполнить
     production-like inventory и будущий signed proposal/apply/rollback,
-    изолировать design-partner CLI, реализовать activation locator, encrypted
+    принять PostgreSQL/remote CI уже прошедшей independent review fail-closed
+    изоляции design-partner identity writers, реализовать activation locator, encrypted
     outbox/verified OWNER delivery и persisted GO; затем закрыть
     delegation/integrations, A/B isolation и tenant-aware workers/Telegram;
 11. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только
@@ -491,8 +502,9 @@ gamification/assortment adoption, tenant entitlements/lifecycle, browser E2E,
 operations, backup/restore и production canary.
 
 Section 5.26 с isolated DP-1 сохраняется как contingency/enterprise-isolation
-lane. Fail-closed bootstrap/rotate/suspend candidate остаётся полезным для
-этого режима, но отдельный runtime/DB больше не является основным способом
+lane. Legacy identity creation/rotation в ней disabled; полезными остаются
+read-only historical status, narrowing-only emergency suspend и isolated
+runtime admission. Отдельный runtime/DB больше не является основным способом
 первого теста и не имеет назначенного календарного окна.
 
 Текущий плановый ориентир первого shared friendly external club —

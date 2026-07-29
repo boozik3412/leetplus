@@ -2,7 +2,7 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.1 |
+| Версия | 1.2 |
 | Дата | 29.07.2026 |
 | Schema target | `CURRENT_169` |
 | Migration | `20260729230000_identity_invite_writer_boundary` |
@@ -179,8 +179,12 @@ persisted GO, production deployment или разрешением на созд�
    fragment + POST-body token flow без утечки URL/token.
 4. Реализовать first-class verified `EMAIL_CHANGE`; до этого user/invite
    email mutation остаётся закрытой.
-5. Перевести или жёстко изолировать design-partner provisioning CLI, который
-   пока является отдельным operator-only writer path.
+5. Принять оставшееся evidence для уже реализованной
+   [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md):
+   legacy CLI/exported `provision` и `rotate-invite` fail-closed до
+   manifest/Prisma/БД/token, local unit/boundary `23/23 PASS`; independent
+   review принят без actionable P0/P1/P2 в заявленном scope. Local PostgreSQL
+   smoke не запускался без `DATABASE_URL`/Postgres, remote exact-head CI pending.
 6. Добавить bounded natural-expiry sweeper с audit/reconciliation. До этого
    expired invite освобождается только явным cancel.
 7. Пройти production-like upgrade, rollback, zero-diff, full
@@ -190,11 +194,13 @@ persisted GO, production deployment или разрешением на созд�
 9. Только после Gate 1MT, Gate 2 и отдельного protected `SHARED BETA GO`
    открыть admin activation route и отправить первое приглашение.
 
-Independent review не обнаружил P0/P1, но сохранил два engineering P2:
-текущий static writer test основан на буквальных Prisma-patterns и должен быть
+Исторический independent review широкого `CURRENT_169` application
+writer-boundary diff не обнаружил P0/P1, но сохранил два engineering P2:
+его static writer test основан на буквальных Prisma-patterns и должен быть
 усилен AST/DB-level guardrail против raw SQL, aliases и nested writes; unit
 transaction mocks не доказывают реальный rollback, поэтому пункт 7 требует
-настоящего PostgreSQL race/recovery evidence.
+настоящего PostgreSQL race/recovery evidence. Это не verdict для отдельного
+`BETA-IAM-004D`, чей exact-head review учитывается отдельно.
 
 До закрытия этих пунктов `gr1mmphone1@gmail.com` не создаётся, пароль
 `123456` не устанавливается, а production остаётся без изменений.

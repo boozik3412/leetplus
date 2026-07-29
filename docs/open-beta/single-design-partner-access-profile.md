@@ -3,9 +3,9 @@
 | Поле             | Значение                                                      |
 | ---------------- | ------------------------------------------------------------- |
 | Profile key      | `SINGLE_DESIGN_PARTNER_V1`                                    |
-| Версия           | 1.4                                                           |
-| Дата             | 28.07.2026                                                    |
-| Статус           | `NO-GO`; bootstrap/rotate/suspend — implementation candidate  |
+| Версия           | 1.5                                                           |
+| Дата             | 29.07.2026                                                    |
+| Статус           | `NO-GO`; identity writers disabled, status/suspend preserved  |
 | Формат           | Contingency/enterprise isolation, invite-only                 |
 | Среда            | Отдельные web, API, PostgreSQL, secrets и storage namespace   |
 | Partner topology | Новый `Tenant D`, один `Store D1`                             |
@@ -28,14 +28,16 @@
 отдельного product/security решения о том, почему целевой shared data plane
 не подходит. Gate 1DP не заменяет Gate 1MT/Gate 2.
 
-Текущая реализация умеет только безопасно подготовить tenant в состоянии
-`SUSPENDED`, проверить его topology и выполнить аварийную БД-блокировку. В CLI
-намеренно нет команды активации. Общий Platform Admin lifecycle также не может
-активировать tenant с design-partner provisioning marker. API startup
-дополнительно связывает isolated marker с пустой pre-provisioning БД либо с
-одним точным `SUSPENDED` tenant/неактивным Store и прекращает запуск при shared
-или active topology. Это исключает случайную выдачу профиля, но ещё не создаёт
-готовый тестовый доступ.
+Текущая реализация не создаёт новый design-partner tenant или invite. Legacy
+CLI/exported `provision` и `rotate-invite` fail-closed с
+`DESIGN_PARTNER_IDENTITY_WRITER_DISABLED` до manifest/Prisma/БД/token.
+Сохранены только read-only `status` для уже существующих isolated fixtures и
+аварийный narrowing-only `suspend`. Общий Platform Admin lifecycle также не
+может активировать tenant с design-partner provisioning marker. API startup
+по-прежнему связывает isolated marker с пустой pre-provisioning БД либо с одним
+точным `SUSPENDED` tenant/неактивным Store и прекращает запуск при shared или
+active topology. Полный контракт:
+[design-partner identity writer isolation](./design-partner-identity-writer-isolation.md).
 
 ## 1. Нормативная topology
 
@@ -157,16 +159,17 @@ Runtime contract:
 считается скрытием согласованного модуля: эти эффекты имеют отдельные gates
 безопасности и остаются fail-closed до своего `GO`.
 
-Provisioning bootstrap до activation сохраняет только least-privilege OWNER override:
-dashboard/read-only assortment discovery и управление пользователями внутри
-Tenant D. Из-за текущего системного OWNER minimum он также явно содержит
-внутреннюю staff knowledge authoring surface; её нужно проверить до выдачи
-credentials либо устранить через strict override policy. Product writes,
-exports, PII, integrations, остальные staff operations, communications и
-gamification в bootstrap override отсутствуют. До `DESIGN_PARTNER GO` нужные
-capabilities `DP-S0..DP-S4` добавляются атомарно только через reviewed persisted
-surface-level policy с expiry;
-generic lifecycle activation для этого tenant запрещена.
+Исторический fixture, уже созданный до writer isolation, может содержать
+least-privilege OWNER override: dashboard/read-only assortment discovery и
+управление пользователями внутри Tenant D. Из-за текущего системного OWNER
+minimum он также явно содержит внутреннюю staff knowledge authoring surface;
+её нужно проверить до выдачи credentials либо устранить через strict override
+policy. Это описание нужно только для read-only status/admission существующей
+fixture и не является инструкцией создать новую. Будущий bootstrap обязан
+использовать отдельно reviewed shared sealed activation writer. До
+`DESIGN_PARTNER GO` нужные capabilities `DP-S0..DP-S4` добавляются атомарно
+только через reviewed persisted surface-level policy с expiry; generic
+lifecycle activation для этого tenant запрещена.
 
 ## 4. Обязательные ограничения
 
@@ -215,7 +218,8 @@ Salary остаётся planning-only. Motivation/discipline допускают 
 
 Один `SURFACE GO` не переносится на другую surface или outbound mode.
 
-Provisioning/rotation evidence не ограничивается подписью manifest:
+Для уже существующей isolated fixture read-only status продолжает проверять
+historical provisioning/rotation evidence, не ограничиваясь подписью manifest:
 
 - initial receipt HMAC-связывает exact Tenant D, Store D1, invite ID, hash
   opaque token и исходный expiry;
@@ -223,11 +227,17 @@ Provisioning/rotation evidence не ограничивается подпись�
   request ID, invite ID, token hash и исходным expiry;
 - revoke может только сократить фактический expiry; продление сверх
   подписанного expiry либо изменение token hash блокирует HMAC-authenticated
-  operator `status`/`rotate` admission;
+  operator `status`;
 - provisioning HMAC key отсутствует в API, web и standalone runtime; его
   наличие приводит к fail-closed startup. Runtime startup выполняет только
   структурную проверку ID/digest/hash shapes и верхней границы expiry; он не
   является криптографическим verifier и не заменяет operator status.
+
+Эти receipts остаются только историческим verification contract. Legacy
+`provision`/`rotate-invite` не могут выпустить новый receipt или token.
+Local unit/boundary `23/23 PASS`; independent review принят без actionable
+P0/P1/P2 в заявленном scope. PostgreSQL writer-isolation smoke не запускался без
+`DATABASE_URL`/Postgres, remote exact-head CI pending.
 
 StaffTask surface дополнительно не может использовать synthetic snapshot,
 proposal report или HMAC digest как production-like authorization. До её

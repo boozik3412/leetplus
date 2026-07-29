@@ -1,9 +1,4 @@
-import {
-  createHash,
-  createHmac,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   DESIGN_PARTNER_OWNER_CAPABILITIES,
   DESIGN_PARTNER_PROFILE_VERSION,
@@ -26,9 +21,12 @@ const RESERVED_TENANT_SLUGS = new Set([
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ROTATION_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,119}$/;
-const DEFAULT_INVITE_TTL_HOURS = 72;
 const MAX_HMAC_KEY_BYTES = 4096;
 const MANIFEST_HMAC_KEY_VERSION = "v1";
+const DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE =
+  "DESIGN_PARTNER_IDENTITY_WRITER_DISABLED";
+const IDENTITY_WRITER_DISABLED_MESSAGE =
+  "Design-partner identity writes are disabled pending the shared sealed identity activation workflow.";
 
 export class DesignPartnerProvisioningError extends Error {
   constructor(code, message) {
@@ -353,38 +351,6 @@ export function computeDesignPartnerInviteRotationDigest(
       "utf8",
     )
     .digest("hex");
-}
-
-export function buildInviteUrl(webUrl, token, expectedOrigin) {
-  const base = requiredText(webUrl, "WEB_URL", 8, 500);
-  let parsed;
-  try {
-    parsed = new URL(base);
-  } catch {
-    fail("UNSAFE_RUNTIME_ENVIRONMENT", "WEB_URL must be a valid HTTPS origin.");
-  }
-
-  if (
-    parsed.protocol !== "https:" ||
-    parsed.username ||
-    parsed.password ||
-    parsed.pathname !== "/" ||
-    parsed.search ||
-    parsed.hash
-  ) {
-    fail(
-      "UNSAFE_RUNTIME_ENVIRONMENT",
-      "WEB_URL must be an HTTPS origin without credentials, path, query or hash.",
-    );
-  }
-  if (expectedOrigin && parsed.origin !== expectedOrigin) {
-    fail(
-      "UNSAFE_RUNTIME_ENVIRONMENT",
-      `WEB_URL must equal the pinned isolated origin ${expectedOrigin}.`,
-    );
-  }
-
-  return `${parsed.origin}/register?invite=${encodeURIComponent(token)}`;
 }
 
 function sameStrings(left, right) {
@@ -781,9 +747,10 @@ export async function previewDesignPartnerProvisioning(
 
   if (topology.tenants.length === 0) {
     return {
-      decision: "READY_TO_PROVISION",
+      decision: DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE,
       emptyTenantDatabase: true,
       physicalIsolationEvidenceRequired: true,
+      sharedSealedIdentityActivationRequired: true,
       profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
       tenantSlug: manifest.tenantSlug,
       storeCount: 1,
@@ -803,403 +770,28 @@ export async function previewDesignPartnerProvisioning(
   return {
     decision:
       ownerUsers.length === 0 && liveOwnerInvites.length === 0
-        ? "INVITE_ROTATION_REQUIRED"
+        ? DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE
         : "ALREADY_PROVISIONED",
     emptyTenantDatabase: false,
     physicalIsolationEvidenceRequired: true,
+    sharedSealedIdentityActivationRequired:
+      ownerUsers.length === 0 && liveOwnerInvites.length === 0,
     ...publicStatus(tenant, manifest, now),
   };
 }
 
-export async function provisionDesignPartner(
-  client,
-  manifest,
-  {
-    now = new Date(),
-    tokenFactory = () => randomBytes(32).toString("base64url"),
-    webUrl,
-    confirmation,
-    runtimeEnv,
-    manifestHmacKey,
-  } = {},
-) {
-  if (confirmation !== `PROVISION ${manifest.tenantSlug}`) {
-    fail(
-      "CONFIRMATION_REQUIRED",
-      `Set confirmation to PROVISION ${manifest.tenantSlug}.`,
-    );
-  }
-  assertDesignPartnerRuntimeSafetyOverlay(runtimeEnv ?? {});
-  const manifestDigest = computeDesignPartnerManifestDigest(
-    manifest,
-    manifestHmacKey,
+export async function provisionDesignPartner() {
+  fail(
+    DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE,
+    IDENTITY_WRITER_DISABLED_MESSAGE,
   );
-
-  const existing = await readDesignPartnerTopology(client);
-  if (existing.tenants.length > 0) {
-    const { tenant } = assertExactProvisionedShape(existing, manifest, now, {
-      allowMissingLiveOwner: true,
-      manifestHmacKey,
-    });
-    return {
-      decision: "ALREADY_PROVISIONED",
-      inviteUrl: null,
-      ...publicStatus(tenant, manifest, now),
-    };
-  }
-
-  const rawToken = tokenFactory();
-  if (typeof rawToken !== "string" || rawToken.length < 32) {
-    fail("TOKEN_GENERATION_FAILED", "Invite token generation failed closed.");
-  }
-  const inviteTokenHash = hashInviteToken(rawToken);
-  const inviteUrl = buildInviteUrl(
-    webUrl,
-    rawToken,
-    `https://${manifest.tenantDomain}`,
-  );
-
-  const inviteExpiresAt = new Date(
-    Math.min(
-      now.getTime() + DEFAULT_INVITE_TTL_HOURS * 60 * 60 * 1000,
-      manifest.accessExpiresAt.getTime(),
-    ),
-  );
-  const result = await client.$transaction(
-    async (tx) => {
-      const tenantCount = await tx.tenant.count();
-      if (tenantCount !== 0) {
-        fail(
-          "DEDICATED_DATABASE_REQUIRED",
-          "Provisioning requires a dedicated database with zero tenants.",
-        );
-      }
-
-      const conflictingUser = await tx.user.findUnique({
-        where: { email: manifest.ownerEmail },
-        select: { id: true },
-      });
-      if (conflictingUser) {
-        fail(
-          "OWNER_EMAIL_CONFLICT",
-          "The owner email already belongs to a user.",
-        );
-      }
-
-      const tenant = await tx.tenant.create({
-        data: {
-          name: manifest.tenantName,
-          slug: manifest.tenantSlug,
-          domain: manifest.tenantDomain,
-          status: "SUSPENDED",
-          statusChangedAt: now,
-          statusReason: `Awaiting Gate 1DP activation: ${manifest.reason}`,
-        },
-        select: { id: true, slug: true, status: true },
-      });
-      const store = await tx.store.create({
-        data: {
-          tenantId: tenant.id,
-          name: manifest.storeName,
-          publicSlug: manifest.storePublicSlug,
-          address: manifest.storeAddress,
-          city: manifest.storeCity,
-          timeZone: manifest.storeTimeZone,
-          isActive: false,
-          gamificationEnabled: false,
-          externalProvider:
-            manifest.dataMode === "LANGAME" ? "LANGAME" : undefined,
-          externalDomain: manifest.langameDomain,
-          externalClubId: manifest.langameClubId,
-        },
-        select: {
-          id: true,
-          isActive: true,
-          gamificationEnabled: true,
-        },
-      });
-
-      await tx.userRoleOverride.create({
-        data: {
-          tenantId: tenant.id,
-          role: "OWNER",
-          permissions: [...DESIGN_PARTNER_OWNER_CAPABILITIES],
-        },
-      });
-      const invite = await tx.userInvite.create({
-        data: {
-          tenantId: tenant.id,
-          email: manifest.ownerEmail,
-          fullName: manifest.ownerFullName,
-          role: "OWNER",
-          accessScope: "NETWORK",
-          storeIds: [],
-          tokenHash: inviteTokenHash,
-          expiresAt: inviteExpiresAt,
-        },
-        select: { id: true, tokenHash: true, expiresAt: true },
-      });
-      const ownerInviteDigest = computeDesignPartnerProvisionedInviteDigest(
-        manifestDigest,
-        tenant.id,
-        store.id,
-        invite.id,
-        invite.tokenHash,
-        invite.expiresAt,
-        manifestHmacKey,
-      );
-
-      await tx.platformAdminAuditEvent.create({
-        data: {
-          tenantId: tenant.id,
-          action: DESIGN_PARTNER_PROVISION_ACTION,
-          targetType: "TENANT",
-          targetId: tenant.id,
-          reason: manifest.reason,
-          metadata: {
-            profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
-            partnerAlias: manifest.partnerAlias,
-            supportOwnerAlias: manifest.supportOwnerAlias,
-            supportTicket: manifest.supportTicket,
-            storeId: store.id,
-            accessExpiresAt: manifest.accessExpiresAt.toISOString(),
-            dataMode: manifest.dataMode,
-            langameMappingPinned: manifest.dataMode === "LANGAME",
-            dedicatedDatabaseRequired: true,
-            inviteEmailBound: true,
-            initialTenantStatus: "SUSPENDED",
-            outboundDefault: "OFF",
-            manifestDigest,
-            manifestHmacKeyVersion: MANIFEST_HMAC_KEY_VERSION,
-            ownerInviteId: invite.id,
-            ownerInviteExpiresAt: invite.expiresAt.toISOString(),
-            ownerInviteDigest,
-          },
-        },
-      });
-
-      return { tenant, store, invite };
-    },
-    { isolationLevel: "Serializable" },
-  );
-
-  return {
-    decision: "PROVISIONED_SUSPENDED",
-    profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
-    tenant: result.tenant,
-    store: result.store,
-    ownerInvite: {
-      id: result.invite.id,
-      expiresAt: result.invite.expiresAt.toISOString(),
-      url: inviteUrl,
-      oneTimeSecret: true,
-    },
-    activationRequired: true,
-  };
 }
 
-export async function rotateDesignPartnerInvite(
-  client,
-  manifest,
-  {
-    now = new Date(),
-    tokenFactory = () => randomBytes(32).toString("base64url"),
-    webUrl,
-    confirmation,
-    runtimeEnv,
-    manifestHmacKey,
-    requestId,
-    operationReason,
-    operationTicket,
-  } = {},
-) {
-  if (confirmation !== `ROTATE_INVITE ${manifest.tenantSlug}`) {
-    fail(
-      "CONFIRMATION_REQUIRED",
-      `Set confirmation to ROTATE_INVITE ${manifest.tenantSlug}.`,
-    );
-  }
-  assertDesignPartnerRuntimeSafetyOverlay(runtimeEnv ?? {});
-  if (
-    typeof requestId !== "string" ||
-    !ROTATION_REQUEST_ID_PATTERN.test(requestId)
-  ) {
-    fail(
-      "ROTATION_REQUEST_ID_INVALID",
-      "DESIGN_PARTNER_ROTATION_REQUEST_ID must be an opaque 8-120 character operation id.",
-    );
-  }
-  const manifestDigest = computeDesignPartnerManifestDigest(
-    manifest,
-    manifestHmacKey,
+export async function rotateDesignPartnerInvite() {
+  fail(
+    DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE,
+    IDENTITY_WRITER_DISABLED_MESSAGE,
   );
-  const normalizedOperationReason = requiredText(
-    operationReason,
-    "operationReason",
-    10,
-    500,
-  );
-  const normalizedOperationTicket = optionalText(
-    operationTicket,
-    "operationTicket",
-    120,
-  );
-  if (manifest.accessExpiresAt <= now) {
-    fail(
-      "ACCESS_EXPIRED",
-      "The design-partner access window has expired; approve a new manifest before rotating the invite.",
-    );
-  }
-
-  buildInviteUrl(
-    webUrl,
-    "design-partner-origin-validation",
-    `https://${manifest.tenantDomain}`,
-  );
-  const inviteExpiresAt = new Date(
-    Math.min(
-      now.getTime() + DEFAULT_INVITE_TTL_HOURS * 60 * 60 * 1000,
-      manifest.accessExpiresAt.getTime(),
-    ),
-  );
-
-  const result = await client.$transaction(
-    async (tx) => {
-      await tx.$queryRawUnsafe(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text AS lock_result",
-        `leetplus-design-partner-invite-rotation:${manifest.tenantSlug}`,
-      );
-      const topology = await readDesignPartnerTopology(tx);
-      const { tenant, ownerUsers } = assertExactProvisionedShape(
-        topology,
-        manifest,
-        now,
-        { allowMissingLiveOwner: true, manifestHmacKey },
-      );
-      const priorRotations = tenant.platformAdminAuditEvents.filter(
-        (event) => event.action === DESIGN_PARTNER_INVITE_ROTATE_ACTION,
-      );
-      const priorRotation = priorRotations.find(
-        (event) => event.metadata?.requestId === requestId,
-      );
-      if (priorRotation) {
-        return {
-          tenant,
-          priorRotation,
-          invite: null,
-          inviteUrl: null,
-          expiredInvites: { count: 0 },
-        };
-      }
-      if (ownerUsers.length !== 0) {
-        fail(
-          "OWNER_ALREADY_ACCEPTED",
-          "The design-partner OWNER already exists; an invite must not be rotated.",
-        );
-      }
-
-      const rawToken = tokenFactory();
-      if (typeof rawToken !== "string" || rawToken.length < 32) {
-        fail(
-          "TOKEN_GENERATION_FAILED",
-          "Invite token generation failed closed.",
-        );
-      }
-      const inviteTokenHash = hashInviteToken(rawToken);
-      const inviteUrl = buildInviteUrl(
-        webUrl,
-        rawToken,
-        `https://${manifest.tenantDomain}`,
-      );
-      const expiredInvites = await tx.userInvite.updateMany({
-        where: {
-          tenantId: tenant.id,
-          acceptedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: { expiresAt: now },
-      });
-      const invite = await tx.userInvite.create({
-        data: {
-          tenantId: tenant.id,
-          email: manifest.ownerEmail,
-          fullName: manifest.ownerFullName,
-          role: "OWNER",
-          accessScope: "NETWORK",
-          storeIds: [],
-          tokenHash: inviteTokenHash,
-          expiresAt: inviteExpiresAt,
-        },
-        select: { id: true, tokenHash: true, expiresAt: true },
-      });
-      const rotationDigest = computeDesignPartnerInviteRotationDigest(
-        manifestDigest,
-        requestId,
-        invite.id,
-        invite.tokenHash,
-        invite.expiresAt,
-        manifestHmacKey,
-      );
-
-      await tx.platformAdminAuditEvent.create({
-        data: {
-          tenantId: tenant.id,
-          action: DESIGN_PARTNER_INVITE_ROTATE_ACTION,
-          targetType: "USER_INVITE",
-          targetId: invite.id,
-          reason: normalizedOperationReason,
-          metadata: {
-            profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
-            partnerAlias: manifest.partnerAlias,
-            supportOwnerAlias: manifest.supportOwnerAlias,
-            operationTicket: normalizedOperationTicket,
-            previousPendingInvitesRevoked: expiredInvites.count,
-            inviteExpiresAt: invite.expiresAt.toISOString(),
-            inviteEmailBound: true,
-            requestId,
-            manifestHmacKeyVersion: MANIFEST_HMAC_KEY_VERSION,
-            rotationDigest,
-          },
-        },
-      });
-
-      return { tenant, invite, inviteUrl, expiredInvites, priorRotation: null };
-    },
-    { isolationLevel: "ReadCommitted" },
-  );
-
-  if (result.priorRotation) {
-    return {
-      decision: "INVITE_ROTATION_ALREADY_APPLIED",
-      profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
-      tenant: {
-        id: result.tenant.id,
-        slug: result.tenant.slug,
-        status: result.tenant.status,
-      },
-      requestId,
-      previousInviteId: result.priorRotation.targetId,
-      ownerInvite: null,
-    };
-  }
-
-  return {
-    decision: "INVITE_ROTATED",
-    profileVersion: DESIGN_PARTNER_PROFILE_VERSION,
-    tenant: {
-      id: result.tenant.id,
-      slug: result.tenant.slug,
-      status: result.tenant.status,
-    },
-    previousPendingInvitesRevoked: result.expiredInvites.count,
-    requestId,
-    ownerInvite: {
-      id: result.invite.id,
-      expiresAt: result.invite.expiresAt.toISOString(),
-      url: result.inviteUrl,
-      oneTimeSecret: true,
-    },
-  };
 }
 
 export async function suspendDesignPartner(
@@ -1266,6 +858,12 @@ export async function suspendDesignPartner(
         fail(
           "PROVISIONING_EVIDENCE_MISSING",
           "Emergency suspend requires the exact tenant and its immutable provisioning marker.",
+        );
+      }
+      if (tenant.status !== "ACTIVE" && tenant.status !== "SUSPENDED") {
+        fail(
+          "SUSPEND_STATE_NOT_NARROWING",
+          "Emergency suspend cannot move a terminal tenant back into service.",
         );
       }
 

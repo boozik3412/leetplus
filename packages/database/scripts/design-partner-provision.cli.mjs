@@ -1,33 +1,35 @@
-import { PrismaClient } from "@prisma/client";
 import { readFile } from "node:fs/promises";
 import {
   DesignPartnerProvisioningError,
   normalizeDesignPartnerManifest,
   previewDesignPartnerProvisioning,
-  provisionDesignPartner,
-  rotateDesignPartnerInvite,
   suspendDesignPartner,
 } from "./design-partner-provisioning.mjs";
+
+const DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE =
+  "DESIGN_PARTNER_IDENTITY_WRITER_DISABLED";
+const IDENTITY_WRITER_DISABLED_MESSAGE =
+  "Design-partner identity writes are disabled pending the shared sealed identity activation workflow.";
 
 const HELP = `Usage:
   node scripts/design-partner-provision.cli.mjs <status|provision|rotate-invite|suspend> --manifest <path>
 
 Safety:
-  status      read-only; reports whether the dedicated database can provision
-  provision   requires DESIGN_PARTNER_CONFIRMATION="PROVISION <tenant-slug>"
+  status      read-only; inspects historical isolated topology
+  provision   DISABLED pending shared sealed identity activation
   rotate-invite
-              requires DESIGN_PARTNER_CONFIRMATION="ROTATE_INVITE <tenant-slug>"
-              a unique DESIGN_PARTNER_ROTATION_REQUEST_ID and operation reason
+              DISABLED pending shared sealed identity activation
   suspend     requires DESIGN_PARTNER_CONFIRMATION="SUSPEND <tenant-slug>"
               and an incident/operation reason
 
-Every command against an existing tenant requires the independent
-DESIGN_PARTNER_MANIFEST_HMAC_KEY. Provision and rotate-invite also require the
-exact design-partner runtime safety overlay in their process environment.
-The first provision is allowed only when the target database has zero tenants.
-Every owner invite URL is emitted once and must be transferred securely.
-Provisioning remains SUSPENDED. This command intentionally has no activation
-path; credentials may be enabled only by the separately reviewed Gate 1DP flow.
+The provision and rotate-invite commands always fail closed with
+DESIGN_PARTNER_IDENTITY_WRITER_DISABLED before reading a manifest or
+constructing a database client. Identity creation and invite rotation may resume
+only through the separately reviewed shared sealed identity activation flow.
+
+Status remains read-only. Status and emergency suspend against historical
+isolated topology require the independent DESIGN_PARTNER_MANIFEST_HMAC_KEY.
+This command intentionally has no activation path.
 `;
 
 function parseArgs(argv) {
@@ -42,9 +44,11 @@ function parseArgs(argv) {
       ? argv[manifestIndex + 1]
       : null;
 
+  const disabledIdentityWriter =
+    command === "provision" || command === "rotate-invite";
   if (
     !["status", "provision", "rotate-invite", "suspend"].includes(command) ||
-    !manifestPath
+    (!disabledIdentityWriter && !manifestPath)
   ) {
     throw new Error(HELP);
   }
@@ -53,10 +57,17 @@ function parseArgs(argv) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const args = parseArgs(argv);
   if (args.help) {
     process.stdout.write(HELP);
     return;
+  }
+  if (args.command === "provision" || args.command === "rotate-invite") {
+    throw new DesignPartnerProvisioningError(
+      DESIGN_PARTNER_IDENTITY_WRITER_DISABLED_CODE,
+      IDENTITY_WRITER_DISABLED_MESSAGE,
+    );
   }
 
   const manifest = normalizeDesignPartnerManifest(
@@ -67,6 +78,7 @@ async function main() {
         args.command === "status" || args.command === "suspend",
     },
   );
+  const { PrismaClient } = await import("@prisma/client");
   const prisma = new PrismaClient({ log: [] });
 
   try {
@@ -77,29 +89,12 @@ async function main() {
         ? await previewDesignPartnerProvisioning(prisma, manifest, {
             manifestHmacKey,
           })
-        : args.command === "provision"
-          ? await provisionDesignPartner(prisma, manifest, {
-              confirmation,
-              manifestHmacKey,
-              runtimeEnv: process.env,
-              webUrl: process.env.WEB_URL,
-            })
-          : args.command === "rotate-invite"
-            ? await rotateDesignPartnerInvite(prisma, manifest, {
-                confirmation,
-                manifestHmacKey,
-                operationReason: process.env.DESIGN_PARTNER_OPERATION_REASON,
-                operationTicket: process.env.DESIGN_PARTNER_OPERATION_TICKET,
-                requestId: process.env.DESIGN_PARTNER_ROTATION_REQUEST_ID,
-                runtimeEnv: process.env,
-                webUrl: process.env.WEB_URL,
-              })
-            : await suspendDesignPartner(prisma, manifest, {
-                confirmation,
-                manifestHmacKey,
-                operationReason: process.env.DESIGN_PARTNER_OPERATION_REASON,
-                operationTicket: process.env.DESIGN_PARTNER_OPERATION_TICKET,
-              });
+        : await suspendDesignPartner(prisma, manifest, {
+            confirmation,
+            manifestHmacKey,
+            operationReason: process.env.DESIGN_PARTNER_OPERATION_REASON,
+            operationTicket: process.env.DESIGN_PARTNER_OPERATION_TICKET,
+          });
 
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } finally {

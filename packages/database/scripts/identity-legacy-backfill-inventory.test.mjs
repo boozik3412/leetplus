@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   APPLIED_MIGRATION_STATE_SQL,
@@ -1323,5 +1326,38 @@ test("runtime dependency boundary pins the reviewed Prisma 6 client", () => {
   assert.throws(
     () => assertRuntimeDependencyVersions("6.19.4"),
     { code: "PRISMA_CLIENT_VERSION_MISMATCH" },
+  );
+});
+
+test("migration checkouts stay LF-stable for Prisma checksum portability", () => {
+  const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  const representativeMigration =
+    "packages/database/prisma/migrations/20260730010000_identity_owner_invite_hold_outbox/migration.sql";
+  const attributes = readFileSync(
+    new URL("../../../.gitattributes", import.meta.url),
+    "utf8",
+  );
+  const migrationPolicy =
+    "packages/database/prisma/migrations/**/migration.sql text eol=lf";
+
+  assert.equal(
+    attributes
+      .split(/\r?\n/gu)
+      .filter((line) => line.trim() === migrationPolicy).length,
+    1,
+  );
+  const effectiveAttribute = spawnSync(
+    "git",
+    ["check-attr", "eol", "--", representativeMigration],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+  assert.equal(effectiveAttribute.status, 0);
+  assert.equal(
+    effectiveAttribute.stdout.trim(),
+    `${representativeMigration}: eol: lf`,
   );
 });

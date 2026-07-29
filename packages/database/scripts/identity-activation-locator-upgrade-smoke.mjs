@@ -14,10 +14,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
-import {
-  APPLICATION_RUNTIME_FUNCTIONS,
-  buildRuntimeFunctionEnrollmentStatements,
-} from "./runtime-function-enrollment.mjs";
+import { APPLICATION_RUNTIME_FUNCTIONS } from "./runtime-function-enrollment.mjs";
 import {
   CURRENT_EXPECTED_LATEST_MIGRATION,
   CURRENT_EXPECTED_MIGRATION_COUNT,
@@ -115,6 +112,22 @@ function quoteIdentifier(value) {
     contractError("DATABASE_IDENTIFIER_INVALID");
   }
   return `"${value}"`;
+}
+
+function buildHistoricalCurrent170RuntimeEnrollmentStatements(roleName) {
+  assert.equal(
+    APPLICATION_RUNTIME_FUNCTIONS.length,
+    7,
+    "The historical CURRENT_170 runtime function manifest changed.",
+  );
+  const role = quoteIdentifier(roleName);
+  return Object.freeze([
+    `REVOKE ALL PRIVILEGES ON TABLE public."IdentityEmailClaim" FROM ${role}`,
+    ...APPLICATION_RUNTIME_FUNCTIONS.flatMap((entry) => [
+      `GRANT EXECUTE ON FUNCTION ${entry.grantSignature} TO ${role}`,
+      `REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION ${entry.grantSignature} FROM ${role}`,
+    ]),
+  ]);
 }
 
 function parseSafeSourceDatabaseUrl(rawDatabaseUrl) {
@@ -1217,7 +1230,7 @@ async function assertCleanBehavior(
       ),
   );
 
-  for (const statement of buildRuntimeFunctionEnrollmentStatements(
+  for (const statement of buildHistoricalCurrent170RuntimeEnrollmentStatements(
     runtimeContext.roleName,
   )) {
     await client.$executeRawUnsafe(statement);
@@ -1365,6 +1378,19 @@ async function runOfflineSelfTest() {
   assert.equal(plan.prefixMigrations.at(-1), PREVIOUS_MIGRATION);
   assert.equal(plan.targetMigration, TARGET_MIGRATION);
   assert.equal(plan.allMigrations.length, 170);
+  const historicalEnrollment =
+    buildHistoricalCurrent170RuntimeEnrollmentStatements(
+      names.runtimeRoleName,
+    );
+  assert.equal(historicalEnrollment.length, 15);
+  assert.equal(
+    historicalEnrollment.some((statement) =>
+      /IdentityOwnerInviteIssueCommand|IdentityMailOutbox|identity_owner_invite_issue_hold_v1/u.test(
+        statement,
+      ),
+    ),
+    false,
+  );
   assert.equal(
     APPLICATION_RUNTIME_FUNCTIONS.some(
       (entry) =>

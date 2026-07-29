@@ -2,7 +2,7 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.7 |
+| Версия | 1.8 |
 | Дата | 29.07.2026 |
 | Backlog | `BETA-IAM-004B` |
 | Contract | `IDENTITY_LEGACY_RECONCILIATION_V1` |
@@ -109,6 +109,17 @@ Release binding сравнивает canonical realpath: на Linux path case д
 совпасть точно, case-insensitive сравнение разрешено только на Windows.
 Frozen-lock CI/install и exact release-artifact verification являются
 обязательным dependency-trust prerequisite.
+
+Prisma checksum является bytewise: БД для release-bound rehearsal должна быть
+развёрнута именно из Git blobs выбранного `RELEASE_SHA`, а не из checkout с
+преобразованными окончаниями строк. Репозиторий фиксирует
+`packages/database/prisma/migrations/**/migration.sql text eol=lf` в
+`.gitattributes`; contract test проверяет наличие этого правила. Уже
+существующий Windows checkout с историческими CRLF не является evidence —
+для него используется новый checkout, raw `git cat-file` materialization либо
+`git -c core.autocrlf=false archive` exact SHA. Обычный `git archive` при
+локальном `core.autocrlf=true` также может применить EOL-преобразование и не
+считается raw-blob evidence.
 
 Последняя команда является destructive fixture harness только для
 подтверждённой loopback `*_ci` PostgreSQL source database; она запрещает

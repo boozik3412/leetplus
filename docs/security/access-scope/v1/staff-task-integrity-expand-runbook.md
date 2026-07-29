@@ -3,8 +3,8 @@
 | Поле                    | Значение                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Статус                  | `IMPLEMENTED_CANDIDATE`; локальная real PostgreSQL rehearsal пройдена; не deployed                                                                           |
-| Версия                  | 1.7.0                                                                                                                                                        |
-| Дата                    | 28.07.2026                                                                                                                                                   |
+| Версия                  | 1.8.0                                                                                                                                                        |
+| Дата                    | 29.07.2026                                                                                                                                                   |
 | Backlog                 | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                                                         |
 | Migration count         | 162                                                                                                                                                          |
 | Latest migration        | `20260727131000_staff_task_integrity_expand`                                                                                                                 |
@@ -13,7 +13,7 @@
 | Historical EXPAND SHA   | `dc26568d94d76b886f1d1b79c36b1bd9f00ac401`; frozen prefix evidence                                                                                           |
 | Historical admission    | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; не current evidence                                                                                              |
 | Входной gate            | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md) `BASELINE_156`                                                                    |
-| После EXPAND            | `EXPAND_162` admission → allowlisted migrations `163..164` → `CURRENT_164` admission → [inventory](./staff-task-integrity-inventory-runbook.md)              |
+| После EXPAND            | `EXPAND_162` admission → allowlisted migrations `163..165` → `CURRENT_165` admission → [inventory](./staff-task-integrity-inventory-runbook.md)              |
 | Следующий этап          | [Aggregate reconciliation plan](./staff-task-integrity-reconciliation-plan-runbook.md)                                                                       |
 | Связанный adoption plan | [Templates и recurring rules](./staff-task-catalog-adoption-plan.md)                                                                                         |
 
@@ -28,9 +28,10 @@ Production-like inventory, reconciliation, `VALIDATE`, deployment и
 операционный rollback drill остаются отдельными обязательными шагами.
 До production-like inventory/planner обязательны три Git-bound admission:
 `BASELINE_156` до EXPAND, frozen-prefix `EXPAND_162` после exact migrations
-`157..162` и `CURRENT_164` после двух allowlisted additive migrations
+`157..162` и `CURRENT_165` после трёх allowlisted additive migrations
 `20260728120000_tenant_execution_control_plane_expand` и
-`20260728150000_tenant_execution_revision_fence`. Третий state не
+`20260728150000_tenant_execution_revision_fence` и
+`20260729120000_store_background_execution_fence`. Третий state не
 изменяет reviewed StaffTask prefix и не переиспользует его envelope/marker.
 
 ## 1. Зафиксированный контекст запуска
@@ -312,16 +313,17 @@ production-данных.
    nonce-bound binding, заменить DB marker его digest и только затем повторно
    пройти snapshot admission; baseline envelope/marker не переиспользовать;
 7. применить только exact allowlisted additive migrations
-   `20260728120000_tenant_execution_control_plane_expand` и
-   `20260728150000_tenant_execution_revision_fence`; подтвердить, что
+   `20260728120000_tenant_execution_control_plane_expand`,
+   `20260728150000_tenant_execution_revision_fence` и
+   `20260729120000_store_background_execution_fence`; подтвердить, что
    protected `StaffTask*` relations не изменились;
-8. получить отдельный `CURRENT_164` authority envelope с новым nonce-bound
+8. получить отдельный `CURRENT_165` authority envelope с новым nonce-bound
    binding, повторно заменить DB marker и пройти третий admission;
 9. выполнить guarded read-only inventory и сохранить только aggregate
    evidence;
-10. на exact current schema `CURRENT_164` выполнить
+10. на exact current schema `CURRENT_165` выполнить
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md):
-   migration count `164`, latest execution-revision migration, unfinished `0`,
+   migration count `165`, latest Store background-execution fence, unfinished `0`,
    14 composite exact, 14 simple exact,
    `0` expected-FK mismatch, `0` unexpected protected FK, 5 indexes exact,
    `0` index mismatch, hidden expected/actual database identity,
@@ -489,6 +491,10 @@ decision: NO-GO | RECONCILE | READY_FOR_VALIDATE | GO
 
 ## 11. Changelog
 
+- `1.8.0`, 29.07.2026 — current additive tail расширен migration `165`;
+  admission/planner state теперь `CURRENT_165`, migration count `165`, latest
+  `20260729120000_store_background_execution_fence`. Store остаются
+  fail-closed, outbound `OFF`; production apply не выполнялся.
 - `1.7.0`, 28.07.2026 — current additive tail расширен второй allowlisted
   migration `164`; current admission/planner state теперь `CURRENT_164`, при
   этом immutable StaffTask prefix остаётся `EXPAND_162`.

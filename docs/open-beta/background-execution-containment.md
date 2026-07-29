@@ -2,8 +2,8 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.1                                                     |
-| Дата             | 28.07.2026                                              |
+| Версия           | 1.3                                                     |
+| Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
 | Топология        | Shared API/workers/PostgreSQL, отдельный tenant на сеть |
@@ -185,16 +185,19 @@ retention и quality collection не объявляются unattended entrypoin
   per-store kill switch;
 - некоторые legacy services сохраняют существующий lint debt, который не
   возник в этом срезе;
-- migration `165` и новые delivery lease-поля намеренно не добавлены до
-  получения exact PostgreSQL 16 evidence для `CURRENT_164`.
+- migration `165` добавляет только fail-closed Store execution fence;
+  delivery lease-поля перенесены в ещё не реализованную migration `166`.
 
+Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
+`37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
 Локальный isolated PostgreSQL `16.14` diagnostic rehearsal populated
-`163 → 164` уже прошёл после усиления проверки exact preflight SQLSTATE:
+`163 → 164` также прошёл после усиления проверки exact preflight SQLSTATE:
 `6` tenants, `6` report runs, `10` ledger rows, три drain rejection,
 database SQLSTATE `55000/55P03/42P07`, lock-timeout/late-DDL rollback, пять
 rolled-back attempts и recovery deploy.
-Он не является remote exact-SHA evidence, поэтому порядок и `NO-GO` ниже не
-изменяются.
+Migration `165` является additive fail-closed candidate: она создаёт
+`Store.backgroundExecutionEnabled=false` и revision fence, не активирует ни
+один Store и не включает outbound. Production apply не выполнялся.
 
 Поэтому `BETA-MT-008` остаётся `В работе`, outbound первого внешнего tenant
 остаётся `OFF`, а release decision остаётся `NO-GO`.
@@ -230,18 +233,22 @@ Suite проверяет:
 
 ## 8. Следующий обязательный порядок
 
-1. Получить remote PostgreSQL 16 PASS populated rehearsal `163 → 164`.
-2. Отдельным reviewed migration `165` добавить durable delivery
+1. Сохранить remote PostgreSQL 16 PASS populated rehearsal `163 → 164` как
+   исторический prerequisite evidence migration `165`: SHA `37f8cc88...` / CI
+   `30423839760`.
+2. Получить отдельный remote exact-SHA `CURRENT_165` PASS populated rehearsal
+   `164 → 165`; до зелёного CI кандидата этот gate остаётся pending.
+3. Только после этого отдельным reviewed migration `166` добавить durable delivery
    claim-generation, captured execution revision, lease owner/expiry,
-   provider-attempt marker, Store revision fence и fenced
+   provider-attempt marker, потребление Store revision fence и fenced
    finalize/reconcile согласно
-   [delivery claim design](./delivery-claim-migration-165-design.md).
-3. Перевести direct dispatcher и bot pull на один claim primitive.
-4. Добавить durable claims и fresh per-source/provider boundary для обычного
+   [delivery claim design](./delivery-claim-migration-166-design.md).
+4. Перевести direct dispatcher и bot pull на один claim primitive.
+5. Добавить durable claims и fresh per-source/provider boundary для обычного
    Langame sync и остальных job kinds.
-5. Реализовать shared Telegram tenant/store identity, durable update dedupe и
+6. Реализовать shared Telegram tenant/store identity, durable update dedupe и
    per-store kill switches.
-6. Реализовать двухфазный suspend/drain и race tests для stage/revision flip.
-7. Пройти real PostgreSQL A/A1/A2 + B/B1 job/provider negative matrix.
-8. Только после этого переходить к canonical owner-email claim, encrypted
+7. Реализовать двухфазный suspend/drain и race tests для stage/revision flip.
+8. Пройти real PostgreSQL A/A1/A2 + B/B1 job/provider negative matrix.
+9. Только после этого переходить к canonical owner-email claim, encrypted
    outbox, shell provisioning и protected activation.

@@ -627,29 +627,31 @@ model EmailVerificationToken {
 }
 
 model Store {
-  id                    String               @id @default(uuid())
-  tenantId              String
-  name                  String
-  publicSlug            String?
-  address               String?
-  city                  String?
-  cityFiasId            String?
-  cityKladrId           String?
-  latitude              Decimal?             @db.Decimal(9, 6)
-  longitude             Decimal?             @db.Decimal(9, 6)
-  yandexMapsUrl         String?
-  gameLogoUrl           String?
-  gamificationEnabled   Boolean              @default(false)
-  timeZone              String?
-  isActive              Boolean              @default(true)
-  externalProvider      IntegrationProvider?
-  externalDomain        String?
-  externalClubId        String?
-  integrationSourceId   String?
-  computerCount         Int?
-  computerCountSyncedAt DateTime?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  id                         String               @id @default(uuid())
+  tenantId                   String
+  name                       String
+  publicSlug                 String?
+  address                    String?
+  city                       String?
+  cityFiasId                 String?
+  cityKladrId                String?
+  latitude                   Decimal?             @db.Decimal(9, 6)
+  longitude                  Decimal?             @db.Decimal(9, 6)
+  yandexMapsUrl              String?
+  gameLogoUrl                String?
+  gamificationEnabled        Boolean              @default(false)
+  backgroundExecutionEnabled Boolean              @default(false)
+  executionRevision          Int                  @default(0)
+  timeZone                   String?
+  isActive                   Boolean              @default(true)
+  externalProvider           IntegrationProvider?
+  externalDomain             String?
+  externalClubId             String?
+  integrationSourceId        String?
+  computerCount              Int?
+  computerCountSyncedAt      DateTime?
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
 
   tenant                          Tenant                            @relation(fields: [tenantId], references: [id])
   integrationSource               IntegrationSource?                @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)

@@ -141,6 +141,22 @@ test("missing, extra, accessor, duplicate, and noncanonical fields reject", () =
   });
 });
 
+test("the ceremony accepts CURRENT_165 and rejects intermediate CURRENT_164", () => {
+  assert.equal(
+    normalizeAcquisitionRequest(request({ expectedState: "CURRENT_165" }), NOW)
+      .expectedState,
+    "CURRENT_165",
+  );
+  assert.throws(
+    () =>
+      normalizeAcquisitionRequest(
+        request({ expectedState: "CURRENT_164" }),
+        NOW,
+      ),
+    { code: "PRODUCTION_LIKE_ACQUISITION_REQUEST_INVALID" },
+  );
+});
+
 test("false controls and non-separated actors reject", () => {
   assert.throws(
     () =>

@@ -1,7 +1,7 @@
 # LeetPlus — специальный backlog выхода на открытый тест
 
 - Дата актуализации: 29.07.2026
-- Версия: 1.41
+- Версия: 1.42
 - Статус документа: активный launch backlog
 - Текущий release decision: `NO-GO` для всех внешних доступов; основной путь
   первого внешнего клуба — `SHARED_MULTI_TENANT_BETA` в общем data plane
@@ -292,10 +292,11 @@
 Current-state уточнение `BETA-MOD-STAFF-003`: перечисленные в строке
 `EXPAND_162` gate и старые SHA являются frozen/historical evidence. Protected
 StaffTask prefix остаётся 162, но current production-like
-admission/inventory/planner допускается только на `CURRENT_164` — exact prefix
+admission/inventory/planner допускается только на `CURRENT_165` — exact prefix
 плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
-`20260728150000_tenant_execution_revision_fence`. Новый exact candidate
+`20260728150000_tenant_execution_revision_fence` и
+`20260729120000_store_background_execution_fence`. Новый exact candidate
 SHA и production-like evidence ещё pending. Strict acquisition contract,
 root lifecycle и detached `prepare → external sign → finalize` реализованы как
 candidate; реальный public root намеренно не enrolled. Статус остаётся
@@ -1610,13 +1611,14 @@ slice. Он полностью заменён актуальной послед�
    `BASELINE_156` envelope → exact DB marker → admission → migrations
    `157..162` → новый `EXPAND_162` envelope с новым nonce-bound binding →
    marker rotation → второй admission → exact allowlisted migrations
-   `163..164` → новый `CURRENT_164` envelope/marker → третий admission.
+   `163..165` → новый `CURRENT_165` envelope/marker → current admission.
    Protected StaffTask
    prefix остаётся 162; предыдущие envelope/marker не переиспользовать; любой
    non-zero exit или
    marker/freshness/blob/authority/ACL mismatch останавливает работу;
-5. только после всех трёх admission отдельно выполнить read-only inventory и
-   aggregate planner на current DB 164, назначить owner каждому non-zero code;
+5. только после всех state-specific admission отдельно выполнить read-only
+   inventory и aggregate planner на current DB 165, назначить owner каждому
+   non-zero code;
 6. отдельно спроектировать, утвердить и выполнить production-like row
    dry-run с protected row evidence; synthetic/HMAC report не засчитывать;
 7. отдельным изменением реализовать explicit idempotent apply с immutable
@@ -1685,10 +1687,11 @@ enrollment, не production-like admission и не разрешение на dep
    rotation и второй admission; baseline envelope/marker reuse запрещён;
 6. применить exact allowlisted migration
    `20260728120000_tenant_execution_control_plane_expand`, затем
-   `20260728150000_tenant_execution_revision_fence`, выпустить отдельный
-   `CURRENT_164` envelope, снова ротировать marker и пройти третий admission;
+   `20260728150000_tenant_execution_revision_fence`, затем
+   `20260729120000_store_background_execution_fence`, выпустить отдельный
+   `CURRENT_165` envelope, снова ротировать marker и пройти current admission;
    StaffTask protected prefix остаётся 162;
-7. затем отдельно проходить inventory/planner на current DB 164, row dry-run,
+7. затем отдельно проходить inventory/planner на current DB 165, row dry-run,
    apply/rollback/zero-diff и последующие Gate 2A/Gate 2 этапы из раздела 7.
 
 Топология и обязательный beta scope не меняются: четыре текущих клуба остаются
@@ -1732,18 +1735,21 @@ Release decision остаётся `NO-GO`.
 Локальная verification:
 
 ```text
-authority/acquisition/root/detached tests = 38/38 PASS
+authority/acquisition/root/detached tests = 40/40 PASS
 admission contract tests                  = 21/21 PASS
 admission smoke self-test                 = PASS
 latest green pre-authority remote SHA     = d77c74393c510b688f9f2a5c43eaa908390450b5
-production public root registry           = EMPTY / FAIL-CLOSED
+production public root registry           = {} / EMPTY / FAIL-CLOSED
+main branch protection/ruleset/CODEOWNERS = ABSENT
 production-like acquisition/restore       = NOT EXECUTED
 production-like admission                 = NO-GO
 external beta                             = NO-GO
 ```
 
-До operational use обязательны повторный independent review исправлений и
-зелёный remote CI exact authority-candidate SHA; выбор внешнего signer/HSM и
+До operational use обязательны independent reviewer и защищённый approval
+path до root enrollment: текущий owner не может заменить независимое
+одобрение self-review. Также обязательны зелёный remote CI exact
+authority-candidate SHA; выбор внешнего signer/HSM и
 key-custody процесса; отдельный reviewed public-root enrollment с собственным
 parent-transition CI; защищённый snapshot acquisition/restore; три
 state-bound request/signing ceremony и marker rotation. Candidate не разрешает
@@ -2053,9 +2059,10 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   canonical email claim + encrypted mail outbox + persisted GO согласно
   [initial OWNER contract](./docs/open-beta/initial-owner-identity-and-activation.md);
 - StaffTask integrity contract сохранён как immutable migrations `1..162`;
-  control-plane migrations `163..164` допускаются только как проверенный
+  control-plane migrations `163..165` допускаются только как проверенный
   additive tail, не меняющий protected `StaffTask*` relations. Current
-  release state — `CURRENT_164`.
+  release state — `CURRENT_165`, `migrationCount=165`, latest
+  `20260729120000_store_background_execution_fence`.
 - checkpoint проходит `16 suites / 663 tests` tenant-execution,
   `32 suites / 523 tests` focused security и полный API regression
   `96 suites / 1873 passed / 2 todo` (`1875 total`). Design-partner subset
@@ -2064,9 +2071,9 @@ Implementation checkpoint `Tenant execution control plane 1.7`:
   typecheck, API boundary/tenant-execution lint, web lint без ошибок, seed
   safety `9/9`, Prisma validate/generate, migration-164 offline contract
   `6/6`, populated-upgrade rehearsal self-test и diff-check зелёные; отдельный
-  real PostgreSQL `16.14` local diagnostic rehearsal также зелёный. CI smoke
-  остаётся обязательным, а до первого remote exact-SHA PASS результат остаётся
-  pending release evidence.
+  real PostgreSQL `16.14` local diagnostic rehearsal также зелёный. Remote
+  PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
+  `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
 
 Этот checkpoint закрывает foundation, но не Gate 1MT. Следующий обязательный
 P0-порядок: закончить durable lease/job/guest/Telegram effect fencing →
@@ -2123,21 +2130,39 @@ Staff recurring job зарезервирован в registry, но scheduler/all
 Stage/revision flip посреди уже начатого `INTERNAL` job, bot provider после
 pull, длинные retention/materializer операции и direct/manual DB entrypoints
 не имеют общего suspend/drain primitive. Activity external jobs могут
-оставаться unclaimed. Migration `165` не создана до remote PostgreSQL 16 PASS
-для populated `163 → 164`. Поэтому `BETA-MT-008` остаётся `В работе`, external
+оставаться unclaimed. Migration `165` теперь добавляет только fail-closed
+Store fence (`backgroundExecutionEnabled=false`, `executionRevision=0`);
+ни один Store не активирован, outbound остаётся `OFF`. Поэтому `BETA-MT-008`
+остаётся `В работе`, external
 outbound — `OFF`, owner invite — `NO-GO`.
 
 Полный контракт, матрица job kinds, проверки и следующий порядок:
 [background-execution-containment.md](./docs/open-beta/background-execution-containment.md).
 Design candidate первого durable vertical slice с включёнными замечаниями
 независимого review зафиксирован отдельно:
-[migration 165 delivery claim design](./docs/open-beta/delivery-claim-migration-165-design.md).
+[migration 166 delivery claim design](./docs/open-beta/delivery-claim-migration-166-design.md).
 Он выбирает typed claim state в `GuestGameDelivery`, opaque capability-token,
 canonical delivery↔reward Store invariant, fresh consent/reward/provider
 revalidation, provider-attempt marker, durable reaper/reconciliation,
-old-worker cutoff и отдельный populated `164 → 165` rehearsal. Migration и
-runtime code намеренно не созданы до remote exact-SHA PostgreSQL 16 PASS для
-`CURRENT_164`.
+old-worker cutoff и отдельный populated `165 → 166` rehearsal. Delivery claim
+migration `166` и runtime code ещё не созданы; это по-прежнему `NO-GO`.
+
+### 5.29. Store background execution fence candidate — 29.07.2026
+
+Exact remote prerequisite `CURRENT_164` подтверждён на SHA
+`37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`. Новый
+bounded schema candidate `20260729120000_store_background_execution_fence`
+переводит release contract в `CURRENT_165` (`migrationCount=165`) и добавляет
+только fail-closed Store-level execution fence. Все существующие и новые Store
+остаются `backgroundExecutionEnabled=false`; автоматической активации и
+outbound effects нет. Production migration/deploy не выполнялись.
+
+Authority bundle локально проходит `40/40`, включая child-process positive
+ceremony E2E; canonical root registry остаётся `{}`. В `main` нет branch
+protection/ruleset и `CODEOWNERS`, поэтому root enrollment запрещён до
+независимого reviewer и защищённого approval path. Delivery claim перенесён в
+не реализованную migration `166`; Gate 1MT, owner invite и внешний доступ
+остаются `NO-GO`.
 
 ## 6. Release gates
 
@@ -2283,20 +2308,21 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    nonce-bound binding, заменить DB marker его digest и выполнить второй
    admission. Затем применить только exact allowlisted migration
    `20260728120000_tenant_execution_control_plane_expand`, затем exact
-   `20260728150000_tenant_execution_revision_fence`, выпустить третий
-   `CURRENT_164` request/envelope с новым binding, повторно заменить marker и
-   пройти третий admission. Protected StaffTask evidence остаётся bound к prefix 162;
-   baseline/expand marker не переиспользовать; все три authority bundle и обе
+   `20260728150000_tenant_execution_revision_fence` и exact
+   `20260729120000_store_background_execution_fence`, выпустить новый
+   `CURRENT_165` request/envelope с новым binding, повторно заменить marker и
+   пройти current admission. Protected StaffTask evidence остаётся bound к prefix 162;
+   предыдущие marker не переиспользовать; все state-specific authority bundle и
    marker-rotation attestation сохранить. Exact роль
    получает table `SELECT` на восьми разрешённых relations и только
    `User(id, tenantId, isPlatformAdmin, isActive, accessScope)`; любой
    non-zero exit или authority/marker/freshness/blob/ACL mismatch
    останавливает работу. После повторного zero-diff inventory/planner login
    reader role отзывается и удаляется до уничтожения snapshot.
-5. Только после всех трёх admission отдельно выполнить read-only inventory и
+5. Только после всех state-specific admission отдельно выполнить read-only inventory и
    aggregate reconciliation planner schema `v1` на exact current
-   `CURRENT_164` (`migrationCount=164`, latest
-   `20260728150000_tenant_execution_revision_fence`) с
+   `CURRENT_165` (`migrationCount=165`, latest
+   `20260729120000_store_background_execution_fence`) с
    одинаковыми thresholds, exact protected StaffTask catalog gate и owner для
    каждого non-zero code. HMAC
    `databaseIdentityDigest`, `contentDigest` и `executionDigest` являются

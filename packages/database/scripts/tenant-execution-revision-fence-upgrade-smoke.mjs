@@ -247,20 +247,20 @@ async function readMigrationPlan() {
     CURRENT_EXPECTED_LATEST_MIGRATION,
     "The current latest migration does not match the release contract.",
   );
-  assert.equal(
-    migrationDirectories.at(-2),
-    PREFIX_MIGRATION,
-    "Migration 163 must remain the exact prefix for the revision rehearsal.",
+  const targetMigrationIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
+  assert(
+    targetMigrationIndex > 0,
+    "Migration 164 must remain present in the reviewed additive tail.",
   );
   assert.equal(
-    migrationDirectories.at(-1),
-    TARGET_MIGRATION,
-    "Migration 164 must remain the only rehearsal target.",
+    migrationDirectories[targetMigrationIndex - 1],
+    PREFIX_MIGRATION,
+    "Migration 163 must remain the exact prefix for the revision rehearsal.",
   );
 
   return {
     sourcePrismaDir,
-    prefixMigrations: migrationDirectories.slice(0, -1),
+    prefixMigrations: migrationDirectories.slice(0, targetMigrationIndex),
     targetMigration: TARGET_MIGRATION,
   };
 }
@@ -1267,9 +1267,7 @@ async function assertMigrationLockSqlState(databaseUrl, lockSql) {
   try {
     await expectSqlState("55P03", () =>
       client.$transaction(async (transaction) => {
-        await transaction.$executeRawUnsafe(
-          `SET LOCAL lock_timeout = '250ms'`,
-        );
+        await transaction.$executeRawUnsafe(`SET LOCAL lock_timeout = '250ms'`);
         await transaction.$executeRawUnsafe(lockSql);
       }),
     );

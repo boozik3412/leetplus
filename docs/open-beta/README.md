@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.18                                         |
+| Версия           | 1.19                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -96,7 +96,7 @@ enterprise-isolation option и не сокращает shared gates.
 18. [Runbook admission StaffTask snapshot](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md) —
     обязательный fail-closed checkpoint перед production-like inventory и
     planner: PostgreSQL 16, frozen `BASELINE_156 | EXPAND_162`, current
-    `CURRENT_164`, release manifest, catalog и отдельная SELECT-only роль.
+    `CURRENT_165`, release manifest, catalog и отдельная SELECT-only роль.
     18a. [Runbook production-like authority operations](../security/access-scope/v1/staff-task-integrity-snapshot-authority-operations.md) —
     strict acquisition evidence, public-root lifecycle и detached Ed25519
     ceremony без private-key path внутри LeetPlus.
@@ -117,12 +117,16 @@ enterprise-isolation option и не сокращает shared gates.
     shell-only provisioning, canonical email claim, encrypted mail outbox,
     persisted release gates, activation/suspend state machine и обязательная
     concurrency/effect-fencing matrix.
-24. [Migration 165 delivery claim design](./delivery-claim-migration-165-design.md) —
+24. [Migration 166 delivery claim design](./delivery-claim-migration-166-design.md) —
     typed claim-generation/lease/revision для direct и bot delivery,
     canonical Store fence, fresh consent/reward/provider revalidation,
     provider-attempt marker, durable reaper/reconciliation, old-worker cutoff
-    и обязательный populated `164 → 165` rehearsal. Это design candidate с
+    и обязательный populated `165 → 166` rehearsal. Это design candidate с
     включёнными замечаниями review; migration и runtime ещё не созданы.
+
+Current migration `165` — отдельный bounded fail-closed Store fence candidate:
+все Store остаются `backgroundExecutionEnabled=false`, ни один Store не
+активирован, outbound `OFF`. Production apply/deploy не выполнялись.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -220,9 +224,9 @@ enterprise-isolation option и не сокращает shared gates.
   обязательны одна read-only `REPEATABLE READ` transaction, exact target /
   confirmation / production attestation / 40-hex SHA / HMAC и expected
   database binding. Frozen StaffTask evidence остаётся на exact
-  `EXPAND_162`, а current schema-first gate требует `CURRENT_164`,
-  `migrationCount=164`, latest
-  `20260728150000_tenant_execution_revision_fence`,
+  `EXPAND_162`, а current schema-first gate требует `CURRENT_165`,
+  `migrationCount=165`, latest
+  `20260729120000_store_background_execution_fence`,
   `unfinished=0`, `14 composite exact`, `14 simple exact`,
   `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact` и
   `0 index mismatch`; expected/actual database names не выводятся, а
@@ -238,7 +242,7 @@ enterprise-isolation option и не сокращает shared gates.
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` не является current evidence;
   новый exact candidate SHA ещё не назначен. `IMPLEMENTED_CANDIDATE`, not
   deployed. Admission принимает только изолированную loopback PostgreSQL 16
-  копию в точном `BASELINE_156`, `EXPAND_162` или `CURRENT_164`,
+  копию в точном `BASELINE_156`, `EXPAND_162` или `CURRENT_165`,
   сверяет ordered migration names/checksums, exact Git blob content, catalog,
   database marker и freshness. Отдельная `LOGIN NOINHERIT` роль получает
   table-level `SELECT` ровно на восьми разрешённых relations и column-level
@@ -257,9 +261,15 @@ enterprise-isolation option и не сокращает shared gates.
   проверяется actual parent→HEAD CI gate, а payload/envelope публикуются
   последними readiness files. Каждая output-пара своей фазы находится в одном
   protected каталоге; каталоги prepare/finalize могут различаться. Локально authority
-  bundle прошёл `38/38`, admission — `21/21`. Реальный
-  public root, внешний signer/HSM, snapshot acquisition/restore и exact-SHA
-  remote CI этого изменения ещё не выполнены.
+  bundle прошёл `40/40`, включая child-process positive ceremony E2E и
+  rejection промежуточного `CURRENT_164`;
+  admission — `21/21`. Root registry остаётся exact `{}`. Ветка `main`
+  сейчас без branch protection/ruleset и без `CODEOWNERS`; до enrollment
+  production public root обязателен независимый reviewer и защищённый approval
+  path. Реальный public root, внешний signer/HSM и snapshot
+  acquisition/restore ещё не выполнены.
+  Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
+  `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
 - Historical public-only pinned-path test evidence
   `2341b99937e54cc50d1763a0a794d975816c72ce` —
   включён в полностью зелёный remote CI SHA
@@ -304,10 +314,11 @@ enterprise-isolation option и не сокращает shared gates.
    `BASELINE_156` → admission → migrations `157..162` → новый request и
    `EXPAND_162` envelope/marker → admission → exact allowlisted migration
    `20260728120000_tenant_execution_control_plane_expand` → exact
-   `20260728150000_tenant_execution_revision_fence` → новый
-   третий request и `CURRENT_164` envelope/marker → третий admission. Protected StaffTask
+   `20260728150000_tenant_execution_revision_fence` → exact fail-closed
+   migration `20260729120000_store_background_execution_fence` → новый третий
+   `CURRENT_165` request/envelope/marker и третий admission. Protected StaffTask
    evidence остаётся bound к prefix 162; planner работает только на current
-   DB 164;
+   DB 165;
 5. отдельно production-like inventory и aggregate planner;
 6. отдельно production-like row dry-run;
 7. отдельно explicit apply, rollback и доказательство zero-diff;
@@ -399,11 +410,11 @@ Gate 2 и
 - тот же production-like snapshot до inventory прошёл
   [обязательный admission checkpoint](../security/access-scope/v1/staff-task-integrity-snapshot-admission-runbook.md)
   в `BASELINE_156`, после migrations `157..162` — в frozen-prefix
-  `EXPAND_162`, а после exact allowlisted migrations `163..164` — в
-  `CURRENT_164`;
-  для каждого из трёх states использован отдельный signed envelope, перед
-  вторым и третьим admission DB marker заменён digest нового envelope, а
-  state-specific protected evidence и обе marker-rotation attestation
+  `EXPAND_162`, а после exact allowlisted migrations `163..165` — в
+  `CURRENT_165`;
+  для каждого состояния использован отдельный signed envelope, перед каждым
+  следующим admission DB marker заменён digest нового envelope, а
+  state-specific protected evidence и marker-rotation attestation
   сохранены;
   подтверждены PostgreSQL 16, admission schema `v2`, exact release
   manifest/blob/catalog, database marker/freshness, table-level `SELECT` на
@@ -420,8 +431,8 @@ Gate 2 и
   findings имеют owner и принятое решение;
 - aggregate reconciliation planner запущен на том же production-like
   snapshot и прошёл exact schema-first gate:
-  `CURRENT_164`, `migrationCount=164`, latest
-  `20260728150000_tenant_execution_revision_fence`, `unfinished=0`,
+  `CURRENT_165`, `migrationCount=165`, latest
+  `20260729120000_store_background_execution_fence`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
   `databaseIdentityMatched=true`, `databaseIdentityDigest` зафиксирован,

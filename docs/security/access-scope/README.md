@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.18.0                                                                                              |
+| Версия контракта               | 1.19.0                                                                                              |
 | Дата                           | 29.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -18,7 +18,7 @@
 | Staff reconciliation planner   | `2c74c663780b3f183be708a01431c22efe57a723` — aggregate-only; no apply; not deployed                 |
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
 | Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
-| Authority operations           | Detached candidate; local 38/38; production public root EMPTY / FAIL-CLOSED                         |
+| Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
 | Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
 
 Это каноническая документация server-side области доступа для перехода LeetPlus к
@@ -272,14 +272,17 @@ Git blobs exact release. Положительный production-like report до�
 привязан к private same-process evidence и не является standalone
 transferable audit proof; аудит опирается на protected signed manifest.
 
-Authority envelope подписывает `expectedState`, поэтому `BASELINE_156`,
-`EXPAND_162` и `CURRENT_164` требуют три отдельных envelope. После migrations
-`157..162` и затем после allowlisted migrations `163..164` выполняются новые
+Authority envelope подписывает `expectedState`, поэтому production-like
+ceremony поддерживает ровно три состояния: `BASELINE_156`, `EXPAND_162` и
+`CURRENT_165`. После migrations `157..162`, а затем после единого exact
+allowlisted tail `163..165` выполняются новые
 detached ceremony `prepare → external Ed25519 sign → finalize` с новым
 nonce-bound binding. DB marker заменяется digest нового envelope до каждого
-следующего admission, а protected evidence хранит три state-specific bundle,
-первоначальную установку marker и две rotation attestation. Marker reuse
+следующего admission, а protected evidence хранит все state-specific bundle,
+первоначальную установку marker и rotation attestation. Marker reuse
 запрещён.
+`CURRENT_164` остаётся только remote SYNTHETIC prerequisite evidence; runtime
+его не принимает и отдельный production-like envelope для него не выпускается.
 
 Historical runtime admission candidate
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` и test evidence
@@ -288,9 +291,15 @@ Historical runtime admission candidate
 до текущего authority-operations изменения. Текущий detached candidate
 добавляет strict acquisition request, derived `acquisition-v1:<digest>`, root
 lifecycle и no-private-key signing ceremony. Локально admission прошёл 21/21,
-authority bundle — 38/38, smoke self-test — 48, real PostgreSQL 16.13 smoke —
-23 scenarios. Pinned production-like roots намеренно пусты, поэтому
-production-like запуск fail-closed остаётся `NO-GO`.
+authority bundle — 40/40, включая child-process positive ceremony E2E и
+rejection промежуточного `CURRENT_164`; smoke
+self-test — 48, real PostgreSQL 16.13 smoke — 23 scenarios. Remote PostgreSQL
+16 prerequisite для exact `CURRENT_164` пройден на SHA
+`37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
+Pinned production-like root registry остаётся exact `{}`, поэтому
+production-like запуск fail-closed остаётся `NO-GO`. Ветка `main` не имеет
+branch protection/ruleset и `CODEOWNERS`; enrollment production root требует
+независимого reviewer и защищённого approval path.
 
 Следующим bounded candidate реализован
 [StaffTask SYNTHETIC proposal dry-run](./v1/staff-task-integrity-reconciliation-proposal-dry-run-runbook.md)
@@ -343,6 +352,16 @@ reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
 
 ## Changelog
 
+- `1.19.0`, 29.07.2026 — current release contract переведён в `CURRENT_165`:
+  exact additive tail `163..165`, migration count `165`, latest
+  `20260729120000_store_background_execution_fence`. Remote `CURRENT_164`
+  prerequisite зелёный на `37f8cc88...` / CI `30423839760`; migration `165`
+  остаётся fail-closed, не активирует Store и не включает outbound. Authority
+  operations проходят 40/40 с child-process positive ceremony E2E и
+  rejection промежуточного `CURRENT_164`, но root
+  registry остаётся `{}`; `main` без protection/ruleset/CODEOWNERS, поэтому
+  independent review обязателен до root enrollment. Production-like/deploy/
+  external beta остаются `NO-GO`.
 - `1.18.0`, 29.07.2026 — ceremony runtime closure отделён от Prisma и
   привязан к exact release через dependency-free canonical JSON module;
   admission release boundary покрывает тот же closure. Readiness outputs

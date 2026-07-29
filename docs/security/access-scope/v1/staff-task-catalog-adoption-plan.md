@@ -3,8 +3,8 @@
 | Поле           | Значение                                                                                                                                                  |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner, SYNTHETIC proposal dry-run и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.11.0                                                                                                                                                    |
-| Дата           | 28.07.2026                                                                                                                                                |
+| Версия         | 1.12.0                                                                                                                                                    |
+| Дата           | 29.07.2026                                                                                                                                                |
 | Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                                                      |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                                                    |
 
@@ -28,10 +28,11 @@ Scheduler и scheduled all-tenant HTTP не зарегистрированы и 
 
 State contract после control-plane EXPAND разделён: StaffTask evidence
 остаётся bound к frozen `EXPAND_162`, а current production-like
-inventory/planner допускается только после `CURRENT_164` admission — exact
+inventory/planner допускается только после `CURRENT_165` admission — exact
 prefix плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
-`20260728150000_tenant_execution_revision_fence`. Historical SHA ниже не
+`20260728150000_tenant_execution_revision_fence` и
+`20260729120000_store_background_execution_fence`. Historical SHA ниже не
 являются evidence текущего незакоммиченного candidate.
 
 ## 1. Инвентаризация поверхности
@@ -225,8 +226,8 @@ current candidate SHA ещё не назначен.
 - считает actionable cap только по proposal/operator, исключая review-only
   counts;
 - сохраняет protected StaffTask prefix `EXPAND_162`, но выполняет current
-  schema-first exact gate `CURRENT_164`, `migrationCount=164`, latest
-  `20260728150000_tenant_execution_revision_fence`, `unfinished=0`,
+  schema-first exact gate `CURRENT_165`, `migrationCount=165`, latest
+  `20260729120000_store_background_execution_fence`, `unfinished=0`,
   `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
   `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
 - использует exits `0/1/2/3`;
@@ -245,8 +246,8 @@ idempotent apply, locks/recheck, audit, rollback и повторный zero-diff
 
 Historical snapshot admission evidence boundary зафиксирован на
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; это не current candidate
-evidence. Current admission также поддерживает `CURRENT_164` после exact
-allowlisted migrations `163..164`, но требует нового exact SHA и повторного
+evidence. Current admission также поддерживает `CURRENT_165` после exact
+allowlisted migrations `163..165`, но требует нового exact SHA и повторного
 evidence.
 Admission допускает только loopback snapshot, точные runtime bytes и migration
 manifest из Git artifact. Logical allowlist содержит девять
@@ -291,7 +292,7 @@ revoke, concurrent pause/store change, duplicate tick и stale run reclaim.
 - historical integrity inventory contract — 9/9; frozen clean PostgreSQL
   prefix 162 `PASS`; намеренная cross-tenant fixture `BLOCKED`/2 без ID;
 - historical aggregate reconciliation planner contract — pass на prefix 162;
-  current `CURRENT_164` production-like evidence ещё pending;
+  current `CURRENT_165` production-like evidence ещё pending;
 - historical snapshot admission contract — `19` admission unit, `9` authority unit и
   `46` offline smoke checks; staged PostgreSQL 16.13 smoke прошёл `23`
   сценария `BASELINE_156 → migrations 157..162 → EXPAND_162`, exact восемь

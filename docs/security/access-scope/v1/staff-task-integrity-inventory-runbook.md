@@ -3,8 +3,8 @@
 | Поле                  | Значение                                                                                                                    |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
-| Версия                | 1.8.0                                                                                                                       |
-| Дата                  | 28.07.2026                                                                                                                  |
+| Версия                | 1.9.0                                                                                                                       |
+| Дата                  | 29.07.2026                                                                                                                  |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
 | Current candidate SHA | Не назначен; historical `56d61543...` не является current evidence                                                         |
 | Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)                                            |
@@ -14,9 +14,9 @@
 Документ задаёт безопасный порядок проверки legacy-данных `StaffTask`,
 `StaffTaskTemplate`, `StaffTaskRecurringRule` и
 `StaffTaskRecurringRuleRun` после schema-only EXPAND и успешного
-`CURRENT_164` admission, но до reconciliation и `VALIDATE`. Reviewed
+`CURRENT_165` admission, но до reconciliation и `VALIDATE`. Reviewed
 StaffTask evidence остаётся привязана к frozen `EXPAND_162` prefix; current
-state добавляет только allowlisted additive tail migrations 163 и 164.
+state добавляет только allowlisted additive tail migrations 163, 164 и 165.
 Он не разрешает автоматическое исправление данных, production migration,
 включение scheduler или выдачу внешнего доступа.
 Production-like scanner можно запускать только после успешного admission
@@ -153,21 +153,22 @@ Review-находка не должна маскироваться как док
    admission. После exact migrations `157..162` выпустить новый state-bound
    `EXPAND_162` envelope с новым nonce-bound binding, заменить DB marker и
    пройти второй admission. Затем применить exact allowlisted migrations
-   `20260728120000_tenant_execution_control_plane_expand` и
-   `20260728150000_tenant_execution_revision_fence`, выпустить отдельный
-   `CURRENT_164` envelope, ещё раз заменить marker и пройти третий admission.
+   `20260728120000_tenant_execution_control_plane_expand`,
+   `20260728150000_tenant_execution_revision_fence` и
+   `20260729120000_store_background_execution_fence`, выпустить отдельный
+   `CURRENT_165` envelope, ещё раз заменить marker и пройти третий admission.
    Предыдущие envelope/marker не переиспользовать.
    Текущий пустой production trusted-root registry означает fail-closed
    `NO-GO`.
-5. Только после успешного `CURRENT_164` admission выполнить scanner на том же
+5. Только после успешного `CURRENT_165` admission выполнить scanner на том же
    неизменённом восстановленном snapshot.
 6. Сохранить только aggregate JSON, SHA, время, target label и exit code в
    защищённый release evidence.
 7. Назначить owner каждому non-zero reason code.
 8. Запустить отдельный
    [aggregate reconciliation planner](./staff-task-integrity-reconciliation-plan-runbook.md)
-   на exact current schema-first gate: `CURRENT_164`, `migrationCount=164`,
-   latest `20260728150000_tenant_execution_revision_fence`,
+   на exact current schema-first gate: `CURRENT_165`, `migrationCount=165`,
+   latest `20260729120000_store_background_execution_fence`,
    `unfinished=0`, `14 composite exact`, `14 simple exact`,
    `0 expected-FK mismatch`, `0 unexpected protected FK`, `5 indexes exact`,
    `0 index mismatch`; подтвердить hidden expected/actual database identity,
@@ -263,7 +264,7 @@ executed_at:
 historical_snapshot_admission_sha: 044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c
 historical_pinned_path_test_sha: 2341b99937e54cc50d1763a0a794d975816c72ce
 snapshot_admission_report_schema_version: 2
-snapshot_admission_state: CURRENT_164
+snapshot_admission_state: CURRENT_165
 baseline_authority_evidence_ref:
 baseline_marker_install_attestation_ref:
 expand_authority_evidence_ref:
@@ -379,7 +380,7 @@ Inventory slice считается реализованным, когда:
 4. blocking/review result детерминирован и не раскрывает row identifiers;
 5. clean-schema smoke зелёный;
 6. production-like scanner запускается только после успешного Git-bound
-   `BASELINE_156 → 157..162 → EXPAND_162 → allowlisted 163..164 → CURRENT_164`
+   `BASELINE_156 → 157..162 → EXPAND_162 → allowlisted 163..165 → CURRENT_165`
    admission; protected StaffTask evidence остаётся bound к prefix 162;
 7. production-like reconciliation остаётся отдельным явным операционным шагом.
 
@@ -389,6 +390,10 @@ rehearsal.
 
 ## 10. Changelog
 
+- `1.9.0`, 29.07.2026 — exact current inventory/planner path переведён на
+  `CURRENT_165`: frozen prefix `EXPAND_162` плюс reviewed additive tail
+  `163..165`; migration count `165`, latest
+  `20260729120000_store_background_execution_fence`.
 - `1.8.0`, 28.07.2026 — exact current inventory/planner path переведён на
   `CURRENT_164`: к frozen StaffTask prefix `EXPAND_162` допускается только
   reviewed additive tail migrations 163 и 164; latest migration и

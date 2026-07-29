@@ -3,8 +3,8 @@
 | Поле     | Значение             |
 | -------- | -------------------- |
 | Статус   | Active               |
-| Версия   | 1.15.0               |
-| Дата     | 28.07.2026           |
+| Версия   | 1.16.0               |
+| Дата     | 29.07.2026           |
 | Владелец | LeetPlus engineering |
 
 Статусы:
@@ -25,10 +25,11 @@ capability, entitlement, PII, audit event, owner, test и release SHA.
 Current-state override для `STAFF-02D/02F/02G`: указанные в строках SHA и
 162-migration smoke являются historical evidence. Reviewed StaffTask boundary
 остаётся frozen prefix `EXPAND_162`; current inventory/planner/admission
-candidate принимает фактическую БД только как `CURRENT_164` — exact prefix
+candidate принимает фактическую БД только как `CURRENT_165` — exact prefix
 плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
-`20260728150000_tenant_execution_revision_fence`. Для current candidate
+`20260728150000_tenant_execution_revision_fence` и
+`20260729120000_store_background_execution_fence`. Для current candidate
 SHA ещё не назначен; production-like evidence остаётся `NO-GO`. SYNTHETIC
 proposal dry-run `STAFF-02H` намеренно остаётся bound к `EXPAND_162`.
 

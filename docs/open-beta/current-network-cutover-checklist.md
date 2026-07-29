@@ -3,8 +3,8 @@
 | Поле            | Значение                                           |
 | --------------- | -------------------------------------------------- |
 | Статус          | Template; execution prohibited without explicit GO |
-| Версия          | 1.11.0                                             |
-| Дата            | 28.07.2026                                         |
+| Версия          | 1.13.0                                             |
+| Дата            | 29.07.2026                                         |
 | Топология       | 1 operational Tenant / 4 Store                     |
 | Метод           | In-place, без смены `tenantId`                     |
 | External access | Запрещён до успешного Gate 2                       |
@@ -15,8 +15,8 @@
 
 Все фиксированные SHA ниже — historical checkpoints. Они не заполняют
 `Full candidate SHA` и не заменяют CI/review/evidence нового exact current
-candidate, который должен включать additive migrations `163..164` и пройти
-`CURRENT_164`
+candidate, который должен включать additive migrations `163..165` и пройти
+`CURRENT_165`
 admission.
 
 ## A. Release identity и authority
@@ -50,7 +50,12 @@ admission.
       `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema `v1`, read-only
       harness-only, no apply, не production deployment.
 - [x] В runtime candidate production authority root registry остаётся exact
-      `EMPTY / FAIL-CLOSED`; `PRODUCTION_LIKE` остаётся `NO-GO`.
+      `{}` / `EMPTY / FAIL-CLOSED`; `PRODUCTION_LIKE` остаётся `NO-GO`.
+- [x] Remote PostgreSQL 16 prerequisite `CURRENT_164` зелёный на
+      `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI `30423839760`; это
+      SYNTHETIC evidence, runtime `CURRENT_164` не принимает.
+- [ ] `main` защищён branch protection/ruleset, CODEOWNERS/approval routing
+      настроены и независимый reviewer одобрил root-enrollment change.
 - [ ] Reviewed Ed25519 public authority root enrolment выполнен отдельным
       change; current empty-root fail-closed state снят только для exact
       approved release.
@@ -86,16 +91,17 @@ admission.
       evidence не засчитываются как этот `Gate 2A` checkpoint.
 - [ ] После `EXPAND_162` применены только exact allowlisted migrations
       `20260728120000_tenant_execution_control_plane_expand` и
-      `20260728150000_tenant_execution_revision_fence`; они не изменили
-      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_164`
+      `20260728150000_tenant_execution_revision_fence` и
+      `20260729120000_store_background_execution_fence`; они не изменили
+      protected `StaffTask*` relations. Выпущен отдельный `CURRENT_165`
       envelope с новым nonce-bound binding, DB marker повторно заменён, третий
       admission schema `v2` завершился exit `0`; reuse expand marker запрещён.
 - [ ] Staff task integrity inventory выполнен на восстановленном snapshot:
       `blockingTotal=0`; каждый review reason code имеет owner/решение.
 - [ ] Aggregate reconciliation planner выполнен на том же snapshot,
       release SHA и thresholds; schema-first gate равен
-      `CURRENT_164`, `migrationCount=164`, latest
-      `20260728150000_tenant_execution_revision_fence`, `unfinished=0`,
+      `CURRENT_165`, `migrationCount=165`, latest
+      `20260729120000_store_background_execution_fence`, `unfinished=0`,
       `14 composite exact`, `14 simple exact`, `0 expected-FK mismatch`,
       `0 unexpected protected FK`, `5 indexes exact`, `0 index mismatch`;
       actionable cap не превышен.
@@ -286,7 +292,15 @@ admission.
 
 ## G. Operations
 
+- [ ] Accepted artifact, migration apply и production runtime environment
+      обновляются одной release-операцией:
+      `EXPECTED_DATABASE_MIGRATION=20260729120000_store_background_execution_fence`
+      и `EXPECTED_DATABASE_MIGRATION_COUNT=165`; старые значения не допускаются
+      после apply.
 - [ ] `/health/live`, `/health/ready`, `/version` проверены внешним probe.
+- [ ] Migration identity/count подтверждены именно через `/health/ready`;
+      legacy `/health` считается только liveness и не принимается как
+      доказательство совместимости release с БД.
 - [ ] Scheduler owner единственный; heartbeat/reclaim проверены.
 - [ ] Langame timeout/retry/reconciliation envelope включён.
 - [ ] Structured logs/request ID/tenant/source/SHA доступны оператору.
@@ -368,6 +382,14 @@ marker/freshness/blob mismatch.
 
 ## Changelog
 
+- `1.13.0`, 29.07.2026 — перед любым production apply добавлен atomic
+  release-env gate для exact migration `165`/count `165`; миграционная
+  совместимость подтверждается `/health/ready`, а не legacy `/health`.
+- `1.12.0`, 29.07.2026 — current schema checkpoint переведён в
+  `CURRENT_165` (`migrationCount=165`, latest
+  `20260729120000_store_background_execution_fence`). Migration `165`
+  fail-closed, не активирует Store и не включает outbound; production
+  apply/cutover не выполнялись.
 - `1.11.0`, 28.07.2026 — в обязательный CI подключён disposable populated
   PostgreSQL 16 rehearsal migration `163 → 164`: success/data preservation,
   три zero-in-flight rejection, lock-timeout, late-DDL transactional rollback

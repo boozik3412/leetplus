@@ -18,6 +18,31 @@ env:
   NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
 
 jobs:
+  authority-root-trust:
+    name: Authority root trust gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out complete root history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Validate pinned authority root transition
+        run: >-
+          node
+          packages/database/scripts/staff-task-integrity-snapshot-authority-root-transition.cli.mjs
+          --check-parent
+          --confirm
+          verify-pinned-authority-root-transition
+
   application:
     name: Application checks
     runs-on: ubuntu-latest
@@ -25,18 +50,19 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 10.33.2
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -90,6 +116,9 @@ jobs:
       - name: Validate tenant execution revision fence contract
         run: pnpm --filter database check:tenant-execution-revision-fence
 
+      - name: Validate Store background execution fence contract
+        run: pnpm --filter database check:store-background-execution-fence
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -135,8 +164,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ github.sha }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260728150000_tenant_execution_revision_fence
-          EXPECTED_DATABASE_MIGRATION_COUNT: "164"
+          EXPECTED_DATABASE_MIGRATION: 20260729120000_store_background_execution_fence
+          EXPECTED_DATABASE_MIGRATION_COUNT: "165"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -173,16 +202,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 10.33.2
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -209,6 +240,11 @@ jobs:
         run: pnpm --filter database db:smoke:tenant-execution-revision-fence-upgrade
         env:
           TENANT_EXECUTION_REVISION_FENCE_UPGRADE_SMOKE_CONFIRM: run-tenant-execution-revision-fence-upgrade-smoke
+
+      - name: Rehearse Store background execution fence 164 to 165 upgrade and rollback
+        run: pnpm --filter database db:smoke:store-background-execution-fence-upgrade
+        env:
+          STORE_BACKGROUND_EXECUTION_FENCE_UPGRADE_SMOKE_CONFIRM: run-store-background-execution-fence-upgrade-smoke
 
       - name: Verify database connectivity and migration state
         run: pnpm --filter database db:smoke

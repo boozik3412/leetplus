@@ -9,6 +9,7 @@ export const STAFF_TASK_FROZEN_PREFIX_LATEST =
 export const STAFF_TASK_ALLOWED_ADDITIVE_TAIL = Object.freeze([
   "20260728120000_tenant_execution_control_plane_expand",
   "20260728150000_tenant_execution_revision_fence",
+  "20260729120000_store_background_execution_fence",
 ]);
 
 export const CURRENT_EXPECTED_MIGRATION_COUNT =
@@ -19,4 +20,4 @@ export const CURRENT_EXPECTED_LATEST_MIGRATION =
 
 // Keep the reader-facing admission state explicit. A later release migration
 // must update this value together with the additive-tail allowlist.
-export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_164";
+export const STAFF_TASK_CURRENT_RELEASE_STATE = "CURRENT_165";

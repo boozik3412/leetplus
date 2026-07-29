@@ -2,11 +2,11 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.13                                                                        |
-| Дата             | 28.07.2026                                                                  |
+| Версия           | 1.14                                                                        |
+| Дата             | 29.07.2026                                                                  |
 | Статус           | Foundation + revision fencing slice; evidence pending                       |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
-| Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` |
+| Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` + `20260729120000...store_background_execution_fence` |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
 
 Этот документ фиксирует фактически реализованный срез
@@ -53,6 +53,12 @@ Migration также удаляет database default с `User.role`. Raw/legacy
 `User.create` больше не может неявно получить максимальную tenant-роль:
 каждый account-creation, invite acceptance и будущий owner-transfer workflow
 обязан передать роль явно.
+
+Migration `165` добавляет отдельный fail-closed Store fence:
+`backgroundExecutionEnabled=false` и `executionRevision=0`. Trigger увеличивает
+revision при изменении execution-состояния и атомарно выключает background
+execution при archive/deactivation. Миграция не включает ни один Store,
+outbound остаётся `OFF`, runtime delivery claim ещё не реализован.
 
 ## 2. Полный entitlement profile
 
@@ -333,7 +339,7 @@ shared external tenant и не является разрешением на до
   на scheduler/claim boundary и повторно непосредственно перед SMTP/Langame.
   `INTERNAL` сохраняет legacy-совместимость. Этот слой является containment, а
   не durable suspend/drain fence: stage/revision flip после claim и уже
-  переданный bot payload требуют migration `165` и общей claim generation.
+  переданный bot payload требуют migration `166` и общей claim generation.
   Полная матрица и ограничения:
   [background-execution-containment.md](./background-execution-containment.md).
 - Scheduled report digest вычисляет фактические capabilities системной или
@@ -468,9 +474,11 @@ database и проверяет populated success, три SQLSTATE `55000` drain 
 Изолированный локальный PostgreSQL `16.14` diagnostic run этого контракта
 прошёл: сохранены `6` tenants, `6` report runs и `10` ledger rows; подтверждены
 три drain rejection (`55000`), lock timeout (`55P03`), late-DDL conflict
-(`42P07`) и rollback, `5` rolled-back attempts и recovery deploy. Этот запуск
-не является remote exact-SHA artifact и не
-закрывает release evidence. Remote PASS текущего candidate пока pending.
+(`42P07`) и rollback, `5` rolled-back attempts и recovery deploy.
+Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
+`37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
+Локальный diagnostic запуск сам по себе production-like evidence не является.
+Migration `165` не применялась в production и не меняет release decision.
 
 Последняя локальная проверка checkpoint:
 
@@ -482,12 +490,15 @@ database и проверяет populated success, три SQLSTATE `55000` drain 
   (`1875 total`);
 - API typecheck, production build, boundary/tenant-execution lint,
   production environment contract, Prisma validate/generate, database
-  typecheck, seed safety `9/9`, migration-164 offline contract `6/6` и
+  typecheck, seed safety `9/9`, migration-164 offline contract `6/6`,
+  Store background-execution fence contract и
   populated-upgrade rehearsal self-test, real PostgreSQL `16.14` local
   diagnostic rehearsal, `git diff --check`: `PASS`.
 
 StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migrations
-`163..164` принимаются только как явно allowlisted additive tail, не
+`163..165` принимаются только как явно allowlisted additive tail, не
 затрагивающий protected `StaffTask*` relations. Frozen StaffTask evidence
 остаётся в state `EXPAND_162`; фактическая текущая БД и downstream
-inventory/planner должны проходить отдельный admission как `CURRENT_164`.
+inventory/planner должны проходить отдельный admission как `CURRENT_165`
+(`migrationCount=165`, latest
+`20260729120000_store_background_execution_fence`).

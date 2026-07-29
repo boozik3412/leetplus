@@ -1,13 +1,13 @@
-# Migration 165: durable delivery claim design
+# Migration 166: durable delivery claim design
 
 | Поле             | Значение                                                   |
 | ---------------- | ---------------------------------------------------------- |
-| Версия           | 0.3                                                        |
-| Дата             | 28.07.2026                                                 |
-| Статус           | Design candidate; 3 review включены, code отсутствует      |
+| Версия           | 0.5                                                        |
+| Дата             | 29.07.2026                                                 |
+| Статус           | Design candidate; 4 review включены, code отсутствует      |
 | Release decision | `NO-GO` для external delivery и owner invite               |
-| Базовая схема    | Exact `CURRENT_164`                                        |
-| Первый scope     | `GuestGameDelivery`, Store fence, direct и bot send paths  |
+| Базовая схема    | Exact `CURRENT_165`                                        |
+| Первый scope     | `GuestGameDelivery`, Store fence consumption, direct и bot send paths |
 
 ## 1. Назначение
 
@@ -24,9 +24,15 @@
 - bot ack и manual mutation не имеют generation-bound CAS;
 - tenant/store policy может измениться после pull, но до provider effect.
 
-Migration `165` не создаётся до remote PostgreSQL 16 PASS для exact
-`CURRENT_164`. Этот документ является design contract, а не разрешением
-создать migration, применить DDL или включить outbound.
+Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
+`37f8cc88cdba05b3c73f6bc14e14528f831228ee` (CI run `30423839760`).
+Migration `165` добавляет только fail-closed Store background-execution fence,
+не включает ни один Store и не разрешает outbound. Delivery claim migration
+`166` всё ещё не создана. До начала её реализации обязателен отдельный remote
+PostgreSQL 16 PASS exact-SHA кандидата `CURRENT_165`, включая populated
+rehearsal `164 → 165`; локальные проверки этого не заменяют. Этот документ
+является design contract, а не разрешением создать migration, применить DDL
+или включить outbound.
 
 ## 2. Принятое архитектурное решение
 
@@ -297,20 +303,27 @@ provider marker допускает не более трёх retries с jitter; �
 
 ### 3.5. Store-level fence
 
-Добавить в `Store`:
+Exact base `CURRENT_165` уже содержит:
 
 ```text
 backgroundExecutionEnabled Boolean NOT NULL DEFAULT false
 executionRevision          Int     NOT NULL DEFAULT 0
 ```
 
-Migration backfill:
+Migration `166` не добавляет эти поля повторно, не меняет их defaults и не
+сбрасывает существующие значения. Она обязана проверить exact base contract и
+использовать captured Store revision во всех claim/attempt/finalize predicates.
+Migration `165` уже гарантирует:
 
-- все существующие и новые Store остаются fail-closed
-  `backgroundExecutionEnabled=false`, `executionRevision=0`;
+- существующие Store в момент применения `165` получают
+  `backgroundExecutionEnabled=false`, `executionRevision=0`, а новые Store
+  имеют те же fail-closed defaults;
+- после любого execution-policy transition trigger сохраняет произвольную
+  неотрицательную монотонную `executionRevision`; migration `166` обязана
+  сохранить её без reset;
 - migration не выбирает «текущий INTERNAL Tenant» и не включает Store по
   environment-specific данным;
-- после deploy отдельный audited control-plane cutover по exact Tenant/Store
+- после будущего отдельного deploy/GO audited control-plane cutover по exact Tenant/Store
   IDs может включить одобренные `Tenant A/A1..A4`; trigger повышает revision,
   а receipt связывает IDs, accepted SHA, actor, reason и timestamp;
 - новый Store по умолчанию не допускает background effect.
@@ -655,19 +668,23 @@ Implementation call-site inventory для одного atomic slice:
 Status labels, DTO validators, mappers, metrics и audit payload меняются в том
 же PR; fallback неизвестного статуса в `READY` запрещён.
 
-## 8. Migration `164 → 165` rehearsal
+## 8. Migration `165 → 166` rehearsal
 
 До добавления canonical migration:
 
-1. сохранить immutable manifest первых `164` migrations с names/checksums;
-2. получить remote exact-SHA PASS populated `163 → 164`;
-3. отвязать rehearsal `164` от предположения, что она всегда latest;
-4. создать отдельный `tenant-delivery-claim-upgrade-smoke`.
+1. сохранить immutable manifest первых `165` migrations с names/checksums;
+2. сохранить уже полученный remote exact-SHA PASS populated `163 → 164` как
+   исторический prerequisite migration `165`;
+3. получить отдельный remote exact-SHA `CURRENT_165` PASS populated
+   `164 → 165` и зафиксировать его как обязательный base gate migration `166`;
+4. отвязать rehearsal `165` от предположения, что она всегда latest;
+5. создать отдельный `tenant-delivery-claim-upgrade-smoke`.
 
 Fixture:
 
 - минимум два tenants `A/B`;
-- Store `A1/A2/B1`;
+- Store `A1/A2/B1`, включая минимум один Store с ненулевой допустимой
+  `executionRevision`;
 - channels `TELEGRAM/MAX/MANUAL`;
 - существующие `READY/BLOCKED/SENT/FAILED/CANCELED`;
 - delivery events;
@@ -681,8 +698,12 @@ Fixture:
 Acceptance:
 
 - legacy rows сохранены, nullable claim state backfill корректен;
-- migration оставляет все Store `backgroundExecutionEnabled=false/revision=0`;
-  activation по exact IDs выполняется только отдельным audited cutover;
+- migration `166` не включает ни один Store, не сбрасывает
+  `backgroundExecutionEnabled` и сохраняет каждую существующую неотрицательную
+  `executionRevision`, включая ненулевую fixture;
+- pre-cutover evidence отдельно доказывает `backgroundExecutionEnabled=false`
+  для всех Store; activation по exact IDs выполняется только отдельным audited
+  cutover;
 - provider delivery получает canonical Store; same-tenant mismatch
   блокируется с одним immutable event;
 - cross-tenant Store/reward preflight даёт `SQLSTATE 55000`, не оставляет
@@ -732,36 +753,40 @@ Acceptance:
 
 ## 9. Rollout
 
-1. Remote `CURRENT_164` evidence.
-2. Независимо reviewed additive migration `165` и отдельный real PostgreSQL
-   rehearsal на exact candidate SHA.
-3. Protected release manifest фиксирует accepted SHA,
+1. Remote `CURRENT_164` evidence — `PASS` на SHA `37f8cc88...`, CI
+   `30423839760`; это исторический prerequisite migration `165`, а не
+   production-like `GO`.
+2. До реализации `166` получить и сохранить отдельный remote exact-SHA
+   `CURRENT_165` PASS populated `164 → 165`; pending до зелёного CI кандидата.
+3. Независимо reviewed additive migration `166` и отдельный real PostgreSQL
+   rehearsal `165 → 166` на exact candidate SHA.
+4. Protected release manifest фиксирует accepted SHA,
    `deliveryProtocolVersion=1`, migration checksums и workload identities;
    startup/readiness нового API/worker/bot отклоняет иной contract.
-4. До cutover развёрнут containment release с job-specific
+5. До cutover развёрнут containment release с job-specific
    `DELIVERY_PROTOCOL_CUTOVER_DENY`, который проверяется **до**
    `ALLOWED_INTERNAL_LEGACY` и действует для `INTERNAL/PILOT/BETA/LIVE`.
    Dispatcher/pull/attempt переходят в `DENY_NEW_EFFECTS`, а exact finalize и
    принятый reaper — только в `MAINTENANCE_ONLY`; новые claims/markers
    прекращаются, выполняется bounded drain. Одна registry-классификация
    `EXTERNAL_DENY` для этого недостаточна.
-5. Все legacy API/worker/bot процессы останавливаются; legacy routes
+6. Все legacy API/worker/bot процессы останавливаются; legacy routes
    удаляются из ingress. Bot service token ротируется, старый отзывается.
    Ранее выданные legacy payloads проходят полное expiry/quarantine; если
    нельзя доказать остановку consumer либо отозвать его provider credential,
    cutover запрещён.
-6. Provider credentials и egress выдаются только новой workload identity.
+7. Provider credentials и egress выдаются только новой workload identity.
    Старый release не может вызвать Telegram/MAX даже при ошибочном restart.
-7. Apply `165` в staging, затем запуск только accepted release. Mixed old/new
+8. Apply `166` в staging, затем запуск только accepted release. Mixed old/new
    workers и unsafe rollback на старый binary запрещены; rollback выполняется
    новым release с outbound OFF либо rollback-forward.
-8. `SHADOW` использует только synthetic deliveries или read-only comparison
+9. `SHADOW` использует только synthetic deliveries или read-only comparison
    решений на snapshot. Он не claim-ит real queue, не меняет delivery/event и
    не вызывает provider. Canary — первый этап, где разрешена реальная
    mutation, и он ограничен одним channel/Store.
-9. Race/reconciliation/kill-switch drill и доказательство, что old token,
+10. Race/reconciliation/kill-switch drill и доказательство, что old token,
    old route, old workload и legacy payload дают zero provider calls.
-10. Только после acceptance отдельно перевести:
+11. Только после acceptance отдельно перевести:
    - `GUEST_GAME_DELIVERY_DISPATCH`;
    - `GUEST_GAME_DELIVERY_BOT_PULL`;
    - `GUEST_GAME_DELIVERY_RECONCILIATION_REAPER`
@@ -772,7 +797,7 @@ Acceptance:
 Production migration/cutover требует отдельного явного решения. Этот документ,
 локальный PostgreSQL PASS и commit сами по себе не являются таким решением.
 
-## 10. Что migration `165` не закрывает
+## 10. Что migration `166` не закрывает
 
 - общий scheduler leader/heartbeat;
 - обычный Langame sync lease;
@@ -782,5 +807,5 @@ Production migration/cutover требует отдельного явного р
 - owner identity/outbox и activation;
 - remote CI, backup/restore и production deployment.
 
-Поэтому даже успешная migration `165` сама по себе не закрывает
+Поэтому даже успешная migration `166` сама по себе не закрывает
 `BETA-MT-008`, Gate 1MT или `SHARED BETA GO`.

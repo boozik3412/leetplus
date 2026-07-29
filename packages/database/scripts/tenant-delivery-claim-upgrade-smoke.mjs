@@ -1425,7 +1425,55 @@ function extractSqlStates(error) {
   return states;
 }
 
-async function expectSqlState(expected, operation) {
+function extractErrorText(error) {
+  const messages = new Set();
+  const visited = new Set();
+  const pending = [error];
+
+  while (pending.length > 0 && visited.size < 64) {
+    const candidate = pending.shift();
+    if (typeof candidate === "string") {
+      messages.add(candidate);
+      continue;
+    }
+    if (
+      candidate === null ||
+      (typeof candidate !== "object" && typeof candidate !== "function") ||
+      visited.has(candidate)
+    ) {
+      continue;
+    }
+    visited.add(candidate);
+
+    for (const property of Reflect.ownKeys(candidate)) {
+      try {
+        pending.push(candidate[property]);
+      } catch {
+        // Continue collecting the remaining driver error fields.
+      }
+    }
+  }
+
+  return [...messages].join("\n");
+}
+
+function assertSqlStateOrPrismaSeverity(error, expected) {
+  const states = extractSqlStates(error);
+  if (states.has(expected)) {
+    return;
+  }
+
+  // Prisma 6.19 query-engine errors may replace PostgreSQL originalCode with
+  // the server severity string ERROR. Static migration tests pin every
+  // ERRCODE; the populated smoke additionally requires the exact database
+  // message and transactional rollback at each call site.
+  assert(
+    states.has("ERROR"),
+    `Expected SQLSTATE ${expected}; observed ${JSON.stringify([...states])}.`,
+  );
+}
+
+async function expectSqlState(expected, operation, expectedMessage) {
   let caught;
   try {
     await operation();
@@ -1433,11 +1481,12 @@ async function expectSqlState(expected, operation) {
     caught = error;
   }
   assert(caught, `Expected SQLSTATE ${expected}.`);
-  const states = extractSqlStates(caught);
+  assertSqlStateOrPrismaSeverity(caught, expected);
   assert(
-    states.has(expected),
-    `Expected SQLSTATE ${expected}; observed ${JSON.stringify([...states])}.`,
+    expectedMessage instanceof RegExp,
+    `Expected a diagnostic pattern for SQLSTATE ${expected}.`,
   );
+  assert.match(extractErrorText(caught), expectedMessage);
 }
 
 async function expectCheckConstraint(constraintName, operation) {
@@ -1448,11 +1497,7 @@ async function expectCheckConstraint(constraintName, operation) {
     caught = error;
   }
   assert(caught, `Expected CHECK ${constraintName} to reject the fixture.`);
-  const states = extractSqlStates(caught);
-  assert(
-    states.has("23514"),
-    `Expected SQLSTATE 23514; observed ${JSON.stringify([...states])}.`,
-  );
+  assertSqlStateOrPrismaSeverity(caught, "23514");
   const details = [
     caught?.message,
     caught?.meta?.message,
@@ -1968,40 +2013,46 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
     3,
   );
 
-  await expectSqlState("23514", () =>
-    client.$transaction(async (transaction) => {
-      await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
-      const changed = await transaction.$executeRawUnsafe(
-        `UPDATE "GuestGameDelivery"
-         SET
-           "status" = 'READY',
-           "stateReasonCode" = NULL,
-           "transitionRevision" = 4
-         WHERE "tenantId" = $1
-           AND "id" = $2
-           AND "status" = 'BLOCKED'
-           AND "transitionRevision" = 3`,
-        delivery.tenantId,
-        delivery.deliveryId,
-      );
-      assert.equal(changed, 1);
-      // The committed revision-2 BLOCKED -> READY event is intentionally
-      // present, but cannot satisfy this revision-4 transition at commit.
-    }),
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        const changed = await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameDelivery"
+           SET
+             "status" = 'READY',
+             "stateReasonCode" = NULL,
+             "transitionRevision" = 4
+           WHERE "tenantId" = $1
+             AND "id" = $2
+             AND "status" = 'BLOCKED'
+             AND "transitionRevision" = 3`,
+          delivery.tenantId,
+          delivery.deliveryId,
+        );
+        assert.equal(changed, 1);
+        // The committed revision-2 BLOCKED -> READY event is intentionally
+        // present, but cannot satisfy this revision-4 transition at commit.
+      }),
+    /Delivery transition requires exactly one typed durable event/u,
   );
 
-  await expectSqlState("23514", () =>
-    client.$transaction(async (transaction) => {
-      await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
-      await insertCanonicalTransitionEvent(transaction, {
-        ...delivery,
-        transitionRevision: 4,
-        eventType: "DELIVERY_RETRIED",
-        fromStatus: "BLOCKED",
-        toStatus: "READY",
-        stateReasonCode: "TEST_FUTURE_REVISION_PREINSERT",
-      });
-    }),
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        await insertCanonicalTransitionEvent(transaction, {
+          ...delivery,
+          transitionRevision: 4,
+          eventType: "DELIVERY_RETRIED",
+          fromStatus: "BLOCKED",
+          toStatus: "READY",
+          stateReasonCode: "TEST_FUTURE_REVISION_PREINSERT",
+        });
+      }),
+    /Durable event revision does not match its current delivery transition/u,
   );
 
   assert.deepEqual(
@@ -2135,107 +2186,131 @@ async function assertTriggerSemantics(client, fixtures) {
     storeId: null,
     suffix: "fresh-quarantine-rejected",
   });
-  await expectSqlState("23514", () =>
-    client.$executeRawUnsafe(
-      `INSERT INTO "GuestGameDelivery" (
-         "id", "tenantId", "rewardId", "profileId", "guestId",
-         "channel", "status", "readinessStatus", "messageTitle", "messageBody",
-         "integrityState", "createdAt", "updatedAt"
-       ) VALUES (
-         $1, $2, $3, $4, $5, 'MANUAL', 'BLOCKED', 'NEEDS_REVIEW',
-         'invalid', 'invalid', 'LEGACY_QUARANTINED',
-         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-       )`,
-      randomUUID(),
-      fixtures.tenantA,
-      invalidRewardId,
-      fixtures.profileA1,
-      fixtures.guestA1,
-    ),
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$executeRawUnsafe(
+        `INSERT INTO "GuestGameDelivery" (
+           "id", "tenantId", "rewardId", "profileId", "guestId",
+           "channel", "status", "readinessStatus", "messageTitle", "messageBody",
+           "integrityState", "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, $4, $5, 'MANUAL', 'BLOCKED', 'NEEDS_REVIEW',
+           'invalid', 'invalid', 'LEGACY_QUARANTINED',
+           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+         )`,
+        randomUUID(),
+        fixtures.tenantA,
+        invalidRewardId,
+        fixtures.profileA1,
+        fixtures.guestA1,
+      ),
+    /Fresh delivery cannot self-assign legacy quarantine/u,
   );
 
-  await expectSqlState("23514", () =>
-    client.$transaction(async (transaction) => {
-      await transaction.$executeRawUnsafe(
-        `UPDATE "GuestGameDelivery"
-         SET "status" = 'BLOCKED',
-             "stateReasonCode" = 'TEST_TRANSITION_WITHOUT_EVENT',
-             "transitionRevision" = "transitionRevision" + 1
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameDelivery"
+           SET "status" = 'BLOCKED',
+               "stateReasonCode" = 'TEST_TRANSITION_WITHOUT_EVENT',
+               "transitionRevision" = "transitionRevision" + 1
+           WHERE "id" = $1`,
+          fixtures.deliveries.backfill,
+        );
+      }),
+    /Delivery transition requires exactly one typed durable event/u,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameReward"
+           SET "storeId" = $1
+           WHERE "id" = $2`,
+          fixtures.storeA2,
+          fixtures.rewards.backfill,
+        );
+      }),
+    /Reward update breaks verified provider delivery binding/u,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameDelivery"
+           SET "storeId" = $1
+           WHERE "id" = $2`,
+          fixtures.storeA2,
+          fixtures.deliveries.backfill,
+        );
+      }),
+    /Verified provider delivery does not match canonical reward binding/u,
+  );
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `UPDATE "GuestGameDeliveryEvent"
+         SET "note" = 'tampered'
          WHERE "id" = $1`,
-        fixtures.deliveries.backfill,
-      );
-    }),
+        fixtures.legacyEvent,
+      ),
+    /GuestGameDeliveryEvent evidence is append-only/u,
   );
-  await expectSqlState("23514", () =>
-    client.$transaction(async (transaction) => {
-      await transaction.$executeRawUnsafe(
-        `UPDATE "GuestGameReward"
-         SET "storeId" = $1
-         WHERE "id" = $2`,
-        fixtures.storeA2,
+  await expectSqlState(
+    "55000",
+    () =>
+      client.$executeRawUnsafe(
+        `DELETE FROM "GuestGameDeliveryEvent" WHERE "id" = $1`,
+        fixtures.legacyEvent,
+      ),
+    /GuestGameDeliveryEvent evidence is append-only/u,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$executeRawUnsafe(
+        `INSERT INTO "GuestGameDeliveryAttempt" (
+           "id", "tenantId", "deliveryId", "rewardId", "storeId", "channel",
+           "claimGeneration", "attemptNumber", "claimJobKind",
+           "executionRevision", "storeExecutionRevision", "claimKeyVersion",
+           "claimOwnerDigest", "claimTokenDigest", "claimedAt",
+           "leaseExpiresAt", "acknowledgeUntil", "effectInputDigest",
+           "providerConfigDigest", "providerAuthorityRevision",
+           "workloadIdentityDigest", "providerAttemptKey", "providerAttemptedAt",
+           "sendGrantDigest", "sendGrantExpiresAt"
+         ) VALUES (
+           $1, $2, $3, $4, $5, 'TELEGRAM', 1, 1,
+           'GUEST_GAME_DELIVERY_DISPATCH', 7, 2, 1,
+           $6, $6, CURRENT_TIMESTAMP,
+           CURRENT_TIMESTAMP + INTERVAL '10 minutes',
+           CURRENT_TIMESTAMP + INTERVAL '20 minutes', $6, $6, 1, $6, $7,
+           CURRENT_TIMESTAMP + INTERVAL '1 minute', $6,
+           CURRENT_TIMESTAMP + INTERVAL '5 minutes'
+         )`,
+        randomUUID(),
+        fixtures.tenantA,
+        fixtures.deliveries.backfill,
         fixtures.rewards.backfill,
-      );
-    }),
+        fixtures.storeA1,
+        "a".repeat(64),
+        `attempt-${randomUUID()}`,
+      ),
+    /Attempt does not match the current delivery provider marker/u,
   );
-  await expectSqlState("23514", () =>
-    client.$transaction(async (transaction) => {
-      await transaction.$executeRawUnsafe(
-        `UPDATE "GuestGameDelivery"
-         SET "storeId" = $1
-         WHERE "id" = $2`,
-        fixtures.storeA2,
-        fixtures.deliveries.backfill,
-      );
-    }),
-  );
-  await expectSqlState("55000", () =>
-    client.$executeRawUnsafe(
-      `UPDATE "GuestGameDeliveryEvent"
-       SET "note" = 'tampered'
-       WHERE "id" = $1`,
-      fixtures.legacyEvent,
-    ),
-  );
-  await expectSqlState("55000", () =>
-    client.$executeRawUnsafe(
-      `DELETE FROM "GuestGameDeliveryEvent" WHERE "id" = $1`,
-      fixtures.legacyEvent,
-    ),
-  );
-  await expectSqlState("23514", () =>
-    client.$executeRawUnsafe(
-      `INSERT INTO "GuestGameDeliveryAttempt" (
-         "id", "tenantId", "deliveryId", "rewardId", "storeId", "channel",
-         "claimGeneration", "attemptNumber", "claimJobKind",
-         "executionRevision", "storeExecutionRevision", "claimKeyVersion",
-         "claimOwnerDigest", "claimTokenDigest", "claimedAt",
-         "leaseExpiresAt", "acknowledgeUntil", "effectInputDigest",
-         "providerConfigDigest", "providerAuthorityRevision",
-         "workloadIdentityDigest", "providerAttemptKey", "providerAttemptedAt",
-         "sendGrantDigest", "sendGrantExpiresAt"
-       ) VALUES (
-         $1, $2, $3, $4, $5, 'TELEGRAM', 1, 1,
-         'GUEST_GAME_DELIVERY_DISPATCH', 7, 2, 1,
-         $6, $6, CURRENT_TIMESTAMP,
-         CURRENT_TIMESTAMP + INTERVAL '10 minutes',
-         CURRENT_TIMESTAMP + INTERVAL '20 minutes', $6, $6, 1, $6, $7,
-         CURRENT_TIMESTAMP + INTERVAL '1 minute', $6,
-         CURRENT_TIMESTAMP + INTERVAL '5 minutes'
-       )`,
-      randomUUID(),
-      fixtures.tenantA,
-      fixtures.deliveries.backfill,
-      fixtures.rewards.backfill,
-      fixtures.storeA1,
-      "a".repeat(64),
-      `attempt-${randomUUID()}`,
-    ),
-  );
-  await expectSqlState("23503", () =>
-    client.$executeRawUnsafe(
-      `DELETE FROM "Store" WHERE "id" = $1`,
-      fixtures.storeA1,
-    ),
+  await expectSqlState(
+    "23503",
+    () =>
+      client.$executeRawUnsafe(
+        `DELETE FROM "Store" WHERE "id" = $1`,
+        fixtures.storeA1,
+      ),
+    /(?:GuestGameReward|GuestGameDelivery|GuestGameDeliveryAttempt|GuestGameDeliveryEvent)_(?:tenantId_)?storeId_fkey/u,
   );
 }
 

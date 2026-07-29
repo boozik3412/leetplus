@@ -950,7 +950,7 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     transition,
-    /TG_OP = 'INSERT'[\s\S]*Fresh delivery cannot self-assign legacy quarantine/u,
+    /TG_OP = 'INSERT'[\s\S]*Fresh delivery cannot self-assign legacy quarantine[\s\S]*ERRCODE = '23514'/u,
   );
   assert.match(
     transition,
@@ -1004,7 +1004,7 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     binding,
-    /Verified provider delivery does not match canonical reward binding/u,
+    /Verified provider delivery does not match canonical reward binding[\s\S]*ERRCODE = '23514'/u,
   );
   assert.match(
     sql,
@@ -1020,10 +1020,13 @@ test("transition, binding, and durable-event functions are hardened and attached
     rewardBinding,
     /INTO STRICT reward_record[\s\S]*FROM public\."GuestGameReward" AS reward[\s\S]*FOR UPDATE;[\s\S]*ORDER BY delivery\."id"\s+FOR UPDATE;/u,
   );
-  assert.match(rewardBinding, /Claimed provider reward Store binding is immutable/u);
   assert.match(
     rewardBinding,
-    /Reward update breaks verified provider delivery binding/u,
+    /Claimed provider reward Store binding is immutable[\s\S]*ERRCODE = '23514'/u,
+  );
+  assert.match(
+    rewardBinding,
+    /Reward update breaks verified provider delivery binding[\s\S]*ERRCODE = '23514'/u,
   );
   assert.match(
     sql,
@@ -1039,7 +1042,7 @@ test("transition, binding, and durable-event functions are hardened and attached
   }
   assert.match(
     eventCheck,
-    /matching_events <> 1[\s\S]*Delivery transition requires exactly one typed durable event/u,
+    /matching_events <> 1[\s\S]*Delivery transition requires exactly one typed durable event[\s\S]*ERRCODE = '23514'/u,
   );
   assert.match(
     eventCheck,
@@ -1107,7 +1110,10 @@ test("delivery attempts are insert-validated, append-only, and deletable only by
       `Attempt INSERT validation no longer binds ${field}.`,
     );
   }
-  assert.match(body, /Attempt does not match the current delivery provider marker/u);
+  assert.match(
+    body,
+    /Attempt does not match the current delivery provider marker[\s\S]*ERRCODE = '23514'/u,
+  );
   assert.match(
     body,
     /TG_OP = 'DELETE'[\s\S]*CURRENT_USER = 'leetplus_evidence_retention'[\s\S]*RETURN OLD;/u,
@@ -1140,7 +1146,7 @@ test("delivery events validate delivery and attempt scope, deny updates, and res
   );
   assert.match(
     body,
-    /delivery_record\."transitionRevision"[\s\S]*IS DISTINCT FROM NEW\."transitionRevision"[\s\S]*Durable event revision does not match its current delivery transition/u,
+    /delivery_record\."transitionRevision"[\s\S]*IS DISTINCT FROM NEW\."transitionRevision"[\s\S]*Durable event revision does not match its current delivery transition[\s\S]*ERRCODE = '23514'/u,
   );
   assert.match(
     body,

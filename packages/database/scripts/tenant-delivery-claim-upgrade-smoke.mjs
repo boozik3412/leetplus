@@ -338,15 +338,22 @@ async function readMigrationPlan() {
     "Committed migration directory names changed.",
   );
   assert.equal(migrationDirectories.length, CURRENT_EXPECTED_MIGRATION_COUNT);
-  assert.equal(CURRENT_EXPECTED_LATEST_MIGRATION, TARGET_MIGRATION);
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_166");
-  assert.deepEqual(STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-2), [
+  assert.equal(
+    migrationDirectories.at(-1),
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+  );
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_167");
+  assert.deepEqual(STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-3, -1), [
     PREFIX_MIGRATION,
     TARGET_MIGRATION,
   ]);
   const targetIndex = migrationDirectories.indexOf(TARGET_MIGRATION);
-  assert.equal(targetIndex, migrationDirectories.length - 1);
+  assert.equal(targetIndex, migrationDirectories.length - 2);
   assert.equal(migrationDirectories[targetIndex - 1], PREFIX_MIGRATION);
+  assert.equal(
+    migrationDirectories[targetIndex + 1],
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+  );
 
   const manifest = JSON.parse(
     await readFile(

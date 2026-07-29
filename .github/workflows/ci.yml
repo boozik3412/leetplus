@@ -142,6 +142,9 @@ jobs:
       - name: Validate runtime function ACL enrollment contract
         run: pnpm --filter database check:runtime-function-enrollment
 
+      - name: Validate identity email claim foundation
+        run: pnpm --filter database check:identity-email-claim
+
       - name: Test database seed safety
         run: pnpm --filter database test:seed-safety
 
@@ -187,8 +190,8 @@ jobs:
           SYNC_SERVICE_TOKEN: ci-contract-scheduler-gggggggggggggggggggggggggggggggg
           RELEASE_SHA: ${{ env.CI_RELEASE_SHA }}
           BUILD_TIME: "2026-07-26T00:00:00Z"
-          EXPECTED_DATABASE_MIGRATION: 20260729160000_guest_game_delivery_claim_fence
-          EXPECTED_DATABASE_MIGRATION_COUNT: "166"
+          EXPECTED_DATABASE_MIGRATION: 20260729190000_identity_email_claim_foundation
+          EXPECTED_DATABASE_MIGRATION_COUNT: "167"
           ACCESS_SCOPE_ENFORCEMENT_MODE: ENFORCED
           STAFF_ATTACHMENT_ACL_MODE: SHADOW
 
@@ -289,6 +292,11 @@ jobs:
         run: pnpm --filter database db:smoke:runtime-function-enrollment
         env:
           RUNTIME_FUNCTION_ENROLLMENT_SMOKE_CONFIRM: run-runtime-function-enrollment-smoke
+
+      - name: Verify global identity email claim invariants
+        run: pnpm --filter database db:smoke:identity-email-claim
+        env:
+          IDENTITY_EMAIL_CLAIM_SMOKE_CONFIRM: run-identity-email-claim-smoke
 
       - name: Verify isolated design-partner provisioning lifecycle
         run: pnpm --filter database db:smoke:design-partner-provisioning

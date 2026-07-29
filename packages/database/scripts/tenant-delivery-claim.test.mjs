@@ -300,14 +300,21 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
   const targetIndex = migrationNames.indexOf(TARGET_MIGRATION);
 
   assert.equal(migrationNames.length, CURRENT_EXPECTED_MIGRATION_COUNT);
-  assert.equal(CURRENT_EXPECTED_LATEST_MIGRATION, TARGET_MIGRATION);
-  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_166");
+  assert.equal(
+    migrationNames.at(-1),
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+  );
+  assert.equal(STAFF_TASK_CURRENT_RELEASE_STATE, "CURRENT_167");
   assert.deepEqual(
-    STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-2),
+    STAFF_TASK_ALLOWED_ADDITIVE_TAIL.slice(-3, -1),
     [PREFIX_MIGRATION, TARGET_MIGRATION],
   );
-  assert.equal(targetIndex, migrationNames.length - 1);
+  assert.equal(targetIndex, migrationNames.length - 2);
   assert.equal(migrationNames[targetIndex - 1], PREFIX_MIGRATION);
+  assert.equal(
+    migrationNames[targetIndex + 1],
+    CURRENT_EXPECTED_LATEST_MIGRATION,
+  );
   assert.deepEqual(
     {
       schemaVersion: baseManifest.schemaVersion,

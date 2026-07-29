@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 export const RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION = 1;
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
+export const RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION =
   "20260729160000_guest_game_delivery_claim_fence";
-export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 166;
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION =
+  "20260729190000_identity_email_claim_foundation";
+export const RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT = 167;
 
 export const APPLICATION_RUNTIME_FUNCTIONS = Object.freeze([
   Object.freeze({
@@ -39,9 +41,25 @@ export const EXCLUDED_WORKER_FUNCTIONS = Object.freeze([
   }),
 ]);
 
+export const EXCLUDED_PENDING_FUNCTIONS = Object.freeze([
+  Object.freeze({
+    key: "identityEmailClaimLockPendingBoundary",
+    catalogSignature:
+      'public."identity_email_claim_lock_v1"(text)',
+    grantSignature:
+      'public."identity_email_claim_lock_v1"(TEXT)',
+    securityDefiner: false,
+    volatility: "v",
+  }),
+]);
+
+const EXCLUDED_RUNTIME_FUNCTIONS = Object.freeze([
+  ...EXCLUDED_WORKER_FUNCTIONS,
+  ...EXCLUDED_PENDING_FUNCTIONS,
+]);
 const ALL_RUNTIME_FUNCTIONS = Object.freeze([
   ...APPLICATION_RUNTIME_FUNCTIONS,
-  ...EXCLUDED_WORKER_FUNCTIONS,
+  ...EXCLUDED_RUNTIME_FUNCTIONS,
 ]);
 const SAFE_DATABASE_NAME = /^[a-z][a-z0-9_]{0,62}$/u;
 const SAFE_ROLE_NAME = /^[a-z][a-z0-9_]{2,62}$/u;
@@ -209,6 +227,8 @@ export function runtimeFunctionContractDigest() {
     .update(
       JSON.stringify({
         schemaVersion: RUNTIME_FUNCTION_ENROLLMENT_SCHEMA_VERSION,
+        requiredMigration:
+          RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION,
         migration: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
         migrationCount:
           RUNTIME_FUNCTION_ENROLLMENT_MIGRATION_COUNT,
@@ -216,6 +236,9 @@ export function runtimeFunctionContractDigest() {
           ({ key, catalogSignature }) => ({ key, catalogSignature }),
         ),
         excludedWorker: EXCLUDED_WORKER_FUNCTIONS.map(
+          ({ key, catalogSignature }) => ({ key, catalogSignature }),
+        ),
+        excludedPending: EXCLUDED_PENDING_FUNCTIONS.map(
           ({ key, catalogSignature }) => ({ key, catalogSignature }),
         ),
       }),
@@ -241,7 +264,7 @@ export function buildRuntimeFunctionEnrollmentStatements(roleName) {
       `REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION ${entry.grantSignature} FROM ${role}`,
     );
   }
-  for (const entry of EXCLUDED_WORKER_FUNCTIONS) {
+  for (const entry of EXCLUDED_RUNTIME_FUNCTIONS) {
     statements.push(
       `REVOKE EXECUTE ON FUNCTION ${entry.grantSignature} FROM ${role}`,
     );
@@ -426,6 +449,11 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
             AND rolled_back_at IS NULL
         )::integer AS completed_target_count,
         pg_catalog.count(*) FILTER (
+          WHERE migration_name = $2
+            AND finished_at IS NOT NULL
+            AND rolled_back_at IS NULL
+        )::integer AS completed_required_count,
+        pg_catalog.count(*) FILTER (
           WHERE finished_at IS NOT NULL
             AND rolled_back_at IS NULL
         )::integer AS completed_count,
@@ -444,6 +472,7 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
       FROM public."_prisma_migrations"
     `,
     RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
+    RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION,
   );
   const functions = [];
   for (const entry of ALL_RUNTIME_FUNCTIONS) {
@@ -486,6 +515,9 @@ export async function inspectRuntimeFunctionEnrollment(prisma, config) {
     migration: {
       completedTargetCount: Number(
         migration?.completed_target_count ?? -1,
+      ),
+      completedRequiredCount: Number(
+        migration?.completed_required_count ?? -1,
       ),
       completedCount: Number(migration?.completed_count ?? -1),
       unfinishedCount: Number(migration?.unfinished_count ?? -1),
@@ -542,8 +574,11 @@ export function runtimeFunctionEnrollmentPreconditionViolations(
       violations.push("RUNTIME_ROLE_OWNS_OBJECTS");
     }
   }
-  if (snapshot.migration.completedTargetCount !== 1) {
+  if (snapshot.migration.completedRequiredCount !== 1) {
     violations.push("MIGRATION_166_NOT_COMPLETED_EXACTLY_ONCE");
+  }
+  if (snapshot.migration.completedTargetCount !== 1) {
+    violations.push("CURRENT_MIGRATION_NOT_COMPLETED_EXACTLY_ONCE");
   }
   if (
     snapshot.migration.latestCompletedMigration !==
@@ -589,6 +624,9 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
   const applicationKeys = new Set(
     APPLICATION_RUNTIME_FUNCTIONS.map(({ key }) => key),
   );
+  const workerKeys = new Set(
+    EXCLUDED_WORKER_FUNCTIONS.map(({ key }) => key),
+  );
 
   for (const entry of snapshot.functions) {
     if (applicationKeys.has(entry.key)) {
@@ -599,11 +637,16 @@ export function runtimeFunctionEnrollmentComplianceViolations(snapshot) {
         violations.push(`${entry.key}:GRANT_OPTION_PRESENT`);
       }
     } else {
+      const exclusionKind = workerKeys.has(entry.key)
+        ? "WORKER"
+        : "PENDING";
       if (entry.effectiveExecute || entry.directExecute) {
-        violations.push(`${entry.key}:WORKER_EXECUTE_PRESENT`);
+        violations.push(`${entry.key}:${exclusionKind}_EXECUTE_PRESENT`);
       }
       if (entry.targetGrantOption) {
-        violations.push(`${entry.key}:WORKER_GRANT_OPTION_PRESENT`);
+        violations.push(
+          `${entry.key}:${exclusionKind}_GRANT_OPTION_PRESENT`,
+        );
       }
     }
   }
@@ -631,7 +674,7 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
     changed,
     database: config.databaseName,
     role: config.roleName,
-    foundationMigration: RUNTIME_FUNCTION_ENROLLMENT_MIGRATION,
+    foundationMigration: RUNTIME_FUNCTION_ENROLLMENT_REQUIRED_MIGRATION,
     currentMigration: config.expectedMigration,
     currentMigrationCount: config.expectedMigrationCount,
     contractDigest: runtimeFunctionContractDigest(),
@@ -639,6 +682,9 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
       ({ key, catalogSignature }) => ({ key, catalogSignature }),
     ),
     excludedWorkerFunctions: EXCLUDED_WORKER_FUNCTIONS.map(
+      ({ key, catalogSignature }) => ({ key, catalogSignature }),
+    ),
+    excludedPendingFunctions: EXCLUDED_PENDING_FUNCTIONS.map(
       ({ key, catalogSignature }) => ({ key, catalogSignature }),
     ),
     postconditions: {
@@ -654,6 +700,15 @@ function enrollmentReceipt(config, snapshot, decision, changed) {
       excludedWorkerExecuteCount: snapshot.functions.filter(
         (entry) =>
           EXCLUDED_WORKER_FUNCTIONS.some(
+            (candidate) => candidate.key === entry.key,
+          ) &&
+          (entry.effectiveExecute ||
+            entry.directExecute ||
+            entry.targetGrantOption),
+      ).length,
+      excludedPendingExecuteCount: snapshot.functions.filter(
+        (entry) =>
+          EXCLUDED_PENDING_FUNCTIONS.some(
             (candidate) => candidate.key === entry.key,
           ) &&
           (entry.effectiveExecute ||
@@ -744,6 +799,7 @@ export function runRuntimeFunctionEnrollmentSelfTest() {
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
   assert.match(sql, /REVOKE EXECUTE.*guest_game_delivery_record_event_v1/su);
+  assert.match(sql, /REVOKE EXECUTE.*identity_email_claim_lock_v1/su);
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
   assert.equal(runtimeFunctionContractDigest().length, 64);

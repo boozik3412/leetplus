@@ -191,6 +191,12 @@ enum TenantModule {
   INTEGRATIONS
 }
 
+enum IdentityEmailClaimType {
+  INVITE
+  USER
+  EMAIL_CHANGE
+}
+
 model Tenant {
   id                         String                 @id @default(uuid())
   name                       String
@@ -347,6 +353,7 @@ model Tenant {
   userAccessRoles                      UserAccessRole[]
   userRoleOverrides                    UserRoleOverride[]
   userInvites                          UserInvite[]
+  identityEmailClaims                  IdentityEmailClaim[]
   platformAdminAuditEvents             PlatformAdminAuditEvent[]
 
   @@index([status, onboardingStatus, customerStage])
@@ -577,6 +584,25 @@ model UserInvite {
   @@index([customRoleId])
   @@index([createdByUserId])
   @@index([acceptedByUserId])
+}
+
+/// Global, canonical reservation for an email participating in an identity
+/// workflow. The database owns canonical form and monotonic revision checks;
+/// subjectId is deliberately polymorphic until Identity and TenantMembership
+/// become separate first-class models.
+model IdentityEmailClaim {
+  emailCanonical String                 @id @db.VarChar(320)
+  claimType      IdentityEmailClaimType
+  tenantId       String
+  subjectId      String
+  revision       Int                    @default(1)
+  createdAt      DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime               @default(now()) @updatedAt @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([tenantId, subjectId], map: "identity_email_claim_tenant_subject_idx")
+  @@index([tenantId, claimType], map: "identity_email_claim_tenant_type_idx")
 }
 
 model UserStoreAccess {

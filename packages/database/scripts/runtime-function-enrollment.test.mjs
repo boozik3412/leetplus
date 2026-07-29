@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   APPLICATION_RUNTIME_FUNCTIONS,
+  EXCLUDED_PENDING_FUNCTIONS,
   EXCLUDED_WORKER_FUNCTIONS,
   RuntimeFunctionEnrollmentError,
   buildRuntimeFunctionEnrollmentStatements,
@@ -43,10 +44,11 @@ function compliantSnapshot() {
     },
     migration: {
       completedTargetCount: 1,
-      completedCount: 166,
+      completedRequiredCount: 1,
+      completedCount: 167,
       unfinishedCount: 0,
       latestCompletedMigration:
-        "20260729160000_guest_game_delivery_claim_fence",
+        "20260729190000_identity_email_claim_foundation",
     },
     functions: [
       ...APPLICATION_RUNTIME_FUNCTIONS.map((entry) => ({
@@ -65,6 +67,21 @@ function compliantSnapshot() {
         grantorCanEnroll: true,
       })),
       ...EXCLUDED_WORKER_FUNCTIONS.map((entry) => ({
+        key: entry.key,
+        catalogSignature: entry.catalogSignature,
+        expectedSecurityDefiner: entry.securityDefiner,
+        expectedVolatility: entry.volatility,
+        exists: true,
+        ownerName: "migration_owner",
+        securityDefiner: entry.securityDefiner,
+        volatility: entry.volatility,
+        effectiveExecute: false,
+        directExecute: false,
+        targetGrantOption: false,
+        publicExecute: false,
+        grantorCanEnroll: true,
+      })),
+      ...EXCLUDED_PENDING_FUNCTIONS.map((entry) => ({
         key: entry.key,
         catalogSignature: entry.catalogSignature,
         expectedSecurityDefiner: entry.securityDefiner,
@@ -115,7 +132,7 @@ test("requires an exact database-and-role-bound confirmation for apply", () => {
   assert.equal(config.mode, "apply");
   assert.match(
     config.requiredConfirmation,
-    /20260729160000_guest_game_delivery_claim_fence 166$/u,
+    /20260729190000_identity_email_claim_foundation 167$/u,
   );
 });
 
@@ -172,7 +189,7 @@ for (const [environment, expectedCode] of [
 test("builds only the exact application grants and worker exclusion", () => {
   const statements =
     buildRuntimeFunctionEnrollmentStatements("leetplus_runtime");
-  assert.equal(statements.length, 5);
+  assert.equal(statements.length, 6);
   assert.equal(
     statements.filter((statement) => statement.startsWith("GRANT EXECUTE"))
       .length,
@@ -188,13 +205,14 @@ test("builds only the exact application grants and worker exclusion", () => {
     statements.filter((statement) =>
       statement.startsWith("REVOKE EXECUTE"),
     ).length,
-    1,
+    2,
   );
 
   const sql = statements.join("\n");
   assert.match(sql, /guest_game_delivery_transition_key_v1/u);
   assert.match(sql, /guest_game_reward_delivery_lock_v1/u);
   assert.match(sql, /guest_game_delivery_record_event_v1/u);
+  assert.match(sql, /identity_email_claim_lock_v1/u);
   assert.doesNotMatch(sql, /\bALL FUNCTIONS\b/iu);
   assert.doesNotMatch(sql, /\bALTER DEFAULT PRIVILEGES\b/iu);
   assert.doesNotMatch(sql, /\bTO PUBLIC\b/iu);
@@ -226,6 +244,8 @@ test("detects authority, migration and function ACL drift independently", () => 
   snapshot.functions[1].securityDefiner = true;
   snapshot.functions[2].effectiveExecute = true;
   snapshot.functions[2].directExecute = true;
+  snapshot.functions[3].effectiveExecute = true;
+  snapshot.functions[3].directExecute = true;
   const config = parseRuntimeFunctionEnrollmentConfig(
     SAFE_ENVIRONMENT,
     "check",
@@ -243,11 +263,14 @@ test("detects authority, migration and function ACL drift independently", () => 
   );
   assert.deepEqual(
     runtimeFunctionEnrollmentComplianceViolations(snapshot),
-    ["durableDeliveryEventWriter:WORKER_EXECUTE_PRESENT"],
+    [
+      "durableDeliveryEventWriter:WORKER_EXECUTE_PRESENT",
+      "identityEmailClaimLockPendingBoundary:PENDING_EXECUTE_PRESENT",
+    ],
   );
 });
 
-test("binds enrollment to exact current migration 166 and exact count 166", () => {
+test("binds enrollment to exact current migration 167 and exact count 167", () => {
   const snapshot = compliantSnapshot();
   snapshot.migration.latestCompletedMigration =
     "20260729120000_store_background_execution_fence";

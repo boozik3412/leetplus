@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.22                                         |
+| Версия           | 1.23                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -126,6 +126,10 @@ enterprise-isolation option и не сокращает shared gates.
     переведён в implementation candidate: additive migration и fail-closed
     legacy runtime containment созданы, но coordinator, Store-scoped effect
     enforcement, production-like evidence и cutover ещё не приняты.
+25. [Identity email claim foundation](./identity-email-claim-foundation.md) —
+    migration 167, global canonical reservation, private advisory-lock
+    namespace, monotonic claim transitions и оставшаяся fail-closed граница
+    до shell-only provisioning.
 
 Accepted remote prerequisite остаётся migration `165` — отдельный bounded
 fail-closed Store fence candidate: все Store остаются

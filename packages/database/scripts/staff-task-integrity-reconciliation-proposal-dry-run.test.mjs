@@ -662,7 +662,7 @@ test("row, RLS, and relation-lock SQL stay bounded and read-only", () => {
   }
 });
 
-test("proposal reports reject correctly signed CURRENT_166 planner evidence", () => {
+test("proposal reports reject correctly signed CURRENT_167 planner evidence", () => {
   const dryRunConfig = config();
   const currentPlan = planFor(
     dryRunConfig,

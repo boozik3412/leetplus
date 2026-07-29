@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   APPLICATION_RUNTIME_FUNCTIONS,
+  EXCLUDED_PENDING_FUNCTIONS,
   EXCLUDED_WORKER_FUNCTIONS,
   expectedApplyConfirmation,
 } from "./runtime-function-enrollment.mjs";
@@ -33,7 +34,7 @@ Required environment:
 
 Safety:
   - PostgreSQL 16, loopback and a dedicated *_ci database are mandatory.
-  - Exact latest migration 166 and exact completed count 166 are mandatory.
+  - Exact latest migration 167 and exact completed count 167 are mandatory.
   - Only one generated disposable LOGIN NOINHERIT role is created.
   - Production is prohibited.
   - The generated role and every grant are removed in finally.
@@ -231,6 +232,17 @@ function callWorkerEventBoundary(runtime) {
   );
 }
 
+function callPendingIdentityBoundary(runtime) {
+  return runtime.$queryRawUnsafe(
+    `
+      SELECT public."identity_email_claim_lock_v1"(
+        CAST($1 AS TEXT)
+      )
+    `,
+    "pending.identity@example.test",
+  );
+}
+
 async function runSmoke() {
   assert.notEqual(
     process.env.NODE_ENV,
@@ -306,6 +318,11 @@ async function runSmoke() {
       () => callWorkerEventBoundary(runtime),
       /permission denied for function guest_game_delivery_record_event_v1/iu,
     );
+    await expectSqlState(
+      "42501",
+      () => callPendingIdentityBoundary(runtime),
+      /permission denied for function identity_email_claim_lock_v1/iu,
+    );
 
     const cliEnvironment = {
       DATABASE_URL: rawDatabaseUrl,
@@ -338,6 +355,10 @@ async function runSmoke() {
       applyReceipt.postconditions.excludedWorkerExecuteCount,
       0,
     );
+    assert.equal(
+      applyReceipt.postconditions.excludedPendingExecuteCount,
+      0,
+    );
     assertNoSecretLeak(apply, [rawDatabaseUrl, password]);
 
     const transitionKey = await callTransitionKey(runtime);
@@ -351,6 +372,11 @@ async function runSmoke() {
       "42501",
       () => callWorkerEventBoundary(runtime),
       /permission denied for function guest_game_delivery_record_event_v1/iu,
+    );
+    await expectSqlState(
+      "42501",
+      () => callPendingIdentityBoundary(runtime),
+      /permission denied for function identity_email_claim_lock_v1/iu,
     );
 
     const replay = runCli("apply", {
@@ -371,6 +397,10 @@ async function runSmoke() {
     assert.equal(checkReceipt.changed, false);
     assert.equal(checkReceipt.applicationFunctions.length, 2);
     assert.equal(checkReceipt.excludedWorkerFunctions.length, 1);
+    assert.equal(
+      checkReceipt.excludedPendingFunctions.length,
+      EXCLUDED_PENDING_FUNCTIONS.length,
+    );
     assertNoSecretLeak(afterCheck, [rawDatabaseUrl, password]);
 
     process.stdout.write(
@@ -378,12 +408,15 @@ async function runSmoke() {
         ok: true,
         schemaVersion: 1,
         database: databaseName,
-        preEnrollmentPermissionDenials: 3,
+        preEnrollmentPermissionDenials: 4,
         applicationFunctionGrants:
           APPLICATION_RUNTIME_FUNCTIONS.length,
         excludedWorkerFunctionGrants: 0,
         excludedWorkerFunctionsDenied:
           EXCLUDED_WORKER_FUNCTIONS.length,
+        excludedPendingFunctionGrants: 0,
+        excludedPendingFunctionsDenied:
+          EXCLUDED_PENDING_FUNCTIONS.length,
         idempotentReplay: true,
         postEnrollmentCheck: "COMPLIANT",
       })}\n`,

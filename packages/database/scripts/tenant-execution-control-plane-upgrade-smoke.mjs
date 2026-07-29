@@ -282,9 +282,11 @@ async function assertTargetMigrationArtifact(migrationPlan) {
     /SET\s+LOCAL\s+lock_timeout\s*=\s*'5s'/iu,
     "Migration 163 must retain the bounded lock timeout.",
   );
-  assert.match(
-    migrationSql,
-    /LOCK\s+TABLE\s+"Tenant"\s*,\s*"User"\s*,\s*"PlatformAdminAuditEvent"\s+IN\s+ACCESS\s+EXCLUSIVE\s+MODE/iu,
+  const lockSql = migrationSql.match(
+    /LOCK\s+TABLE\s+"Tenant"\s*,\s*"User"\s*,\s*"PlatformAdminAuditEvent"\s+IN\s+ACCESS\s+EXCLUSIVE\s+MODE;/iu,
+  )?.[0];
+  assert(
+    lockSql,
     "Migration 163 must lock every table whose defaults or shape it changes.",
   );
   assert.match(
@@ -317,6 +319,8 @@ async function assertTargetMigrationArtifact(migrationPlan) {
     /UPDATE\s+"Tenant"\s+SET\s+"onboardingStatus"\s*=\s*'ACTIVE'\s+WHERE\s+"status"\s*=\s*'ACTIVE'/iu,
     "Migration 163 must preserve existing ACTIVE tenant sessions.",
   );
+
+  return { lockSql };
 }
 
 async function createMigrationArtifact(tempRoot, migrationPlan) {
@@ -525,8 +529,8 @@ function assertLockTimeoutFailure(attempt) {
   );
   assert.match(
     attempt.output,
-    /(?:55P03|lock timeout|lock_timeout)/iu,
-    "Migration failure did not contain a PostgreSQL lock-timeout marker.",
+    /(?:P3018|failed to apply|20260728120000_tenant_execution_control_plane_expand)/iu,
+    "Prisma did not report a target-migration failure.",
   );
 }
 
@@ -789,6 +793,25 @@ async function expectSqlState(expectedState, operation) {
     expectedState,
     "PostgreSQL rejected the operation with an unexpected SQLSTATE.",
   );
+}
+
+async function assertMigrationLockSqlState(databaseUrl, lockSql) {
+  // Prisma CLI can mask the original SQLSTATE after the explicit migration
+  // transaction aborts. Prove the exact committed lock through a dedicated
+  // connection, then verify migrate-deploy failure and rollback separately.
+  const client = prismaClient(databaseUrl);
+  try {
+    await expectSqlState("55P03", () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(
+          `SET LOCAL lock_timeout = '250ms'`,
+        );
+        await transaction.$executeRawUnsafe(lockSql);
+      }),
+    );
+  } finally {
+    await client.$disconnect();
+  }
 }
 
 async function assertUpgradePostconditions(
@@ -1072,6 +1095,7 @@ async function runLockTimeoutScenario(
   schemaPath,
   databaseUrl,
   migrationPlan,
+  migrationSqlContract,
   fixtures,
   fixtureKey,
   baselineSnapshot,
@@ -1085,6 +1109,10 @@ async function runLockTimeoutScenario(
       async (transaction) => {
         await transaction.$executeRawUnsafe(
           `LOCK TABLE "User" IN ACCESS SHARE MODE`,
+        );
+        await assertMigrationLockSqlState(
+          databaseUrl,
+          migrationSqlContract.lockSql,
         );
         const attempt = await spawnMigrateDeployAsync(
           schemaPath,
@@ -1246,7 +1274,7 @@ async function runOfflineSelfTest() {
     },
     elapsedMs: 5_000,
     output:
-      "P3018 migration failed: 55P03 canceling statement due to lock timeout",
+      "P3018 migration failed: current transaction is aborted, commands ignored until end of transaction block",
   });
   expectOfflineFailure(() =>
     assertLockTimeoutFailure({
@@ -1259,12 +1287,17 @@ async function runOfflineSelfTest() {
     assertLockTimeoutFailure({
       result: { error: undefined, status: 1 },
       elapsedMs: 5_000,
-      output: "P3018 generic migration failure",
+      output: "unrelated migration failure",
     }),
   );
 
   const migrationPlan = await readMigrationPlan();
-  await assertTargetMigrationArtifact(migrationPlan);
+  const migrationSqlContract =
+    await assertTargetMigrationArtifact(migrationPlan);
+  assert.match(
+    migrationSqlContract.lockSql,
+    /^LOCK\s+TABLE\s+"Tenant"\s*,\s*"User"\s*,\s*"PlatformAdminAuditEvent"\s+IN\s+ACCESS\s+EXCLUSIVE\s+MODE;$/iu,
+  );
   assert.equal(
     migrationPlan.prefixMigrations.length,
     STAFF_TASK_FROZEN_PREFIX_COUNT,
@@ -1290,7 +1323,8 @@ async function runRealSmoke(environment) {
   const { sourceUrl, databaseName: sourceDatabaseName } =
     assertRealEnvironment(environment);
   const migrationPlan = await readMigrationPlan();
-  await assertTargetMigrationArtifact(migrationPlan);
+  const migrationSqlContract =
+    await assertTargetMigrationArtifact(migrationPlan);
   const { upgradeDatabaseName, lockDatabaseName } = generatedDatabaseNames();
   const sourceDatabaseUrl = databaseUrlFor(sourceUrl, sourceDatabaseName);
   const upgradeDatabaseUrl = databaseUrlFor(
@@ -1384,6 +1418,7 @@ async function runRealSmoke(environment) {
       artifact.schemaPath,
       lockDatabaseUrl,
       migrationPlan,
+      migrationSqlContract,
       lockFixtures,
       lockFixtureKey,
       lockBaselineSnapshot,
@@ -1400,6 +1435,7 @@ async function runRealSmoke(environment) {
         preservedUsers: upgradeFixtures.length,
         preservedInvites: upgradeFixtures.length,
         preservedAuditEvents: upgradeFixtures.length,
+        databaseLockSqlStateVerified: "55P03",
         lockTimeoutRollbackVerified: true,
         partialControlPlaneDdlAfterLockFailure: 0,
         sourceDatabaseMigrationsApplied: 0,

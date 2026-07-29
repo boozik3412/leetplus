@@ -13,6 +13,7 @@ import {
 import {
   CURRENT_EXPECTED_LATEST_MIGRATION,
   CURRENT_EXPECTED_MIGRATION_COUNT,
+  STAFF_TASK_CURRENT_RELEASE_STATE,
   STAFF_TASK_FROZEN_PREFIX_COUNT,
   STAFF_TASK_FROZEN_PREFIX_LATEST,
 } from "./staff-task-integrity-migration-state.mjs";
@@ -27,6 +28,21 @@ export const EXPECTED_LATEST_MIGRATION = CURRENT_EXPECTED_LATEST_MIGRATION;
 export const PROTECTED_MIGRATION_PREFIX_COUNT = STAFF_TASK_FROZEN_PREFIX_COUNT;
 export const PROTECTED_MIGRATION_PREFIX_LATEST =
   STAFF_TASK_FROZEN_PREFIX_LATEST;
+export const CURRENT_SCHEMA_CONTRACT = Object.freeze({
+  state: STAFF_TASK_CURRENT_RELEASE_STATE,
+  migrationCount: EXPECTED_MIGRATION_COUNT,
+  latestMigration: EXPECTED_LATEST_MIGRATION,
+});
+export const FROZEN_EXPAND_SCHEMA_CONTRACT = Object.freeze({
+  state: "EXPAND_162",
+  migrationCount: PROTECTED_MIGRATION_PREFIX_COUNT,
+  latestMigration: PROTECTED_MIGRATION_PREFIX_LATEST,
+});
+
+const SANCTIONED_SCHEMA_CONTRACTS = Object.freeze([
+  CURRENT_SCHEMA_CONTRACT,
+  FROZEN_EXPAND_SCHEMA_CONTRACT,
+]);
 
 const TARGET_ENVIRONMENTS = new Set(["development", "staging", "production"]);
 const DEVELOPMENT_DATABASE_PATTERN =
@@ -1306,12 +1322,47 @@ function normalizeFindings(rows) {
   return findings.sort((left, right) => left.code.localeCompare(right.code));
 }
 
+function resolveSchemaContract(candidate = CURRENT_SCHEMA_CONTRACT) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    contractError(
+      "SCHEMA_CONTRACT_UNSUPPORTED",
+      "The planner schema contract is not sanctioned.",
+    );
+  }
+  const candidateKeys = Object.keys(candidate).sort();
+  const expectedKeys = ["latestMigration", "migrationCount", "state"];
+  if (
+    candidateKeys.length !== expectedKeys.length ||
+    candidateKeys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    contractError(
+      "SCHEMA_CONTRACT_UNSUPPORTED",
+      "The planner schema contract is not sanctioned.",
+    );
+  }
+  const sanctioned = SANCTIONED_SCHEMA_CONTRACTS.find(
+    (contract) =>
+      candidate.state === contract.state &&
+      candidate.migrationCount === contract.migrationCount &&
+      candidate.latestMigration === contract.latestMigration,
+  );
+  if (!sanctioned) {
+    contractError(
+      "SCHEMA_CONTRACT_UNSUPPORTED",
+      "The planner schema contract is not sanctioned.",
+    );
+  }
+  return sanctioned;
+}
+
 function normalizeSchemaState({
   config,
   snapshotRow,
   migrationRow,
   catalogRow,
+  schemaContract = CURRENT_SCHEMA_CONTRACT,
 }) {
+  const resolvedSchemaContract = resolveSchemaContract(schemaContract);
   const migrationCount = safeCount(
     migrationRow?.migration_count,
     "DATABASE_MIGRATION_COUNT_INVALID",
@@ -1366,8 +1417,8 @@ function normalizeSchemaState({
   const expected = {
     currentSchemaIsPublic: true,
     databaseIdentityMatched: true,
-    migrationCount: EXPECTED_MIGRATION_COUNT,
-    latestMigration: EXPECTED_LATEST_MIGRATION,
+    migrationCount: resolvedSchemaContract.migrationCount,
+    latestMigration: resolvedSchemaContract.latestMigration,
     unfinishedMigrationCount: 0,
     compositeContractMatchCount: COMPOSITE_CONSTRAINTS.length,
     simpleContractMatchCount: SIMPLE_CONSTRAINTS.length,
@@ -1487,6 +1538,7 @@ export function buildPlan({
   migrationRow,
   catalogRow,
   inventoryExecuted = true,
+  schemaContract = CURRENT_SCHEMA_CONTRACT,
 }) {
   const findings = normalizeFindings(rows);
   const schema = normalizeSchemaState({
@@ -1494,6 +1546,7 @@ export function buildPlan({
     snapshotRow,
     migrationRow,
     catalogRow,
+    schemaContract,
   });
   if (
     typeof inventoryExecuted !== "boolean" ||

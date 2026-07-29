@@ -4,11 +4,15 @@ import test from "node:test";
 import {
   CATALOG_STATE_SQL,
   COMPOSITE_CONSTRAINTS,
+  CURRENT_SCHEMA_CONTRACT,
   EXPECTED_LATEST_MIGRATION,
   EXPECTED_MIGRATION_COUNT,
   FINDING_MANIFEST,
+  FROZEN_EXPAND_SCHEMA_CONTRACT,
   MIGRATION_STATE_SQL,
   PARENT_INDEXES,
+  PROTECTED_MIGRATION_PREFIX_COUNT,
+  PROTECTED_MIGRATION_PREFIX_LATEST,
   PRODUCTION_ATTESTATION,
   READ_QUERY_TEXTS,
   RUN_CONFIRMATION,
@@ -109,6 +113,7 @@ function planInput(overrides = {}) {
       ),
     },
     inventoryExecuted: overrides.inventoryExecuted ?? true,
+    schemaContract: overrides.schemaContract,
   };
 }
 
@@ -231,6 +236,82 @@ test("runtime limits are bounded and ordered", () => {
       ),
     { code: "TIMEOUT_ORDER_INVALID" },
   );
+});
+
+test("planner defaults to CURRENT_164 and permits only sanctioned schema contracts", () => {
+  const current = buildPlan(planInput());
+  assert.equal(current.schema.ready, true);
+  assert.equal(
+    current.schema.expected.migrationCount,
+    CURRENT_SCHEMA_CONTRACT.migrationCount,
+  );
+  assert.equal(
+    current.schema.expected.latestMigration,
+    CURRENT_SCHEMA_CONTRACT.latestMigration,
+  );
+  assert.equal(CURRENT_SCHEMA_CONTRACT.state, "CURRENT_164");
+
+  const frozen = buildPlan(
+    planInput({
+      schemaContract: FROZEN_EXPAND_SCHEMA_CONTRACT,
+      migrationCount: PROTECTED_MIGRATION_PREFIX_COUNT,
+      latestMigration: PROTECTED_MIGRATION_PREFIX_LATEST,
+    }),
+  );
+  assert.equal(frozen.schema.ready, true);
+  assert.equal(
+    frozen.schema.expected.migrationCount,
+    PROTECTED_MIGRATION_PREFIX_COUNT,
+  );
+  assert.equal(
+    frozen.schema.expected.latestMigration,
+    PROTECTED_MIGRATION_PREFIX_LATEST,
+  );
+
+  const frozenRowsUnderCurrentDefault = buildPlan(
+    planInput({
+      migrationCount: PROTECTED_MIGRATION_PREFIX_COUNT,
+      latestMigration: PROTECTED_MIGRATION_PREFIX_LATEST,
+      inventoryExecuted: false,
+    }),
+  );
+  assert.equal(frozenRowsUnderCurrentDefault.schema.ready, false);
+
+  const currentRowsUnderFrozenContract = buildPlan(
+    planInput({
+      schemaContract: FROZEN_EXPAND_SCHEMA_CONTRACT,
+      inventoryExecuted: false,
+    }),
+  );
+  assert.equal(currentRowsUnderFrozenContract.schema.ready, false);
+
+  for (const schemaContract of [
+    null,
+    {
+      ...FROZEN_EXPAND_SCHEMA_CONTRACT,
+      migrationCount: EXPECTED_MIGRATION_COUNT,
+    },
+    {
+      ...CURRENT_SCHEMA_CONTRACT,
+      extra: true,
+    },
+    {
+      state: "CURRENT_163",
+      migrationCount: 163,
+      latestMigration:
+        "20260728120000_tenant_execution_control_plane_expand",
+    },
+  ]) {
+    assert.throws(
+      () =>
+        buildPlan(
+          planInput({
+            schemaContract,
+          }),
+        ),
+      { code: "SCHEMA_CONTRACT_UNSUPPORTED" },
+    );
+  }
 });
 
 test("all 43 inventory codes are classified exactly once", () => {

@@ -3,9 +3,9 @@ import test from "node:test";
 
 import {
   COMPOSITE_CONSTRAINTS,
-  EXPECTED_LATEST_MIGRATION,
-  EXPECTED_MIGRATION_COUNT,
+  CURRENT_SCHEMA_CONTRACT,
   FINDING_MANIFEST,
+  FROZEN_EXPAND_SCHEMA_CONTRACT,
   PARENT_INDEXES,
   SIMPLE_CONSTRAINTS,
   buildPlan,
@@ -165,8 +165,8 @@ function admissionRows() {
       server_version_num: "160009",
     },
     migrationRow: {
-      migration_count: String(EXPECTED_MIGRATION_COUNT),
-      latest_migration: EXPECTED_LATEST_MIGRATION,
+      migration_count: String(FROZEN_EXPAND_SCHEMA_CONTRACT.migrationCount),
+      latest_migration: FROZEN_EXPAND_SCHEMA_CONTRACT.latestMigration,
       unfinished_migration_count: "0",
     },
     catalogRow: {
@@ -180,8 +180,8 @@ function admissionRows() {
     privilegeRow: privilegeRow(),
     migrationManifest: {
       ready: true,
-      expectedCount: EXPECTED_MIGRATION_COUNT,
-      actualCount: EXPECTED_MIGRATION_COUNT,
+      expectedCount: FROZEN_EXPAND_SCHEMA_CONTRACT.migrationCount,
+      actualCount: FROZEN_EXPAND_SCHEMA_CONTRACT.migrationCount,
       manifestDigest: "e".repeat(64),
     },
   };
@@ -190,7 +190,10 @@ function admissionRows() {
 function planFor(
   dryRunConfig,
   findings = {},
-  { generatedAt = "2026-07-27T00:00:00.000Z" } = {},
+  {
+    generatedAt = "2026-07-27T00:00:00.000Z",
+    schemaContract = FROZEN_EXPAND_SCHEMA_CONTRACT,
+  } = {},
 ) {
   return buildPlan({
     config: {
@@ -216,8 +219,8 @@ function planFor(
       database_oid: "16384",
     },
     migrationRow: {
-      migration_count: String(EXPECTED_MIGRATION_COUNT),
-      latest_migration: EXPECTED_LATEST_MIGRATION,
+      migration_count: String(schemaContract.migrationCount),
+      latest_migration: schemaContract.latestMigration,
       unfinished_migration_count: "0",
     },
     catalogRow: {
@@ -229,6 +232,7 @@ function planFor(
       parent_index_contract_mismatch_count: "0",
     },
     inventoryExecuted: true,
+    schemaContract,
   });
 }
 
@@ -266,9 +270,11 @@ function reportFor({
   proposalRows = [],
   generatedAt,
   admission = admissionReport(dryRunConfig),
+  plannerPlan,
   gates = {},
 } = {}) {
-  const plan = planFor(dryRunConfig, findings, { generatedAt });
+  const plan =
+    plannerPlan ?? planFor(dryRunConfig, findings, { generatedAt });
   return buildDryRunReport({
     config: dryRunConfig,
     admissionReport: admission,
@@ -283,6 +289,7 @@ function reportFor({
       bindingDigest: "9".repeat(64),
     },
     databaseIdentityDigest: admission.databaseIdentityDigest,
+    plannerDatabaseIdentityDigest: plan.databaseIdentityDigest,
     verificationTime: NOW,
     ...gates,
   });
@@ -655,6 +662,26 @@ test("row, RLS, and relation-lock SQL stay bounded and read-only", () => {
   }
 });
 
+test("proposal reports reject correctly signed CURRENT_164 planner evidence", () => {
+  const dryRunConfig = config();
+  const currentPlan = planFor(dryRunConfig, {}, {
+    schemaContract: CURRENT_SCHEMA_CONTRACT,
+  });
+  assert.equal(currentPlan.schema.ready, true);
+  assert.equal(
+    currentPlan.schema.expected.migrationCount,
+    CURRENT_SCHEMA_CONTRACT.migrationCount,
+  );
+  assert.throws(
+    () =>
+      reportFor({
+        dryRunConfig,
+        plannerPlan: currentPlan,
+      }),
+    { code: "PLANNER_BINDING_INVALID", exitCode: 3 },
+  );
+});
+
 test("the two last-task findings coalesce into one review-required case", () => {
   const dryRunConfig = config();
   const plan = planFor(dryRunConfig, {
@@ -997,6 +1024,7 @@ test("admission and same-snapshot gates reject before a proposal report is issue
       },
     },
     { databaseIdentityDigest: "0".repeat(64) },
+    { plannerDatabaseIdentityDigest: "0".repeat(64) },
   ]) {
     assert.throws(
       () =>

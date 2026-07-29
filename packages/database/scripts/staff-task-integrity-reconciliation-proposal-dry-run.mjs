@@ -11,8 +11,13 @@ import {
 } from "./staff-task-integrity-inventory.mjs";
 import {
   CATALOG_STATE_SQL,
+  COMPOSITE_CONSTRAINTS,
   FINDING_MANIFEST,
+  FROZEN_EXPAND_SCHEMA_CONTRACT,
   MIGRATION_STATE_SQL,
+  PARENT_INDEXES,
+  REPORT_SCHEMA_VERSION as PLANNER_REPORT_SCHEMA_VERSION,
+  SIMPLE_CONSTRAINTS,
   SNAPSHOT_STATE_SQL,
   buildPlan,
   canonicalStringify,
@@ -58,6 +63,19 @@ const HMAC_PATTERN = /^[0-9a-f]{64}$/;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 const MUTATING_KEYWORD_PATTERN =
   /\b(?:INSERT|UPDATE|DELETE|MERGE|ALTER|CREATE|DROP|TRUNCATE|COPY|CALL|DO|GRANT|REVOKE|VACUUM|ANALYZE|REFRESH|REINDEX|CLUSTER|COMMENT|SECURITY\s+LABEL)\b/iu;
+const FROZEN_PLANNER_SCHEMA_EVIDENCE = Object.freeze({
+  currentSchemaIsPublic: true,
+  databaseIdentityMatched: true,
+  migrationCount: FROZEN_EXPAND_SCHEMA_CONTRACT.migrationCount,
+  latestMigration: FROZEN_EXPAND_SCHEMA_CONTRACT.latestMigration,
+  unfinishedMigrationCount: 0,
+  compositeContractMatchCount: COMPOSITE_CONSTRAINTS.length,
+  simpleContractMatchCount: SIMPLE_CONSTRAINTS.length,
+  foreignKeyContractMismatchCount: 0,
+  unexpectedProtectedForeignKeyCount: 0,
+  parentIndexContractMatchCount: PARENT_INDEXES.length,
+  parentIndexContractMismatchCount: 0,
+});
 export const ADVISORY_LOCK_NAMESPACE = 1_911_005_401;
 export const ADVISORY_LOCK_RESOURCE = 20_260_727;
 
@@ -1152,6 +1170,20 @@ function validateAdmissionBinding(
   }
 }
 
+function matchesFrozenPlannerSchemaEvidence(candidate) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return false;
+  }
+  const expectedEntries = Object.entries(FROZEN_PLANNER_SCHEMA_EVIDENCE);
+  const candidateKeys = Object.keys(candidate).sort();
+  const expectedKeys = expectedEntries.map(([key]) => key).sort();
+  return (
+    candidateKeys.length === expectedKeys.length &&
+    candidateKeys.every((key, index) => key === expectedKeys[index]) &&
+    expectedEntries.every(([key, value]) => candidate[key] === value)
+  );
+}
+
 function validatePlannerBinding(plan, config) {
   const { generatedAt, contentDigest, executionDigest, ...stablePlan } =
     plan ?? {};
@@ -1165,9 +1197,12 @@ function validatePlannerBinding(plan, config) {
   );
   if (
     plan?.script !== "staff-task-integrity-reconciliation-plan" ||
+    plan?.reportSchemaVersion !== PLANNER_REPORT_SCHEMA_VERSION ||
     plan?.target !== "development" ||
     plan?.releaseSha !== config.admission.releaseSha ||
     plan?.schema?.ready !== true ||
+    !matchesFrozenPlannerSchemaEvidence(plan?.schema?.expected) ||
+    !matchesFrozenPlannerSchemaEvidence(plan?.schema?.actual) ||
     plan?.summary?.inventoryExecuted !== true ||
     plan?.safety?.databaseWrites !== false ||
     plan?.safety?.applySupported !== false ||
@@ -1259,6 +1294,7 @@ export function buildDryRunReport({
   advisoryLockAcquired = true,
   provenanceBinding,
   databaseIdentityDigest,
+  plannerDatabaseIdentityDigest,
   verificationTime = new Date(),
 }) {
   validateAdmissionBinding(admissionReport, config, verificationTime);
@@ -1274,6 +1310,10 @@ export function buildDryRunReport({
     !safeHmacEqual(
       admissionReport.databaseIdentityDigest,
       databaseIdentityDigest,
+    ) ||
+    !safeHmacEqual(
+      plan.databaseIdentityDigest,
+      plannerDatabaseIdentityDigest,
     )
   ) {
     contractError(
@@ -1614,70 +1654,37 @@ function selfTestConfig() {
 function selfTestPlan(config, proposalCount = 0) {
   const manifest = proposalManifest();
   const findings = FINDING_MANIFEST.map((finding) => ({
-    ...finding,
+    code: finding.code,
+    severity: finding.severity,
     count: finding.code === "TEMPLATE_CREATOR_CROSS_TENANT" ? proposalCount : 0,
-  })).sort((left, right) => left.code.localeCompare(right.code));
+  }));
   assert.equal(manifest.length, 8);
-  const stablePlan = {
-    script: "staff-task-integrity-reconciliation-plan",
-    reportSchemaVersion: 1,
-    target: "development",
-    releaseSha: config.admission.releaseSha,
-    databaseIdentityDigest: "c".repeat(64),
-    safety: {
-      databaseWrites: false,
-      applySupported: false,
-      proposalIsAuthorization: false,
-      connectionLimit: 1,
-      transactionReadOnly: true,
-      isolationLevel: "REPEATABLE READ",
-      aggregateOnly: true,
-      outputContainsRowIdentifiers: false,
+  return buildPlan({
+    config: plannerConfig(config),
+    rows: findings,
+    snapshotRow: {
+      generated_at: "2026-07-27T00:00:00.000Z",
+      current_schema: "public",
+      current_database: config.admission.expectedDatabaseName,
+      cluster_system_identifier: "1234567890123456789",
+      database_oid: "16384",
     },
-    thresholds: {},
-    limits: {},
-    schema: { ready: true, expected: {}, actual: {} },
-    summary: {
-      decision: proposalCount > 0 ? "FINDINGS" : "PASS",
-      inventoryExecuted: true,
-      candidateOccurrences: proposalCount,
-      observedOccurrences: proposalCount,
-      capExceeded: false,
-      blockingTotal: proposalCount,
-      blockingCodes: proposalCount > 0 ? 1 : 0,
-      reviewTotal: 0,
-      reviewCodes: 0,
-      classifications: {
-        proposal: {
-          catalogCodes: 8,
-          positiveCodes: proposalCount > 0 ? 1 : 0,
-          candidateOccurrences: proposalCount,
-        },
-        operator: {
-          catalogCodes: 29,
-          positiveCodes: 0,
-          candidateOccurrences: 0,
-        },
-        review: {
-          catalogCodes: 6,
-          positiveCodes: 0,
-          candidateOccurrences: 0,
-        },
-      },
+    migrationRow: {
+      migration_count: String(FROZEN_EXPAND_SCHEMA_CONTRACT.migrationCount),
+      latest_migration: FROZEN_EXPAND_SCHEMA_CONTRACT.latestMigration,
+      unfinished_migration_count: "0",
     },
-    findings,
-  };
-  const generatedAt = "2026-07-27T00:00:00.000Z";
-  const contentDigest = computePlannerContentDigest(stablePlan, config.hmacKey);
-  return {
-    ...stablePlan,
-    generatedAt,
-    contentDigest,
-    executionDigest: computePlannerExecutionDigest(
-      { contentDigest, generatedAt },
-      config.hmacKey,
-    ),
-  };
+    catalogRow: {
+      composite_contract_match_count: String(COMPOSITE_CONSTRAINTS.length),
+      simple_contract_match_count: String(SIMPLE_CONSTRAINTS.length),
+      foreign_key_contract_mismatch_count: "0",
+      unexpected_protected_foreign_key_count: "0",
+      parent_index_contract_match_count: String(PARENT_INDEXES.length),
+      parent_index_contract_mismatch_count: "0",
+    },
+    inventoryExecuted: true,
+    schemaContract: FROZEN_EXPAND_SCHEMA_CONTRACT,
+  });
 }
 
 export function runSelfTest() {
@@ -1767,6 +1774,7 @@ export function runSelfTest() {
       bindingDigest: "f".repeat(64),
     },
     databaseIdentityDigest: admissionReport.databaseIdentityDigest,
+    plannerDatabaseIdentityDigest: plan.databaseIdentityDigest,
     verificationTime: new Date("2026-07-27T00:00:00.000Z"),
   });
   assert.equal(exitCodeForDryRun(report, config.hmacKey), 2);
@@ -1949,11 +1957,16 @@ export async function scanDatabase(
           migrationRow: migrationRows[0],
           catalogRow: catalogRows[0],
           inventoryExecuted: true,
+          schemaContract: FROZEN_EXPAND_SCHEMA_CONTRACT,
         });
         const privileges = privilegeState(privilegeRows[0]);
         const databaseIdentityDigest = computeDatabaseIdentityDigest(
           snapshotRows[0],
           config.admission.hmacKey,
+        );
+        const plannerDatabaseIdentityDigest = computeDatabaseIdentityDigest(
+          snapshotRows[0],
+          config.hmacKey,
         );
 
         const proposalRows = plan.summary.capExceeded
@@ -2010,6 +2023,7 @@ export async function scanDatabase(
           advisoryLockAcquired,
           provenanceBinding: finalProvenanceBinding,
           databaseIdentityDigest,
+          plannerDatabaseIdentityDigest,
           verificationTime: new Date(finalProvenanceRows[0].verified_at),
         });
       },

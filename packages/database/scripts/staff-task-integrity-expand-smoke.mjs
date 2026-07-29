@@ -299,6 +299,25 @@ const EXPECTED_PRISMA_DRIFT_DROPS = [
   ...LEGACY_STORE_CONSTRAINTS.map((constraint) => constraint.name),
 ].sort();
 
+// The historical StaffTask rehearsal stops at migration 162 but compares that
+// database with the current Prisma schema. Migration 166 intentionally replaces
+// these six legacy guest-delivery foreign keys with same-tenant composite
+// contracts. Keep the unrelated additive-tail drift explicit so any additional
+// destructive diff still fails closed.
+const ALLOWED_ADDITIVE_TAIL_PRISMA_DRIFT_DROPS = [
+  "GuestGameDeliveryEvent_deliveryId_fkey",
+  "GuestGameDeliveryEvent_rewardId_fkey",
+  "GuestGameDelivery_guestId_fkey",
+  "GuestGameDelivery_profileId_fkey",
+  "GuestGameDelivery_rewardId_fkey",
+  "GuestGameDelivery_storeId_fkey",
+].sort();
+
+const EXPECTED_CURRENT_PRISMA_DRIFT_DROPS = [
+  ...EXPECTED_PRISMA_DRIFT_DROPS,
+  ...ALLOWED_ADDITIVE_TAIL_PRISMA_DRIFT_DROPS,
+].sort();
+
 const DB_NATIVE_TABLE_NAMES = [
   ...new Set(
     CONSTRAINTS.flatMap((constraint) => [
@@ -502,8 +521,8 @@ function assertPrismaDriftContract(migrationSql) {
 
   assertEqualArray(
     dropNames,
-    EXPECTED_PRISMA_DRIFT_DROPS,
-    `Prisma destructive FK drift changed unexpectedly: expected ${EXPECTED_PRISMA_DRIFT_DROPS.join(",")}; actual ${dropNames.join(",")}.`,
+    EXPECTED_CURRENT_PRISMA_DRIFT_DROPS,
+    `Prisma destructive FK drift changed unexpectedly: expected ${EXPECTED_CURRENT_PRISMA_DRIFT_DROPS.join(",")}; actual ${dropNames.join(",")}.`,
   );
   assert(
     dbNativeAdds.length === 0,
@@ -2479,6 +2498,10 @@ async function runOfflineSelfTest() {
     EXPECTED_PRISMA_DRIFT_DROPS.length === 14,
     "Frozen Prisma destructive drift count changed unexpectedly.",
   );
+  assert(
+    ALLOWED_ADDITIVE_TAIL_PRISMA_DRIFT_DROPS.length === 6,
+    "Reviewed additive-tail Prisma destructive drift count changed unexpectedly.",
+  );
   assertEqualArray(
     Object.keys(BASELINE_STORE_SELECT),
     ["id", "tenantId", "isActive"],
@@ -2631,6 +2654,8 @@ async function main() {
       parentIdentifierUpdatesRejected: parentUpdateChecks.identifierUpdates,
       parentTenantUpdatesRejected: parentUpdateChecks.tenantUpdates,
       prismaDriftDrops: EXPECTED_PRISMA_DRIFT_DROPS.length,
+      additiveTailPrismaDriftDrops:
+        ALLOWED_ADDITIVE_TAIL_PRISMA_DRIFT_DROPS.length,
       schemaPrefix: SAFE_SCHEMA_PREFIX,
     };
   } catch (error) {

@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                   |
 | ---------------- | ---------------------------------------------------------- |
-| Версия           | 0.10                                                       |
+| Версия           | 0.12                                                       |
 | Дата             | 29.07.2026                                                 |
-| Статус           | Implementation candidate; PostgreSQL/remote evidence pending |
+| Статус           | Schema target `CURRENT_166`; last accepted exact-head `be8c94c4...` / run #29; all four engineering P1 closed |
 | Release decision | `NO-GO` для external delivery и owner invite               |
 | Базовая схема    | Exact `CURRENT_165`                                        |
 | Первый scope     | `GuestGameDelivery`, Store fence consumption, direct и bot send paths |
@@ -31,15 +31,65 @@ Migration `165` добавляет только fail-closed Store background-exe
 `166`, Prisma contract и fail-closed legacy runtime containment созданы в
 рабочей ветке как implementation candidate. Отдельный remote PostgreSQL 16
 PASS exact-SHA кандидата `CURRENT_165`, включая populated rehearsal
-`164 → 165`, получен на `4bd6a036...` / CI `30428288353`. Независимый
-adversarial review candidate `166` не нашёл P0-блокера для применения схемы
-как неактивного фундамента, но зафиксировал четыре P1-блокера до разрешения
-любых provider writes: глобальный lock order, final-row/evidence consistency,
-явный legacy-quarantine reconciliation protocol и запрет прямой вставки
-transition evidence. Для `CURRENT_166` ещё обязательны populated PostgreSQL
-rehearsal, exact-SHA remote CI и effect-capable coordinator. Этот документ
-является design/implementation contract, а не разрешением применить DDL или
-включить outbound.
+`164 → 165`, получен на `4bd6a036...` / CI `30428288353`. Schema target —
+`CURRENT_166`. Previous accepted engineering baseline связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856` / CI `30443837684`
+(`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
+Все три job `PASS`; PostgreSQL evidence подтвердил
+`immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / CI `30442286822`
+сохраняется как historical precursor, который принял foundation migration
+`166`, но предшествовал legacy quarantine delivery-row/lifecycle freeze.
+Rejected exact-head candidate
+`a644b81e909ea97c21e3c404480505bf97b19935` / CI
+[`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
+(`run #27`) дал `2/3 PASS`, но PostgreSQL job `90559756334` завершился
+`FAIL`: harness ожидал custom replay text, тогда как unique index вернул
+SQLSTATE `23505` через generic Prisma message. Он не accepted. Rejected
+`6a69cd8247a2ec1787d00e4f9afacee2af075c60` / CI `30445054152`
+(`run #26`), PostgreSQL job `90553255161`, завершился `FAILED`: retry fixture
+не выставлял `readinessStatus=READY_FOR_BOT`, а independent preflight
+обнаружил null-closed Event integrity gap. Previous accepted exact-head
+checkpoint —
+`d525b736d03162a2c58de17cbf7679ba6f515096`, CI
+[`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
+(`run #28`): Application `90561260920`, Authority checks `90561260926` и
+PostgreSQL `90561260878` — `3/3 PASS`. Authority checks не выполняли root
+enrollment; registry остаётся `{}`. PostgreSQL major `16` evidence
+зафиксировал `populatedLegacyDeliveries=10`, `canonicalStoreBackfills=1`,
+`legacyQuarantines=6`, `preservedFailClosedStores=3`,
+`committedTransitions=4`, `runtimeBoundaryNegatives=9`,
+`immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true` и
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён,
+source application data не затронуты. Last accepted exact-head checkpoint —
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, CI
+[`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
+(`run #29`): Application `90566337085`, Authority checks `90566337062` и
+PostgreSQL major `16` job `90566337060` — `3/3 PASS`. Authority checks не
+выполняли root enrollment; registry остаётся `{}`. Run #29 повторно
+подтвердил evidence выше, `privateSecurityInvokerLockBoundaries=1` и
+`rewardDeliveryLockOrderEvidence`: restricted runtime scope, две disposable
+owner-DML session, rejection missing/cross-tenant Reward, advisory-lock waiter,
+committed delivery/reward deferred-trigger paths, committed holder/waiter,
+`rawDeadlockOrLockTimeoutErrors=0` и неизменный state/evidence.
+Независимый adversarial review не нашёл
+P0-блокера для применения схемы как неактивного фундамента и исходно
+зафиксировал четыре P1. Legacy quarantine delivery-row/lifecycle freeze
+закрыла один, а accepted exact-head `d525b736...` закрыл ещё два:
+final-row reason/evidence consistency с null-closed Event integrity и worker
+boundary-only durable event write. Accepted exact-head `be8c94c4...` закрыл
+четвёртый — глобальный lock order/deadlock/`40P01`. Все четыре исходных
+engineering provider-write P1 закрыты. Несмотря на accepted engineering
+checkpoint, обязательны отдельная non-owner runtime role и operational
+grants: actual runtime/app DB role должна пройти admission и получить explicit
+`EXECUTE`, поскольку `PUBLIC EXECUTE` revoked. Batch/rebind/future provider
+writers остаются fail-closed; whole-transaction bounded retry сохраняется
+pre-activation defense-in-depth. Worker boundary не принимает `actorUserId`,
+interactive same-tenant actor boundary pending.
+Effect-capable coordinator, production-like admission и cutover также
+обязательны. Этот документ является design/implementation contract, а не
+разрешением применить DDL или включить outbound.
 
 Текущий candidate намеренно сохраняет hard deny на legacy direct provider,
 bot pull, provider prepare/update/ack, revoke и unsubscribe delivery mutation
@@ -47,9 +97,12 @@ bot pull, provider prepare/update/ack, revoke и unsubscribe delivery mutation
 продолжается, а `CASHIER/MANUAL` delivery остаётся доступным. До effect-capable
 release дополнительно
 обязательны persisted `NETWORK | STORES` enforcement с пересечением
-`allowedStoreIds`, versioned provider/workload authority, operational
-retention identity/procedure и cutover старых worker/bot credentials. Ни один
-из этих пунктов нельзя заменить одной успешной миграцией.
+`allowedStoreIds`, versioned provider/workload authority, будущие bounded
+audited retention identity/procedure/exact grants и cutover старых worker/bot
+credentials. Сейчас прямой `DELETE` Attempt/Event запрещён ordinary/enrolled
+DML roles при включённых triggers; owner/superuser/DDL bypass operationally
+denied, retention не enrolled. Ни один из этих пунктов нельзя заменить одной
+успешной миграцией.
 
 ## 2. Принятое архитектурное решение
 
@@ -188,7 +241,9 @@ Non-provider matrix для `CASHIER`/`MANUAL`:
   `VERIFIED`.
 
 Для `LEGACY_QUARANTINED` migration допускает отсутствующее новое evidence,
-но DB запрещает переход в `READY/PROCESSING/DISPATCHING` до reconciliation.
+но после backfill DB полностью замораживает delivery: любой `UPDATE`, включая
+state/reason/scope/provider/identity fields, и любой `DELETE` отклоняются.
+Generation-0 reconciliation path не включён.
 Для всех новых `VERIFIED` rows state matrix является строгим CHECK, а не
 только service-level validation.
 
@@ -196,8 +251,8 @@ Non-provider matrix для `CASHIER`/`MANUAL`:
 `SENT/FAILED/CANCELED` получают `LEGACY_QUARANTINED` независимо от совпадения
 Store/recipient: у них нет доказуемого pre-provider marker. Они сохраняют
 исходный status и получают `integrityReasonCode=LEGACY_PRE_166_PROVIDER_TERMINAL`
-и один `DELIVERY_INTEGRITY_QUARANTINED` event. Они не могут retry/send без
-dedicated reconciliation.
+и один `DELIVERY_INTEGRITY_QUARANTINED` event. Они остаются read-only evidence
+и не могут retry/send/reconcile или удаляться.
 
 Retention contract:
 
@@ -331,11 +386,14 @@ Constraints:
 - deferred trigger требует exact совпадения attempt с current delivery marker
   и `DELIVERY_PROVIDER_ATTEMPTED` event в той же транзакции.
 
-`GuestGameDeliveryAttempt` — append-only. DB trigger отклоняет `UPDATE` и
-обычный `DELETE`; application runtime role не получает эти privileges.
-Удаление возможно только documented evidence-retention procedure под
-отдельной non-login DB role после удаления зависимых events. Retention order:
-`event → attempt → delivery → reward`.
+`GuestGameDeliveryAttempt` — append-only. DB trigger отклоняет любой `UPDATE`
+и `DELETE` ordinary/enrolled DML roles при включённых triggers; application
+runtime не получает обходных privileges. Owner/superuser/DDL bypass
+operationally denied и не является разрешённой retention границей. Bounded
+audited evidence-retention procedure, отдельная non-login identity, exact
+grants/window и порядок
+`event → attempt → delivery → reward` являются будущим reviewed operations
+change и сейчас не enrolled.
 
 Индексы:
 
@@ -383,8 +441,8 @@ tenant-global:
 5. все pre-166 provider `FAILED/SENT/CANCELED`, включая matching rows,
    сохраняют status/evidence, получают `LEGACY_QUARANTINED`,
    `LEGACY_PRE_166_PROVIDER_TERMINAL` и exact
-   `DELIVERY_INTEGRITY_QUARANTINED` event; retry запрещён без dedicated
-   reconciliation;
+   `DELIVERY_INTEGRITY_QUARANTINED` event; после backfill любые
+   update/retry/reconcile/delete запрещены;
 6. nullable non-provider строки сохраняются без искусственного Store и
    используют отдельную non-provider matrix.
 
@@ -418,7 +476,7 @@ Migration inventory:
 - same-tenant delivery↔reward recipient mismatch, включая null profile для
   provider channel, — status сохраняется, кроме effect-eligible `READY`,
   которая становится `BLOCKED`; строка получает
-  `integrityState=LEGACY_QUARANTINED`, event и запрет retry;
+  `integrityState=LEGACY_QUARANTINED`, event и полную immutability;
 - nullable non-provider legacy identity допустима, но не может войти в
   provider claim;
 - hard delete profile/guest с delivery evidence запрещён; PII удаляется
@@ -516,11 +574,12 @@ claim/provider evidence. Constraint trigger проверяет, что `event.re
 равен reward текущей delivery, а attempt/store/generation соответствуют
 transition.
 
-`GuestGameDeliveryEvent` — append-only. DB trigger отклоняет `UPDATE` и
-обычный `DELETE`; application runtime role не получает эти privileges.
-Documented retention procedure выполняется отдельной non-login DB role после
-evidence-retention window в порядке
-`event → attempt → delivery → reward`.
+`GuestGameDeliveryEvent` — append-only. DB trigger отклоняет любой `UPDATE` и
+`DELETE` ordinary/enrolled DML roles при включённых triggers; application
+runtime не получает обходных privileges. Owner/superuser/DDL bypass
+operationally denied. Будущая bounded audited retention procedure с отдельной
+non-login identity, exact grants/window/audit и порядком
+`event → attempt → delivery → reward` ещё не реализована и не enrolled.
 
 Перед FK выполняется inventory legacy events. Cross-tenant
 `event.tenantId/deliveryId/rewardId` либо event reward, не равный delivery
@@ -536,16 +595,24 @@ provenance.
 raw claim/send token, recipient identity, provider credentials, response body
 и payload PII в event/log не попадают.
 
-Для cross-table trigger все writers сначала берут transaction advisory lock
-по versioned hash `(tenantId,rewardId)`, затем `GuestGameReward FOR UPDATE`,
-затем связанные deliveries `FOR UPDATE ORDER BY id`. SQLSTATE `40P01` до
-provider marker допускает не более трёх retries с jitter; после marker
-автоматический transaction retry запрещён и требуется reconciliation.
+Private SECURITY INVOKER `guest_game_reward_delivery_lock_v1` задаёт единый
+до-первой-DML порядок: canonical transaction advisory seed `166`, затем
+same-tenant `GuestGameReward FOR UPDATE`, затем связанные `VERIFIED`
+Telegram/MAX deliveries `ORDER BY id FOR UPDATE`. Оба deferred binding trigger
+делегируют этой boundary; application Reward/Delivery writers вызывают её до
+первой DML. `PUBLIC EXECUTE` отозван. Actual non-owner runtime/app DB role
+получает explicit `EXECUTE` только после отдельного admission. Batch, rebind и
+будущие provider writers до adoption остаются fail-closed.
+Whole-transaction bounded `40P01` retry с jitter до provider marker остаётся
+defense-in-depth; после marker автоматический retry запрещён и требуется
+reconciliation.
 
 Exact DB objects migration `166`:
 
 ```text
 function guest_game_delivery_transition_key_v1(...)
+
+function guest_game_reward_delivery_lock_v1(...)
 
 function guest_game_delivery_transition_guard()
 trigger  GuestGameDelivery_transition_guard
@@ -566,12 +633,18 @@ function guest_game_delivery_event_append_only()
 trigger  GuestGameDeliveryEvent_append_only
 ```
 
-Binding/event constraint triggers являются `DEFERRABLE INITIALLY DEFERRED`.
-Transition guard является `BEFORE INSERT OR UPDATE` и защищает generation,
-attempt counter, allowed transition graph, immutable marker и terminal state.
-Append-only triggers являются `BEFORE UPDATE OR DELETE`: `UPDATE` запрещён
-всегда, `DELETE` разрешён только при
-`current_user = leetplus_evidence_retention`. Все trigger functions
+Lock boundary является private `SECURITY INVOKER` с fixed
+`search_path=pg_catalog,public`; `PUBLIC EXECUTE` отозван. Binding/event
+constraint triggers являются `DEFERRABLE INITIALLY DEFERRED`; оба
+Reward↔Delivery binding trigger делегируют lock boundary.
+Transition guard является `BEFORE INSERT OR UPDATE OR DELETE` и защищает
+generation, attempt counter, allowed transition graph, immutable marker,
+terminal state и legacy quarantine delivery-row/lifecycle freeze.
+Append-only triggers являются `BEFORE INSERT OR UPDATE OR DELETE`: после
+insert-validation любой `UPDATE` и `DELETE` Attempt/Event запрещён
+ordinary/enrolled DML roles при включённых triggers. Owner/superuser/DDL bypass
+operationally denied; этот baseline не доказывает невозможность
+administrative DDL bypass. Все trigger functions
 schema-qualified, используют fixed `search_path=pg_catalog,public`, не
 являются `SECURITY DEFINER`; их `EXECUTE FROM PUBLIC` отзывается. У чистой
 immutable-функции
@@ -580,11 +653,10 @@ immutable-функции
 helper выдаётся только отдельно зарегистрированной delivery-writer role во
 время её operational enrollment. Функция работает только с аргументами и
 `pg_catalog`, не читает таблицы и не повышает привилегии. Dedicated retention
-использует отдельно audited
-`SECURITY DEFINER` procedure,
-принадлежащую non-login role `leetplus_evidence_retention`, с fixed
-`search_path`, bounded IDs и проверкой retention window. Application role не
-получает прямое членство в этой role и не может отключить triggers.
+ещё не реализован: будущий отдельный reviewed operations change обязан ввести
+audited `SECURITY DEFINER` procedure, non-login owner identity, fixed
+`search_path`, bounded IDs, exact grants и проверку retention window без
+прямого membership application role и без возможности отключать triggers.
 
 ### 3.6. Store-level fence
 
@@ -873,7 +945,8 @@ Generic delivery update не имеет права выполнять reconcilia
 но row может вернуться в `READY` только dedicated retry после
 `DELIVERY_RETRIED`; immutable attempt/event evidence сохраняется;
 migration никогда не переписывает legacy `FAILED` в `BLOCKED`, а ставит
-`LEGACY_QUARANTINED` и сохраняет status/evidence.
+`LEGACY_QUARANTINED`, сохраняет status/evidence и навсегда исключает строку из
+retry/reconciliation/update/delete paths.
 
 ### 5.6. Reaper и reconciliation
 
@@ -953,7 +1026,7 @@ retry limits и provider outcome taxonomy.
 | bot ack                           | Exact generation/owner/revisions; same terminal idempotent      |
 | direct finalize                   | Exact generation/owner/revisions                               |
 | retry                             | Только dedicated workflow; generation не сбрасывается          |
-| retention/delete                  | Не удаляет active/reconciliation evidence                      |
+| retention/delete                  | Direct DELETE запрещён; будущая bounded audited procedure не удаляет active/reconciliation evidence |
 
 Implementation call-site inventory для одного atomic slice:
 
@@ -983,6 +1056,62 @@ Status labels, DTO validators, mappers, metrics и audit payload меняютс�
 же PR; fallback неизвестного статуса в `READY` запрещён.
 
 ## 8. Migration `165 → 166` rehearsal
+
+Previous accepted engineering rehearsal связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
+[`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
+(`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
+Все три job `PASS`: Application `90549245276`, Authority checks
+`90549245284`, PostgreSQL migration smoke `90549245372` на PostgreSQL major
+`16`. Authority job не выполнял root enrollment; registry остаётся `{}`.
+Delivery fixture подтвердил exact prefix `165 → 166`, а legacy quarantine
+delivery-row/lifecycle negative suite —
+`immutableMutationsRejected=7` и `finalStateAndEvidenceUnchanged=true`.
+Accepted `c1fee42c...` / CI `30442286822` остаётся historical precursor до
+этой lifecycle freeze.
+
+Rejected exact-head candidate
+`a644b81e909ea97c21e3c404480505bf97b19935`, CI
+[`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
+(`run #27`) не accepted: Application `90559756157` и Authority
+`90559756309` — `PASS`, PostgreSQL `90559756334` — `FAIL` из-за несовпадения
+custom replay text с SQLSTATE `23505`/generic Prisma message.
+Rejected `6a69cd8247a2ec1787d00e4f9afacee2af075c60` / CI `30445054152`
+(`run #26`), PostgreSQL job `90553255161`, завершился `FAILED` из-за retry
+readiness fixture; independent preflight также обнаружил null-closed Event
+gap. Ни один P1 этим run не закрыт.
+
+Previous accepted exact-head rehearsal —
+`d525b736d03162a2c58de17cbf7679ba6f515096`, GitHub CI
+[`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
+(`run #28`), `3/3 PASS`: Application `90561260920`, Authority checks
+`90561260926`, PostgreSQL `90561260878`. Structured PostgreSQL major `16`
+evidence: `populatedLegacyDeliveries=10`, `canonicalStoreBackfills=1`,
+`legacyQuarantines=6`, `preservedFailClosedStores=3`,
+`committedTransitions=4`, `runtimeBoundaryNegatives=9`,
+`immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true`,
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён,
+source application data не затронуты. Он закрыл final-row reason/Event
+integrity и worker boundary-only durable event write.
+
+Last accepted exact-head rehearsal —
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, GitHub CI
+[`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
+(`run #29`), `3/3 PASS`: Application `90566337085`, Authority checks
+`90566337062`, PostgreSQL major `16` job `90566337060`. Authority checks не
+выполняли root enrollment; registry остаётся `{}`. Он повторно подтвердил
+run #28 evidence и добавил `privateSecurityInvokerLockBoundaries=1`,
+`rewardDeliveryLockOrderEvidence={restrictedRuntimeScopeChecks:true,
+disposableOwnerDmlSessions:2, missingRewardRejected:true,
+crossTenantRewardRejected:true, waiterObservedOnAdvisoryLock:true,
+deliveryDeferredTriggerCommitted:true, rewardDeferredTriggerCommitted:true,
+holderAndWaiterCommitted:true, rawDeadlockOrLockTimeoutErrors:0,
+stateAndEvidenceUnchanged:true}`. Все четыре исходных engineering
+provider-write P1 закрыты.
+
+Этот результат не является production-like rehearsal, migration apply,
+provider-write activation, deployment или cutover `GO`.
 
 До добавления canonical migration:
 
@@ -1059,14 +1188,17 @@ Acceptance:
   archive-first behavior доказаны;
 - hard delete Store с delivery history отклоняется без dangling/global rows;
 - hard delete reward/delivery не каскадно стирает attempt/event evidence;
-  dedicated retention удаляет его только в порядке
-  `event → attempt → delivery → reward`;
+  прямой `DELETE` Attempt/Event всегда отклоняется, а будущая bounded audited
+  retention procedure с порядком `event → attempt → delivery → reward`
+  остаётся pending и не enrolled;
 - parent unique, все FK/CHECK/trigger и раздельные partial indexes exact;
   `convalidated=true`;
 - отдельные provider/non-provider matrices, typed outcome evidence и
   durable-event transition key CHECK отклоняют direct invalid DML;
 - direct transition без exact same-transaction event не commit-ится;
-- attempt/event `UPDATE` и обычный `DELETE` отклоняются DB trigger;
+- attempt/event `UPDATE` и любой `DELETE` ordinary/enrolled DML roles при
+  включённых triggers отклоняются DB trigger; owner/superuser/DDL bypass
+  operationally denied, retention не enrolled;
 - повторное использование старого `providerAttemptKey` отклоняется permanent
   unique attempt index даже после dedicated retry;
 - concurrent reward/delivery/recipient mutation использует единый lock order;
@@ -1110,7 +1242,22 @@ Acceptance:
 2. Отдельный remote exact-SHA `CURRENT_165` PASS populated `164 → 165`
    принят на `4bd6a036...` / CI `30428288353`.
 3. Независимо reviewed additive migration `166` и отдельный real PostgreSQL
-   rehearsal `165 → 166` на exact candidate SHA.
+   engineering rehearsal `165 → 166`: previous accepted PR-head-associated
+   merge-ref baseline — `bbef153a...` / `30443837684` (`run #23`), `3/3
+   PASS`, но не exact-SHA evidence. `c1fee42c...` / `30442286822` остаётся
+   historical precursor. Legacy quarantine delivery-row/lifecycle freeze
+   закрыла один из исходных четырёх P1.
+   Rejected `6a69cd8...` / run #26 / PG job `90553255161` сохраняется как
+   `FAILED`; exact-head `a644b81...` / CI `30447011917` (`run #27`) —
+   `REJECTED`, `2/3 PASS`. Previous accepted exact-head `d525b736...` / CI
+   `30447467729` (`run #28`) — `3/3 PASS`; он закрыл final-row reason/Event
+   integrity и worker boundary-only durable event write. Last accepted
+   exact-head `be8c94c4...` / CI `30449026506` (`run #29`) — `3/3 PASS`;
+   private SECURITY INVOKER lock boundary и двухсессионный rehearsal закрыли
+   lock order/deadlock/`40P01`. Все четыре исходных engineering
+   provider-write P1 закрыты. Provider activation всё ещё требует actual
+   non-owner runtime/app role, explicit `EXECUTE` grant/admission и остальные
+   operational gates.
 4. Protected release manifest фиксирует accepted SHA,
    `deliveryProtocolVersion=1`, migration checksums и workload identities;
    startup/readiness нового API/worker/bot отклоняет иной contract.
@@ -1148,31 +1295,41 @@ Acceptance:
 Production migration/cutover требует отдельного явного решения. Этот документ,
 локальный PostgreSQL PASS и commit сами по себе не являются таким решением.
 
-## 10. Что migration `166` не закрывает
+## 10. Статус P1 и что accepted engineering checkpoint не закрывает
 
-- единый до-первой-mutation lock order для Reward и Delivery. Deferred
-  constraint triggers берут advisory/relation locks слишком поздно, поэтому
-  конкурентные Reward/Delivery writers потенциально получают PostgreSQL
-  `40P01`. До activation coordinator и все Reward writers обязаны использовать
-  одну SECURITY INVOKER boundary либо порядок
-  `advisory → Reward FOR UPDATE → Delivery FOR UPDATE`, а также bounded
-  `40P01` retry/reconciliation; обязательна двухсессионная PG-регрессия;
-- final-row/evidence consistency для reason/integrity полей. Deferred checker
-  проверяет queued `OLD/NEW`, а не окончательную строку; отдельное изменение
-  `stateReasonCode`/`integrityReasonCode` может разойтись с immutable event.
-  До activation reason/evidence mutation должна быть event-bearing, checker
-  обязан re-read final Delivery и сопоставлять revision/state/reason, а smoke
-  — доказывать rejection stale reason drift;
-- однозначный lifecycle `LEGACY_QUARANTINED`. Текущая transition matrix не
-  является готовым recovery path для legacy generation `0`: нельзя считать
-  допустимым ни тихий переход без event, ни синтетический Attempt. Нужен
-  отдельный approved legacy-reconciliation event с provenance/operator
-  approval либо полная неизменяемость quarantine;
-- защищённая запись durable events. Прямой column-level `INSERT` позволяет
-  сформировать дополнительный канонически хешированный event на текущей
-  revision, не являющийся фактическим transition. До выдачи runtime-прав
-  прямой `INSERT` должен быть отозван в пользу узкой procedure/подписанной
-  provenance boundary с проверкой current transition;
+- единый до-первой-mutation lock order для Reward и Delivery закрыт accepted
+  exact-head `be8c94c4...` / CI `30449026506` (`run #29`). Private SECURITY
+  INVOKER `guest_game_reward_delivery_lock_v1` берёт canonical advisory seed
+  `166`, same-tenant Reward `FOR UPDATE`, затем `VERIFIED` Telegram/MAX
+  Deliveries `ORDER BY id FOR UPDATE`; оба deferred trigger делегируют
+  boundary, application writers вызывают её до первой DML. Двухсессионный
+  rehearsal подтвердил `rawDeadlockOrLockTimeoutErrors=0`, committed
+  holder/waiter и неизменный state/evidence. Этот пункт больше не входит в
+  P1;
+- все четыре исходных engineering provider-write P1 закрыты. Operational
+  activation при этом не завершена: actual non-owner runtime/app DB role
+  должна пройти admission и получить explicit `EXECUTE` grant, поскольку
+  `PUBLIC EXECUTE` revoked; batch/rebind/future provider writers остаются
+  fail-closed, а whole-transaction bounded retry остаётся pre-activation
+  defense-in-depth;
+- final-row/evidence consistency для reason/integrity полей и null-closed
+  Event integrity закрыты previous accepted exact-head `d525b736...` / CI
+  `30447467729` (`run #28`): reason/evidence mutation event-bearing, deferred
+  validation re-read окончательной Delivery строки отклоняет stale
+  reason/revision drift. Этот пункт больше не входит в оставшиеся P1;
+- lifecycle `LEGACY_QUARANTINED` закрыт previous accepted legacy quarantine
+  delivery-row/lifecycle freeze baseline
+  `bbef153a...` / `30443837684`: generation `0` не имеет recovery path,
+  любой `UPDATE` state/reason/scope/provider/identity fields и любой `DELETE`
+  отклоняются; семь negative mutations доказывают неизменность delivery row и
+  evidence. Этот пункт больше не входит в оставшиеся P1;
+- worker boundary-only durable event write закрыт previous accepted exact-head
+  `d525b736...` / CI `30447467729` (`run #28`): worker не получает прямой
+  column-level `INSERT`, а узкая boundary проверяет current transition и
+  отклоняет fabricated extra event. Этот пункт больше не входит в оставшиеся
+  P1. Operational admission при этом не завершён: обязательны separate
+  non-owner runtime role и operational grants; worker boundary отвергает
+  `actorUserId`, interactive same-tenant actor boundary реализуется отдельно;
 - effect-capable coordinator и atomic protocol
   `claim -> prepare -> provider effect -> finalize/ack/reconcile`: до его
   реализации legacy direct-send принудительно остаётся dry-run, bot pull

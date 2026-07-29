@@ -3,13 +3,16 @@
 | Поле          | Значение                                               |
 | ------------- | ------------------------------------------------------ |
 | Profile key   | `OPEN_BETA_FULL_OPERATIONS_V1`                         |
-| Версия        | 1.8                                                    |
+| Версия        | 1.10                                                   |
 | Дата          | 29.07.2026                                             |
 | Статус        | `NO-GO`; control-plane foundation реализован, adoption pending |
 | Выдача        | Invite-only, отдельный Tenant на независимую сеть      |
 | Область       | Собственная сеть или явно разрешённые клубы            |
 | Назначение    | Первый shared external tenant и последующая когорта    |
-| Current target | `CURRENT_166`; exact-SHA remote CI ещё pending         |
+| Schema target | `CURRENT_166` |
+| Previous accepted baseline | PR-head-associated merge-ref `bbef153a...` / `30443837684`; not exact-SHA |
+| Previous accepted exact-head | `d525b736...` / CI `30447467729`; `3/3 PASS` |
+| Last accepted checkpoint | exact-head `be8c94c4...` / CI `30449026506`; `3/3 PASS` |
 | Accepted prerequisite | `CURRENT_165`: `4bd6a036...` / `7c20adec...`, remote PASS |
 | Historical evidence | `044ceca2` / `2341b999`, не evidence текущего candidate |
 
@@ -39,9 +42,48 @@ Local public-only pinned-path evidence прошёл admission suite `19/19`; е�
 исторический prerequisite вместе с authority/application/PostgreSQL gates
 прошёл remote CI как `CURRENT_165` на
 `4bd6a036...` / `30428288353`; documentation/evidence successor
-`7c20adec...` / `30429463161` также зелёный. Current implementation candidate
-`CURRENT_166` ещё не имеет принятого exact-SHA remote CI и populated
-PostgreSQL `165 → 166` evidence. Production authority roots
+`7c20adec...` / `30429463161` также зелёный. Schema target —
+`CURRENT_166`. Previous accepted engineering baseline связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856` / merge-ref CI `30443837684`
+(`run #23`), не exact-SHA checkout evidence: `3/3 PASS`, PostgreSQL job
+`90549245372` подтвердил
+`immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / CI `30442286822`
+сохраняется как historical precursor до legacy quarantine
+delivery-row/lifecycle freeze. Rejected `6a69cd8...` / CI `30445054152`
+(`run #26`), PostgreSQL job `90553255161`, завершился `FAILED` и не закрыл P1.
+Exact-head `a644b81e909ea97c21e3c404480505bf97b19935` / CI
+[`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
+(`run #27`) также `REJECTED`: Application/Authority — `PASS`, PostgreSQL —
+`FAIL` из-за replay-message expectation поверх SQLSTATE `23505`. Previous
+accepted
+exact-head —
+`d525b736d03162a2c58de17cbf7679ba6f515096` / CI
+[`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
+(`run #28`), `3/3 PASS`: Application `90561260920`, Authority checks
+`90561260926`, PostgreSQL major `16` job `90561260878`. Authority checks не
+выполняли root enrollment; registry остаётся `{}`. Structured rehearsal
+подтвердил `committedTransitions=4`, `runtimeBoundaryNegatives=9`,
+`immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true` и
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён,
+source application data не затронуты. Checkpoint закрыл final-row
+reason/Event integrity и worker boundary-only durable event write. Last
+accepted exact-head —
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI
+[`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
+(`run #29`), `3/3 PASS`: Application `90566337085`, Authority checks
+`90566337062`, PostgreSQL major `16` job `90566337060`. Authority checks не
+выполняли root enrollment; registry остаётся `{}`. Private SECURITY INVOKER
+lock boundary, две DML session и advisory waiter закрыли
+lock-order/deadlock/`40P01`; `privateSecurityInvokerLockBoundaries=1`,
+`rawDeadlockOrLockTimeoutErrors=0`,
+`stateAndEvidenceUnchanged=true`. Все четыре исходных engineering
+provider-write P1 закрыты. Actual non-owner runtime/app DB role всё ещё должна
+пройти admission и получить explicit `EXECUTE` grant (`PUBLIC EXECUTE`
+revoked); batch/rebind/future provider writers остаются fail-closed,
+whole-transaction bounded retry — defense-in-depth.
+Production authority roots
 остаются `EMPTY / FAIL-CLOSED`, поэтому fixture не является production-like
 authority или Gate 2 evidence. Experimental Node.js 22 module mock учитывается
 как `P2` test-infrastructure risk и не меняет entitlement или продуктовый

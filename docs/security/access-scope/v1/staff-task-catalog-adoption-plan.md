@@ -3,7 +3,7 @@
 | Поле           | Значение                                                                                                                                                  |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Статус         | templates, recurring actor HTTP, snapshot admission, inventory/planner, SYNTHETIC proposal dry-run и DB EXPAND `IMPLEMENTED_CANDIDATE`; scheduler `NO-GO` |
-| Версия         | 1.14.0                                                                                                                                                    |
+| Версия         | 1.16.0                                                                                                                                                    |
 | Дата           | 29.07.2026                                                                                                                                                |
 | Backlog        | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-OPS-008`                                                                                                      |
 | Scope contract | [access-scope-contract.md](./access-scope-contract.md)                                                                                                    |
@@ -33,9 +33,41 @@ prefix плюс allowlisted migrations
 `20260728120000_tenant_execution_control_plane_expand` и
 `20260728150000_tenant_execution_revision_fence` и
 `20260729120000_store_background_execution_fence` и
-`20260729160000_guest_game_delivery_claim_fence`. Remote exact-SHA и
-populated `165 → 166` для implementation candidate ещё pending; historical
-SHA ниже не являются evidence current `CURRENT_166`.
+`20260729160000_guest_game_delivery_claim_fence`. Schema target —
+`CURRENT_166`. Prior engineering baseline связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856` / CI `30443837684`
+(`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
+Baseline завершился `3/3 PASS`; PostgreSQL подтвердил
+`immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / CI `30442286822`
+сохраняется как historical precursor до legacy quarantine
+delivery-row/lifecycle freeze. Rejected `6a69cd8...` / run #26 / PG job
+`90553255161` и `a644b81...` / run #27 (`2/3 PASS`, PostgreSQL
+`90559756334` `FAIL`) не являются accepted evidence. Previous accepted
+exact-head `d525b736d03162a2c58de17cbf7679ba6f515096` / CI `30447467729`
+(`run #28`) завершился `3/3 PASS`. Last accepted exact-head
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI `30449026506`
+(`run #29`) завершился `3/3 PASS`: Application `90566337085`, Authority
+checks `90566337062`, PostgreSQL major `16` job `90566337060`. Authority
+checks не выполняли root enrollment; roots `{}`. Structured evidence включает
+`populatedLegacyDeliveries=10`, `canonicalStoreBackfills=1`,
+`legacyQuarantines=6`, `preservedFailClosedStores=3`,
+`committedTransitions=4`, `runtimeBoundaryNegatives=9`,
+`immutableMutationsRejected=7`, `finalStateAndEvidenceUnchanged=true`,
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён,
+source application data не затронуты. Lock evidence включает
+`rewardDeliveryLockOrderEvidence={restrictedRuntimeScopeChecks:true,disposableOwnerDmlSessions:2,missingRewardRejected:true,crossTenantRewardRejected:true,waiterObservedOnAdvisoryLock:true,deliveryDeferredTriggerCommitted:true,rewardDeferredTriggerCommitted:true,holderAndWaiterCommitted:true,rawDeadlockOrLockTimeoutErrors:0,stateAndEvidenceUnchanged:true}`
+и `privateSecurityInvokerLockBoundaries=1`. Private `SECURITY INVOKER`
+`guest_game_reward_delivery_lock_v1`, оба deferred trigger и pre-DML adoption
+application writers закрыли последний lock-order/`40P01` slice; все четыре
+engineering provider-write P1 закрыты.
+
+Provider activation и внешний beta всё ещё `NO-GO`: фактическая non-owner
+runtime/app DB role должна пройти admission и получить явный `EXECUTE`;
+`PUBLIC` revoked. Batch/rebind/future provider writers остаются fail-closed,
+bounded whole-transaction retry — defense-in-depth. Interactive actor boundary,
+retention, roots/acquisition и production-like apply/deploy/cutover pending.
+Historical SHA ниже не являются evidence current `CURRENT_166`.
 
 ## 1. Инвентаризация поверхности
 
@@ -219,8 +251,13 @@ historical candidate `2c74c663...` не является current evidence; exact
 `CURRENT_165` engineering candidate
 `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote CI
 `30428288353`, а documentation/evidence successor `7c20adec...` — по CI
-`30429463161`. Это historical prerequisite; remote/current production-like
-evidence для `CURRENT_166` ещё pending.
+`30429463161`. Это historical prerequisite. Schema target — `CURRENT_166`;
+prior PR-head-associated merge-ref baseline —
+`bbef153a...` / `30443837684`, не exact-SHA evidence; previous accepted
+exact-head — `d525b736...` / `30447467729`, `3/3 PASS`; last accepted
+exact-head — `be8c94c4...` / `30449026506`, `3/3 PASS`, все четыре engineering
+provider-write P1 закрыты. `c1fee42c...` / `30442286822` остаётся historical
+precursor. Production-like evidence ещё pending.
 
 - использует одно соединение и одну `READ ONLY REPEATABLE READ` transaction;
 - требует exact target/confirmation, production attestation, 40-hex
@@ -252,11 +289,15 @@ idempotent apply, locks/recheck, audit, rollback и повторный zero-diff
 
 Historical snapshot admission evidence boundary зафиксирован на
 `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c`; это не current candidate
-evidence. Current admission поддерживает `CURRENT_166` после exact
-allowlisted migrations `163..166`; exact-SHA remote CI и populated
-PostgreSQL `165 → 166` ещё pending. Historical `CURRENT_165` engineering
-candidate `4bd6a036...` / CI `30428288353` и evidence successor
-`7c20adec...` / CI `30429463161` не закрывают этот gate.
+evidence. Current admission поддерживает schema target `CURRENT_166` после
+exact allowlisted migrations `163..166`; prior merge-ref engineering baseline
+— `bbef153a...` / `30443837684`, PostgreSQL major `16`; previous accepted
+exact-head — `d525b736...` / `30447467729`, `3/3 PASS`; last accepted
+exact-head — `be8c94c4...` / `30449026506`, `3/3 PASS`, все четыре engineering
+provider-write P1 закрыты. `c1fee42c...` / `30442286822` остаётся historical
+precursor. Historical `CURRENT_165` engineering candidate
+`4bd6a036...` / CI `30428288353` и evidence successor
+`7c20adec...` / CI `30429463161` остаются prerequisite.
 Admission допускает только loopback snapshot, точные runtime bytes и migration
 manifest из Git artifact. Logical allowlist содержит девять
 relations, но роль получает table-level `SELECT` только на восемь; для `User`
@@ -369,6 +410,28 @@ ownership и общий Gate 2.
 
 ## 7. Changelog
 
+- `1.16.0`, 29.07.2026 — единая retroactive evidence correction:
+  schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref
+  baseline `bbef153a...` / CI `30443837684` (`run #23`) завершился `3/3
+  PASS`, но не является exact-SHA evidence;
+  PostgreSQL evidence:
+  `immutableMutationsRejected=7`,
+  `finalStateAndEvidenceUnchanged=true`. Legacy quarantine
+  delivery-row/lifecycle P1 закрыт. Run #26 и run #27 rejected. Previous
+  accepted exact-head `d525b736...` / CI `30447467729` (`run #28`) — `3/3
+  PASS`. Last accepted exact-head `be8c94c4...` / CI `30449026506` (`run #29`)
+  — `3/3 PASS`: Application `90566337085`, Authority checks `90566337062`,
+  PostgreSQL major `16` `90566337060`; checks не выполняли enrollment, roots
+  `{}`. Structured lock-order evidence закрыл последний engineering
+  provider-write P1; все четыре закрыты. Non-owner runtime role admission и
+  explicit `EXECUTE`, interactive boundary, retention, roots/acquisition,
+  production-like admission/reconciliation/apply/deploy и внешний beta
+  остаются `NO-GO`.
+- `1.15.0`, 29.07.2026 — exact-SHA engineering evidence catalog/admission
+  target `CURRENT_166` принято на `c1fee42c...` / CI `30442286822`;
+  PostgreSQL major `16` rehearsal `165 → 166` зелёный. Scheduler,
+  production-like admission/reconciliation, apply/deploy и внешний beta
+  остаются `NO-GO`.
 - `1.14.0`, 29.07.2026 — current operational catalog/admission/planner target
   переведён на implementation candidate `CURRENT_166`: tail `163..166`, count
   `166`, latest `20260729160000_guest_game_delivery_claim_fence`. Remote

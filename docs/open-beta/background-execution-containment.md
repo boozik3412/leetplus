@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                |
 | ---------------- | ------------------------------------------------------- |
-| Версия           | 1.6                                                     |
+| Версия           | 1.8                                                     |
 | Дата             | 29.07.2026                                              |
 | Статус           | Code candidate; не deployed                             |
 | Release decision | `NO-GO` для внешнего owner invite                       |
@@ -196,7 +196,7 @@ retention и quality collection не объявляются unattended entrypoin
 
 Remote PostgreSQL 16 prerequisite для exact `CURRENT_164` пройден на SHA
 `37f8cc88cdba05b3c73f6bc14e14528f831228ee`, CI run `30423839760`.
-Локальный isolated PostgreSQL `16.14` diagnostic rehearsal populated
+Локальный isolated PostgreSQL major `16` diagnostic rehearsal populated
 `163 → 164` также прошёл после усиления проверки exact preflight SQLSTATE:
 `6` tenants, `6` report runs, `10` ledger rows, три drain rejection,
 database SQLSTATE `55000/55P03/42P07`, lock-timeout/late-DDL rollback, пять
@@ -241,9 +241,50 @@ Suite проверяет:
 - полный API regression: `96 suites / 1873 passed / 2 todo`;
 - tenant-execution lint, API production typecheck и API build: `PASS`.
 
-Для expanded containment выше обязательны повторный focused/full API run,
-typecheck/lint и remote exact-SHA CI; они не заявлены этим документом как
-завершённые.
+Для expanded containment повторный focused/full API run, typecheck/lint и
+предыдущий accepted engineering baseline связаны с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
+[`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
+(`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
+Application checks `90549245276`, Authority checks
+`90549245284` и PostgreSQL migration smoke `90549245372` завершились `PASS`.
+Authority checks не выполняли root enrollment; registry остаётся `{}`.
+PostgreSQL evidence зафиксировал `immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / CI `30442286822`
+остаётся historical precursor до legacy quarantine delivery-row/lifecycle
+freeze. Schema target — `CURRENT_166`; exact-head
+`a644b81e909ea97c21e3c404480505bf97b19935` / CI
+[`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
+(`run #27`) rejected (`2/3 PASS`: Application `90559756157` и Authority
+`90559756309` — `PASS`, PostgreSQL `90559756334` — `FAIL` из-за несовпадения
+ожидаемого custom replay text с SQLSTATE `23505`/generic Prisma message).
+Previous accepted exact-head checkpoint —
+`d525b736d03162a2c58de17cbf7679ba6f515096`, GitHub CI
+[`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
+(`run #28`): Application `90561260920`, Authority checks `90561260926` и
+PostgreSQL `90561260878` — `3/3 PASS`. Authority checks не выполняли root
+enrollment; registry остаётся `{}`. PostgreSQL major `16` evidence
+зафиксировал `populatedLegacyDeliveries=10`, `canonicalStoreBackfills=1`,
+`legacyQuarantines=6`, `preservedFailClosedStores=3`,
+`committedTransitions=4`, `runtimeBoundaryNegatives=9`,
+`immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true` и
+`sourceDatabaseMigrationsApplied=0`; migration state source-базы не изменён,
+source application data не затронуты. Last accepted exact-head checkpoint —
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, GitHub CI
+[`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
+(`run #29`): Application `90566337085`, Authority checks `90566337062` и
+PostgreSQL major `16` job `90566337060` — `3/3 PASS`. Authority checks не
+выполняли root enrollment; registry остаётся `{}`. Run #29 повторно
+подтвердил evidence выше, `privateSecurityInvokerLockBoundaries=1` и
+`rewardDeliveryLockOrderEvidence`: `restrictedRuntimeScopeChecks=true`,
+`disposableOwnerDmlSessions=2`, `missingRewardRejected=true`,
+`crossTenantRewardRejected=true`, `waiterObservedOnAdvisoryLock=true`,
+`deliveryDeferredTriggerCommitted=true`, `rewardDeferredTriggerCommitted=true`,
+`holderAndWaiterCommitted=true`, `rawDeadlockOrLockTimeoutErrors=0`,
+`stateAndEvidenceUnchanged=true`. Все четыре исходных engineering
+provider-write P1 закрыты. Это engineering checkpoint, не
+production-like, deploy или outbound `GO`.
 
 ## 8. Следующий обязательный порядок
 
@@ -256,16 +297,47 @@ typecheck/lint и remote exact-SHA CI; они не заявлены этим д�
    `30429463161` также зелёный; оба checkpoint исторические.
 3. Exact additive migration
    `20260729160000_guest_game_delivery_claim_fence` уже создана как
-   implementation candidate `CURRENT_166`; до принятия обязательны clean и
-   populated PostgreSQL rehearsal `165 → 166` и remote exact-SHA CI.
-   Independent adversarial review не нашёл P0-блокера для inert schema, но
-   зафиксировал P1 перед provider activation: общий Reward→Delivery lock
-   order/`40P01` rehearsal, final-row reason/evidence consistency,
-   однозначный legacy-quarantine recovery и procedure-only durable event
-   writes. Полученный `CURRENT_165` PASS остаётся только историческим
-   prerequisite и не доказывает migration `166`.
-4. Закрыть четыре P1 review отдельными PostgreSQL regression-сценариями и
-   запретить выдачу runtime direct `INSERT` на transition evidence.
+   implementation candidate `CURRENT_166`; clean/populated PostgreSQL major
+   `16` rehearsal `165 → 166` и previous accepted PR-head-associated
+   merge-ref baseline — `bbef153a...` / `30443837684` (`run #23`), не
+   exact-SHA evidence. Предыдущий `c1fee42c...` / `30442286822` остаётся
+   historical precursor. Previous accepted exact-head checkpoint —
+   `d525b736...` / `30447467729` (`run #28`), `3/3 PASS`; last accepted
+   exact-head — `be8c94c4...` / `30449026506` (`run #29`), `3/3 PASS`.
+   Independent adversarial review не нашёл P0-блокера для inert schema и
+   исходно зафиксировал четыре P1 перед provider activation. Legacy quarantine
+   delivery-row/lifecycle freeze закрыла один: `LEGACY_QUARANTINED` отклоняет
+   любое изменение
+   state/reason/scope/provider-полей и `DELETE`, а семь negative mutations
+   сохраняют row/evidence неизменными. Exact-head `d525b736...` закрыл ещё два
+   исходных P1: final-row reason/evidence consistency с null-closed Event
+   integrity и worker boundary-only durable event write. Exact-head
+   `be8c94c4...` закрыл четвёртый P1: Reward→Delivery lock
+   order/deadlock/`40P01`. Полученный `CURRENT_165` PASS остаётся только историческим
+   prerequisite; current engineering PASS не является production-like
+   evidence или cutover.
+4. Сохранить закрытие всех четырёх engineering P1 и отдельно пройти
+   operational admission. Rejected `6a69cd8...` / CI `30445054152`
+   (`run #26`), PostgreSQL job `90553255161`, сохраняется как `FAILED`
+   evidence: retry readiness fixture и preflight null-closed Event gap не
+   позволили закрыть P1. Exact-head `a644b81...` / CI `30447011917`
+   (`run #27`) rejected: Application/Authority прошли, PostgreSQL — `FAIL`.
+   Exact-head `d525b736...` / CI `30447467729` (`run #28`) принят после `3/3
+   PASS` и закрыл reason/Event и worker durable-event P1. Exact-head
+   `be8c94c4...` / CI `30449026506` (`run #29`) принят после `3/3 PASS`:
+   private SECURITY INVOKER `guest_game_reward_delivery_lock_v1` берёт
+   advisory seed `166`, same-tenant Reward `FOR UPDATE`, затем `VERIFIED`
+   Telegram/MAX Deliveries `ORDER BY id FOR UPDATE`; оба deferred trigger
+   делегируют boundary, application writers вызывают её до первой DML.
+   Для operational boundary обязательны отдельная non-owner runtime/app
+   DB role, explicit `EXECUTE` grant и admission, поскольку `PUBLIC EXECUTE`
+   revoked. Batch/rebind/future provider writers остаются fail-closed;
+   whole-transaction bounded retry сохраняется defense-in-depth. Worker
+   boundary не принимает
+   `actorUserId`, interactive same-tenant actor boundary pending. Прямой
+   `DELETE` Attempt/Event fail-closed запрещён ordinary/enrolled DML roles при
+   включённых triggers; owner/superuser/DDL bypass operationally denied,
+   bounded audited retention identity/procedure/grants не enrolled.
 5. Реализовать effect-capable coordinator поверх durable
    claim/attempt/finalize/reaper/reconcile primitive и перевести на него direct
    dispatcher и bot pull. Текущий legacy runtime только fail-closed блокирует

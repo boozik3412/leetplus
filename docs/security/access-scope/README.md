@@ -3,7 +3,7 @@
 | Поле                           | Значение                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
 | Статус                         | Active                                                                                              |
-| Версия контракта               | 1.21.0                                                                                              |
+| Версия контракта               | 1.23.0                                                                                              |
 | Дата                           | 29.07.2026                                                                                          |
 | Владелец                       | LeetPlus engineering                                                                                |
 | Связанный backlog              | `BETA-SEC-003`, `BETA-SEC-006`, `BETA-IAM-001..003`, `BETA-CUT-001`, `BETA-CUT-003`, `BETA-CUT-008` |
@@ -19,7 +19,11 @@
 | Staff snapshot admission       | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — schema v2; synthetic verified; production-like NO-GO   |
 | Admission test evidence        | `2341b99937e54cc50d1763a0a794d975816c72ce` — included in green remote SHA `d77c7439...`             |
 | Authority operations           | Detached candidate; local 40/40; production public root `{}` / FAIL-CLOSED                          |
-| Current operational target     | `CURRENT_166`; exact-SHA remote CI и populated `165 → 166` pending; not deployed                    |
+| Schema target                  | `CURRENT_166`; not deployed                                                                       |
+| Prior merge-ref baseline       | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                      |
+| Previous accepted exact-head   | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                            |
+| Last accepted checkpoint       | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                 |
+| Current operational gate       | non-owner runtime/app DB role admission and explicit `EXECUTE`; provider activation remains `NO-GO` |
 | Historical remote evidence     | `CURRENT_165`: `4bd6a036...` / CI `30428288353`; `7c20adec...` / CI `30429463161` PASS              |
 | Staff proposal dry-run         | `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` — all 8 fixtures; SYNTHETIC only; no apply; not deployed |
 
@@ -339,10 +343,53 @@ reconciliation apply, `VALIDATE`, `CONTRACT`, deployment и production cutover
 не выполнялись. Historical `CURRENT_165` engineering candidate
 `4bd6a036...` / CI `30428288353` и documentation/evidence successor
 `7c20adec...` / CI `30429463161` прошли remote CI, включая real PostgreSQL
-`164 → 165`; это prerequisite, а не evidence текущего `CURRENT_166`.
-Exact-SHA remote CI и populated PostgreSQL `165 → 166` для implementation
-candidate ещё pending.
+`164 → 165`; это historical prerequisite. Schema target — `CURRENT_166`.
+Previous accepted engineering baseline связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
+[`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
+(`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
+Application `90549245276`, Authority checks `90549245284` и PostgreSQL
+`90549245372` завершились `PASS`; Authority job не выполнял root enrollment,
+registry остаётся `{}`. PostgreSQL major `16` подтвердил
+`immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / CI `30442286822`
+сохраняется как historical precursor до legacy quarantine
+delivery-row/lifecycle freeze. Она закрыла один из исходных четырёх
+provider-write P1. Rejected `6a69cd8...` / CI `30445054152`
+(`run #26`), PostgreSQL job `90553255161`, завершился `FAILED` и не закрыл P1.
+Exact-head `a644b81e909ea97c21e3c404480505bf97b19935` / CI
+[`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
+(`run #27`) `REJECTED`: Application/Authority — `PASS`, PostgreSQL —
+`FAIL` из-за replay-message expectation поверх SQLSTATE `23505`. Previous
+accepted exact-head —
+`d525b736d03162a2c58de17cbf7679ba6f515096` / CI
+[`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
+(`run #28`), `3/3 PASS`. Last accepted exact-head —
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI
+[`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
+(`run #29`), `3/3 PASS`: Application `90566337085`, Authority checks
+`90566337062`, PostgreSQL major `16` job `90566337060`. Authority checks не
+выполняли root enrollment; canonical roots остаются `{}`. Structured evidence:
+`populatedLegacyDeliveries=10`, `canonicalStoreBackfills=1`,
+`legacyQuarantines=6`, `preservedFailClosedStores=3`,
+`committedTransitions=4`, `runtimeBoundaryNegatives=9`,
+`immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true`,
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён,
+source application data не затронуты. Lock evidence:
+`rewardDeliveryLockOrderEvidence={restrictedRuntimeScopeChecks:true,disposableOwnerDmlSessions:2,missingRewardRejected:true,crossTenantRewardRejected:true,waiterObservedOnAdvisoryLock:true,deliveryDeferredTriggerCommitted:true,rewardDeferredTriggerCommitted:true,holderAndWaiterCommitted:true,rawDeadlockOrLockTimeoutErrors:0,stateAndEvidenceUnchanged:true}`
+и `privateSecurityInvokerLockBoundaries=1`. Private `SECURITY INVOKER`
+`guest_game_reward_delivery_lock_v1` фиксирует порядок: canonical advisory
+seed `166` → same-tenant `Reward FOR UPDATE` → `VERIFIED` `TELEGRAM/MAX`
+Deliveries `ORDER BY id FOR UPDATE`; оба deferred trigger делегируют в эту
+границу, а application writers вызывают её до первого DML. Все исходные четыре
+engineering provider-write P1 закрыты.
 
+Provider activation и внешний beta всё ещё `NO-GO`: фактическая non-owner
+runtime/app DB role должна пройти admission и получить явный `EXECUTE`, тогда
+как `PUBLIC` revoked. Batch/rebind и будущие provider writers остаются
+fail-closed; bounded whole-transaction retry сохраняется как defense-in-depth.
+Worker boundary не принимает `actorUserId`; interactive same-tenant actor
 Четыре текущих клуба по-прежнему являются четырьмя `Store` одного `Tenant`.
 Первый внешний тест после прохождения gates включает полные модули
 геймификации, ассортимента, сотрудников, коммуникаций и users/roles только в
@@ -359,6 +406,35 @@ candidate ещё pending.
 
 ## Changelog
 
+- `1.23.0`, 29.07.2026 — единая retroactive evidence correction:
+  schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref
+  baseline —
+  `bbef153a288bfdf1c3573eb704f27c013cc0e856`, CI `30443837684`
+  (`run #23`), `3/3 PASS`, но не exact-SHA evidence. Authority checks не
+  выполняли root enrollment; roots `{}`. PostgreSQL подтвердил
+  `immutableMutationsRejected=7` и
+  `finalStateAndEvidenceUnchanged=true`. `c1fee42c...` остаётся historical
+  precursor. Legacy quarantine delivery-row/lifecycle freeze закрыла первый
+  из исходных четырёх P1. Rejected `6a69cd8...` / run #26 / PG job
+  `90553255161` сохраняется как `FAILED`; exact-head `a644b81...` / CI
+  `30447011917` (`run #27`) — `REJECTED`, `2/3 PASS`. Previous accepted
+  exact-head `d525b736...` / CI `30447467729` (`run #28`) — `3/3 PASS`.
+  Last accepted exact-head `be8c94c4...` / CI `30449026506` (`run #29`) —
+  `3/3 PASS`: Application `90566337085`, Authority checks `90566337062`,
+  PostgreSQL major `16` `90566337060`; checks не выполняли enrollment, roots
+  `{}`. Run #29 подтвердил полный structured evidence, private
+  `SECURITY INVOKER` lock boundary и нулевые deadlock/lock-timeout ошибки; все
+  четыре engineering provider-write P1 закрыты. Non-owner runtime role
+  admission/explicit `EXECUTE`, interactive actor boundary, retention,
+  roots/acquisition, production-like admission/apply/deploy/cutover, provider
+  activation, owner invite и внешний beta остаются `NO-GO`.
+- `1.22.0`, 29.07.2026 — exact-SHA engineering evidence `CURRENT_166`
+  принято на
+  `c1fee42cc0d85a2c2d1acb354ff5198280bc4ecc`, CI `30442286822`
+  (`run #20`): все три job и populated PostgreSQL major `16` rehearsal
+  `165 → 166` зелёные. Production roots остаются `{}`; production-like
+  acquisition/admission, provider writes, deploy, cutover и внешний beta —
+  `NO-GO`.
 - `1.21.0`, 29.07.2026 — operational admission/authority/inventory/planner
   target переведён в implementation candidate `CURRENT_166`: additive tail
   `163..166`, migration count `166`, latest
@@ -428,7 +504,7 @@ candidate ещё pending.
   candidate `dee25393ae7bff171bdd74a49f2d01cdef9ce4ee`: signed disposable
   harness provenance, повторный admission, ранние relation locks, exact
   `8 proposal / 29 operator / 6 review`, bounded unlinkable HMAC evidence и
-  no-apply boundary. Пройдены self-test 20, unit 14/14 и PostgreSQL 16.14
+  no-apply boundary. Пройдены self-test 20, unit 14/14 и PostgreSQL major `16`
   smoke 14 scenarios; оставшиеся 7 positive fixtures + coalescing,
   production-like trust boundary и column-scoped `User` evidence — P1.
   Production-like/standalone/apply/deploy/external beta остаются `NO-GO`.

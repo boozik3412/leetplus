@@ -3,10 +3,14 @@
 | Поле                  | Значение                                                                                                                    |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Статус                | Snapshot admission, inventory, aggregate planner и DB EXPAND candidates; production-like admission/inventory не выполнялись |
-| Версия                | 1.11.0                                                                                                                      |
+| Версия                | 1.13.0                                                                                                                      |
 | Дата                  | 29.07.2026                                                                                                                  |
 | Backlog               | `BETA-MOD-STAFF-003`, `BETA-SEC-003`, `BETA-CUT-001`                                                                        |
-| Current target        | `CURRENT_166`; exact-SHA remote CI / populated `165 → 166` pending; historical `56d61543...` не current evidence             |
+| Schema target         | `CURRENT_166`; historical `56d61543...` не current evidence                                                    |
+| Prior merge-ref baseline | PR-head-associated merge-ref `bbef153a...` / CI `30443837684`; not exact-SHA                                 |
+| Previous accepted exact-head | `d525b736...` / CI `30447467729` (`run #28`); `3/3 PASS`                                                |
+| Last accepted checkpoint | exact-head `be8c94c4...` / CI `30449026506` (`run #29`); `3/3 PASS`                                          |
+| Current operational gate | non-owner runtime/app DB role admission and explicit `EXECUTE`; provider activation `NO-GO`                 |
 | Historical remote     | `CURRENT_165`: `4bd6a036...` / `30428288353`; `7c20adec...` / `30429463161` PASS                                           |
 | Предыдущий checkpoint | [Recurring actor HTTP](./staff-task-recurring-http-implementation-checkpoint.md)                                            |
 | Обязательный допуск   | [Snapshot admission](./staff-task-integrity-snapshot-admission-runbook.md)                                                  |
@@ -23,6 +27,29 @@ state добавляет только allowlisted additive tail migrations `163.
 Production-like scanner можно запускать только после успешного admission
 точного Git-bound snapshot в требуемом состоянии; сам inventory не заменяет
 этот допуск.
+
+Last accepted exact-head
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI `30449026506`
+(`run #29`) завершился `3/3 PASS`: Application `90566337085`, Authority checks
+`90566337062`, PostgreSQL major `16` job `90566337060`. Authority checks не
+выполняли root enrollment; canonical roots `{}`. Previous accepted exact-head
+— `d525b736d03162a2c58de17cbf7679ba6f515096` / CI `30447467729`
+(`run #28`); prior PR-head-associated merge-ref — `bbef153a...` / CI
+`30443837684`. Run #26 и run #27 rejected.
+
+Structured evidence: `populatedLegacyDeliveries=10`,
+`canonicalStoreBackfills=1`, `legacyQuarantines=6`,
+`preservedFailClosedStores=3`, `committedTransitions=4`,
+`runtimeBoundaryNegatives=9`, `immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true`,
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён, source
+application data не затронуты. Lock evidence:
+`rewardDeliveryLockOrderEvidence={restrictedRuntimeScopeChecks:true,disposableOwnerDmlSessions:2,missingRewardRejected:true,crossTenantRewardRejected:true,waiterObservedOnAdvisoryLock:true,deliveryDeferredTriggerCommitted:true,rewardDeferredTriggerCommitted:true,holderAndWaiterCommitted:true,rawDeadlockOrLockTimeoutErrors:0,stateAndEvidenceUnchanged:true}`
+и `privateSecurityInvokerLockBoundaries=1`. Все четыре engineering
+provider-write P1 закрыты. Это не снимает operational `NO-GO`: actual non-owner
+runtime/app DB role требует admission и explicit `EXECUTE` при revoked
+`PUBLIC`; batch/rebind/future writers fail-closed, interactive actor boundary,
+retention, roots/acquisition и production-like apply/deploy/cutover pending.
 
 ## 1. Зафиксированный контекст
 
@@ -371,8 +398,22 @@ Public-only pre-signed pinned-path test имеет отдельный evidence S
 `19/19` и имеет `LOCAL PASS` в isolated child.
 Historical `CURRENT_165` engineering CI
 `4bd6a036...` / `30428288353` и documentation/evidence successor
-`7c20adec...` / `30429463161` прошли. Они не являются evidence current
-`CURRENT_166`; exact-SHA remote CI и populated `165 → 166` ещё pending.
+`7c20adec...` / `30429463161` прошли. Schema target — `CURRENT_166`. Prior
+engineering baseline связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856` / `30443837684` (`run #23`),
+выполненным через merge-ref; это не exact-SHA checkout evidence. Baseline —
+`3/3 PASS`; PostgreSQL подтвердил `immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / `30442286822`
+сохраняется как historical precursor до legacy quarantine
+delivery-row/lifecycle freeze. Run #26 и run #27 rejected. Previous accepted
+exact-head `d525b736d03162a2c58de17cbf7679ba6f515096` / CI `30447467729`
+(`run #28`) завершился `3/3 PASS`. Last accepted exact-head
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI `30449026506`
+(`run #29`) завершился `3/3 PASS`: Application `90566337085`, Authority
+checks `90566337062`, PostgreSQL major `16` job `90566337060`. Authority
+checks не выполняли root enrollment; roots `{}`. Полный structured evidence
+зафиксирован выше; все четыре engineering provider-write P1 закрыты. Это не
+production-like inventory/admission и не operational provider activation.
 Experimental Node 22 module mock — P2. Production root enrollment,
 operational signer и approved acquisition остаются P0.
 
@@ -396,6 +437,26 @@ rehearsal.
 
 ## 10. Changelog
 
+- `1.13.0`, 29.07.2026 — единая retroactive evidence correction:
+  schema target — `CURRENT_166`; previous accepted PR-head-associated merge-ref
+  baseline `bbef153a...` / CI `30443837684` (`run #23`) завершился `3/3
+  PASS`, но не является exact-SHA evidence;
+  PostgreSQL evidence:
+  `immutableMutationsRejected=7`,
+  `finalStateAndEvidenceUnchanged=true`. Legacy quarantine
+  delivery-row/lifecycle P1 закрыт. Run #26 и run #27 rejected. Previous
+  accepted exact-head `d525b736...` / CI `30447467729` (`run #28`) — `3/3
+  PASS`. Last accepted exact-head `be8c94c4...` / CI `30449026506` (`run #29`)
+  — `3/3 PASS`: Application `90566337085`, Authority checks `90566337062`,
+  PostgreSQL major `16` `90566337060`; checks не выполняли enrollment, roots
+  `{}`. Structured lock-order evidence закрыл последний engineering
+  provider-write P1; все четыре закрыты. Non-owner runtime role admission и
+  explicit `EXECUTE`, interactive boundary, retention, roots/acquisition,
+  production-like inventory/apply/deploy и внешний beta остаются `NO-GO`.
+- `1.12.0`, 29.07.2026 — exact-SHA engineering evidence current
+  `CURRENT_166` принято на `c1fee42c...` / CI `30442286822`; PostgreSQL
+  major `16` rehearsal `165 → 166` зелёный. Production-like inventory,
+  root/acquisition, apply/deploy и внешний beta остаются `NO-GO`.
 - `1.11.0`, 29.07.2026 — operational inventory/admission/planner target
   переведён на implementation candidate `CURRENT_166`: tail `163..166`, count
   `166`, latest `20260729160000_guest_game_delivery_claim_fence`. Remote

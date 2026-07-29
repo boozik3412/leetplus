@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.16                                                                        |
+| Версия           | 1.18                                                                        |
 | Дата             | 29.07.2026                                                                  |
-| Статус           | `CURRENT_166` implementation candidate; remote `CURRENT_165` prerequisite PASS; current evidence pending |
+| Статус           | Schema target `CURRENT_166`; last accepted exact-head `be8c94c4...` / run #29; all four engineering P1 closed |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
 | Migrations       | `20260728120000...control_plane_expand` + `20260728150000...revision_fence` + `20260729120000...store_background_execution_fence` + `20260729160000...guest_game_delivery_claim_fence` |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
@@ -477,7 +477,7 @@ database и проверяет populated success, три SQLSTATE `55000` drain 
    проверяет database SQLSTATE `55P03`/`42P07`; Prisma CLI output при этом
    обязан как минимум идентифицировать target-migration failure.
 
-Изолированный локальный PostgreSQL `16.14` diagnostic run этого контракта
+Изолированный локальный PostgreSQL major `16` diagnostic run этого контракта
 прошёл: сохранены `6` tenants, `6` report runs и `10` ledger rows; подтверждены
 три drain rejection (`55000`), lock timeout (`55P03`), late-DDL conflict
 (`42P07`) и rollback, `5` rolled-back attempts и recovery deploy.
@@ -493,10 +493,57 @@ Documentation/evidence successor
 Migration `165` не применялась в production и не меняет release decision.
 Это принятое historical prerequisite evidence. Current implementation
 candidate уже включает
-`20260729160000_guest_game_delivery_claim_fence`/`CURRENT_166`; его remote
-exact-SHA и populated PostgreSQL `165 → 166` evidence ещё pending.
+`20260729160000_guest_game_delivery_claim_fence`/`CURRENT_166`. Для него
+действует трёхуровневый evidence status. Schema target —
+`CURRENT_166`. Previous accepted engineering baseline связан с PR head
+`bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
+[`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
+(`run #23`), выполненным через merge-ref; это не exact-SHA checkout evidence.
+Application checks `90549245276`, Authority checks `90549245284` и PostgreSQL
+migration smoke `90549245372` завершились `PASS`; Authority job не выполнял
+root enrollment, registry остаётся `{}`. PostgreSQL evidence подтвердил
+`immutableMutationsRejected=7` и
+`finalStateAndEvidenceUnchanged=true`. `c1fee42c...` / CI `30442286822`
+сохраняется как historical precursor до legacy quarantine
+delivery-row/lifecycle freeze. Rejected `6a69cd8...` / CI `30445054152`
+(`run #26`), PostgreSQL job `90553255161`, завершился `FAILED` и не закрыл P1.
+Exact-head `a644b81e909ea97c21e3c404480505bf97b19935` / CI
+[`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
+(`run #27`) `REJECTED`: Application `90559756157` и Authority `90559756309`
+— `PASS`, PostgreSQL `90559756334` — `FAIL` из-за replay-message expectation
+поверх SQLSTATE `23505`. Previous accepted exact-head —
+`d525b736d03162a2c58de17cbf7679ba6f515096`, CI
+[`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
+(`run #28`), `3/3 PASS`: Application `90561260920`, Authority checks
+`90561260926`, PostgreSQL major `16` job `90561260878`. Authority checks не
+выполняли root enrollment; registry остаётся `{}`. Structured evidence:
+`populatedLegacyDeliveries=10`, `canonicalStoreBackfills=1`,
+`legacyQuarantines=6`, `preservedFailClosedStores=3`,
+`committedTransitions=4`, `runtimeBoundaryNegatives=9`,
+`immutableMutationsRejected=7`,
+`finalStateAndEvidenceUnchanged=true`,
+`sourceDatabaseMigrationsApplied=0`; source migration state не изменён,
+source application data не затронуты. Checkpoint закрыл final-row
+reason/Event integrity и worker boundary-only durable event write. Last
+accepted exact-head —
+`be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, CI
+[`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
+(`run #29`), `3/3 PASS`: Application `90566337085`, Authority checks
+`90566337062`, PostgreSQL major `16` job `90566337060`. Authority checks не
+выполняли root enrollment; registry остаётся `{}`. Structured evidence
+повторно подтвердил source invariants и добавил
+`privateSecurityInvokerLockBoundaries=1` плюс двухсессионный
+`rewardDeliveryLockOrderEvidence` с advisory waiter, committed
+delivery/reward trigger paths, `rawDeadlockOrLockTimeoutErrors=0` и
+неизменным state/evidence. Все четыре исходных engineering provider-write P1
+закрыты. Actual non-owner runtime/app DB role всё ещё требует explicit
+`EXECUTE` grant/admission (`PUBLIC EXECUTE` revoked); batch/rebind/future
+provider writers остаются fail-closed, whole-transaction bounded retry —
+pre-activation defense-in-depth.
+Production-like admission, apply/deploy, cutover, provider writes и owner
+invite остаются pending/`NO-GO`.
 
-Последняя принятая проверка checkpoint `CURRENT_165`:
+Последняя детализированная historical проверка checkpoint `CURRENT_165`:
 
 - tenant-execution suite: `16 suites / 663 tests`;
 - background-execution containment suite: `15 suites / 665 tests`;
@@ -508,7 +555,7 @@ exact-SHA и populated PostgreSQL `165 → 166` evidence ещё pending.
   production environment contract, Prisma validate/generate, database
   typecheck, seed safety `9/9`, migration-164 offline contract `6/6`,
   Store background-execution fence contract и
-  populated-upgrade rehearsal self-test, real PostgreSQL `16.14` local
+  populated-upgrade rehearsal self-test, real PostgreSQL major `16` local
   diagnostic rehearsal, `git diff --check`: `PASS`.
 
 StaffTask integrity-проверки сохраняют immutable prefix `1..162`, а migrations
@@ -518,4 +565,5 @@ StaffTask integrity-проверки сохраняют immutable prefix `1..162
 inventory/planner для current implementation candidate должны проходить
 отдельный admission как `CURRENT_166` (`migrationCount=166`, latest
 `20260729160000_guest_game_delivery_claim_fence`). Это operational target, а
-не утверждение о завершённом remote или production-like evidence.
+принятое remote evidence является только engineering checkpoint, не
+production-like evidence.

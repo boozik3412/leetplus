@@ -3,7 +3,7 @@
 | Поле             | Значение                                     |
 | ---------------- | -------------------------------------------- |
 | Статус           | Active implementation package                |
-| Версия           | 1.20                                         |
+| Версия           | 1.22                                         |
 | Дата             | 29.07.2026                                   |
 | Release decision | `NO-GO`; shared beta только после Gate 1MT/2 |
 | Владелец         | LeetPlus product / engineering / operations  |
@@ -125,7 +125,7 @@ enterprise-isolation option и не сокращает shared gates.
     и обязательный populated `165 → 166` rehearsal. Reviewed design уже
     переведён в implementation candidate: additive migration и fail-closed
     legacy runtime containment созданы, но coordinator, Store-scoped effect
-    enforcement, populated PostgreSQL evidence и cutover ещё не приняты.
+    enforcement, production-like evidence и cutover ещё не приняты.
 
 Accepted remote prerequisite остаётся migration `165` — отдельный bounded
 fail-closed Store fence candidate: все Store остаются
@@ -195,19 +195,71 @@ apply/deploy не выполнялись.
   Bonus-ledger revoke и Telegram unsubscribe продолжают основную
   ledger/reward/consent mutation, но не изменяют provider delivery rows/events;
   `CASHIER/MANUAL` cancellation сохраняется.
+  Schema target — `CURRENT_166`. Previous accepted engineering baseline связан с
+  PR head
+  `bbef153a288bfdf1c3573eb704f27c013cc0e856`, GitHub CI
+  [`30443837684`](https://github.com/boozik3412/leetplus/actions/runs/30443837684)
+  (`run #23`), но выполнен через merge-ref и не является exact-SHA checkout
+  evidence. Все три job `PASS`; PostgreSQL major `16` подтвердил
+  `immutableMutationsRejected=7` и
+  `finalStateAndEvidenceUnchanged=true`. Authority checks не выполняли root
+  enrollment; canonical root registry остаётся `{}`. Это закрывает legacy
+  quarantine delivery-row/lifecycle P1: `LEGACY_QUARANTINED` delivery
+  immutable для ordinary/enrolled DML roles при включённых triggers, включая
+  `DELETE`.
+  `c1fee42c...` / CI `30442286822` сохраняется как historical precursor,
+  принявший foundation migration `166` до этой lifecycle freeze.
+  Изначально оставались три provider-write P1: lock order/`40P01`, final-row
+  reason/evidence consistency и procedure-only durable events.
+  Rejected `6a69cd8247a2ec1787d00e4f9afacee2af075c60` / CI
+  `30445054152` (`run #26`), PostgreSQL job `90553255161`, завершился
+  `FAILED`: retry readiness fixture и найденный preflight null-closed Event gap
+  не позволили закрыть P1. Exact-head
+  `a644b81e909ea97c21e3c404480505bf97b19935` / CI
+  [`30447011917`](https://github.com/boozik3412/leetplus/actions/runs/30447011917)
+  (`run #27`) — `REJECTED`: Application `90559756157` и Authority
+  `90559756309` — `PASS`, PostgreSQL `90559756334` — `FAIL` из-за
+  replay-message expectation. Previous accepted exact-head checkpoint —
+  `d525b736d03162a2c58de17cbf7679ba6f515096`, CI
+  [`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
+  (`run #28`): Application `90561260920`, Authority `90561260926` и PostgreSQL
+  `90561260878` — `3/3 PASS`; `committedTransitions=4`,
+  `runtimeBoundaryNegatives=9`. Он закрыл final-row reason/evidence и worker
+  boundary-only durable-event P1. Last accepted exact-head checkpoint —
+  `be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, CI
+  [`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
+  (`run #29`): Application `90566337085`, Authority checks `90566337062` и
+  PostgreSQL major `16` job `90566337060` — `3/3 PASS`. Authority checks не
+  выполняли root enrollment; roots остаются `{}`. Private SECURITY INVOKER
+  `guest_game_reward_delivery_lock_v1` и двухсессионный rehearsal закрыли
+  lock-order/`40P01`; `privateSecurityInvokerLockBoundaries=1`,
+  `rawDeadlockOrLockTimeoutErrors=0`,
+  `stateAndEvidenceUnchanged=true`,
+  `sourceDatabaseMigrationsApplied=0`. Все четыре исходных engineering
+  provider-write P1 закрыты. Отдельная non-owner runtime/app DB role всё ещё
+  должна пройти admission и получить explicit `EXECUTE` grant, поскольку
+  `PUBLIC EXECUTE` revoked; batch/rebind/future provider writers остаются
+  fail-closed, whole-transaction bounded retry — defense-in-depth. Worker
+  boundary не принимает `actorUserId`, а interactive same-tenant actor
+  boundary и operational grants ещё pending.
   Effect-capable coordinator, persisted `NETWORK | STORES` проверка
-  `allowedStoreIds`, provider/workload authority, retention operations,
-  populated `165 → 166` rehearsal и remote exact-SHA CI ещё pending. Поэтому
-  outbound, production deploy и owner invite остаются `NO-GO`;
-- populated migration rehearsal candidate: обязательный CI создаёт две
+  `allowedStoreIds`, provider/workload authority, bounded audited retention
+  identity/procedure/grants, production-like evidence и cutover ещё pending.
+  Прямой `DELETE` Attempt/Event fail-closed запрещён для ordinary/enrolled DML
+  roles при включённых triggers. Owner/superuser/DDL bypass operationally
+  denied; retention не enrolled. Поэтому outbound, production deploy и owner
+  invite остаются `NO-GO`;
+- historical migration `164` rehearsal workflow создаёт две
   disposable PostgreSQL 16 test-БД, поднимает exact schema `1..163` с
   tenant/report-run/bonus-ledger fixtures и проверяет upgrade `164`,
   preservation/backfill/defaults, trigger/CAS, три SQLSTATE `55000`,
   `lock_timeout`, late-DDL rollback и повторный deploy. Source database не
   мигрируется и не используется как template. Offline self-test и отдельный
-  local PostgreSQL `16.14` diagnostic rehearsal зелёные; remote exact-SHA
-  PostgreSQL PASS и production-like backup/restore остаются pending, поэтому
-  этот пункт не меняет `NO-GO`;
+  local PostgreSQL major `16` diagnostic rehearsal зелёные; remote
+  prerequisite `CURRENT_164` уже прошёл на `37f8cc88...` / CI `30423839760`.
+  Это historical prerequisite, не current migration `166` evidence;
+  production-like backup/restore остаётся pending, поэтому этот пункт не
+  меняет `NO-GO`;
 - scheduled report digest применяет effective role/custom-role overrides и
   требует `export_reports`; Langame/guest foundation/business snapshot
   проверяют полный cross-module entitlement и AND-capability contract;
@@ -264,8 +316,17 @@ apply/deploy не выполнялись.
 - StaffTask snapshot admission schema `v2`: исторический runtime
   `044ceca2c2476bcd3c0fc58f3151c5c8e237fa9c` не является current evidence;
   historical prerequisite `CURRENT_165` на `4bd6a036...` и его
-  documentation/evidence successor `7c20adec...` прошли remote CI, а exact-SHA
-  remote CI для current `CURRENT_166` ещё pending.
+  documentation/evidence successor `7c20adec...` прошли remote CI. Last
+  previous accepted `CURRENT_166` baseline связан с PR head
+  `bbef153a288bfdf1c3573eb704f27c013cc0e856` / merge-ref CI `30443837684`;
+  это не exact-SHA checkout evidence. Historical precursor `c1fee42c...` /
+  `30442286822` предшествовал legacy quarantine delivery-row/lifecycle freeze.
+  Exact-head `a644b81...` / CI `30447011917` (`run #27`) rejected (`2/3
+  PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
+  `30447467729` (`run #28`) — `3/3 PASS`. Last accepted exact-head
+  `be8c94c4...` / CI `30449026506` (`run #29`) — `3/3 PASS`; все четыре
+  исходных engineering provider-write P1 закрыты. Это не production-like
+  admission.
   `IMPLEMENTED_CANDIDATE`, not deployed. Admission принимает только
   изолированную loopback PostgreSQL 16 копию в точном `BASELINE_156`,
   `EXPAND_162` или `CURRENT_166`,

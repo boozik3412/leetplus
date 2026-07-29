@@ -1462,6 +1462,15 @@ async function grantRestrictedRuntimeRole(client, roleName) {
        "transitionRevision"
      ) ON TABLE "GuestGameDelivery" TO ${quotedRole}`,
   );
+  // PostgreSQL requires UPDATE privilege on at least one column of every
+  // relation referenced by a row-locking clause. The deferred binding
+  // triggers lock the canonical reward with FOR UPDATE, so give the
+  // generated smoke-only role the least sensitive mutable column instead of
+  // broad reward UPDATE.
+  await client.$executeRawUnsafe(
+    `GRANT UPDATE ("updatedAt")
+     ON TABLE "GuestGameReward" TO ${quotedRole}`,
+  );
   await client.$executeRawUnsafe(
     `GRANT INSERT (
        "id",
@@ -1522,6 +1531,41 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
          'public."GuestGameDelivery"',
          'UPDATE'
        ) AS broad_delivery_update,
+       pg_catalog.has_table_privilege(
+         $1,
+         'public."GuestGameReward"',
+         'UPDATE'
+       ) AS broad_reward_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameReward"',
+         'updatedAt',
+         'UPDATE'
+       ) AS reward_lock_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameReward"',
+         'storeId',
+         'UPDATE'
+       ) AS reward_store_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameReward"',
+         'profileId',
+         'UPDATE'
+       ) AS reward_profile_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameReward"',
+         'guestId',
+         'UPDATE'
+       ) AS reward_guest_update,
+       pg_catalog.has_column_privilege(
+         $1,
+         'public."GuestGameReward"',
+         'status',
+         'UPDATE'
+       ) AS reward_status_update,
        pg_catalog.has_column_privilege(
          $1,
          'public."GuestGameDelivery"',
@@ -1570,6 +1614,12 @@ async function assertRestrictedRuntimeRolePrivileges(client, roleName) {
     schema_usage: true,
     helper_execute: true,
     broad_delivery_update: false,
+    broad_reward_update: false,
+    reward_lock_update: true,
+    reward_store_update: false,
+    reward_profile_update: false,
+    reward_guest_update: false,
+    reward_status_update: false,
     status_update: true,
     revision_update: true,
     broad_event_insert: false,

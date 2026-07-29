@@ -156,7 +156,8 @@ Shared tenant shell candidate одной serializable-транзакцией:
 Не создаются `User`, `UserInvite`, token, registration URL, trial, outbox или
 email message. Replay привязан к HMAC request digest и не создаёт дублей.
 После fail-closed recovery весь serializable shell повторяется не более одного
-раза и только для `P2034`/`IDENTITY_CLAIM_RETRY_REQUIRED`.
+раза и только для `P2034`, PostgreSQL `40001/40P01` или
+`IDENTITY_CLAIM_RETRY_REQUIRED`.
 
 Пока activation-контракт не завершён, оба route намеренно недоступны:
 

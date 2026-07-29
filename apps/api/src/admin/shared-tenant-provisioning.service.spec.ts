@@ -470,6 +470,43 @@ describe('SharedTenantProvisioningService shell boundary', () => {
     expect(reserveInvite).toHaveBeenCalledTimes(1);
   });
 
+  it('retries once when the sealed RPC maps SQLSTATE 40001 to a retry decision', async () => {
+    reserveInvite
+      .mockRejectedValueOnce(
+        new ConflictException({
+          message: 'Identity claim command must be retried',
+          reasonCode: 'IDENTITY_CLAIM_RETRY_REQUIRED',
+        }),
+      )
+      .mockRejectedValueOnce(
+        new ConflictException({
+          message: 'Identity email is unavailable',
+          reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
+        }),
+      );
+
+    await expect(
+      service.provision(platformAdmin, provisioningDto()),
+    ).rejects.toMatchObject({
+      response: {
+        reasonCode: 'IDENTITY_EMAIL_UNAVAILABLE',
+      },
+    });
+
+    const calls = prisma.$transaction.mock.calls as unknown[][];
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+    expect(calls[1]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    });
+    expect(calls[2]?.[1]).toEqual({
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+    expect(reserveInvite).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry a serializable shell more than once', async () => {
     const firstConflict = new Prisma.PrismaClientKnownRequestError(
       'first serialization conflict',

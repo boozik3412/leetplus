@@ -342,27 +342,40 @@ describe('IdentityEmailClaimService', () => {
   }
 
   it('maps serialization conflicts to an explicit retry decision', async () => {
-    const tx = transaction();
-    tx.$queryRaw.mockRejectedValue(
+    const conflicts = [
       new Prisma.PrismaClientKnownRequestError('serialization detail', {
         code: 'P2034',
         clientVersion: '6.19.3',
       }),
-    );
+      rpcError('40001'),
+      rpcError('40P01'),
+      Object.assign(new Error('structural Prisma serialization detail'), {
+        code: 'P2010',
+        meta: { code: '40001' },
+      }),
+      Object.assign(new Error('direct serialization detail'), {
+        code: '40001',
+      }),
+    ];
 
-    try {
-      await service().assertInvite(tx, {
-        email: EMAIL,
-        tenantId: TENANT_ID,
-        subjectId: RESERVATION_ID,
-        expectedRevision: 1,
-      });
-      throw new Error('Expected retry rejection');
-    } catch (error) {
-      expect(reasonCode(error)).toBe('IDENTITY_CLAIM_RETRY_REQUIRED');
-      expect(JSON.stringify(httpResponse(error))).not.toContain(
-        'serialization detail',
-      );
+    for (const conflict of conflicts) {
+      const tx = transaction();
+      tx.$queryRaw.mockRejectedValue(conflict);
+
+      try {
+        await service().assertInvite(tx, {
+          email: EMAIL,
+          tenantId: TENANT_ID,
+          subjectId: RESERVATION_ID,
+          expectedRevision: 1,
+        });
+        throw new Error('Expected retry rejection');
+      } catch (error) {
+        expect(reasonCode(error)).toBe('IDENTITY_CLAIM_RETRY_REQUIRED');
+        expect(JSON.stringify(httpResponse(error))).not.toContain(
+          'serialization detail',
+        );
+      }
     }
   });
 });

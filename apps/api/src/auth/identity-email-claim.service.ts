@@ -511,16 +511,14 @@ export class IdentityEmailClaimService {
     ) {
       return error;
     }
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2034'
-    ) {
+    const errorCode = this.errorCode(error);
+    const sqlState = this.sqlState(error);
+    if (errorCode === 'P2034' || sqlState === '40001' || sqlState === '40P01') {
       return new ConflictException({
         message: 'Identity claim command must be retried',
         reasonCode: 'IDENTITY_CLAIM_RETRY_REQUIRED',
       });
     }
-    const sqlState = this.sqlState(error);
     if (sqlState === '22023') {
       return this.invalidEmail();
     }
@@ -555,14 +553,28 @@ export class IdentityEmailClaimService {
   }
 
   private sqlState(error: unknown): string | null {
-    if (
-      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-      error.code !== 'P2010' ||
-      !this.record(error.meta)
-    ) {
+    if (!this.record(error)) {
       return null;
     }
-    return typeof error.meta.code === 'string' ? error.meta.code : null;
+    const code = this.errorCode(error);
+    if (
+      code === 'P2010' &&
+      this.record(error.meta) &&
+      typeof error.meta.code === 'string' &&
+      /^[0-9A-Z]{5}$/u.test(error.meta.code)
+    ) {
+      return error.meta.code;
+    }
+    if (code && /^[0-9A-Z]{5}$/u.test(code)) {
+      return code;
+    }
+    return null;
+  }
+
+  private errorCode(error: unknown): string | null {
+    return this.record(error) && typeof error.code === 'string'
+      ? error.code
+      : null;
   }
 
   private invalidEmail(): BadRequestException {

@@ -2444,7 +2444,8 @@ release decision = NO-GO
   `PILOT/SUSPENDED/PROVISIONING` tenant, inactive Store, OWNER capability
   override, exact six-row `read/write=ON + outbound=OFF` profile и canonical
   owner reservation; после recovery допускается ровно один полный retry только
-  для serialization conflict (`P2034`/`IDENTITY_CLAIM_RETRY_REQUIRED`);
+  для serialization conflict (`P2034`, PostgreSQL `40001/40P01` или
+  `IDENTITY_CLAIM_RETRY_REQUIRED`);
 - shell audit содержит только HMAC fingerprint/key version и HMAC-bound
   request digest; raw email не сохраняется в audit/response;
 - production startup-validation candidate требует отдельный fingerprint HMAC

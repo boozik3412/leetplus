@@ -12,6 +12,7 @@ import {
   EXPAND_STATE,
   ISOLATION_ATTESTATION,
   PRIVILEGE_STATE_SQL,
+  RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH,
   RELEASE_RUNTIME_SOURCE_PATHS,
   REQUIRED_COLUMN_SELECTS,
   RUN_CONFIRMATION,
@@ -43,6 +44,15 @@ const HMAC_KEY = "unit-test-snapshot-admission-hmac-key-aaaaaaaa";
 const SYNTHETIC_DATABASE = "lp_snapshot_admission_ci_aaaaaaaaaaaaaaaa";
 
 test("admission release evidence covers the detached ceremony runtime", () => {
+  assert.equal(
+    RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH,
+    "packages/database/scripts/staff-task-integrity-snapshot-admission.mjs",
+  );
+  assert.ok(
+    RELEASE_RUNTIME_SOURCE_PATHS.includes(
+      RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH,
+    ),
+  );
   for (const ceremonySource of CEREMONY_RELEASE_SOURCE_PATHS) {
     assert.ok(
       RELEASE_RUNTIME_SOURCE_PATHS.includes(ceremonySource),

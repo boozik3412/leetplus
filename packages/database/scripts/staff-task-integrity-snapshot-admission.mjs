@@ -62,9 +62,11 @@ const MAX_HMAC_KEY_BYTES = 4_096;
 const MAX_SYNTHETIC_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAX_PRODUCTION_LIKE_LIFETIME_MS = 72 * 60 * 60 * 1_000;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
+export const RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH =
+  "packages/database/scripts/staff-task-integrity-snapshot-admission.mjs";
 export const RELEASE_RUNTIME_SOURCE_PATHS = Object.freeze([
+  RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH,
   "packages/database/scripts/staff-task-integrity-canonical-json.mjs",
-  "packages/database/scripts/staff-task-integrity-snapshot-admission.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-admission-smoke.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-authority.mjs",
   "packages/database/scripts/staff-task-integrity-snapshot-authority-offline-sign.cli.mjs",
@@ -1406,7 +1408,7 @@ export async function loadExpectedMigrationManifest(expectedState, releaseSha) {
   ).trim();
   const expectedRuntimePath = path.resolve(
     repositoryRoot,
-    RELEASE_SOURCE_PATHS[0],
+    RELEASE_RUNTIME_ENTRYPOINT_SOURCE_PATH,
   );
   if (
     runtimePath.toLowerCase() !== expectedRuntimePath.toLowerCase() ||

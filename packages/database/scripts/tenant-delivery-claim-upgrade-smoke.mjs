@@ -155,7 +155,7 @@ two tenants, three fail-closed Stores, provider/non-provider deliveries and
 legacy events, then upgraded to CURRENT_166. The smoke verifies deterministic
 Store backfill, legacy quarantine, evidence preservation, same-scope RESTRICT
 foreign keys, CHECK/index/function/trigger catalogs, append-only evidence,
-three revision-fenced READY/BLOCKED transitions under a restricted runtime
+four revision-fenced READY/BLOCKED transitions under a restricted runtime
 role, stale/future event replay rejection, final-row reason/integrity evidence
 consistency, seven rejected legacy-quarantine mutations with zero state/evidence
 drift, and idempotent deploy.
@@ -2117,6 +2117,70 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
     3,
   );
 
+  const finalRetryDelivery = {
+    tenantId: fixtures.tenantA,
+    deliveryId: fixtures.deliveries.blocked,
+    rewardId: fixtures.rewards.blocked,
+    storeId: fixtures.storeA1,
+    channel: "MAX",
+  };
+  let finalRetryEvidence;
+  await client.$transaction(async (transaction) => {
+    await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+    finalRetryEvidence = await applyRevisionFencedTransition(transaction, {
+      ...finalRetryDelivery,
+      oldRevision: 0,
+      transitionRevision: 1,
+      eventType: "DELIVERY_RETRIED",
+      fromStatus: "BLOCKED",
+      toStatus: "READY",
+      deliveryReasonCode: null,
+      eventReasonCode: "TEST_FINAL_RETRIED_REASON",
+    });
+  });
+  const finalRetryState = await readRevisionFenceState(
+    client,
+    finalRetryDelivery.deliveryId,
+  );
+  assert.deepEqual(finalRetryState.delivery, {
+    status: "READY",
+    integrityState: "VERIFIED",
+    integrityReasonCode: null,
+    stateReasonCode: null,
+    transitionRevision: "1",
+  });
+  assert.deepEqual(
+    finalRetryState.events.map((event) => ({
+      eventType: event.eventType,
+      transitionKey: event.transitionKey,
+      transitionRevision: event.transitionRevision,
+      fromStatus: event.fromStatus,
+      toStatus: event.toStatus,
+      integrityState: event.integrityState,
+      integrityReasonCode: event.integrityReasonCode,
+      stateReasonCode: event.stateReasonCode,
+    })),
+    [
+      {
+        eventType: "DELIVERY_RETRIED",
+        transitionKey: finalRetryEvidence.transitionKey,
+        transitionRevision: "1",
+        fromStatus: "BLOCKED",
+        toStatus: "READY",
+        integrityState: "VERIFIED",
+        integrityReasonCode: null,
+        stateReasonCode: "TEST_FINAL_RETRIED_REASON",
+      },
+    ],
+  );
+  assert.equal(
+    new Set([
+      ...committedEvidence.map(({ transitionKey }) => transitionKey),
+      finalRetryEvidence.transitionKey,
+    ]).size,
+    4,
+  );
+
   await expectSqlState(
     "23514",
     () =>
@@ -2234,6 +2298,38 @@ async function assertRevisionFencedTransitions(client, fixtures, roleName) {
           toStatus: "BLOCKED",
           deliveryReasonCode: "TEST_EXPECTED_FINAL_REASON",
           eventReasonCode: "TEST_WRONG_FINAL_REASON",
+        });
+      }),
+    /Durable event final state does not match its current delivery/u,
+  );
+  await expectSqlState(
+    "23514",
+    () =>
+      client.$transaction(async (transaction) => {
+        await transaction.$executeRawUnsafe(`SET LOCAL ROLE ${quotedRole}`);
+        const changed = await transaction.$executeRawUnsafe(
+          `UPDATE "GuestGameDelivery"
+           SET
+             "status" = 'READY',
+             "stateReasonCode" = NULL,
+             "transitionRevision" = 4
+           WHERE "tenantId" = $1
+             AND "id" = $2
+             AND "status" = 'BLOCKED'
+             AND "transitionRevision" = 3`,
+          delivery.tenantId,
+          delivery.deliveryId,
+        );
+        assert.equal(changed, 1);
+        await insertCanonicalTransitionEvent(transaction, {
+          ...delivery,
+          transitionRevision: 4,
+          eventType: "DELIVERY_RETRIED",
+          fromStatus: "BLOCKED",
+          toStatus: "READY",
+          integrityState: "LEGACY_QUARANTINED",
+          integrityReasonCode: "TEST_EVENT_INTEGRITY_MISMATCH",
+          stateReasonCode: "TEST_EVENT_INTEGRITY_MISMATCH",
         });
       }),
     /Durable event final state does not match its current delivery/u,
@@ -3182,10 +3278,10 @@ async function runOfflineSelfTest() {
       nullClosedMatrixScenarios: 4,
       lockTimeoutRollbackScenarios: 1,
       lateDdlRollbackScenarios: 1,
-      revisionFencedTransitions: 3,
+      revisionFencedTransitions: 4,
       antiReplayScenarios: 2,
       legacyQuarantineFreezeScenarios: 7,
-      reasonIntegrityConsistencyScenarios: 6,
+      reasonIntegrityConsistencyScenarios: 8,
       destructiveSourceDatabaseActions: 0,
     })}\n`,
   );
@@ -3309,8 +3405,9 @@ async function runRealSmoke(environment) {
       },
       transitionRevisionEvidence: {
         restrictedRuntimeRole: true,
-        committedTransitions: 3,
-        distinctCanonicalKeys: 3,
+        committedTransitions: 4,
+        distinctCanonicalKeys: 4,
+        finalRetriedStateVerified: true,
         staleEventReplayRejected: true,
         futureRevisionPreinsertRejected: true,
       },
@@ -3328,6 +3425,7 @@ async function runRealSmoke(environment) {
         migrationSnapshotsExact: true,
         providerReasonMutationsRejected: 3,
         mismatchedEventSnapshotRejected: true,
+        mismatchedIntegritySnapshotRejected: true,
         deferredFinalRowRereadRejected: true,
         nonProviderCompatibilityPreserved: true,
       },

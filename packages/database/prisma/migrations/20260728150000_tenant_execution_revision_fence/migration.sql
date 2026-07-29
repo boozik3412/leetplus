@@ -102,6 +102,8 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public."tenant_execution_revision_fence"() FROM PUBLIC;
+
 CREATE TRIGGER "Tenant_execution_revision_fence_trigger"
 BEFORE UPDATE OF
   "status",

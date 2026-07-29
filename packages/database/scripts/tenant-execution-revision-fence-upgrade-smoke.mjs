@@ -319,6 +319,10 @@ async function assertTargetMigrationArtifact(migrationPlan) {
   );
   assert.match(
     migrationSql,
+    /REVOKE ALL ON FUNCTION public\."tenant_execution_revision_fence"\(\) FROM PUBLIC;/u,
+  );
+  assert.match(
+    migrationSql,
     /CREATE INDEX "report_digest_schedule_execution_revision_idx"/u,
   );
   assert.match(
@@ -1082,7 +1086,22 @@ async function readRevisionCatalog(client) {
     `SELECT
        to_regprocedure(
          'public.tenant_execution_revision_fence()'
-       )::text AS function_name`,
+       )::text AS function_name,
+       EXISTS (
+         SELECT 1
+         FROM pg_proc AS function_row
+         CROSS JOIN LATERAL aclexplode(
+           COALESCE(
+             function_row.proacl,
+             acldefault('f', function_row.proowner)
+           )
+         ) AS privilege
+         WHERE function_row.oid = to_regprocedure(
+           'public.tenant_execution_revision_fence()'
+         )
+           AND privilege.grantee = 0
+           AND privilege.privilege_type = 'EXECUTE'
+       ) AS public_execute`,
   );
   const [trialConstraint] = await client.$queryRawUnsafe(
     `SELECT pg_get_constraintdef(constraint_row.oid) AS definition
@@ -1097,6 +1116,7 @@ async function readRevisionCatalog(client) {
     indexes,
     triggers,
     functionName: functionRow?.function_name ?? null,
+    functionPublicExecute: functionRow?.public_execute ?? false,
     trialConstraintDefinition: trialConstraint?.definition ?? null,
   });
 }
@@ -1106,6 +1126,7 @@ function assertPre164CoreCatalog(catalog) {
   assert.deepEqual(catalog.constraints, []);
   assert.deepEqual(catalog.triggers, []);
   assert.equal(catalog.functionName, null);
+  assert.equal(catalog.functionPublicExecute, false);
   assert.match(catalog.trialConstraintDefinition ?? "", /PILOT/u);
   assert.doesNotMatch(catalog.trialConstraintDefinition ?? "", /PROVISIONING/u);
 }
@@ -1189,6 +1210,7 @@ function assertPost164Catalog(catalog) {
     },
   ]);
   assert.equal(catalog.functionName, "tenant_execution_revision_fence()");
+  assert.equal(catalog.functionPublicExecute, false);
   assert.match(catalog.trialConstraintDefinition ?? "", /SUSPENDED/u);
   assert.match(catalog.trialConstraintDefinition ?? "", /PROVISIONING/u);
 }

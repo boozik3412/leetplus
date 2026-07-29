@@ -78,6 +78,26 @@ test('the trigger owns and advances the execution revision exactly at policy mut
     sql,
     /BEFORE UPDATE OF[\s\S]*"executionRevision"[\s\S]*ON "Tenant"/,
   );
+  assert.match(
+    sql,
+    /REVOKE ALL ON FUNCTION public\."tenant_execution_revision_fence"\(\) FROM PUBLIC;/,
+  );
+
+  const functionIndex = sql.indexOf(
+    'CREATE OR REPLACE FUNCTION "tenant_execution_revision_fence"()',
+  );
+  const revokeIndex = sql.indexOf(
+    'REVOKE ALL ON FUNCTION public."tenant_execution_revision_fence"() FROM PUBLIC;',
+  );
+  const triggerIndex = sql.indexOf(
+    'CREATE TRIGGER "Tenant_execution_revision_fence_trigger"',
+  );
+  assert(
+    functionIndex >= 0 &&
+      revokeIndex > functionIndex &&
+      triggerIndex > revokeIndex,
+    'The trigger function must be created, removed from PUBLIC, and only then attached.',
+  );
 });
 
 test('only the exact suspended/provisioning shell may omit trial dates', async () => {

@@ -919,12 +919,16 @@ async function assertScopedConnection(
 }
 
 async function createTenant(prisma, fixtureId, suffix) {
-  return prisma.tenant.create({
-    data: {
-      name: `Integrity smoke ${suffix} ${fixtureId}`,
-      slug: `integrity-smoke-${suffix}-${fixtureId}`,
-    },
-  });
+  const id = randomUUID();
+  const name = `Integrity smoke ${suffix} ${fixtureId}`;
+  const slug = `integrity-smoke-${suffix}-${fixtureId}`;
+  const [tenant] = await prisma.$queryRaw`
+    INSERT INTO "Tenant" ("id", "name", "slug", "updatedAt")
+    VALUES (${id}, ${name}, ${slug}, CURRENT_TIMESTAMP)
+    RETURNING "id"
+  `;
+  assert(tenant?.id === id, "Frozen baseline tenant fixture was not created.");
+  return tenant;
 }
 
 async function createStore(prisma, tenantId, fixtureId, suffix) {

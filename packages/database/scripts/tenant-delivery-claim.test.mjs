@@ -368,6 +368,14 @@ test("migration 166 is transactional and requires the exact CURRENT_165 Store fe
     sql,
     /FROM "GuestGameDeliveryEvent" AS event\s+WHERE event\."eventType" IN \(\s+'DELIVERY_CLAIMED',\s+'DELIVERY_PROVIDER_ATTEMPTED',\s+'DELIVERY_FINALIZED',\s+'DELIVERY_REAPED',\s+'DELIVERY_RETRIED',\s+'DELIVERY_CANCELED',\s+'DELIVERY_RECONCILED',\s+'DELIVERY_INTEGRITY_QUARANTINED'\s+\)[\s\S]*pre-166 reserved typed event name[\s\S]*ERRCODE = '55000'/u,
   );
+  assert.match(
+    sql,
+    /reward\."tenantId" <> delivery\."tenantId"[\s\S]*cross-tenant reward binding[\s\S]*ERRCODE = '55000'/u,
+  );
+  assert.match(
+    sql,
+    /event\."tenantId" <> delivery\."tenantId"[\s\S]*cross-scope delivery or reward binding[\s\S]*ERRCODE = '55000'/u,
+  );
   assert(
     sql.indexOf("CURRENT_165 Store background execution fence is not present") <
       sql.indexOf('CREATE UNIQUE INDEX "guest_tenant_id_uidx"'),

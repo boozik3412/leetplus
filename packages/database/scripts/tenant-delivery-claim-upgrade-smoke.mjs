@@ -2362,12 +2362,20 @@ async function runPreflightFailures(
 ) {
   let client = prismaClient(databaseUrl);
   let baseline = await readLegacySnapshot(client);
+  const [rewardScopeFixture] = await client.$queryRawUnsafe(
+    `SELECT COUNT(*)::INTEGER AS count
+     FROM "GuestGameDelivery" AS delivery
+     JOIN "GuestGameReward" AS reward
+       ON reward."id" = delivery."rewardId"
+     WHERE reward."tenantId" <> delivery."tenantId"`,
+  );
+  assert.equal(rewardScopeFixture.count, 1);
   await client.$disconnect();
 
   let attempt = spawnMigrateDeploy(schemaPath, databaseUrl);
   assertMigrationFailure(
     attempt,
-    /(?:55000|cross-tenant reward binding)/iu,
+    /(?:55000|cross-tenant reward binding|current transaction is aborted)/iu,
   );
   client = prismaClient(databaseUrl);
   try {
@@ -2397,6 +2405,18 @@ async function runPreflightFailures(
       rewardId: fixtures.failureRewardA,
       eventType: "FAILURE_EVENT_SCOPE_FIXTURE",
     });
+    const [eventScopeFixture] = await client.$queryRawUnsafe(
+      `SELECT COUNT(*)::INTEGER AS count
+       FROM "GuestGameDeliveryEvent" AS event
+       JOIN "GuestGameDelivery" AS delivery
+         ON delivery."id" = event."deliveryId"
+       JOIN "GuestGameReward" AS reward
+         ON reward."id" = event."rewardId"
+       WHERE event."tenantId" <> delivery."tenantId"
+          OR event."tenantId" <> reward."tenantId"
+          OR event."rewardId" <> delivery."rewardId"`,
+    );
+    assert.equal(eventScopeFixture.count, 1);
     baseline = await readLegacySnapshot(client);
   } finally {
     await client.$disconnect();
@@ -2405,7 +2425,7 @@ async function runPreflightFailures(
   attempt = spawnMigrateDeploy(schemaPath, databaseUrl);
   assertMigrationFailure(
     attempt,
-    /(?:55000|cross-scope delivery or reward binding)/iu,
+    /(?:55000|cross-scope delivery or reward binding|current transaction is aborted)/iu,
   );
   client = prismaClient(databaseUrl);
   try {
@@ -2466,7 +2486,7 @@ async function runPreflightFailures(
   attempt = spawnMigrateDeploy(schemaPath, databaseUrl);
   assertMigrationFailure(
     attempt,
-    /(?:55000|pre-166 reserved typed event name)/iu,
+    /(?:55000|pre-166 reserved typed event name|current transaction is aborted)/iu,
   );
   client = prismaClient(databaseUrl);
   try {

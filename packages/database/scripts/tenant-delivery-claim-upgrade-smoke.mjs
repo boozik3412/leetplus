@@ -1221,7 +1221,7 @@ function assertPost166Catalog(catalog) {
     transitionKeyHelper.identity_arguments,
     "tenant_id text, delivery_id text, reward_id text, transition_revision bigint, claim_generation integer, event_type text, attempt_number integer, outcome_class text, outcome_code text, from_status text, to_status text",
   );
-  assert.equal(transitionKeyHelper.public_execute, true);
+  assert.equal(transitionKeyHelper.public_execute, false);
   assert.deepEqual(transitionKeyHelper.configuration, [
     "search_path=pg_catalog",
   ]);
@@ -2906,7 +2906,7 @@ async function runRealSmoke(environment) {
         restrictForeignKeys: REQUIRED_RESTRICT_FOREIGN_KEYS.length,
         indexes: REQUIRED_INDEXES.length,
         triggers: REQUIRED_TRIGGERS.length,
-        publicExecutableFunctions: 1,
+        publicExecutableFunctions: 0,
         privateTriggerFunctions: REQUIRED_FUNCTIONS.length - 1,
       },
       transitionRevisionEvidence: {

@@ -3061,13 +3061,9 @@ export async function runSmoke(environment = process.env) {
         expectedState: CURRENT_STATE,
       }),
     );
-    assert.equal(
-      currentAdmission.exitCode,
-      0,
-      `CURRENT_166 admission failed: ${JSON.stringify(
-        currentAdmission.report,
-      )}`,
-    );
+    if (currentAdmission.exitCode !== 0) {
+      contractError("CURRENT_ADMISSION_REJECTED");
+    }
     assertAdmissionShape(currentAdmission.report, CURRENT_STATE);
     assertOutputSafe(currentAdmission.serialized, {
       ...privacyContext,

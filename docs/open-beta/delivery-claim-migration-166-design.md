@@ -573,11 +573,14 @@ Append-only triggers являются `BEFORE UPDATE OR DELETE`: `UPDATE` зап
 всегда, `DELETE` разрешён только при
 `current_user = leetplus_evidence_retention`. Все trigger functions
 schema-qualified, используют fixed `search_path=pg_catalog,public`, не
-являются `SECURITY DEFINER`; их `EXECUTE FROM PUBLIC` отзывается. Исключение —
-чистая immutable-функция `guest_game_delivery_transition_key_v1(...)`: она
-оставляет `EXECUTE` для `PUBLIC`, потому что invoker-trigger должен иметь право
-вызова. Функция работает только с аргументами и `pg_catalog`, не читает таблицы
-и не повышает привилегии. Dedicated retention использует отдельно audited
+являются `SECURITY DEFINER`; их `EXECUTE FROM PUBLIC` отзывается. У чистой
+immutable-функции
+`guest_game_delivery_transition_key_v1(...)` доступ `PUBLIC` также отозван.
+Поскольку constraint triggers работают как `SECURITY INVOKER`, `EXECUTE` на
+helper выдаётся только отдельно зарегистрированной delivery-writer role во
+время её operational enrollment. Функция работает только с аргументами и
+`pg_catalog`, не читает таблицы и не повышает привилегии. Dedicated retention
+использует отдельно audited
 `SECURITY DEFINER` procedure,
 принадлежащую non-login role `leetplus_evidence_retention`, с fixed
 `search_path`, bounded IDs и проверкой retention window. Application role не
@@ -1006,9 +1009,9 @@ Canonical migration выполняется одной транзакцией в 
 6. NOT NULL/default, provider/non-provider state CHECK, exact outcome/digest/
    transition CHECK и partial indexes;
 7. cross-table, same-transition и append-only functions/triggers; все trigger
-   functions получают explicit `search_path`, `PUBLIC EXECUTE` отзывается;
-   исключение — чистый immutable transition-key helper с `pg_catalog`-only
-   body, которому `EXECUTE PUBLIC` нужен для SECURITY INVOKER triggers;
+   functions и чистый immutable transition-key helper получают explicit
+   `search_path`, а `PUBLIC EXECUTE` отзывается. `EXECUTE` на helper выдаётся
+   только reviewed delivery-writer role при отдельном role enrollment;
 8. validation всех constraints и catalog assertions до `COMMIT`.
 
 Любая ошибка, включая late DDL/trigger validation, откатывает columns, data,

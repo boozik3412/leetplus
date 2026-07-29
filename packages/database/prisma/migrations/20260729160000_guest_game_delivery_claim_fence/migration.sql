@@ -379,10 +379,11 @@ AS $$
     );
 $$;
 
--- This helper is immutable, pg_catalog-only, and exposes no secret material.
--- Runtime constraint triggers are SECURITY INVOKER, so non-owner application
--- roles need EXECUTE in order to validate canonical durable-event keys.
-GRANT EXECUTE
+-- Runtime constraint triggers are SECURITY INVOKER. Keep the helper private by
+-- default and grant EXECUTE only to an explicitly reviewed delivery-writer role
+-- during role enrollment; PUBLIC access would violate the snapshot admission
+-- least-privilege boundary.
+REVOKE ALL
 ON FUNCTION public."guest_game_delivery_transition_key_v1"(
   TEXT,
   TEXT,
@@ -396,7 +397,7 @@ ON FUNCTION public."guest_game_delivery_transition_key_v1"(
   TEXT,
   TEXT
 )
-TO PUBLIC;
+FROM PUBLIC;
 
 -- Backfill a canonical Store only for non-terminal provider deliveries where
 -- the reward already supplies an unambiguous same-tenant Store.

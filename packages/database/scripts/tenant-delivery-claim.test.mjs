@@ -1066,6 +1066,10 @@ test("transition, binding, and durable-event functions are hardened and attached
   );
   assert.match(
     sql,
+    /REVOKE ALL\s+ON FUNCTION public\."guest_game_delivery_transition_key_v1"\([\s\S]*\)\s+FROM PUBLIC;/u,
+  );
+  assert.doesNotMatch(
+    sql,
     /GRANT EXECUTE\s+ON FUNCTION public\."guest_game_delivery_transition_key_v1"\([\s\S]*\)\s+TO PUBLIC;/u,
   );
   assert.match(

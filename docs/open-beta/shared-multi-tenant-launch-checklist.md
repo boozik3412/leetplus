@@ -54,9 +54,11 @@ identity state machine. Launch checkboxes ниже этим не закрыва�
   `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`.
 - legacy design-partner CLI/exported `provision` и `rotate-invite` изолированы
   с `DESIGN_PARTNER_IDENTITY_WRITER_DISABLED` до manifest/Prisma/БД/token;
-  `status` read-only, emergency `suspend` narrowing-only. Это local candidate:
-  unit/boundary `23/23 PASS`, independent review принят без actionable
-  P0/P1/P2; PostgreSQL smoke/remote CI pending.
+  `status` read-only, emergency `suspend` narrowing-only. Engineering
+  checkpoint принят: unit/boundary `23/23 PASS`, independent review без
+  actionable P0/P1/P2, exact-head
+  `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+  (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke.
 
 Engineering exact-head
 `f5d39fd89145c995c51e7005698327f5581a5cd8` принят GitHub CI
@@ -149,10 +151,9 @@ Evidence:
       `assert → write → transition`/reserve/release invariant и не обходят его
       прямым table DML.
       Обычные `UsersService`/`AuthService` paths переведены в `CURRENT_169`,
-      Legacy design-partner CLI writers изолированы local candidate, но
-      checkbox остаётся открытым до inventory/backfill строк без provenance,
-      PostgreSQL/CI/review этой изоляции и реализации activation/outbox
-      writers.
+      Legacy design-partner CLI writer isolation принят exact-head, но checkbox
+      остаётся открытым до inventory/backfill строк без provenance и реализации
+      activation/outbox writers.
 - [x] `BETA-IAM-004B` engineering read-only inventory на exact `CURRENT_169`
       принят по
       exact-head tests/CI/review: все User, включая inactive, считаются
@@ -233,11 +234,12 @@ Evidence:
       остаётся открытым, production inventory не запускался,
       proposal/apply/rollback/deploy остаются `NO-GO`, а
       `gr1mmphone1@gmail.com` не создан;
-- [ ] принять exact-head
+- [x] принять exact-head
       [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md):
-      local unit/boundary `23/23 PASS`, independent review принят без
-      actionable P0/P1/P2, но PostgreSQL smoke не запускался без
-      `DATABASE_URL`/Postgres и remote exact-head CI pending;
+      `f4224072f60507bd97f8e49440e3bda89ffe2aaa` /
+      [`30483184102`](https://github.com/boozik3412/leetplus/actions/runs/30483184102)
+      (`run #41`), `3/3 PASS`, PostgreSQL 16 writer-isolation lifecycle и
+      independent review без actionable P0/P1/P2;
 - [x] remote exact-head CI и independent review для `CURRENT_168`:
       `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
       `3/3 PASS`, review PASS без новых P0; local `168/168`, identity `1/99`

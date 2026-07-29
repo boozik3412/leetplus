@@ -126,10 +126,12 @@ Gate 1DP не заменяет Gate 1MT/Gate 2 shared beta.
 - [ ] Platform Admin не назначается через tenant API/UI.
 - [ ] `BLOCKED`: revoke/expire invite и accept race проверены shared sealed
       identity workflow.
-- [ ] Exact-head
+- [x] Exact-head
       [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md)
-      принят: local unit/boundary `23/23 PASS`, independent review без
-      actionable P0/P1/P2; PostgreSQL smoke и remote CI пока pending.
+      принят: `f4224072f60507bd97f8e49440e3bda89ffe2aaa` /
+      [`30483184102`](https://github.com/boozik3412/leetplus/actions/runs/30483184102)
+      (`run #41`), `3/3 PASS`, PostgreSQL 16 writer-isolation lifecycle и
+      independent review без actionable P0/P1/P2.
 - [ ] `BLOCKED`: Real-PostgreSQL bridge создаёт candidate штатным shared sealed
       provisioning/activation workflow и на той же неизменённой БД успешно
       запускает API database admission; два независимых hand-written fixtures

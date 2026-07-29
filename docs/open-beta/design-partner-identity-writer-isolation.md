@@ -5,7 +5,7 @@
 | Contract | `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1` |
 | Версия | 1.0 |
 | Дата | 29.07.2026 |
-| Статус | `IMPLEMENTED_CANDIDATE`; local unit/boundary и independent review приняты, PostgreSQL/CI pending |
+| Статус | `ACCEPTED_ENGINEERING_CHECKPOINT`; exact-head CI/PostgreSQL/review приняты |
 | Schema target | `CURRENT_169`; migrations не изменены |
 | Release decision | `NO-GO`; production, account и invites не изменялись |
 
@@ -171,19 +171,26 @@ design-partner provisioning unit + executable boundary: 23/23 PASS
 разрешены контрактом: их предотвращение и admission относятся к отдельным
 credential/DB-role gates и обязательному review.
 
-Пока не принято:
+Exact-head evidence:
 
 ```text
 local PostgreSQL writer-isolation smoke: NOT RUN
 reason: DATABASE_URL/Postgres отсутствует в локальном окружении
-remote exact-head CI: PENDING
+implementation exact-head: f4224072f60507bd97f8e49440e3bda89ffe2aaa
+GitHub CI: 30483184102 / run #41 / 3 of 3 PASS
+Application job: 90682228273 / PASS
+PostgreSQL 16 job: 90682228302 / writer-isolation lifecycle PASS
+Authority root job: 90682228357 / PASS
 independent review: PASS / no actionable P0/P1/P2 in stated scope
 production-like evidence: NOT EXECUTED
 ```
 
-Нельзя повышать этот статус до accepted exact-head или закрывать launch
-checkbox до зелёного PostgreSQL smoke и remote CI exact candidate SHA.
-Independent review текущего diff уже принят.
+Remote PostgreSQL smoke подтвердил на exact implementation SHA: обе
+расширяющие операции отказывают до DB/token access, historical status остаётся
+read-only, emergency suspend только сужает эффекты, а fixture cleanup оставляет
+zero residue. Engineering checkbox `BETA-IAM-004D` закрыт. Это не повышает
+общий release decision: production-like admission, deployment и внешний доступ
+остаются `NO-GO`.
 
 ## Что разблокирует дальнейшую работу
 

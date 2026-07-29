@@ -150,9 +150,10 @@ enterprise-isolation option и не сокращает shared gates.
     `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`: legacy
     `provision`/`rotate-invite` fail-closed до manifest/Prisma/БД/token,
     `status` остаётся read-only для исторических isolated fixtures, emergency
-    `suspend` — narrowing-only. Local unit/boundary `23/23 PASS`; independent
-    review принят без actionable P0/P1/P2 в заявленном scope. PostgreSQL smoke
-    не запускался без `DATABASE_URL`/Postgres, remote exact-head CI pending.
+    `suspend` — narrowing-only. Local unit/boundary `23/23 PASS`, independent
+    review без actionable P0/P1/P2; exact-head
+    `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+    (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 writer-isolation lifecycle.
 
 Текущий schema target рабочего кандидата — `CURRENT_169`. Локальный
 disposable PostgreSQL `16.13` подтвердил clean deploy `169/169`, exact
@@ -212,10 +213,11 @@ engineering evidence не являются production-like admission, persisted 
   включён в CI environment contract; до deploy нужно настроить отдельное
   production значение. Activation locator, admitted legacy provenance
   backfill, encrypted outbox/verified delivery и persisted GO ещё pending.
-  Design-partner identity writer boundary реализована как local candidate:
+  Design-partner identity writer boundary принята как engineering checkpoint:
   legacy `provision`/`rotate-invite` fail-closed до manifest/Prisma/БД/token;
-  schema, six-RPC allowlist и shared admin route не изменены. PostgreSQL smoke,
-  remote exact-head CI и independent review этой изоляции ещё pending;
+  schema, six-RPC allowlist и shared admin route не изменены. Exact-head
+  `f4224072f60507bd97f8e49440e3bda89ffe2aaa`, PostgreSQL 16 и independent
+  review приняты; production-like admission и activation остаются pending;
 - external authenticated HTTP admission candidate: обязательные beta-prefixes
   получают `module + READ|WRITE|OUTBOUND`, неизвестный route запрещён;
   reusable lower-layer admission перечитывает persisted state на каждый
@@ -484,9 +486,9 @@ engineering evidence не являются production-like admission, persisted 
    внутри одного существующего `Tenant`;
 10. параллельно закрыть `BETA-MT-001..009`: использовать принятые exact-head
     CI/review `BETA-IAM-004B` как engineering prerequisite, отдельно выполнить
-    production-like inventory и будущий signed proposal/apply/rollback,
-    принять PostgreSQL/remote CI уже прошедшей independent review fail-closed
-    изоляции design-partner identity writers, реализовать activation locator, encrypted
+    production-like inventory и будущий signed proposal/apply/rollback;
+    использовать принятый exact-head PostgreSQL/CI/review checkpoint
+    design-partner writer isolation, реализовать activation locator, encrypted
     outbox/verified OWNER delivery и persisted GO; затем закрыть
     delegation/integrations, A/B isolation и tenant-aware workers/Telegram;
 11. семь стабильных дней internal alpha и Gate 1MT завершают Gate 2; только

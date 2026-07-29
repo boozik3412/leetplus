@@ -151,9 +151,10 @@ independent security review и exact-head
   production-like inventory и будущего signed proposal/apply/rollback.
   Legacy design-partner `provision`/`rotate-invite` уже изолированы
   fail-closed до manifest/Prisma/БД/token; local unit/boundary `23/23 PASS`,
-  independent review принят без actionable P0/P1/P2 в заявленном scope, но
-  local PostgreSQL smoke и remote exact-head CI ещё pending. Полный
-  issue/reissue/revoke/accept race также не
+  independent review без actionable P0/P1/P2; exact-head
+  `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+  (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke. Полный
+  issue/reissue/revoke/accept race всё ещё не
   пройден. Fingerprint HMAC startup validation уже
 реализована candidate; до deploy требуется защищённо настроить и аттестовать
 отдельный production secret version `v1`. Поэтому реальный tester email в

@@ -25,8 +25,10 @@ Legacy isolated design-partner writers теперь fail-closed по
 [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md):
 `provision`/`rotate-invite` отклоняются до manifest/Prisma/БД/token,
 `status` остаётся read-only, emergency `suspend` — narrowing-only. Schema,
-exact six-RPC allowlist и admin routes не изменены; PostgreSQL smoke, remote
-exact-head CI и independent review этой изоляции ещё pending.
+exact six-RPC allowlist и admin routes не изменены; exact-head
+`f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+(`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke; independent review —
+без actionable P0/P1/P2.
 Документ не разрешает production migration или выдачу доступа.
 
 ## 1. Persisted control plane
@@ -474,8 +476,8 @@ READY / ACTIVE / OFFBOARDING onboarding transitions
    prerequisite, затем отдельно выполнить production-like inventory и
    будущий signed
    proposal/apply/rollback исторических identity rows без provenance;
-   принять PostgreSQL smoke и remote exact-head CI уже прошедшей independent
-   review fail-closed изоляции design-partner identity writers;
+   использовать принятый exact-head PostgreSQL/CI/review checkpoint fail-closed
+   изоляции design-partner identity writers;
 4. реализовать privacy-safe activation locator, encrypted outbox и
    fail-closed mail config;
 5. persisted release gates и dedicated initial OWNER

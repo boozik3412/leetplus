@@ -235,9 +235,9 @@ historical provisioning/rotation evidence, не ограничиваясь по�
 
 Эти receipts остаются только историческим verification contract. Legacy
 `provision`/`rotate-invite` не могут выпустить новый receipt или token.
-Local unit/boundary `23/23 PASS`; independent review принят без actionable
-P0/P1/P2 в заявленном scope. PostgreSQL writer-isolation smoke не запускался без
-`DATABASE_URL`/Postgres, remote exact-head CI pending.
+Local unit/boundary `23/23 PASS`, independent review без actionable P0/P1/P2;
+exact-head `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+(`run #41`) — `3/3 PASS`, включая PostgreSQL 16 writer-isolation lifecycle.
 
 StaffTask surface дополнительно не может использовать synthetic snapshot,
 proposal report или HMAC digest как production-like authorization. До её

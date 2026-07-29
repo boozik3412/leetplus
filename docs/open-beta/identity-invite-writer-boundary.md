@@ -183,8 +183,9 @@ persisted GO, production deployment или разрешением на созд�
    [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md):
    legacy CLI/exported `provision` и `rotate-invite` fail-closed до
    manifest/Prisma/БД/token, local unit/boundary `23/23 PASS`; independent
-   review принят без actionable P0/P1/P2 в заявленном scope. Local PostgreSQL
-   smoke не запускался без `DATABASE_URL`/Postgres, remote exact-head CI pending.
+   review без actionable P0/P1/P2 и exact-head
+   `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+   (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke.
 6. Добавить bounded natural-expiry sweeper с audit/reconciliation. До этого
    expired invite освобождается только явным cancel.
 7. Пройти production-like upgrade, rollback, zero-diff, full

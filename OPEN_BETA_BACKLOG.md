@@ -225,7 +225,7 @@
 | BETA-IAM-004A | P0        | В работе      | Реализовать initial OWNER identity outbox                 | Migrations 167..169 дают case-insensitive `IdentityEmailClaim`, sealed RPC, persisted `User/UserInvite` provenance/revocation, zero runtime table DML и обычные sealed issue/reissue/revoke/accept paths; legacy reconciliation выделен в `BETA-IAM-004B`, design-partner writer isolation — в `BETA-IAM-004D`; до готовности initial OWNER остаются activation locator, encrypted leased outbox/verified delivery, protected initial issue/reissue/resend и fragment + POST-body transport; до deploy настраивается отдельный prod HMAC secret; raw email/token/URL/ciphertext отсутствуют в responses/logs/audit | BETA-SEC-008, BETA-SEC-009, BETA-TEN-001, BETA-TEN-002 |
 | BETA-IAM-004B | P0        | В работе      | `IDENTITY_LEGACY_RECONCILIATION_V1`                       | На exact `CURRENT_169` integrated least-privilege inventory читает `User`/`UserInvite`/claims без DML; local core self-test `18`, smoke self-test `18`, unit `17/17` и PostgreSQL 16 smoke на трёх disposable clones — `PASS`; exact-head `d1162eed042893ec3b27ed823bdaddfa64c7e90f` / CI `30479020686` (`run #39`) — `3/3 PASS`, финальный independent security review — `PASS` без оставшихся P0/P1/P2; item остаётся `В работе` до отдельного production-like inventory; любой User, включая inactive, остаётся owner-кандидатом, invite — только live candidate; bound claim + `NULL` provenance, collision/mismatch/invalid email блокируют, terminal history не получает synthetic revision, Platform Admin/unverified User и legacy live token требуют review; evidence aggregate-only и HMAC-bound; production inventory не выполнялся, proposal/apply/rollback отсутствуют и запрещены; обе admin route остаются `503`, runtime allowlist — exact six-RPC | BETA-SEC-007..009, BETA-IAM-004A |
 | BETA-IAM-004C | P0        | Запланировано | Включить tenant-owned employee invites и email change     | Только после 004A/004B OWNER может выдавать scope-bounded invites; email change требует password step-up, reservation, confirmation, `authVersion` revoke и уведомления на old/new mailbox; owner transfer остаётся отдельным workflow                                                                                     | BETA-IAM-002..005, BETA-IAM-004A, BETA-IAM-004B       |
-| BETA-IAM-004D | P0        | В работе      | `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`              | Legacy design-partner CLI `provision`/`rotate-invite` и оба exported writer entrypoint fail-closed с `DESIGN_PARTNER_IDENTITY_WRITER_DISABLED` до чтения manifest, загрузки/создания Prisma client, обращения к БД или генерации token; exact package operator namespace содержит только guarded CLI, URL builder и legacy write bodies отсутствуют; `status` только читает уже существующие isolated fixtures, emergency `suspend` только сужает эффекты; arbitrary repository/DB-owner execution не входит в этот checkpoint и требует отдельной runtime-role/credential границы; schema, exact six-RPC runtime allowlist и обе `503` admin route не изменены. Local unit/boundary `23/23 PASS`, включая terminal `ARCHIVED` suspend rejection, executable remote-target rejection и exact `leetplus_ci` smoke-target matrix; independent review — `PASS` без actionable P0/P1/P2 в заявленном scope; local PostgreSQL smoke не запускался без `DATABASE_URL`/Postgres, remote exact-head CI pending | BETA-IAM-004A, BETA-IAM-004B                          |
+| BETA-IAM-004D | P0        | Готово        | `DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`              | Legacy design-partner CLI `provision`/`rotate-invite` и оба exported writer entrypoint fail-closed с `DESIGN_PARTNER_IDENTITY_WRITER_DISABLED` до чтения manifest, загрузки/создания Prisma client, обращения к БД или генерации token; exact package operator namespace содержит только guarded CLI, URL builder и legacy write bodies отсутствуют; `status` только читает уже существующие isolated fixtures, emergency `suspend` только сужает эффекты; arbitrary repository/DB-owner execution не входит в этот checkpoint и требует отдельной runtime-role/credential границы; schema, exact six-RPC runtime allowlist и обе `503` admin route не изменены. Local unit/boundary `23/23 PASS`, independent review — `PASS` без actionable P0/P1/P2; implementation exact-head `f4224072f60507bd97f8e49440e3bda89ffe2aaa`, CI `30483184102` (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 writer-isolation lifecycle. Production, account и invites не изменялись | BETA-IAM-004A, BETA-IAM-004B                          |
 | BETA-IAM-005  | P0        | В работе      | Ограничить особо чувствительное повышение привилегий      | Generic users/invites API не назначает OWNER; добавление/смена OWNER выполняется только отдельным атомарным owner-transfer workflow; Platform Admin нельзя назначить tenant API                                                                                                                                            | BETA-IAM-001, BETA-IAM-003                             |
 | BETA-IAM-006  | P0        | Запланировано | Свести backend/frontend permission maps                   | Один источник или contract-test подтверждает одинаковые роли, capabilities и nav visibility; скрытый UI не заменяет API authorization                                                                                                                                                                                      | BETA-IAM-001                                           |
 | BETA-IAM-007  | P0        | Запланировано | Добавить журнал доступа и управление сессиями             | Владелец видит активных пользователей и security events своей сети; может блокировать аккаунт и отзывать его сессии                                                                                                                                                                                                        | BETA-SEC-010                                           |
@@ -1857,10 +1857,12 @@ Implementation checkpoint:
   разрешает создавать или ротировать identity.
 - `accessExpiresAt` пока закреплён только manifest/audit metadata и не является
   runtime policy; persisted expiry/entitlements остаются `BETA-DP-004`.
-- Обновлённый PostgreSQL writer-isolation smoke должен доказать disabled
-  provision/rotate, historical read-only status и narrowing-only suspend.
-  Локально он ещё не запускался из-за отсутствующего `DATABASE_URL`; remote
-  exact-head CI и independent review текущего candidate pending.
+- PostgreSQL writer-isolation smoke доказал disabled provision/rotate,
+  historical read-only status и narrowing-only suspend на exact implementation
+  SHA `f4224072f60507bd97f8e49440e3bda89ffe2aaa`: CI `30483184102`
+  (`run #41`), PostgreSQL 16 job `90682228302` — `PASS`. Локально smoke не
+  запускался из-за отсутствующего `DATABASE_URL`; independent review принят
+  без actionable P0/P1/P2.
 - Provisioning lifecycle и API admission пока выполняются двумя отдельными
   PostgreSQL fixtures; обязательный bridge `shared sealed activation output →
   same DB startup admission` без ручного fake receipt ещё не реализован и
@@ -2697,14 +2699,11 @@ release decision остаются `NOT DEPLOYED / NO-GO`, аккаунт
    fragment + POST-body token transport и session revoke.
 4. First-class verified `EMAIL_CHANGE`; до него email mutation остаётся
    закрытой.
-5. Принять exact-head evidence для реализованной fail-closed изоляции
-   design-partner identity writers: independent review принят без actionable
-   P0/P1/P2; local PostgreSQL smoke и remote CI ещё pending.
-6. Bounded natural-expiry sweeper с audit/reconciliation.
-7. Production-like migration 168→169, inventory/backfill dry-run,
+5. Bounded natural-expiry sweeper с audit/reconciliation.
+6. Production-like migration 168→169, inventory/backfill dry-run,
    apply/rollback/zero-diff, full accept/revoke/reissue concurrency и
    two-tenant application/browser matrix.
-8. Function body/owner attestation, production fingerprint secret,
+7. Function body/owner attestation, production fingerprint secret,
    backup/restore, monitoring и exact release-artifact CI/review после
    оставшихся изменений.
 
@@ -2712,7 +2711,7 @@ release decision остаются `NOT DEPLOYED / NO-GO`, аккаунт
 writer-boundary diff не обнаружил P0/P1. В нём остались P2:
 literal-pattern static writer test требуется усилить AST/DB-level boundary
 против raw SQL, aliases и nested writes; callback unit mocks не заменяют
-реальный PostgreSQL rollback/race evidence из пункта 7. Это не verdict
+реальный PostgreSQL rollback/race evidence из пункта 6. Это не verdict
 отдельного `BETA-IAM-004D`, чей exact-head review учитывается отдельно.
 
 Канонические подробные checkpoints:
@@ -2747,13 +2746,18 @@ identity writer:
 ```text
 local unit + executable boundary: 23/23 PASS
 local PostgreSQL writer-isolation smoke: NOT RUN / DATABASE_URL/Postgres absent
-remote exact-head CI: PENDING
+implementation exact-head: f4224072f60507bd97f8e49440e3bda89ffe2aaa
+GitHub CI: 30483184102 / run #41 / 3 of 3 PASS
+Application job: 90682228273 / PASS
+PostgreSQL 16 job: 90682228302 / writer-isolation lifecycle PASS
+Authority root job: 90682228357 / PASS
 independent review: PASS / no actionable P0/P1/P2 in stated scope
 production/account/invites: UNCHANGED
 release decision: NO-GO
 ```
 
-Этот checkpoint не реализует shared sealed activation, initial OWNER outbox,
+Engineering checkpoint `BETA-IAM-004D` принят. Он не реализует shared sealed
+activation, initial OWNER outbox,
 Tenant D/Store D1 provisioning или выдачу credentials. `BETA-DP-005` остаётся
 заблокированным до отдельного reviewed writer поверх общей sealed identity
 state machine. Канонический контракт:

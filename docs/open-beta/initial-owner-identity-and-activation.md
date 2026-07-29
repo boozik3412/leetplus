@@ -496,10 +496,11 @@ Two-tenant:
    production-like inventory и будущего signed proposal/apply/rollback
    исторических `User`/`UserInvite` без provenance. Для уже реализованной
    [`DESIGN_PARTNER_IDENTITY_WRITER_ISOLATION_V1`](./design-partner-identity-writer-isolation.md)
-   independent review принят без actionable P0/P1/P2; остаётся принять local
-   PostgreSQL smoke и remote exact-head CI. CLI/exported `provision` и
-   `rotate-invite` уже fail-closed до manifest/Prisma/БД/token, local
-   unit/boundary `23/23 PASS`.
+   independent review принят без actionable P0/P1/P2; exact-head
+   `f4224072f60507bd97f8e49440e3bda89ffe2aaa` / CI `30483184102`
+   (`run #41`) — `3/3 PASS`, включая PostgreSQL 16 smoke. CLI/exported
+   `provision` и `rotate-invite` fail-closed до manifest/Prisma/БД/token,
+   local unit/boundary `23/23 PASS`.
 2. Спроектировать activation locator без хранения и раскрытия raw email;
    lookup и повторная проверка claim должны выполняться fail-closed под lock.
 3. Добавить encrypted identity mail outbox и fail-closed mail config.

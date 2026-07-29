@@ -207,7 +207,7 @@
 | ------------ | --------- | ------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | BETA-TEN-001 | P0        | В работе      | Разделить operational lifecycle и customer stage                 | Существуют lifecycle `ACTIVE/SUSPENDED/ARCHIVED` и отдельный stage `INTERNAL/PILOT/BETA/LIVE`; сохраняются cohort, trial dates, support owner и onboarding state                                                                                                                                                                                                                    | BETA-SRC-002                                            |
 | BETA-TEN-002 | P0        | В работе      | Добавить tenant/store entitlements                               | Полный атомарный профиль первого теста содержит пять product rows `gamification`, `assortment`, `staff`, `communications`, `users_roles` и supporting row `integrations`; initial state для всех шести — `read/write=ON`, `outbound=OFF`; изменения имеют revision, reason, expiry и audit, а outbound включается только отдельным workflow                                         | BETA-TEN-001                                            |
-| BETA-TEN-003 | P0        | В работе      | Реализовать idempotent shell-only Platform Admin provisioning    | Service candidate атомарно создаёт `PILOT/SUSPENDED/PROVISIONING` tenant, неактивный Store, OWNER override, полный six-row профиль и canonical owner-email reservation, но не создаёт `User/UserInvite`, token, mail/outbox и не запускает trial; replay HMAC-bound и не раскрывает identity data; HTTP route остаётся `503` до protected activation, remote exact-head и production-like evidence | BETA-TEN-001, BETA-TEN-002, BETA-IAM-004A               |
+| BETA-TEN-003 | P0        | В работе      | Реализовать idempotent shell-only Platform Admin provisioning    | Service candidate атомарно создаёт `PILOT/SUSPENDED/PROVISIONING` tenant, неактивный Store, OWNER override, полный six-row профиль и canonical owner-email reservation, но не создаёт `User/UserInvite`, token, mail/outbox и не запускает trial; replay HMAC-bound и не раскрывает identity data; exact-head implementation evidence принято, HTTP route остаётся `503` до protected activation и production-like evidence | BETA-TEN-001, BETA-TEN-002, BETA-IAM-004A               |
 | BETA-TEN-004 | P0        | В работе      | Ввести единый `TenantExecutionPolicy`                            | External HTTP routes fail-closed сопоставлены с module/action; reusable fresh-PostgreSQL admission поддерживает cross-module requirements; login, invites, BFF/files, guest/Telegram, schedulers, sync, messages, rewards и exports принимают тот же policy; `INTERNAL` имеет только временный entitlement bypass; неизвестный route/action запрещён                                | BETA-TEN-002, BETA-SEC-003                              |
 | BETA-TEN-005 | P1        | Запланировано | Расширить Platform Admin cockpit                                 | Видны stage, trial, entitlement, owner invite, onboarding, stores, source freshness, sync errors, last activity, support owner и incidents                                                                                                                                                                                                                                          | BETA-TEN-003, BETA-OPS-010                              |
 | BETA-TEN-006 | P0        | Запланировано | Реализовать offboarding и retention workflow                     | Suspend/archive отзывает invites/sessions, выключает integrations и jobs; data export/delete/retention выполняются по утверждённой процедуре и аудируются                                                                                                                                                                                                                           | BETA-TEN-004                                            |
@@ -306,9 +306,11 @@ engineering prerequisite `CURRENT_165` на
 `4bd6a036df16579f68b2c96a14b6475c8311b231` принят по зелёному remote CI
 `30428288353`; documentation/evidence successor
 `7c20adec4ee7cb0a390f1e38ec8e7dd333fa367f` также прошёл remote CI
-`30429463161`. Оба SHA являются historical `CURRENT_165` evidence; remote
-exact-SHA и remote CI evidence для `CURRENT_168`, как и production-like
-evidence, ещё pending. Strict acquisition contract,
+`30429463161`. Оба SHA являются historical `CURRENT_165` evidence.
+Implementation `CURRENT_168` принят на exact-head
+`3b8228dd278fae062c753bf4301e0339ba93738b` по GitHub CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
+`3/3 PASS`; production-like evidence ещё pending. Strict acquisition contract,
 root lifecycle и detached `prepare → external sign → finalize` реализованы как
 candidate; реальный public root намеренно не enrolled. Статус остаётся
 `В работе / NO-GO`.
@@ -2113,8 +2115,8 @@ tenant lifecycle/stage/trial
   через generic Prisma message. Он не закрыл P1.
   `d525b736d03162a2c58de17cbf7679ba6f515096` / GitHub CI
   [`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
-  (`run #28`) остаётся previous accepted exact-head baseline. Новый last
-  accepted exact-head engineering checkpoint —
+  (`run #28`) остаётся previous accepted exact-head baseline. Следующий
+  accepted provider-write engineering checkpoint —
   `be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, GitHub CI
   [`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
   (`run #29`): Application `90566337085`, Authority checks `90566337062` и
@@ -2143,6 +2145,20 @@ tenant lifecycle/stage/trial
   как `PUBLIC EXECUTE` revoked; batch/rebind/future provider writers остаются
   fail-closed, а whole-transaction bounded retry сохраняется обязательной
   pre-activation defense-in-depth.
+- текущий accepted `CURRENT_168` implementation checkpoint —
+  `3b8228dd278fae062c753bf4301e0339ba93738b`, GitHub CI
+  [`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200):
+  Application checks, PostgreSQL migration smoke и Authority root trust gate —
+  `3/3 PASS`. Предшествующий exact-head
+  `474fce63ede2938f1ad8e0dd167e00b8298b5828`, CI
+  [`30459289293`](https://github.com/boozik3412/leetplus/actions/runs/30459289293),
+  был отклонён только PostgreSQL job: serialization conflict пришёл как
+  Prisma `P2010` с PostgreSQL SQLSTATE `40001`. Текущий checkpoint структурно
+  нормализует `P2034`, `P2010/meta 40001|40P01` и прямые
+  `40001|40P01`, выполняет не более одного полного serializable retry и
+  сохраняет unknown errors fail-closed. Независимый review текущего diff не
+  обнаружил новых P0; targeted review error mapping подтвердил fail-closed
+  контракт.
 - последний детализированный historical checkpoint `CURRENT_165` проходит
   `16 suites / 663 tests` tenant-execution,
   `32 suites / 523 tests` focused security и полный API regression
@@ -2317,7 +2333,7 @@ Authority `90559756309` — `PASS`, PostgreSQL `90559756334` — `FAIL`; ито�
 `d525b736d03162a2c58de17cbf7679ba6f515096`, GitHub CI
 [`30447467729`](https://github.com/boozik3412/leetplus/actions/runs/30447467729)
 (`run #28`): Application `90561260920`, Authority `90561260926` и PostgreSQL
-`90561260878` — `3/3 PASS`. Last accepted exact-head checkpoint —
+`90561260878` — `3/3 PASS`. Последний принятый provider-write exact-head —
 `be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, GitHub CI
 [`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
 (`run #29`): Application `90566337085`, Authority checks `90566337062` и
@@ -2388,7 +2404,7 @@ checkpoint выше. До provider activation и production-like приняти�
   Engineering closure не заменяет operational boundary: обязательны отдельная
   non-owner runtime DB role и grants; worker boundary не принимает
   `actorUserId`, а interactive same-tenant actor boundary остаётся pending;
-- четвёртый исходный P1 закрыт last accepted exact-head
+- четвёртый исходный P1 закрыт последним provider-write exact-head
   `be8c94c4...` / CI `30449026506` (`run #29`): private SECURITY INVOKER
   `guest_game_reward_delivery_lock_v1` берёт canonical advisory seed `166`,
   затем same-tenant `Reward FOR UPDATE`, затем `VERIFIED` Telegram/MAX
@@ -2468,8 +2484,17 @@ shell PostgreSQL integration: 2/2
 cross-slug shell race: 50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE
 ```
 
-Это не remote exact-head CI, не production-like admission, не persisted GO,
-не deploy и не разрешение создать external account.
+Remote exact-head implementation evidence принято:
+
+```text
+implementation SHA: 3b8228dd278fae062c753bf4301e0339ba93738b
+GitHub CI: https://github.com/boozik3412/leetplus/actions/runs/30460154200
+result: Application + PostgreSQL + Authority = 3/3 PASS
+independent review: PASS, новых P0 не обнаружено
+```
+
+Это не production-like admission, не persisted GO, не deploy и не разрешение
+создать external account.
 
 Открытые launch-blocking P0:
 
@@ -2483,9 +2508,6 @@ cross-slug shell race: 50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE
 4. Не пройдены полный 100-way accept/revoke/reissue matrix,
    production-like upgrade/rollback/zero-diff и полноценная two-tenant
    rehearsal.
-5. Remote exact-head CI и независимый review текущего `CURRENT_168` ещё
-   pending.
-
 Открытый hardening P1 до внешней активации:
 
 1. Runtime admission должен привязать четыре `SECURITY DEFINER` RPC не только
@@ -2626,8 +2648,10 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
 эта lane не переносит approvals или evidence в shared последовательность.
 
 1. Schema target — `CURRENT_168`. Local disposable PostgreSQL `16.14`
-   подтвердил `168/168`, identity `1 winner / 99 fail-closed` и shell `2/2`,
-   но remote exact-head CI текущего кандидата ещё pending. SHA
+   подтвердил `168/168`, identity `1 winner / 99 fail-closed` и shell `2/2`.
+   Exact-head implementation
+   `3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+   `30460154200`, `3/3 PASS`, и независимым review без новых P0. SHA
    `2341b999...`, `044ceca2...` и
    accepted precursor
    `c1fee42cc0d85a2c2d1acb354ff5198280bc4ecc` являются historical evidence, а
@@ -2639,7 +2663,7 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
    PostgreSQL `FAIL`). Previous accepted exact-head checkpoint —
    `d525b736d03162a2c58de17cbf7679ba6f515096` / CI `30447467729`
    (`run #28`), `3/3 PASS`; он закрыл reason/evidence и worker durable-event
-   P1. Last accepted exact-head checkpoint —
+   P1. Последний принятый provider-write checkpoint —
    `be8c94c4ea9106a31055a0aff577ffbd62b67e7c` / CI `30449026506`
    (`run #29`), `3/3 PASS`; private SECURITY INVOKER lock boundary и
    двухсессионный rehearsal закрыли lock-order/`40P01` P1. Все четыре
@@ -2729,8 +2753,9 @@ Optional isolated `SINGLE_DESIGN_PARTNER`, если он отдельно про
     assortment/reports/imports и пройти store-level negative suites.
 16. Добавить PII reveal/export audit policy и browser E2E для пяти обязательных
     контуров.
-17. Завершить `BETA-MT-001..006`: принять shell-only shared provisioning
-    только после remote exact-head evidence, реализовать persisted GO + owner
+17. Завершить `BETA-MT-001..006`: shell-only shared provisioning уже принят
+    как exact-head engineering candidate; теперь перевести legacy identity
+    writers на sealed boundary, затем реализовать persisted GO + owner
     activation/invite, delegation limits и безопасный tenant-owned
     integrations control-plane.
 18. Реализовать `BETA-MT-007..009`: полную shared PostgreSQL/API/BFF/browser/

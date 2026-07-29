@@ -2,12 +2,12 @@
 
 | Поле | Значение |
 | --- | --- |
-| Версия | 1.1 |
+| Версия | 1.2 |
 | Дата | 29.07.2026 |
 | Schema target | `CURRENT_168` |
 | Foundation migration | `20260729190000_identity_email_claim_foundation` |
 | Write-boundary migration | `20260729210000_identity_email_claim_write_boundary` |
-| Статус | `IMPLEMENTED_CANDIDATE`; remote exact-head CI для текущего кандидата ещё не принят |
+| Статус | `IMPLEMENTED_CANDIDATE`; exact-head CI/review приняты, not deployed |
 | Release decision | `NO-GO` для реального Tenant B, OWNER invite и production deploy |
 
 ## Назначение
@@ -184,9 +184,12 @@ deployment, получены:
 - runtime enrollment подтвердил exact six-RPC allowlist и zero
   `IdentityEmailClaim` table DML.
 
-Это локальное engineering evidence. Оно не является remote exact-head CI,
-production-like admission, persisted GO, production deploy или разрешением на
-выдачу доступа.
+Remote exact-head implementation
+`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
+`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
+evidence не являются production-like admission, persisted GO, production
+deploy или разрешением на выдачу доступа.
 
 Startup validation candidate уже требует отдельный
 `IDENTITY_EMAIL_FINGERPRINT_HMAC_KEY`, запрещает reuse с другими production
@@ -211,7 +214,10 @@ secrets и требует version `v1`; CI environment contract обновлён
    PostgreSQL matrix.
 6. Пройти production-like upgrade/rollback/zero-diff и полноценную
    two-tenant rehearsal.
-7. Получить remote exact-head CI и независимый review текущего кандидата.
+
+Remote exact-head CI и независимый review текущего кандидата закрыты:
+`3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
+`3/3 PASS`, review PASS без новых P0.
 
 До внешней активации также закрываются P1 hardening items:
 

@@ -2,7 +2,7 @@
 
 | Поле       | Значение                                                   |
 | ---------- | ---------------------------------------------------------- |
-| Версия     | 1.7                                                        |
+| Версия     | 1.8                                                        |
 | Дата       | 29.07.2026                                                 |
 | Статус     | `NO-GO`; checklist не выполнен                             |
 | Data plane | Shared web/API/workers/PostgreSQL/Telegram                 |
@@ -49,8 +49,12 @@ service, но launch checkboxes ниже этим не закрываются:
 - legacy initial-owner revoke route возвращает
   `503 SHARED_BETA_OWNER_INVITE_WORKFLOW_PENDING`.
 
-Это local disposable evidence. Remote exact-head CI, production-like
-admission, persisted GO, production deploy и доступ тестеру ещё не приняты.
+Remote exact-head implementation
+`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
+`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
+evidence не являются production-like admission: persisted GO, production
+deploy и доступ тестеру ещё не приняты.
 
 ## A. Gate 0: source и release
 
@@ -172,8 +176,10 @@ Evidence:
 
 - [ ] real PostgreSQL concurrent shell provision/activate/reissue/revoke/accept
       matrix, включая case-variant email collision;
-- [ ] remote exact-head CI и independent review для `CURRENT_168`; local
-      `168/168`, identity `1/99` и shell `2/2` являются только prerequisite;
+- [x] remote exact-head CI и independent review для `CURRENT_168`:
+      `3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
+      `3/3 PASS`, review PASS без новых P0; local `168/168`, identity `1/99`
+      и shell `2/2` приняты как engineering prerequisites;
 - [ ] email outbox lease/crash/retry drill без утечки raw token;
 - [ ] delegation/escalation negative matrix;
 - [ ] stale-token и immediate-revoke tests;

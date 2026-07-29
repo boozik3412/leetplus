@@ -136,9 +136,13 @@ disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`, ident
 idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
 `INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
 cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`, exact
-six-RPC runtime allowlist и zero `IdentityEmailClaim` table DML. Эти
-результаты не являются remote exact-head CI, production-like admission,
-persisted GO или production deploy. Production apply/deploy не выполнялись.
+six-RPC runtime allowlist и zero `IdentityEmailClaim` table DML. Remote
+exact-head implementation
+`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
+`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
+evidence не являются production-like admission, persisted GO или production
+deploy. Production apply/deploy не выполнялись.
 
 При противоречии исторического документа этому пакету действует
 `OPEN_BETA_BACKLOG.md`. Изменение продуктового состава первой когорты требует
@@ -243,7 +247,7 @@ persisted GO или production deploy. Production apply/deploy не выполн
   (`run #28`): Application `90561260920`, Authority `90561260926` и PostgreSQL
   `90561260878` — `3/3 PASS`; `committedTransitions=4`,
   `runtimeBoundaryNegatives=9`. Он закрыл final-row reason/evidence и worker
-  boundary-only durable-event P1. Last accepted exact-head checkpoint —
+  boundary-only durable-event P1. Последний принятый provider-write exact-head —
   `be8c94c4ea9106a31055a0aff577ffbd62b67e7c`, CI
   [`30449026506`](https://github.com/boozik3412/leetplus/actions/runs/30449026506)
   (`run #29`): Application `90566337085`, Authority checks `90566337062` и
@@ -341,10 +345,12 @@ persisted GO или production deploy. Production apply/deploy не выполн
   `30442286822` предшествовал legacy quarantine delivery-row/lifecycle freeze.
   Exact-head `a644b81...` / CI `30447011917` (`run #27`) rejected (`2/3
   PASS`, PostgreSQL `FAIL`). Previous accepted exact-head `d525b73...` / CI
-  `30447467729` (`run #28`) — `3/3 PASS`. Last accepted exact-head
+  `30447467729` (`run #28`) — `3/3 PASS`. Последний принятый provider-write
+  exact-head
   `be8c94c4...` / CI `30449026506` (`run #29`) — `3/3 PASS`; все четыре
-  исходных engineering provider-write P1 закрыты. Это не production-like
-  admission.
+  исходных engineering provider-write P1 закрыты. Текущий accepted
+  `CURRENT_168` implementation — `3b8228dd...` / CI `30460154200`,
+  `3/3 PASS`. Это не production-like admission.
   `IMPLEMENTED_CANDIDATE`, not deployed. Admission принимает только
   изолированную loopback PostgreSQL 16 копию в точном `BASELINE_156`,
   `EXPAND_162` или `CURRENT_168`,
@@ -404,9 +410,11 @@ persisted GO или production deploy. Production apply/deploy не выполн
 
 Ближайшая последовательность намеренно разделена на независимые решения:
 
-1. Исторические test/runtime SHA `2341b999...`/`044ceca2...` не использовать
-   как current evidence; сначала создать exact candidate SHA текущего рабочего
-   дерева, получить зелёные mandatory remote CI checks и independent review.
+1. Exact `CURRENT_168` implementation
+   `3b8228dd278fae062c753bf4301e0339ba93738b` уже принят mandatory remote CI
+   `30460154200`, `3/3 PASS`, и independent review без новых P0.
+   Исторические test/runtime SHA `2341b999...`/`044ceca2...` не использовать
+   как current evidence.
 2. Независимо проверить detached authority candidate, утвердить внешний
    signer/HSM, separation of duties и key custody; затем отдельным reviewed
    change enrol Ed25519 public root и получить зелёный remote CI exact

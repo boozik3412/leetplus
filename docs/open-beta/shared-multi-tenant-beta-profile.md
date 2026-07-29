@@ -3,7 +3,7 @@
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
 | Profile key      | `SHARED_MULTI_TENANT_BETA_V1`                                   |
-| Версия           | 1.3                                                             |
+| Версия           | 1.4                                                             |
 | Дата             | 29.07.2026                                                      |
 | Статус           | `NO-GO`; обязательные P0 и Gate 1MT/Gate 2 не завершены         |
 | Формат           | Первый friendly external club, invite-only                      |
@@ -115,8 +115,12 @@ identity RPC; полный application allowlist содержит ровно ш�
 Локальный disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
 `INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
-cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`. Это
-local candidate evidence, не remote exact-head CI и не launch approval.
+cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`.
+Remote exact-head implementation
+`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
+`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
+evidence не являются launch approval.
 
 Оба Platform Admin route остаются закрытыми:
 

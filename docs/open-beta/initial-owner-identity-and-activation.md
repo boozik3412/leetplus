@@ -2,7 +2,7 @@
 
 | Поле             | Значение                                                        |
 | ---------------- | --------------------------------------------------------------- |
-| Версия           | 1.2                                                             |
+| Версия           | 1.3                                                             |
 | Дата             | 29.07.2026                                                      |
 | Статус           | `CURRENT_168` shell/claim candidate; activation ещё pending      |
 | Release decision | `NO-GO` для создания реального external tenant и owner invite   |
@@ -283,9 +283,12 @@ Legacy initial-owner revoke route также закрыт:
 Локальный disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
 `INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
-cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`. Это
-engineering evidence без production data; оно не является remote exact-head
-CI, production-like admission или разрешением вызвать route.
+cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`.
+Remote exact-head implementation
+`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
+`3/3 PASS`, и независимым review без новых P0. Local и remote engineering
+evidence не являются production-like admission или разрешением вызвать route.
 
 ### 5.2. Activation
 
@@ -452,7 +455,9 @@ Two-tenant:
 - migration 168: sealed reserve/assert/transition/release boundary;
 - shell-only service: `PILOT/SUSPENDED/PROVISIONING`, inactive Store, six-row
   profile, HMAC audit, без User/UserInvite/token/trial/outbox;
-- local PostgreSQL `16.14`: `168/168`, identity `1/99`, shell `2/2`.
+- local PostgreSQL `16.14`: `168/168`, identity `1/99`, shell `2/2`;
+- exact-head `3b8228dd278fae062c753bf4301e0339ba93738b`, CI `30460154200`:
+  `3/3 PASS`; independent review: PASS без новых P0.
 
 Следующие обязательные шаги:
 

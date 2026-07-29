@@ -2,9 +2,9 @@
 
 | Поле             | Значение                                                                    |
 | ---------------- | --------------------------------------------------------------------------- |
-| Версия           | 1.19                                                                        |
+| Версия           | 1.20                                                                        |
 | Дата             | 29.07.2026                                                                  |
-| Статус           | Schema target `CURRENT_168`; local shell/identity candidate, remote exact-head CI pending |
+| Статус           | Schema target `CURRENT_168`; exact-head implementation evidence accepted, production-like admission pending |
 | Release decision | `NO-GO` для внешнего owner invite                                           |
 | Migrations       | control-plane/revision/store/delivery fences + identity claim foundation/write boundary (`163..168`) |
 | Основная модель  | Shared PostgreSQL, отдельный `Tenant` на независимую сеть                   |
@@ -218,9 +218,12 @@ legacy `User`/live `UserInvite` до replay, exact `search_path=pg_catalog`
 Локальный disposable PostgreSQL `16.14` подтвердил clean deploy `168/168`,
 identity idempotency `100 = 1 CREATED + 99 ALREADY_RESERVED`, combined
 `INVITE | USER` same-subject rejection, shell integration `2/2` и 100-way
-cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`. Это
-engineering prerequisite, а не remote exact-head CI, production-like
-admission или launch approval.
+cross-slug race `50 winner responses + 50 IDENTITY_EMAIL_UNAVAILABLE`.
+Remote exact-head implementation
+`3b8228dd278fae062c753bf4301e0339ba93738b` принят GitHub CI
+[`30460154200`](https://github.com/boozik3412/leetplus/actions/runs/30460154200),
+`3/3 PASS`, и независимым review без новых P0. Эти engineering prerequisites
+не являются production-like admission или launch approval.
 
 Production startup-validation candidate уже требует отдельный fingerprint
 HMAC secret, запрещает reuse и принимает только version `v1`; CI environment
@@ -580,5 +583,7 @@ StaffTask integrity-проверки сохраняют immutable prefix `1..162
 inventory/planner для current implementation candidate должны проходить
 отдельный admission как `CURRENT_168` (`migrationCount=168`, latest
 `20260729210000_identity_email_claim_write_boundary`). Remote exact-head
-evidence текущего кандидата ещё pending; local PostgreSQL evidence не является
-production-like admission.
+evidence текущего implementation принято на
+`3b8228dd278fae062c753bf4301e0339ba93738b` / CI `30460154200`,
+`3/3 PASS`; local и remote engineering evidence не являются production-like
+admission.
